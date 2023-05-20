@@ -1,0 +1,62 @@
+{ pkgs, ... }:
+{
+  environment.systemPackages = with pkgs; [
+    asdf-vm
+    aws-iam-authenticator
+    aws-vault
+    awscli2
+    bash
+    bat
+    binutils
+    bottom
+    colima
+    coreutils
+    curl
+    curlie
+    dasel
+    delta
+    difftastic
+    diffutils
+    direnv
+    dprint
+    duf
+    envchain
+    exa
+    exa
+    fd
+    findutils
+    fzf
+    gawk
+    gh
+    git
+    gnupg
+    go
+    jq
+    mercurial
+    moreutils
+    neovim
+    nil
+    nixpkgs-fmt
+    pinentry_mac
+    poetry
+    procs
+    python3
+    rage
+    ripgrep
+    sd
+    shellcheck
+    starship
+    subversion
+    tmux
+    tree
+    vim
+    watchman
+    yamlfmt
+    yq
+    zellij
+    zoxide
+    zsh
+  ] ++ (lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+    reattach-to-user-namespace
+  ]);
+}

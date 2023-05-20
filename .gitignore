@@ -1,0 +1,8 @@
+# Nix build output
+result
+
+# Nix direnv integration
+.direnv
+
+# Needed for formatting .vscode/settings.json
+!.vscode/
