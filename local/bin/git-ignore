@@ -1,0 +1,15 @@
+#!/bin/bash
+# vi: ft=bash
+# shellcheck shell=bash
+set -eo pipefail
+
+main() {
+  url="$(
+    curl -s https://api.github.com/repos/github/gitignore/contents \
+      | jq -r ".[]|select(.name|ascii_downcase==\"${1}.gitignore\").url"
+  )"
+
+  curl -s "${url}" | jq -r '.content' | base64 -d
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then main "$@"; fi

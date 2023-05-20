@@ -1,0 +1,4 @@
+# vi: ft=gitconfig
+[user]
+	name = gkze
+	email = george.kontridze@gmail.com
