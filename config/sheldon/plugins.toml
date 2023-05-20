@@ -1,0 +1,48 @@
+shell = 'zsh'
+
+[plugins]
+
+[plugins.base16]
+github = 'tinted-theming/base16-shell'
+
+[plugins.docker-completions]
+apply = ['fpath']
+remote = 'https://raw.githubusercontent.com/docker/cli/master/contrib/completion/zsh/_docker'
+
+[plugins.fast-syntax-highlighting]
+github = 'zdharma-continuum/fast-syntax-highlighting'
+
+[plugins.fzf]
+github = 'junegunn/fzf'
+use = ['shell/completion.zsh', 'shell/key-bindings.zsh']
+
+[plugins.local]
+local = '~/.zsh/plugins'
+
+[plugins.zsh-histdb]
+github = 'larkery/zsh-histdb'
+
+[plugins.zsh-autosuggestions]
+github = 'zsh-users/zsh-autosuggestions'
+
+[plugins.zsh-completions]
+github = 'zsh-users/zsh-completions'
+
+[plugins.zsh-defer]
+github = 'romkatv/zsh-defer'
+
+[plugins.zsh-fzf-history-search]
+github = 'joshskidmore/zsh-fzf-history-search'
+
+[plugins.zsh-system-clipboard]
+github = 'kutsan/zsh-system-clipboard'
+
+[plugins.zsh-vi-mode]
+github = 'jeffreytse/zsh-vi-mode'
+
+[plugins.zsh-nix-completions]
+github = "nix-community/nix-zsh-completions"
+
+[templates]
+defer = "{% for file in files %}zsh-defer source \"{{ file }}\"\n{% endfor %}"
+
