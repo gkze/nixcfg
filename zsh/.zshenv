@@ -10,6 +10,7 @@ export \
   LESS="--mouse" \
   MANPAGER="sh -c 'col -bx | bat -l man -p'" \
   NIX_PAGER="bat -p" \
+  PATH="/opt/homebrew/bin:${PATH}" \
   XDG_CONFIG_DATA="${HOME}/.local/share" \
   XDG_CONFIG_HOME="${HOME}/.config" \
   ZDOTDIR="${HOME}/.zsh"
