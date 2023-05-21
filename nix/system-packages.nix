@@ -1,6 +1,7 @@
 { pkgs, ... }:
 {
   environment.systemPackages = with pkgs; [
+    (python311.withPackages (ps: with ps; [ pip pipx ]))
     asdf-vm
     aws-iam-authenticator
     aws-vault
@@ -19,6 +20,7 @@
     diffutils
     direnv
     dprint
+    du-dust
     duf
     envchain
     exa
@@ -39,12 +41,13 @@
     neovim
     nil
     nixpkgs-fmt
+    nodejs
+    ookla-speedtest
     pinentry_mac
     poetry
-    procs
-    python3
     rage
     ripgrep
+    rustup
     sd
     shellcheck
     starship
