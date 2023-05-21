@@ -104,7 +104,8 @@ declare -a PATHS=(
   "${HOME}/.krew/bin"
   "${HOME}/go/bin"
   "${HOME}/.cargo/bin"
-  "$(find_path_dirs "${HOMEBREW_PREFIX}/Cellar" "^gnubin$" 4)"
+  # Not needed since we're on Nix
+  #"$(find_path_dirs "${HOMEBREW_PREFIX}/Cellar" "^gnubin$" 4)"
 )
 
 # Configure MANPATH in the same fashion as PATH
