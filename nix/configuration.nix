@@ -7,12 +7,20 @@ let isDarwin = pkgs.stdenv.hostPlatform.isDarwin; in
   ];
 
   nix = {
-    # Enable nix command and flakes
-    settings.experimental-features = [ "nix-command" "flakes" ];
+    settings = {
+      # Enable nix command and flakes
+      experimental-features = [ "nix-command" "flakes" ];
+
+      # Perform builds in a sandboxed environment
+      sandbox = true;
+    };
 
     # Auto-upgrade nix command
     package = pkgs.nix;
   };
+
+  # Allow unfree software
+  nixpkgs.config.allowUnfree = true;
 
   environment = {
     # Use a custom configuration.nix location.
