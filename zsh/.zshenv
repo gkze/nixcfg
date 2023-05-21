@@ -7,11 +7,9 @@ export \
   GPG_TTY="$(tty)" \
   GRAB_HOME="${HOME}/Development" \
   HISTFILE="${HOME}/.zsh/.zsh_history" \
-  HOMEBREW_BUNDLE_FILE="${HOME}/.config/Brewfile" \
+  LESS="--mouse" \
   MANPAGER="sh -c 'col -bx | bat -l man -p'" \
   NIX_PAGER="bat -p" \
-  PAGER="bat -p" \
-  PATH="/opt/homebrew/bin:${PATH}" \
   XDG_CONFIG_DATA="${HOME}/.local/share" \
   XDG_CONFIG_HOME="${HOME}/.config" \
   ZDOTDIR="${HOME}/.zsh"
