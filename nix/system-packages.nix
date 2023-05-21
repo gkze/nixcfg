@@ -32,6 +32,8 @@
     gnupg
     go
     jq
+    kubectl
+    less
     mercurial
     moreutils
     neovim
@@ -52,7 +54,7 @@
     vim
     watchman
     yamlfmt
-    yq
+    yq-go
     zellij
     zoxide
     zsh

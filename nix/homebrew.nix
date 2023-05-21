@@ -39,6 +39,7 @@
       "messenger"
       "monitorcontrol"
       "netnewswire-beta"
+      "openlens"
       "osquery"
       "rapidapi"
       "rectangle"
