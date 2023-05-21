@@ -135,6 +135,7 @@
         line_break.disabled = true;
         package.disabled = true;
         nix_shell.disabled = true;
+        command_timeout = 2000;
       };
     };
     # SSH

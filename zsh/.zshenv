@@ -1,6 +1,7 @@
 export \
   ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH="go1.20" \
   AWS_SDK_LOAD_CONFIG="1" \
+  BUN_INSTALL="${HOME}/.bun" \
   DOCKER_SCAN_SUGGEST="false" \
   EDITOR="nvim" \
   GITHUB_TOKEN="$(envchain main printenv GITHUB_TOKEN)" \
