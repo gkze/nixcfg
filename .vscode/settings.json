@@ -1,3 +1,4 @@
 {
-  "nixEnvSelector.nixFile": "flake.nix"
+  "nixEnvSelector.nixFile": "flake.nix",
+  "editor.formatOnSave": true
 }

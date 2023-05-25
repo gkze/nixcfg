@@ -1,0 +1,3 @@
+# We explicitly set the prefix to $HOME/.local because npm operates out of the
+# Nix store, which is read-only.
+prefix = "${HOME}/.local"

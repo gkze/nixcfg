@@ -35,9 +35,10 @@
   xdg = {
     enable = true;
     configFile = {
-      "sheldon" = { source = ../config/sheldon; recursive = true; };
       "git" = { source = ../config/git; recursive = true; };
+      "npmrc".source = ../config/npmrc;
       "nvim/lua" = { source = ../config/nvim/lua; recursive = true; };
+      "sheldon" = { source = ../config/sheldon; recursive = true; };
     };
   };
 

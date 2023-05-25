@@ -1,7 +1,8 @@
 { pkgs, ... }:
 {
   environment.systemPackages = with pkgs; [
-    (python311.withPackages (ps: with ps; [ pip pipx ]))
+    # sequoia
+    # sequoia-chameleon-gnupg
     asdf-vm
     aws-iam-authenticator
     aws-vault
@@ -24,15 +25,16 @@
     duf
     envchain
     exa
-    exa
     fd
     findutils
     fzf
     gawk
     gh
     git
+    gnumake
     gnupg
     go
+    helix
     jq
     kubectl
     less
@@ -44,17 +46,22 @@
     nodejs
     ookla-speedtest
     pinentry_mac
+    pipx
     poetry
+    python311
     rage
     ripgrep
     rustup
     sd
+    sentry-cli
     shellcheck
     starship
+    stern
     subversion
     tmux
     tree
     vim
+    watch
     watchman
     yamlfmt
     yq-go
