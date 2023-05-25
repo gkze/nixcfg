@@ -69,7 +69,12 @@
         commit.gpgsign = true;
         fetch.prune = true;
         merge.conflictstyle = "diff3";
-        pager = { diff = "delta"; log = "delta"; reflog = "delta"; show = "delta"; };
+        pager = {
+          diff = "delta";
+          log = "delta";
+          reflog = "delta";
+          show = "delta";
+        };
         rebase.pull = true;
         user.signingkey = "9578FF9AB0BDE622307E7E833A7266FAC0D2F08D";
       };
@@ -127,7 +132,7 @@
     # Starship configuration
     starship = {
       enable = true;
-      enableZshIntegration = true;
+      # enableZshIntegration = true;
       settings = {
         add_newline = false;
         aws.disabled = true;
@@ -163,7 +168,11 @@
     };
     topgrade = {
       enable = true;
-      settings = { assume_yes = true; cleanup = true; };
+      settings = {
+        assume_yes = true;
+        cleanup = true;
+        git = { repos = [ "~/Development/**" ]; };
+      };
     };
   };
 }

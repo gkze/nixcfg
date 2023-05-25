@@ -105,6 +105,7 @@ declare -a PATHS=(
   "${HOME}/go/bin"
   "${HOME}/.bun/bin"
   "${HOME}/.cargo/bin"
+  "${HOME}/.asdf/shims"
   # Not needed since we're on Nix
   #"$(find_path_dirs "${HOMEBREW_PREFIX}/Cellar" "^gnubin$" 4)"
 )
