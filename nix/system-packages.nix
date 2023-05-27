@@ -33,8 +33,11 @@
     git
     gnumake
     gnupg
+    gnused
     go
+    gping
     helix
+    jo
     jq
     kubectl
     less

@@ -127,7 +127,7 @@
       prefix = "`";
       shell = "${pkgs.zsh}/bin/zsh";
       terminal = "xterm-256color";
-      extraConfig = builtins.readFile ../config/tmux/tmux.conf;
+      extraConfig = builtins.readFile ../config/tmux.conf;
     };
     # Starship configuration
     starship = {

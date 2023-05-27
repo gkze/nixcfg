@@ -84,6 +84,7 @@
         formatter = treefmt-nix.lib.mkWrapper pkgs {
           projectRootFile = "flake.nix";
           programs = {
+            black.enable = true;
             # no-lambda-pattern-names is needed to preserve self input arg
             deadnix = { enable = true; no-lambda-pattern-names = true; };
             nixpkgs-fmt.enable = true;
