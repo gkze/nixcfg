@@ -38,7 +38,8 @@
       "git" = { source = ../config/git; recursive = true; };
       "npmrc".source = ../config/npmrc;
       "nvim/lua" = { source = ../config/nvim/lua; recursive = true; };
-      "sheldon" = { source = ../config/sheldon; recursive = true; };
+      "pip/pip.conf".source = ../config/pip.conf;
+      "sheldon/plugins.toml".source = ../config/sheldon.toml;
     };
   };
 
