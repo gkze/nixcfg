@@ -1,15 +1,46 @@
-#!/bin/bash
-# vi: ft=bash
-# shellcheck shell=bash
-set -eo pipefail
+#!/usr/bin/env python3
+# vi: ft=python
+from __future__ import annotations
 
-main() {
-  url="$(
-    curl -s https://api.github.com/repos/github/gitignore/contents \
-      | jq -r ".[]|select(.name|ascii_downcase==\"${1}.gitignore\").url"
-  )"
+import base64
+import json
+import sys
+from urllib.request import urlopen
+from urllib.error import HTTPError
 
-  curl -s "${url}" | jq -r '.content' | base64 -d
-}
+GITIGNORE_URL: str = (
+    "https://api.github.com/repos/github/gitignore/contents/{language}.gitignore"
+)
 
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then main "$@"; fi
+
+class GitignoreNotFound(Exception):
+    def __init__(self, language: str, *args: object) -> None:
+        super().__init__(f"gitignore for {language} not found!")
+
+
+def get_gitignore(language: str) -> str | None:
+    try:
+        return base64.b64decode(
+            json.load(
+                urlopen(
+                    GITIGNORE_URL.format(language=language[0].upper() + language[1:])
+                )
+            )["content"]
+        ).decode()
+
+    except HTTPError as e:
+        if e.code == 404:
+            raise GitignoreNotFound(language)
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 1:
+        raise RuntimeError("Must pass exactly 1 language to get gitignore for!")
+
+    print(get_gitignore(argv[0]))
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
