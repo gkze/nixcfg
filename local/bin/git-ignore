@@ -13,7 +13,7 @@ GITIGNORE_URL: str = "https://api.github.com/repos/github/gitignore/contents"
 
 class GitignoreNotFound(Exception):
     def __init__(self, language: str, *args: object) -> None:
-        super().__init__(f"gitignore for {language} not found!")
+        super().__init__(f"gitignore for {language} not found!", *args)
 
 
 def list_gitignores() -> list[str]:
