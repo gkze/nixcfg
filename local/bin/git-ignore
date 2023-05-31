@@ -8,9 +8,7 @@ import sys
 from urllib.request import urlopen
 from urllib.error import HTTPError
 
-GITIGNORE_URL: str = (
-    "https://api.github.com/repos/github/gitignore/contents/{language}.gitignore"
-)
+GITIGNORE_URL: str = "https://api.github.com/repos/github/gitignore/contents"
 
 
 class GitignoreNotFound(Exception):
@@ -18,15 +16,23 @@ class GitignoreNotFound(Exception):
         super().__init__(f"gitignore for {language} not found!")
 
 
+def list_gitignores() -> list[str]:
+    return [
+        blob["path"].rstrip(".gitignore")
+        for blob in json.load(urlopen(GITIGNORE_URL))
+        if blob["path"].endswith(".gitignore")
+    ]
+
+
 def get_gitignore(language: str) -> str | None:
     try:
-        return base64.b64decode(
-            json.load(
-                urlopen(
-                    GITIGNORE_URL.format(language=language[0].upper() + language[1:])
-                )
-            )["content"]
-        ).decode()
+        # fmt: off
+        return base64.b64decode(json.load(urlopen(
+            (GITIGNORE_URL + "/{language}.gitignore").format(
+                language=language[0].upper() + language[1:]
+            )
+        ))["content"]).decode()
+        # fmt: on
 
     except HTTPError as e:
         if e.code == 404:
@@ -34,11 +40,16 @@ def get_gitignore(language: str) -> str | None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 1:
-        raise RuntimeError("Must pass exactly 1 language to get gitignore for!")
+    if len(argv) > 1:
+        raise RuntimeError("Cannot request more than 1 .gitignore template at a time!")
+
+    if len(argv) == 0:
+        for gi in list_gitignores():
+            print(gi)
+
+        return 0
 
     print(get_gitignore(argv[0]))
-
     return 0
 
 
