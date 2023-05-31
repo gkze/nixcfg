@@ -1,8 +1,8 @@
 {
-  "nixEnvSelector.nixFile": "flake.nix",
-  "editor.formatOnSave": true,
   "[python]": {
     "editor.defaultFormatter": "ms-python.black-formatter"
   },
+  "editor.formatOnSave": true,
+  "nixEnvSelector.nixFile": "flake.nix",
   "python.formatting.provider": "none"
 }
