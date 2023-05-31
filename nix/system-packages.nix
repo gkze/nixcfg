@@ -34,6 +34,7 @@
     gnumake
     gnupg
     gnused
+    gnutar
     go
     gping
     helix
@@ -48,6 +49,7 @@
     nixpkgs-fmt
     nodejs
     ookla-speedtest
+    ouch
     pinentry_mac
     pipx
     poetry
