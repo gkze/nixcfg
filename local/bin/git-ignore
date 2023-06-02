@@ -16,7 +16,7 @@ class GitignoreNotFound(Exception):
         super().__init__(f"gitignore for {language} not found!", *args)
 
 
-def list_gitignores() -> list[str]:
+def list_gitignore_languages() -> list[str]:
     return [
         blob["path"].rstrip(".gitignore") for blob in json.load(urlopen(GITIGNORE_URL))
     ]
@@ -40,8 +40,8 @@ def main(argv: list[str]) -> int:
         raise RuntimeError("Cannot request more than 1 .gitignore template at a time!")
 
     if len(argv) == 0:
-        for gi in list_gitignores():
-            print(gi)
+        for language_gitignore in list_gitignore_languages():
+            print(language_gitignore)
 
         return 0
 
