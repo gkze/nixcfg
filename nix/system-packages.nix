@@ -49,6 +49,7 @@
     nixpkgs-fmt
     nodejs
     ookla-speedtest
+    openssh
     ouch
     pinentry_mac
     pipx

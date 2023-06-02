@@ -18,21 +18,17 @@ class GitignoreNotFound(Exception):
 
 def list_gitignores() -> list[str]:
     return [
-        blob["path"].rstrip(".gitignore")
-        for blob in json.load(urlopen(GITIGNORE_URL))
-        if blob["path"].endswith(".gitignore")
+        blob["path"].rstrip(".gitignore") for blob in json.load(urlopen(GITIGNORE_URL))
     ]
 
 
 def get_gitignore(language: str) -> str | None:
     try:
-        # fmt: off
-        return base64.b64decode(json.load(urlopen(
-            (GITIGNORE_URL + "/{language}.gitignore").format(
-                language=language[0].upper() + language[1:]
-            )
-        ))["content"]).decode()
-        # fmt: on
+        return base64.b64decode(
+            json.load(urlopen(f"{GITIGNORE_URL}/{language.capitalize()}.gitignore"))[
+                "content"
+            ]
+        ).decode()
 
     except HTTPError as e:
         if e.code == 404:
