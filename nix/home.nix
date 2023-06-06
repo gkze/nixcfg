@@ -16,7 +16,7 @@
     # Files
     file = {
       ".local/bin" = {
-        source = ../local/bin;
+        source = ../bin;
         recursive = true;
         executable = true;
       };
@@ -45,9 +45,15 @@
 
   # Activate Zsh configuration for Home Manager
   # programs.zsh.enable = true;
-
-  # Let Home Manager install and manage itself.
-  programs.home-manager.enable = true;
+  programs = {
+    # Let Home Manager install and manage itself.
+    home-manager.enable = true;
+    # nix-direnv is a faster and persistent implementaiton of direnv's use_nix
+    # and use_flake
+    direnv = { enable = true; nix-direnv = { enable = true; }; };
+    # Zsh <=> Nix integration
+    zsh.enable = true;
+  };
 
   # Configure GPG agent
   services.gpg-agent = { enable = pkgs.stdenv.hostPlatform.isLinux; };
