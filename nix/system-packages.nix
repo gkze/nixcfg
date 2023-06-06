@@ -4,6 +4,7 @@
     # sequoia
     # sequoia-chameleon-gnupg
     asdf-vm
+    ast-grep
     aws-iam-authenticator
     aws-vault
     awscli2
@@ -51,7 +52,6 @@
     ookla-speedtest
     openssh
     ouch
-    pinentry_mac
     pipx
     poetry
     python311
@@ -76,5 +76,6 @@
     zsh
   ] ++ (lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
     reattach-to-user-namespace
+    pinentry_mac
   ]);
 }
