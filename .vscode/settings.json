@@ -3,6 +3,10 @@
     "editor.defaultFormatter": "ms-python.black-formatter"
   },
   "editor.formatOnSave": true,
+  "files.associations": {
+    "**/config/git/*": "ini",
+    "npmrc": "ini"
+  },
   "nixEnvSelector.nixFile": "flake.nix",
   "python.formatting.provider": "none"
 }
