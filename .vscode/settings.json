@@ -5,6 +5,7 @@
   "editor.formatOnSave": true,
   "files.associations": {
     "**/config/git/*": "ini",
+    "**/bin/git-ignore": "python",
     "npmrc": "ini"
   },
   "nixEnvSelector.nixFile": "flake.nix",
