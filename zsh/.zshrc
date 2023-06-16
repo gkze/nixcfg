@@ -1,5 +1,5 @@
 # vi: ft=zsh
-# shellcheck shell=bash disable=SC2034,SC2296
+# shellcheck disable=all
 
 # Zsh builtins help
 &>/dev/null unalias run-help && autoload run-help
@@ -30,7 +30,6 @@ eval "$(sheldon source)"
 export HOMEBREW_PREFIX="/opt/homebrew"
 
 # Add local Zsh functions path
-# shellcheck disable=SC2206
 fpath=(
   "${XDG_CONFIG_DATA:-"${HOME}.local/share"}/zsh/site-functions"
   "${HOMEBREW_PREFIX}/share/zsh/site-functions"
@@ -103,7 +102,6 @@ declare -a PATHS=(
   "${HOME}/.local/bin"
   "${HOME}/.krew/bin"
   "${HOME}/go/bin"
-  "${HOME}/.bun/bin"
   "${HOME}/.cargo/bin"
   "${HOME}/.asdf/shims"
   # Not needed since we're on Nix
