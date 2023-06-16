@@ -5,6 +5,9 @@
     # Only manage Homebrew when underlying system is macOS
     enable = pkgs.stdenv.hostPlatform.isDarwin;
 
+    # Stay updated & clean up things that are not defined below
+    onActivation = { autoUpdate = true; cleanup = "zap"; upgrade = true; };
+
     # Homebrew Taps
     taps = [ "homebrew/cask-fonts" "homebrew/cask-versions" "gkze/gkze" ];
 
@@ -49,18 +52,18 @@
       "sloth"
       "spotify"
       "tableplus"
+      "telegram"
       "utm"
       "vagrant"
       "vimr"
       "visual-studio-code-insiders"
       "vlc"
-      "webtorrent"
       "whatsapp"
       "xcodes"
       "zoom"
     ] ++
     # Plaid-restricted software
-    (lib.optionals (!builtins.elem "plaid" profiles) [ "nordvpn" ]);
+    (lib.optionals (!builtins.elem "plaid" profiles) [ "nordvpn" "webtorrent" ]);
 
     # mas manages macOS App Store Apps via a CLI
     masApps = {

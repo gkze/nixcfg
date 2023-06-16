@@ -42,11 +42,13 @@
     jo
     jq
     kubectl
+    kubeswitch
     less
     mercurial
     moreutils
     neovim
     nil
+    nix-du
     nixpkgs-fmt
     nodejs
     ookla-speedtest
