@@ -3,7 +3,7 @@
 
   inputs = {
     # Use latest nixpkgs
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.05";
 
     # Flake helper utilities
     flake-utils.url = "github:numtide/flake-utils";
@@ -16,15 +16,21 @@
 
     # Manage $HOME environment
     home-manager = {
-      url = "github:nix-community/home-manager";
+      url = "github:nix-community/home-manager/release-23.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # Unified polyglot source formatter
-    treefmt-nix.url = "github:numtide/treefmt-nix";
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     # Nix development shell helper
-    devshell.url = "github:numtide/devshell";
+    devshell = {
+      url = "github:numtide/devshell";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -58,10 +64,7 @@
                 useGlobalPkgs = true;
                 useUserPackages = true;
                 users = builtins.listToAttrs (map
-                  (user: {
-                    name = user;
-                    value = import ./nix/home.nix;
-                  })
+                  (user: { name = user; value = import ./nix/home.nix; })
                   users);
               };
             }
@@ -97,8 +100,8 @@
                 includes = [ "**/*.{json,md}" ];
                 excludes = [ "flake.lock" ];
                 plugins = [
-                  (dprintWasmPluginUrl "json" "0.17.2")
-                  (dprintWasmPluginUrl "markdown" "0.15.2")
+                  (dprintWasmPluginUrl "json" "0.17.3")
+                  (dprintWasmPluginUrl "markdown" "0.15.3")
                 ];
               };
             };
