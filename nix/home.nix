@@ -56,7 +56,7 @@
   };
 
   # Configure GPG agent
-  services.gpg-agent = { enable = pkgs.stdenv.hostPlatform.isLinux; };
+  services.gpg-agent.enable = pkgs.stdenv.hostPlatform.isLinux;
 
   # User-local launchd agents
   launchd.agents = {
