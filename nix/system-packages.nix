@@ -44,6 +44,7 @@
     kubectl
     kubeswitch
     less
+    license-generator
     mercurial
     moreutils
     neovim
@@ -71,6 +72,7 @@
     vim
     watch
     watchman
+    yaml-language-server
     yamlfmt
     yq-go
     zellij
