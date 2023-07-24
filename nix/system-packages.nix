@@ -12,6 +12,7 @@
     bat
     binutils
     bottom
+    cmake
     colima
     coreutils
     curl
