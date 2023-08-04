@@ -56,11 +56,13 @@
     ookla-speedtest
     openssh
     ouch
+    pinentry
     pipx
     poetry
     python311
     rage
     ripgrep
+    rsync
     rustup
     sd
     sentry-cli
@@ -69,6 +71,7 @@
     stern
     subversion
     tmux
+    tokei
     tree
     vim
     watch
