@@ -157,6 +157,7 @@
             AddKeysToAgent = "yes";
             LogLevel = "ERROR";
             StrictHostKeyChecking = "no";
+            ServerAliveInterval = "120";
           };
         };
         "rocinante" = {
