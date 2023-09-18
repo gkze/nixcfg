@@ -96,7 +96,7 @@
             stylua.enable = true;
             dprint = {
               enable = true;
-              config = {
+              settings = {
                 includes = [ "**/*.{json,md}" ];
                 excludes = [ "flake.lock" ];
                 plugins = [

@@ -12,7 +12,7 @@
     taps = [ "homebrew/cask-fonts" "homebrew/cask-versions" "gkze/gkze" ];
 
     # Homebrew Formulae
-    brews = [ "sheldon" "stars" ];
+    brews = [ "bash-language-server" "sheldon" "stars" ];
 
     # Homebrew Casks
     casks = [
@@ -46,6 +46,7 @@
       "osquery"
       "rapidapi"
       "rectangle"
+      "rekordbox"
       "signal"
       "skype"
       "slack"
