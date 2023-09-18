@@ -21,6 +21,7 @@
       "appcleaner"
       "arctype"
       "beekeeper-studio"
+      "beeper"
       "brave-browser-beta"
       "cyberduck"
       "dash"
@@ -41,6 +42,7 @@
       "maccy"
       "messenger"
       "monitorcontrol"
+      "musicbrainz-picard"
       "netnewswire-beta"
       "openlens"
       "osquery"
@@ -51,6 +53,7 @@
       "skype"
       "slack"
       "sloth"
+      "soulseek"
       "spotify"
       "tableplus"
       "telegram"
@@ -71,6 +74,7 @@
       "AdGuard for Safari" = 1440147259;
       "Apple Configurator" = 1037126344;
       "JSONPeep" = 1458969831;
+      "Shazam: Identify Songs" = 897118787;
       "Table Tool" = 1122008420;
       "Twitter" = 1482454543;
       "Xcode" = 497799835;

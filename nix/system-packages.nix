@@ -58,6 +58,7 @@
     ouch
     pinentry
     pipx
+    pkg-config
     poetry
     python311
     rage
