@@ -49,6 +49,7 @@
     mercurial
     moreutils
     neovim
+    nettle
     nil
     nix-du
     nixpkgs-fmt
