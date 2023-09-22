@@ -23,6 +23,7 @@
       "beekeeper-studio"
       "beeper"
       "brave-browser-beta"
+      "cog"
       "cyberduck"
       "dash"
       "discord"
@@ -53,7 +54,6 @@
       "skype"
       "slack"
       "sloth"
-      "soulseek"
       "spotify"
       "tableplus"
       "telegram"
@@ -67,7 +67,11 @@
       "zoom"
     ] ++
     # Plaid-restricted software
-    (lib.optionals (!builtins.elem "plaid" profiles) [ "nordvpn" "webtorrent" ]);
+    (lib.optionals (!builtins.elem "plaid" profiles) [
+      "nordvpn"
+      "soulseek"
+      "webtorrent"
+    ]);
 
     # mas manages macOS App Store Apps via a CLI
     masApps = {
