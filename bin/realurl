@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# shellcheck disable=all
+# vi: ft=zsh
+
+function main() {
+  curl -sLw '%{url_effective}' -o/dev/null "${1}" |
+    rg --color="never" -o '^(.*)\?.*' -r '$1'
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
