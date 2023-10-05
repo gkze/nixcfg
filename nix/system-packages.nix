@@ -33,6 +33,7 @@
     gawk
     gh
     git
+    git-trim
     gnumake
     gnupg
     gnused
@@ -54,6 +55,7 @@
     nix-du
     nixpkgs-fmt
     nodejs
+    ookla-speedtest
     ookla-speedtest
     openssh
     ouch
