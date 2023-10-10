@@ -54,6 +54,7 @@
     nil
     nix-du
     nixpkgs-fmt
+    nls
     nodejs
     ookla-speedtest
     ookla-speedtest
