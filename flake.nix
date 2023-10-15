@@ -77,6 +77,7 @@
         pkgs = import nixpkgs {
           system = defaultSystem;
           overlays = [ devshell.overlays.default ];
+          config.allowUnfree = true;
         };
 
         dprintWasmPluginUrl = name: version:

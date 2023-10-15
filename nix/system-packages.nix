@@ -47,6 +47,9 @@
     kubeswitch
     less
     license-generator
+    llvm
+    man-pages
+    man-pages-posix
     mercurial
     moreutils
     neovim

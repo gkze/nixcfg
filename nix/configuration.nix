@@ -22,6 +22,12 @@ let isDarwin = pkgs.stdenv.hostPlatform.isDarwin; in
   # Allow unfree software
   nixpkgs.config.allowUnfree = true;
 
+  documentation = {
+    doc.enable = true;
+    info.enable = true;
+    man.enable = true;
+  };
+
   environment = {
     # Use a custom configuration.nix location.
     # $ darwin-rebuild switch -I darwin-config=$HOME/.config/nixcfg/configuration.nix
