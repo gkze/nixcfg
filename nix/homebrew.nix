@@ -1,5 +1,4 @@
-{ pkgs, ... }:
-{
+{ pkgs, ... }: {
   # Homebrew & mas
   homebrew = {
     # Only manage Homebrew when underlying system is macOS

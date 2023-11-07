@@ -1,6 +1,5 @@
 { pkgs, lib, hostPlatform, users, ... }:
-let isDarwin = pkgs.stdenv.isDarwin; in
-{
+let isDarwin = pkgs.stdenv.isDarwin; in {
   imports = [ ./system-packages.nix ];
 
   nix = {
