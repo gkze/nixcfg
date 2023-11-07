@@ -63,8 +63,8 @@ complete -C /run/current-system/sw/bin/aws_completer aws
 
 # Aliases
 alias \
-  exap='exa -FlabghHistype --color=always --icons' \
-  exat='exa -FlabghHistype --color=always --icons --tree' \
+  ezap='eza -FlabghHistype --color=always --icons' \
+  ezat='eza -FlabghHistype --color=always --icons --tree' \
   kc=kubectl \
   nvc='cd "${HOME}/.config/nvim" && nvim init.lua' \
   pbc=pbcopy \

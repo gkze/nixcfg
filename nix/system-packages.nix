@@ -3,17 +3,11 @@
   environment.systemPackages = with pkgs; [
     # sequoia
     # sequoia-chameleon-gnupg
-    asdf-vm
     ast-grep
-    aws-iam-authenticator
-    aws-vault
-    awscli2
-    bash
     bat
     binutils
     bottom
     cmake
-    colima
     coreutils
     curl
     curlie
@@ -26,7 +20,7 @@
     du-dust
     duf
     envchain
-    exa
+    eza
     fd
     findutils
     fzf
@@ -43,8 +37,6 @@
     helix
     jo
     jq
-    kubectl
-    kubeswitch
     less
     license-generator
     llvm
@@ -60,7 +52,6 @@
     nls
     nodejs
     ookla-speedtest
-    ookla-speedtest
     openssh
     ouch
     pinentry
@@ -73,10 +64,7 @@
     rsync
     rustup
     sd
-    sentry-cli
-    shellcheck
     starship
-    stern
     subversion
     tmux
     tokei
