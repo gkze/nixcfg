@@ -1,5 +1,4 @@
-{ config, pkgs, lib, ... }:
-{
+{ config, pkgs, lib, ... }: {
   home = {
     # This value determines the Home Manager release that your
     # configuration is compatible with. This helps avoid breakage
