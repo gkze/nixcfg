@@ -1,7 +1,0 @@
-# vi: ft=gitconfig
-[user]
-	name = gkontridze
-	email = gkontridze@plaid.com
-
-[url "git@github.plaid.com:"]
-	insteadOf = https://github.plaid.com/

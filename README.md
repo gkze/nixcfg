@@ -1,22 +1,45 @@
 # nixcfg: Nix configuration
 
-Mostly for macOS, Linux TBD / WIP
+Unified configuration for macOS and Linux systems from a single point of control
+
+* **Darwin (macOS)**
+
+  Currently being used actively on my personal MacBook Pro
+
+* **Linux (NixOS)**
+  
+  In development, targeting [ThinkPad X1 Carbon (Gen 10)](https://psref.lenovo.com/Detail/ThinkPad/ThinkPad_X1_Carbon_Gen_10?M=21CB00F7US)
 
 ## Installation
 
-Ideally, it'd be:
+* **Darwin (macOS)**
 
-```shell
-curl -Ls https://github.com/gkze/nixcfg/raw/master/bootstrap.sh | bash
+  Use the [Determinate Systems Nix Installer](https://github.com/DeterminateSystems/nix-installer)
+  to get Nix 
+
+* **Linux (nixOS)**
+
+  WIP
+
+## Usage
+
+After changes are made:
+
+```
+nix run .#rebuild -- --flake . switch
 ```
 
-But there are still some errors that need to be ironed out.
+This app will pick the right command to run depending on the host system.
 
-```shell
-git clone git@github.com:gkze/nixcfg ~/.config/nixcfg
-cd ~/.config/nixcfg
-./bootstrap.sh
-./deploy.sh
-```
+## Roadmap
 
-Not 100% yet...
+| Feature :arrow_down: / OS :arrow_right: | macOS | NixOS | Debian | Any Linux distribution |
+|-----------------------------------------|-------|-------|--------|------------------------|
+| Automatic setup                         | :x:   | :x:   | :x:    | :x:                    |
+| Automatic backups                       | :x:   | :x:   | :x:    | :x:                    |
+| Storage encryption                      | :x:   | :x:   | :x:    | :x:                    |
+| Secret management                       | :x:   | :x:   | :x:    | :x:                    |
+
+## License
+
+[MIT](LICENSE)

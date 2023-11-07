@@ -1,5 +1,6 @@
 { pkgs, ... }: {
   environment.systemPackages = with pkgs; [
+    (pkgs.callPackage ./esbonio.nix { })
     # sequoia
     # sequoia-chameleon-gnupg
     ast-grep
@@ -77,7 +78,7 @@
     zellij
     zoxide
     zsh
-  ] ++ (lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+  ] ++ (lib.optionals pkgs.stdenv.isDarwin [
     reattach-to-user-namespace
     pinentry_mac
   ]);
