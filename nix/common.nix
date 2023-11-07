@@ -1,12 +1,12 @@
-{ pkgs, users, profiles, ... }@args:
-let isDarwin = pkgs.stdenv.hostPlatform.isDarwin; in
+{ pkgs, lib, hostPlatform, users, ... }:
+let isDarwin = pkgs.stdenv.isDarwin; in
 {
-  imports = [
-    ./system-packages.nix
-    (import ./homebrew.nix (args // { inherit profiles; }))
-  ];
+  imports = [ ./system-packages.nix ];
 
   nix = {
+    # Pin registry to system Nixpkgs
+    # registry.nixpkgs.ro = { type = "path"; path = pkgs.path; };
+
     settings = {
       # Enable nix command and flakes
       experimental-features = [ "nix-command" "flakes" ];
@@ -20,8 +20,9 @@ let isDarwin = pkgs.stdenv.hostPlatform.isDarwin; in
   };
 
   # Allow unfree software
-  nixpkgs.config.allowUnfree = true;
+  nixpkgs = { inherit hostPlatform; config.allowUnfree = true; };
 
+  # Install documentation for packages
   documentation = {
     doc.enable = true;
     info.enable = true;
@@ -31,16 +32,16 @@ let isDarwin = pkgs.stdenv.hostPlatform.isDarwin; in
   environment = {
     # Use a custom configuration.nix location.
     # $ darwin-rebuild switch -I darwin-config=$HOME/.config/nixcfg/configuration.nix
-    darwinConfig = "$HOME/.config/nixcfg/nix/configuration.nix";
+    darwinConfig = "$HOME/.config/nixcfg/nix/common.nix";
 
     pathsToLink = [ "/share/zsh" ];
   };
 
   # Enable Toudh ID for sudo
-  security.pam.enableSudoTouchIdAuth = true;
+  security.pam.enableSudoTouchIdAuth = if isDarwin then true else false;
 
-  # System-wide launchd daemons
-  launchd.daemons = {
+  # System-wide launchd daemons (darwin only)
+  launchd.daemons = (lib.attrsets.optionalAttrs isDarwin {
     # Raise maximum open file limit
     maxfiles.serviceConfig = {
       Label = "limit.maxfiles";
@@ -56,7 +57,7 @@ let isDarwin = pkgs.stdenv.hostPlatform.isDarwin; in
       ServiceIPC = true;
       ProgramArguments = [ "launchctl" "limit" "maxproc" "1000000" "1000000" ];
     };
-  };
+  });
 
   # Users
   users.users = builtins.listToAttrs (map
@@ -72,11 +73,11 @@ let isDarwin = pkgs.stdenv.hostPlatform.isDarwin; in
   # Auto upgrade nix package and the daemon service
   services.nix-daemon.enable = true;
 
-  # Create /etc/zshrc that loads the nix-darwin environment
+  # Create /etc/zshrc that loads the nix-darwin/NixOS environment
   programs.zsh.enable = true; # default shell on Ventura
 
   # System-wide settings
   # Used for backwards compatibility, please read the changelog before changing.
-  # $ darwin-rebuild changelog
-  system.stateVersion = 4;
+  # $ (darwin|nixos)-rebuild changelog
+  system.stateVersion = if isDarwin then 4 else "23.05";
 }

@@ -1,12 +1,94 @@
-{ config, pkgs, ... }:
+{ config, pkgs, lib, ... }:
 {
+  home = {
+    # This value determines the Home Manager release that your
+    # configuration is compatible with. This helps avoid breakage
+    # when a new Home Manager release introduces backwards
+    # incompatible changes.
+    #
+    # You can update Home Manager without changing this value. See
+    # the Home Manager release notes for a list of state version
+    # changes in each release.
+    stateVersion = "23.11";
+
+    # Files
+    file = {
+      ".local/bin" = {
+        source = ../bin;
+        recursive = true;
+        executable = true;
+      };
+      ".zsh" = { source = ../zsh; recursive = true; };
+      # Needed for things that don't understand $ZDOTDIR easily
+      ".zshenv".source = ../zsh/.zshenv;
+    };
+
+    # Packages that should be installed to the user profile.
+    # packages = with pkgs; [ ];
+  };
+
+  # Enable managing XDG Base Directories
+  # Specification:
+  # https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+  xdg = {
+    enable = true;
+    configFile = {
+      "git" = { source = ../config/git; recursive = true; };
+      "npmrc".source = ../config/npmrc;
+      "nvim/lua" = { source = ../config/nvim/lua; recursive = true; };
+      "pip/pip.conf".source = ../config/pip.conf;
+      "sheldon/plugins.toml".source = ../config/sheldon.toml;
+    };
+  };
+
+  # Activate Zsh configuration for Home Manager
+  # programs.zsh.enable = true;
+  programs = {
+    # Let Home Manager install and manage itself.
+    home-manager.enable = true;
+    # nix-direnv is a faster and persistent implementaiton of direnv's use_nix
+    # and use_flake
+    direnv = { enable = true; nix-direnv.enable = true; };
+    # Zsh <=> Nix integration
+    zsh.enable = true;
+  };
+
+  # Configure GPG agent
+  services.gpg-agent.enable = pkgs.stdenv.hostPlatform.isLinux;
+
+  # User-local launchd agents (darwin only)
+  launchd.agents = (lib.attrsets.optionalAttrs pkgs.stdenv.isDarwin {
+    ssh-add = {
+      enable = pkgs.stdenv.isDarwin;
+      config = {
+        Label = "org.openssh.add";
+        LaunchOnlyOnce = true;
+        RunAtLoad = true;
+        ProgramArguments = [
+          "/usr/bin/ssh-add"
+          "--apple-load-keychain"
+          "--apple-use-keychain"
+        ];
+      };
+    };
+    gpg-agent = {
+      enable = pkgs.stdenv.isDarwin;
+      config = {
+        Label = "org.gnupg.gpg-agent";
+        RunAtLoad = true;
+        ProgramArguments = [ "~/.nix-profile/bin/gpg-agent" "--server" ];
+      };
+    };
+  });
+
+  # Configure installed software
   programs = {
     # Terminal emulator
     alacritty = {
       enable = true;
       settings = {
         draw_bold_text_with_bright_colors = false;
-        font = { size = 12.0; normal = { family = "Hack Nerd Font Mono"; }; };
+        font = { size = 12.0; normal.family = "Hack Nerd Font Mono"; };
         shell = { program = "${pkgs.tmux}/bin/tmux"; args = [ "attach" ]; };
         window = {
           # Remap Apple Option key to Alt key. Useful in Neovim for meta / alt
@@ -91,10 +173,6 @@
           path = "~/.config/git/personal";
           condition = "gitdir:~/.config/nixcfg/**";
         }
-        {
-          path = "~/.config/git/plaid";
-          condition = "gitdir:~/Development/github.plaid.com/**";
-        }
       ];
     };
     # GnuPG
@@ -150,15 +228,12 @@
       forwardAgent = true;
       hashKnownHosts = true;
       matchBlocks = {
-        "github.plaid.com".user = "git";
         "github.com".user = "git";
-        "*" = {
-          extraOptions = {
-            AddKeysToAgent = "yes";
-            LogLevel = "ERROR";
-            StrictHostKeyChecking = "no";
-            ServerAliveInterval = "120";
-          };
+        "*".extraOptions = {
+          AddKeysToAgent = "yes";
+          LogLevel = "ERROR";
+          StrictHostKeyChecking = "no";
+          ServerAliveInterval = "120";
         };
         "rocinante" = {
           hostname = "10.0.0.241";
@@ -172,8 +247,9 @@
       settings = {
         assume_yes = true;
         cleanup = true;
-        git = { repos = [ "~/Development/**" ]; };
+        git.repos = [ "~/Development/**" ];
       };
     };
   };
 }
+

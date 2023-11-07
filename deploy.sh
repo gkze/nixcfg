@@ -2,4 +2,4 @@
 set -euo pipefail
 
 nix build ".#darwinConfigurations.$(hostname).system" &&
-  ./result/sw/bin/darwin-rebuild switch --flake .
+  nix run .#rebuild -- --flake "." switch

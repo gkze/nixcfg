@@ -3,20 +3,20 @@
 
   inputs = {
     # Use latest nixpkgs
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-    # Flake helper utilities
-    flake-utils.url = "github:numtide/flake-utils";
+    # Flake helper
+    fp.url = "github:hercules-ci/flake-parts";
 
     # Manage macOS configuration
-    darwin = {
+    nix-darwin = {
       url = "github:LnL7/nix-darwin";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # Manage $HOME environment
     home-manager = {
-      url = "github:nix-community/home-manager/release-23.05";
+      url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -31,98 +31,127 @@
       url = "github:numtide/devshell";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Nix editor
+    nix-editor = {
+      url = "github:vlinkz/nix-editor";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs =
-    { self
-    , nixpkgs
-    , flake-utils
-    , darwin
-    , home-manager
-    , treefmt-nix
-    , devshell
-    }:
+  outputs = inputs:
     let
-      # macOS configuration helper
-      darwinSystem =
-        { users
-        , profiles ? [ ]
-        , system ? "aarch64-darwin"
-        , extraModules ? [ ]
-        }:
-        darwin.lib.darwinSystem {
-          inherit system; specialArgs = { inherit users profiles; };
-          modules = [
-            # nix-darwin configuration
-            ./nix/configuration.nix
-            # macOS system defaults
-            ./nix/macos-defaults.nix
-            # home-manager configuration
-            home-manager.darwinModules.home-manager
-            {
-              home-manager = {
-                useGlobalPkgs = true;
-                useUserPackages = true;
-                users = builtins.listToAttrs (map
-                  (user: { name = user; value = import ./nix/home.nix; })
-                  users);
-              };
-            }
-          ] ++ extraModules;
+      username = "george";
+
+      dprintWasmPluginUrl = n: v: "https://plugins.dprint.dev/${n}-${v}.wasm";
+
+      # Unifying NixOS and Darwin system config declaration...
+      mkSystem = { arch, kernel, users, extraModules ? [ ] }:
+        let
+          hostPlatform = "${arch}-${kernel}";
+
+          sysFn = {
+            "linux" = inputs.nixpkgs.lib.nixosSystem;
+            "darwin" = inputs.nix-darwin.lib.darwinSystem;
+          }.${kernel};
+
+          hmMod = {
+            "linux" = inputs.home-manager.nixosModules.home-manager;
+            "darwin" = inputs.home-manager.darwinModules.home-manager;
+          }.${kernel};
+        in
+        sysFn {
+          specialArgs = { inherit users hostPlatform; };
+          modules =
+            [ ./nix/common.nix ]
+            ++ (inputs.nixpkgs.lib.optionals (kernel == "darwin") [
+              ./nix/macos-defaults.nix
+              ./nix/homebrew.nix
+            ])
+            ++ [
+              hmMod
+              {
+                home-manager = {
+                  useGlobalPkgs = true;
+                  useUserPackages = true;
+                  users = builtins.listToAttrs
+                    (map (u: { name = u; value = import ./nix/${u}.nix; }) users);
+                };
+              }
+            ]
+            ++ extraModules;
         };
     in
-    flake-utils.lib.eachDefaultSystem
-      (defaultSystem:
-      let
-        pkgs = import nixpkgs {
-          system = defaultSystem;
-          overlays = [ devshell.overlays.default ];
+    inputs.fp.lib.mkFlake { inherit inputs; } {
+      # All officially supported systems
+      systems = inputs.nixpkgs.lib.systems.flakeExposed;
+
+      # Attributes here have systeme above suffixed across them
+      perSystem = { system, config, pkgs, ... }: {
+        # https://nixos.org/manual/nixos/unstable/options#opt-_module.args
+        _module.args.pkgs = import inputs.nixpkgs {
+          inherit system;
+          overlays = [ inputs.devshell.overlays.default ];
           config.allowUnfree = true;
         };
 
-        dprintWasmPluginUrl = name: version:
-          "https://plugins.dprint.dev/${name}-${version}.wasm";
-      in
-      {
-        # Configure source formatters for project
-        formatter = treefmt-nix.lib.mkWrapper pkgs {
+        formatter = inputs.treefmt-nix.lib.mkWrapper pkgs {
           projectRootFile = "flake.nix";
           programs = {
             black.enable = true;
-            # no-lambda-pattern-names is needed to preserve self input arg
-            deadnix = { enable = true; no-lambda-pattern-names = true; };
             nixpkgs-fmt.enable = true;
             shellcheck.enable = true;
             shfmt.enable = true;
             stylua.enable = true;
+            # no-lambda-pattern-names is needed to preserve self input arg
+            deadnix = { enable = true; no-lambda-pattern-names = true; };
             dprint = {
               enable = true;
               settings = {
                 includes = [ "**/*.{json,md}" ];
                 excludes = [ "flake.lock" ];
                 plugins = [
-                  (dprintWasmPluginUrl "json" "0.17.3")
-                  (dprintWasmPluginUrl "markdown" "0.15.3")
+                  (dprintWasmPluginUrl "json" "0.19.0")
+                  (dprintWasmPluginUrl "markdown" "0.16.2")
                 ];
               };
             };
           };
         };
 
-        # Configure Nix deveopment shell
-        devShells.default = pkgs.devshell.mkShell { };
-      })
-    //
-    {
-      # macOS machines
-      darwinConfigurations = {
-        # Personal MacBook Pro
-        rocinante = darwinSystem { users = [ "george" ]; };
+        devShells.default = pkgs.devshell.mkShell {
+          name = "nixcfg";
+          packages = [
+            pkgs.nix-melt
+            inputs.nix-editor.packages.${system}.default
+          ];
+        };
 
-        # Plaid MacBook Pro
-        gkontridze-mbp = darwinSystem {
-          users = [ "gkontridze" ];
-          profiles = [ "plaid" ];
+        apps.rebuild = {
+          type = "app";
+          program = {
+            "darwin" = inputs.nix-darwin.packages.${system}.darwin-rebuild + "/bin/darwin-rebuild";
+            "linux" = pkgs.nixos-rebuild + "/bin/nixos-rebuild";
+          }.${builtins.elemAt (builtins.split "-" system) 2};
+        };
+      };
+
+      # System-independent (sort of) attributes. They're required to be
+      # top-level without a suffixed system attribute, but ironically define
+      # system-specific machine configuration.
+      flake = {
+        # Personal MacBook Pro
+        darwinConfigurations.rocinante = mkSystem {
+          arch = "aarch64";
+          kernel = "darwin";
+          users = [ username ];
+        };
+
+        # Basis ThinkPad X1 Carbon
+        nixosConfigurations.frontier = mkSystem {
+          arch = "x86_64";
+          kernel = "linux";
+          users = [ username ];
         };
       };
     };

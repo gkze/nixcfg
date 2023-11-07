@@ -1,5 +1,4 @@
-{ ... }:
-{
+{ ... }: {
   system = {
     # Keyboard settings
     keyboard = {
@@ -26,7 +25,7 @@
       # ALF - Application Layer Firewall
       # Allow any downloaded Application that has been signed to accept incoming
       # requests
-      alf.allowdownloadsignedenabled = 1;
+      alf.allowdownloadsignedenabled = 0;
       # Dock settings
       dock = {
         # Auto-hide
