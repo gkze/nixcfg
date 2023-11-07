@@ -37,12 +37,20 @@
       url = "github:vlinkz/nix-editor";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # NixOS image generation
+    nixos-generators = {
+      url = "github:nix-community/nixos-generators";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs:
     let
+      # Main user
       username = "george";
 
+      # Helper to shorten writing dprint WASM plugin URLs
       dprintWasmPluginUrl = n: v: "https://plugins.dprint.dev/${n}-${v}.wasm";
 
       # Unifying NixOS and Darwin system config declaration...
@@ -122,15 +130,17 @@
         devShells.default = pkgs.devshell.mkShell {
           name = "nixcfg";
           packages = [
-            pkgs.nix-melt
             inputs.nix-editor.packages.${system}.default
+            pkgs.nix-init
+            pkgs.nix-melt
           ];
         };
 
         apps.rebuild = {
           type = "app";
           program = {
-            "darwin" = inputs.nix-darwin.packages.${system}.darwin-rebuild + "/bin/darwin-rebuild";
+            "darwin" = inputs.nix-darwin.packages.${system}.darwin-rebuild
+              + "/bin/darwin-rebuild";
             "linux" = pkgs.nixos-rebuild + "/bin/nixos-rebuild";
           }.${builtins.elemAt (builtins.split "-" system) 2};
         };
@@ -140,6 +150,13 @@
       # top-level without a suffixed system attribute, but ironically define
       # system-specific machine configuration.
       flake = {
+        packages.nixos-generators.frontier = inputs.nixos-generators.nixosGenerate {
+          system = "x86_64-linux";
+          format = "iso";
+          modules = [ inputs.nix-darwin ./nix/common.nix ];
+          specialArgs = { users = [ username ]; hostPlatform = "x86_64-linux"; };
+        };
+
         # Personal MacBook Pro
         darwinConfigurations.rocinante = mkSystem {
           arch = "aarch64";
