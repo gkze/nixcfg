@@ -8,6 +8,5 @@
     "**/bin/git-ignore": "python",
     "npmrc": "ini"
   },
-  "nixEnvSelector.nixFile": "flake.nix",
-  "python.formatting.provider": "none"
+  "nixEnvSelector.nixFile": "flake.nix"
 }
