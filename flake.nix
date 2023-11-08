@@ -37,12 +37,6 @@
       url = "github:vlinkz/nix-editor";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    # NixOS image generation
-    nixos-generators = {
-      url = "github:nix-community/nixos-generators";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs = inputs:
@@ -150,13 +144,6 @@
       # top-level without a suffixed system attribute, but ironically define
       # system-specific machine configuration.
       flake = {
-        packages.nixos-generators.frontier = inputs.nixos-generators.nixosGenerate {
-          system = "x86_64-linux";
-          format = "iso";
-          modules = [ inputs.nix-darwin ./nix/common.nix ];
-          specialArgs = { users = [ username ]; hostPlatform = "x86_64-linux"; };
-        };
-
         # Personal MacBook Pro
         darwinConfigurations.rocinante = mkSystem {
           arch = "aarch64";
