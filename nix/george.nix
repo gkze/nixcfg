@@ -1,4 +1,5 @@
-{ config, pkgs, lib, ... }: {
+{ config, pkgs, lib, hostPlatform, ... }:
+let kernel = builtins.elemAt (builtins.split "-" hostPlatform) 2; in {
   home = {
     # This value determines the Home Manager release that your
     # configuration is compatible with. This helps avoid breakage
@@ -8,7 +9,7 @@
     # You can update Home Manager without changing this value. See
     # the Home Manager release notes for a list of state version
     # changes in each release.
-    stateVersion = "23.11";
+    stateVersion = lib.removeSuffix "\n" (builtins.readFile ../NIXOS_VERSION);
 
     # Files
     file = {
@@ -53,32 +54,7 @@
   };
 
   # Configure GPG agent
-  services.gpg-agent.enable = pkgs.stdenv.hostPlatform.isLinux;
-
-  # User-local launchd agents (darwin only)
-  launchd.agents = (lib.attrsets.optionalAttrs pkgs.stdenv.isDarwin {
-    ssh-add = {
-      enable = pkgs.stdenv.isDarwin;
-      config = {
-        Label = "org.openssh.add";
-        LaunchOnlyOnce = true;
-        RunAtLoad = true;
-        ProgramArguments = [
-          "/usr/bin/ssh-add"
-          "--apple-load-keychain"
-          "--apple-use-keychain"
-        ];
-      };
-    };
-    gpg-agent = {
-      enable = pkgs.stdenv.isDarwin;
-      config = {
-        Label = "org.gnupg.gpg-agent";
-        RunAtLoad = true;
-        ProgramArguments = [ "~/.nix-profile/bin/gpg-agent" "--server" ];
-      };
-    };
-  });
+  services.gpg-agent.enable = pkgs.stdenv.isLinux;
 
   # Configure installed software
   programs = {
@@ -129,33 +105,18 @@
     # Git configuration
     git = {
       enable = true;
-      aliases.branches = "branch --sort=-committerdate --format='%(committerdate)\t::  %(refname:short)'";
-      delta = {
+      aliases.branches = ''
+        branch --sort=-committerdate --format='%(committerdate)\t::  %(refname:short)'
+      '';
+      difftastic = {
         enable = true;
-        options = {
-          features = "decorations";
-          navigate = true;
-          decorations = {
-            commit-decoration-style = "blue ol";
-            commit-style = "raw";
-            file-style = "omit";
-            hunk-header-decoration-style = "blue box";
-            hunk-header-file-style = "red";
-            hunk-header-line-number-style = "#067a00";
-            hunk-header-style = "file line-number syntax";
-          };
-        };
+        background = "dark";
+        display = "inline";
       };
       extraConfig = {
         commit.gpgsign = true;
         fetch.prune = true;
         merge.conflictstyle = "diff3";
-        pager = {
-          diff = "delta";
-          log = "delta";
-          reflog = "delta";
-          show = "delta";
-        };
         rebase.pull = true;
         user.signingkey = "9578FF9AB0BDE622307E7E833A7266FAC0D2F08D";
       };
@@ -244,11 +205,36 @@
     topgrade = {
       enable = true;
       settings = {
-        assume_yes = true;
-        cleanup = true;
-        git.repos = [ "~/Development/**" ];
+        misc = { assume_yes = true; cleanup = true; };
+        git.pull_only_repos = [ "~/Development/**" ];
       };
     };
   };
 }
-
+  //
+lib.attrsets.optionalAttrs (kernel == "darwin") {
+  # User-local launchd agents (darwin only)
+  launchd.agents = {
+    ssh-add = {
+      enable = true;
+      config = {
+        Label = "org.openssh.add";
+        LaunchOnlyOnce = true;
+        RunAtLoad = true;
+        ProgramArguments = [
+          "/usr/bin/ssh-add"
+          "--apple-load-keychain"
+          "--apple-use-keychain"
+        ];
+      };
+    };
+    gpg-agent = {
+      enable = true;
+      config = {
+        Label = "org.gnupg.gpg-agent";
+        RunAtLoad = true;
+        ProgramArguments = [ "~/.nix-profile/bin/gpg-agent" "--server" ];
+      };
+    };
+  };
+}

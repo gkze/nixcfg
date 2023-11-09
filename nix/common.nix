@@ -1,5 +1,5 @@
 { pkgs, lib, hostPlatform, users, ... }:
-let isDarwin = pkgs.stdenv.isDarwin; in {
+let kernel = builtins.elemAt (builtins.split "-" hostPlatform) 2; in {
   imports = [ ./system-packages.nix ];
 
   nix = {
@@ -18,7 +18,6 @@ let isDarwin = pkgs.stdenv.isDarwin; in {
     package = pkgs.nix;
   };
 
-  # Allow unfree software
   nixpkgs = { inherit hostPlatform; config.allowUnfree = true; };
 
   # Install documentation for packages
@@ -28,19 +27,39 @@ let isDarwin = pkgs.stdenv.isDarwin; in {
     man.enable = true;
   };
 
-  environment = {
-    # Use a custom configuration.nix location.
-    # $ darwin-rebuild switch -I darwin-config=$HOME/.config/nixcfg/configuration.nix
-    darwinConfig = "$HOME/.config/nixcfg/nix/common.nix";
+  # Additional paths to symlink into `/run/current-system/sw`
+  environment.pathsToLink = [ "/share/zsh" ];
 
-    pathsToLink = [ "/share/zsh" ];
-  };
+  # Users
+  users.users = builtins.listToAttrs (map
+    (user: {
+      name = user;
+      value = {
+        name = user;
+        home = { darwin = "/Users/${user}"; linux = "/home/${user}"; }.${kernel};
+      };
+    })
+    users);
+
+  # Create /etc/zshrc that loads the nix-darwin/NixOS environment
+  programs.zsh.enable = true; # default shell on Ventura
+
+  system.stateVersion = lib.removeSuffix "\n" (builtins.readFile ../NIXOS_VERSION);
+}
+  //
+lib.attrsets.optionalAttrs (kernel == "darwin") {
+  # Use a custom configuration.nix location.
+  # $ darwin-rebuild switch -I darwin-config=$HOME/.config/nixcfg/configuration.nix
+  environment.darwinConfig = "$HOME/.config/nixcfg/nix/common.nix";
 
   # Enable Toudh ID for sudo
-  security.pam.enableSudoTouchIdAuth = if isDarwin then true else false;
+  security.pam.enableSudoTouchIdAuth = true;
 
-  # System-wide launchd daemons (darwin only)
-  launchd.daemons = (lib.attrsets.optionalAttrs isDarwin {
+  # Auto upgrade nix package and the daemon service
+  services.nix-daemon.enable = true;
+
+  # System-wide Launch Daemons
+  launchd.daemons = {
     # Raise maximum open file limit
     maxfiles.serviceConfig = {
       Label = "limit.maxfiles";
@@ -56,27 +75,5 @@ let isDarwin = pkgs.stdenv.isDarwin; in {
       ServiceIPC = true;
       ProgramArguments = [ "launchctl" "limit" "maxproc" "1000000" "1000000" ];
     };
-  });
-
-  # Users
-  users.users = builtins.listToAttrs (map
-    (user: {
-      name = user;
-      value = {
-        name = user;
-        home = if isDarwin then "/Users/${user}" else "/home/${user}";
-      };
-    })
-    users);
-
-  # Auto upgrade nix package and the daemon service
-  services.nix-daemon.enable = true;
-
-  # Create /etc/zshrc that loads the nix-darwin/NixOS environment
-  programs.zsh.enable = true; # default shell on Ventura
-
-  # System-wide settings
-  # Used for backwards compatibility, please read the changelog before changing.
-  # $ (darwin|nixos)-rebuild changelog
-  system.stateVersion = if isDarwin then 4 else "23.05";
+  };
 }

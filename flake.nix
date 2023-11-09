@@ -37,6 +37,12 @@
       url = "github:vlinkz/nix-editor";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # NixOS image creation
+    nixos-generators = {
+      url = "github:nix-community/nixos-generators";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs:
@@ -47,42 +53,8 @@
       # Helper to shorten writing dprint WASM plugin URLs
       dprintWasmPluginUrl = n: v: "https://plugins.dprint.dev/${n}-${v}.wasm";
 
-      # Unifying NixOS and Darwin system config declaration...
-      mkSystem = { arch, kernel, users, extraModules ? [ ] }:
-        let
-          hostPlatform = "${arch}-${kernel}";
-
-          sysFn = {
-            "linux" = inputs.nixpkgs.lib.nixosSystem;
-            "darwin" = inputs.nix-darwin.lib.darwinSystem;
-          }.${kernel};
-
-          hmMod = {
-            "linux" = inputs.home-manager.nixosModules.home-manager;
-            "darwin" = inputs.home-manager.darwinModules.home-manager;
-          }.${kernel};
-        in
-        sysFn {
-          specialArgs = { inherit users hostPlatform; };
-          modules =
-            [ ./nix/common.nix ]
-            ++ (inputs.nixpkgs.lib.optionals (kernel == "darwin") [
-              ./nix/macos-defaults.nix
-              ./nix/homebrew.nix
-            ])
-            ++ [
-              hmMod
-              {
-                home-manager = {
-                  useGlobalPkgs = true;
-                  useUserPackages = true;
-                  users = builtins.listToAttrs
-                    (map (u: { name = u; value = import ./nix/${u}.nix; }) users);
-                };
-              }
-            ]
-            ++ extraModules;
-        };
+      # One function to declare both NixOS and Darwin system config
+      mkSystem = import ./nix/mksystem.nix;
     in
     inputs.fp.lib.mkFlake { inherit inputs; } {
       # All officially supported systems
@@ -90,6 +62,7 @@
 
       # Attributes here have systeme above suffixed across them
       perSystem = { system, config, pkgs, ... }: {
+        # Inject Nixpkgs with our config
         # https://nixos.org/manual/nixos/unstable/options#opt-_module.args
         _module.args.pkgs = import inputs.nixpkgs {
           inherit system;
@@ -138,6 +111,24 @@
             "linux" = pkgs.nixos-rebuild + "/bin/nixos-rebuild";
           }.${builtins.elemAt (builtins.split "-" system) 2};
         };
+
+        # NixOS installer ISO for Basis ThinkPad X1 Carbon
+        packages.frontier-iso = let targetSystem = "x86_64-linux"; in
+          inputs.nixos-generators.nixosGenerate {
+            system = targetSystem;
+            format = "install-iso";
+            specialArgs = { hostPlatform = targetSystem; users = [ username ]; };
+            modules = [
+              ./nix/common.nix
+              # NixOS requires this
+              # https://search.nixos.org/options?channel=23.05&show=users.users.%3Cname%3E.isNormalUser
+              (builtins.listToAttrs (map
+                (u: {
+                  name = "users";
+                  value = { users.${u}.isNormalUser = true; };
+                }) [ username ]))
+            ];
+          };
       };
 
       # System-independent (sort of) attributes. They're required to be
@@ -146,6 +137,7 @@
       flake = {
         # Personal MacBook Pro
         darwinConfigurations.rocinante = mkSystem {
+          inherit inputs;
           arch = "aarch64";
           kernel = "darwin";
           users = [ username ];
@@ -153,6 +145,7 @@
 
         # Basis ThinkPad X1 Carbon
         nixosConfigurations.frontier = mkSystem {
+          inherit inputs;
           arch = "x86_64";
           kernel = "linux";
           users = [ username ];
