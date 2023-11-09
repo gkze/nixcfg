@@ -8,5 +8,5 @@
     "**/config/git/*": "ini",
     "npmrc": "ini"
   },
-  "nixEnvSelector.nixFile": "flake.nix"
+  "nixEnvSelector.nixFile": "${workspaceRoot}/flake.nix"
 }

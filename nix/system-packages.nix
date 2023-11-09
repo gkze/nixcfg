@@ -1,6 +1,5 @@
 { pkgs, ... }: {
   environment.systemPackages = with pkgs; [
-    (pkgs.callPackage ./esbonio.nix { })
     # sequoia
     # sequoia-chameleon-gnupg
     ast-grep
@@ -48,6 +47,7 @@
     nettle
     nil
     nix-du
+    nixd
     nixpkgs-fmt
     nls
     nodejs
@@ -79,7 +79,7 @@
     zoxide
     zsh
   ] ++ (lib.optionals pkgs.stdenv.isDarwin [
-    reattach-to-user-namespace
     pinentry_mac
+    reattach-to-user-namespace
   ]);
 }
