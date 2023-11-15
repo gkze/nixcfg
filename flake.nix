@@ -43,6 +43,12 @@
       url = "github:nix-community/nixos-generators";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Declarative disk partitioning
+    disko = {
+      url = "github:nix-community/disko";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs:
@@ -96,11 +102,12 @@
 
         devShells.default = pkgs.devshell.mkShell {
           name = "nixcfg";
-          packages = [
-            inputs.nix-editor.packages.${system}.default
-            pkgs.nix-init
-            pkgs.nix-melt
-          ];
+          packages =
+            (with inputs; [
+              nix-editor.packages.${system}.default
+              nixos-generators.packages.${system}.default
+            ])
+            ++ (with pkgs; [ nix-init nix-melt ]);
         };
 
         apps.rebuild = {
@@ -113,22 +120,21 @@
         };
 
         # NixOS installer ISO for Basis ThinkPad X1 Carbon
-        packages.frontier-iso = let targetSystem = "x86_64-linux"; in
-          inputs.nixos-generators.nixosGenerate {
-            system = targetSystem;
-            format = "install-iso";
-            specialArgs = { hostPlatform = targetSystem; users = [ username ]; };
-            modules = [
-              ./nix/common.nix
-              # NixOS requires this
-              # https://search.nixos.org/options?channel=23.05&show=users.users.%3Cname%3E.isNormalUser
-              (builtins.listToAttrs (map
-                (u: {
-                  name = "users";
-                  value = { users.${u}.isNormalUser = true; };
-                }) [ username ]))
-            ];
-          };
+        packages.frontier-iso = inputs.nixos-generators.nixosGenerate {
+          inherit system;
+          format = "install-iso";
+          specialArgs = { hostPlatform = "x86_64-linux"; users = [ username ]; };
+          modules = [
+            ./nix/common.nix
+            # NixOS requires this
+            # https://search.nixos.org/options?channel=23.05&show=users.users.%3Cname%3E.isNormalUser
+            (builtins.listToAttrs (map
+              (u: {
+                name = "users";
+                value = { users.${u}.isNormalUser = true; };
+              }) [ username ]))
+          ];
+        };
       };
 
       # System-independent (sort of) attributes. They're required to be
