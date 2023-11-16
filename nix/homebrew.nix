@@ -22,6 +22,7 @@
       "beeper"
       "brave-browser-beta"
       "codeedit"
+      "cog"
       "cyberduck"
       "dash"
       "discord"
