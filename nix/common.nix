@@ -53,7 +53,7 @@ let kernel = builtins.elemAt (builtins.split "-" hostPlatform) 2; in {
 lib.attrsets.optionalAttrs (kernel == "darwin") {
   # Use a custom configuration.nix location.
   # $ darwin-rebuild switch -I darwin-config=$HOME/.config/nixcfg/configuration.nix
-  environment.darwinConfig = "$HOME/.config/nixcfg/nix/common.nix ";
+  environment.darwinConfig = "$HOME/.config/nixcfg/nix/common.nix";
 
   # Enable Toudh ID for sudo
   security.pam.enableSudoTouchIdAuth = true;
