@@ -4,9 +4,11 @@
   },
   "editor.formatOnSave": true,
   "files.associations": {
-    "**/bin/git-ignore": "python",
-    "**/config/git/*": "ini",
-    "npmrc": "ini"
+    "**/.config/git/*": "ini",
+    "git-ignore": "python",
+    "npmrc": "ini",
+    "realurl": "shellscript"
   },
-  "nixEnvSelector.nixFile": "${workspaceRoot}/flake.nix"
+  "nixEnvSelector.nixFile": "${workspaceRoot}/flake.nix",
+  "cmake.configureOnOpen": false
 }

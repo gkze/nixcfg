@@ -1,5 +1,6 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # vi: ft=python
+# .gitignore creation utility
 from __future__ import annotations
 
 import base64
