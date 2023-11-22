@@ -1,6 +1,6 @@
 { config, lib, pkgs, inputs, hostPlatform, hmMods ? [ ], ... }:
 let
-  inherit (builtins) attrNames elemAt readFile split;
+  inherit (builtins) elemAt readFile split;
   inherit (lib.strings) concatStringsSep;
   inherit (lib) optionalString removeSuffix;
 
