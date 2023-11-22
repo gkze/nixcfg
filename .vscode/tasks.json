@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Apply Nix configuration",
+      "group": "build",
+      "command": "nix",
+      "args": [
+        "run"
+      ]
+    },
+    {
+      "label": "Format sources",
+      "group": "build",
+      "command": "nix",
+      "args": [
+        "fmt"
+      ]
+    }
+  ]
+}
