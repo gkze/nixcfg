@@ -1,7 +1,8 @@
-{ pkgs, ... }: {
+{ pkgs, lib, ... }: {
   # Homebrew & mas
   homebrew = {
     # Only manage Homebrew when underlying system is macOS
+    # (Maybe try on NixOS in the future)
     enable = pkgs.stdenv.isDarwin;
 
     # Stay updated & clean up things that are not defined below
@@ -11,73 +12,63 @@
     taps = [ "gkze/gkze" "homebrew/cask-fonts" "homebrew/cask-versions" ];
 
     # Homebrew Formulae
-    brews = [ "bash-language-server" "sheldon" "stars" ];
+    brews = [ "bash-language-server" "stars" ];
 
-    # Homebrew Casks
+    # Homebrew Casks. They've been split out to what I believe to be
+    # cross-platform vs. macOS-only casks (in case we'd like to use Homebrew
+    # outside of macOS in the future for whatever reason)
     casks = [
-      "aerial"
       "alacritty"
-      "appcleaner"
       "beekeeper-studio"
       "beeper"
       "brave-browser-beta"
-      "codeedit"
-      "cog"
-      "cyberduck"
-      "dash"
       "discord"
       "docker"
       "element"
       "figma"
       "firefox"
-      "font-hack-nerd-font"
-      "font-source-code-pro-for-powerline"
       "gimp"
       "github"
       "google-chrome"
       "google-cloud-sdk"
       "google-drive"
-      "hot"
       "httpie"
       "low-profile"
-      "maccy"
       "messenger"
-      "monitorcontrol"
       "musicbrainz-picard"
-      "netnewswire-beta"
       "nordvpn"
       "openlens"
-      "rapidapi"
-      "rectangle"
-      "rekordbox"
       "signal"
       "skype"
       "slack"
-      "sloth"
       "soulseek"
       "spotify"
-      "tableplus"
       "telegram"
-      "utm"
       "vagrant"
-      "vimr"
       "visual-studio-code-insiders"
       "vlc"
       "webtorrent"
       "whatsapp"
-      "xcodes"
       "zoom"
-    ];
-
-    # mas manages macOS App Store Apps via a CLI
-    masApps = {
-      "AdGuard for Safari" = 1440147259;
-      "Apple Configurator" = 1037126344;
-      "JSONPeep" = 1458969831;
-      "Shazam: Identify Songs" = 897118787;
-      "Table Tool" = 1122008420;
-      "Twitter" = 1482454543;
-      "Xcode" = 497799835;
-    };
+    ] ++ (lib.optionals pkgs.stdenv.isDarwin [
+      "aerial"
+      "appcleaner"
+      "codeedit"
+      "cog"
+      "cyberduck"
+      "dash"
+      "hot"
+      "maccy"
+      "monitorcontrol"
+      "netnewswire-beta"
+      "rapidapi"
+      "rectangle"
+      "rekordbox"
+      "sloth"
+      "tableplus"
+      "utm"
+      "vimr"
+      "xcodes"
+    ]);
   };
 }

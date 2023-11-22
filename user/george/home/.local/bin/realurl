@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=all
 # vi: ft=zsh
+# Follows HTTP redirects and returns the final location
 
 function main() {
   curl -sLw '%{url_effective}' -o/dev/null "${1}" |
