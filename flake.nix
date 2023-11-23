@@ -3,7 +3,7 @@
 
   inputs = {
     # Use latest nixpkgs
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11";
 
     # Flake helper
     fp.url = "github:hercules-ci/flake-parts";
@@ -182,6 +182,7 @@
           kernel = "darwin";
           users = [ username ];
         };
+
 
         # Basis ThinkPad X1 Carbon
         nixosConfigurations.frontier = mkSystem inputs {

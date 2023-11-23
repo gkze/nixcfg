@@ -30,7 +30,6 @@
       "gimp"
       "github"
       "google-chrome"
-      "google-cloud-sdk"
       "google-drive"
       "httpie"
       "low-profile"
