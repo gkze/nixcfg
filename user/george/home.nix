@@ -45,7 +45,7 @@ in
       # Set Bat as the default pager
       PAGER = "bat -p";
       # Set $PATH. Priority is:
-      # User-local executables in $HOME/.local/bin
+      # - User-local executables in $HOME/.local/bin
       PATH = concatStringsSep ":" [ ''''${HOME}/.local/bin'' ''''${PATH}'' ];
     };
 
@@ -60,7 +60,8 @@ in
         ezat = "eza ${ezaDefaultArgs} --tree";
         zac = "zellij action clear";
         zj = "zellij";
-        zq = "zellij kill-all-sessions --yes; zellij delete-all-sessions --yes";
+        zq = "zellij kill-all-sessions --yes && zellij delete-all-sessions --force --yes";
+        cr = "clear && reset";
       };
 
     file =
@@ -101,6 +102,8 @@ in
     packages = with pkgs; [
       # Bazel build tools (mostly to satisfy Visual Studio Code Bazel extension)
       bazel-buildtools
+      # # Duplicate file finder
+      # czkawka
       # Envchain is a utility that loads environment variables from the system
       # keychain
       envchain
@@ -192,8 +195,6 @@ in
       cdpath = [ srcDir ];
       # $ZDOTDIR (https://zsh.sourceforge.io/Doc/Release/Files.html#Files)
       dotDir = ".config/zsh";
-      enableAutosuggestions = true;
-      enableCompletion = true;
       enableVteIntegration = true;
       history = {
         expireDuplicatesFirst = true;
@@ -298,18 +299,17 @@ in
     zellij = {
       enable = true;
       settings = {
-        theme = "gruvbox-dark";
-        pane_frames = false;
         keybinds.scroll."bind \"c\"".Clear = { };
+        pane_frames = false;
+        session_serialization = false;
+        theme = "gruvbox-dark";
       };
     };
     # Terminal file manager
     yazi = {
       enable = true;
       enableZshIntegration = true;
-      settings.manager = {
-        sort_by = "alphabetical";
-      };
+      settings.manager.sort_by = "alphabetical";
     };
     # Neovim configured with Nix - NEEDS TUNING
     nixvim = {
@@ -336,6 +336,7 @@ in
           extends = ">";
           nbsp = "°";
           precedes = "<";
+          space = "·";
           tab = ">-";
           trail = ".";
         };
@@ -361,10 +362,14 @@ in
         nvim-cmp.enable = true;
         # Git integration
         neogit.enable = true;
+        # Git praise
+        gitblame.enable = true;
         # Diff view
         diffview.enable = true;
         # Highlight other occurrences of word under cursor
         illuminate.enable = true;
+        # Enable Nix language support
+        nix.enable = true;
       };
       keymaps = [
         # So that we don't have to press shift to enter command mode
@@ -373,12 +378,21 @@ in
         { key = "<leader>f"; action = ":NvimTreeToggle<CR>"; }
         # Toggle Telescope (file finder)
         { key = "<A-t>"; action = ":Telescope<CR>"; }
-        # Previous buffer
-        { key = "<leader>p"; action = ":BufferPrevious<CR>"; }
         # Next buffer
-        { key = "<leader>n"; action = ":BufferNext<CR>"; }
+        { key = "<cs-]>"; action = ":BufferNext<CR>"; }
+        # Previous buffer
+        { key = "<cs-[>"; action = ":BufferPrevious<CR>"; }
         # Close buffer
         { key = "<leader>x"; action = ":BufferClose<CR>"; }
+      ];
+    };
+    # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
+    helix = {
+      enable = true;
+      languages.language = [
+        { name = "nix"; }
+        { name = "python"; }
+        { name = "bash"; }
       ];
     };
     # Version control
@@ -412,20 +426,32 @@ in
         }
       ]);
     };
+    # Git terminal UI
+    gitui.enable = true;
     # GitHub CLI
     gh.enable = true;
-    # Manual page inrerface
+    # Manual page interface
     man = { enable = true; generateCaches = true; };
-    # FuZzy Finder
+    # FuZzy Finder - finds items in lists. Current integrations / use cases:
+    # - Zsh history search
+    # - Neovim file picking
     fzf = { enable = true; enableZshIntegration = true; };
     # More robust alternative to `cat`
-    bat = { enable = true; config.theme = "gruvbox-dark"; };
+    bat = {
+      enable = true;
+      config = { style = "full"; theme = "gruvbox-dark"; };
+    };
     # `ls` alternative
     eza.enable = true;
+    # Executes commands when changing to a directory with an `.envrc` in it
     # nix-direnv is a faster and persistent implementaiton of direnv's use_nix
     # and use_flake
-    direnv = { enable = true; nix-direnv.enable = true; };
-    # zoxide is a `cd` replacement that ranks frequently / recently used
+    direnv = {
+      enable = true;
+      nix-direnv.enable = true;
+      enableZshIntegration = true;
+    };
+    # `cd` replacement that ranks frequently / recently used
     # directories for easier shorthand access
     zoxide = {
       enable = true;
@@ -438,9 +464,7 @@ in
     nix-index.enable = true;
     # Alternative to `grep`
     ripgrep.enable = true;
-
-    # Go
-    go = { enable = true; packages = { }; };
+    # Java
     java.enable = true;
     # GnuPG
     gpg = {
