@@ -88,7 +88,11 @@ in
           [install]
           user = true
         '';
-        ".local/bin" = { source = ./home/.local/bin; recursive = true; executable = true; };
+        ".local/bin" = {
+          source = ./home/.local/bin;
+          recursive = true;
+          executable = true;
+        };
         "${config.xdg.configHome}/git/personal".text = ''
           [user]
           	name = gkze
@@ -130,7 +134,7 @@ in
     ];
   };
 
-  # Install and configure user-level installed software
+  # Install and configure user-level software
   programs = {
     # Let Home Manager install and manage itself
     home-manager.enable = true;
@@ -318,14 +322,19 @@ in
       enableMan = true;
       globals.mapleader = ",";
       options = {
-        # Text width
-        textwidth = 80;
+        # Automatically change directory to that surrounding the open file
+        autochdir = true;
+        # Copy indent from current line when starting a new line
+        autoindent = true;
+        # Automatically read open file if updates to it on storage have been
+        # detected
+        autoread = true;
         # Highlight cursor line
         cursorline = true;
         # Highlight cursor column
         cursorcolumn = true;
         # Rulers at 80 and 100 characters
-        colorcolumn = [ "+0" "+20" ];
+        colorcolumn = [ 80 100 ];
         # Line numbers
         number = true;
         # List mode (display non-printing characters)
@@ -342,7 +351,7 @@ in
         };
       };
       plugins = {
-        # # Greeter (home page)
+        # Greeter (home page)
         alpha.enable = true;
         # Buffer line (top)
         bufferline.enable = true;
@@ -352,8 +361,6 @@ in
         nvim-tree.enable = true;
         # File finder (popup)
         telescope.enable = true;
-        # UI facelift
-        # noice.enable = true;
         # Language Server Protocol client
         lsp.enable = true;
         # Tree-sitter https://tree-sitter.github.io/tree-sitter/
@@ -371,20 +378,7 @@ in
         # Enable Nix language support
         nix.enable = true;
       };
-      keymaps = [
-        # So that we don't have to press shift to enter command mode
-        { key = ";"; action = ":"; }
-        # Toggle file explorer
-        { key = "<leader>f"; action = ":NvimTreeToggle<CR>"; }
-        # Toggle Telescope (file finder)
-        { key = "<A-t>"; action = ":Telescope<CR>"; }
-        # Next buffer
-        { key = "<cs-]>"; action = ":BufferNext<CR>"; }
-        # Previous buffer
-        { key = "<cs-[>"; action = ":BufferPrevious<CR>"; }
-        # Close buffer
-        { key = "<leader>x"; action = ":BufferClose<CR>"; }
-      ];
+      keymaps = [ ];
     };
     # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
     helix = {
@@ -464,6 +458,10 @@ in
     nix-index.enable = true;
     # Alternative to `grep`
     ripgrep.enable = true;
+    # Right now this breaks with sandbox-exec error
+    # https://github.com/NixOS/nix/issues/4119
+    # # Go
+    # go.enable = true;
     # Java
     java.enable = true;
     # GnuPG
