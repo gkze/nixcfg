@@ -1,8 +1,8 @@
 { config, lib, pkgs, inputs, hostPlatform, hmMods ? [ ], ... }:
 let
   inherit (builtins) elemAt readFile split;
+  inherit (lib) optionals optionalString removeSuffix;
   inherit (lib.strings) concatStringsSep;
-  inherit (lib) optionalString removeSuffix;
 
   # Grab the OS kernel part of the hostPlatform tuple
   kernel = elemAt (split "-" hostPlatform) 2;
@@ -12,13 +12,25 @@ let
 in
 {
   # Home Manager modules go here
-  imports = [ inputs.nixvim.homeManagerModules.nixvim ] ++ hmMods;
+  imports =
+    [ inputs.nixvim.homeManagerModules.nixvim ]
+    # TODO make sure this is well settled
+    ++ (optionals (kernel == "linux") [ ./dconf.nix ])
+    ++ hmMods;
 
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
 
-  # Configure GPG agent on Linux
-  services.gpg-agent.enable = kernel == "linux";
+  services = {
+    # Activate GPG agent on Linux
+    gpg-agent.enable = kernel == "linux";
+
+    # File synchronization
+    # TODO Factor out into Basis profile
+    syncthing.enable = true;
+  };
+
+  # wayland.windowManager.hyprland.enable = true;
 
   home = {
     # This value determines the Home Manager release that your
@@ -56,12 +68,14 @@ in
       in
       # Add aliases here
       {
+        cr = "clear && reset";
         ezap = "eza ${ezaDefaultArgs}";
         ezat = "eza ${ezaDefaultArgs} --tree";
+        ne = "cd ~/.config/nixcfg && nvim";
+        nv = "nvim";
         zac = "zellij action clear";
         zj = "zellij";
         zq = "zellij kill-all-sessions --yes && zellij delete-all-sessions --force --yes";
-        cr = "clear && reset";
       };
 
     file =
@@ -98,40 +112,84 @@ in
           	name = gkze
           	email = george.kontridze@gmail.com
         '';
+        "${config.xdg.configHome}/git/basis".text = ''
+          [user]
+          	name = george
+          	email = george@usebasis.co
+        '';
       };
 
     # Packages that should be installed to the user profile. These are just
     # installed. Programs section below both installs and configures software,
     # and is the preferred method.
-    packages = with pkgs; [
-      # Bazel build tools (mostly to satisfy Visual Studio Code Bazel extension)
-      bazel-buildtools
-      # # Duplicate file finder
-      # czkawka
-      # Envchain is a utility that loads environment variables from the system
-      # keychain
-      envchain
-      # Alternative to `find`
-      fd
-      # Additional useful utilities (a la coreutils)
-      moreutils
-      # Nerd Fonts
-      # - https://www.nerdfonts.com/
-      # - https://github.com/ryanoasis/nerd-fonts
-      # Only install Hack Nerd Font, since the entire package / font repository
-      # is quite large
-      (nerdfonts.override { fonts = [ "Hack" ]; })
-      # Nix language server
-      nil
-      # Nix formatter
-      nixpkgs-fmt
-      # Alternative to `sed`
-      sd
-      # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
-      # tokei 
-      # Alternative to `watch`
-      viddy
-    ];
+    packages =
+      with pkgs; [
+        # Web browser
+        brave
+        # Duplicate file finder
+        czkawka
+        # Display Data Channel UTILity
+        ddcutil
+        # Matrix client
+        # TODO factor out into Basis profile
+        # TODO TBD if works on macOS
+        element-desktop
+        # Envchain is a utility that loads environment variables from the system
+        # keychain
+        envchain
+        # Alternative to `find`
+        fd
+        # GitLab Command Line Interface
+        glab
+        # Brightness control for all detected monitors
+        # Currently managed manually
+        # TODO fix
+        # gnomeExtensions.brightness-control-using-ddcutil
+        # File transfer over LAN
+        localsend
+        # Additional useful utilities (a la coreutils)
+        moreutils
+        # Nerd Fonts
+        # - https://www.nerdfonts.com/
+        # - https://github.com/ryanoasis/nerd-fonts
+        # Only install Hack Nerd Font, since the entire package / font repository
+        # is quite large
+        (nerdfonts.override { fonts = [ "Hack" ]; })
+        # Knowledge management
+        obsidian
+        # For Basis
+        # TODO factor out into Basis profile
+        networkmanager-openvpn
+        # Alternative to `sed`
+        sd
+        # TODO TBD if works on macOS
+        slack
+        # TODO TBD if works on macOS
+        signal-desktop-beta
+        # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
+        # tokei 
+        # Alternative to `watch`
+        viddy
+        # File transfer over LAN
+        warp
+        # Clipboard utility
+        xclip
+      ]
+      ++ (with inputs; [
+        # Nix software management GUI
+        nix-software-center.packages.${hostPlatform}.default
+        # Nix configuration editor GUI
+        nixos-conf-editor.packages.${hostPlatform}.default
+      ])
+      ++ (with pkgs.gnome; [
+        # Additional GNOME settings tool
+        # TODO factor out into nixos-only home manager
+        gnome-tweaks
+        # Additional GNOME settings editing tool
+        # https://wiki.gnome.org/Apps/DconfEditor
+        dconf-editor
+      ])
+    ;
   };
 
   # Install and configure user-level software
@@ -180,7 +238,7 @@ in
             { index = 21; color = "0xebdbb2"; }
           ];
         };
-        font = { size = 12.0; normal.family = "Hack Nerd Font Mono"; };
+        font = { size = lib.mkDefault 12.0; normal.family = "Hack Nerd Font Mono"; };
         # Launch Zellij directly instead of going through a shell
         shell = {
           program = "${pkgs.zellij}/bin/zellij";
@@ -204,7 +262,7 @@ in
         expireDuplicatesFirst = true;
         extended = true;
         ignoreAllDups = true;
-        path = "${config.xdg.configHome}/history";
+        path = "${config.xdg.configHome}/zsh/history";
         save = 100000;
         share = true;
         size = 100000;
@@ -278,8 +336,12 @@ in
         # Yank selections into system clipboard
         {
           name = "zsh-system-clipboard";
-          src = "${pkgs.zsh-system-clipboard}/share/zsh/zsh-system-clipboard";
-          file = "zsh-system-clipboard.zsh";
+          src = (pkgs.fetchFromGitHub {
+            owner = "kutsan";
+            repo = "zsh-system-clipboard";
+            rev = "5f66befd96529b28767fe8a239e9c6de6d57cdc4";
+            hash = "sha256-t4xPKd9BvrH4cyq8rN/IVGcm13OJNutdZ4e+FdGbPIo=";
+          });
         }
         # docker(d) CLI completion
         {
@@ -318,30 +380,31 @@ in
     # Neovim configured with Nix - NEEDS TUNING
     nixvim = {
       enable = true;
-      colorschemes.gruvbox.enable = true;
-      enableMan = true;
-      globals.mapleader = ",";
+      # https://github.com/nix-community/nixvim/issues/754
+      # https://github.com/nix-community/nixvim/pull/751
+      # https://github.com/NixOS/nixpkgs/pull/269942
+      enableMan = false;
+      colorschemes.gruvbox = { enable = true; contrastDark = "soft"; };
       options = {
-        # Automatically change directory to that surrounding the open file
-        autochdir = true;
         # Copy indent from current line when starting a new line
         autoindent = true;
         # Automatically read open file if updates to it on storage have been
         # detected
         autoread = true;
+        # Text width helper
+        colorcolumn = [ 80 100 ];
         # Highlight cursor line
         cursorline = true;
         # Highlight cursor column
         cursorcolumn = true;
         # Rulers at 80 and 100 characters
-        colorcolumn = [ 80 100 ];
         # Line numbers
         number = true;
         # List mode (display non-printing characters)
         list = true;
         # Set printing characters for non-printing characters
         listchars = {
-          eol = "$";
+          eol = "↵";
           extends = ">";
           nbsp = "°";
           precedes = "<";
@@ -349,12 +412,17 @@ in
           tab = ">-";
           trail = ".";
         };
+        # Keep sign column rendered so that errors popping up don't trigger a
+        # redraw
+        signcolumn = "yes";
       };
       plugins = {
         # Greeter (home page)
         alpha.enable = true;
-        # Buffer line (top)
-        bufferline.enable = true;
+        # Buffer line (top, tabs)
+        bufferline = { enable = true; enforceRegularTabs = true; };
+        # File / AST breadcrumbs
+        barbecue.enable = true;
         # Status line (bottom)
         lualine.enable = true;
         # File explorer (side)
@@ -362,11 +430,41 @@ in
         # File finder (popup)
         telescope.enable = true;
         # Language Server Protocol client
-        lsp.enable = true;
-        # Tree-sitter https://tree-sitter.github.io/tree-sitter/
+        lsp = {
+          enable = true;
+          keymaps.lspBuf = {
+            "gd" = "definition";
+            "gD" = "references";
+            "gt" = "type_definition";
+            "K" = "hover";
+          };
+          servers = {
+            # Nix (nil with nixpkgs-fmt)
+            nixd = {
+              enable = true;
+              settings.formatting.command = "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt";
+            };
+            bashls.enable = true;
+            gopls.enable = true;
+            html.enable = true;
+            jsonls.enable = true;
+            pyright.enable = true;
+            ruff-lsp.enable = true;
+            tsserver.enable = true;
+            yamlls.enable = true;
+          };
+        };
+        # LSP formatting
+        lsp-format.enable = true;
         treesitter.enable = true;
         # LSP completion
-        nvim-cmp.enable = true;
+        nvim-cmp = {
+          enable = true;
+          mappingPresets = [ "insert" ];
+          snippet.expand = "ultisnips";
+        };
+        # LSP pictograms
+        lspkind.enable = true;
         # Git integration
         neogit.enable = true;
         # Git praise
@@ -377,8 +475,31 @@ in
         illuminate.enable = true;
         # Enable Nix language support
         nix.enable = true;
+        # Enable working with TODO code comments
+        todo-comments.enable = true;
+        # Diagnostics, etc. 
+        trouble.enable = true;
       };
-      keymaps = [ ];
+      extraPlugins = with pkgs.vimPlugins; [ autoclose-nvim git-conflict-nvim ];
+      extraConfigLua = ''
+        require("autoclose").setup()
+      '';
+      keymaps = [
+        { key = ";"; action = ":"; }
+        { key = "<A-W>"; action = ":wall<CR>"; }
+        { key = "<A-w>"; action = ":write<CR>"; }
+        { key = "<A-x>"; action = ":bdelete<CR>"; }
+        { key = "<A-{>"; action = ":BufferLineCyclePrev<CR>"; }
+        { key = "<A-}>"; action = ":BufferLineCycleNext<CR>"; }
+        { key = "<C-l>"; action = ":set invlist<CR>"; }
+        { key = "<S-p>"; action = ":BufferLinePick<CR>"; }
+        { key = "<S-s>"; action = ":sort<CR>"; }
+        { key = "<Space>c"; action = ":nohlsearch<CR>"; }
+        { key = "<leader>T"; action = ":Telescope find_files hidden=true<CR>"; }
+        { key = "<leader>f"; action = ":NvimTreeToggle<CR>"; }
+        { key = "<leader>g"; action = ":Telescope live_grep<CR>"; }
+        { key = "<leader>t"; action = ":Telescope find_files<CR>"; }
+      ];
     };
     # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
     helix = {
@@ -408,6 +529,10 @@ in
         {
           path = "${config.xdg.configHome}/git/personal";
           condition = "gitdir:~/.config/nixcfg/**";
+        }
+        {
+          path = "${config.xdg.configHome}/git/basis";
+          condition = "gitdir:~/src/git.usebasis.co/**";
         }
       ] ++ (lib.optionals (kernel == "darwin") [
         {
@@ -460,10 +585,36 @@ in
     ripgrep.enable = true;
     # Right now this breaks with sandbox-exec error
     # https://github.com/NixOS/nix/issues/4119
-    # # Go
-    # go.enable = true;
-    # Java
+    # Java (to satisfy Visual Studio Code Java extension - possibly factor out)
     java.enable = true;
+    # # Amazon Web Services Command Line Interface
+    awscli = {
+      enable = true;
+      settings = {
+        default = { region = "us-east-1"; output = "json"; };
+        # TODO: factor out into Basis profile
+        "profile development" = {
+          sso_session = "basis";
+          sso_account_id = 820061307359;
+          sso_role_name = "PowerUserAccess";
+        };
+        "profile staging" = {
+          sso_session = "basis";
+          sso_account_id = 523331955727;
+          sso_role_name = "PowerUserAccess";
+        };
+        "profile production" = {
+          sso_session = "basis";
+          sso_account_id = 432644110438;
+          sso_role_name = "PowerUserAccess";
+        };
+        "sso-session basis" = {
+          sso_start_url = "https://d-90679b66bf.awsapps.com/start";
+          sso_region = "us-east-1";
+          sso_registration_scopes = "sso:account:access";
+        };
+      };
+    };
     # GnuPG
     gpg = {
       enable = true;

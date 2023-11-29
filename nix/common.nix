@@ -2,7 +2,7 @@
   # Configuration for Nix itself
   nix = {
     # Pin registry to system Nixpkgs
-    # registry.nixpkgs.ro = { type = "path"; path = pkgs.path; };
+    #registry.nixpkgs.flake = pkgs;
 
     settings = {
       # Enable nix command and flakes
@@ -13,7 +13,7 @@
     };
 
     # Auto-upgrade nix command
-    package = pkgs.nix;
+    package = pkgs.nixUnstable;
   };
 
   # Configuration for Nixpkgs
