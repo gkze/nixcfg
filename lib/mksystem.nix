@@ -1,4 +1,5 @@
 # Unifying NixOS and Darwin system config declaration...
+# TODO configure hostname
 inputs: { device ? "", arch, kernel, users, sysMods ? [ ], hmMods ? [ ], ... }@args:
 let
   inherit (builtins) listToAttrs pathExists;
@@ -22,14 +23,14 @@ let
 in
 sysFn {
   # Pass additional arguments to all modules below
-  specialArgs = { inherit users hostPlatform; };
+  specialArgs = { inherit users hostPlatform inputs; };
   modules =
     # Common to everything and everyone
     [ ../nix/common.nix ]
     # Device-specific system module
     ++ optionals
       (device != null && pathExists ../device/system/${device}.nix)
-      [ ../devices/system/${device}.nix ]
+      [ ../device/system/${device}.nix ]
     # OS-specific
     ++ {
       darwin = [
