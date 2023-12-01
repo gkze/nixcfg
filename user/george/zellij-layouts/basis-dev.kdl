@@ -1,0 +1,38 @@
+layout {
+	pane size=1 borderless=true {
+		plugin location="zellij:tab-bar"
+	}
+	pane split_direction="vertical" {
+		pane split_direction="horizontal" {
+			pane {
+				cwd "/home/george/src/git.usebasis.co/basis/basis"
+			}
+			pane {
+				cwd "/home/george/src/git.usebasis.co/basis/basis"
+			}
+			pane {
+				cwd "/home/george/src/git.usebasis.co/basis/basis"
+			}
+			pane {
+				cwd "/home/george/src/git.usebasis.co/basis/basis"
+			}
+		}
+		pane split_direction="horizontal" {
+			pane {
+				cwd "/home/george/src/git.usebasis.co/basis/basis"
+			}
+			pane {
+				cwd "/home/george/src/git.usebasis.co/basis/basis"
+			}
+			pane {
+				cwd "/home/george/src/git.usebasis.co/basis/basis"
+			}
+			pane {
+				cwd "/home/george/src/git.usebasis.co/basis/basis"
+			}
+		}
+	}
+	pane size=2 borderless=true {
+		plugin location="zellij:status-bar"
+	}
+}

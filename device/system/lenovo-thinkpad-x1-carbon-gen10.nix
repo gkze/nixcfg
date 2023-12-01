@@ -2,6 +2,11 @@
   imports = [ (modulesPath + "/installer/scan/not-detected.nix") ];
 
   boot = {
+    # Inter-Integrated Circuit (I2C)
+    # https://en.wikipedia.org/wiki/I%C2%B2C
+    # Used for communicating with external monitor(s) over DDC (Display Data
+    # Channel)
+    # Currently used to set brightness
     kernelModules = [ "i2c-dev" "kvm-intel" ];
     initrd = {
       availableKernelModules = [

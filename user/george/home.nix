@@ -3,6 +3,7 @@ let
   inherit (builtins) elemAt readFile split;
   inherit (lib) optionals optionalString removeSuffix;
   inherit (lib.strings) concatStringsSep;
+  inherit (lib.attrsets) optionalAttrs;
 
   # Grab the OS kernel part of the hostPlatform tuple
   kernel = elemAt (split "-" hostPlatform) 2;
@@ -12,23 +13,10 @@ let
 in
 {
   # Home Manager modules go here
-  imports =
-    [ inputs.nixvim.homeManagerModules.nixvim ]
-    # TODO make sure this is well settled
-    ++ (optionals (kernel == "linux") [ ./dconf.nix ])
-    ++ hmMods;
+  imports = [ inputs.nixvim.homeManagerModules.nixvim ] ++ hmMods;
 
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
-
-  services = {
-    # Activate GPG agent on Linux
-    gpg-agent.enable = kernel == "linux";
-
-    # File synchronization
-    # TODO Factor out into Basis profile
-    syncthing.enable = true;
-  };
 
   # wayland.windowManager.hyprland.enable = true;
 
@@ -73,122 +61,112 @@ in
         ezat = "eza ${ezaDefaultArgs} --tree";
         ne = "cd ~/.config/nixcfg && nvim";
         nv = "nvim";
-        zac = "zellij action clear";
+        zc = "zellij action clear";
         zj = "zellij";
         zq = "zellij kill-all-sessions --yes && zellij delete-all-sessions --force --yes";
       };
 
-    file =
-      # Wire up symlinks to everything under $ROOT/user/$USER/home from $HOME
-      # That way no additional code needs to be written
-      # Not in use right now, should probably not be needed as most software
-      # should be configured via `programs` attribute
-      # mapAttrs
-      #   (n: v: {
-      #     source = ./home/${n};
-      #     recursive = if v == "directory" then true else false;
-      #   })
-      #   (readDir ./home)
-      # //
-      # # Additional manual files for various reasons
-      {
-        # We explicitly set the prefix to $HOME/.local because npm operates out 
-        # of the Nix store, which is read-only
-        "${config.xdg.configHome}/npmrc".text = ''
-          prefix = "''${HOME}/.local"
-        '';
-        # Same as above for pip
-        "${config.xdg.configHome}/pip/pip.conf".text = ''
-          [install]
-          user = true
-        '';
-        ".local/bin" = {
-          source = ./home/.local/bin;
-          recursive = true;
-          executable = true;
-        };
-        "${config.xdg.configHome}/git/personal".text = ''
-          [user]
-          	name = gkze
-          	email = george.kontridze@gmail.com
-        '';
-        "${config.xdg.configHome}/git/basis".text = ''
-          [user]
-          	name = george
-          	email = george@usebasis.co
-        '';
-      };
+    # Files/directories for $HOME
+    file = {
+      # We explicitly set the prefix to $HOME/.local because npm operates out 
+      # of the Nix store, which is read-only
+      "${config.xdg.configHome}/npmrc".text = ''
+        prefix = "''${HOME}/.local"
+      '';
+      # Same as above for pip
+      "${config.xdg.configHome}/pip/pip.conf".text = ''
+        [install]
+        user = true
+      '';
+      "${config.xdg.configHome}/git/personal".text = ''
+        [user]
+        	name = gkze
+        	email = george.kontridze@gmail.com
+      '';
+      "${config.xdg.configHome}/git/basis".text = ''
+        [user]
+        	name = george
+        	email = george@usebasis.co
+      '';
+      ".local/bin" = { source = ./bin; recursive = true; executable = true; };
+    };
 
     # Packages that should be installed to the user profile. These are just
     # installed. Programs section below both installs and configures software,
     # and is the preferred method.
-    packages =
-      with pkgs; [
-        # Web browser
-        brave
-        # Duplicate file finder
-        czkawka
-        # Display Data Channel UTILity
-        ddcutil
-        # Matrix client
-        # TODO factor out into Basis profile
-        # TODO TBD if works on macOS
-        element-desktop
-        # Envchain is a utility that loads environment variables from the system
-        # keychain
-        envchain
-        # Alternative to `find`
-        fd
-        # GitLab Command Line Interface
-        glab
-        # Brightness control for all detected monitors
-        # Currently managed manually
-        # TODO fix
-        # gnomeExtensions.brightness-control-using-ddcutil
-        # File transfer over LAN
-        localsend
-        # Additional useful utilities (a la coreutils)
-        moreutils
-        # Nerd Fonts
-        # - https://www.nerdfonts.com/
-        # - https://github.com/ryanoasis/nerd-fonts
-        # Only install Hack Nerd Font, since the entire package / font repository
-        # is quite large
-        (nerdfonts.override { fonts = [ "Hack" ]; })
-        # Knowledge management
-        obsidian
-        # For Basis
-        # TODO factor out into Basis profile
-        networkmanager-openvpn
-        # Alternative to `sed`
-        sd
-        # TODO TBD if works on macOS
-        slack
-        # TODO TBD if works on macOS
-        signal-desktop-beta
-        # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
-        # tokei 
-        # Alternative to `watch`
-        viddy
-        # File transfer over LAN
-        warp
-        # Clipboard utility
-        xclip
-      ]
-      ++ (with inputs; [
-        # Nix software management GUI
-        nix-software-center.packages.${hostPlatform}.default
-        # Nix configuration editor GUI
-        nixos-conf-editor.packages.${hostPlatform}.default
-      ])
-      ++ (with pkgs.gnome; [
-        # Additional GNOME settings tool
-        # TODO factor out into nixos-only home manager
-        gnome-tweaks
-        # Additional GNOME settings editing tool
-        # https://wiki.gnome.org/Apps/DconfEditor
-        dconf-editor
-      ])
+    packages = with pkgs; [
+      # Password manager
+      # TODO factor out into Basis profile
+      _1password-gui
+      # Web browser
+      brave
+      # Duplicate file finder
+      czkawka
+      # Display Data Channel UTILity
+      ddcutil
+      # Matrix client
+      # TODO factor out into Basis profile
+      # TODO TBD if works on macOS
+      element-desktop
+      # Envchain is a utility that loads environment variables from the system
+      # keychain
+      envchain
+      # Alternative to `find`
+      fd
+      # Multiple git repository management
+      gita
+      # GitLab Command Line Interface
+      glab
+      # Brightness control for all detected monitors
+      # Currently managed manually
+      # TODO fix
+      # gnomeExtensions.brightness-control-using-ddcutil
+      # File transfer over LAN
+      localsend
+      # Additional useful utilities (a la coreutils)
+      moreutils
+      # Nerd Fonts
+      # - https://www.nerdfonts.com/
+      # - https://github.com/ryanoasis/nerd-fonts
+      # Only install Hack Nerd Font, since the entire package / font repository
+      # is quite large
+      (nerdfonts.override { fonts = [ "Hack" ]; })
+      # Knowledge management
+      obsidian
+      # For Basis
+      # TODO factor out into Basis profile
+      networkmanager-openvpn
+      # Alternative to `ps`
+      procs
+      # Alternative to `sed`
+      sd
+      # TODO TBD if works on macOS
+      slack
+      # TODO TBD if works on macOS
+      signal-desktop-beta
+      # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
+      # tokei 
+      # Alternative to `watch`
+      viddy
+      # File transfer over LAN
+      warp
+      # Clipboard utility
+      xclip
+    ]
+    ++ (with inputs; [
+      # Nix software management GUI
+      nix-software-center.packages.${hostPlatform}.default
+      # Nix configuration editor GUI
+      nixos-conf-editor.packages.${hostPlatform}.default
+    ])
+    ++ (with pkgs.gnome; [
+      # Additional GNOME settings tool
+      # TODO factor out into nixos-only home manager
+      gnome-tweaks
+      # Additional GNOME settings editing tool
+      # https://wiki.gnome.org/Apps/DconfEditor
+      dconf-editor
+    ])
     ;
   };
 
@@ -267,17 +245,17 @@ in
         share = true;
         size = 100000;
       };
+      # Any additional manual confiuration goes here
       # Placed in $ZDOTDIR/.zshrc
       initExtra = ''
-        # vi: ft=zsh
-        # shellcheck disable=all
-
+        # Post-compinit
         # Zsh builtins help
         unalias &>/dev/null run-help && autoload run-help
 
-        # Load completion system
+        # Load completion system, enable Bash completion compatibility
         zmodload zsh/complist
-        autoload -Uz +X compinit bashcompinit select-word-style
+        autoload -Uz +X bashcompinit select-word-style
+        bashcompinit
         select-word-style bash
 
         # Tune the completion system a bit
@@ -286,7 +264,12 @@ in
 
         # Keep elements of {,MAN}PATH unique
         typeset -U PATH MANPATH
-      '' + optionalString (kernel == "darwin") ''
+
+        # AWS Zsh completion. Defined for Bash so ``
+        # complete -C ${pkgs.awscli2}/bin/aws_completer aws
+      ''
+      # Darwin-only Zsh configuration (post-compinit)
+      + optionalString (kernel == "darwin") ''
         # Enable Homebrew on macOS
 
         # Set Homebrew prefix for M1 Mac
@@ -302,10 +285,15 @@ in
         export MANPATH="''${HOMEBREW_PREFIX}/share/man:''${MANPATH}"
       '';
       # Placed in $ZDOTDIR/.zshrc before compinit
-      initExtraBeforeCompInit = optionalString (kernel == "darwin") ''
+      initExtraBeforeCompInit = ''
+        # Pre-compinit
+      ''
+      # Darwin-only Zsh configuration (pre-compinit)
+      + optionalString (kernel == "darwin") ''
         # Homebrew Zsh completion
-        fpath+="/opt/homebrew/share/zsh/site-functions"
-      '';
+        fpath+="''${HOMEBREW_PREFIX}/zsh/site-functions"
+      ''
+      ;
       plugins = [
         # Fish-like command autosuggestions
         {
@@ -326,7 +314,7 @@ in
         # Zsh Vi mode granular backward kill word
         {
           name = "zsh-vi-mode-backward-kill-word";
-          src = ./home/.config/zsh/plugins;
+          src = ./zsh-plugins;
         }
         # Use FZF for searching through history
         {
@@ -334,6 +322,7 @@ in
           src = "${pkgs.zsh-fzf-history-search}/share/zsh-fzf-history-search";
         }
         # Yank selections into system clipboard
+        # TODO send Nixpkgs update PR
         {
           name = "zsh-system-clipboard";
           src = (pkgs.fetchFromGitHub {
@@ -343,16 +332,10 @@ in
             hash = "sha256-t4xPKd9BvrH4cyq8rN/IVGcm13OJNutdZ4e+FdGbPIo=";
           });
         }
-        # docker(d) CLI completion
-        {
-          name = "docker";
-          src = "${pkgs.docker}/share/zsh/site-functions";
-          file = "_docker";
-        }
       ];
     };
     # Modern shell that focuses on structured data
-    # TODO: tune
+    # TODO tune
     nushell.enable = true;
     # Shell prompt
     starship = {
@@ -385,6 +368,8 @@ in
       # https://github.com/NixOS/nixpkgs/pull/269942
       enableMan = false;
       colorschemes.gruvbox = { enable = true; contrastDark = "soft"; };
+      # Editor-agnostic configuration
+      editorconfig.enable = true;
       options = {
         # Copy indent from current line when starting a new line
         autoindent = true;
@@ -418,15 +403,60 @@ in
       };
       plugins = {
         # Greeter (home page)
-        alpha.enable = true;
+        alpha = {
+          enable = true;
+          layout = [
+            { type = "padding"; val = 2; }
+            {
+              type = "text";
+              val = [
+                "  ███╗   ██╗██╗██╗  ██╗██╗   ██╗██╗███╗   ███╗  "
+                "  ████╗  ██║██║╚██╗██╔╝██║   ██║██║████╗ ████║  "
+                "  ██╔██╗ ██║██║ ╚███╔╝ ██║   ██║██║██╔████╔██║  "
+                "  ██║╚██╗██║██║ ██╔██╗ ╚██╗ ██╔╝██║██║╚██╔╝██║  "
+                "  ██║ ╚████║██║██╔╝ ██╗ ╚████╔╝ ██║██║ ╚═╝ ██║  "
+                "  ╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝     ╚═╝  "
+              ];
+              opts = { position = "center"; hl = "Type"; };
+            }
+            { type = "padding"; val = 2; }
+            {
+              type = "group";
+              val = [
+                { shortcut = "SPC e"; desc = "  New file"; command = "<CMD>ene <CR>"; }
+                { shortcut = "SPC f"; desc = "󰈞  Find file"; command = "<CMD>Telescope find_files<CR>"; }
+                { shortcut = "SPC w"; desc = "󰈞  Find word"; command = "<CMD>Telescope live_grep<CR>"; }
+                { shortcut = "q"; desc = "  Quit Neovim"; command = ":qa<CR>"; }
+              ];
+            }
+            { type = "padding"; val = 2; }
+            {
+              type = "text";
+              val = "Crankenstein";
+              opts = { position = "center"; hl = "Keyword"; };
+            }
+          ];
+        };
         # Buffer line (top, tabs)
-        bufferline = { enable = true; enforceRegularTabs = true; };
+        bufferline = {
+          enable = true;
+          enforceRegularTabs = true;
+          offsets = [{
+            filetype = "neo-tree";
+            text = "Neo-tree";
+            separator = true;
+            textAlign = "left";
+          }];
+        };
         # File / AST breadcrumbs
         barbecue.enable = true;
         # Status line (bottom)
         lualine.enable = true;
-        # File explorer (side)
-        nvim-tree.enable = true;
+        # File explorer
+        neo-tree = {
+          enable = true;
+          filesystem.filteredItems = { hideDotfiles = false; hideGitignored = false; };
+        };
         # File finder (popup)
         telescope.enable = true;
         # Language Server Protocol client
@@ -440,6 +470,7 @@ in
           };
           servers = {
             # Nix (nil with nixpkgs-fmt)
+            # TODO determine if nil or nixd is better
             nixd = {
               enable = true;
               settings.formatting.command = "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt";
@@ -456,17 +487,49 @@ in
         };
         # LSP formatting
         lsp-format.enable = true;
-        treesitter.enable = true;
+        # Parser generator & incremental parsing toolkit
+        treesitter = { enable = true; incrementalSelection.enable = true; };
         # LSP completion
         nvim-cmp = {
           enable = true;
           mappingPresets = [ "insert" ];
           snippet.expand = "ultisnips";
+          sources = [
+            { name = "nvim_lsp"; }
+            { name = "ultisnips"; }
+            { name = "path"; }
+            { name = "buffer"; }
+          ];
+          mapping = {
+            "<CR>" = "cmp.mapping.confirm({ select = true })";
+            "<Tab>" = {
+              modes = [ "i" "s" ];
+              action = ''
+                function(fallback)
+                  if cmp.visible() then
+                    cmp.select_next_item()
+                  elseif luasnip.expandable() then
+                    luasnip.expand()
+                  elseif luasnip.expand_or_jumpable() then
+                    luasnip.expand_or_jump()
+                  elseif check_backspace() then
+                    fallback()
+                  else
+                    fallback()
+                  end
+                end
+              '';
+            };
+          };
         };
         # LSP pictograms
         lspkind.enable = true;
+        # Multi-faceted LSP UX improvements
+        lspsaga.enable = true;
         # Git integration
         neogit.enable = true;
+        # Git changes
+        gitgutter.enable = true;
         # Git praise
         gitblame.enable = true;
         # Diff view
@@ -479,10 +542,18 @@ in
         todo-comments.enable = true;
         # Diagnostics, etc. 
         trouble.enable = true;
+        # Symbol navigation popup
+        navbuddy.enable = true;
       };
-      extraPlugins = with pkgs.vimPlugins; [ autoclose-nvim git-conflict-nvim ];
+      extraPlugins = with pkgs.vimPlugins; [
+        autoclose-nvim
+        git-conflict-nvim
+        symbols-outline-nvim
+      ];
       extraConfigLua = ''
         require("autoclose").setup()
+        require("git-conflict").setup()
+        require("symbols-outline").setup()
       '';
       keymaps = [
         { key = ";"; action = ":"; }
@@ -495,10 +566,12 @@ in
         { key = "<S-p>"; action = ":BufferLinePick<CR>"; }
         { key = "<S-s>"; action = ":sort<CR>"; }
         { key = "<Space>c"; action = ":nohlsearch<CR>"; }
-        { key = "<leader>T"; action = ":Telescope find_files hidden=true<CR>"; }
-        { key = "<leader>f"; action = ":NvimTreeToggle<CR>"; }
+        { key = "<leader>F"; action = ":Telescope find_files hidden=true<CR>"; }
+        { key = "<leader>f"; action = ":Telescope find_files<CR>"; }
         { key = "<leader>g"; action = ":Telescope live_grep<CR>"; }
-        { key = "<leader>t"; action = ":Telescope find_files<CR>"; }
+        { key = "<leader>s"; action = ":SymbolsOutline<CR>"; }
+        { key = "<leader>t"; action = ":Neotree toggle<CR>"; }
+        { key = "<leader>n"; action = ":Neotree focus<CR>"; }
       ];
     };
     # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
@@ -654,9 +727,9 @@ in
     };
   };
 }
-  //
-  # nix-darwin-only attributes
-lib.attrsets.optionalAttrs (kernel == "darwin") {
+//
+# nix-darwin-only attributes
+optionalAttrs (kernel == "darwin") {
   # User-local launchd agents
   launchd.agents = {
     # Run /usr/bin/ssh-add (shipped by Apple with macOS by default, which
@@ -687,4 +760,18 @@ lib.attrsets.optionalAttrs (kernel == "darwin") {
     };
   };
 }
+  //
+optionalAttrs (kernel == "linux") {
+  # TODO factor out into Linux-only attrs
+  services = {
+    # Activate GPG agent on Linux
+    gpg-agent.enable = true;
 
+    # File synchronization
+    # TODO Factor out into Basis profile
+    syncthing.enable = true;
+
+    # Nix shell direnv background daemon
+    lorri.enable = true;
+  };
+}
