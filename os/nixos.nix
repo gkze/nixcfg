@@ -23,7 +23,12 @@ in
     };
   };
 
+  # TODO get working
   # programs.hyprland.enable = true;
+  # https://github.com/Mic92/nix-ld
+  programs.nix-ld.enable = true;
+
+  virtualisation.docker.enable = true;
 
   services.xserver = {
     enable = true;
@@ -53,11 +58,17 @@ in
   ];
 
   # Define a user account. Don't forget to set a password with ‘passwd’.
+  # TODO factor out into separate system-agnostic (hopefully) user config
   users = {
+    # Inter-Integrated Circuit (I2C)
+    # https://en.wikipedia.org/wiki/I%C2%B2C
+    # Used for communicating with external monitor(s) over DDC (Display Data
+    # Channel)
+    # Currently used to set brightness
     groups.i2c = { };
     users.george = {
       description = "George Kontridze";
-      extraGroups = [ "i2c" "networkmanager" "wheel" ];
+      extraGroups = [ "docker" "i2c" "networkmanager" "wheel" ];
       isNormalUser = true;
       shell = pkgs.zsh;
     };
