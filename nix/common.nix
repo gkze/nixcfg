@@ -17,9 +17,16 @@
   };
 
   # Configuration for Nixpkgs
-  # Set host platform and allow unfree software
+  # Set host platform and allow unfree and insecure software
   # https://nixos.wiki/wiki/Unfree_Software
-  nixpkgs = { inherit hostPlatform; config.allowUnfree = true; };
+  nixpkgs = {
+    inherit hostPlatform;
+    config = {
+      allowUnfree = true;
+      allowInsecure = true;
+      permittedInsecurePackages = [ "electron-25.9.0" ]; # Beekeeper Studio
+    };
+  };
 
   # Common system configuration
   environment = {
