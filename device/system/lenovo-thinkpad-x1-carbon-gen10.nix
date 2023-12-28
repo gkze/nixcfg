@@ -1,36 +1,59 @@
-{ ... }: {
-  # imports = [ (modulesPath + "/installer/scan/not-detected.nix") ];
+{ config, pkgs, lib, modulesPath, ... }: {
+  imports = [ (modulesPath + "/installer/scan/not-detected.nix") ];
 
-  # boot.initrd.availableKernelModules = [ "xhci_pci" "thunderbolt" "nvme" "usb_storage" "sd_mod" ];
-  # boot.initrd.kernelModules = [ ];
-  # boot.kernelModules = [ "kvm-intel" ];
-  # boot.extraModulePackages = [ ];
+  boot = {
+    # Inter-Integrated Circuit (I2C)
+    # https://en.wikipedia.org/wiki/I%C2%B2C
+    # Used for communicating with external monitor(s) over DDC (Display Data
+    # Channel)
+    # Currently used to set brightness
+    kernelModules = [ "i2c-dev" "kvm-intel" ];
+    initrd = {
+      availableKernelModules = [
+        "nvme"
+        "sd_mod"
+        "thunderbolt"
+        "usb_storage"
+        "xhci_pci"
+      ];
+      luks.devices = {
+        "luks-a3c480ba-744e-48f7-b509-fb525972d806".device = "/dev/disk/by-uuid/a3c480ba-744e-48f7-b509-fb525972d806";
+        "luks-5283c0a3-818c-4e5e-aad5-b46b75bc677f".device = "/dev/disk/by-uuid/5283c0a3-818c-4e5e-aad5-b46b75bc677f";
+      };
+    };
+    loader = { efi.canTouchEfiVariables = true; systemd-boot.enable = true; };
+  };
 
-  # fileSystems."/" =
-  #   {
-  #     device = "/dev/disk/by-uuid/3900d3b0-334b-4e0e-aafe-f46c4dd13a3f";
-  #     fsType = "ext4";
-  #   };
+  systemd.services.fprintd.after = [ "display-manager.service" ];
 
-  # boot.initrd.luks.devices."luks-ea2de727-3163-4f8c-874a-1cfd9e537a8c".device = "/dev/disk/by-uuid/ea2de727-3163-4f8c-874a-1cfd9e537a8c";
+  services = {
+    udev.extraRules = ''
+      KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"
+    '';
+    fprintd = {
+      enable = true;
+      package = pkgs.fprintd-tod;
+      tod = { enable = true; driver = pkgs.libfprint-2-tod1-vfs0090; };
+    };
+  };
 
-  # fileSystems."/boot" =
-  #   {
-  #     device = "/dev/disk/by-uuid/F54B-D0C3";
-  #     fsType = "vfat";
-  #   };
+  fileSystems = {
+    "/" = {
+      device = "/dev/disk/by-uuid/c2e89227-23c9-4d05-926d-e0414c693801";
+      fsType = "ext4";
+    };
+    "/boot" = {
+      device = "/dev/disk/by-uuid/AFEC-5C32";
+      fsType = "vfat";
+    };
+  };
 
-  # swapDevices =
-  #   [{ device = "/dev/disk/by-uuid/34822754-f52c-4daa-b5f9-26b5d1229a6f"; }];
+  swapDevices = [
+    { device = "/dev/disk/by-uuid/082a8004-f741-4862-8b9e-273f00ff520d"; }
+  ];
 
-  # # Enables DHCP on each ethernet and wireless interface. In case of scripted networking
-  # # (the default) this is the recommended approach. When using systemd-networkd it's
-  # # still possible to use this option, but it's recommended to use it in conjunction
-  # # with explicit per-interface declarations with `networking.interfaces.<interface>.useDHCP`.
-  # networking.useDHCP = lib.mkDefault true;
-  # # networking.interfaces.wlp0s20f3.useDHCP = lib.mkDefault true;
+  networking.useDHCP = lib.mkDefault true;
 
-  # nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
-  # powerManagement.cpuFreqGovernor = lib.mkDefault "powersave";
-  # hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
+  powerManagement.cpuFreqGovernor = lib.mkDefault "powersave";
+  hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
 }

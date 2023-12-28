@@ -1,132 +1,92 @@
 { pkgs, lib, ... }:
-let locale = "en_US.UTF-8"; in {
-  # imports = [ ./hardware-configuration.nix ];
+let
+  inherit (builtins) readFile;
+  inherit (lib) removeSuffix;
+in
+{
+  networking = {
+    hostName = "mesa";
+    networkmanager = { enable = true; wifi.backend = "iwd"; };
+  };
 
-  # boot = {
-  #   loader = { systemd-boot.enable = true; efi.canTouchEfiVariables = true; };
-  #   initrd.luks.devices."luks-4c3acb5a-1b6c-4e4f-a29d-b9ed8dcc9682".device = "/dev/disk/by-uuid/4c3acb5a-1b6c-4e4f-a29d-b9ed8dcc9682";
-  # };
+  time.timeZone = "America/Los_Angeles";
 
-  # networking = {
-  #   hostName = "frontier"; # Define your hostname.
-  #   networkmanager.enable = true;
-  # };
+  i18n = {
+    defaultLocale = "en_US.UTF-8";
+    extraLocaleSettings = {
+      LC_ADDRESS = "en_US.UTF-8";
+      LC_IDENTIFICATION = "en_US.UTF-8";
+      LC_MEASUREMENT = "en_US.UTF-8";
+      LC_MONETARY = "en_US.UTF-8";
+      LC_NAME = "en_US.UTF-8";
+      LC_NUMERIC = "en_US.UTF-8";
+      LC_PAPER = "en_US.UTF-8";
+      LC_TELEPHONE = "en_US.UTF-8";
+      LC_TIME = "en_US.UTF-8";
+    };
+  };
 
-  # hardware = {
-  #   bluetooth = { enable = true; powerOnBoot = true; };
-  #   pulseaudio.enable = false;
-  # };
+  # TODO: get working
+  # programs.hyprland.enable = true;
+  # https://github.com/Mic92/nix-ld
+  programs.nix-ld.enable = true;
 
-  # virtualisation.libvirtd.enable = true;
+  virtualisation.docker.enable = true;
 
-  # sound.enable = true;
+  # Linux application distribution format
+  services.flatpak.enable = true;
 
-  # i18n = {
-  #   defaultLocale = locale;
-  #   extraLocaleSettings = {
-  #     LC_ADDRESS = locale;
-  #     LC_IDENTIFICATION = locale;
-  #     LC_MEASUREMENT = locale;
-  #     LC_MONETARY = locale;
-  #     LC_NAME = locale;
-  #     LC_NUMERIC = locale;
-  #     LC_PAPER = locale;
-  #     LC_TELEPHONE = locale;
-  #     LC_TIME = locale;
-  #   };
-  # };
+  # Display
+  services.xserver = {
+    enable = true;
+    desktopManager.gnome.enable = true;
+    displayManager.gdm.enable = true;
+    layout = "us";
+    # When changing, run:
+    # ```
+    # $ gsettings reset org.gnome.desktop.input-sources xkb-option
+    # $ gsettings reset org.gnome.desktop.input-sources sources
+    # ```
+    xkbOptions = "caps:swapescape";
+  };
 
-  # fonts.fonts = with pkgs; [ (nerdfonts.override { fonts = [ "Hack" ]; }) ];
+  # Sound
+  sound.enable = true;
+  hardware.pulseaudio.enable = false;
+  security.rtkit.enable = true;
+  services.pipewire = {
+    enable = true;
+    alsa.enable = true;
+    alsa.support32Bit = true;
+    pulse.enable = true;
+  };
 
-  # nix.settings.experimental-features = [ "nix-command" "flakes" ];
-  # nixpkgs.config.allowUnfree = true;
+  environment.systemPackages = [
+    # TODO: Nix Software Center
+  ];
 
-  # services = {
-  #   # Bluebooth
-  #   blueman.enable = true;
+  # Define a user account. Don't forget to set a password with ‘passwd’.
+  # TODO: factor out into separate system-agnostic (hopefully) user config
+  users = {
+    # Inter-Integrated Circuit (I2C)
+    # https://en.wikipedia.org/wiki/I%C2%B2C
+    # Used for communicating with external monitor(s) over DDC (Display Data
+    # Channel)
+    # Currently used to set brightness
+    groups.i2c = { };
+    users.george = {
+      description = "George Kontridze";
+      extraGroups = [ "docker" "i2c" "networkmanager" "wheel" ];
+      isNormalUser = true;
+      shell = pkgs.zsh;
+    };
+  };
 
-  #   # FirmWare UPdate Daemon
-  #   fwupd.enable = true;
-
-  #   # X11 windowing system
-  #   xserver = {
-  #     enable = true;
-
-  #     # GNOME desktop environment
-  #     displayManager.gdm.enable = true;
-  #     desktopManager.gnome.enable = true;
-
-  #     # X11 keymap
-  #     layout = "us";
-  #     xkbVariant = "";
-  #   };
-
-  #   # Audio
-  #   pipewire = {
-  #     enable = true;
-  #     alsa.enable = true;
-  #     alsa.support32Bit = true;
-  #     pulse.enable = true;
-  #   };
-
-  #   # Fingerprint reader (TOD = Touch OEM Driver)
-  #   fprintd = {
-  #     enable = true;
-  #     package = pkgs.fprintd-tod;
-  #     tod = {
-  #       enable = true;
-  #       driver = pkgs.libfprint-2-tod1-goodix;
-  #     };
-  #   };
-  # };
-
-  # programs = {
-  #   dconf.enable = true;
-  #   gnupg.agent = { enable = true; enableSSHSupport = true; };
-  # };
-
-  # security.rtkit.enable = true;
-
-  # # Define a user account. Don't forget to set a password with ‘passwd’.
-  # users.users.george = {
-  #   isNormalUser = true;
-  #   description = "George Kontridze";
-  #   extraGroups = [ "libvirtd" "networkmanager" "wheel" ];
-  # };
-
-  # # List packages installed in system profile. To search, run:
-  # # $ nix search wget
-  # environment.systemPackages = with pkgs; [
-  #   alacritty
-  #   brave
-  #   gnomeExtensions.systemd-manager
-  #   google-chrome
-  #   helix
-  #   neovim
-  #   nil
-  #   nushell
-  #   nyxt
-  #   spotify
-  #   systemdgenie
-  #   virt-manager
-  #   vscode
-  #   xclip
-  #   zellij
-  #   (import
-  #     (pkgs.fetchFromGitHub {
-  #       owner = "vlinkz";
-  #       repo = "nix-software-center";
-  #       rev = "0.1.2";
-  #       sha256 = "xiqF1mP8wFubdsAQ1BmfjzCgOD3YZf7EGWl9i69FTls=";
-  #     })
-  #     { })
-  # ];
-
-  # # This value determines the NixOS release from which the default
-  # # settings for stateful data, like file locations and database versions
-  # # on your system were taken. It‘s perfectly fine and recommended to leave
-  # # this value at the release version of the first install of this system.
-  # # Before changing this value read the documentation for this option
-  # # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
-  # stateVersion = lib.removeSuffix "\n" (builtins.readFile ../../NIXOS_VERSION);
+  # This value determines the NixOS release from which the default
+  # settings for stateful data, like file locations and database versions
+  # on your system were taken. It‘s perfectly fine and recommended to leave
+  # this value at the release version of the first install of this system.
+  # Before changing this value read the documentation for this option
+  # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
+  system.stateVersion = removeSuffix "\n" (readFile ../NIXOS_VERSION); # Did you read the comment?
 }

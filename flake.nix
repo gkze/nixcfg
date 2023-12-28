@@ -55,6 +55,16 @@
       url = "github:nix-community/disko";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    nix-software-center = {
+      url = "github:vlinkz/nix-software-center";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    nixos-conf-editor = {
+      url = "github:vlinkz/nixos-conf-editor";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs:
@@ -134,7 +144,7 @@
                 nix-editor.packages.${system}.default
                 nixos-generators.packages.${system}.default
               ])
-              ++ (with pkgs; [ nix-init nix-melt nurl ]);
+              ++ (with pkgs; [ dconf2nix nix-init nix-melt nurl ]);
           };
 
           # For `nix run`
@@ -185,7 +195,8 @@
 
 
         # Basis ThinkPad X1 Carbon
-        nixosConfigurations.frontier = mkSystem inputs {
+        # TODO: Symlink merged /etc/nixos/configuration.nix for nixos-rebuild
+        nixosConfigurations.mesa = mkSystem inputs {
           device = "lenovo-thinkpad-x1-carbon-gen10";
           arch = "x86_64";
           kernel = "linux";

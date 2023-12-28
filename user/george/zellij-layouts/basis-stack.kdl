@@ -1,0 +1,85 @@
+layout {
+    pane size=1 borderless=true {
+        plugin location="zellij:tab-bar"
+    }
+    pane split_direction="vertical" {
+        pane split_direction="horizontal" {
+            pane {
+                name "credito-ui"
+                cwd "~/src/git.usebasis.co/basis/credito"
+                command "direnv"
+                args "exec" "." "npm" "start"
+            }
+            pane {
+                name "credito-api"
+                cwd "~/src/git.usebasis.co/basis/basis"
+                command "direnv"
+                args "exec" "." "basis-cli" "-D" "app" "serve" "credito"
+            }
+            pane {
+                name "sync-executor"
+                cwd "~/src/git.usebasis.co/basis/basis"
+                command "direnv"
+                args "exec" "." "zsh" "-c" "
+                    while ! nc -z localhost 5672; do
+                        sleep 0.1
+                    done
+
+                    basis-cli -D sync run-executor -B
+                "
+            }
+            pane {
+                name "banco"
+                cwd "~/src/git.usebasis.co/basis/banco-basis"
+                command "direnv"
+                args "exec" "." "./manage.py" "runserver"
+            }
+            pane {
+                name "rabbit"
+                cwd "~/src/git.usebasis.co/basis/basis"
+                command "direnv"
+                args "exec" "." "rabbitmq-server"
+            }
+        }
+        pane split_direction="horizontal" {
+            pane {
+                name "connect-ui"
+                cwd "~/src/git.usebasis.co/basis/connect"
+                command "direnv"
+                args "exec" "." "npm" "start"
+            }
+            pane {
+                name "connect-api"
+                cwd "~/src/git.usebasis.co/basis/basis"
+                command "direnv"
+                args "exec" "." "basis-cli" "-D" "app" "serve" "connect"
+            }
+            pane {
+                name "api"
+                cwd "~/src/git.usebasis.co/basis/basis"
+                command "direnv"
+                args "exec" "." "basis-cli" "-D" "app" "serve" "api"
+            }
+            pane {
+                name "spotlight"
+                command "npx"
+                args "@spotlightjs/spotlight"
+            }
+            pane {
+                name "postgres"
+                cwd "~/src/git.usebasis.co/basis/basis"
+                command "direnv"
+                args "exec" "." "zsh" "-c" "postgres -h '' -k ${PWD}/.tmp/postgres/run"
+            }
+        }
+    }
+    pane {
+        name "shell"
+        size "15%"
+        cwd "~/src/git.usebasis.co/basis/basis"
+        focus true
+    }
+    pane size=2 borderless=true {
+        plugin location="zellij:status-bar"
+    }
+}
