@@ -1,8 +1,7 @@
 { config, lib, pkgs, inputs, hostPlatform, hmMods ? [ ], ... }:
 let
   inherit (builtins) elemAt readFile split;
-  inherit (lib) optionals optionalString removeSuffix;
-  inherit (lib.strings) concatStringsSep;
+  inherit (lib) optionalString removeSuffix;
   inherit (lib.attrsets) optionalAttrs;
 
   # Grab the OS kernel part of the hostPlatform tuple
@@ -31,7 +30,11 @@ in
     # changes in each release.
     stateVersion = removeSuffix "\n" (readFile ../../NIXOS_VERSION);
 
-    # Shell-agnostic session environment variables that are always set 
+    # Shell-agnostic session $PATH
+    sessionPath = [ "$HOME/.local/bin" "$HOME/go/bin" ];
+
+    # Shell-agnostic session environment variables
+    # These only get applied on login
     sessionVariables = {
       # Set Neovim as the default editor
       EDITOR = "nvim";
@@ -44,9 +47,6 @@ in
       NIX_PAGER = "bat -p";
       # Set Bat as the default pager
       PAGER = "bat -p";
-      # Set $PATH. Priority is:
-      # - User-local executables in $HOME/.local/bin
-      PATH = concatStringsSep ":" [ ''''${HOME}/.local/bin'' ''''${PATH}'' ];
     };
 
     # Universal cross-shell aliases
@@ -96,33 +96,44 @@ in
     # and is the preferred method.
     packages = with pkgs; [
       # Password manager
-      # TODO factor out into Basis profile
+      # TODO: factor out into Basis profile
       _1password-gui
+      # Database GUI
+      beekeeper-studio
       # Web browser
       brave
+      # cURL wrapper with niceties
+      curlie
       # Duplicate file finder
       czkawka
       # Display Data Channel UTILity
       ddcutil
+      # Disk space usage analyzer (in Rust)
+      du-dust
       # Matrix client
-      # TODO factor out into Basis profile
-      # TODO TBD if works on macOS
+      # TODO: factor out into Basis profile
+      # TODO: TBD if works on macOS
       element-desktop
       # Envchain is a utility that loads environment variables from the system
       # keychain
       envchain
       # Alternative to `find`
       fd
+      # File type identification via libmagic
+      # - https://www.darwinsys.com/file/
+      # - https://github.com/file/file
       # Multiple git repository management
       gita
       # GitLab Command Line Interface
       glab
+      # Graphical Ping (ICMP)
+      gping
+      # HTTP client
+      httpie
       # Brightness control for all detected monitors
       # Currently managed manually
-      # TODO fix
+      # TODO: fix
       # gnomeExtensions.brightness-control-using-ddcutil
-      # File transfer over LAN
-      localsend
       # Additional useful utilities (a la coreutils)
       moreutils
       # Nerd Fonts
@@ -131,27 +142,47 @@ in
       # Only install Hack Nerd Font, since the entire package / font repository
       # is quite large
       (nerdfonts.override { fonts = [ "Hack" ]; })
+      # For running one-off npx stuff
+      nodejs_latest
       # Knowledge management
+      # TODO: factor out into Basis profile
       obsidian
       # For Basis
-      # TODO factor out into Basis profile
+      # TODO: factor out into Basis profile
       networkmanager-openvpn
       # Alternative to `ps`
       procs
       # Alternative to `sed`
       sd
-      # TODO TBD if works on macOS
+      # TODO: TBD if works on macOS
       slack
-      # TODO TBD if works on macOS
-      signal-desktop-beta
+      # TODO: TBD if works on macOS
+      signal-desktop
       # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
-      # tokei 
+      tokei
       # Alternative to `watch`
       viddy
       # File transfer over LAN
       warp
-      # Clipboard utility
-      xclip
+      # Wayland Clipboard
+      wl-clipboard
+      # Git branch maintenance
+      # TODO: upstream to Nixpkgs
+      # TODO: get working
+      # (stdenv.mkDerivation {
+      #   name = "git-trim";
+      #   src = pkgs.fetchFromGitHub {
+      #     owner = "jasonmccreary";
+      #     repo = "git-trim";
+      #     rev = "5f05032011948c306661687f2abdc33e738ec7b4";
+      #     hash = "sha256-fukz/9hnJCnKyrpStwycTdHYJYJDMcCD2YDJ9VLN2hM=";
+      #   };
+      #   intsallPhase = ''
+      #     mkdir -p $out/bin
+      #     cp git-trim $out/bin
+      #     chmod +x $out/bin/git-trim
+      #   '';
+      # })
     ]
     ++ (with inputs; [
       # Nix software management GUI
@@ -161,7 +192,7 @@ in
     ])
     ++ (with pkgs.gnome; [
       # Additional GNOME settings tool
-      # TODO factor out into nixos-only home manager
+      # TODO: factor out into nixos-only home manager
       gnome-tweaks
       # Additional GNOME settings editing tool
       # https://wiki.gnome.org/Apps/DconfEditor
@@ -222,6 +253,9 @@ in
           program = "${pkgs.zellij}/bin/zellij";
           # Attach to session called "main" if it exists, create one named that
           # if it doesn't
+          # NOTE: this gets merged in with
+          # device/home/lenovo-thinkpad-x1-carbon-gen10.nix#programs.alacritty.settings.shell.args
+          # It comes last
           args = [ "attach" "--create" "main" ];
         };
       };
@@ -245,6 +279,16 @@ in
         share = true;
         size = 100000;
       };
+      # Placed in $ZDOTDIR/.zshrc before compinit
+      initExtraBeforeCompInit = ''
+        # Pre-compinit
+      ''
+      # Darwin-only Zsh configuration (pre-compinit)
+      + optionalString (kernel == "darwin") ''
+        # Homebrew Zsh completion
+        fpath+="''${HOMEBREW_PREFIX}/zsh/site-functions"
+      ''
+      ;
       # Any additional manual confiuration goes here
       # Placed in $ZDOTDIR/.zshrc
       initExtra = ''
@@ -255,7 +299,6 @@ in
         # Load completion system, enable Bash completion compatibility
         zmodload zsh/complist
         autoload -Uz +X bashcompinit select-word-style
-        bashcompinit
         select-word-style bash
 
         # Tune the completion system a bit
@@ -264,9 +307,6 @@ in
 
         # Keep elements of {,MAN}PATH unique
         typeset -U PATH MANPATH
-
-        # AWS Zsh completion. Defined for Bash so ``
-        # complete -C ${pkgs.awscli2}/bin/aws_completer aws
       ''
       # Darwin-only Zsh configuration (post-compinit)
       + optionalString (kernel == "darwin") ''
@@ -284,16 +324,6 @@ in
         export PATH="''${HOMEBREW_PREFIX}/bin:''${PATH}"
         export MANPATH="''${HOMEBREW_PREFIX}/share/man:''${MANPATH}"
       '';
-      # Placed in $ZDOTDIR/.zshrc before compinit
-      initExtraBeforeCompInit = ''
-        # Pre-compinit
-      ''
-      # Darwin-only Zsh configuration (pre-compinit)
-      + optionalString (kernel == "darwin") ''
-        # Homebrew Zsh completion
-        fpath+="''${HOMEBREW_PREFIX}/zsh/site-functions"
-      ''
-      ;
       plugins = [
         # Fish-like command autosuggestions
         {
@@ -322,7 +352,7 @@ in
           src = "${pkgs.zsh-fzf-history-search}/share/zsh-fzf-history-search";
         }
         # Yank selections into system clipboard
-        # TODO send Nixpkgs update PR
+        # TODO: send Nixpkgs update PR
         {
           name = "zsh-system-clipboard";
           src = (pkgs.fetchFromGitHub {
@@ -332,10 +362,21 @@ in
             hash = "sha256-t4xPKd9BvrH4cyq8rN/IVGcm13OJNutdZ4e+FdGbPIo=";
           });
         }
+        # direnv Zsh completion
+        {
+          name = "direnv";
+          src = "${pkgs.zsh-completions}/share/zsh/site-functions";
+        }
+        # TODO: upstream fix to Nixpkgs
+        {
+          name = "aws";
+          src = "${pkgs.awscli2}/share/zsh/site-functions";
+          file = "_aws";
+        }
       ];
     };
     # Modern shell that focuses on structured data
-    # TODO tune
+    # TODO: tune
     nushell.enable = true;
     # Shell prompt
     starship = {
@@ -348,9 +389,9 @@ in
     zellij = {
       enable = true;
       settings = {
-        keybinds.scroll."bind \"c\"".Clear = { };
-        pane_frames = false;
+        keybinds.normal."bind \"Alt s\"".Clear = { };
         session_serialization = false;
+        simplified_ui = true;
         theme = "gruvbox-dark";
       };
     };
@@ -424,8 +465,9 @@ in
               type = "group";
               val = [
                 { shortcut = "SPC e"; desc = "  New file"; command = "<CMD>ene <CR>"; }
-                { shortcut = "SPC f"; desc = "󰈞  Find file"; command = "<CMD>Telescope find_files<CR>"; }
-                { shortcut = "SPC w"; desc = "󰈞  Find word"; command = "<CMD>Telescope live_grep<CR>"; }
+                # TODO: get these working
+                # { shortcut = "SPC f"; desc = "󰈞  Find file"; command = "<CMD>Telescope find_files<CR>"; }
+                # { shortcut = "SPC w"; desc = "󰈞  Find word"; command = "<CMD>Telescope live_grep<CR>"; }
                 { shortcut = "q"; desc = "  Quit Neovim"; command = ":qa<CR>"; }
               ];
             }
@@ -437,10 +479,14 @@ in
             }
           ];
         };
+        # barbar = {
+        #   enable = true;
+        #   sidebarFiletypes.neo-tree = { text = "Neo-tree"; };
+        # };
         # Buffer line (top, tabs)
         bufferline = {
           enable = true;
-          enforceRegularTabs = true;
+          enforceRegularTabs = false;
           offsets = [{
             filetype = "neo-tree";
             text = "Neo-tree";
@@ -455,7 +501,14 @@ in
         # File explorer
         neo-tree = {
           enable = true;
-          filesystem.filteredItems = { hideDotfiles = false; hideGitignored = false; };
+          closeIfLastWindow = true;
+          filesystem = {
+            filteredItems = { hideDotfiles = false; hideGitignored = false; };
+            followCurrentFile = { enabled = true; leaveDirsOpen = true; };
+            useLibuvFileWatcher = true;
+          };
+          sourceSelector.winbar = true;
+          window.mappings = { "<A-{>" = "prev_source"; "<A-}>" = "next_source"; };
         };
         # File finder (popup)
         telescope.enable = true;
@@ -470,17 +523,25 @@ in
           };
           servers = {
             # Nix (nil with nixpkgs-fmt)
-            # TODO determine if nil or nixd is better
-            nixd = {
+            # TODO: determine if nil or nixd is better
+            # nixd = {
+            #   enable = true;
+            #   settings.formatting.command = "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt";
+            # };
+            nil_ls = {
               enable = true;
-              settings.formatting.command = "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt";
+              settings.formatting.command = [ "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt" ];
             };
             bashls.enable = true;
+            cssls.enable = true;
+            dockerls.enable = true;
+            eslint.enable = true;
             gopls.enable = true;
             html.enable = true;
             jsonls.enable = true;
             pyright.enable = true;
-            ruff-lsp.enable = true;
+            # ruff-lsp.enable = true;
+            # pylyzer.enable = true;
             tsserver.enable = true;
             yamlls.enable = true;
           };
@@ -489,31 +550,44 @@ in
         lsp-format.enable = true;
         # Parser generator & incremental parsing toolkit
         treesitter = { enable = true; incrementalSelection.enable = true; };
+        treesitter-textobjects.enable = true;
         # LSP completion
         nvim-cmp = {
           enable = true;
-          mappingPresets = [ "insert" ];
-          snippet.expand = "ultisnips";
+          snippet.expand = "luasnip";
           sources = [
             { name = "nvim_lsp"; }
-            { name = "ultisnips"; }
+            { name = "luasnip"; }
             { name = "path"; }
             { name = "buffer"; }
           ];
+          # mappingPresets = [ "insert" "cmdline" ];
           mapping = {
             "<CR>" = "cmp.mapping.confirm({ select = true })";
             "<Tab>" = {
               modes = [ "i" "s" ];
               action = ''
                 function(fallback)
+                  local luasnip = require('luasnip')
+
                   if cmp.visible() then
                     cmp.select_next_item()
                   elseif luasnip.expandable() then
                     luasnip.expand()
                   elseif luasnip.expand_or_jumpable() then
                     luasnip.expand_or_jump()
-                  elseif check_backspace() then
+                  else
                     fallback()
+                  end
+                end
+              '';
+            };
+            "<S-Tab>" = {
+              modes = [ "i" "s" ];
+              action = ''
+                function(callback)
+                  if cmp.visible then
+                    cmp.select_prev_item()
                   else
                     fallback()
                   end
@@ -522,14 +596,18 @@ in
             };
           };
         };
+        # Snippet engine
+        luasnip.enable = true;
         # LSP pictograms
         lspkind.enable = true;
         # Multi-faceted LSP UX improvements
         lspsaga.enable = true;
-        # Git integration
-        neogit.enable = true;
-        # Git changes
-        gitgutter.enable = true;
+        # NOTE: Git integration (looks mostly commit-oriented, TBD)
+        neogit = { enable = true; autoRefresh = true; };
+        # Git toolit
+        fugitive.enable = true;
+        # Git decoration
+        gitsigns.enable = true;
         # Git praise
         gitblame.enable = true;
         # Diff view
@@ -538,40 +616,60 @@ in
         illuminate.enable = true;
         # Enable Nix language support
         nix.enable = true;
-        # Enable working with TODO code comments
+        # Enable working with TODO: code comments
         todo-comments.enable = true;
         # Diagnostics, etc. 
         trouble.enable = true;
         # Symbol navigation popup
         navbuddy.enable = true;
+        # Built-in terminal
+        toggleterm = { enable = true; size = 10; };
+        # Markdown preview
+        markdown-preview.enable = true;
       };
       extraPlugins = with pkgs.vimPlugins; [
         autoclose-nvim
+        bufdelete-nvim
         git-conflict-nvim
         symbols-outline-nvim
+        nvim-surround
+        (pkgs.fetchFromGitHub {
+          owner = "sophacles";
+          repo = "vim-bundle-mako";
+          rev = "09d2a93b1a853972ccfca44495d597c717789232";
+          hash = "sha256-q5PgPAKjyjLUuKvK6S1m8huQ1G7SoFvq9bmQmlMoS1g=";
+        })
       ];
       extraConfigLua = ''
         require("autoclose").setup()
         require("git-conflict").setup()
+        require("nvim-surround").setup()
         require("symbols-outline").setup()
       '';
       keymaps = [
         { key = ";"; action = ":"; }
         { key = "<A-W>"; action = ":wall<CR>"; }
         { key = "<A-w>"; action = ":write<CR>"; }
-        { key = "<A-x>"; action = ":bdelete<CR>"; }
+        { key = "<A-x>"; action = ":Bdelete<CR>"; }
         { key = "<A-{>"; action = ":BufferLineCyclePrev<CR>"; }
         { key = "<A-}>"; action = ":BufferLineCycleNext<CR>"; }
+        { key = "<A-(>"; action = ":BufferLineMovePrev<CR>"; }
+        { key = "<A-)>"; action = ":BufferLineMoveNext<CR>"; }
         { key = "<C-l>"; action = ":set invlist<CR>"; }
-        { key = "<S-p>"; action = ":BufferLinePick<CR>"; }
+        # TODO: figure out how to resize
+        { key = "<S-f>"; action = ":ToggleTerm direction=float<CR>"; }
         { key = "<S-s>"; action = ":sort<CR>"; }
+        { key = "<S-t>"; action = ":ToggleTerm<CR>"; }
         { key = "<Space>c"; action = ":nohlsearch<CR>"; }
         { key = "<leader>F"; action = ":Telescope find_files hidden=true<CR>"; }
         { key = "<leader>f"; action = ":Telescope find_files<CR>"; }
         { key = "<leader>g"; action = ":Telescope live_grep<CR>"; }
-        { key = "<leader>s"; action = ":SymbolsOutline<CR>"; }
-        { key = "<leader>t"; action = ":Neotree toggle<CR>"; }
         { key = "<leader>n"; action = ":Neotree focus<CR>"; }
+        { key = "<leader>r"; action = ":Neotree reveal<CR>"; }
+        { key = "<leader>s"; action = ":SymbolsOutline<CR>"; }
+        { key = "<leader>t"; action = ":Neotree toggle filesystem<CR>"; }
+        { key = "<leader>b"; action = ":Neotree toggle buffers<CR>"; }
+        { key = "<leader>p"; action = ":TroubleToggle>"; }
       ];
     };
     # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
@@ -590,7 +688,8 @@ in
         branches = "branch --sort=-committerdate --format='%(committerdate)\t::  %(refname:short)'";
         praise = "blame";
       };
-      difftastic = { enable = true; background = "dark"; display = "inline"; };
+      delta = { enable = true; options = { side-by-side = true; }; };
+      # difftastic = { enable = true; background = "dark"; };
       extraConfig = {
         commit.gpgsign = true;
         fetch.prune = true;
@@ -605,13 +704,13 @@ in
         }
         {
           path = "${config.xdg.configHome}/git/basis";
-          condition = "gitdir:~/src/git.usebasis.co/**";
+          condition = "gitdir:~/${srcDir}/git.usebasis.co/**";
         }
-      ] ++ (lib.optionals (kernel == "darwin") [
         {
           path = "${config.xdg.configHome}/git/personal";
           condition = "gitdir:~/${srcDir}/github.com/**";
         }
+      ] ++ (lib.optionals (kernel == "darwin") [
         {
           path = "${config.xdg.configHome}/git/personal";
           condition = "gitdir:~/iCloud\ Drive/Development/github.com/**";
@@ -619,7 +718,56 @@ in
       ]);
     };
     # Git terminal UI
-    gitui.enable = true;
+    gitui = {
+      enable = true;
+      keyConfig = ''
+        // bit for modifiers
+        // bits: 0  None 
+        // bits: 1  SHIFT
+        // bits: 2  CONTROL
+        //
+        // Note:
+        // If the default key layout is lower case,
+        // and you want to use `Shift + q` to trigger the exit event,
+        // the setting should like this `exit: Some(( code: Char('Q'), modifiers: ( bits: 1,),)),`
+        // The Char should be upper case, and the shift modified bit should be set to 1.
+        //
+        // Note:
+        // find `KeysList` type in src/keys/key_list.rs for all possible keys.
+        // every key not overwritten via the config file will use the default specified there
+        (
+            open_help: Some(( code: F(1), modifiers: ( bits: 0,),)),
+
+            move_left: Some(( code: Char('h'), modifiers: ( bits: 0,),)),
+            move_right: Some(( code: Char('l'), modifiers: ( bits: 0,),)),
+            move_up: Some(( code: Char('k'), modifiers: ( bits: 0,),)),
+            move_down: Some(( code: Char('j'), modifiers: ( bits: 0,),)),
+    
+            popup_up: Some(( code: Char('p'), modifiers: ( bits: 2,),)),
+            popup_down: Some(( code: Char('n'), modifiers: ( bits: 2,),)),
+            page_up: Some(( code: Char('b'), modifiers: ( bits: 2,),)),
+            page_down: Some(( code: Char('f'), modifiers: ( bits: 2,),)),
+            home: Some(( code: Char('g'), modifiers: ( bits: 0,),)),
+            end: Some(( code: Char('G'), modifiers: ( bits: 1,),)),
+            shift_up: Some(( code: Char('K'), modifiers: ( bits: 1,),)),
+            shift_down: Some(( code: Char('J'), modifiers: ( bits: 1,),)),
+
+            edit_file: Some(( code: Char('I'), modifiers: ( bits: 1,),)),
+
+            status_reset_item: Some(( code: Char('U'), modifiers: ( bits: 1,),)),
+
+            diff_reset_lines: Some(( code: Char('u'), modifiers: ( bits: 0,),)),
+            diff_stage_lines: Some(( code: Char('s'), modifiers: ( bits: 0,),)),
+
+            stashing_save: Some(( code: Char('w'), modifiers: ( bits: 0,),)),
+            stashing_toggle_index: Some(( code: Char('m'), modifiers: ( bits: 0,),)),
+
+            stash_open: Some(( code: Char('l'), modifiers: ( bits: 0,),)),
+
+            abort_merge: Some(( code: Char('M'), modifiers: ( bits: 1,),)),
+        )
+      '';
+    };
     # GitHub CLI
     gh.enable = true;
     # Manual page interface
@@ -645,11 +793,7 @@ in
     };
     # `cd` replacement that ranks frequently / recently used
     # directories for easier shorthand access
-    zoxide = {
-      enable = true;
-      enableNushellIntegration = true;
-      enableZshIntegration = true;
-    };
+    zoxide = { enable = true; enableNushellIntegration = true; };
     # JSON Querier
     jq.enable = true;
     # Nixpkgs file database
@@ -660,6 +804,9 @@ in
     # https://github.com/NixOS/nix/issues/4119
     # Java (to satisfy Visual Studio Code Java extension - possibly factor out)
     java.enable = true;
+    # Go
+    # TODO: debug
+    # go.enable = true;
     # # Amazon Web Services Command Line Interface
     awscli = {
       enable = true;
@@ -762,16 +909,16 @@ optionalAttrs (kernel == "darwin") {
 }
   //
 optionalAttrs (kernel == "linux") {
-  # TODO factor out into Linux-only attrs
+  # TODO: factor out into Linux-only attrs
   services = {
     # Activate GPG agent on Linux
-    gpg-agent.enable = true;
-
-    # File synchronization
-    # TODO Factor out into Basis profile
-    syncthing.enable = true;
+    gpg-agent = { enable = true; pinentryFlavor = "gnome3"; };
 
     # Nix shell direnv background daemon
     lorri.enable = true;
+
+    # File synchronization
+    # TODO: Factor out into Basis profile
+    syncthing.enable = true;
   };
 }

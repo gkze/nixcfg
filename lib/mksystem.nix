@@ -1,5 +1,5 @@
 # Unifying NixOS and Darwin system config declaration...
-# TODO configure hostname
+# TODO: configure hostname
 inputs: { device ? "", arch, kernel, users, sysMods ? [ ], hmMods ? [ ], ... }@args:
 let
   inherit (builtins) listToAttrs pathExists;

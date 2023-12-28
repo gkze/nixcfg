@@ -4,7 +4,10 @@ let
   inherit (lib) removeSuffix;
 in
 {
-  networking = { hostName = "mesa"; networkmanager.enable = true; };
+  networking = {
+    hostName = "mesa";
+    networkmanager = { enable = true; wifi.backend = "iwd"; };
+  };
 
   time.timeZone = "America/Los_Angeles";
 
@@ -23,13 +26,17 @@ in
     };
   };
 
-  # TODO get working
+  # TODO: get working
   # programs.hyprland.enable = true;
   # https://github.com/Mic92/nix-ld
   programs.nix-ld.enable = true;
 
   virtualisation.docker.enable = true;
 
+  # Linux application distribution format
+  services.flatpak.enable = true;
+
+  # Display
   services.xserver = {
     enable = true;
     desktopManager.gnome.enable = true;
@@ -43,6 +50,7 @@ in
     xkbOptions = "caps:swapescape";
   };
 
+  # Sound
   sound.enable = true;
   hardware.pulseaudio.enable = false;
   security.rtkit.enable = true;
@@ -54,11 +62,11 @@ in
   };
 
   environment.systemPackages = [
-    # TODO Nix Software Center
+    # TODO: Nix Software Center
   ];
 
   # Define a user account. Don't forget to set a password with ‘passwd’.
-  # TODO factor out into separate system-agnostic (hopefully) user config
+  # TODO: factor out into separate system-agnostic (hopefully) user config
   users = {
     # Inter-Integrated Circuit (I2C)
     # https://en.wikipedia.org/wiki/I%C2%B2C

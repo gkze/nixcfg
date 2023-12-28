@@ -195,7 +195,7 @@
 
 
         # Basis ThinkPad X1 Carbon
-        # TODO Symlink merged /etc/nixos/configuration.nix for nixos-rebuild
+        # TODO: Symlink merged /etc/nixos/configuration.nix for nixos-rebuild
         nixosConfigurations.mesa = mkSystem inputs {
           device = "lenovo-thinkpad-x1-carbon-gen10";
           arch = "x86_64";
