@@ -15,7 +15,7 @@ in
   imports = [ inputs.nixvim.homeManagerModules.nixvim ] ++ hmMods;
 
   # Automatically discover installed fonts
-  fonts.fontconfig.enable = true;
+  # fonts.fontconfig.enable = true;
 
   # wayland.windowManager.hyprland.enable = true;
 
@@ -98,16 +98,10 @@ in
       # Password manager
       # TODO: factor out into Basis profile
       _1password-gui
-      # Database GUI
-      beekeeper-studio
-      # Web browser
-      brave
       # cURL wrapper with niceties
       curlie
       # Duplicate file finder
       czkawka
-      # Display Data Channel UTILity
-      ddcutil
       # Disk space usage analyzer (in Rust)
       du-dust
       # Matrix client
@@ -147,23 +141,16 @@ in
       # Knowledge management
       # TODO: factor out into Basis profile
       obsidian
-      # For Basis
-      # TODO: factor out into Basis profile
-      networkmanager-openvpn
       # Alternative to `ps`
       procs
       # Alternative to `sed`
       sd
       # TODO: TBD if works on macOS
       slack
-      # TODO: TBD if works on macOS
-      signal-desktop
       # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
       tokei
       # Alternative to `watch`
       viddy
-      # File transfer over LAN
-      warp
       # Wayland Clipboard
       wl-clipboard
       # Git branch maintenance
@@ -183,22 +170,7 @@ in
       #     chmod +x $out/bin/git-trim
       #   '';
       # })
-    ]
-    ++ (with inputs; [
-      # Nix software management GUI
-      nix-software-center.packages.${hostPlatform}.default
-      # Nix configuration editor GUI
-      nixos-conf-editor.packages.${hostPlatform}.default
-    ])
-    ++ (with pkgs.gnome; [
-      # Additional GNOME settings tool
-      # TODO: factor out into nixos-only home manager
-      gnome-tweaks
-      # Additional GNOME settings editing tool
-      # https://wiki.gnome.org/Apps/DconfEditor
-      dconf-editor
-    ])
-    ;
+    ];
   };
 
   # Install and configure user-level software
@@ -921,4 +893,33 @@ optionalAttrs (kernel == "linux") {
     # TODO: Factor out into Basis profile
     syncthing.enable = true;
   };
+
+  # These are marked as unsupported on darwin
+  packages = with pkgs; [
+    # Database GUI
+    beekeeper-studio
+    # Web browser
+    brave
+    # Display Data Channel UTILity
+    ddcutil
+    # For Basis
+    # TODO: factor out into Basis profile
+    networkmanager-openvpn
+    # TODO: TBD if works on macOS
+    signal-desktop
+  ]
+  ++ (with inputs; [
+    # Nix software management GUI
+    nix-software-center.packages.${hostPlatform}.default
+    # Nix configuration editor GUI
+    nixos-conf-editor.packages.${hostPlatform}.default
+  ])
+  ++ (with pkgs.gnome; [
+    # Additional GNOME settings tool
+    gnome-tweaks
+    # Additional GNOME settings editing tool
+    # https://wiki.gnome.org/Apps/DconfEditor
+    dconf-editor
+  ])
+  ;
 }
