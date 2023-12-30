@@ -12,10 +12,87 @@ let
 in
 {
   # Home Manager modules go here
-  imports = [ inputs.nixvim.homeManagerModules.nixvim ] ++ hmMods;
+  imports = [
+    inputs.nixvim.homeManagerModules.nixvim
+    {
+      darwin = {
+        # User-local launchd agents
+        launchd.agents = {
+          # Run /usr/bin/ssh-add (shipped by Apple with macOS by default, which
+          # includes integration with macOS Keychain) and add SSH keys using macOS
+          # Keychain
+          ssh-add = {
+            enable = true;
+            config = {
+              Label = "org.openssh.add";
+              LaunchOnlyOnce = true;
+              RunAtLoad = true;
+              ProgramArguments = [
+                "/usr/bin/ssh-add"
+                "--apple-load-keychain"
+                "--apple-use-keychain"
+              ];
+            };
+          };
+
+          # Start GnuPG agent
+          gpg-agent = {
+            enable = true;
+            config = {
+              Label = "org.gnupg.gpg-agent";
+              RunAtLoad = true;
+              ProgramArguments = [ "${pkgs.gnupg}/bin/gpg-agent" "--server" ];
+            };
+          };
+        };
+      };
+      linux = {
+        services = {
+          # Activate GPG agent on Linux
+          gpg-agent = { enable = true; pinentryFlavor = "gnome3"; };
+
+          # Nix shell direnv background daemon
+          lorri.enable = true;
+
+          # File synchronization
+          # TODO: Factor out into Basis profile
+          syncthing.enable = true;
+        };
+
+        # These are marked as unsupported on darwin
+        home.packages = with pkgs; [
+          # Database GUI
+          beekeeper-studio
+          # Web browser
+          brave
+          # Display Data Channel UTILity
+          ddcutil
+          # For Basis
+          # TODO: factor out into Basis profile
+          networkmanager-openvpn
+          # TODO: TBD if works on macOS
+          signal-desktop
+        ]
+        ++ (with inputs; [
+          # Nix software management GUI
+          nix-software-center.packages.${hostPlatform}.default
+          # Nix configuration editor GUI
+          nixos-conf-editor.packages.${hostPlatform}.default
+        ])
+        ++ (with pkgs.gnome; [
+          # Additional GNOME settings tool
+          gnome-tweaks
+          # Additional GNOME settings editing tool
+          # https://wiki.gnome.org/Apps/DconfEditor
+          dconf-editor
+        ])
+        ;
+      };
+    }.${kernel}
+  ] ++ hmMods;
 
   # Automatically discover installed fonts
-  # fonts.fontconfig.enable = true;
+  fonts.fontconfig.enable = true;
 
   # wayland.windowManager.hyprland.enable = true;
 
@@ -845,81 +922,4 @@ in
       };
     };
   };
-}
-//
-# nix-darwin-only attributes
-optionalAttrs (kernel == "darwin") {
-  # User-local launchd agents
-  launchd.agents = {
-    # Run /usr/bin/ssh-add (shipped by Apple with macOS by default, which
-    # includes integration with macOS Keychain) and add SSH keys using macOS
-    # Keychain
-    ssh-add = {
-      enable = true;
-      config = {
-        Label = "org.openssh.add";
-        LaunchOnlyOnce = true;
-        RunAtLoad = true;
-        ProgramArguments = [
-          "/usr/bin/ssh-add"
-          "--apple-load-keychain"
-          "--apple-use-keychain"
-        ];
-      };
-    };
-
-    # Start GnuPG agent
-    gpg-agent = {
-      enable = true;
-      config = {
-        Label = "org.gnupg.gpg-agent";
-        RunAtLoad = true;
-        ProgramArguments = [ "${pkgs.gnupg}/bin/gpg-agent" "--server" ];
-      };
-    };
-  };
-}
-  //
-optionalAttrs (kernel == "linux") {
-  # TODO: factor out into Linux-only attrs
-  services = {
-    # Activate GPG agent on Linux
-    gpg-agent = { enable = true; pinentryFlavor = "gnome3"; };
-
-    # Nix shell direnv background daemon
-    lorri.enable = true;
-
-    # File synchronization
-    # TODO: Factor out into Basis profile
-    syncthing.enable = true;
-  };
-
-  # These are marked as unsupported on darwin
-  packages = with pkgs; [
-    # Database GUI
-    beekeeper-studio
-    # Web browser
-    brave
-    # Display Data Channel UTILity
-    ddcutil
-    # For Basis
-    # TODO: factor out into Basis profile
-    networkmanager-openvpn
-    # TODO: TBD if works on macOS
-    signal-desktop
-  ]
-  ++ (with inputs; [
-    # Nix software management GUI
-    nix-software-center.packages.${hostPlatform}.default
-    # Nix configuration editor GUI
-    nixos-conf-editor.packages.${hostPlatform}.default
-  ])
-  ++ (with pkgs.gnome; [
-    # Additional GNOME settings tool
-    gnome-tweaks
-    # Additional GNOME settings editing tool
-    # https://wiki.gnome.org/Apps/DconfEditor
-    dconf-editor
-  ])
-  ;
 }
