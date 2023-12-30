@@ -2,7 +2,6 @@
 let
   inherit (builtins) elemAt readFile split;
   inherit (lib) optionalString removeSuffix;
-  inherit (lib.attrsets) optionalAttrs;
 
   # Grab the OS kernel part of the hostPlatform tuple
   kernel = elemAt (split "-" hostPlatform) 2;
