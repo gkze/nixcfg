@@ -5,6 +5,7 @@
       # Enable key mapping
       enableKeyMapping = true;
       # Remap Caps Lock to Escape
+      # TODO: debug doesn't work
       remapCapsLockToEscape = true;
     };
     # macOS defaults
