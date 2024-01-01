@@ -79,11 +79,11 @@ sysFn {
               optionals
                 (device != null && pathExists ../device/home/${device}.nix)
                 [ ../device/home/${device}.nix ]
-              # Any additional Home Manager modules passed
               ++ {
-                darwin = [ inputs.mac-app-util.homeManagerModules.default ];
+                darwin = [ ];
                 linux = [ ];
               }.${kernel}
+              # Any additional Home Manager modules passed
               ++ hmMods;
           };
           users = listToAttrs (map
