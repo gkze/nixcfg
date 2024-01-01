@@ -46,14 +46,17 @@
       # "whatsapp"
       # "zoom"
     ] ++ (lib.optionals pkgs.stdenv.isDarwin [
-      "brave-browser-beta"
-      "beekeeper-studio"
       "aerial"
       "appcleaner"
+      "beekeeper-studio"
+      "brave-browser-beta"
       "codeedit"
       "cog"
       "cyberduck"
       "dash"
+      # Installs via Nixpkgs but login doesn't work because probable failure of
+      # element:// URI handler install
+      "element"
       "hot"
       "maccy"
       "monitorcontrol"
@@ -62,6 +65,7 @@
       "rectangle"
       "rekordbox"
       "sloth"
+      "swiftdefaultappsprefpane"
       "tableplus"
       "utm"
       "vimr"

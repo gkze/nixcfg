@@ -1,8 +1,4 @@
 { ... }: {
-  # Use a custom configuration.nix location.
-  # $ darwin-rebuild switch -I darwin-config=$HOME/.config/nixcfg/configuration.nix
-  environment.darwinConfig = "$HOME/.config/nixcfg/nix/common.nix ";
-
   # Enable Toudh ID for sudo
   security.pam.enableSudoTouchIdAuth = true;
 

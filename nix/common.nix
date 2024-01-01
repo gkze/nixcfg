@@ -9,7 +9,7 @@
       experimental-features = [ "nix-command" "flakes" ];
 
       # Perform builds in a sandboxed environment
-      sandbox = true;
+      sandbox = false;
     };
 
     # Auto-upgrade nix command
