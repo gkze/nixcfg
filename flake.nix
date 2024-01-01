@@ -65,8 +65,6 @@
       url = "github:vlinkz/nixos-conf-editor";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    mac-app-util.url = "github:hraban/mac-app-util";
   };
 
   outputs = inputs:

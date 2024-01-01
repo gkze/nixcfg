@@ -15,6 +15,20 @@ in
     inputs.nixvim.homeManagerModules.nixvim
     {
       darwin = {
+        # https://github.com/nix-community/home-manager/issues/1341
+        home = {
+          extraActivationPath = with pkgs; [
+            rsync
+            dockutil
+            gawk
+          ];
+          activation.trampolineApps = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+            ${builtins.readFile ../../lib/trampoline-apps.sh}
+            fromDir="$HOME/Applications/Home Manager Apps"
+            toDir="$HOME/Applications/Home Manager Trampolines"
+            sync_trampolines "$fromDir" "$toDir"
+          '';
+        };
         # User-local launchd agents
         launchd.agents = {
           # Run /usr/bin/ssh-add (shipped by Apple with macOS by default, which
@@ -66,6 +80,8 @@ in
           brave
           # Display Data Channel UTILity
           ddcutil
+          # Matrix client
+          element-desktop
           # For Basis
           # TODO: factor out into Basis profile
           networkmanager-openvpn
@@ -84,8 +100,7 @@ in
           # Additional GNOME settings editing tool
           # https://wiki.gnome.org/Apps/DconfEditor
           dconf-editor
-        ])
-        ;
+        ]);
       };
     }.${kernel}
   ] ++ hmMods;
@@ -93,6 +108,7 @@ in
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
 
+  # TODO: figure out and make NixOS-only (for now?)
   # wayland.windowManager.hyprland.enable = true;
 
   home = {
@@ -127,9 +143,7 @@ in
 
     # Universal cross-shell aliases
     shellAliases =
-      let
-        ezaDefaultArgs = "-FlabghHistype --color=always --icons=always";
-      in
+      let ezaDefaultArgs = "-FlabghHistype --color=always --icons=always"; in
       # Add aliases here
       {
         cr = "clear && reset";
@@ -180,10 +194,6 @@ in
       czkawka
       # Disk space usage analyzer (in Rust)
       du-dust
-      # Matrix client
-      # TODO: factor out into Basis profile
-      # TODO: TBD if works on macOS
-      element-desktop
       # Envchain is a utility that loads environment variables from the system
       # keychain
       envchain
@@ -223,6 +233,8 @@ in
       sd
       # TODO: TBD if works on macOS
       slack
+      # Music streaming
+      spotify
       # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
       tokei
       # Alternative to `watch`
@@ -257,44 +269,45 @@ in
     alacritty = {
       enable = true;
       settings = {
-        # Base16 Gruvbox Dark Soft 256
-        # https://github.com/aarowill/base16-alacritty/blob/master/colors/base16-gruvbox-dark-soft-256.yml
-        colors = {
-          # Default colors
-          primary = { background = "0x32302f"; foreground = "0xd5c4a1"; };
-          # Colors the cursor will use if `custom_cursor_colors` is true
-          cursor = { text = "0x32302f"; cursor = "0xd5c4a1"; };
-          # Normal colors
-          normal = {
-            black = "0x32302f";
-            red = "0xfb4934";
-            green = "0xb8bb26";
-            yellow = "0xfabd2f";
-            blue = "0x83a598";
-            magenta = "0xd3869b";
-            cyan = "0x8ec07c";
-            white = "0xd5c4a1";
-          };
-          # Bright colors
-          bright = {
-            black = "0x665c54";
-            red = "0xfb4934";
-            green = "0xb8bb26";
-            yellow = "0xfabd2f";
-            blue = "0x83a598";
-            magenta = "0xd3869b";
-            cyan = "0x8ec07c";
-            white = "0xfbf1c7";
-          };
-          indexed_colors = [
-            { index = 16; color = "0xfe8019"; }
-            { index = 17; color = "0xd65d0e"; }
-            { index = 18; color = "0x3c3836"; }
-            { index = 19; color = "0x504945"; }
-            { index = 20; color = "0xbdae93"; }
-            { index = 21; color = "0xebdbb2"; }
-          ];
-        };
+        import = [ "${pkgs.alacritty-theme}/catppuccin_frappe.yaml" ];
+        # # Base16 Gruvbox Dark Soft 256
+        # # https://github.com/aarowill/base16-alacritty/blob/master/colors/base16-gruvbox-dark-soft-256.yml
+        # colors = {
+        #   # Default colors
+        #   primary = { background = "0x32302f"; foreground = "0xd5c4a1"; };
+        #   # Colors the cursor will use if `custom_cursor_colors` is true
+        #   cursor = { text = "0x32302f"; cursor = "0xd5c4a1"; };
+        #   # Normal colors
+        #   normal = {
+        #     black = "0x32302f";
+        #     red = "0xfb4934";
+        #     green = "0xb8bb26";
+        #     yellow = "0xfabd2f";
+        #     blue = "0x83a598";
+        #     magenta = "0xd3869b";
+        #     cyan = "0x8ec07c";
+        #     white = "0xd5c4a1";
+        #   };
+        #   # Bright colors
+        #   bright = {
+        #     black = "0x665c54";
+        #     red = "0xfb4934";
+        #     green = "0xb8bb26";
+        #     yellow = "0xfabd2f";
+        #     blue = "0x83a598";
+        #     magenta = "0xd3869b";
+        #     cyan = "0x8ec07c";
+        #     white = "0xfbf1c7";
+        #   };
+        #   indexed_colors = [
+        #     { index = 16; color = "0xfe8019"; }
+        #     { index = 17; color = "0xd65d0e"; }
+        #     { index = 18; color = "0x3c3836"; }
+        #     { index = 19; color = "0x504945"; }
+        #     { index = 20; color = "0xbdae93"; }
+        #     { index = 21; color = "0xebdbb2"; }
+        #   ];
+        # };
         font = { size = lib.mkDefault 12.0; normal.family = "Hack Nerd Font Mono"; };
         # Launch Zellij directly instead of going through a shell
         shell = {
@@ -333,8 +346,13 @@ in
       ''
       # Darwin-only Zsh configuration (pre-compinit)
       + optionalString (kernel == "darwin") ''
+        # Enable Homebrew on macOS
+
+        # Set Homebrew prefix for M1 Mac
+        HOMEBREW_PREFIX="/opt/homebrew"
+
         # Homebrew Zsh completion
-        fpath+="''${HOMEBREW_PREFIX}/zsh/site-functions"
+        fpath+="''${HOMEBREW_PREFIX}/share/zsh/site-functions"
       ''
       ;
       # Any additional manual confiuration goes here
@@ -358,11 +376,6 @@ in
       ''
       # Darwin-only Zsh configuration (post-compinit)
       + optionalString (kernel == "darwin") ''
-        # Enable Homebrew on macOS
-
-        # Set Homebrew prefix for M1 Mac
-        HOMEBREW_PREFIX="/opt/homebrew"
-
         # For the rare case we're running on an Intel Mac
         if [[ "$(uname -m)" != "arm64" ]]; then
           HOMEBREW_PREFIX="/usr/local"
@@ -423,6 +436,7 @@ in
         }
       ];
     };
+    vscode.enable = true;
     # Modern shell that focuses on structured data
     # TODO: tune
     nushell.enable = true;
@@ -440,7 +454,7 @@ in
         keybinds.normal."bind \"Alt s\"".Clear = { };
         session_serialization = false;
         simplified_ui = true;
-        theme = "gruvbox-dark";
+        theme = "catppuccin-frappe";
       };
     };
     # Terminal file manager
@@ -456,7 +470,11 @@ in
       # https://github.com/nix-community/nixvim/pull/751
       # https://github.com/NixOS/nixpkgs/pull/269942
       enableMan = false;
-      colorschemes.gruvbox = { enable = true; contrastDark = "soft"; };
+      colorschemes = {
+        gruvbox = { enable = false; contrastDark = "soft"; };
+        kanagawa = { enable = false; theme = "dragon"; };
+        catppuccin = { enable = true; flavour = "frappe"; };
+      };
       # Editor-agnostic configuration
       editorconfig.enable = true;
       options = {
@@ -588,7 +606,7 @@ in
             html.enable = true;
             jsonls.enable = true;
             pyright.enable = true;
-            # ruff-lsp.enable = true;
+            ruff-lsp.enable = true;
             # pylyzer.enable = true;
             tsserver.enable = true;
             yamlls.enable = true;
@@ -681,6 +699,7 @@ in
         git-conflict-nvim
         symbols-outline-nvim
         nvim-surround
+        # TODO: upstream to Nixpkgs
         (pkgs.fetchFromGitHub {
           owner = "sophacles";
           repo = "vim-bundle-mako";
@@ -854,7 +873,7 @@ in
     java.enable = true;
     # Go
     # TODO: debug
-    # go.enable = true;
+    go.enable = true;
     # # Amazon Web Services Command Line Interface
     awscli = {
       enable = true;
