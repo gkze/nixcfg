@@ -188,6 +188,8 @@ in
       # Password manager
       # TODO: factor out into Basis profile
       _1password-gui
+      # Color theme
+      catppuccin
       # cURL wrapper with niceties
       curlie
       # Duplicate file finder
@@ -202,10 +204,17 @@ in
       # File type identification via libmagic
       # - https://www.darwinsys.com/file/
       # - https://github.com/file/file
+      file
+      # GNU AWK
+      gawk
       # Multiple git repository management
       gita
       # GitLab Command Line Interface
       glab
+      # Stream EDitor
+      gnused
+      # Tape ARchrive
+      gnutar
       # Graphical Ping (ICMP)
       gping
       # HTTP client
@@ -229,6 +238,8 @@ in
       obsidian
       # Alternative to `ps`
       procs
+      # Synchronization utility
+      rsync
       # Alternative to `sed`
       sd
       # TODO: TBD if works on macOS
@@ -715,13 +726,13 @@ in
       '';
       keymaps = [
         { key = ";"; action = ":"; }
+        { key = "<A-(>"; action = ":BufferLineMovePrev<CR>"; }
+        { key = "<A-)>"; action = ":BufferLineMoveNext<CR>"; }
         { key = "<A-W>"; action = ":wall<CR>"; }
         { key = "<A-w>"; action = ":write<CR>"; }
         { key = "<A-x>"; action = ":Bdelete<CR>"; }
         { key = "<A-{>"; action = ":BufferLineCyclePrev<CR>"; }
         { key = "<A-}>"; action = ":BufferLineCycleNext<CR>"; }
-        { key = "<A-(>"; action = ":BufferLineMovePrev<CR>"; }
-        { key = "<A-)>"; action = ":BufferLineMoveNext<CR>"; }
         { key = "<C-l>"; action = ":set invlist<CR>"; }
         # TODO: figure out how to resize
         { key = "<S-f>"; action = ":ToggleTerm direction=float<CR>"; }
@@ -729,14 +740,14 @@ in
         { key = "<S-t>"; action = ":ToggleTerm<CR>"; }
         { key = "<Space>c"; action = ":nohlsearch<CR>"; }
         { key = "<leader>F"; action = ":Telescope find_files hidden=true<CR>"; }
+        { key = "<leader>b"; action = ":Neotree toggle buffers<CR>"; }
         { key = "<leader>f"; action = ":Telescope find_files<CR>"; }
         { key = "<leader>g"; action = ":Telescope live_grep<CR>"; }
         { key = "<leader>n"; action = ":Neotree focus<CR>"; }
+        { key = "<leader>p"; action = ":TroubleToggle>"; }
         { key = "<leader>r"; action = ":Neotree reveal<CR>"; }
         { key = "<leader>s"; action = ":SymbolsOutline<CR>"; }
         { key = "<leader>t"; action = ":Neotree toggle filesystem<CR>"; }
-        { key = "<leader>b"; action = ":Neotree toggle buffers<CR>"; }
-        { key = "<leader>p"; action = ":TroubleToggle>"; }
       ];
     };
     # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
@@ -846,6 +857,15 @@ in
     # More robust alternative to `cat`
     bat = {
       enable = true;
+      themes.catppuccin-frappe = {
+        src = pkgs.fetchFromGitHub {
+          owner = "catppuccin";
+          repo = "bat";
+          rev = "ba4d16880d63e656acced2b7d4e034e4a93f74b1";
+          hash = "sha256-6WVKQErGdaqb++oaXnY3i6/GuH2FhTgK0v4TN4Y0Wbw=";
+        };
+        file = "./Catppuccin-frappe.tmTheme";
+      };
       config = { style = "full"; theme = "gruvbox-dark"; };
     };
     # `ls` alternative
