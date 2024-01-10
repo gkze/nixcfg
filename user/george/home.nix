@@ -280,7 +280,10 @@ in
     alacritty = {
       enable = true;
       settings = {
-        import = [ "${pkgs.alacritty-theme}/catppuccin_frappe.yaml" ];
+        # TODO: re-enable once https://github.com/NixOS/nixpkgs/issues/279707
+        # is resolved
+        # import = [ "${pkgs.alacritty-theme}/catppuccin_frappe.yaml" ];
+        import = [ ../../asset/alacritty/catppuccin-frappe.toml ];
         # # Base16 Gruvbox Dark Soft 256
         # # https://github.com/aarowill/base16-alacritty/blob/master/colors/base16-gruvbox-dark-soft-256.yml
         # colors = {
@@ -319,7 +322,10 @@ in
         #     { index = 21; color = "0xebdbb2"; }
         #   ];
         # };
-        font = { size = lib.mkDefault 12.0; normal.family = "Hack Nerd Font Mono"; };
+        font = {
+          size = lib.mkDefault 12.0;
+          normal.family = "Hack Nerd Font Mono";
+        };
         # Launch Zellij directly instead of going through a shell
         shell = {
           program = "${pkgs.zellij}/bin/zellij";
@@ -703,6 +709,8 @@ in
         toggleterm = { enable = true; size = 10; };
         # Markdown preview
         markdown-preview.enable = true;
+        # Indentation guide
+        indent-blankline.enable = true;
       };
       extraPlugins = with pkgs.vimPlugins; [
         autoclose-nvim
