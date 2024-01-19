@@ -270,7 +270,7 @@ in
           binVersion = "0.17.2";
           hostPlatformElems = split "-" hostPlatform;
           nixArch = elemAt hostPlatformElems 0;
-          arch = if nixArch == "x86_64" then "amd64" else nixArch;
+          arch = { x86_64 = "amd64"; aarch64 = "arm64"; }.${nixArch};
           kernel = elemAt hostPlatformElems 2;
           binName = "bin_${binVersion}_${kernel}_${arch}";
         in
@@ -286,6 +286,7 @@ in
             cp $src $out/bin/bin
             chmod +x $out/bin/bin
           '';
+          # TODO: get working
           nativeBuildInputs = [ installShellFiles ];
           postInstall = ''
             installShellCompletion --zsh <($out/bin/bin completion zsh)
