@@ -12,6 +12,7 @@ in
   time.timeZone = "America/Los_Angeles";
 
   i18n = {
+    inputMethod.enabled = "ibus";
     defaultLocale = "en_US.UTF-8";
     extraLocaleSettings = {
       LC_ADDRESS = "en_US.UTF-8";
@@ -53,7 +54,7 @@ in
   # Sound
   sound.enable = true;
   hardware.pulseaudio.enable = false;
-  security.rtkit.enable = true;
+  security = { rtkit.enable = true; audit.enable = true; };
   services.pipewire = {
     enable = true;
     alsa.enable = true;
