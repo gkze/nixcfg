@@ -54,6 +54,7 @@
       "cog"
       "cyberduck"
       "dash"
+      "docker"
       # Installs via Nixpkgs but login doesn't work because probable failure of
       # element:// URI handler install
       "element"

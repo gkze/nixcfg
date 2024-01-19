@@ -235,7 +235,9 @@ in
       obsidian
       # Alternative to `ps`
       procs
-      # Synchronization utility
+      # Rust toolchain manager
+      rustup
+      # Synhronization utility
       rsync
       # Alternative to `sed`
       sd
@@ -278,7 +280,10 @@ in
           name = "bin";
           src = fetchurl {
             url = "https://github.com/marcosnils/bin/releases/download/v${binVersion}/${binName}";
-            hash = "sha256-C3h+35qTRkSWf6dRyrgl082FFXtgNgaLgicDbCFUOrY=";
+            hash = {
+              aarch64-darwin = "sha256-/KgRUpF4bJCfbwp5V+R0uPKfXwH+KluThLYN7sBdpbk=";
+              x86_64-linux = "sha256-C3h+35qTRkSWf6dRyrgl082FFXtgNgaLgicDbCFUOrY=";
+            }.${hostPlatform};
           };
           dontUnpack = true;
           installPhase = ''
@@ -561,7 +566,6 @@ in
       plugins = {
         # Greeter (home page)
         alpha = {
-          # Re-enable once stops crashing
           enable = false;
           layout = [
             { type = "padding"; val = 2; }
