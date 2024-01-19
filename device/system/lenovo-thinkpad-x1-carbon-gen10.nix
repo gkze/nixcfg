@@ -1,5 +1,8 @@
-{ config, pkgs, lib, modulesPath, ... }: {
-  imports = [ (modulesPath + "/installer/scan/not-detected.nix") ];
+{ config, pkgs, lib, modulesPath, inputs, ... }: {
+  imports = [
+    (modulesPath + "/installer/scan/not-detected.nix")
+    inputs.nixos-hardware.nixosModules.lenovo-thinkpad-x1-10th-gen
+  ];
 
   boot = {
     # Inter-Integrated Circuit (I2C)
