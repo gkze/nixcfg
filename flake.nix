@@ -65,6 +65,9 @@
       url = "github:vlinkz/nixos-conf-editor";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Hardware-specific settings
+    nixos-hardware.url = "github:NixOS/nixos-hardware/master";
   };
 
   outputs = inputs:

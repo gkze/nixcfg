@@ -17,11 +17,7 @@ in
       darwin = {
         # https://github.com/nix-community/home-manager/issues/1341
         home = {
-          extraActivationPath = with pkgs; [
-            rsync
-            dockutil
-            gawk
-          ];
+          extraActivationPath = with pkgs; [ rsync dockutil gawk ];
           activation.trampolineApps = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
             ${builtins.readFile ../../lib/trampoline-apps.sh}
             fromDir="$HOME/Applications/Home Manager Apps"
@@ -82,6 +78,10 @@ in
           ddcutil
           # Matrix client
           element-desktop
+          # Brightness control for all detected monitors
+          # Currently managed manually
+          # TODO: fix
+          gnomeExtensions.brightness-control-using-ddcutil
           # For Basis
           # TODO: factor out into Basis profile
           networkmanager-openvpn
@@ -208,6 +208,7 @@ in
       # GNU AWK
       gawk
       # Multiple git repository management
+      # TODO: completion not working
       gita
       # GitLab Command Line Interface
       glab
@@ -219,10 +220,6 @@ in
       gping
       # HTTP client
       httpie
-      # Brightness control for all detected monitors
-      # Currently managed manually
-      # TODO: fix
-      # gnomeExtensions.brightness-control-using-ddcutil
       # Additional useful utilities (a la coreutils)
       moreutils
       # Nerd Fonts
@@ -254,21 +251,47 @@ in
       wl-clipboard
       # Git branch maintenance
       # TODO: upstream to Nixpkgs
-      # TODO: get working
-      # (stdenv.mkDerivation {
-      #   name = "git-trim";
-      #   src = pkgs.fetchFromGitHub {
-      #     owner = "jasonmccreary";
-      #     repo = "git-trim";
-      #     rev = "5f05032011948c306661687f2abdc33e738ec7b4";
-      #     hash = "sha256-fukz/9hnJCnKyrpStwycTdHYJYJDMcCD2YDJ9VLN2hM=";
-      #   };
-      #   intsallPhase = ''
-      #     mkdir -p $out/bin
-      #     cp git-trim $out/bin
-      #     chmod +x $out/bin/git-trim
-      #   '';
-      # })
+      (stdenv.mkDerivation {
+        name = "git-trim";
+        src = pkgs.fetchFromGitHub {
+          owner = "jasonmccreary";
+          repo = "git-trim";
+          rev = "5f05032011948c306661687f2abdc33e738ec7b4";
+          hash = "sha256-fukz/9hnJCnKyrpStwycTdHYJYJDMcCD2YDJ9VLN2hM=";
+        };
+        installPhase = ''
+          mkdir -p $out/bin
+          cp git-trim $out/bin
+          chmod +x $out/bin/git-trim
+        '';
+      })
+      (
+        let
+          binVersion = "0.17.2";
+          hostPlatformElems = split "-" hostPlatform;
+          nixArch = elemAt hostPlatformElems 0;
+          arch = if nixArch == "x86_64" then "amd64" else nixArch;
+          kernel = elemAt hostPlatformElems 2;
+          binName = "bin_${binVersion}_${kernel}_${arch}";
+        in
+        stdenv.mkDerivation {
+          name = "bin";
+          src = fetchurl {
+            url = "https://github.com/marcosnils/bin/releases/download/v${binVersion}/${binName}";
+            hash = "sha256-C3h+35qTRkSWf6dRyrgl082FFXtgNgaLgicDbCFUOrY=";
+          };
+          dontUnpack = true;
+          installPhase = ''
+            mkdir -p $out/bin
+            cp $src $out/bin/bin
+            chmod +x $out/bin/bin
+          '';
+          nativeBuildInputs = [ installShellFiles ];
+          postInstall = ''
+            installShellCompletion --zsh <($out/bin/bin completion zsh)
+          '';
+        }
+      )
     ];
   };
 
@@ -387,6 +410,7 @@ in
         # Tune the completion system a bit
         zstyle ':completion:*' menu select
         bindkey -M menuselect '^[[Z' reverse-menu-complete
+        bindkey "^R" history-incremental-search-backward
 
         # Keep elements of {,MAN}PATH unique
         typeset -U PATH MANPATH
@@ -450,6 +474,14 @@ in
           name = "aws";
           src = "${pkgs.awscli2}/share/zsh/site-functions";
           file = "_aws";
+        }
+        {
+          name = "docker";
+          src = pkgs.runCommand "_docker" { buildInputs = [ pkgs.docker ]; } ''
+            mkdir $out
+            docker completion zsh > $out/_docker;
+          '';
+          file = "_docker";
         }
       ];
     };
@@ -528,7 +560,8 @@ in
       plugins = {
         # Greeter (home page)
         alpha = {
-          enable = true;
+          # Re-enable once stops crashing
+          enable = false;
           layout = [
             { type = "padding"; val = 2; }
             {
@@ -577,24 +610,6 @@ in
             textAlign = "left";
           }];
         };
-        # File / AST breadcrumbs
-        barbecue.enable = true;
-        # Status line (bottom)
-        lualine.enable = true;
-        # File explorer
-        neo-tree = {
-          enable = true;
-          closeIfLastWindow = true;
-          filesystem = {
-            filteredItems = { hideDotfiles = false; hideGitignored = false; };
-            followCurrentFile = { enabled = true; leaveDirsOpen = true; };
-            useLibuvFileWatcher = true;
-          };
-          sourceSelector.winbar = true;
-          window.mappings = { "<A-{>" = "prev_source"; "<A-}>" = "next_source"; };
-        };
-        # File finder (popup)
-        telescope.enable = true;
         # Language Server Protocol client
         lsp = {
           enable = true;
@@ -623,17 +638,24 @@ in
             html.enable = true;
             jsonls.enable = true;
             pyright.enable = true;
-            ruff-lsp.enable = true;
+            ruff-lsp.enable = false;
             # pylyzer.enable = true;
             tsserver.enable = true;
             yamlls.enable = true;
           };
         };
-        # LSP formatting
-        lsp-format.enable = true;
-        # Parser generator & incremental parsing toolkit
-        treesitter = { enable = true; incrementalSelection.enable = true; };
-        treesitter-textobjects.enable = true;
+        # File explorer
+        neo-tree = {
+          enable = true;
+          closeIfLastWindow = true;
+          filesystem = {
+            filteredItems = { hideDotfiles = false; hideGitignored = false; };
+            followCurrentFile = { enabled = true; leaveDirsOpen = true; };
+            useLibuvFileWatcher = true;
+          };
+          sourceSelector.winbar = true;
+          window.mappings = { "<A-{>" = "prev_source"; "<A-}>" = "next_source"; };
+        };
         # LSP completion
         nvim-cmp = {
           enable = true;
@@ -679,45 +701,61 @@ in
             };
           };
         };
-        # Snippet engine
-        luasnip.enable = true;
-        # LSP pictograms
-        lspkind.enable = true;
-        # Multi-faceted LSP UX improvements
-        lspsaga.enable = true;
-        # NOTE: Git integration (looks mostly commit-oriented, TBD)
-        neogit = { enable = true; autoRefresh = true; };
-        # Git toolit
-        fugitive.enable = true;
-        # Git decoration
-        gitsigns.enable = true;
-        # Git praise
-        gitblame.enable = true;
+        # File / AST breadcrumbs
+        barbecue.enable = true;
+        # Code commenting
+        comment-nvim.enable = true;
         # Diff view
         diffview.enable = true;
         # Highlight other occurrences of word under cursor
         illuminate.enable = true;
-        # Enable Nix language support
-        nix.enable = true;
-        # Enable working with TODO: code comments
-        todo-comments.enable = true;
-        # Diagnostics, etc. 
-        trouble.enable = true;
-        # Symbol navigation popup
-        navbuddy.enable = true;
-        # Built-in terminal
-        toggleterm = { enable = true; size = 10; };
-        # Markdown preview
-        markdown-preview.enable = true;
         # Indentation guide
         indent-blankline.enable = true;
+        # Status line (bottom)
+        lualine.enable = true;
+        # Snippet engine
+        luasnip.enable = true;
+        # LSP formatting
+        lsp-format.enable = true;
+        # LSP pictograms
+        lspkind.enable = true;
+        # Multi-faceted LSP UX improvements
+        lspsaga.enable = true;
+        # Markdown preview
+        markdown-preview.enable = true;
+        # NOTE: Git integration (looks mostly commit-oriented, TBD)
+        neogit = { enable = true; autoRefresh = true; };
+        # Git toolit
+        fugitive.enable = true;
+        # Git praise
+        gitblame.enable = true;
+        # Git decoration
+        gitsigns.enable = true;
+        # Symbol navigation popup
+        navbuddy.enable = true;
+        # Enable Nix language support
+        nix.enable = true;
+        # File finder (popup)
+        telescope.enable = true;
+        # Enable working with TODO: code comments
+        todo-comments.enable = true;
+        # Built-in terminal
+        toggleterm = { enable = true; size = 10; };
+        # Parser generator & incremental parsing toolkit
+        treesitter = { enable = true; incrementalSelection.enable = true; };
+        # Tree-sitter text objects
+        # TODO: figure out
+        treesitter-textobjects.enable = true;
+        # Diagnostics, etc. 
+        trouble.enable = true;
       };
       extraPlugins = with pkgs.vimPlugins; [
+        # TODO: add comments about each plugin
         autoclose-nvim
         bufdelete-nvim
         git-conflict-nvim
-        symbols-outline-nvim
         nvim-surround
+        vim-jinja
         # TODO: upstream to Nixpkgs
         (pkgs.fetchFromGitHub {
           owner = "sophacles";
@@ -725,12 +763,26 @@ in
           rev = "09d2a93b1a853972ccfca44495d597c717789232";
           hash = "sha256-q5PgPAKjyjLUuKvK6S1m8huQ1G7SoFvq9bmQmlMoS1g=";
         })
+        # TODO: upstream to Nixpkgs
+        # TODO: figure out
+        (pkgs.fetchFromGitHub {
+          owner = "roobert";
+          repo = "bufferline-cycle-windowless.nvim";
+          rev = "74aba67d4cbc0a8ddd031a93f214a15dfc0a790f";
+          hash = "sha256-SVX1H5wRFGOUdi09g4xIdqTeYvDpVYnN9zCH3YzUsuY=";
+        })
+        (pkgs.fetchFromGitHub {
+          owner = "hedyhli";
+          repo = "outline.nvim";
+          rev = "4ad4e8e2b9c797d68774b0d88f91c92183975639";
+          hash = "sha256-oYzLtFUw+2edvjsj7aDTfZ9gL1oSwUwwdElFHwlOmr4=";
+        })
       ];
       extraConfigLua = ''
         require("autoclose").setup()
         require("git-conflict").setup()
         require("nvim-surround").setup()
-        require("symbols-outline").setup()
+        require("outline").setup()
       '';
       keymaps = [
         { key = ";"; action = ":"; }
@@ -754,7 +806,7 @@ in
         { key = "<leader>n"; action = ":Neotree focus<CR>"; }
         { key = "<leader>p"; action = ":TroubleToggle>"; }
         { key = "<leader>r"; action = ":Neotree reveal<CR>"; }
-        { key = "<leader>s"; action = ":SymbolsOutline<CR>"; }
+        { key = "<leader>s"; action = ":lua require('outline').toggle({ width = '10%' })<CR>"; }
         { key = "<leader>t"; action = ":Neotree toggle filesystem<CR>"; }
       ];
     };
@@ -874,7 +926,7 @@ in
         };
         file = "./Catppuccin-frappe.tmTheme";
       };
-      config = { style = "full"; theme = "gruvbox-dark"; };
+      config.style = "full";
     };
     # `ls` alternative
     eza.enable = true;
