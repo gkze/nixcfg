@@ -312,7 +312,19 @@ in
         # TODO: re-enable once https://github.com/NixOS/nixpkgs/issues/279707
         # is resolved
         # import = [ "${pkgs.alacritty-theme}/catppuccin_frappe.yaml" ];
-        import = [ ../../asset/alacritty/catppuccin-frappe.toml ];
+        import = [
+          (pkgs.stdenv.mkDerivation {
+            name = "catppuccin-alacritty-frappe";
+            src = pkgs.fetchurl {
+              url = "https://raw.githubusercontent.com/catppuccin/alacritty/f2da554ee63690712274971dd9ce0217895f5ee0/catppuccin-frappe.toml";
+              hash = "sha256-Rhr5XExaY0YF2t+PVwxBRIXQ58TH1+kMue7wkKNaSJI=";
+            };
+            dontUnpack = true;
+            installPhase = ''
+              cp $src $out
+            '';
+          })
+        ];
         # # Base16 Gruvbox Dark Soft 256
         # # https://github.com/aarowill/base16-alacritty/blob/master/colors/base16-gruvbox-dark-soft-256.yml
         # colors = {
@@ -566,9 +578,9 @@ in
       plugins = {
         # Greeter (home page)
         alpha = {
-          enable = false;
+          enable = true;
           layout = [
-            { type = "padding"; val = 2; }
+            { type = "padding"; val = 2; opts.position = "center"; }
             {
               type = "text";
               val = [
@@ -581,18 +593,69 @@ in
               ];
               opts = { position = "center"; hl = "Type"; };
             }
-            { type = "padding"; val = 2; }
+            { type = "padding"; val = 2; opts.position = "center"; }
             {
               type = "group";
               val = [
-                { shortcut = "SPC e"; desc = "  New file"; command = "<CMD>ene <CR>"; }
-                # TODO: get these working
-                # { shortcut = "SPC f"; desc = "󰈞  Find file"; command = "<CMD>Telescope find_files<CR>"; }
-                # { shortcut = "SPC w"; desc = "󰈞  Find word"; command = "<CMD>Telescope live_grep<CR>"; }
-                { shortcut = "q"; desc = "  Quit Neovim"; command = ":qa<CR>"; }
+                {
+                  type = "button";
+                  val = " New file";
+                  on_press.__raw = "function() vim.cmd[[ene]] end";
+                  opts = {
+                    align_shortcut = "right";
+                    cursor = 3;
+                    hl_shortcut = "Keyword";
+                    keymap = [ "n" "e" ":ene<CR>" { noremap = true; nowait = true; silent = true; } ];
+                    position = "center";
+                    shortcut = "e";
+                    width = 50;
+                  };
+                }
+                # {
+                #   type = "button";
+                #   val = "󰈞 Find file";
+                #   on_press.__raw = "function() require(\"telescope.builtin\").find_files end";
+                #   opts = {
+                #     align_shortcut = "right";
+                #     cursor = 3;
+                #     hl_shortcut = "Keyword";
+                #     keymap = [ "n" "f" ":Telescope find_files<CR>" { noremap = true; nowait = true; silent = true; } ];
+                #     position = "center";
+                #     shortcut = "f";
+                #     width = 50;
+                #   };
+                # }
+                # {
+                #   type = "button";
+                #   val = "󰈞 Find string(s)";
+                #   on_press.__raw = "function() require(\"telescope.builtin\").live_grep end";
+                #   opts = {
+                #     align_shortcut = "right";
+                #     cursor = 3;
+                #     hl_shortcut = "Keyword";
+                #     keymap = [ "n" "g" ":Telescope live_grep<CR>" { noremap = true; nowait = true; silent = true; } ];
+                #     position = "center";
+                #     shortcut = "g";
+                #     width = 50;
+                #   };
+                # }
+                {
+                  type = "button";
+                  val = " Quit Neovim";
+                  on_press.__raw = "function() vim.cmd[[qa]] end";
+                  opts = {
+                    align_shortcut = "right";
+                    cursor = 3;
+                    hl_shortcut = "Keyword";
+                    keymap = [ "n" "q" ":qa<CR>" { noremap = true; nowait = true; silent = true; } ];
+                    position = "center";
+                    shortcut = "q";
+                    width = 50;
+                  };
+                }
               ];
             }
-            { type = "padding"; val = 2; }
+            { type = "padding"; val = 2; opts.position = "center"; }
             {
               type = "text";
               val = "Crankenstein";
@@ -776,18 +839,26 @@ in
           rev = "74aba67d4cbc0a8ddd031a93f214a15dfc0a790f";
           hash = "sha256-SVX1H5wRFGOUdi09g4xIdqTeYvDpVYnN9zCH3YzUsuY=";
         })
+        # TODO: upstream to Nixpkgs
         (pkgs.fetchFromGitHub {
           owner = "hedyhli";
           repo = "outline.nvim";
           rev = "4ad4e8e2b9c797d68774b0d88f91c92183975639";
           hash = "sha256-oYzLtFUw+2edvjsj7aDTfZ9gL1oSwUwwdElFHwlOmr4=";
         })
+        # TODO: upstream to Nixpkgs
+        (pkgs.fetchFromGitHub {
+          owner = "kndndrj";
+          repo = "nvim-dbee";
+          rev = "2f8e14e8dcd397f5da45fcd73d9576692906a4e3";
+          hash = "sha256-rpTGcTxfGkHf21YEmMk3SYQIJ/KQFbWx4NH2gMLVeAA=";
+        })
       ];
       extraConfigLua = ''
         require("autoclose").setup()
+        require("dbee").setup()
         require("git-conflict").setup()
         require("nvim-surround").setup()
-        require("outline").setup()
       '';
       keymaps = [
         { key = ";"; action = ":"; }
@@ -806,6 +877,8 @@ in
         { key = "<Space>c"; action = ":nohlsearch<CR>"; }
         { key = "<leader>F"; action = ":Telescope find_files hidden=true<CR>"; }
         { key = "<leader>b"; action = ":Neotree toggle buffers<CR>"; }
+        { key = "<leader>d"; action = ":DiffviewOpen<CR>"; }
+        { key = "<leader>D"; action = ":DiffviewClose<CR>"; }
         { key = "<leader>f"; action = ":Telescope find_files<CR>"; }
         { key = "<leader>g"; action = ":Telescope live_grep<CR>"; }
         { key = "<leader>n"; action = ":Neotree focus<CR>"; }
