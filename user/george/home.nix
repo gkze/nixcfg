@@ -530,26 +530,16 @@ in
       enableZshIntegration = true;
       settings.manager.sort_by = "alphabetical";
     };
+    firefox.enable = true;
     # Neovim configured with Nix - NEEDS TUNING
     nixvim = {
       enable = true;
-      # https://github.com/nix-community/nixvim/issues/754
-      # https://github.com/nix-community/nixvim/pull/751
-      # https://github.com/NixOS/nixpkgs/pull/269942
-      enableMan = false;
-      colorschemes = {
-        gruvbox = { enable = false; contrastDark = "soft"; };
-        kanagawa = { enable = false; theme = "dragon"; };
-        catppuccin = { enable = true; flavour = "frappe"; };
-      };
+      enableMan = true;
+      colorschemes.catppuccin = { enable = true; flavour = "frappe"; };
       # Editor-agnostic configuration
       editorconfig.enable = true;
+      # Set Space key to be leader
       options = {
-        # Copy indent from current line when starting a new line
-        autoindent = true;
-        # Automatically read open file if updates to it on storage have been
-        # detected
-        autoread = true;
         # Text width helper
         colorcolumn = [ 80 100 ];
         # Highlight cursor line
@@ -611,6 +601,7 @@ in
                     width = 50;
                   };
                 }
+                # TODO: get working
                 # {
                 #   type = "button";
                 #   val = "󰈞 Find file";
@@ -663,10 +654,6 @@ in
             }
           ];
         };
-        # barbar = {
-        #   enable = true;
-        #   sidebarFiletypes.neo-tree = { text = "Neo-tree"; };
-        # };
         # Buffer line (top, tabs)
         bufferline = {
           enable = true;
@@ -678,6 +665,8 @@ in
             textAlign = "left";
           }];
         };
+        #Git information
+        gitsigns = { enable = true; currentLineBlame = true; currentLineBlameOpts.delay = 500; };
         # Language Server Protocol client
         lsp = {
           enable = true;
@@ -685,6 +674,7 @@ in
             "gd" = "definition";
             "gD" = "references";
             "gt" = "type_definition";
+            "gi" = "implementation";
             "K" = "hover";
           };
           servers = {
@@ -701,17 +691,21 @@ in
             bashls.enable = true;
             cssls.enable = true;
             dockerls.enable = true;
+            efm.enable = true;
             eslint.enable = true;
             gopls.enable = true;
             html.enable = true;
             jsonls.enable = true;
             pyright.enable = true;
             ruff-lsp.enable = false;
-            # pylyzer.enable = true;
             tsserver.enable = true;
             yamlls.enable = true;
           };
         };
+        # Symbol navigation popup
+        navbuddy = { enable = true; lsp.autoAttach = true; };
+        # Neovim git interface
+        neogit = { enable = true; integrations.diffview = true; };
         # File explorer
         neo-tree = {
           enable = true;
@@ -735,11 +729,9 @@ in
             { name = "buffer"; }
           ];
           # mappingPresets = [ "insert" "cmdline" ];
-          mapping = {
-            "<CR>" = "cmp.mapping.confirm({ select = true })";
-            "<Tab>" = {
-              modes = [ "i" "s" ];
-              action = ''
+          mapping =
+            let
+              selectNextItemFn = ''
                 function(fallback)
                   local luasnip = require('luasnip')
 
@@ -754,10 +746,7 @@ in
                   end
                 end
               '';
-            };
-            "<S-Tab>" = {
-              modes = [ "i" "s" ];
-              action = ''
+              selectPrevItemFn = ''
                 function(callback)
                   if cmp.visible then
                     cmp.select_prev_item()
@@ -766,15 +755,22 @@ in
                   end
                 end
               '';
+            in
+            {
+              "<CR>" = "cmp.mapping.confirm({ select = true })";
+              "<Tab>" = { modes = [ "i" "s" ]; action = selectNextItemFn; };
+              "<S-Tab>" = { modes = [ "i" "s" ]; action = selectPrevItemFn; };
+              # Yes for some reason it's backwards'
+              "<Up>" = { modes = [ "i" "s" ]; action = selectPrevItemFn; };
+              "<Down>" = { modes = [ "i" "s" ]; action = selectNextItemFn; };
             };
-          };
         };
         # File / AST breadcrumbs
         barbecue.enable = true;
         # Code commenting
         comment-nvim.enable = true;
-        # Diff view
-        diffview.enable = true;
+        # Debug Adapter Protocol
+        dap.enable = true;
         # Highlight other occurrences of word under cursor
         illuminate.enable = true;
         # Indentation guide
@@ -791,16 +787,6 @@ in
         lspsaga.enable = true;
         # Markdown preview
         markdown-preview.enable = true;
-        # NOTE: Git integration (looks mostly commit-oriented, TBD)
-        neogit = { enable = true; autoRefresh = true; };
-        # Git toolit
-        fugitive.enable = true;
-        # Git praise
-        gitblame.enable = true;
-        # Git decoration
-        gitsigns.enable = true;
-        # Symbol navigation popup
-        navbuddy.enable = true;
         # Enable Nix language support
         nix.enable = true;
         # File finder (popup)
@@ -824,6 +810,7 @@ in
         git-conflict-nvim
         nvim-surround
         vim-jinja
+      ] ++ [
         # TODO: upstream to Nixpkgs
         (pkgs.fetchFromGitHub {
           owner = "sophacles";
@@ -838,13 +825,6 @@ in
           repo = "bufferline-cycle-windowless.nvim";
           rev = "74aba67d4cbc0a8ddd031a93f214a15dfc0a790f";
           hash = "sha256-SVX1H5wRFGOUdi09g4xIdqTeYvDpVYnN9zCH3YzUsuY=";
-        })
-        # TODO: upstream to Nixpkgs
-        (pkgs.fetchFromGitHub {
-          owner = "hedyhli";
-          repo = "outline.nvim";
-          rev = "4ad4e8e2b9c797d68774b0d88f91c92183975639";
-          hash = "sha256-oYzLtFUw+2edvjsj7aDTfZ9gL1oSwUwwdElFHwlOmr4=";
         })
         # TODO: upstream to Nixpkgs
         (pkgs.fetchFromGitHub {
@@ -867,9 +847,9 @@ in
         { key = "<A-W>"; action = ":wall<CR>"; }
         { key = "<A-w>"; action = ":write<CR>"; }
         { key = "<A-x>"; action = ":Bdelete<CR>"; }
+        { key = "<C-l>"; action = ":set invlist<CR>"; }
         { key = "<A-{>"; action = ":BufferLineCyclePrev<CR>"; }
         { key = "<A-}>"; action = ":BufferLineCycleNext<CR>"; }
-        { key = "<C-l>"; action = ":set invlist<CR>"; }
         # TODO: figure out how to resize
         { key = "<S-f>"; action = ":ToggleTerm direction=float<CR>"; }
         { key = "<S-s>"; action = ":sort<CR>"; }
@@ -877,15 +857,16 @@ in
         { key = "<Space>c"; action = ":nohlsearch<CR>"; }
         { key = "<leader>F"; action = ":Telescope find_files hidden=true<CR>"; }
         { key = "<leader>b"; action = ":Neotree toggle buffers<CR>"; }
-        { key = "<leader>d"; action = ":DiffviewOpen<CR>"; }
-        { key = "<leader>D"; action = ":DiffviewClose<CR>"; }
         { key = "<leader>f"; action = ":Telescope find_files<CR>"; }
         { key = "<leader>g"; action = ":Telescope live_grep<CR>"; }
         { key = "<leader>n"; action = ":Neotree focus<CR>"; }
-        { key = "<leader>p"; action = ":TroubleToggle>"; }
+        { key = "<leader>o"; action = ":lua require('outline').toggle({ width = '10%' })<CR>"; }
+        { key = "<leader>p"; action = ":TroubleToggle<CR>"; }
         { key = "<leader>r"; action = ":Neotree reveal<CR>"; }
-        { key = "<leader>s"; action = ":lua require('outline').toggle({ width = '10%' })<CR>"; }
+        { key = "<leader>s"; action = ":Navbuddy<CR>"; }
         { key = "<leader>t"; action = ":Neotree toggle filesystem<CR>"; }
+        { key = "<leader>v"; action = ":Neotree toggle git_status<CR>"; }
+        { key = "<leader>x"; action = ":Neogit<CR>"; }
       ];
     };
     # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
