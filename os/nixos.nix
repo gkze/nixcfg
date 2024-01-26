@@ -1,4 +1,4 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, inputs, hostPlatform, ... }:
 let
   inherit (builtins) readFile;
   inherit (lib) removeSuffix;
@@ -62,8 +62,11 @@ in
     pulse.enable = true;
   };
 
-  environment.systemPackages = [
-    # TODO: Nix Software Center
+  environment.systemPackages = with inputs; [
+    # Nix software management GUI
+    nix-software-center.packages.${hostPlatform}.default
+    # Nix configuration editor GUI
+    nixos-conf-editor.packages.${hostPlatform}.default
   ];
 
   # Define a user account. Don't forget to set a password with ‘passwd’.

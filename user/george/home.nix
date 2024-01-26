@@ -2,6 +2,7 @@
 let
   inherit (builtins) elemAt readFile split;
   inherit (lib) optionalString removeSuffix;
+  inherit (lib.lists) flatten;
 
   # Grab the OS kernel part of the hostPlatform tuple
   kernel = elemAt (split "-" hostPlatform) 2;
@@ -82,18 +83,14 @@ in
           # Currently managed manually
           # TODO: fix
           gnomeExtensions.brightness-control-using-ddcutil
+          # Productivity suite
+          libreoffice
           # For Basis
           # TODO: factor out into Basis profile
           networkmanager-openvpn
           # TODO: TBD if works on macOS
           signal-desktop
         ]
-        ++ (with inputs; [
-          # Nix software management GUI
-          nix-software-center.packages.${hostPlatform}.default
-          # Nix configuration editor GUI
-          nixos-conf-editor.packages.${hostPlatform}.default
-        ])
         ++ (with pkgs.gnome; [
           # Additional GNOME settings tool
           gnome-tweaks
@@ -411,8 +408,14 @@ in
 
         # Homebrew Zsh completion
         fpath+="''${HOMEBREW_PREFIX}/share/zsh/site-functions"
-      ''
-      ;
+      '';
+      completionInit = ''
+        autoload -Uz +X compinit bashcompinit
+        for dump in ''${ZDOTDIR}/.zcompdump(N.mh+24); do
+          compinit && bashcompinit
+        done
+        compinit -C && bashcompinit -C
+      '';
       # Any additional manual confiuration goes here
       # Placed in $ZDOTDIR/.zshrc
       initExtra = ''
@@ -422,7 +425,7 @@ in
 
         # Load completion system, enable Bash completion compatibility
         zmodload zsh/complist
-        autoload -Uz +X bashcompinit select-word-style
+        autoload -Uz +X select-word-style
         select-word-style bash
 
         # Tune the completion system a bit
@@ -538,6 +541,8 @@ in
       colorschemes.catppuccin = { enable = true; flavour = "frappe"; };
       # Editor-agnostic configuration
       editorconfig.enable = true;
+      # Remap leader key to spacebar
+      globals.mapleader = " ";
       # Set Space key to be leader
       options = {
         # Text width helper
@@ -657,6 +662,7 @@ in
         # Buffer line (top, tabs)
         bufferline = {
           enable = true;
+          diagnostics = "nvim_lsp";
           enforceRegularTabs = false;
           offsets = [{
             filetype = "neo-tree";
@@ -666,7 +672,7 @@ in
           }];
         };
         #Git information
-        gitsigns = { enable = true; currentLineBlame = true; currentLineBlameOpts.delay = 500; };
+        gitsigns = { enable = true; currentLineBlame = true; currentLineBlameOpts.delay = 300; };
         # Language Server Protocol client
         lsp = {
           enable = true;
@@ -799,45 +805,70 @@ in
         treesitter = { enable = true; incrementalSelection.enable = true; };
         # Tree-sitter text objects
         # TODO: figure out
-        treesitter-textobjects.enable = true;
+        treesitter-textobjects = {
+          enable = true;
+          move = {
+            enable = true;
+            gotoNextStart = { "]m" = "@function.outer"; "]]" = "@class.outer"; };
+            gotoNextEnd = { "]M" = "@function.outer"; "][" = "@class.outer"; };
+            gotoPreviousStart = { "[m" = "@function.outer"; "[[" = "@class.outer"; };
+            gotoPreviousEnd = { "[M" = "@function.outer"; "[]" = "@class.outer"; };
+          };
+          select = {
+            enable = true;
+            lookahead = true;
+            keymaps = {
+              "af" = "@function.outer";
+              "if" = "@function.inner";
+              "ac" = "@class.outer";
+              "ic" = "@class.inner";
+              "as" = "@scope";
+            };
+          };
+        };
         # Diagnostics, etc. 
         trouble.enable = true;
       };
-      extraPlugins = with pkgs.vimPlugins; [
-        # TODO: add comments about each plugin
-        autoclose-nvim
-        bufdelete-nvim
-        git-conflict-nvim
-        nvim-surround
-        vim-jinja
-      ] ++ [
+      extraPlugins = flatten (with pkgs; [
+        # TODO: add comments for each plugin
+        (with vimPlugins; [
+          aerial-nvim
+          bufdelete-nvim
+          git-conflict-nvim
+          nvim-surround
+          vim-jinja
+        ])
         # TODO: upstream to Nixpkgs
-        (pkgs.fetchFromGitHub {
-          owner = "sophacles";
-          repo = "vim-bundle-mako";
-          rev = "09d2a93b1a853972ccfca44495d597c717789232";
-          hash = "sha256-q5PgPAKjyjLUuKvK6S1m8huQ1G7SoFvq9bmQmlMoS1g=";
+        (stdenv.mkDerivation {
+          name = "mini-align";
+          src = fetchFromGitHub {
+            owner = "echasnovski";
+            repo = "mini.align";
+            rev = "708c0265b1513a00c83c181bff3d237741031cd1";
+            hash = "sha256-tDf6zUoSU9f1PJ8Di6+iV8MCTaXPEEgbQZlGRFa9Dss=";
+          };
+          installPhase = "cp -r $src $out";
         })
         # TODO: upstream to Nixpkgs
-        # TODO: figure out
-        (pkgs.fetchFromGitHub {
-          owner = "roobert";
-          repo = "bufferline-cycle-windowless.nvim";
-          rev = "74aba67d4cbc0a8ddd031a93f214a15dfc0a790f";
-          hash = "sha256-SVX1H5wRFGOUdi09g4xIdqTeYvDpVYnN9zCH3YzUsuY=";
+        (stdenv.mkDerivation {
+          name = "vim-bundle-mako";
+          src = fetchFromGitHub {
+            owner = "sophacles";
+            repo = "vim-bundle-mako";
+            rev = "09d2a93b1a853972ccfca44495d597c717789232";
+            hash = "sha256-q5PgPAKjyjLUuKvK6S1m8huQ1G7SoFvq9bmQmlMoS1g=";
+          };
+          installPhase = "cp -r $src $out";
         })
-        # TODO: upstream to Nixpkgs
-        (pkgs.fetchFromGitHub {
-          owner = "kndndrj";
-          repo = "nvim-dbee";
-          rev = "2f8e14e8dcd397f5da45fcd73d9576692906a4e3";
-          hash = "sha256-rpTGcTxfGkHf21YEmMk3SYQIJ/KQFbWx4NH2gMLVeAA=";
-        })
-      ];
+      ]);
       extraConfigLua = ''
-        require("autoclose").setup()
-        require("dbee").setup()
+        require("aerial").setup({
+          autojump = true,
+          filter_kind = false,
+          open_automatic = true
+        })
         require("git-conflict").setup()
+        require("mini.align").setup()
         require("nvim-surround").setup()
       '';
       keymaps = [
@@ -846,21 +877,28 @@ in
         { key = "<A-)>"; action = ":BufferLineMoveNext<CR>"; }
         { key = "<A-W>"; action = ":wall<CR>"; }
         { key = "<A-w>"; action = ":write<CR>"; }
+        { key = "<A-w>"; action = ":write<CR>"; }
         { key = "<A-x>"; action = ":Bdelete<CR>"; }
-        { key = "<C-l>"; action = ":set invlist<CR>"; }
         { key = "<A-{>"; action = ":BufferLineCyclePrev<CR>"; }
         { key = "<A-}>"; action = ":BufferLineCycleNext<CR>"; }
-        # TODO: figure out how to resize
-        { key = "<S-f>"; action = ":ToggleTerm direction=float<CR>"; }
+        { key = "<C-l>"; action = ":set invlist<CR>"; }
+        { key = "<S-f>"; action = ":ToggleTerm direction=float<CR>"; } # TODO: figure out how to resize
         { key = "<S-s>"; action = ":sort<CR>"; }
         { key = "<S-t>"; action = ":ToggleTerm<CR>"; }
-        { key = "<Space>c"; action = ":nohlsearch<CR>"; }
+        { key = "<leader>h"; action = ":wincmd h<CR>"; }
+        { key = "<leader>j"; action = ":wincmd j<CR>"; }
+        { key = "<leader>k"; action = ":wincmd k<CR>"; }
+        { key = "<leader>l"; action = ":wincmd l<CR>"; }
         { key = "<leader>F"; action = ":Telescope find_files hidden=true<CR>"; }
+        { key = "<leader>a"; action = ":AerialToggle<CR>"; }
         { key = "<leader>b"; action = ":Neotree toggle buffers<CR>"; }
+        { key = "<leader>c"; action = ":nohlsearch<CR>"; }
+        { key = "<leader>de"; action = ":TodoTelescope<CR>"; }
+        { key = "<leader>dl"; action = ":TodoLocList<CR>"; }
+        { key = "<leader>dr"; action = ":TodoTrouble<CR>"; }
         { key = "<leader>f"; action = ":Telescope find_files<CR>"; }
         { key = "<leader>g"; action = ":Telescope live_grep<CR>"; }
         { key = "<leader>n"; action = ":Neotree focus<CR>"; }
-        { key = "<leader>o"; action = ":lua require('outline').toggle({ width = '10%' })<CR>"; }
         { key = "<leader>p"; action = ":TroubleToggle<CR>"; }
         { key = "<leader>r"; action = ":Neotree reveal<CR>"; }
         { key = "<leader>s"; action = ":Navbuddy<CR>"; }
