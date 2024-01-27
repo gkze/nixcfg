@@ -27,12 +27,18 @@ in
     };
   };
 
-  # TODO: get working
-  # programs.hyprland.enable = true;
-  # https://github.com/Mic92/nix-ld
-  programs.nix-ld.enable = true;
+  programs = {
+    # TODO: get working
+    # programs.hyprland.enable = true;
+    # https://github.com/Mic92/nix-ld
+    nix-ld.enable = true;
+    virt-manager.enable = true;
+  };
 
-  virtualisation.docker.enable = true;
+  virtualisation = {
+    docker.enable = true;
+    libvirtd.enable = true;
+  };
 
   # Linux application distribution format
   services.flatpak.enable = true;
