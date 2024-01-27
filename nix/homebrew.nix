@@ -22,7 +22,7 @@
       # "discord"
       # "docker"
       # "figma"
-      # "firefox"
+      "firefox"
       # "gimp"
       # "github"
       # "google-chrome"
