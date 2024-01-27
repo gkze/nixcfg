@@ -766,10 +766,58 @@ in
               "<CR>" = "cmp.mapping.confirm({ select = true })";
               "<Tab>" = { modes = [ "i" "s" ]; action = selectNextItemFn; };
               "<S-Tab>" = { modes = [ "i" "s" ]; action = selectPrevItemFn; };
-              # Yes for some reason it's backwards'
-              "<Up>" = { modes = [ "i" "s" ]; action = selectPrevItemFn; };
-              "<Down>" = { modes = [ "i" "s" ]; action = selectNextItemFn; };
+              # Yes for some reason it's backward
+              "<Up>" = { modes = [ "s" ]; action = selectPrevItemFn; };
+              "<Down>" = { modes = [ "s" ]; action = selectNextItemFn; };
             };
+        };
+        # Tree-sitter text objects
+        # TODO: figure out
+        treesitter-textobjects = {
+          enable = true;
+          move = {
+            enable = true;
+            gotoNextStart = {
+              "]]" = "@class.outer";
+              "]a" = "@attribute.outer";
+              "]k" = "@keyword";
+              "]m" = "@function.outer";
+              "]p" = "@property";
+            };
+            gotoNextEnd = {
+              "]A" = "@attribute.outer";
+              "]K" = "@keyword";
+              "]M" = "@function.outer";
+              "]P" = "@property";
+              "][" = "@class.outer";
+            };
+            gotoPreviousStart = {
+              "[[" = "@class.outer";
+              "[a" = "@attribute.outer";
+              "[k" = "@keyword";
+              "[m" = "@function.outer";
+              "[p" = "@property";
+            };
+            gotoPreviousEnd = {
+              "[A" = "@attribute.outer";
+              "[K" = "@keyword";
+              "[M" = "@function.outer";
+              "[]" = "@class.outer";
+              "[p" = "@property";
+            };
+          };
+          select = {
+            enable = true;
+            lookahead = true;
+            keymaps = {
+              "ac" = "@class.outer";
+              "af" = "@function.outer";
+              "as" = "@scope";
+              "ic" = "@class.inner";
+              "if" = "@function.inner";
+              "p" = "@property";
+            };
+          };
         };
         # File / AST breadcrumbs
         barbecue.enable = true;
@@ -803,29 +851,6 @@ in
         toggleterm = { enable = true; size = 10; };
         # Parser generator & incremental parsing toolkit
         treesitter = { enable = true; incrementalSelection.enable = true; };
-        # Tree-sitter text objects
-        # TODO: figure out
-        treesitter-textobjects = {
-          enable = true;
-          move = {
-            enable = true;
-            gotoNextStart = { "]m" = "@function.outer"; "]]" = "@class.outer"; };
-            gotoNextEnd = { "]M" = "@function.outer"; "][" = "@class.outer"; };
-            gotoPreviousStart = { "[m" = "@function.outer"; "[[" = "@class.outer"; };
-            gotoPreviousEnd = { "[M" = "@function.outer"; "[]" = "@class.outer"; };
-          };
-          select = {
-            enable = true;
-            lookahead = true;
-            keymaps = {
-              "af" = "@function.outer";
-              "if" = "@function.inner";
-              "ac" = "@class.outer";
-              "ic" = "@class.inner";
-              "as" = "@scope";
-            };
-          };
-        };
         # Diagnostics, etc. 
         trouble.enable = true;
       };
@@ -836,6 +861,7 @@ in
           bufdelete-nvim
           git-conflict-nvim
           nvim-surround
+          nvim-treesitter-textsubjects
           vim-jinja
         ])
         # TODO: upstream to Nixpkgs
@@ -870,6 +896,18 @@ in
         require("git-conflict").setup()
         require("mini.align").setup()
         require("nvim-surround").setup()
+        require('nvim-treesitter.configs').setup {
+            textsubjects = {
+                enable = true,
+                prev_selection = ',',
+                keymaps = {
+                    ['.'] = 'textsubjects-smart',
+                    [';'] = 'textsubjects-container-outer',
+                    ['i;'] = 'textsubjects-container-inner',
+                    ['i;'] = 'textsubjects-container-inner',
+                },
+            },
+        }
       '';
       keymaps = [
         { key = ";"; action = ":"; }
@@ -885,10 +923,6 @@ in
         { key = "<S-f>"; action = ":ToggleTerm direction=float<CR>"; } # TODO: figure out how to resize
         { key = "<S-s>"; action = ":sort<CR>"; }
         { key = "<S-t>"; action = ":ToggleTerm<CR>"; }
-        { key = "<leader>h"; action = ":wincmd h<CR>"; }
-        { key = "<leader>j"; action = ":wincmd j<CR>"; }
-        { key = "<leader>k"; action = ":wincmd k<CR>"; }
-        { key = "<leader>l"; action = ":wincmd l<CR>"; }
         { key = "<leader>F"; action = ":Telescope find_files hidden=true<CR>"; }
         { key = "<leader>a"; action = ":AerialToggle<CR>"; }
         { key = "<leader>b"; action = ":Neotree toggle buffers<CR>"; }
@@ -898,6 +932,11 @@ in
         { key = "<leader>dr"; action = ":TodoTrouble<CR>"; }
         { key = "<leader>f"; action = ":Telescope find_files<CR>"; }
         { key = "<leader>g"; action = ":Telescope live_grep<CR>"; }
+        { key = "<leader>h"; action = ":wincmd h<CR>"; }
+        { key = "<leader>j"; action = ":wincmd j<CR>"; }
+        { key = "<leader>k"; action = ":wincmd k<CR>"; }
+        { key = "<leader>l"; action = ":wincmd l<CR>"; }
+        { key = "<leader>m"; action = ":Telescope keymaps<CR>"; }
         { key = "<leader>n"; action = ":Neotree focus<CR>"; }
         { key = "<leader>p"; action = ":TroubleToggle<CR>"; }
         { key = "<leader>r"; action = ":Neotree reveal<CR>"; }
