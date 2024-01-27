@@ -79,6 +79,8 @@ in
           ddcutil
           # Matrix client
           element-desktop
+          # Web browser
+          firefox
           # Brightness control for all detected monitors
           # Currently managed manually
           # TODO: fix
@@ -533,7 +535,6 @@ in
       enableZshIntegration = true;
       settings.manager.sort_by = "alphabetical";
     };
-    firefox.enable = true;
     # Neovim configured with Nix - NEEDS TUNING
     nixvim = {
       enable = true;
