@@ -33,7 +33,7 @@
       # "musicbrainz-picard"
       "nordvpn"
       # "openlens"
-      # "signal"
+      "signal"
       "skype"
       # "slack"
       # "soulseek"
@@ -44,6 +44,7 @@
       # "vlc"
       # "webtorrent"
       # "whatsapp"
+      "zed"
       # "zoom"
     ] ++ (lib.optionals pkgs.stdenv.isDarwin [
       "aerial"
