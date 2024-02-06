@@ -81,6 +81,8 @@ in
           element-desktop
           # Web browser
           firefox
+          # Gnome firmware update utility
+          gnome-firmware
           # Brightness control for all detected monitors
           # Currently managed manually
           # TODO: fix
@@ -142,12 +144,13 @@ in
 
     # Universal cross-shell aliases
     shellAliases =
-      let ezaDefaultArgs = "-FlabghHistype --color=always --icons=always"; in
+      let ezaDefaultArgs = "-albghHistype -F --color=always --icons=always"; in
       # Add aliases here
       {
         cr = "clear && reset";
         ezap = "eza ${ezaDefaultArgs}";
         ezat = "eza ${ezaDefaultArgs} --tree";
+        jaws = "function() { aws $@ | jq -r '.' }";
         ne = "cd ~/.config/nixcfg && nvim";
         nv = "nvim";
         zc = "zellij action clear";
@@ -450,6 +453,11 @@ in
         export MANPATH="''${HOMEBREW_PREFIX}/share/man:''${MANPATH}"
       '';
       plugins = [
+        # IDE-like autocompletion
+        # {
+        #   name = "zsh-autocomplete";
+        #   src = "${pkgs.zsh-autocomplete}/share/zsh-autocomplete";
+        # }
         # Fish-like command autosuggestions
         {
           name = "zsh-autosuggestions";
@@ -698,6 +706,7 @@ in
             bashls.enable = true;
             cssls.enable = true;
             dockerls.enable = true;
+            # Generic language server proxy for multiple tools
             efm.enable = true;
             eslint.enable = true;
             gopls.enable = true;
@@ -705,9 +714,17 @@ in
             jsonls.enable = true;
             pyright.enable = true;
             ruff-lsp.enable = false;
+            # TOML
+            taplo.enable = true;
             tsserver.enable = true;
             yamlls.enable = true;
           };
+        };
+        # Status line (bottom)
+        lualine = {
+          enable = true;
+          componentSeparators = { left = ""; right = ""; };
+          sectionSeparators = { left = ""; right = ""; };
         };
         # Symbol navigation popup
         navbuddy = { enable = true; lsp.autoAttach = true; };
@@ -780,43 +797,35 @@ in
             enable = true;
             gotoNextStart = {
               "]]" = "@class.outer";
-              "]a" = "@attribute.outer";
-              "]k" = "@keyword";
               "]m" = "@function.outer";
-              "]p" = "@property";
             };
             gotoNextEnd = {
-              "]A" = "@attribute.outer";
-              "]K" = "@keyword";
               "]M" = "@function.outer";
-              "]P" = "@property";
               "][" = "@class.outer";
             };
             gotoPreviousStart = {
               "[[" = "@class.outer";
-              "[a" = "@attribute.outer";
-              "[k" = "@keyword";
               "[m" = "@function.outer";
-              "[p" = "@property";
             };
             gotoPreviousEnd = {
-              "[A" = "@attribute.outer";
-              "[K" = "@keyword";
               "[M" = "@function.outer";
               "[]" = "@class.outer";
-              "[p" = "@property";
             };
           };
           select = {
             enable = true;
             lookahead = true;
             keymaps = {
-              "ac" = "@class.outer";
+              "aa" = "@parameter.outer";
+              "ia" = "@parameter.inner";
               "af" = "@function.outer";
-              "as" = "@scope";
-              "ic" = "@class.inner";
               "if" = "@function.inner";
-              "p" = "@property";
+              "ac" = "@class.outer";
+              "ic" = "@class.inner";
+              "ii" = "@conditional.inner";
+              "ai" = "@conditional.inner";
+              "il" = "@loop.inner";
+              "al" = "@loop.inner";
             };
           };
         };
@@ -828,10 +837,10 @@ in
         dap.enable = true;
         # Highlight other occurrences of word under cursor
         illuminate.enable = true;
+        # Incremental rename
+        inc-rename.enable = true;
         # Indentation guide
         indent-blankline.enable = true;
-        # Status line (bottom)
-        lualine.enable = true;
         # Snippet engine
         luasnip.enable = true;
         # LSP formatting
@@ -842,6 +851,8 @@ in
         lspsaga.enable = true;
         # Markdown preview
         markdown-preview.enable = true;
+        # (Neo)Vim markers enhancer
+        marks.enable = true;
         # Enable Nix language support
         nix.enable = true;
         # File finder (popup)
@@ -858,11 +869,14 @@ in
       extraPlugins = flatten (with pkgs; [
         # TODO: add comments for each plugin
         (with vimPlugins; [
+          # TODO: figure out
+          SchemaStore-nvim
           aerial-nvim
           bufdelete-nvim
           git-conflict-nvim
           nvim-surround
           nvim-treesitter-textsubjects
+          overseer-nvim
           vim-jinja
         ])
         # TODO: upstream to Nixpkgs
@@ -887,6 +901,17 @@ in
           };
           installPhase = "cp -r $src $out";
         })
+        # TODO: figure out
+        # (stdenv.mkDerivation {
+        #   name = "nvim-treeclimber";
+        #   src = fetchFromGitHub {
+        #     owner = "Dkendal";
+        #     repo = "nvim-treeclimber";
+        #     rev = "613daac29f134ad66ccc20f3445d35645a7fe17e";
+        #     hash = "sha256-6n4E0FF3kQ0cVkhvYB6G8R0Zrm8iJwLVuVmvHl6SbIk=";
+        #   };
+        #   installPhase = "cp -r $src $out";
+        # })
       ]);
       extraConfigLua = ''
         require("aerial").setup({
@@ -897,6 +922,7 @@ in
         require("git-conflict").setup()
         require("mini.align").setup()
         require("nvim-surround").setup()
+        -- require('nvim-treeclimber').setup()
         require('nvim-treesitter.configs').setup {
             textsubjects = {
                 enable = true,
@@ -909,42 +935,45 @@ in
                 },
             },
         }
+        require("overseer").setup()
       '';
       keymaps = [
-        { key = ";"; action = ":"; }
-        { key = "<A-(>"; action = ":BufferLineMovePrev<CR>"; }
-        { key = "<A-)>"; action = ":BufferLineMoveNext<CR>"; }
-        { key = "<A-W>"; action = ":wall<CR>"; }
-        { key = "<A-w>"; action = ":write<CR>"; }
-        { key = "<A-w>"; action = ":write<CR>"; }
-        { key = "<A-x>"; action = ":Bdelete<CR>"; }
-        { key = "<A-{>"; action = ":BufferLineCyclePrev<CR>"; }
-        { key = "<A-}>"; action = ":BufferLineCycleNext<CR>"; }
-        { key = "<C-l>"; action = ":set invlist<CR>"; }
-        { key = "<S-f>"; action = ":ToggleTerm direction=float<CR>"; } # TODO: figure out how to resize
-        { key = "<S-s>"; action = ":sort<CR>"; }
-        { key = "<S-t>"; action = ":ToggleTerm<CR>"; }
-        { key = "<leader>F"; action = ":Telescope find_files hidden=true<CR>"; }
-        { key = "<leader>a"; action = ":AerialToggle<CR>"; }
-        { key = "<leader>b"; action = ":Neotree toggle buffers<CR>"; }
-        { key = "<leader>c"; action = ":nohlsearch<CR>"; }
-        { key = "<leader>de"; action = ":TodoTelescope<CR>"; }
-        { key = "<leader>dl"; action = ":TodoLocList<CR>"; }
-        { key = "<leader>dr"; action = ":TodoTrouble<CR>"; }
-        { key = "<leader>f"; action = ":Telescope find_files<CR>"; }
-        { key = "<leader>g"; action = ":Telescope live_grep<CR>"; }
-        { key = "<leader>h"; action = ":wincmd h<CR>"; }
-        { key = "<leader>j"; action = ":wincmd j<CR>"; }
-        { key = "<leader>k"; action = ":wincmd k<CR>"; }
-        { key = "<leader>l"; action = ":wincmd l<CR>"; }
-        { key = "<leader>m"; action = ":Telescope keymaps<CR>"; }
-        { key = "<leader>n"; action = ":Neotree focus<CR>"; }
-        { key = "<leader>p"; action = ":TroubleToggle<CR>"; }
-        { key = "<leader>r"; action = ":Neotree reveal<CR>"; }
-        { key = "<leader>s"; action = ":Navbuddy<CR>"; }
-        { key = "<leader>t"; action = ":Neotree toggle filesystem<CR>"; }
-        { key = "<leader>v"; action = ":Neotree toggle git_status<CR>"; }
-        { key = "<leader>x"; action = ":Neogit<CR>"; }
+        { action = ":"; key = ";"; }
+        { action = ":AerialToggle<CR>"; key = "<leader>a"; }
+        { action = ":Bdelete<CR>"; key = "<A-x>"; }
+        { action = ":BufferLineCycleNext<CR>"; key = "<A-}>"; }
+        { action = ":BufferLineCyclePrev<CR>"; key = "<A-{>"; }
+        { action = ":BufferLineMoveNext<CR>"; key = "<A-)>"; }
+        { action = ":BufferLineMovePrev<CR>"; key = "<A-(>"; }
+        { action = ":IncRename "; key = "<leader>rn"; }
+        { action = ":Navbuddy<CR>"; key = "<leader>s"; }
+        { action = ":Neogit branch<CR>"; key = "<leader>z"; }
+        { action = ":Neogit<CR>"; key = "<leader>x"; }
+        { action = ":Neotree focus<CR>"; key = "<leader>n"; }
+        { action = ":Neotree reveal<CR>"; key = "<leader>r"; }
+        { action = ":Neotree toggle buffers<CR>"; key = "<leader>b"; }
+        { action = ":Neotree toggle filesystem<CR>"; key = "<leader>t"; }
+        { action = ":Neotree toggle git_status<CR>"; key = "<leader>v"; }
+        { action = ":Telescope find_files hidden=true<CR>"; key = "<leader>F"; }
+        { action = ":Telescope find_files<CR>"; key = "<leader>f"; }
+        { action = ":Telescope keymaps<CR>"; key = "<leader>m"; }
+        { action = ":Telescope live_grep<CR>"; key = "<leader>g"; }
+        { action = ":TodoLocList<CR>"; key = "<leader>dl"; }
+        { action = ":TodoTelescope<CR>"; key = "<leader>de"; }
+        { action = ":TodoTrouble<CR>"; key = "<leader>dr"; }
+        { action = ":ToggleTerm direction=float<CR>"; key = "<S-f>"; } # TODO: figure out how to resize
+        { action = ":ToggleTerm<CR>"; key = "<S-t>"; }
+        { action = ":TroubleToggle<CR>"; key = "<leader>p"; }
+        { action = ":nohlsearch<CR>"; key = "<leader>c"; }
+        { action = ":set invlist<CR>"; key = "<C-l>"; }
+        { action = ":sort<CR>"; key = "<S-s>"; }
+        { action = ":wall<CR>"; key = "<A-W>"; }
+        { action = ":wincmd h<CR>"; key = "<leader>h"; }
+        { action = ":wincmd j<CR>"; key = "<leader>j"; }
+        { action = ":wincmd k<CR>"; key = "<leader>k"; }
+        { action = ":wincmd l<CR>"; key = "<leader>l"; }
+        { action = ":write<CR>"; key = "<A-w>"; }
+        { action = ":write<CR>"; key = "<A-w>"; }
       ];
     };
     # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
@@ -963,7 +992,7 @@ in
         branches = "branch --sort=-committerdate --format='%(committerdate)\t::  %(refname:short)'";
         praise = "blame";
       };
-      delta = { enable = true; options = { side-by-side = true; }; };
+      delta = { enable = true; options = { side-by-side = true; theme = "catppuccin_frappe"; }; };
       # difftastic = { enable = true; background = "dark"; };
       extraConfig = {
         commit.gpgsign = true;
@@ -1063,7 +1092,7 @@ in
         };
         file = "./Catppuccin-frappe.tmTheme";
       };
-      config.style = "full";
+      config = { style = "full"; theme = "catppuccin-frappe"; };
     };
     # `ls` alternative
     eza.enable = true;

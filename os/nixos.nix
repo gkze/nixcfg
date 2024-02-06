@@ -40,33 +40,37 @@ in
     libvirtd.enable = true;
   };
 
-  # Linux application distribution format
-  services.flatpak.enable = true;
-
-  # Display
-  services.xserver = {
-    enable = true;
-    desktopManager.gnome.enable = true;
-    displayManager.gdm.enable = true;
-    layout = "us";
-    # When changing, run:
-    # ```
-    # $ gsettings reset org.gnome.desktop.input-sources xkb-option
-    # $ gsettings reset org.gnome.desktop.input-sources sources
-    # ```
-    xkbOptions = "caps:swapescape";
+  services = {
+    # Application distribution format
+    flatpak.enable = true;
+    # Firmware UPdate Daemon
+    fwupd.enable = true;
+    # Display
+    xserver = {
+      enable = true;
+      desktopManager.gnome.enable = true;
+      displayManager.gdm.enable = true;
+      # When changing, run:
+      # ```
+      # $ gsettings reset org.gnome.desktop.input-sources xkb-option
+      # $ gsettings reset org.gnome.desktop.input-sources sources
+      # ```
+      xkb = { options = "caps:swapescape"; layout = "us"; };
+    };
+    # Sound
+    pipewire = {
+      enable = true;
+      alsa.enable = true;
+      alsa.support32Bit = true;
+      pulse.enable = true;
+    };
   };
+
 
   # Sound
   sound.enable = true;
   hardware.pulseaudio.enable = false;
   security = { rtkit.enable = true; audit.enable = true; };
-  services.pipewire = {
-    enable = true;
-    alsa.enable = true;
-    alsa.support32Bit = true;
-    pulse.enable = true;
-  };
 
   environment.systemPackages = with inputs; [
     # Nix software management GUI
