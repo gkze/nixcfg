@@ -1083,14 +1083,17 @@ in
     # More robust alternative to `cat`
     bat = {
       enable = true;
-      themes.catppuccin-frappe = {
-        src = pkgs.fetchFromGitHub {
-          owner = "catppuccin";
-          repo = "bat";
-          rev = "ba4d16880d63e656acced2b7d4e034e4a93f74b1";
-          hash = "sha256-6WVKQErGdaqb++oaXnY3i6/GuH2FhTgK0v4TN4Y0Wbw=";
+      syntaxes.kdl = {
+        src = pkgs.fetchurl {
+          url = "https://raw.githubusercontent.com/eugenesvk/sublime-KDL/44b2f5d25bdc6afbe0bb645f6db9d34234cbe6bb/KDL.sublime-syntax";
+          hash = "sha256-+3FgIvCYLSq1nA3698t2tn/skbXVh2QpX7eA6fsRB1Y=";
         };
-        file = "./Catppuccin-frappe.tmTheme";
+      };
+      themes.catppuccin-frappe = {
+        src = pkgs.fetchurl {
+          url = "https://raw.githubusercontent.com/catppuccin/bat/ba4d16880d63e656acced2b7d4e034e4a93f74b1/Catppuccin-frappe.tmTheme";
+          hash = "sha256-v8dycvuCdw/zl4LMpa0pMiNVBuk3CMmSCH8vWS+RIVs=";
+        };
       };
       config = { style = "full"; theme = "catppuccin-frappe"; };
     };
