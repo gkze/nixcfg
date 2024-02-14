@@ -24,6 +24,7 @@
       # "figma"
       "firefox"
       # "gimp"
+      "gitbutler"
       # "github"
       # "google-chrome"
       # "google-drive"
