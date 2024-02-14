@@ -1,8 +1,15 @@
-{ pkgs, hostPlatform, ... }: {
+{ pkgs, hostPlatform, ... }:
+let inherit (builtins) elemAt split; in {
   # Configuration for Nix itself
   nix = {
     # Pin registry to system Nixpkgs
     #registry.nixpkgs.flake = pkgs;
+
+    # Perform automatic garbage collection
+    gc = { automatic = true; } // {
+      darwin.interval = { Hour = 09; Minute = 30; };
+      linux.dates = "09:30";
+    }.${elemAt (split "-" hostPlatform) 2};
 
     settings = {
       # Enable nix command and flakes

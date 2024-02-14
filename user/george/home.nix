@@ -253,6 +253,17 @@ in
       viddy
       # Wayland Clipboard
       wl-clipboard
+      # Yet Another AWS SSO tool
+      # TODO: factor out into Basis profile
+      (pkgs.python3Packages.buildPythonApplication rec {
+        pname = "yawsso";
+        version = "1.1.0";
+        src = pkgs.fetchPypi {
+          inherit pname version;
+          hash = "sha256-GZ2rVDpXvtAVvDnZEPjkT1JqV0a3MB9IixG6F3jIIIA=";
+        };
+        doCheck = false;
+      })
       # Git branch maintenance
       # TODO: upstream to Nixpkgs
       (stdenv.mkDerivation {
@@ -798,18 +809,34 @@ in
             gotoNextStart = {
               "]]" = "@class.outer";
               "]m" = "@function.outer";
+              "]v" = "@assignment.outer";
+              "]c" = "@call.outer";
+              "]b" = "@block.outer";
+              "]s" = "@statement.outer";
             };
             gotoNextEnd = {
               "]M" = "@function.outer";
               "][" = "@class.outer";
+              "]V" = "@assignment.outer";
+              "]C" = "@call.outer";
+              "]B" = "@block.outer";
+              "]S" = "@statement.outer";
             };
             gotoPreviousStart = {
               "[[" = "@class.outer";
               "[m" = "@function.outer";
+              "[v" = "@assignment.outer";
+              "[c" = "@call.outer";
+              "[b" = "@block.outer";
+              "[s" = "@statement.outer";
             };
             gotoPreviousEnd = {
               "[M" = "@function.outer";
               "[]" = "@class.outer";
+              "[V" = "@assignment.outer";
+              "[C" = "@call.outer";
+              "[B" = "@block.outer";
+              "[S" = "@statement.outer";
             };
           };
           select = {
@@ -822,10 +849,16 @@ in
               "if" = "@function.inner";
               "ac" = "@class.outer";
               "ic" = "@class.inner";
-              "ii" = "@conditional.inner";
+              "ii" = "@conditional.outer";
               "ai" = "@conditional.inner";
-              "il" = "@loop.inner";
+              "il" = "@loop.outer";
               "al" = "@loop.inner";
+              "av" = "@assignment.outer";
+              "iv" = "@assignment.inner";
+              "lv" = "@assignment.lhs";
+              "rv" = "@assignment.rhs";
+              "ab" = "@block.outer";
+              "ib" = "@block.inner";
             };
           };
         };
