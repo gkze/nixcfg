@@ -9,6 +9,9 @@ let
 
   # Source code directory
   srcDir = { darwin = "Development"; linux = "src"; }.${kernel};
+
+  # npm config file
+  npmConfigFile = "${config.xdg.configHome}/npmrc";
 in
 {
   # Home Manager modules go here
@@ -94,6 +97,8 @@ in
           networkmanager-openvpn
           # TODO: TBD if works on macOS
           signal-desktop
+          # Offline documentatoin browser
+          zeal
         ]
         ++ (with pkgs.gnome; [
           # Additional GNOME settings tool
@@ -124,7 +129,7 @@ in
     stateVersion = removeSuffix "\n" (readFile ../../NIXOS_VERSION);
 
     # Shell-agnostic session $PATH
-    sessionPath = [ "$HOME/.local/bin" "$HOME/go/bin" ];
+    sessionPath = [ "$HOME/.local/bin" "$HOME/.cargo/bin" "$HOME/go/bin" ];
 
     # Shell-agnostic session environment variables
     # These only get applied on login
@@ -138,6 +143,8 @@ in
       MANROFFOPT = "-c";
       # Set Bat as the Nix pager
       NIX_PAGER = "bat -p";
+      # Tell npm where to look for its config file
+      NPM_CONFIG_USERCONFIG = npmConfigFile;
       # Set Bat as the default pager
       PAGER = "bat -p";
     };
@@ -162,7 +169,7 @@ in
     file = {
       # We explicitly set the prefix to $HOME/.local because npm operates out 
       # of the Nix store, which is read-only
-      "${config.xdg.configHome}/npmrc".text = ''
+      ${npmConfigFile}.text = ''
         prefix = "''${HOME}/.local"
       '';
       # Same as above for pip
@@ -222,6 +229,10 @@ in
       gping
       # HTTP client
       httpie
+      # JSON Language server
+      vscode-langservers-extracted
+      # YAML Language Server
+      yaml-language-server
       # Additional useful utilities (a la coreutils)
       moreutils
       # Nerd Fonts
@@ -722,13 +733,18 @@ in
             eslint.enable = true;
             gopls.enable = true;
             html.enable = true;
-            jsonls.enable = true;
+            jsonls.enable = false;
             pyright.enable = true;
             ruff-lsp.enable = false;
+            rust-analyzer = {
+              enable = true;
+              installCargo = true;
+              installRustc = true;
+            };
             # TOML
             taplo.enable = true;
             tsserver.enable = true;
-            yamlls.enable = true;
+            yamlls.enable = false;
           };
         };
         # Status line (bottom)
@@ -813,6 +829,7 @@ in
               "]c" = "@call.outer";
               "]b" = "@block.outer";
               "]s" = "@statement.outer";
+              "]i" = "@conditional.outer";
             };
             gotoNextEnd = {
               "]M" = "@function.outer";
@@ -821,6 +838,7 @@ in
               "]C" = "@call.outer";
               "]B" = "@block.outer";
               "]S" = "@statement.outer";
+              "]I" = "@conditional.outer";
             };
             gotoPreviousStart = {
               "[[" = "@class.outer";
@@ -829,6 +847,7 @@ in
               "[c" = "@call.outer";
               "[b" = "@block.outer";
               "[s" = "@statement.outer";
+              "[i" = "@conditional.outer";
             };
             gotoPreviousEnd = {
               "[M" = "@function.outer";
@@ -837,6 +856,7 @@ in
               "[C" = "@call.outer";
               "[B" = "@block.outer";
               "[S" = "@statement.outer";
+              "[I" = "@conditional.outer";
             };
           };
           select = {
@@ -849,10 +869,10 @@ in
               "if" = "@function.inner";
               "ac" = "@class.outer";
               "ic" = "@class.inner";
-              "ii" = "@conditional.outer";
-              "ai" = "@conditional.inner";
-              "il" = "@loop.outer";
-              "al" = "@loop.inner";
+              "ai" = "@conditional.outer";
+              "ii" = "@conditional.inner";
+              "al" = "@loop.outer";
+              "il" = "@loop.inner";
               "av" = "@assignment.outer";
               "iv" = "@assignment.inner";
               "lv" = "@assignment.lhs";
@@ -947,28 +967,67 @@ in
         # })
       ]);
       extraConfigLua = ''
+        require("git-conflict").setup()
+        require("mini.align").setup()
+        require("nvim-surround").setup()
+        require("overseer").setup()
+        -- require("nvim-treeclimber").setup()
         require("aerial").setup({
           autojump = true,
           filter_kind = false,
           open_automatic = true
         })
-        require("git-conflict").setup()
-        require("mini.align").setup()
-        require("nvim-surround").setup()
-        -- require('nvim-treeclimber').setup()
-        require('nvim-treesitter.configs').setup {
+        require("lspconfig").jsonls.setup {
+          settings = {
+            json = {
+              schemas = require("schemastore").json.schemas(),
+              validate = { enable = true },
+            },
+          },
+        }
+        require("lspconfig").yamlls.setup {
+          settings = {
+            yaml = {
+              customTags = {
+                "!Base64",
+                "!Cidr",
+                "!FindInMap",
+                "!ForEach",
+                "!GetAZs",
+                "!GetAtt",
+                "!ImportValue",
+                "!Join",
+                "!Length",
+                "!Ref",
+                "!Select",
+                "!Split",
+                "!Sub",
+                "!ToJsonString",
+                "!Transform",
+              },
+              schemaStore = {
+                -- You must disable built-in schemaStore support if you want to use
+                -- this plugin and its advanced options like `ignore`.
+                enable = false,
+                -- Avoid TypeError: Cannot read properties of undefined (reading 'length')
+                url = "",
+              },
+              schemas = require("schemastore").yaml.schemas(),
+            },
+          },
+        }
+        require("nvim-treesitter.configs").setup {
             textsubjects = {
                 enable = true,
-                prev_selection = ',',
+                rrev_selection = ",",
                 keymaps = {
-                    ['.'] = 'textsubjects-smart',
-                    [';'] = 'textsubjects-container-outer',
-                    ['i;'] = 'textsubjects-container-inner',
-                    ['i;'] = 'textsubjects-container-inner',
+                    ["."] = "textsubjects-smart",
+                    [";"] = "textsubjects-container-outer",
+                    ["i;"] = "textsubjects-container-inner",
+                    ["i;"] = "textsubjects-container-inner",
                 },
             },
         }
-        require("overseer").setup()
       '';
       keymaps = [
         { action = ":"; key = ";"; }
@@ -1007,6 +1066,8 @@ in
         { action = ":wincmd l<CR>"; key = "<leader>l"; }
         { action = ":write<CR>"; key = "<A-w>"; }
         { action = ":write<CR>"; key = "<A-w>"; }
+        { action = ":DiffviewOpen<CR>"; key = "<leader>d"; }
+        { action = ":DiffviewClose<CR>"; key = "<leader>D"; }
       ];
     };
     # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
@@ -1022,7 +1083,16 @@ in
     git = {
       enable = true;
       aliases = {
-        branches = "branch --sort=-committerdate --format='%(committerdate)\t::  %(refname:short)'";
+        branches = ''
+          !git for-each-ref \
+            --color \
+            --sort=-committerdate \
+            --format=$'%(color:red)%(ahead-behind:HEAD)\t%(color:blue)%(refname:short)\t%(color:yellow)%(committerdate:relative)\t%(color:default)%(describe)' \
+            refs/heads/ \
+            --no-merged \
+            | sed 's/ /\t/' \
+            | column --separator=$'\t' --table --table-columns='Ahead,Behind,Branch Name,Last Commit,Description'
+        '';
         praise = "blame";
       };
       delta = { enable = true; options = { side-by-side = true; theme = "catppuccin_frappe"; }; };
@@ -1058,50 +1128,45 @@ in
     gitui = {
       enable = true;
       keyConfig = ''
-        // bit for modifiers
-        // bits: 0  None 
-        // bits: 1  SHIFT
-        // bits: 2  CONTROL
-        //
         // Note:
         // If the default key layout is lower case,
         // and you want to use `Shift + q` to trigger the exit event,
-        // the setting should like this `exit: Some(( code: Char('Q'), modifiers: ( bits: 1,),)),`
-        // The Char should be upper case, and the shift modified bit should be set to 1.
+        // the setting should like this `exit: Some(( code: Char('Q'), modifiers: "SHIFT")),`
+        // The Char should be upper case, and the modifier should be set to "SHIFT".
         //
         // Note:
         // find `KeysList` type in src/keys/key_list.rs for all possible keys.
         // every key not overwritten via the config file will use the default specified there
         (
-            open_help: Some(( code: F(1), modifiers: ( bits: 0,),)),
+            open_help: Some(( code: F(1), modifiers: "")),
 
-            move_left: Some(( code: Char('h'), modifiers: ( bits: 0,),)),
-            move_right: Some(( code: Char('l'), modifiers: ( bits: 0,),)),
-            move_up: Some(( code: Char('k'), modifiers: ( bits: 0,),)),
-            move_down: Some(( code: Char('j'), modifiers: ( bits: 0,),)),
+            move_left: Some(( code: Char('h'), modifiers: "")),
+            move_right: Some(( code: Char('l'), modifiers: "")),
+            move_up: Some(( code: Char('k'), modifiers: "")),
+            move_down: Some(( code: Char('j'), modifiers: "")),
     
-            popup_up: Some(( code: Char('p'), modifiers: ( bits: 2,),)),
-            popup_down: Some(( code: Char('n'), modifiers: ( bits: 2,),)),
-            page_up: Some(( code: Char('b'), modifiers: ( bits: 2,),)),
-            page_down: Some(( code: Char('f'), modifiers: ( bits: 2,),)),
-            home: Some(( code: Char('g'), modifiers: ( bits: 0,),)),
-            end: Some(( code: Char('G'), modifiers: ( bits: 1,),)),
-            shift_up: Some(( code: Char('K'), modifiers: ( bits: 1,),)),
-            shift_down: Some(( code: Char('J'), modifiers: ( bits: 1,),)),
+            popup_up: Some(( code: Char('p'), modifiers: "CONTROL")),
+            popup_down: Some(( code: Char('n'), modifiers: "CONTROL")),
+            page_up: Some(( code: Char('b'), modifiers: "CONTROL")),
+            page_down: Some(( code: Char('f'), modifiers: "CONTROL")),
+            home: Some(( code: Char('g'), modifiers: "")),
+            end: Some(( code: Char('G'), modifiers: "SHIFT")),
+            shift_up: Some(( code: Char('K'), modifiers: "SHIFT")),
+            shift_down: Some(( code: Char('J'), modifiers: "SHIFT")),
 
-            edit_file: Some(( code: Char('I'), modifiers: ( bits: 1,),)),
+            edit_file: Some(( code: Char('I'), modifiers: "SHIFT")),
 
-            status_reset_item: Some(( code: Char('U'), modifiers: ( bits: 1,),)),
+            status_reset_item: Some(( code: Char('U'), modifiers: "SHIFT")),
 
-            diff_reset_lines: Some(( code: Char('u'), modifiers: ( bits: 0,),)),
-            diff_stage_lines: Some(( code: Char('s'), modifiers: ( bits: 0,),)),
+            diff_reset_lines: Some(( code: Char('u'), modifiers: "")),
+            diff_stage_lines: Some(( code: Char('s'), modifiers: "")),
 
-            stashing_save: Some(( code: Char('w'), modifiers: ( bits: 0,),)),
-            stashing_toggle_index: Some(( code: Char('m'), modifiers: ( bits: 0,),)),
+            stashing_save: Some(( code: Char('w'), modifiers: "")),
+            stashing_toggle_index: Some(( code: Char('m'), modifiers: "")),
 
-            stash_open: Some(( code: Char('l'), modifiers: ( bits: 0,),)),
+            stash_open: Some(( code: Char('l'), modifiers: "")),
 
-            abort_merge: Some(( code: Char('M'), modifiers: ( bits: 1,),)),
+            abort_merge: Some(( code: Char('M'), modifiers: "SHIFT")),
         )
       '';
     };
@@ -1223,3 +1288,6 @@ in
     };
   };
 }
+
+
+
