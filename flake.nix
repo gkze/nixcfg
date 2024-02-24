@@ -3,7 +3,7 @@
 
   inputs = {
     # Use latest nixpkgs
-    nixpkgs.url = "github:NixOS/nixpkgs/a1c9432d542efc7387c5a470a3b66763cceaf593";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # Flake helper
     fp.url = "github:hercules-ci/flake-parts";
