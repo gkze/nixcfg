@@ -12,6 +12,20 @@ let
 
   # npm config file
   npmConfigFile = "${config.xdg.configHome}/npmrc";
+
+  zellijPkg = pkgs.zellij.overrideAttrs (_: p: rec {
+    version = "0.40.0";
+    src = pkgs.fetchFromGitHub {
+      owner = "zellij-org";
+      repo = "zellij";
+      rev = "7bd77ccc61f30e08ff089a7cc41878e746f6e06b";
+      hash = "sha256-2AN4nUF0VKtcjEFRbH1qqWKMKhtsKTzMN5MvJjqMwSE=";
+    };
+    cargoDeps = p.cargoDeps.overrideAttrs {
+      inherit src;
+      outputHash = "sha256-aOO9B6h0e7j/uCl4POnErlNgKysjAWm7q1tUsXD3KnY=";
+    };
+  });
 in
 {
   # Home Manager modules go here
@@ -322,6 +336,26 @@ in
           '';
         }
       )
+      # TODO: upstream to Nixpkgs
+      (pkgs.rustPlatform.buildRustPackage rec {
+        pname = "uv";
+        version = "0.1.11";
+        src = pkgs.fetchFromGitHub {
+          owner = "astral-sh";
+          repo = "uv";
+          rev = "e811070ef1f0637506b1727af218158e33b43501";
+          hash = "sha256-1wBJtVIWpdx4FhQlq00N5lW52P128r9djREC+CX+XOk=";
+        };
+        cargoLock = {
+          lockFile = "${src}/Cargo.lock";
+          allowBuiltinFetchGit = true;
+        };
+        buildInputs = [ openssl ];
+        cargoHash = "";
+        doCheck = false;
+        nativeBuildInputs = [ cmake pkg-config ];
+        OPENSSL_NO_VENDOR = 1;
+      })
     ];
   };
 
@@ -344,9 +378,7 @@ in
               hash = "sha256-Rhr5XExaY0YF2t+PVwxBRIXQ58TH1+kMue7wkKNaSJI=";
             };
             dontUnpack = true;
-            installPhase = ''
-              cp $src $out
-            '';
+            installPhase = ''cp $src $out'';
           })
         ];
         # # Base16 Gruvbox Dark Soft 256
@@ -393,7 +425,7 @@ in
         };
         # Launch Zellij directly instead of going through a shell
         shell = {
-          program = "${pkgs.zellij}/bin/zellij";
+          program = "${zellijPkg}/bin/zellij";
           # Attach to session called "main" if it exists, create one named that
           # if it doesn't
           # NOTE: this gets merged in with
@@ -551,6 +583,8 @@ in
     };
     # Terminal multiplexer / workspace manager
     zellij = {
+      # TODO: drop once new release is out
+      package = zellijPkg;
       enable = true;
       settings = {
         keybinds.normal."bind \"Alt s\"".Clear = { };
@@ -888,6 +922,8 @@ in
         comment-nvim.enable = true;
         # Debug Adapter Protocol
         dap.enable = true;
+        # Diff view
+        diffview.enable = true;
         # Highlight other occurrences of word under cursor
         illuminate.enable = true;
         # Incremental rename
@@ -995,7 +1031,7 @@ in
                 "!ForEach",
                 "!GetAZs",
                 "!GetAtt",
-                "!ImportValue",
+                "!ImportValue mapping",
                 "!Join",
                 "!Length",
                 "!Ref",
