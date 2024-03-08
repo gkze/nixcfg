@@ -66,10 +66,4 @@ in
       };
     }.${kernel}
   ];
-
-  home.file."${config.xdg.configHome}/git/basis".text = ''
-    [user]
-      name = george
-      email = george@usebasis.co
-  '';
 }

@@ -81,7 +81,7 @@ sysFn {
           useGlobalPkgs = true;
           useUserPackages = true;
           extraSpecialArgs = {
-            inherit hostPlatform inputs args;
+            inherit hostPlatform inputs profiles args;
             hmMods =
               # Device-specific Home Manager module
               optionals

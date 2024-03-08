@@ -28,11 +28,7 @@ let inherit (builtins) elemAt split; in {
   # https://nixos.wiki/wiki/Unfree_Software
   nixpkgs = {
     inherit hostPlatform;
-    config = {
-      allowUnfree = true;
-      allowInsecure = true;
-      permittedInsecurePackages = [ "electron-25.9.0" ]; # Beekeeper Studio
-    };
+    config = { allowUnfree = true; allowInsecure = true; };
   };
 
   # Common system configuration
