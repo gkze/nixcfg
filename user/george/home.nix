@@ -1,7 +1,8 @@
-{ config, lib, pkgs, inputs, hostPlatform, hmMods ? [ ], ... }:
+{ config, lib, pkgs, inputs, hostPlatform, profiles, hmMods ? [ ], ... }:
 let
-  inherit (builtins) elemAt readFile split;
+  inherit (builtins) elem elemAt readFile split;
   inherit (lib) optionalString removeSuffix;
+  inherit (lib.attrsets) optionalAttrs;
   inherit (lib.lists) flatten;
 
   # Grab the OS kernel part of the hostPlatform tuple
@@ -190,7 +191,13 @@ in
           email = george.kontridze@gmail.com
       '';
       ".local/bin" = { source = ./bin; recursive = true; executable = true; };
-    };
+    } // (optionalAttrs (elem "basis" profiles) {
+      "${config.xdg.configHome}/git/basis".text = ''
+        [user]
+          name = george
+          email = george@usebasis.co
+      '';
+    });
 
     # Packages that should be installed to the user profile. These are just
     # installed. Programs section below both installs and configures software,
