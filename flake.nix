@@ -204,6 +204,7 @@
           arch = "x86_64";
           kernel = "linux";
           users = [ username ];
+          profiles = [ "basis" ];
         };
       };
     };

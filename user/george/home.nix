@@ -80,10 +80,6 @@ in
 
           # Nix shell direnv background daemon
           lorri.enable = true;
-
-          # File synchronization
-          # TODO: Factor out into Basis profile
-          syncthing.enable = true;
         };
 
         # These are marked as unsupported on darwin
@@ -106,9 +102,6 @@ in
           gnomeExtensions.brightness-control-using-ddcutil
           # Productivity suite
           libreoffice
-          # For Basis
-          # TODO: factor out into Basis profile
-          networkmanager-openvpn
           # TODO: TBD if works on macOS
           signal-desktop
           # Offline documentatoin browser
@@ -193,13 +186,8 @@ in
       '';
       "${config.xdg.configHome}/git/personal".text = ''
         [user]
-        	name = gkze
-        	email = george.kontridze@gmail.com
-      '';
-      "${config.xdg.configHome}/git/basis".text = ''
-        [user]
-        	name = george
-        	email = george@usebasis.co
+          name = gkze
+          email = george.kontridze@gmail.com
       '';
       ".local/bin" = { source = ./bin; recursive = true; executable = true; };
     };
@@ -208,15 +196,14 @@ in
     # installed. Programs section below both installs and configures software,
     # and is the preferred method.
     packages = with pkgs; [
-      # Password manager
-      # TODO: factor out into Basis profile
-      _1password-gui
       # Color theme
       catppuccin
       # cURL wrapper with niceties
       curlie
       # Duplicate file finder
       czkawka
+      # Universal Database Tool
+      dbeaver
       # Disk space usage analyzer (in Rust)
       du-dust
       # Envchain is a utility that loads environment variables from the system
@@ -257,9 +244,6 @@ in
       (nerdfonts.override { fonts = [ "Hack" ]; })
       # For running one-off npx stuff
       nodejs_latest
-      # Knowledge management
-      # TODO: factor out into Basis profile
-      obsidian
       # Alternative to `ps`
       procs
       # Rust toolchain manager
@@ -278,17 +262,6 @@ in
       viddy
       # Wayland Clipboard
       wl-clipboard
-      # Yet Another AWS SSO tool
-      # TODO: factor out into Basis profile
-      (pkgs.python3Packages.buildPythonApplication rec {
-        pname = "yawsso";
-        version = "1.1.0";
-        src = pkgs.fetchPypi {
-          inherit pname version;
-          hash = "sha256-GZ2rVDpXvtAVvDnZEPjkT1JqV0a3MB9IixG6F3jIIIA=";
-        };
-        doCheck = false;
-      })
       # Git branch maintenance
       # TODO: upstream to Nixpkgs
       (stdenv.mkDerivation {
@@ -790,7 +763,7 @@ in
         # Symbol navigation popup
         navbuddy = { enable = true; lsp.autoAttach = true; };
         # Neovim git interface
-        neogit = { enable = true; integrations.diffview = true; };
+        neogit = { enable = true; settings.integrations.diffview = true; };
         # File explorer
         neo-tree = {
           enable = true;
@@ -804,51 +777,27 @@ in
           window.mappings = { "<A-{>" = "prev_source"; "<A-}>" = "next_source"; };
         };
         # LSP completion
-        nvim-cmp = {
+        cmp = {
           enable = true;
-          snippet.expand = "luasnip";
-          sources = [
-            { name = "nvim_lsp"; }
-            { name = "luasnip"; }
-            { name = "path"; }
-            { name = "buffer"; }
-          ];
-          # mappingPresets = [ "insert" "cmdline" ];
-          mapping =
-            let
-              selectNextItemFn = ''
-                function(fallback)
-                  local luasnip = require('luasnip')
-
-                  if cmp.visible() then
-                    cmp.select_next_item()
-                  elseif luasnip.expandable() then
-                    luasnip.expand()
-                  elseif luasnip.expand_or_jumpable() then
-                    luasnip.expand_or_jump()
-                  else
-                    fallback()
-                  end
-                end
-              '';
-              selectPrevItemFn = ''
-                function(callback)
-                  if cmp.visible then
-                    cmp.select_prev_item()
-                  else
-                    fallback()
-                  end
-                end
-              '';
-            in
-            {
+          settings = {
+            extraOptions.autoEnableSources = true;
+            snippet.expand = "luasnip";
+            sources = [
+              { name = "nvim_lsp"; }
+              { name = "luasnip"; }
+              { name = "path"; }
+              { name = "buffer"; }
+            ];
+            mapping = {
+              "<C-d>" = "cmp.mapping.scroll_docs(-4)";
+              "<C-f>" = "cmp.mapping.scroll_docs(4)";
+              "<C-Space>" = "cmp.mapping.complete()";
+              "<C-e>" = "cmp.mapping.close()";
+              "<Tab>" = "cmp.mapping(cmp.mapping.select_next_item(), {'i', 's'})";
+              "<S-Tab>" = "cmp.mapping(cmp.mapping.select_prev_item(), {'i', 's'})";
               "<CR>" = "cmp.mapping.confirm({ select = true })";
-              "<Tab>" = { modes = [ "i" "s" ]; action = selectNextItemFn; };
-              "<S-Tab>" = { modes = [ "i" "s" ]; action = selectPrevItemFn; };
-              # Yes for some reason it's backward
-              "<Up>" = { modes = [ "s" ]; action = selectPrevItemFn; };
-              "<Down>" = { modes = [ "s" ]; action = selectNextItemFn; };
             };
+          };
         };
         # Tree-sitter text objects
         # TODO: figure out
@@ -966,6 +915,7 @@ in
           nvim-surround
           nvim-treesitter-textsubjects
           overseer-nvim
+          tailwindcss-language-server
           vim-jinja
         ])
         # TODO: upstream to Nixpkgs
@@ -1052,6 +1002,7 @@ in
             },
           },
         }
+        require("lspconfig").tailwindcss.setup{}
         require("nvim-treesitter.configs").setup {
             textsubjects = {
                 enable = true,
@@ -1138,16 +1089,12 @@ in
         fetch.prune = true;
         merge.conflictstyle = "diff3";
         rebase.pull = true;
-        user.signingkey = "9578FF9AB0BDE622307E7E833A7266FAC0D2F08D";
+        user.signingkey = (import ./default.nix { }).gpg.keys.personal;
       };
       includes = [
         {
           path = "${config.xdg.configHome}/git/personal";
           condition = "gitdir:~/.config/nixcfg/**";
-        }
-        {
-          path = "${config.xdg.configHome}/git/basis";
-          condition = "gitdir:~/${srcDir}/git.usebasis.co/**";
         }
         {
           path = "${config.xdg.configHome}/git/personal";
@@ -1258,33 +1205,7 @@ in
     # TODO: debug
     go.enable = true;
     # # Amazon Web Services Command Line Interface
-    awscli = {
-      enable = true;
-      settings = {
-        default = { region = "us-east-1"; output = "json"; };
-        # TODO: factor out into Basis profile
-        "profile development" = {
-          sso_session = "basis";
-          sso_account_id = 820061307359;
-          sso_role_name = "PowerUserAccess";
-        };
-        "profile staging" = {
-          sso_session = "basis";
-          sso_account_id = 523331955727;
-          sso_role_name = "PowerUserAccess";
-        };
-        "profile production" = {
-          sso_session = "basis";
-          sso_account_id = 432644110438;
-          sso_role_name = "PowerUserAccess";
-        };
-        "sso-session basis" = {
-          sso_start_url = "https://d-90679b66bf.awsapps.com/start";
-          sso_region = "us-east-1";
-          sso_registration_scopes = "sso:account:access";
-        };
-      };
-    };
+    awscli.enable = true;
     # GnuPG
     gpg = {
       enable = true;
@@ -1324,6 +1245,3 @@ in
     };
   };
 }
-
-
-
