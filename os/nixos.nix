@@ -1,6 +1,6 @@
-{ pkgs, lib, inputs, hostPlatform, ... }:
+{ pkgs, lib, inputs, hostPlatform, users, ... }:
 let
-  inherit (builtins) readFile;
+  inherit (builtins) listToAttrs readFile;
   inherit (lib) removeSuffix;
 in
 {
@@ -88,12 +88,17 @@ in
     # Channel)
     # Currently used to set brightness
     groups.i2c = { };
-    users.george = {
-      description = "George Kontridze";
-      extraGroups = [ "docker" "i2c" "networkmanager" "wheel" ];
-      isNormalUser = true;
-      shell = pkgs.zsh;
-    };
+    users = listToAttrs (map
+      (u: {
+        name = u;
+        value = {
+          description = u;
+          extraGroups = [ "docker" "i2c" "networkmanager" "wheel" ];
+          isNormalUser = true;
+          shell = pkgs.zsh;
+        };
+      })
+      users);
   };
 
   # This value determines the NixOS release from which the default

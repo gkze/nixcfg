@@ -1,6 +1,14 @@
 # Unifying NixOS and Darwin system config declaration...
 # TODO: configure hostname
-inputs: { device ? "", arch, kernel, users, sysMods ? [ ], hmMods ? [ ], ... }@args:
+inputs: { device ? ""
+        , arch
+        , kernel
+        , users
+        , profiles ? [ ]
+        , sysMods ? [ ]
+        , hmMods ? [ ]
+        , ...
+        }@args:
 let
   inherit (builtins) listToAttrs pathExists;
   inherit (inputs.nixpkgs.lib.attrsets) optionalAttrs;
@@ -23,7 +31,7 @@ let
 in
 sysFn {
   # Pass additional arguments to all modules below
-  specialArgs = { inherit users hostPlatform inputs; };
+  specialArgs = { inherit users profiles hostPlatform inputs; };
   modules =
     # Common to everything and everyone
     [ ../nix/common.nix ]
@@ -83,6 +91,7 @@ sysFn {
                 darwin = [ ];
                 linux = [ ];
               }.${kernel}
+              ++ map (p: ../profile/home/${p}.nix) profiles
               # Any additional Home Manager modules passed
               ++ hmMods;
           };

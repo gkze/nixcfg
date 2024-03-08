@@ -8,6 +8,6 @@
     # NOTE: this gets mered in with
     # users/george/homx.nix#programs.alacritty.settings.shell.args
     # It comes first
-    # shell.args = [ "--layout=basis-main" ];
+    # shell.args = [ ];
   };
 }
