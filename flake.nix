@@ -206,6 +206,16 @@
           users = [ username ];
           profiles = [ "basis" ];
         };
+
+        # Basis ThinkPad X1 Carbon
+        # TODO: Symlink merged /etc/nixos/configuration.nix for nixos-rebuild
+        nixosConfigurations.seriesa = mkSystem inputs {
+          device = "lenovo-thinkpad-x1-carbon-gen10";
+          arch = "x86_64";
+          kernel = "linux";
+          users = [ username ];
+          profiles = [ "basis" ];
+        };
       };
     };
 }
