@@ -1,4 +1,7 @@
-{ ... }: {
+{ hostName, ... }: {
+  # Set hostname
+  networking = { inherit hostName; };
+
   # Enable Toudh ID for sudo
   security.pam.enableSudoTouchIdAuth = true;
 

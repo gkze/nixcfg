@@ -1,9 +1,10 @@
 # Unifying NixOS and Darwin system config declaration...
 # TODO: configure hostname
-inputs: { device ? ""
-        , arch
+inputs: { arch
         , kernel
         , users
+        , hostName
+        , device ? ""
         , profiles ? [ ]
         , sysMods ? [ ]
         , hmMods ? [ ]
@@ -31,7 +32,7 @@ let
 in
 sysFn {
   # Pass additional arguments to all modules below
-  specialArgs = { inherit users profiles hostPlatform inputs; };
+  specialArgs = { inherit users profiles hostName hostPlatform inputs; };
   modules =
     # Common to everything and everyone
     [ ../nix/common.nix ]
@@ -81,7 +82,7 @@ sysFn {
           useGlobalPkgs = true;
           useUserPackages = true;
           extraSpecialArgs = {
-            inherit hostPlatform inputs profiles args;
+            inherit hostName hostPlatform inputs profiles args;
             hmMods =
               # Device-specific Home Manager module
               optionals
