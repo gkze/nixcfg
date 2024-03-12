@@ -68,6 +68,15 @@
 
     # Hardware-specific settings
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
+
+    # Alacritty themes
+    alacritty-theme = {
+      url = "github:alacritty/alacritty-theme";
+      flake = false;
+    };
+
+    # Terminal multiplexer / workspace manager
+    zellij = { url = "github:zellij-org/zellij"; flake = false; };
   };
 
   outputs = inputs:
@@ -106,7 +115,18 @@
           # https://nixos.org/manual/nixos/unstable/options#opt-_module.args
           _module.args.pkgs = import inputs.nixpkgs {
             inherit system;
-            overlays = [ inputs.devshell.overlays.default ];
+            overlays = [
+              inputs.devshell.overlays.default
+              (final: prev: {
+                alacritty-theme = prev.alacritty-theme.override {
+                  src = inputs.alacritty-theme;
+                };
+                zellij = prev.zellij.overrideAttrs (prev: {
+                  version = "0.40.0";
+                  src = inputs.zelij;
+                });
+              })
+            ];
             config.allowUnfree = true;
           };
 
@@ -190,6 +210,7 @@
       flake = {
         # Personal MacBook Pro
         darwinConfigurations.rocinante = mkSystem inputs {
+          hostName = "rocinante";
           device = "apple-macbook-pro-m1-16in";
           arch = "aarch64";
           kernel = "darwin";
@@ -200,6 +221,7 @@
         # Basis ThinkPad X1 Carbon
         # TODO: Symlink merged /etc/nixos/configuration.nix for nixos-rebuild
         nixosConfigurations.mesa = mkSystem inputs {
+          hostName = "mesa";
           device = "lenovo-thinkpad-x1-carbon-gen10-14in";
           arch = "x86_64";
           kernel = "linux";
@@ -210,6 +232,8 @@
         # Basis ThinkPad X1 Carbon - office use
         # TODO: Symlink merged /etc/nixos/configuration.nix for nixos-rebuild
         nixosConfigurations.seriesa = mkSystem inputs {
+          hostName = "seriesa";
+          # device = "lenovo-thinkpad-x1-extreme-gen5";
           arch = "x86_64";
           kernel = "linux";
           users = [ username ];

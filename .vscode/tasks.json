@@ -5,17 +5,13 @@
       "label": "Apply Nix configuration",
       "group": "build",
       "command": "nix",
-      "args": [
-        "run"
-      ]
+      "args": ["run"]
     },
     {
       "label": "Format sources",
       "group": "build",
       "command": "nix",
-      "args": [
-        "fmt"
-      ]
+      "args": ["fmt"]
     }
   ]
 }
