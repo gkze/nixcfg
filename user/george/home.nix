@@ -14,19 +14,19 @@ let
   # npm config file
   npmConfigFile = "${config.xdg.configHome}/npmrc";
 
-  zellijPkg = pkgs.zellij.overrideAttrs (_: p: rec {
-    version = "0.40.0";
-    src = pkgs.fetchFromGitHub {
-      owner = "zellij-org";
-      repo = "zellij";
-      rev = "7bd77ccc61f30e08ff089a7cc41878e746f6e06b";
-      hash = "sha256-2AN4nUF0VKtcjEFRbH1qqWKMKhtsKTzMN5MvJjqMwSE=";
-    };
-    cargoDeps = p.cargoDeps.overrideAttrs {
-      inherit src;
-      outputHash = "sha256-aOO9B6h0e7j/uCl4POnErlNgKysjAWm7q1tUsXD3KnY=";
-    };
-  });
+  # zellijPkg = pkgs.zellij.overrideAttrs (_: p: rec {
+  #   version = "0.40.0";
+  #   src = pkgs.fetchFromGitHub {
+  #     owner = "zellij-org";
+  #     repo = "zellij";
+  #     rev = "7bd77ccc61f30e08ff089a7cc41878e746f6e06b";
+  #     hash = "sha256-2AN4nUF0VKtcjEFRbH1qqWKMKhtsKTzMN5MvJjqMwSE=";
+  #   };
+  #   cargoDeps = p.cargoDeps.overrideAttrs {
+  #     inherit src;
+  #     outputHash = "sha256-aOO9B6h0e7j/uCl4POnErlNgKysjAWm7q1tUsXD3KnY=";
+  #   };
+  # });
 in
 {
   # Home Manager modules go here
@@ -347,65 +347,14 @@ in
     alacritty = {
       enable = true;
       settings = {
-        # TODO: re-enable once https://github.com/NixOS/nixpkgs/issues/279707
-        # is resolved
-        # import = [ "${pkgs.alacritty-theme}/catppuccin_frappe.yaml" ];
-        import = [
-          (pkgs.stdenv.mkDerivation {
-            name = "catppuccin-alacritty-frappe";
-            src = pkgs.fetchurl {
-              url = "https://raw.githubusercontent.com/catppuccin/alacritty/f2da554ee63690712274971dd9ce0217895f5ee0/catppuccin-frappe.toml";
-              hash = "sha256-Rhr5XExaY0YF2t+PVwxBRIXQ58TH1+kMue7wkKNaSJI=";
-            };
-            dontUnpack = true;
-            installPhase = ''cp $src $out'';
-          })
-        ];
-        # # Base16 Gruvbox Dark Soft 256
-        # # https://github.com/aarowill/base16-alacritty/blob/master/colors/base16-gruvbox-dark-soft-256.yml
-        # colors = {
-        #   # Default colors
-        #   primary = { background = "0x32302f"; foreground = "0xd5c4a1"; };
-        #   # Colors the cursor will use if `custom_cursor_colors` is true
-        #   cursor = { text = "0x32302f"; cursor = "0xd5c4a1"; };
-        #   # Normal colors
-        #   normal = {
-        #     black = "0x32302f";
-        #     red = "0xfb4934";
-        #     green = "0xb8bb26";
-        #     yellow = "0xfabd2f";
-        #     blue = "0x83a598";
-        #     magenta = "0xd3869b";
-        #     cyan = "0x8ec07c";
-        #     white = "0xd5c4a1";
-        #   };
-        #   # Bright colors
-        #   bright = {
-        #     black = "0x665c54";
-        #     red = "0xfb4934";
-        #     green = "0xb8bb26";
-        #     yellow = "0xfabd2f";
-        #     blue = "0x83a598";
-        #     magenta = "0xd3869b";
-        #     cyan = "0x8ec07c";
-        #     white = "0xfbf1c7";
-        #   };
-        #   indexed_colors = [
-        #     { index = 16; color = "0xfe8019"; }
-        #     { index = 17; color = "0xd65d0e"; }
-        #     { index = 18; color = "0x3c3836"; }
-        #     { index = 19; color = "0x504945"; }
-        #     { index = 20; color = "0xbdae93"; }
-        #     { index = 21; color = "0xebdbb2"; }
-        #   ];
-        # };
+        import = [ "${pkgs.alacritty-theme}/catppuccin_frappe.toml" ];
         font = {
           size = lib.mkDefault 12.0;
           normal.family = "Hack Nerd Font Mono";
         };
         # Launch Zellij directly instead of going through a shell
         shell = {
-          program = "${zellijPkg}/bin/zellij";
+          program = "${pkgs.zellij}/bin/zellij";
           # Attach to session called "main" if it exists, create one named that
           # if it doesn't
           # NOTE: this gets merged in with
@@ -563,14 +512,12 @@ in
     };
     # Terminal multiplexer / workspace manager
     zellij = {
-      # TODO: drop once new release is out
-      package = zellijPkg;
       enable = true;
       settings = {
         keybinds.normal."bind \"Alt s\"".Clear = { };
         session_serialization = false;
-        simplified_ui = true;
         theme = "catppuccin-frappe";
+        simplified_ui = true;
       };
     };
     # Terminal file manager
@@ -919,34 +866,14 @@ in
           aerial-nvim
           bufdelete-nvim
           git-conflict-nvim
+          # mini-align
           nvim-surround
           nvim-treesitter-textsubjects
           overseer-nvim
           tailwindcss-language-server
+          # vim-bundle-mako
           vim-jinja
         ])
-        # TODO: upstream to Nixpkgs
-        (stdenv.mkDerivation {
-          name = "mini-align";
-          src = fetchFromGitHub {
-            owner = "echasnovski";
-            repo = "mini.align";
-            rev = "708c0265b1513a00c83c181bff3d237741031cd1";
-            hash = "sha256-tDf6zUoSU9f1PJ8Di6+iV8MCTaXPEEgbQZlGRFa9Dss=";
-          };
-          installPhase = "cp -r $src $out";
-        })
-        # TODO: upstream to Nixpkgs
-        (stdenv.mkDerivation {
-          name = "vim-bundle-mako";
-          src = fetchFromGitHub {
-            owner = "sophacles";
-            repo = "vim-bundle-mako";
-            rev = "09d2a93b1a853972ccfca44495d597c717789232";
-            hash = "sha256-q5PgPAKjyjLUuKvK6S1m8huQ1G7SoFvq9bmQmlMoS1g=";
-          };
-          installPhase = "cp -r $src $out";
-        })
         # TODO: figure out
         # (stdenv.mkDerivation {
         #   name = "nvim-treeclimber";
@@ -961,7 +888,7 @@ in
       ]);
       extraConfigLua = ''
         require("git-conflict").setup()
-        require("mini.align").setup()
+        -- require("mini.align").setup()
         require("nvim-surround").setup()
         require("overseer").setup()
         -- require("nvim-treeclimber").setup()

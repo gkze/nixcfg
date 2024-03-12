@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# for macOS only
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  printf "This script is only for macOS"
+  exit 1
+fi
 # shellcheck shell=bash
 # Utilities not in nixpkgs.
 plutil="/usr/bin/plutil"

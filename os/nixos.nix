@@ -9,8 +9,6 @@ in
     networkmanager = { enable = true; wifi.backend = "iwd"; };
   };
 
-  time.timeZone = "America/Los_Angeles";
-
   i18n = {
     inputMethod.enabled = "ibus";
     defaultLocale = "en_US.UTF-8";
@@ -41,6 +39,8 @@ in
   };
 
   services = {
+    # Automatically set timezone
+    automatic-timezoned.enable = true;
     # Application distribution format
     flatpak.enable = true;
     # Firmware UPdate Daemon

@@ -1,4 +1,4 @@
-{}: {
+{ ... }: {
   name = { user = "george"; full = "George Kontridze"; };
   emails = {
     personal = "george.kontridze@gmail.com";
