@@ -23,16 +23,7 @@ in
         # Knowledge management
         obsidian
         # Yet Another AWS SSO tool
-        # TODO: upstream to Nixpkgs
-        (python3Packages.buildPythonApplication rec {
-          pname = "yawsso";
-          version = "1.1.0";
-          src = pkgs.fetchPypi {
-            inherit pname version;
-            hash = "sha256-GZ2rVDpXvtAVvDnZEPjkT1JqV0a3MB9IixG6F3jIIIA=";
-          };
-          doCheck = false;
-        })
+        yawsso
       ];
       programs = {
         awscli = {

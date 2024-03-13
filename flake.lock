@@ -628,6 +628,7 @@
         "treefmt-nix": "treefmt-nix",
         "uv": "uv",
         "vim-bundle-mako": "vim-bundle-mako",
+        "yawsso": "yawsso",
         "zellij": "zellij"
       }
     },
@@ -812,6 +813,22 @@
       "original": {
         "owner": "sophacles",
         "repo": "vim-bundle-mako",
+        "type": "github"
+      }
+    },
+    "yawsso": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1709470719,
+        "narHash": "sha256-HOvbVNu+CGnAbuRfTmkwZ0eHKL9yEqWiJPu4nU2ANdE=",
+        "owner": "victorskl",
+        "repo": "yawsso",
+        "rev": "18d8021af1edbde4ca0775b98175250698c51ed9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "victorskl",
+        "repo": "yawsso",
         "type": "github"
       }
     },

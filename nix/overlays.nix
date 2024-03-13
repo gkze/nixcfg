@@ -13,6 +13,12 @@
       chmod +x $out/bin/git-trim
     '';
   };
+  yawsso = op.python3Packages.buildPythonApplication {
+    pname = "yawsso";
+    version = "1.2.0";
+    src = inputs.yawsso;
+    doCheck = false;
+  };
   zellij = op.zellij.overrideAttrs (p: rec {
     version = "0.40.0";
     src = inputs.zellij;
