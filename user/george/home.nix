@@ -14,19 +14,7 @@ let
   # npm config file
   npmConfigFile = "${config.xdg.configHome}/npmrc";
 
-  # zellijPkg = pkgs.zellij.overrideAttrs (_: p: rec {
-  #   version = "0.40.0";
-  #   src = pkgs.fetchFromGitHub {
-  #     owner = "zellij-org";
-  #     repo = "zellij";
-  #     rev = "7bd77ccc61f30e08ff089a7cc41878e746f6e06b";
-  #     hash = "sha256-2AN4nUF0VKtcjEFRbH1qqWKMKhtsKTzMN5MvJjqMwSE=";
-  #   };
-  #   cargoDeps = p.cargoDeps.overrideAttrs {
-  #     inherit src;
-  #     outputHash = "sha256-aOO9B6h0e7j/uCl4POnErlNgKysjAWm7q1tUsXD3KnY=";
-  #   };
-  # });
+  meta = import ./meta.nix;
 in
 {
   # Home Manager modules go here
@@ -77,7 +65,7 @@ in
       linux = {
         services = {
           # Activate GPG agent on Linux
-          gpg-agent = { enable = true; pinentryFlavor = "gnome3"; };
+          gpg-agent = { enable = true; pinentryFlavor = "gtk2"; };
 
           # Nix shell direnv background daemon
           lorri.enable = true;
@@ -99,7 +87,7 @@ in
           gnome-firmware
           # Brightness control for all detected monitors
           # Currently managed manually
-          # TODO: fix
+          # TODO: needs direct nix store path to ddcutil - fix
           gnomeExtensions.brightness-control-using-ddcutil
           # Productivity suite
           libreoffice
@@ -187,15 +175,15 @@ in
       '';
       "${config.xdg.configHome}/git/personal".text = ''
         [user]
-          name = gkze
-          email = george.kontridze@gmail.com
+          name = ${meta.name.user.github}
+          email = ${meta.emails.personal}
       '';
       ".local/bin" = { source = ./bin; recursive = true; executable = true; };
     } // (optionalAttrs (elem "basis" profiles) {
       "${config.xdg.configHome}/git/basis".text = ''
         [user]
-          name = george
-          email = george@usebasis.co
+          name = ${meta.name.user.system}
+          email = ${meta.emails.basis}
       '';
     });
 
@@ -227,6 +215,8 @@ in
       # Multiple git repository management
       # TODO: completion not working
       gita
+      # Git branch maintenance tool
+      git-trim
       # GitLab Command Line Interface
       glab
       # Stream EDitor
@@ -265,77 +255,12 @@ in
       spotify
       # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
       tokei
+      # Rust-based Python package resolver & installed (faster pip)
+      uv
       # Alternative to `watch`
       viddy
       # Wayland Clipboard
       wl-clipboard
-      # Git branch maintenance
-      # TODO: upstream to Nixpkgs
-      (stdenv.mkDerivation {
-        name = "git-trim";
-        src = pkgs.fetchFromGitHub {
-          owner = "jasonmccreary";
-          repo = "git-trim";
-          rev = "5f05032011948c306661687f2abdc33e738ec7b4";
-          hash = "sha256-fukz/9hnJCnKyrpStwycTdHYJYJDMcCD2YDJ9VLN2hM=";
-        };
-        installPhase = ''
-          mkdir -p $out/bin
-          cp git-trim $out/bin
-          chmod +x $out/bin/git-trim
-        '';
-      })
-      (
-        let
-          binVersion = "0.17.2";
-          hostPlatformElems = split "-" hostPlatform;
-          nixArch = elemAt hostPlatformElems 0;
-          arch = { x86_64 = "amd64"; aarch64 = "arm64"; }.${nixArch};
-          kernel = elemAt hostPlatformElems 2;
-          binName = "bin_${binVersion}_${kernel}_${arch}";
-        in
-        stdenv.mkDerivation {
-          name = "bin";
-          src = fetchurl {
-            url = "https://github.com/marcosnils/bin/releases/download/v${binVersion}/${binName}";
-            hash = {
-              aarch64-darwin = "sha256-/KgRUpF4bJCfbwp5V+R0uPKfXwH+KluThLYN7sBdpbk=";
-              x86_64-linux = "sha256-C3h+35qTRkSWf6dRyrgl082FFXtgNgaLgicDbCFUOrY=";
-            }.${hostPlatform};
-          };
-          dontUnpack = true;
-          installPhase = ''
-            mkdir -p $out/bin
-            cp $src $out/bin/bin
-            chmod +x $out/bin/bin
-          '';
-          # TODO: get working
-          nativeBuildInputs = [ installShellFiles ];
-          postInstall = ''
-            installShellCompletion --zsh <($out/bin/bin completion zsh)
-          '';
-        }
-      )
-      # TODO: upstream to Nixpkgs
-      (pkgs.rustPlatform.buildRustPackage rec {
-        pname = "uv";
-        version = "0.1.11";
-        src = pkgs.fetchFromGitHub {
-          owner = "astral-sh";
-          repo = "uv";
-          rev = "e811070ef1f0637506b1727af218158e33b43501";
-          hash = "sha256-1wBJtVIWpdx4FhQlq00N5lW52P128r9djREC+CX+XOk=";
-        };
-        cargoLock = {
-          lockFile = "${src}/Cargo.lock";
-          allowBuiltinFetchGit = true;
-        };
-        buildInputs = [ openssl ];
-        cargoHash = "";
-        doCheck = false;
-        nativeBuildInputs = [ cmake pkg-config ];
-        OPENSSL_NO_VENDOR = 1;
-      })
     ];
   };
 
@@ -513,6 +438,7 @@ in
     # Terminal multiplexer / workspace manager
     zellij = {
       enable = true;
+      package = pkgs.zellij;
       settings = {
         keybinds.normal."bind \"Alt s\"".Clear = { };
         session_serialization = false;
@@ -735,7 +661,11 @@ in
           enable = true;
           settings = {
             extraOptions.autoEnableSources = true;
-            snippet.expand = "luasnip";
+            snippet.expand = ''
+              function(args)
+                require('luasnip').lsp_expand(args.body)
+              end
+            '';
             sources = [
               { name = "nvim_lsp"; }
               { name = "luasnip"; }
@@ -866,29 +796,20 @@ in
           aerial-nvim
           bufdelete-nvim
           git-conflict-nvim
-          # mini-align
+          mini-align
           nvim-surround
+          # TODO: fix - see flake inputs
+          # nvim-treeclimber
           nvim-treesitter-textsubjects
           overseer-nvim
           tailwindcss-language-server
-          # vim-bundle-mako
+          vim-bundle-mako
           vim-jinja
         ])
-        # TODO: figure out
-        # (stdenv.mkDerivation {
-        #   name = "nvim-treeclimber";
-        #   src = fetchFromGitHub {
-        #     owner = "Dkendal";
-        #     repo = "nvim-treeclimber";
-        #     rev = "613daac29f134ad66ccc20f3445d35645a7fe17e";
-        #     hash = "sha256-6n4E0FF3kQ0cVkhvYB6G8R0Zrm8iJwLVuVmvHl6SbIk=";
-        #   };
-        #   installPhase = "cp -r $src $out";
-        # })
       ]);
       extraConfigLua = ''
         require("git-conflict").setup()
-        -- require("mini.align").setup()
+        require("mini.align").setup()
         require("nvim-surround").setup()
         require("overseer").setup()
         -- require("nvim-treeclimber").setup()
@@ -938,16 +859,16 @@ in
         }
         require("lspconfig").tailwindcss.setup{}
         require("nvim-treesitter.configs").setup {
-            textsubjects = {
-                enable = true,
-                rrev_selection = ",",
-                keymaps = {
-                    ["."] = "textsubjects-smart",
-                    [";"] = "textsubjects-container-outer",
-                    ["i;"] = "textsubjects-container-inner",
-                    ["i;"] = "textsubjects-container-inner",
-                },
+          textsubjects = {
+            enable = true,
+            rrev_selection = ",",
+            keymaps = {
+              ["."] = "textsubjects-smart",
+              [";"] = "textsubjects-container-outer",
+              ["i;"] = "textsubjects-container-inner",
+              ["i;"] = "textsubjects-container-inner",
             },
+          },
         }
       '';
       keymaps = [
@@ -1023,7 +944,7 @@ in
         fetch.prune = true;
         merge.conflictstyle = "diff3";
         rebase.pull = true;
-        user.signingkey = (import ./default.nix { }).gpg.keys.personal;
+        user.signingkey = meta.gpg.keys.personal;
       };
       includes = [
         {
@@ -1146,7 +1067,7 @@ in
       homedir = "${config.xdg.dataHome}/gnupg";
       settings = {
         auto-key-retrieve = true;
-        default-key = "9578FF9AB0BDE622307E7E833A7266FAC0D2F08D";
+        default-key = meta.gpg.keys.personal;
       };
     };
     # Secure SHell
@@ -1161,11 +1082,6 @@ in
           AddKeysToAgent = "yes";
           LogLevel = "ERROR";
           StrictHostKeyChecking = "no";
-        };
-        "rocinante" = {
-          hostname = "10.0.0.241";
-          user = "george";
-          identityFile = "~/.ssh/personal.pem";
         };
       };
     };
