@@ -94,12 +94,15 @@
 
     # Rust-based Python package resolver & installed (faster pip)
     uv = { url = "github:astral-sh/uv/0.1.18"; flake = false; };
+
+    # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
+    yawsso = { url = "github:victorskl/yawsso"; flake = false; };
   };
 
   outputs = inputs:
     let
       # Grab some builtins into our lexical scope
-      inherit (builtins) elemAt listToAttrs split;
+      inherit (builtins) elemAt split;
 
       # Main user
       username = "george";
