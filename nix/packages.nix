@@ -1,3 +1,4 @@
+# Currently unused - historical for packages that might be desired
 { pkgs, ... }: {
   environment.systemPackages = with pkgs; [
     # sequoia

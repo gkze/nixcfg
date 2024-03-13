@@ -1,10 +1,7 @@
-{ pkgs, hostPlatform, ... }:
+{ pkgs, hostPlatform, inputs, ... }:
 let inherit (builtins) elemAt split; in {
   # Configuration for Nix itself
   nix = {
-    # Pin registry to system Nixpkgs
-    #registry.nixpkgs.flake = pkgs;
-
     # Perform automatic garbage collection
     gc = { automatic = true; } // {
       darwin.interval = { Hour = 09; Minute = 30; };
@@ -21,6 +18,9 @@ let inherit (builtins) elemAt split; in {
 
     # Auto-upgrade nix command
     package = pkgs.nixUnstable;
+
+    # Pin Nixpkgs to flake spec
+    registry.nixpkgs.flake = inputs.nixpkgs;
   };
 
   # Configuration for Nixpkgs
