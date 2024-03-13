@@ -51,16 +51,19 @@
     };
 
     # Declarative disk partitioning
+    # TODO: use
     disko = {
       url = "github:nix-community/disko";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # NixOS-specific "app store" GUI
     nix-software-center = {
       url = "github:vlinkz/nix-software-center";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Graphical NixOS configuration editor
     nixos-conf-editor = {
       url = "github:vlinkz/nixos-conf-editor";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -70,13 +73,27 @@
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
 
     # Alacritty themes
-    alacritty-theme = {
-      url = "github:alacritty/alacritty-theme";
-      flake = false;
-    };
+    alacritty-theme = { url = "github:alacritty/alacritty-theme"; flake = false; };
 
     # Terminal multiplexer / workspace manager
     zellij = { url = "github:zellij-org/zellij"; flake = false; };
+
+    # Vim Mako (template language) syntax
+    vim-bundle-mako = { url = "github:sophacles/vim-bundle-mako"; flake = false; };
+
+    # Vim text alignment plugin
+    mini-align = { url = "github:echasnovski/mini.align"; flake = false; };
+
+    # Neovim structured editing plugin
+    # TODO: fix attempt to index nil value" 
+    # @ https://github.com/Dkendal/nvim-treeclimber/blob/613daac29f134ad66ccc20f3445d35645a7fe17e/lua/nvim-treeclimber.lua#L29
+    # nvim-treeclimber = { url = "github:Dkendal/nvim-treeclimber"; flake = false; };
+
+    # Git branch cleanup tool
+    git-trim = { url = "github:jasonmccreary/git-trim"; flake = false; };
+
+    # Rust-based Python package resolver & installed (faster pip)
+    uv = { url = "github:astral-sh/uv/0.1.18"; flake = false; };
   };
 
   outputs = inputs:
@@ -92,13 +109,23 @@
 
       # One function to declare both NixOS and Darwin system config
       mkSystem = import ./lib/mksystem.nix;
+
+      # Our Nixpkgs
+      mkNixpkgs = system: import inputs.nixpkgs {
+        inherit system;
+        config.allowUnfree = true;
+        overlays = [
+          inputs.devshell.overlays.default
+          (import ./nix/overlays.nix { inherit inputs; })
+        ];
+      };
     in
     inputs.fp.lib.mkFlake { inherit inputs; } {
       # All officially supported systems
       systems = inputs.nixpkgs.lib.systems.flakeExposed;
 
       # Attributes here have systeme above suffixed across them
-      perSystem = { system, config, pkgs, lib, ... }:
+      perSystem = { system, pkgs, lib, ... }:
         let
           # Cross-platform configuration rebuild action
           rebuild = {
@@ -113,22 +140,7 @@
         {
           # Inject Nixpkgs with our config
           # https://nixos.org/manual/nixos/unstable/options#opt-_module.args
-          _module.args.pkgs = import inputs.nixpkgs {
-            inherit system;
-            overlays = [
-              inputs.devshell.overlays.default
-              (final: prev: {
-                alacritty-theme = prev.alacritty-theme.override {
-                  src = inputs.alacritty-theme;
-                };
-                zellij = prev.zellij.overrideAttrs (prev: {
-                  version = "0.40.0";
-                  src = inputs.zelij;
-                });
-              })
-            ];
-            config.allowUnfree = true;
-          };
+          _module.args.pkgs = mkNixpkgs system;
 
           # Unified source formatting
           formatter = inputs.treefmt-nix.lib.mkWrapper pkgs {
@@ -167,7 +179,13 @@
                 nix-editor.packages.${system}.default
                 nixos-generators.packages.${system}.default
               ])
-              ++ (with pkgs; [ dconf2nix nix-init nix-melt nurl ]);
+              ++ (with pkgs; [
+                dconf2nix
+                nix-init
+                nix-melt
+                nurl
+                vimPluginsUpdater
+              ]);
           };
 
           # For `nix run`
@@ -184,24 +202,25 @@
 
           # NixOS installer ISO for Basis ThinkPad X1 Carbon
           # Only runs on an x86_64 system
-          packages.frontier-iso = inputs.nixos-generators.nixosGenerate {
-            inherit system;
-            format = "install-iso";
-            specialArgs = {
-              hostPlatform = "x86_64-linux";
-              users = [ username ];
-            };
-            modules = [
-              ./nix/common.nix
-              # NixOS requires this
-              # https://search.nixos.org/options?channel=23.05&show=users.users.%3Cname%3E.isNormalUser
-              (listToAttrs (map
-                (u: {
-                  name = "users";
-                  value = { users.${u}.isNormalUser = true; };
-                }) [ username ]))
-            ];
-          };
+          # TODO: get working
+          # packages.frontier-iso = inputs.nixos-generators.nixosGenerate {
+          #   inherit system;
+          #   format = "install-iso";
+          #   specialArgs = {
+          #     hostPlatform = "x86_64-linux";
+          #     users = [ username ];
+          #   };
+          #   modules = [
+          #     ./nix/common.nix
+          #     # NixOS requires this
+          #     # https://search.nixos.org/options?channel=23.05&show=users.users.%3Cname%3E.isNormalUser
+          #     (listToAttrs (map
+          #       (u: {
+          #         name = "users";
+          #         value = { users.${u}.isNormalUser = true; };
+          #       }) [ username ]))
+          #   ];
+          # };
         };
 
       # System-independent (sort of) attributes. They're required to be
@@ -209,35 +228,42 @@
       # system-specific machine configuration.
       flake = {
         # Personal MacBook Pro
-        darwinConfigurations.rocinante = mkSystem inputs {
-          hostName = "rocinante";
-          device = "apple-macbook-pro-m1-16in";
-          arch = "aarch64";
-          kernel = "darwin";
-          users = [ username ];
-        };
+        darwinConfigurations.rocinante =
+          let arch = "aarch64"; kernel = "darwin"; in
+          mkSystem {
+            inherit inputs arch kernel;
+            pkgs = mkNixpkgs "${arch}-${kernel}";
+            hostName = "rocinante";
+            device = "apple-macbook-pro-m1-16in";
+            users = [ username ];
+          };
 
-
-        # Basis ThinkPad X1 Carbon
         # TODO: Symlink merged /etc/nixos/configuration.nix for nixos-rebuild
-        nixosConfigurations.mesa = mkSystem inputs {
-          hostName = "mesa";
-          device = "lenovo-thinkpad-x1-carbon-gen10-14in";
-          arch = "x86_64";
-          kernel = "linux";
-          users = [ username ];
-          profiles = [ "basis" ];
-        };
+        nixosConfigurations = {
+          # Basis ThinkPad X1 Carbon
+          mesa =
+            let arch = "x86_64"; kernel = "linux"; in
+            mkSystem {
+              inherit inputs arch kernel;
+              pkgs = mkNixpkgs "${arch}-${kernel}";
+              hostName = "mesa";
+              device = "lenovo-thinkpad-x1-carbon-gen10";
+              users = [ username ];
+              profiles = [ "basis" ];
+            };
 
-        # Basis ThinkPad X1 Carbon - office use
-        # TODO: Symlink merged /etc/nixos/configuration.nix for nixos-rebuild
-        nixosConfigurations.seriesa = mkSystem inputs {
-          hostName = "seriesa";
-          # device = "lenovo-thinkpad-x1-extreme-gen5";
-          arch = "x86_64";
-          kernel = "linux";
-          users = [ username ];
-          profiles = [ "basis" ];
+          # TODO:
+          # # Basis ThinkPad X1 Carbon - office use
+          # seriesa =
+          #   let arch = "x86_64"; kernel = "linux"; in
+          #   mkSystem {
+          #     inherit inputs arch kernel;
+          #     pkgs = mkNixpkgs "${arch}-${kernel}";
+          #     hostName = "seriesa";
+          #     # device = "lenovo-thinkpad-x1-extreme-gen5";
+          #     users = [ username ];
+          #     profiles = [ "basis" ];
+          #   };
         };
       };
     };
