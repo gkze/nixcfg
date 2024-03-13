@@ -1,5 +1,11 @@
-{ ... }: {
-  name = { user = "george"; full = "George Kontridze"; };
+{
+  name = {
+    user = {
+      github = "gkze";
+      system = "george";
+    };
+    full = "George Kontridze";
+  };
   emails = {
     personal = "george.kontridze@gmail.com";
     basis = "george@usebasis.co";
