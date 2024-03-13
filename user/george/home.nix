@@ -14,19 +14,7 @@ let
   # npm config file
   npmConfigFile = "${config.xdg.configHome}/npmrc";
 
-  zellijPkg = pkgs.zellij.overrideAttrs (_: p: rec {
-    version = "0.40.0";
-    src = pkgs.fetchFromGitHub {
-      owner = "zellij-org";
-      repo = "zellij";
-      rev = "7bd77ccc61f30e08ff089a7cc41878e746f6e06b";
-      hash = "sha256-2AN4nUF0VKtcjEFRbH1qqWKMKhtsKTzMN5MvJjqMwSE=";
-    };
-    cargoDeps = p.cargoDeps.overrideAttrs {
-      inherit src;
-      outputHash = "sha256-aOO9B6h0e7j/uCl4POnErlNgKysjAWm7q1tUsXD3KnY=";
-    };
-  });
+  meta = import ./meta.nix;
 in
 {
   # Home Manager modules go here
@@ -77,7 +65,7 @@ in
       linux = {
         services = {
           # Activate GPG agent on Linux
-          gpg-agent = { enable = true; pinentryFlavor = "gnome3"; };
+          gpg-agent = { enable = true; pinentryFlavor = "gtk2"; };
 
           # Nix shell direnv background daemon
           lorri.enable = true;
@@ -99,7 +87,7 @@ in
           gnome-firmware
           # Brightness control for all detected monitors
           # Currently managed manually
-          # TODO: fix
+          # TODO: needs direct nix store path to ddcutil - fix
           gnomeExtensions.brightness-control-using-ddcutil
           # Productivity suite
           libreoffice
@@ -187,15 +175,15 @@ in
       '';
       "${config.xdg.configHome}/git/personal".text = ''
         [user]
-          name = gkze
-          email = george.kontridze@gmail.com
+          name = ${meta.name.user.github}
+          email = ${meta.emails.personal}
       '';
       ".local/bin" = { source = ./bin; recursive = true; executable = true; };
     } // (optionalAttrs (elem "basis" profiles) {
       "${config.xdg.configHome}/git/basis".text = ''
         [user]
-          name = george
-          email = george@usebasis.co
+          name = ${meta.name.user.system}
+          email = ${meta.emails.basis}
       '';
     });
 
@@ -227,6 +215,8 @@ in
       # Multiple git repository management
       # TODO: completion not working
       gita
+      # Git branch maintenance tool
+      git-trim
       # GitLab Command Line Interface
       glab
       # Stream EDitor
@@ -265,77 +255,12 @@ in
       spotify
       # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
       tokei
+      # Rust-based Python package resolver & installed (faster pip)
+      uv
       # Alternative to `watch`
       viddy
       # Wayland Clipboard
       wl-clipboard
-      # Git branch maintenance
-      # TODO: upstream to Nixpkgs
-      (stdenv.mkDerivation {
-        name = "git-trim";
-        src = pkgs.fetchFromGitHub {
-          owner = "jasonmccreary";
-          repo = "git-trim";
-          rev = "5f05032011948c306661687f2abdc33e738ec7b4";
-          hash = "sha256-fukz/9hnJCnKyrpStwycTdHYJYJDMcCD2YDJ9VLN2hM=";
-        };
-        installPhase = ''
-          mkdir -p $out/bin
-          cp git-trim $out/bin
-          chmod +x $out/bin/git-trim
-        '';
-      })
-      (
-        let
-          binVersion = "0.17.2";
-          hostPlatformElems = split "-" hostPlatform;
-          nixArch = elemAt hostPlatformElems 0;
-          arch = { x86_64 = "amd64"; aarch64 = "arm64"; }.${nixArch};
-          kernel = elemAt hostPlatformElems 2;
-          binName = "bin_${binVersion}_${kernel}_${arch}";
-        in
-        stdenv.mkDerivation {
-          name = "bin";
-          src = fetchurl {
-            url = "https://github.com/marcosnils/bin/releases/download/v${binVersion}/${binName}";
-            hash = {
-              aarch64-darwin = "sha256-/KgRUpF4bJCfbwp5V+R0uPKfXwH+KluThLYN7sBdpbk=";
-              x86_64-linux = "sha256-C3h+35qTRkSWf6dRyrgl082FFXtgNgaLgicDbCFUOrY=";
-            }.${hostPlatform};
-          };
-          dontUnpack = true;
-          installPhase = ''
-            mkdir -p $out/bin
-            cp $src $out/bin/bin
-            chmod +x $out/bin/bin
-          '';
-          # TODO: get working
-          nativeBuildInputs = [ installShellFiles ];
-          postInstall = ''
-            installShellCompletion --zsh <($out/bin/bin completion zsh)
-          '';
-        }
-      )
-      # TODO: upstream to Nixpkgs
-      (pkgs.rustPlatform.buildRustPackage rec {
-        pname = "uv";
-        version = "0.1.11";
-        src = pkgs.fetchFromGitHub {
-          owner = "astral-sh";
-          repo = "uv";
-          rev = "e811070ef1f0637506b1727af218158e33b43501";
-          hash = "sha256-1wBJtVIWpdx4FhQlq00N5lW52P128r9djREC+CX+XOk=";
-        };
-        cargoLock = {
-          lockFile = "${src}/Cargo.lock";
-          allowBuiltinFetchGit = true;
-        };
-        buildInputs = [ openssl ];
-        cargoHash = "";
-        doCheck = false;
-        nativeBuildInputs = [ cmake pkg-config ];
-        OPENSSL_NO_VENDOR = 1;
-      })
     ];
   };
 
@@ -347,65 +272,14 @@ in
     alacritty = {
       enable = true;
       settings = {
-        # TODO: re-enable once https://github.com/NixOS/nixpkgs/issues/279707
-        # is resolved
-        # import = [ "${pkgs.alacritty-theme}/catppuccin_frappe.yaml" ];
-        import = [
-          (pkgs.stdenv.mkDerivation {
-            name = "catppuccin-alacritty-frappe";
-            src = pkgs.fetchurl {
-              url = "https://raw.githubusercontent.com/catppuccin/alacritty/f2da554ee63690712274971dd9ce0217895f5ee0/catppuccin-frappe.toml";
-              hash = "sha256-Rhr5XExaY0YF2t+PVwxBRIXQ58TH1+kMue7wkKNaSJI=";
-            };
-            dontUnpack = true;
-            installPhase = ''cp $src $out'';
-          })
-        ];
-        # # Base16 Gruvbox Dark Soft 256
-        # # https://github.com/aarowill/base16-alacritty/blob/master/colors/base16-gruvbox-dark-soft-256.yml
-        # colors = {
-        #   # Default colors
-        #   primary = { background = "0x32302f"; foreground = "0xd5c4a1"; };
-        #   # Colors the cursor will use if `custom_cursor_colors` is true
-        #   cursor = { text = "0x32302f"; cursor = "0xd5c4a1"; };
-        #   # Normal colors
-        #   normal = {
-        #     black = "0x32302f";
-        #     red = "0xfb4934";
-        #     green = "0xb8bb26";
-        #     yellow = "0xfabd2f";
-        #     blue = "0x83a598";
-        #     magenta = "0xd3869b";
-        #     cyan = "0x8ec07c";
-        #     white = "0xd5c4a1";
-        #   };
-        #   # Bright colors
-        #   bright = {
-        #     black = "0x665c54";
-        #     red = "0xfb4934";
-        #     green = "0xb8bb26";
-        #     yellow = "0xfabd2f";
-        #     blue = "0x83a598";
-        #     magenta = "0xd3869b";
-        #     cyan = "0x8ec07c";
-        #     white = "0xfbf1c7";
-        #   };
-        #   indexed_colors = [
-        #     { index = 16; color = "0xfe8019"; }
-        #     { index = 17; color = "0xd65d0e"; }
-        #     { index = 18; color = "0x3c3836"; }
-        #     { index = 19; color = "0x504945"; }
-        #     { index = 20; color = "0xbdae93"; }
-        #     { index = 21; color = "0xebdbb2"; }
-        #   ];
-        # };
+        import = [ "${pkgs.alacritty-theme}/catppuccin_frappe.toml" ];
         font = {
           size = lib.mkDefault 12.0;
           normal.family = "Hack Nerd Font Mono";
         };
         # Launch Zellij directly instead of going through a shell
         shell = {
-          program = "${zellijPkg}/bin/zellij";
+          program = "${pkgs.zellij}/bin/zellij";
           # Attach to session called "main" if it exists, create one named that
           # if it doesn't
           # NOTE: this gets merged in with
@@ -563,14 +437,13 @@ in
     };
     # Terminal multiplexer / workspace manager
     zellij = {
-      # TODO: drop once new release is out
-      package = zellijPkg;
       enable = true;
+      package = pkgs.zellij;
       settings = {
         keybinds.normal."bind \"Alt s\"".Clear = { };
         session_serialization = false;
-        simplified_ui = true;
         theme = "catppuccin-frappe";
+        simplified_ui = true;
       };
     };
     # Terminal file manager
@@ -788,7 +661,11 @@ in
           enable = true;
           settings = {
             extraOptions.autoEnableSources = true;
-            snippet.expand = "luasnip";
+            snippet.expand = ''
+              function(args)
+                require('luasnip').lsp_expand(args.body)
+              end
+            '';
             sources = [
               { name = "nvim_lsp"; }
               { name = "luasnip"; }
@@ -919,45 +796,16 @@ in
           aerial-nvim
           bufdelete-nvim
           git-conflict-nvim
+          mini-align
           nvim-surround
+          # TODO: fix - see flake inputs
+          # nvim-treeclimber
           nvim-treesitter-textsubjects
           overseer-nvim
           tailwindcss-language-server
+          vim-bundle-mako
           vim-jinja
         ])
-        # TODO: upstream to Nixpkgs
-        (stdenv.mkDerivation {
-          name = "mini-align";
-          src = fetchFromGitHub {
-            owner = "echasnovski";
-            repo = "mini.align";
-            rev = "708c0265b1513a00c83c181bff3d237741031cd1";
-            hash = "sha256-tDf6zUoSU9f1PJ8Di6+iV8MCTaXPEEgbQZlGRFa9Dss=";
-          };
-          installPhase = "cp -r $src $out";
-        })
-        # TODO: upstream to Nixpkgs
-        (stdenv.mkDerivation {
-          name = "vim-bundle-mako";
-          src = fetchFromGitHub {
-            owner = "sophacles";
-            repo = "vim-bundle-mako";
-            rev = "09d2a93b1a853972ccfca44495d597c717789232";
-            hash = "sha256-q5PgPAKjyjLUuKvK6S1m8huQ1G7SoFvq9bmQmlMoS1g=";
-          };
-          installPhase = "cp -r $src $out";
-        })
-        # TODO: figure out
-        # (stdenv.mkDerivation {
-        #   name = "nvim-treeclimber";
-        #   src = fetchFromGitHub {
-        #     owner = "Dkendal";
-        #     repo = "nvim-treeclimber";
-        #     rev = "613daac29f134ad66ccc20f3445d35645a7fe17e";
-        #     hash = "sha256-6n4E0FF3kQ0cVkhvYB6G8R0Zrm8iJwLVuVmvHl6SbIk=";
-        #   };
-        #   installPhase = "cp -r $src $out";
-        # })
       ]);
       extraConfigLua = ''
         require("git-conflict").setup()
@@ -1011,16 +859,16 @@ in
         }
         require("lspconfig").tailwindcss.setup{}
         require("nvim-treesitter.configs").setup {
-            textsubjects = {
-                enable = true,
-                rrev_selection = ",",
-                keymaps = {
-                    ["."] = "textsubjects-smart",
-                    [";"] = "textsubjects-container-outer",
-                    ["i;"] = "textsubjects-container-inner",
-                    ["i;"] = "textsubjects-container-inner",
-                },
+          textsubjects = {
+            enable = true,
+            rrev_selection = ",",
+            keymaps = {
+              ["."] = "textsubjects-smart",
+              [";"] = "textsubjects-container-outer",
+              ["i;"] = "textsubjects-container-inner",
+              ["i;"] = "textsubjects-container-inner",
             },
+          },
         }
       '';
       keymaps = [
@@ -1096,7 +944,7 @@ in
         fetch.prune = true;
         merge.conflictstyle = "diff3";
         rebase.pull = true;
-        user.signingkey = (import ./default.nix { }).gpg.keys.personal;
+        user.signingkey = meta.gpg.keys.personal;
       };
       includes = [
         {
@@ -1219,7 +1067,7 @@ in
       homedir = "${config.xdg.dataHome}/gnupg";
       settings = {
         auto-key-retrieve = true;
-        default-key = "9578FF9AB0BDE622307E7E833A7266FAC0D2F08D";
+        default-key = meta.gpg.keys.personal;
       };
     };
     # Secure SHell
@@ -1234,11 +1082,6 @@ in
           AddKeysToAgent = "yes";
           LogLevel = "ERROR";
           StrictHostKeyChecking = "no";
-        };
-        "rocinante" = {
-          hostname = "10.0.0.241";
-          user = "george";
-          identityFile = "~/.ssh/personal.pem";
         };
       };
     };
