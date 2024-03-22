@@ -1,9 +1,21 @@
 # TODO: upstream to Nixpkgs
-{ inputs }: (_of: op: {
-  alacritty-theme = op.alacritty-theme.override {
-    src = op.alacritty-theme;
+{ inputs, system, ... }: (_: prev: {
+  alacritty-theme = prev.alacritty-theme.override {
+    src = inputs.alacritty-theme;
   };
-  git-trim = op.stdenvNoCC.mkDerivation {
+  catppuccin-bat = prev.stdenvNoCC.mkDerivation {
+    pname = "catppuccin-bat";
+    version = inputs.catppuccin-bat.rev;
+    src = inputs.catppuccin-bat;
+    installPhase = "cp -r $src $out";
+  };
+  catppuccin-delta = prev.stdenvNoCC.mkDerivation {
+    pname = "catppuccin-delta";
+    version = inputs.catppuccin-delta.rev;
+    src = inputs.catppuccin-delta;
+    installPhase = "cp -r $src $out";
+  };
+  git-trim = prev.stdenvNoCC.mkDerivation {
     pname = "git-trim";
     version = inputs.git-trim.rev;
     src = inputs.git-trim;
@@ -13,50 +25,58 @@
       chmod +x $out/bin/git-trim
     '';
   };
-  yawsso = op.python3Packages.buildPythonApplication {
-    pname = "yawsso";
-    version = "1.2.0";
-    src = inputs.yawsso;
-    doCheck = false;
+  nix-software-center = inputs.nix-software-center.packages.${system}.default;
+  nixos-conf-editor = inputs.nixos-conf-editor.packages.${system}.default;
+  sublime-kdl = prev.stdenvNoCC.mkDerivation {
+    pname = "sublime-kdl";
+    version = inputs.sublime-kdl.rev;
+    src = inputs.sublime-kdl;
+    installPhase = "cp -r $src $out";
   };
-  zellij = op.zellij.overrideAttrs (p: rec {
-    version = "0.40.0";
-    src = inputs.zellij;
-    cargoDeps = p.cargoDeps.overrideAttrs {
-      name = "${p.pname}-${version}-vendor.tar.gz";
-      inherit src;
-      outputHash = "sha256-LFNYEFl49ATlFV3/ikgW4syaLOAhG0fhoXW3CUa+bZo=";
-    };
-  });
-  uv = op.rustPlatform.buildRustPackage rec {
+  uv = prev.rustPlatform.buildRustPackage rec {
     pname = "uv";
-    version = "0.1.18";
+    version = "0.1.23";
     src = inputs.uv;
     cargoLock = {
       lockFile = "${src}/Cargo.lock";
       allowBuiltinFetchGit = true;
     };
-    buildInputs = [ op.openssl ];
+    buildInputs = [ prev.openssl ];
     cargoHash = "";
     doCheck = false;
-    nativeBuildInputs = with op; [ cmake pkg-config ];
+    nativeBuildInputs = with prev; [ cmake pkg-config ];
     OPENSSL_NO_VENDOR = 1;
   };
-  vimPlugins = op.vimPlugins.extend (_f: _p: {
-    vim-bundle-mako = op.vimUtils.buildVimPlugin {
+  vimPlugins = prev.vimPlugins.extend (_: _: {
+    vim-bundle-mako = prev.vimUtils.buildVimPlugin {
       pname = "vim-bundle-mako";
       version = inputs.vim-bundle-mako.rev;
       src = inputs.vim-bundle-mako;
     };
-    mini-align = op.vimUtils.buildVimPlugin {
+    mini-align = prev.vimUtils.buildVimPlugin {
       pname = "mini-align";
       version = inputs.mini-align.rev;
       src = inputs.mini-align;
     };
-    nvim-treeclimber = op.vimUtils.buildVimPlugin {
+    nvim-treeclimber = prev.vimUtils.buildVimPlugin {
       pname = "nvim-treeclimber";
       version = inputs.nvim-treeclimber.rev;
       src = inputs.nvim-treeclimber;
+    };
+  });
+  yawsso = prev.python3Packages.buildPythonApplication {
+    pname = "yawsso";
+    version = "1.2.0";
+    src = inputs.yawsso;
+    doCheck = false;
+  };
+  zellij = prev.zellij.overrideAttrs (p: rec {
+    version = "0.40.0";
+    src = inputs.zellij;
+    cargoDeps = p.cargoDeps.overrideAttrs {
+      name = "${p.pname}-${version}-vendor.tar.gz";
+      inherit src;
+      outputHash = "sha256-KXXldWtcUsdbDsWd66Q1TbaClfr+Uo8f6gCi1exNIRc=";
     };
   });
 })

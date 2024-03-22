@@ -75,6 +75,12 @@
     # Alacritty themes
     alacritty-theme = { url = "github:alacritty/alacritty-theme"; flake = false; };
 
+    # Catppuccin theme for Delta
+    catppuccin-delta = { url = "github:catppuccin/delta"; flake = false; };
+
+    # Catppuccin theme for Bat
+    catppuccin-bat = { url = "github:catppuccin/bat"; flake = false; };
+
     # Terminal multiplexer / workspace manager
     zellij = { url = "github:zellij-org/zellij"; flake = false; };
 
@@ -93,10 +99,13 @@
     git-trim = { url = "github:jasonmccreary/git-trim"; flake = false; };
 
     # Rust-based Python package resolver & installed (faster pip)
-    uv = { url = "github:astral-sh/uv/0.1.18"; flake = false; };
+    uv = { url = "github:astral-sh/uv"; flake = false; };
 
     # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
     yawsso = { url = "github:victorskl/yawsso"; flake = false; };
+
+    # Sublime syntax for KDL (used in bat)
+    sublime-kdl = { url = "github:eugenesvk/sublime-KDL"; flake = false; };
   };
 
   outputs = inputs:
@@ -119,7 +128,7 @@
         config.allowUnfree = true;
         overlays = [
           inputs.devshell.overlays.default
-          (import ./nix/overlays.nix { inherit inputs; })
+          (import ./nix/overlays.nix { inherit inputs system; })
         ];
       };
     in

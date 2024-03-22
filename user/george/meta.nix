@@ -1,3 +1,4 @@
+# TODO: module with types
 {
   name = {
     user = {
