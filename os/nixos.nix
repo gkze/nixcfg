@@ -1,9 +1,21 @@
-{ pkgs, lib, inputs, hostPlatform, users, ... }:
+{ pkgs, lib, users, hostPlatform, ... }:
 let
   inherit (builtins) listToAttrs readFile;
   inherit (lib) removeSuffix;
 in
 {
+  nix = {
+    distributedBuilds = true;
+    buildMachines = [
+      {
+        hostName = "eu.nixbuild.net";
+        system = hostPlatform;
+        maxJobs = 100;
+        supportedFeatures = [ "benchmark" "big-parallel" ];
+      }
+    ];
+  };
+
   networking = {
     hostName = "mesa";
     networkmanager = { enable = true; wifi.backend = "iwd"; };
@@ -31,6 +43,21 @@ in
     # https://github.com/Mic92/nix-ld
     nix-ld.enable = true;
     virt-manager.enable = true;
+    ssh = {
+      # TODO: improve
+      extraConfig = ''
+        Host eu.nixbuild.net
+          PubkeyAcceptedKeyTypes ssh-ed25519
+          ServerAliveInterval 60
+          IPQoS throughput
+          IdentityFile /home/george/.ssh/personal_ed25519_256.pem
+          IdentityAgent /run/user/1000/keyring/ssh
+      '';
+      knownHosts.nixbuild = {
+        hostNames = [ "eu.nixbuild.net" ];
+        publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPIQCZc54poJ8vqawd8TraNryQeJnvH1eLpIDgbiqymM";
+      };
+    };
   };
 
   virtualisation = {
@@ -41,6 +68,8 @@ in
   services = {
     # Automatically set timezone
     automatic-timezoned.enable = true;
+    # GNOME 3 enable keyring
+    gnome.gnome-keyring.enable = true;
     # Application distribution format
     flatpak.enable = true;
     # Firmware UPdate Daemon
@@ -50,6 +79,7 @@ in
       enable = true;
       desktopManager.gnome.enable = true;
       displayManager.gdm.enable = true;
+      # TODO: automate
       # When changing, run:
       # ```
       # $ gsettings reset org.gnome.desktop.input-sources xkb-option
@@ -70,18 +100,25 @@ in
   # Sound
   sound.enable = true;
   hardware.pulseaudio.enable = false;
-  security = { rtkit.enable = true; audit.enable = true; };
+  security = {
+    audit.enable = true;
+    pam.services.login.enableGnomeKeyring = true;
+    rtkit.enable = true;
+  };
 
-  environment.systemPackages = with inputs; [
+  environment.systemPackages = with pkgs; [
     # Nix software management GUI
-    nix-software-center.packages.${hostPlatform}.default
+    nix-software-center
     # Nix configuration editor GUI
-    nixos-conf-editor.packages.${hostPlatform}.default
+    nixos-conf-editor
   ];
 
   # Define a user account. Don't forget to set a password with ‘passwd’.
   # TODO: factor out into separate system-agnostic (hopefully) user config
   users = {
+    # Disallow imperatively managing users (via useradd / userdel etc.)
+    # TODO: finish once secrets management is solved
+    mutableUsers = true;
     # Inter-Integrated Circuit (I2C)
     # https://en.wikipedia.org/wiki/I%C2%B2C
     # Used for communicating with external monitor(s) over DDC (Display Data
