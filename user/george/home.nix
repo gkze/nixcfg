@@ -65,7 +65,7 @@ in
       linux = {
         services = {
           # Activate GPG agent on Linux
-          gpg-agent = { enable = true; pinentryFlavor = "gtk2"; };
+          gpg-agent = { enable = true; pinentryPackage = pkgs.pinentry-gnome3; };
 
           # Nix shell direnv background daemon
           lorri.enable = true;
@@ -107,6 +107,9 @@ in
     }.${kernel}
   ] ++ hmMods;
 
+  # User-level Nix config
+  nix = { package = lib.mkForce pkgs.nixUnstable; checkConfig = true; };
+
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
 
@@ -130,6 +133,9 @@ in
     # Shell-agnostic session environment variables
     # These only get applied on login
     sessionVariables = {
+      # For when Delta uses Bat and we don't want Bat's line numbers (since we
+      # use the full style by default)
+      DELTA_PAGER = "bat -p";
       # Set Neovim as the default editor
       EDITOR = "nvim";
       # Set Bat with man syntax highlighting as the default man pager
@@ -787,11 +793,13 @@ in
         treesitter = { enable = true; incrementalSelection.enable = true; };
         # Diagnostics, etc. 
         trouble.enable = true;
+        # Keybinding hint viewer
+        # TODO: figure out
+        which-key.enable = true;
       };
       extraPlugins = flatten (with pkgs; [
         # TODO: add comments for each plugin
         (with vimPlugins; [
-          # TODO: figure out
           SchemaStore-nvim
           aerial-nvim
           bufdelete-nvim
@@ -818,7 +826,10 @@ in
           filter_kind = false,
           open_automatic = true
         })
+        local capabilities = vim.lsp.protocol.make_client_capabilities()
+        capabilities.textDocument.completion.completionItem.snippetSupport = true
         require("lspconfig").jsonls.setup {
+          capabilities = capabilities,
           settings = {
             json = {
               schemas = require("schemastore").json.schemas(),
@@ -929,7 +940,15 @@ in
           !git for-each-ref \
             --color \
             --sort=-committerdate \
-            --format=$'%(color:red)%(ahead-behind:HEAD)\t%(color:blue)%(refname:short)\t%(color:yellow)%(committerdate:relative)\t%(color:default)%(describe)' \
+            --format=$'
+            %(color:red)
+            %(ahead-behind:HEAD)
+            \t%(color:blue)
+            %(refname:short)
+            \t%(color:yellow)
+            %(committerdate:relative)
+            \t%(color:default)
+            %(describe)' \
             refs/heads/ \
             --no-merged \
             | sed 's/ /\t/' \
@@ -937,16 +956,25 @@ in
         '';
         praise = "blame";
       };
-      delta = { enable = true; options = { side-by-side = true; theme = "catppuccin_frappe"; }; };
+      delta = {
+        enable = true;
+        options = {
+          features = "catppuccin-frappe";
+          navigate = true;
+          side-by-side = true;
+        };
+      };
       # difftastic = { enable = true; background = "dark"; };
       extraConfig = {
         commit.gpgsign = true;
+        diff.colorMoved = "default";
         fetch.prune = true;
         merge.conflictstyle = "diff3";
         rebase.pull = true;
         user.signingkey = meta.gpg.keys.personal;
       };
       includes = [
+        { path = "${pkgs.catppuccin-delta}/themes/frappe.gitconfig"; }
         {
           path = "${config.xdg.configHome}/git/personal";
           condition = "gitdir:~/.config/nixcfg/**";
@@ -1009,7 +1037,15 @@ in
       '';
     };
     # GitHub CLI
-    gh.enable = true;
+    gh = {
+      enable = true;
+      settings = {
+        git_protocol = "ssh";
+        editor = "nvim";
+        prompt = "enabled";
+        extensions = with pkgs; [ gh-dash ];
+      };
+    };
     # Manual page interface
     man = { enable = true; generateCaches = true; };
     # FuZzy Finder - finds items in lists. Current integrations / use cases:
@@ -1019,30 +1055,19 @@ in
     # More robust alternative to `cat`
     bat = {
       enable = true;
-      syntaxes.kdl = {
-        src = pkgs.fetchurl {
-          url = "https://raw.githubusercontent.com/eugenesvk/sublime-KDL/44b2f5d25bdc6afbe0bb645f6db9d34234cbe6bb/KDL.sublime-syntax";
-          hash = "sha256-+3FgIvCYLSq1nA3698t2tn/skbXVh2QpX7eA6fsRB1Y=";
-        };
-      };
-      themes.catppuccin-frappe = {
-        src = pkgs.fetchurl {
-          url = "https://raw.githubusercontent.com/catppuccin/bat/ba4d16880d63e656acced2b7d4e034e4a93f74b1/Catppuccin-frappe.tmTheme";
-          hash = "sha256-v8dycvuCdw/zl4LMpa0pMiNVBuk3CMmSCH8vWS+RIVs=";
-        };
-      };
       config = { style = "full"; theme = "catppuccin-frappe"; };
+      syntaxes.kdl = { src = pkgs.sublime-kdl; file = "KDL.sublime-syntax"; };
+      themes.catppuccin-frappe = {
+        src = pkgs.catppuccin-bat;
+        file = "themes/Catppuccin Frappe.tmTheme";
+      };
     };
     # `ls` alternative
     eza.enable = true;
     # Executes commands when changing to a directory with an `.envrc` in it
     # nix-direnv is a faster and persistent implementaiton of direnv's use_nix
     # and use_flake
-    direnv = {
-      enable = true;
-      nix-direnv.enable = true;
-      enableZshIntegration = true;
-    };
+    direnv = { enable = true; nix-direnv.enable = true; enableZshIntegration = true; };
     # `cd` replacement that ranks frequently / recently used
     # directories for easier shorthand access
     zoxide = { enable = true; enableNushellIntegration = true; };
@@ -1082,6 +1107,14 @@ in
           AddKeysToAgent = "yes";
           LogLevel = "ERROR";
           StrictHostKeyChecking = "no";
+        };
+        # TODO: improve
+        "eu.nixbuild.net".extraOptions = {
+          PubkeyAcceptedKeyTypes = "ssh-ed25519";
+          ServerAliveInterval = "60";
+          IPQoS = "throughput";
+          IdentityFile = "~/.ssh/personal_ed25519_256.pem";
+          IdentityAgent = "/run/user/1000/keyring/ssh";
         };
       };
     };
