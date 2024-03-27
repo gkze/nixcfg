@@ -1,5 +1,5 @@
 # TODO: upstream to Nixpkgs
-{ inputs, system, ... }: (_: prev: {
+{ inputs, system, ... }: (final: prev: {
   alacritty-theme = prev.alacritty-theme.override {
     src = inputs.alacritty-theme;
   };
@@ -25,6 +25,13 @@
       chmod +x $out/bin/git-trim
     '';
   };
+  # TODO: figure out
+  # jnv = prev.rustPlatform.buildRustPackage rec {
+  #   pname = "jnv";
+  #   version = "0.1.2";
+  #   src = inputs.jnv;
+  #   cargoLock.lockFile = "${src}/Cargo.lock";
+  # };
   nix-software-center = inputs.nix-software-center.packages.${system}.default;
   nixos-conf-editor = inputs.nixos-conf-editor.packages.${system}.default;
   sublime-kdl = prev.stdenvNoCC.mkDerivation {
@@ -35,7 +42,7 @@
   };
   uv = prev.rustPlatform.buildRustPackage rec {
     pname = "uv";
-    version = "0.1.23";
+    version = "0.1.24";
     src = inputs.uv;
     cargoLock = {
       lockFile = "${src}/Cargo.lock";
@@ -44,7 +51,7 @@
     buildInputs = [ prev.openssl ];
     cargoHash = "";
     doCheck = false;
-    nativeBuildInputs = with prev; [ cmake pkg-config ];
+    nativeBuildInputs = with prev; [ cmake pkg-config final.rust-bin.stable.latest.default ];
     OPENSSL_NO_VENDOR = 1;
   };
   vimPlugins = prev.vimPlugins.extend (_: _: {

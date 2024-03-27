@@ -2,17 +2,6 @@
 let inherit (builtins) elemAt split; in {
   # Configuration for Nix itself
   nix = {
-    distributedBuilds = true;
-
-    # buildMachines = [
-    #   {
-    #     hostName = "eu.nixbuild.net";
-    #     system = "x86_64-linux";
-    #     maxJobs = 100;
-    #     supportedFeatures = [ "benchmark" "big-parallel" ];
-    #   }
-    # ];
-
     # Perform automatic garbage collection
     gc = { automatic = true; } // {
       darwin.interval = { Hour = 09; Minute = 30; };
