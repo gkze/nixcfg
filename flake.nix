@@ -69,31 +69,19 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Hardware-specific settings
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
-
-    # Alacritty themes
-    alacritty-theme = { url = "github:alacritty/alacritty-theme"; flake = false; };
-
-    # Catppuccin theme for Delta
-    catppuccin-delta = { url = "github:catppuccin/delta"; flake = false; };
-
-    # Catppuccin theme for Bat
-    catppuccin-bat = { url = "github:catppuccin/bat"; flake = false; };
 
     # Terminal multiplexer / workspace manager
     zellij = { url = "github:zellij-org/zellij"; flake = false; };
 
-    # Vim Mako (template language) syntax
-    vim-bundle-mako = { url = "github:sophacles/vim-bundle-mako"; flake = false; };
-
     # Vim text alignment plugin
     mini-align = { url = "github:echasnovski/mini.align"; flake = false; };
-
-    # Neovim structured editing plugin
-    # TODO: fix attempt to index nil value" 
-    # @ https://github.com/Dkendal/nvim-treeclimber/blob/613daac29f134ad66ccc20f3445d35645a7fe17e/lua/nvim-treeclimber.lua#L29
-    # nvim-treeclimber = { url = "github:Dkendal/nvim-treeclimber"; flake = false; };
 
     # Git branch cleanup tool
     git-trim = { url = "github:jasonmccreary/git-trim"; flake = false; };
@@ -104,8 +92,28 @@
     # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
     yawsso = { url = "github:victorskl/yawsso"; flake = false; };
 
+    # Interactive JSON filter
+    jnv = { url = "github:ynqa/jnv"; flake = false; };
+
+    # Alacritty themes
+    alacritty-theme = { url = "github:alacritty/alacritty-theme"; flake = false; };
+
+    # Catppuccin theme for Delta
+    catppuccin-delta = { url = "github:catppuccin/delta"; flake = false; };
+
+    # Catppuccin theme for Bat
+    catppuccin-bat = { url = "github:catppuccin/bat"; flake = false; };
+
     # Sublime syntax for KDL (used in bat)
     sublime-kdl = { url = "github:eugenesvk/sublime-KDL"; flake = false; };
+
+    # Vim Mako (template language) syntax
+    vim-bundle-mako = { url = "github:sophacles/vim-bundle-mako"; flake = false; };
+
+    # Neovim structured editing plugin
+    # TODO: fix attempt to index nil value" 
+    # @ https://github.com/Dkendal/nvim-treeclimber/blob/613daac29f134ad66ccc20f3445d35645a7fe17e/lua/nvim-treeclimber.lua#L29
+    # nvim-treeclimber = { url = "github:Dkendal/nvim-treeclimber"; flake = false; };
   };
 
   outputs = inputs:
@@ -128,6 +136,7 @@
         config.allowUnfree = true;
         overlays = [
           inputs.devshell.overlays.default
+          inputs.rust-overlay.overlays.default
           (import ./nix/overlays.nix { inherit inputs system; })
         ];
       };
@@ -191,13 +200,7 @@
                 nix-editor.packages.${system}.default
                 nixos-generators.packages.${system}.default
               ])
-              ++ (with pkgs; [
-                dconf2nix
-                nix-init
-                nix-melt
-                nurl
-                vimPluginsUpdater
-              ]);
+              ++ (with pkgs; [ dconf2nix nix-init nix-melt nurl ]);
           };
 
           # For `nix run`

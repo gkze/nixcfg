@@ -1,4 +1,4 @@
-{ pkgs, lib, users, hostPlatform, ... }:
+{ pkgs, lib, users, ... }:
 let
   inherit (builtins) listToAttrs readFile;
   inherit (lib) removeSuffix;
@@ -6,14 +6,22 @@ in
 {
   nix = {
     distributedBuilds = true;
+
     buildMachines = [
       {
         hostName = "eu.nixbuild.net";
-        system = hostPlatform;
+        system = "x86_64-linux";
         maxJobs = 100;
         supportedFeatures = [ "benchmark" "big-parallel" ];
       }
+      # {
+      #   hostName = "45.32.139.249";
+      #   system = "x86_64-linux";
+      #   maxJobs = 100;
+      #   supportedFeatures = [ "benchmark" "big-parallel" ];
+      # }
     ];
+
   };
 
   networking = {
@@ -21,19 +29,19 @@ in
     networkmanager = { enable = true; wifi.backend = "iwd"; };
   };
 
-  i18n = {
+  i18n = let locale = "en_US.UTF-8"; in {
     inputMethod.enabled = "ibus";
-    defaultLocale = "en_US.UTF-8";
+    defaultLocale = locale;
     extraLocaleSettings = {
-      LC_ADDRESS = "en_US.UTF-8";
-      LC_IDENTIFICATION = "en_US.UTF-8";
-      LC_MEASUREMENT = "en_US.UTF-8";
-      LC_MONETARY = "en_US.UTF-8";
-      LC_NAME = "en_US.UTF-8";
-      LC_NUMERIC = "en_US.UTF-8";
-      LC_PAPER = "en_US.UTF-8";
-      LC_TELEPHONE = "en_US.UTF-8";
-      LC_TIME = "en_US.UTF-8";
+      LC_ADDRESS = locale;
+      LC_IDENTIFICATION = locale;
+      LC_MEASUREMENT = locale;
+      LC_MONETARY = locale;
+      LC_NAME = locale;
+      LC_NUMERIC = locale;
+      LC_PAPER = locale;
+      LC_TELEPHONE = locale;
+      LC_TIME = locale;
     };
   };
 
@@ -52,10 +60,22 @@ in
           IPQoS throughput
           IdentityFile /home/george/.ssh/personal_ed25519_256.pem
           IdentityAgent /run/user/1000/keyring/ssh
+        Host 45.32.139.249
+          PubkeyAcceptedKeyTypes ssh-ed25519
+          ServerAliveInterval 60
+          IPQoS throughput
+          IdentityFile /home/george/.ssh/personal_ed25519_256.pem
+          IdentityAgent /run/user/1000/keyring/ssh
       '';
-      knownHosts.nixbuild = {
-        hostNames = [ "eu.nixbuild.net" ];
-        publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPIQCZc54poJ8vqawd8TraNryQeJnvH1eLpIDgbiqymM";
+      knownHosts = {
+        nixbuild = {
+          hostNames = [ "eu.nixbuild.net" ];
+          publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPIQCZc54poJ8vqawd8TraNryQeJnvH1eLpIDgbiqymM";
+        };
+        "45.32.139.249" = {
+          hostNames = [ "45.32.139.249" ];
+          publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOj6gF/E+yIBr30ieiejR/cqwaFEq/kn3BeRu41kwSlG";
+        };
       };
     };
   };
