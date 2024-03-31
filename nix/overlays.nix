@@ -42,7 +42,7 @@
   };
   uv = prev.rustPlatform.buildRustPackage rec {
     pname = "uv";
-    version = "0.1.24";
+    version = "0.1.26";
     src = inputs.uv;
     cargoLock = {
       lockFile = "${src}/Cargo.lock";

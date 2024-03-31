@@ -113,7 +113,7 @@
     # Neovim structured editing plugin
     # TODO: fix attempt to index nil value" 
     # @ https://github.com/Dkendal/nvim-treeclimber/blob/613daac29f134ad66ccc20f3445d35645a7fe17e/lua/nvim-treeclimber.lua#L29
-    # nvim-treeclimber = { url = "github:Dkendal/nvim-treeclimber"; flake = false; };
+    nvim-treeclimber = { url = "github:Dkendal/nvim-treeclimber"; flake = false; };
   };
 
   outputs = inputs:
@@ -200,7 +200,7 @@
                 nix-editor.packages.${system}.default
                 nixos-generators.packages.${system}.default
               ])
-              ++ (with pkgs; [ dconf2nix nix-init nix-melt nurl ]);
+              ++ (with pkgs; [ dconf2nix nix-init nix-melt nixpkgs-fmt nurl ]);
           };
 
           # For `nix run`
