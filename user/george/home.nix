@@ -3,7 +3,6 @@ let
   inherit (builtins) elem elemAt readFile split;
   inherit (lib) optionalString removeSuffix;
   inherit (lib.attrsets) optionalAttrs;
-  inherit (lib.lists) flatten;
 
   # Grab the OS kernel part of the hostPlatform tuple
   kernel = elemAt (split "-" hostPlatform) 2;
@@ -239,6 +238,14 @@ in
           # Database GUI
           beekeeper-studio
           # Web browser
+          # TODO: get TouchpadOverscrollHistoryNavigation working
+          # (brave.overrideAttrs {
+          #   postFixup = ''
+          #     extraWrapperArgs='--append-flags --enable-features=TouchpadOverscrollHistoryNavigation'
+          #     wrapProgram $out/bin/brave $extraWrapperArgs
+          #     gappsWrapperArgs+=($extraWrapperArgs)
+          #   '';
+          # })
           brave
           # Display Data Channel UTILity
           ddcutil
@@ -252,6 +259,8 @@ in
           libreoffice
           # TODO: TBD if works on macOS
           signal-desktop
+          # System Profiler
+          sysprof
           # Offline documentatoin browser
           zeal
         ]
@@ -590,6 +599,11 @@ in
           name = "direnv";
           src = "${pkgs.zsh-completions}/share/zsh/site-functions";
         }
+        # Go Zsh completion
+        {
+          name = "go";
+          src = "${pkgs.zsh-completions}/share/zsh/site-functions";
+        }
         # TODO: upstream fix to Nixpkgs
         {
           name = "aws";
@@ -641,7 +655,27 @@ in
     nixvim = {
       enable = true;
       enableMan = true;
-      colorschemes.catppuccin = { enable = true; flavour = "frappe"; };
+      colorschemes.catppuccin = {
+        enable = true;
+        flavour = "frappe";
+        integrations = {
+          aerial = true;
+          alpha = true;
+          barbecue = { alt_background = true; bold_basename = true; dim_context = true; dim_dirname = true; };
+          cmp = true;
+          dap = { enabled = true; enable_ui = true; };
+          gitsigns = true;
+          native_lsp = { enabled = true; inlay_hints.background = true; };
+          neogit = true;
+          neotree = true;
+          telescope.enabled = true;
+          treesitter = true;
+          treesitter_context = true;
+          which_key = true;
+        };
+        showBufferEnd = true;
+        terminalColors = true;
+      };
       # Editor-agnostic configuration
       editorconfig.enable = true;
       # Remap leader key to spacebar
@@ -677,90 +711,56 @@ in
         # Greeter (home page)
         alpha = {
           enable = true;
-          layout = [
-            { type = "padding"; val = 2; opts.position = "center"; }
-            {
-              type = "text";
-              val = [
-                "  ███╗   ██╗██╗██╗  ██╗██╗   ██╗██╗███╗   ███╗  "
-                "  ████╗  ██║██║╚██╗██╔╝██║   ██║██║████╗ ████║  "
-                "  ██╔██╗ ██║██║ ╚███╔╝ ██║   ██║██║██╔████╔██║  "
-                "  ██║╚██╗██║██║ ██╔██╗ ╚██╗ ██╔╝██║██║╚██╔╝██║  "
-                "  ██║ ╚████║██║██╔╝ ██╗ ╚████╔╝ ██║██║ ╚═╝ ██║  "
-                "  ╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝     ╚═╝  "
-              ];
-              opts = { position = "center"; hl = "Type"; };
-            }
-            { type = "padding"; val = 2; opts.position = "center"; }
-            {
-              type = "group";
-              val = [
-                {
-                  type = "button";
-                  val = " New file";
-                  on_press.__raw = "function() vim.cmd[[ene]] end";
-                  opts = {
-                    align_shortcut = "right";
-                    cursor = 3;
-                    hl_shortcut = "Keyword";
-                    keymap = [ "n" "e" ":ene<CR>" { noremap = true; nowait = true; silent = true; } ];
-                    position = "center";
-                    shortcut = "e";
-                    width = 50;
-                  };
-                }
-                # TODO: get working
-                # {
-                #   type = "button";
-                #   val = "󰈞 Find file";
-                #   on_press.__raw = "function() require(\"telescope.builtin\").find_files end";
-                #   opts = {
-                #     align_shortcut = "right";
-                #     cursor = 3;
-                #     hl_shortcut = "Keyword";
-                #     keymap = [ "n" "f" ":Telescope find_files<CR>" { noremap = true; nowait = true; silent = true; } ];
-                #     position = "center";
-                #     shortcut = "f";
-                #     width = 50;
-                #   };
-                # }
-                # {
-                #   type = "button";
-                #   val = "󰈞 Find string(s)";
-                #   on_press.__raw = "function() require(\"telescope.builtin\").live_grep end";
-                #   opts = {
-                #     align_shortcut = "right";
-                #     cursor = 3;
-                #     hl_shortcut = "Keyword";
-                #     keymap = [ "n" "g" ":Telescope live_grep<CR>" { noremap = true; nowait = true; silent = true; } ];
-                #     position = "center";
-                #     shortcut = "g";
-                #     width = 50;
-                #   };
-                # }
-                {
-                  type = "button";
-                  val = " Quit Neovim";
-                  on_press.__raw = "function() vim.cmd[[qa]] end";
-                  opts = {
-                    align_shortcut = "right";
-                    cursor = 3;
-                    hl_shortcut = "Keyword";
-                    keymap = [ "n" "q" ":qa<CR>" { noremap = true; nowait = true; silent = true; } ];
-                    position = "center";
-                    shortcut = "q";
-                    width = 50;
-                  };
-                }
-              ];
-            }
-            { type = "padding"; val = 2; opts.position = "center"; }
-            {
-              type = "text";
-              val = "Crankenstein";
-              opts = { position = "center"; hl = "Keyword"; };
-            }
-          ];
+          layout =
+            let
+              button = val: shortcut: cmd: {
+                type = "button";
+                inherit val;
+                on_press.__raw = "function() vim.cmd[[${cmd}]] end";
+                opts = {
+                  inherit shortcut;
+                  align_shortcut = "right";
+                  keymap = [ "n" shortcut ":${cmd}<CR>" { } ];
+                  position = "center";
+                  width = 50;
+                };
+              };
+              padding = { type = "padding"; val = 1; opts.position = "center"; };
+            in
+            [
+              padding
+              {
+                type = "text";
+                val = [
+                  "███╗   ██╗██╗██╗  ██╗██╗   ██╗██╗███╗   ███╗"
+                  "████╗  ██║██║╚██╗██╔╝██║   ██║██║████╗ ████║"
+                  "██╔██╗ ██║██║ ╚███╔╝ ██║   ██║██║██╔████╔██║"
+                  "██║╚██╗██║██║ ██╔██╗ ╚██╗ ██╔╝██║██║╚██╔╝██║"
+                  "██║ ╚████║██║██╔╝ ██╗ ╚████╔╝ ██║██║ ╚═╝ ██║"
+                  "╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝     ╚═╝"
+                ];
+                opts = { position = "center"; hl = "Type"; };
+              }
+              padding
+              {
+                type = "group";
+                val = [
+                  (button " New file" "e" "ene")
+                  padding
+                  (button "󰈞 Find file(s)" "f" "Telescope find_files")
+                  padding
+                  (button "󰈞 Find text" "t" "Telescope live_grep")
+                  padding
+                  (button " Quit Neovim" "q" "qall")
+                ];
+              }
+              { type = "padding"; val = 2; }
+              {
+                type = "text";
+                val = "Crankenstein";
+                opts = { position = "center"; hl = "Keyword"; };
+              }
+            ];
         };
         # Buffer line (top, tabs)
         bufferline = {
@@ -774,7 +774,8 @@ in
             textAlign = "left";
           }];
         };
-        #Git information
+        cmp-treesitter.enable = true;
+        # Git information
         gitsigns = {
           enable = true;
           settings = { current_line_blame = true; current_line_blame_opts.delay = 300; };
@@ -818,6 +819,7 @@ in
             };
             # TOML
             taplo.enable = true;
+            tailwindcss.enable = true;
             tsserver.enable = true;
             yamlls.enable = false;
           };
@@ -828,6 +830,8 @@ in
           componentSeparators = { left = ""; right = ""; };
           sectionSeparators = { left = ""; right = ""; };
         };
+        # Mini library collection - alignment
+        mini.modules.align = { };
         # Symbol navigation popup
         navbuddy = { enable = true; lsp.autoAttach = true; };
         # Neovim git interface
@@ -847,8 +851,17 @@ in
         # Neovim built-in LSP client multitool
         none-ls = {
           enable = true;
-          sources.formatting.prettier.disableTsServerFormatter = true;
+          enableLspFormat = true;
+          sources.formatting.prettier = {
+            enable = true;
+            disableTsServerFormatter = true;
+          };
         };
+        # Display colors for color codes
+        # nvim-colorizer = {
+        #   enable = true;
+        #   fileTypes = [{ language = "tailwind"; tailwind = "both"; }];
+        # };
         # LSP completion
         cmp = {
           enable = true;
@@ -859,11 +872,12 @@ in
                 require('luasnip').lsp_expand(args.body)
               end
             '';
-            sources = [
-              { name = "nvim_lsp"; }
-              { name = "luasnip"; }
-              { name = "path"; }
-              { name = "buffer"; }
+            sources = map (s: { name = s; }) [
+              "nvim_lsp"
+              "treesitter"
+              "luasnip"
+              "path"
+              "buffer"
             ];
             mapping = {
               "<C-d>" = "cmp.mapping.scroll_docs(-4)";
@@ -950,6 +964,8 @@ in
         dap.enable = true;
         # Diff view
         diffview.enable = true;
+        # LSP & notification UI
+        fidget.enable = true;
         # Highlight other occurrences of word under cursor
         illuminate.enable = true;
         # Incremental rename
@@ -984,37 +1000,34 @@ in
         # TODO: figure out
         which-key.enable = true;
       };
-      extraPlugins = flatten (with pkgs; [
-        # TODO: add comments for each plugin
-        (with vimPlugins; [
-          SchemaStore-nvim
-          aerial-nvim
-          bufdelete-nvim
-          git-conflict-nvim
-          mini-align
-          nvim-surround
-          # TODO: fix - see flake inputs
-          # nvim-treeclimber
-          nvim-treesitter-textsubjects
-          overseer-nvim
-          tailwindcss-language-server
-          vim-bundle-mako
-          vim-jinja
-        ])
-      ]);
+      extraPlugins = with pkgs.vimPlugins; [
+        # TODO: fix - see flake inputs
+        nvim-treeclimber
+        SchemaStore-nvim
+        aerial-nvim
+        bufdelete-nvim
+        git-conflict-nvim
+        nvim-surround
+        nvim-treesitter-textsubjects
+        overseer-nvim
+        vim-bundle-mako
+        vim-jinja
+      ];
       extraConfigLua = ''
         require("git-conflict").setup()
-        require("mini.align").setup()
         require("nvim-surround").setup()
         require("overseer").setup()
-        -- require("nvim-treeclimber").setup()
+        require("nvim-treeclimber").setup()
+
         require("aerial").setup({
           autojump = true,
           filter_kind = false,
           open_automatic = true
         })
+
         local capabilities = vim.lsp.protocol.make_client_capabilities()
         capabilities.textDocument.completion.completionItem.snippetSupport = true
+
         require("lspconfig").jsonls.setup {
           capabilities = capabilities,
           settings = {
@@ -1024,6 +1037,7 @@ in
             },
           },
         }
+
         require("lspconfig").yamlls.setup {
           settings = {
             yaml = {
@@ -1055,7 +1069,7 @@ in
             },
           },
         }
-        require("lspconfig").tailwindcss.setup{}
+
         require("nvim-treesitter.configs").setup {
           textsubjects = {
             enable = true,
@@ -1063,7 +1077,6 @@ in
             keymaps = {
               ["."] = "textsubjects-smart",
               [";"] = "textsubjects-container-outer",
-              ["i;"] = "textsubjects-container-inner",
               ["i;"] = "textsubjects-container-inner",
             },
           },
