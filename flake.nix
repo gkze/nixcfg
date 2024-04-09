@@ -87,7 +87,7 @@
     git-trim = { url = "github:jasonmccreary/git-trim"; flake = false; };
 
     # Rust-based Python package resolver & installed (faster pip)
-    uv = { url = "github:astral-sh/uv"; flake = false; };
+    uv = { url = "github:astral-sh/uv/0.1.28"; flake = false; };
 
     # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
     yawsso = { url = "github:victorskl/yawsso"; flake = false; };
@@ -114,6 +114,8 @@
     # TODO: fix attempt to index nil value" 
     # @ https://github.com/Dkendal/nvim-treeclimber/blob/613daac29f134ad66ccc20f3445d35645a7fe17e/lua/nvim-treeclimber.lua#L29
     nvim-treeclimber = { url = "github:Dkendal/nvim-treeclimber"; flake = false; };
+
+    bin = { url = "github:marcosnils/bin/v0.17.4"; flake = false; };
   };
 
   outputs = inputs:
