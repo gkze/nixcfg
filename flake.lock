@@ -16,6 +16,23 @@
         "type": "github"
       }
     },
+    "bin": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1710041173,
+        "narHash": "sha256-vDXO5Vy+fzvBylgZR6yjze5Vi/gr9P187D25kn8K9TE=",
+        "owner": "marcosnils",
+        "repo": "bin",
+        "rev": "c45e354d2980f5ad549db5aff3da16c7fe5338d4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "marcosnils",
+        "ref": "v0.17.4",
+        "repo": "bin",
+        "type": "github"
+      }
+    },
     "catppuccin-bat": {
       "flake": false,
       "locked": {
@@ -693,6 +710,7 @@
     "root": {
       "inputs": {
         "alacritty-theme": "alacritty-theme",
+        "bin": "bin",
         "catppuccin-bat": "catppuccin-bat",
         "catppuccin-delta": "catppuccin-delta",
         "devshell": "devshell",
@@ -926,15 +944,16 @@
     "uv": {
       "flake": false,
       "locked": {
-        "lastModified": 1711810534,
-        "narHash": "sha256-xjl+IsKnMWBvE7+LAGSo61+/iKAhSPT+m2m3OwPUJzk=",
+        "lastModified": 1712093975,
+        "narHash": "sha256-DJiu5xHLHWH2GkrmV6kzNo6vUmHSJUO9b7HeVtqNr0k=",
         "owner": "astral-sh",
         "repo": "uv",
-        "rev": "472d302ef017d09e2440b7022f9a5a2177ad9e4e",
+        "rev": "0046a0d5963fd88ae10f35f1e65b641ae75e173f",
         "type": "github"
       },
       "original": {
         "owner": "astral-sh",
+        "ref": "0.1.28",
         "repo": "uv",
         "type": "github"
       }
