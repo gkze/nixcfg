@@ -3,6 +3,12 @@
   alacritty-theme = prev.alacritty-theme.override {
     src = inputs.alacritty-theme;
   };
+  bin = prev.buildGoModule {
+    pname = "bin";
+    version = "0.17.4";
+    src = inputs.bin;
+    vendorHash = "sha256-9kgenzKjo5Lc9JrEdXQlRocl17o4RyKrKuJAFoOEVwY=";
+  };
   catppuccin-bat = prev.stdenvNoCC.mkDerivation {
     pname = "catppuccin-bat";
     version = inputs.catppuccin-bat.rev;
@@ -42,7 +48,7 @@
   };
   uv = prev.rustPlatform.buildRustPackage rec {
     pname = "uv";
-    version = "0.1.26";
+    version = "0.1.28";
     src = inputs.uv;
     cargoLock = {
       lockFile = "${src}/Cargo.lock";

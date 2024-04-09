@@ -1,8 +1,8 @@
 { config, lib, pkgs, inputs, hostPlatform, profiles, hmMods ? [ ], ... }:
 let
-  inherit (builtins) elem elemAt readFile split;
+  inherit (builtins) concatStringsSep elem elemAt readFile split;
   inherit (lib) optionalString removeSuffix;
-  inherit (lib.attrsets) optionalAttrs;
+  inherit (lib.attrsets) mapAttrsToList optionalAttrs;
 
   # Grab the OS kernel part of the hostPlatform tuple
   kernel = elemAt (split "-" hostPlatform) 2;
@@ -172,14 +172,14 @@ in
               "user-theme@gnome-shell-extensions.gcampax.github.com"
             ];
             favorite-apps = [
-              "Alacritty.desktop"
               "beekeeper-studio.desktop"
-              "brave-browser.desktop"
               "obsidian.desktop"
+              "brave-browser.desktop"
+              "Alacritty.desktop"
+              "slack.desktop"
               "org.gnome.Calendar.desktop"
               "org.gnome.Nautilus.desktop"
               "org.gnome.Settings.desktop"
-              "slack.desktop"
             ];
             last-selected-power-profile = "power-saver";
           };
@@ -261,7 +261,7 @@ in
           signal-desktop
           # System Profiler
           sysprof
-          # Offline documentatoin browser
+          # Offline documentation browser
           zeal
         ]
         ++ (with pkgs.gnome; [
@@ -352,10 +352,11 @@ in
         prefix = "''${HOME}/.local"
       '';
       # Same as above for pip
-      "${config.xdg.configHome}/pip/pip.conf".text = ''
-        [install]
-        user = true
-      '';
+      # TODO: figure out
+      # "${config.xdg.configHome}/pip/pip.conf".text = ''
+      #   [install]
+      #   user = true
+      # '';
       "${config.xdg.configHome}/git/personal".text = ''
         [user]
           name = ${meta.name.user.github}
@@ -374,6 +375,8 @@ in
     # installed. Programs section below both installs and configures software,
     # and is the preferred method.
     packages = with pkgs; [
+      # Binary manager
+      bin
       # Color theme
       catppuccin
       # cURL wrapper with niceties
@@ -413,10 +416,6 @@ in
       # Interactive JSON filter
       # TODO: figure out
       # jnv
-      # JSON Language server
-      vscode-langservers-extracted
-      # YAML Language Server
-      yaml-language-server
       # Additional useful utilities (a la coreutils)
       moreutils
       # Nerd Fonts
@@ -425,8 +424,6 @@ in
       # Only install Hack Nerd Font, since the entire package / font repository
       # is quite large
       (nerdfonts.override { fonts = [ "Hack" ]; })
-      # For running one-off npx stuff
-      nodejs_latest
       # Alternative to `ps`
       procs
       # Rust toolchain manager
@@ -520,7 +517,7 @@ in
         done
         compinit -C && bashcompinit -C
       '';
-      # Any additional manual confiuration goes here
+      # Any additional manual configuration goes here
       # Placed in $ZDOTDIR/.zshrc
       initExtra = ''
         # Post-compinit
@@ -614,10 +611,18 @@ in
           name = "docker";
           src = pkgs.runCommand "_docker" { buildInputs = [ pkgs.docker ]; } ''
             mkdir $out
-            docker completion zsh > $out/_docker;
+            docker completion zsh > $out/_docker
           '';
           file = "_docker";
         }
+        # {
+        #   name = "bin";
+        #   src = pkgs.runCommand "_bin" { buildInputs = [ pkgs.bin ]; } ''
+        #     mkdir $out
+        #     bin completion zsh > $out/_bin
+        #   '';
+        #   file = "_bin";
+        # }
       ];
     };
     vscode.enable = true;
@@ -725,10 +730,10 @@ in
                   width = 50;
                 };
               };
-              padding = { type = "padding"; val = 1; opts.position = "center"; };
+              padding = v: { type = "padding"; val = v; opts.position = "center"; };
             in
             [
-              padding
+              (padding 2)
               {
                 type = "text";
                 val = [
@@ -741,20 +746,20 @@ in
                 ];
                 opts = { position = "center"; hl = "Type"; };
               }
-              padding
+              (padding 2)
               {
                 type = "group";
                 val = [
                   (button " New file" "e" "ene")
-                  padding
+                  (padding 1)
                   (button "󰈞 Find file(s)" "f" "Telescope find_files")
-                  padding
+                  (padding 1)
                   (button "󰈞 Find text" "t" "Telescope live_grep")
-                  padding
+                  (padding 1)
                   (button " Quit Neovim" "q" "qall")
                 ];
               }
-              { type = "padding"; val = 2; }
+              (padding 2)
               {
                 type = "text";
                 val = "Crankenstein";
@@ -774,11 +779,23 @@ in
             textAlign = "left";
           }];
         };
+        # Treesitter completion source
         cmp-treesitter.enable = true;
+        # General purpose language server - configuration
+        efmls-configs = {
+          enable = true;
+          setup = {
+            javascript.formatter = "prettier";
+            typescript.formatter = "prettier";
+          };
+        };
         # Git information
         gitsigns = {
           enable = true;
-          settings = { current_line_blame = true; current_line_blame_opts.delay = 300; };
+          settings = {
+            current_line_blame = true;
+            current_line_blame_opts.delay = 300;
+          };
         };
         # Language Server Protocol client
         lsp = {
@@ -802,6 +819,8 @@ in
               settings.formatting.command = [ "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt" ];
             };
             bashls.enable = true;
+            # TypeScript & JavaScript
+            biome.enable = true;
             cssls.enable = true;
             dockerls.enable = true;
             # Generic language server proxy for multiple tools
@@ -809,7 +828,13 @@ in
             eslint.enable = true;
             gopls.enable = true;
             html.enable = true;
-            jsonls.enable = false;
+            jsonls = {
+              enable = true;
+              extraOptions.settings.json = {
+                schemas.__raw = "require(\"schemastore\").json.schemas()";
+                validate.enable = true;
+              };
+            };
             pyright.enable = true;
             ruff-lsp.enable = false;
             rust-analyzer = {
@@ -821,7 +846,34 @@ in
             taplo.enable = true;
             tailwindcss.enable = true;
             tsserver.enable = true;
-            yamlls.enable = false;
+            typos-lsp.enable = true;
+            yamlls = {
+              enable = true;
+              extraOptions.settings.yamlls = {
+                customTags = [
+                  "!And"
+                  "!Base64"
+                  "!Cidr"
+                  "!Equals"
+                  "!FindInMap sequence"
+                  "!GetAZs"
+                  "!GetAtt"
+                  "!If"
+                  "!ImportValue"
+                  "!Join sequence"
+                  "!Not"
+                  "!Or"
+                  "!Ref Scalar"
+                  "!Ref"
+                  "!Select"
+                  "!Split"
+                  "!Sub"
+                  "!fn"
+                ];
+                schemaStore = { enable = false; url = ""; };
+                schemas.__raw = "require(\"schemastore\").yaml.schemas()";
+              };
+            };
           };
         };
         # Status line (bottom)
@@ -848,20 +900,11 @@ in
           sourceSelector.winbar = true;
           window.mappings = { "<A-{>" = "prev_source"; "<A-}>" = "next_source"; };
         };
-        # Neovim built-in LSP client multitool
-        none-ls = {
-          enable = true;
-          enableLspFormat = true;
-          sources.formatting.prettier = {
-            enable = true;
-            disableTsServerFormatter = true;
-          };
-        };
         # Display colors for color codes
-        # nvim-colorizer = {
-        #   enable = true;
-        #   fileTypes = [{ language = "tailwind"; tailwind = "both"; }];
-        # };
+        nvim-colorizer = {
+          enable = true;
+          fileTypes = [{ language = "typescriptreact"; tailwind = "both"; }];
+        };
         # LSP completion
         cmp = {
           enable = true;
@@ -986,6 +1029,8 @@ in
         marks.enable = true;
         # Enable Nix language support
         nix.enable = true;
+        # Automatically manage character pairs
+        nvim-autopairs.enable = true;
         # File finder (popup)
         telescope.enable = true;
         # Enable working with TODO: code comments
@@ -994,94 +1039,48 @@ in
         toggleterm = { enable = true; size = 10; };
         # Parser generator & incremental parsing toolkit
         treesitter = { enable = true; incrementalSelection.enable = true; };
+        # Code context via Treesitter
+        # treesitter-context.enable = true;
         # Diagnostics, etc. 
         trouble.enable = true;
         # Keybinding hint viewer
-        # TODO: figure out
         which-key.enable = true;
       };
       extraPlugins = with pkgs.vimPlugins; [
-        # TODO: fix - see flake inputs
-        nvim-treeclimber
         SchemaStore-nvim
         aerial-nvim
         bufdelete-nvim
         git-conflict-nvim
         nvim-surround
+        nvim-treeclimber
         nvim-treesitter-textsubjects
         overseer-nvim
         vim-bundle-mako
         vim-jinja
       ];
-      extraConfigLua = ''
-        require("git-conflict").setup()
-        require("nvim-surround").setup()
-        require("overseer").setup()
-        require("nvim-treeclimber").setup()
-
-        require("aerial").setup({
-          autojump = true,
-          filter_kind = false,
-          open_automatic = true
-        })
-
-        local capabilities = vim.lsp.protocol.make_client_capabilities()
-        capabilities.textDocument.completion.completionItem.snippetSupport = true
-
-        require("lspconfig").jsonls.setup {
-          capabilities = capabilities,
-          settings = {
-            json = {
-              schemas = require("schemastore").json.schemas(),
-              validate = { enable = true },
-            },
-          },
-        }
-
-        require("lspconfig").yamlls.setup {
-          settings = {
-            yaml = {
-              customTags = {
-                "!Base64",
-                "!Cidr",
-                "!FindInMap",
-                "!ForEach",
-                "!GetAZs",
-                "!GetAtt",
-                "!ImportValue mapping",
-                "!Join",
-                "!Length",
-                "!Ref",
-                "!Select",
-                "!Split",
-                "!Sub",
-                "!ToJsonString",
-                "!Transform",
-              },
-              schemaStore = {
-                -- You must disable built-in schemaStore support if you want to use
-                -- this plugin and its advanced options like `ignore`.
-                enable = false,
-                -- Avoid TypeError: Cannot read properties of undefined (reading 'length')
-                url = "",
-              },
-              schemas = require("schemastore").yaml.schemas(),
-            },
-          },
-        }
-
-        require("nvim-treesitter.configs").setup {
-          textsubjects = {
-            enable = true,
-            rrev_selection = ",",
-            keymaps = {
-              ["."] = "textsubjects-smart",
-              [";"] = "textsubjects-container-outer",
-              ["i;"] = "textsubjects-container-inner",
-            },
-          },
-        }
-      '';
+      extraConfigLua =
+        let
+          helpers = inputs.nixvim.lib.${hostPlatform}.helpers;
+          extraPluginsConfig = {
+            git-conflict = { };
+            nvim-surround = { };
+            overseer = { };
+            nvim-treeclimber = { };
+            aerial = { autojump = true; filter_kind = false; open_automatic = true; };
+            "nvim-treesitter.configs".textsubjects = {
+              enable = true;
+              rrev_selection = ",";
+              keymaps = {
+                "." = "textsubjects-smart";
+                ";" = "textsubjects-container-outer";
+                "i;" = "textsubjects-container-inner";
+              };
+            };
+          };
+        in
+        concatStringsSep "\n" (mapAttrsToList
+          (n: v: "require(\"${n}\").setup(${helpers.toLuaObject v})")
+          extraPluginsConfig);
       keymaps = [
         { action = ":"; key = ";"; }
         { action = ":AerialToggle<CR>"; key = "<leader>a"; }
@@ -1111,7 +1110,7 @@ in
         { action = ":TroubleToggle<CR>"; key = "<leader>p"; }
         { action = ":nohlsearch<CR>"; key = "<leader>c"; }
         { action = ":set invlist<CR>"; key = "<C-l>"; }
-        { action = ":sort<CR>"; key = "<S-s>"; }
+        { action = ":sort<CR>"; key = "<S-s>"; mode = "v"; }
         { action = ":wall<CR>"; key = "<A-W>"; }
         { action = ":wincmd h<CR>"; key = "<leader>h"; }
         { action = ":wincmd j<CR>"; key = "<leader>j"; }
@@ -1136,24 +1135,38 @@ in
     git = {
       enable = true;
       aliases = {
-        branches = ''
-          !git for-each-ref \
-            --color \
-            --sort=-committerdate \
-            --format=$'
-            %(color:red)
-            %(ahead-behind:HEAD)
-            \t%(color:blue)
-            %(refname:short)
-            \t%(color:yellow)
-            %(committerdate:relative)
-            \t%(color:default)
-            %(describe)' \
-            refs/heads/ \
-            --no-merged \
-            | sed 's/ /\t/' \
-            | column --separator=$'\t' --table --table-columns='Ahead,Behind,Branch Name,Last Commit,Description'
-        '';
+        branches =
+          let
+            format = concatStringsSep "\t" [
+              "%(color:red)%(ahead-behind:HEAD)"
+              "%(color:blue)%(refname:short)"
+              "%(color:yellow)%(committerdate:relative)"
+              "%(color:default)%(describe)"
+            ];
+            header = concatStringsSep "," [
+              "Ahead"
+              "Behind"
+              "Branch Name"
+              "Last Commit"
+              "Description"
+            ];
+          in
+          concatStringsSep " " [
+            "!git for-each-ref"
+            "--color"
+            "--sort=-committerdate"
+            "--format=$'${format}'"
+            "refs/heads/"
+            "--no-merged"
+            "|"
+            "sed"
+            "'s/ /\t/'"
+            "|"
+            "column"
+            "--separator=$'\t'"
+            "--table"
+            "--table-columns='${header}'"
+          ];
         praise = "blame";
       };
       delta = {
@@ -1265,9 +1278,13 @@ in
     # `ls` alternative
     eza.enable = true;
     # Executes commands when changing to a directory with an `.envrc` in it
-    # nix-direnv is a faster and persistent implementaiton of direnv's use_nix
+    # nix-direnv is a faster and persistent implementation of direnv's use_nix
     # and use_flake
-    direnv = { enable = true; nix-direnv.enable = true; enableZshIntegration = true; };
+    direnv = {
+      enable = true;
+      nix-direnv.enable = true;
+      enableZshIntegration = true;
+    };
     # `cd` replacement that ranks frequently / recently used
     # directories for easier shorthand access
     zoxide = { enable = true; enableNushellIntegration = true; };
@@ -1330,8 +1347,8 @@ in
     topgrade = {
       enable = true;
       settings = {
-        misc = { assume_yes = true; cleanup = true; };
         git.repos = [ srcDir ];
+        misc = { assume_yes = true; cleanup = true; };
       };
     };
   };
