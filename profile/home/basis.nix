@@ -29,7 +29,7 @@ in
         awscli = {
           enable = true;
           settings = {
-            default = { region = "us-east-1"; output = "json"; };
+            default = { region = "us-west-2"; output = "json"; };
             "profile development" = {
               sso_session = "basis";
               sso_account_id = 820061307359;
@@ -37,7 +37,7 @@ in
             };
             "profile staging" = {
               sso_session = "basis";
-              sso_account_id = 523331955727;
+              sso_account_id = 905418462882;
               sso_role_name = "PowerUserAccess";
             };
             "profile production" = {
