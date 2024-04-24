@@ -115,7 +115,11 @@
     # @ https://github.com/Dkendal/nvim-treeclimber/blob/613daac29f134ad66ccc20f3445d35645a7fe17e/lua/nvim-treeclimber.lua#L29
     nvim-treeclimber = { url = "github:Dkendal/nvim-treeclimber"; flake = false; };
 
+    # Binary manager
     bin = { url = "github:marcosnils/bin/v0.17.4"; flake = false; };
+
+    # Browser Neovim client
+    firenvim = { url = "github:glacambre/firenvim"; flake = false; };
   };
 
   outputs = inputs:

@@ -226,7 +226,6 @@ in
           lorri.enable = true;
         };
 
-        # Now symlink the `~/.config/gtk-4.0/` folder declaratively:
         xdg.configFile = {
           "gtk-4.0/assets".source = "${config.gtk.theme.package}/share/themes/${config.gtk.theme.name}/gtk-4.0/assets";
           "gtk-4.0/gtk.css".source = "${config.gtk.theme.package}/share/themes/${config.gtk.theme.name}/gtk-4.0/gtk.css";
@@ -405,6 +404,7 @@ in
       git-trim
       # GitLab Command Line Interface
       glab
+      # GRAPH VIsualiZer
       # Stream EDitor
       gnused
       # Tape ARchrive
@@ -418,12 +418,16 @@ in
       # jnv
       # Additional useful utilities (a la coreutils)
       moreutils
+      # Neovim Rust GUI
+      neovide
       # Nerd Fonts
       # - https://www.nerdfonts.com/
       # - https://github.com/ryanoasis/nerd-fonts
       # Only install Hack Nerd Font, since the entire package / font repository
       # is quite large
       (nerdfonts.override { fonts = [ "Hack" ]; })
+      # PostgreSQL Language Server
+      postgres-lsp
       # Alternative to `ps`
       procs
       # Rust toolchain manager
@@ -662,24 +666,26 @@ in
       enableMan = true;
       colorschemes.catppuccin = {
         enable = true;
-        flavour = "frappe";
-        integrations = {
-          aerial = true;
-          alpha = true;
-          barbecue = { alt_background = true; bold_basename = true; dim_context = true; dim_dirname = true; };
-          cmp = true;
-          dap = { enabled = true; enable_ui = true; };
-          gitsigns = true;
-          native_lsp = { enabled = true; inlay_hints.background = true; };
-          neogit = true;
-          neotree = true;
-          telescope.enabled = true;
-          treesitter = true;
-          treesitter_context = true;
-          which_key = true;
+        settings = {
+          flavour = "frappe";
+          integrations = {
+            aerial = true;
+            alpha = true;
+            barbecue = { alt_background = true; bold_basename = true; dim_context = true; dim_dirname = true; };
+            cmp = true;
+            dap = { enabled = true; enable_ui = true; };
+            gitsigns = true;
+            native_lsp = { enabled = true; inlay_hints.background = true; };
+            neogit = true;
+            neotree = true;
+            telescope.enabled = true;
+            treesitter = true;
+            treesitter_context = true;
+            which_key = true;
+          };
+          show_end_of_buffer = true;
+          term_colors = true;
         };
-        showBufferEnd = true;
-        terminalColors = true;
       };
       # Editor-agnostic configuration
       editorconfig.enable = true;
@@ -824,7 +830,7 @@ in
             cssls.enable = true;
             dockerls.enable = true;
             # Generic language server proxy for multiple tools
-            # efm.enable = true;
+            efm.enable = true;
             eslint.enable = true;
             gopls.enable = true;
             html.enable = true;
@@ -849,7 +855,7 @@ in
             typos-lsp.enable = true;
             yamlls = {
               enable = true;
-              extraOptions.settings.yamlls = {
+              extraOptions.settings.yaml = {
                 customTags = [
                   "!And"
                   "!Base64"
@@ -1036,7 +1042,7 @@ in
         # Enable working with TODO: code comments
         todo-comments.enable = true;
         # Built-in terminal
-        toggleterm = { enable = true; size = 10; };
+        toggleterm = { enable = true; settings.size = 10; };
         # Parser generator & incremental parsing toolkit
         treesitter = { enable = true; incrementalSelection.enable = true; };
         # Code context via Treesitter
@@ -1050,11 +1056,13 @@ in
         SchemaStore-nvim
         aerial-nvim
         bufdelete-nvim
+        firenvim
         git-conflict-nvim
         nvim-surround
         nvim-treeclimber
         nvim-treesitter-textsubjects
         overseer-nvim
+        vim-bazel
         vim-bundle-mako
         vim-jinja
       ];
@@ -1064,9 +1072,13 @@ in
           extraPluginsConfig = {
             git-conflict = { };
             nvim-surround = { };
-            overseer = { };
             nvim-treeclimber = { };
-            aerial = { autojump = true; filter_kind = false; open_automatic = true; };
+            overseer = { };
+            aerial = {
+              autojump = true;
+              filter_kind = false;
+              open_automatic = true;
+            };
             "nvim-treesitter.configs".textsubjects = {
               enable = true;
               rrev_selection = ",";
@@ -1078,9 +1090,17 @@ in
             };
           };
         in
-        concatStringsSep "\n" (mapAttrsToList
-          (n: v: "require(\"${n}\").setup(${helpers.toLuaObject v})")
-          extraPluginsConfig);
+        (concatStringsSep "\n"
+          ((mapAttrsToList (n: v: "require(\"${n}\").setup(${helpers.toLuaObject v})") extraPluginsConfig)
+            ++ [
+            "if vim.g.neovide then vim.g.neovide_scale_factor = 0.7 end"
+            ''
+              lspconfig = require('lspconfig')
+              lspconfig.postgres_lsp.setup({
+                root_dir = lspconfig.util.root_pattern 'flake.nix'
+              })
+            ''
+          ]));
       keymaps = [
         { action = ":"; key = ";"; }
         { action = ":AerialToggle<CR>"; key = "<leader>a"; }
@@ -1089,7 +1109,10 @@ in
         { action = ":BufferLineCyclePrev<CR>"; key = "<A-{>"; }
         { action = ":BufferLineMoveNext<CR>"; key = "<A-)>"; }
         { action = ":BufferLineMovePrev<CR>"; key = "<A-(>"; }
+        { action = ":DiffviewClose<CR>"; key = "<leader>D"; }
+        { action = ":DiffviewOpen<CR>"; key = "<leader>d"; }
         { action = ":IncRename "; key = "<leader>rn"; }
+        { action = ":LspRestart<CR>"; key = "<C-l>r"; }
         { action = ":Navbuddy<CR>"; key = "<leader>s"; }
         { action = ":Neogit branch<CR>"; key = "<leader>z"; }
         { action = ":Neogit<CR>"; key = "<leader>x"; }
@@ -1107,19 +1130,17 @@ in
         { action = ":TodoTrouble<CR>"; key = "<leader>dr"; }
         { action = ":ToggleTerm direction=float<CR>"; key = "<S-f>"; } # TODO: figure out how to resize
         { action = ":ToggleTerm<CR>"; key = "<S-t>"; }
-        { action = ":TroubleToggle<CR>"; key = "<leader>p"; }
         { action = ":nohlsearch<CR>"; key = "<leader>c"; }
         { action = ":set invlist<CR>"; key = "<C-l>"; }
-        { action = ":sort<CR>"; key = "<S-s>"; mode = "v"; }
+        { action = ":sort<CR>"; key = "<S-s>"; }
         { action = ":wall<CR>"; key = "<A-W>"; }
         { action = ":wincmd h<CR>"; key = "<leader>h"; }
         { action = ":wincmd j<CR>"; key = "<leader>j"; }
+        { action = ":TroubleToggle<CR>"; key = "<leader>p"; }
         { action = ":wincmd k<CR>"; key = "<leader>k"; }
         { action = ":wincmd l<CR>"; key = "<leader>l"; }
         { action = ":write<CR>"; key = "<A-w>"; }
         { action = ":write<CR>"; key = "<A-w>"; }
-        { action = ":DiffviewOpen<CR>"; key = "<leader>d"; }
-        { action = ":DiffviewClose<CR>"; key = "<leader>D"; }
       ];
     };
     # Post-modern editor https://helix-editor.com/ - NEEDS TUNING

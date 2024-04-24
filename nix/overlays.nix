@@ -84,12 +84,12 @@
     doCheck = false;
   };
   zellij = prev.zellij.overrideAttrs (p: rec {
-    version = "0.40.0";
+    version = "0.41.0";
     src = inputs.zellij;
     cargoDeps = p.cargoDeps.overrideAttrs {
       name = "${p.pname}-${version}-vendor.tar.gz";
       inherit src;
-      outputHash = "sha256-KXXldWtcUsdbDsWd66Q1TbaClfr+Uo8f6gCi1exNIRc=";
+      outputHash = "sha256-UVjiqbwM2XuVtin4/dNcoXN8C0Dtrk17CpGFhX+sh6s=";
     };
   });
 })
