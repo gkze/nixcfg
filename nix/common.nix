@@ -17,7 +17,7 @@ let inherit (builtins) elemAt split; in {
     };
 
     # Auto-upgrade nix command
-    package = pkgs.nixUnstable;
+    package = pkgs.nixVersions.git;
 
     # Pin Nixpkgs to flake spec
     registry.nixpkgs.flake = inputs.nixpkgs;

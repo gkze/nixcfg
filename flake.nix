@@ -57,6 +57,12 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Run unpatched binaries on Nix/NixOS
+    nix-alien = {
+      url = "github:thiagokokada/nix-alien";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # NixOS-specific "app store" GUI
     nix-software-center = {
       url = "github:vlinkz/nix-software-center";
@@ -142,6 +148,7 @@
         config.allowUnfree = true;
         overlays = [
           inputs.devshell.overlays.default
+          inputs.nix-alien.overlays.default
           inputs.rust-overlay.overlays.default
           (import ./nix/overlays.nix { inherit inputs system; })
         ];
