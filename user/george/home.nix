@@ -258,6 +258,8 @@ in
           libreoffice
           # TODO: TBD if works on macOS
           signal-desktop
+          # Logitech device manager
+          solaar
           # System Profiler
           sysprof
           # Offline documentation browser
@@ -284,7 +286,7 @@ in
   ] ++ hmMods;
 
   # User-level Nix config
-  nix = { package = lib.mkForce pkgs.nixUnstable; checkConfig = true; };
+  nix = { package = lib.mkForce pkgs.nixVersions.git; checkConfig = true; };
 
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
@@ -426,6 +428,8 @@ in
       # Only install Hack Nerd Font, since the entire package / font repository
       # is quite large
       (nerdfonts.override { fonts = [ "Hack" ]; })
+      # Run unpatched binaries on Nix/NixOS
+      nix-alien
       # PostgreSQL Language Server
       postgres-lsp
       # Alternative to `ps`
@@ -862,6 +866,7 @@ in
                   "!Cidr"
                   "!Equals"
                   "!FindInMap sequence"
+                  "!ForEach sequence"
                   "!GetAZs"
                   "!GetAtt"
                   "!If"
@@ -874,7 +879,8 @@ in
                   "!Select"
                   "!Split"
                   "!Sub"
-                  "!fn"
+                  "!ToJsonString"
+                  "!Transform"
                 ];
                 schemaStore = { enable = false; url = ""; };
                 schemas.__raw = "require(\"schemastore\").yaml.schemas()";
