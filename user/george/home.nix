@@ -251,6 +251,8 @@ in
           #   '';
           # })
           brave
+          # Universal Database Tool
+          dbeaver-bin
           # Display Data Channel UTILity
           ddcutil
           # Matrix client
@@ -393,8 +395,6 @@ in
       curlie
       # Duplicate file finder
       czkawka
-      # Universal Database Tool
-      dbeaver-bin
       # Disk space usage analyzer (in Rust)
       du-dust
       # Envchain is a utility that loads environment variables from the system
