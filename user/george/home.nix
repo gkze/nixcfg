@@ -13,7 +13,12 @@ let
   # npm config file
   npmConfigFile = "${config.xdg.configHome}/npmrc";
 
+  # User metadata
   meta = import ./meta.nix;
+
+  # Raw GitHub Content
+  ghRaw = { owner, repo, rev, path }:
+    "https://raw.githubusercontent.com/${owner}/${repo}/${rev}/${path}";
 in
 {
   # Home Manager modules go here
@@ -187,7 +192,7 @@ in
           "org/gnome/shell/extensions/display-brightness-ddcutil" = {
             allow-zero-brightness = true;
             button-location = 0;
-            ddcutil-binary-path = "/etc/profiles/per-user/${meta.name.user.system}/bin/ddcutil";
+            ddcutil-binary-path = "${pkgs.ddcutil}/bin/ddcutil";
             ddcutil-queue-ms = 130.0;
             ddcutil-sleep-multiplier = 4.0;
             decrease-brightness-shortcut = [ "<Control>MonBrightnessDown" ];
@@ -254,8 +259,12 @@ in
           firefox
           # Gnome firmware update utility
           gnome-firmware
+          # Gnome Network Displays
+          gnome-network-displays
           # Productivity suite
           libreoffice
+          # Unofficial userspace driver for HID++ Logitech devices
+          logiops
           # TODO: TBD if works on macOS
           signal-desktop
           # Logitech device manager
@@ -385,7 +394,7 @@ in
       # Duplicate file finder
       czkawka
       # Universal Database Tool
-      dbeaver
+      dbeaver-bin
       # Disk space usage analyzer (in Rust)
       du-dust
       # Envchain is a utility that loads environment variables from the system
@@ -417,7 +426,7 @@ in
       httpie
       # Interactive JSON filter
       # TODO: figure out
-      # jnv
+      jnv
       # Additional useful utilities (a la coreutils)
       moreutils
       # Neovim Rust GUI
@@ -430,6 +439,8 @@ in
       (nerdfonts.override { fonts = [ "Hack" ]; })
       # Run unpatched binaries on Nix/NixOS
       nix-alien
+      # Modern developer workflow system
+      # pants
       # PostgreSQL Language Server
       postgres-lsp
       # Alternative to `ps`
@@ -444,6 +455,8 @@ in
       slack
       # Music streaming
       spotify
+      # Aesthetic modern terminal file manager
+      superfile
       # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
       tokei
       # Rust-based Python package resolver & installed (faster pip)
@@ -830,7 +843,8 @@ in
             };
             bashls.enable = true;
             # TypeScript & JavaScript
-            biome.enable = true;
+            # TODO: Re-enable at some point...
+            biome.enable = false;
             cssls.enable = true;
             dockerls.enable = true;
             # Generic language server proxy for multiple tools
@@ -1015,6 +1029,8 @@ in
         barbecue.enable = true;
         # Code commenting
         comment.enable = true;
+        # GitHub Copilot coding assistant
+        copilot-vim.enable = true;
         # Debug Adapter Protocol
         dap.enable = true;
         # Diff view
@@ -1233,48 +1249,24 @@ in
     # Git terminal UI
     gitui = {
       enable = true;
-      keyConfig = ''
-        // Note:
-        // If the default key layout is lower case,
-        // and you want to use `Shift + q` to trigger the exit event,
-        // the setting should like this `exit: Some(( code: Char('Q'), modifiers: "SHIFT")),`
-        // The Char should be upper case, and the modifier should be set to "SHIFT".
-        //
-        // Note:
-        // find `KeysList` type in src/keys/key_list.rs for all possible keys.
-        // every key not overwritten via the config file will use the default specified there
-        (
-            open_help: Some(( code: F(1), modifiers: "")),
-
-            move_left: Some(( code: Char('h'), modifiers: "")),
-            move_right: Some(( code: Char('l'), modifiers: "")),
-            move_up: Some(( code: Char('k'), modifiers: "")),
-            move_down: Some(( code: Char('j'), modifiers: "")),
-    
-            popup_up: Some(( code: Char('p'), modifiers: "CONTROL")),
-            popup_down: Some(( code: Char('n'), modifiers: "CONTROL")),
-            page_up: Some(( code: Char('b'), modifiers: "CONTROL")),
-            page_down: Some(( code: Char('f'), modifiers: "CONTROL")),
-            home: Some(( code: Char('g'), modifiers: "")),
-            end: Some(( code: Char('G'), modifiers: "SHIFT")),
-            shift_up: Some(( code: Char('K'), modifiers: "SHIFT")),
-            shift_down: Some(( code: Char('J'), modifiers: "SHIFT")),
-
-            edit_file: Some(( code: Char('I'), modifiers: "SHIFT")),
-
-            status_reset_item: Some(( code: Char('U'), modifiers: "SHIFT")),
-
-            diff_reset_lines: Some(( code: Char('u'), modifiers: "")),
-            diff_stage_lines: Some(( code: Char('s'), modifiers: "")),
-
-            stashing_save: Some(( code: Char('w'), modifiers: "")),
-            stashing_toggle_index: Some(( code: Char('m'), modifiers: "")),
-
-            stash_open: Some(( code: Char('l'), modifiers: "")),
-
-            abort_merge: Some(( code: Char('M'), modifiers: "SHIFT")),
-        )
-      '';
+      keyConfig = pkgs.fetchurl {
+        url = ghRaw {
+          owner = "extrawurst";
+          repo = "gitui";
+          rev = "c57543b4f884af31146eeee8a90e29ec69b6ef5e";
+          path = "vim_style_key_config.ron";
+        };
+        hash = "sha256-uYL9CSCOlTdW3E87I7GsgvDEwOPHoz1LIxo8DARDX1Y=";
+      };
+      theme = pkgs.fetchurl {
+        url = ghRaw {
+          owner = "catppuccin";
+          repo = "gitui";
+          rev = "39978362b2c88b636cacd55b65d2f05c45a47eb9";
+          path = "theme/frappe.ron";
+        };
+        hash = "sha256-ufqp12acsWlJlmFpjZyrjKijs40+8APloLukeAxCBRw=";
+      };
     };
     # GitHub CLI
     gh = {

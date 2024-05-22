@@ -5,7 +5,7 @@
   };
   bin = prev.buildGoModule {
     pname = "bin";
-    version = "0.17.4";
+    version = "0.17.5";
     src = inputs.bin;
     vendorHash = "sha256-9kgenzKjo5Lc9JrEdXQlRocl17o4RyKrKuJAFoOEVwY=";
   };
@@ -31,24 +31,19 @@
       chmod +x $out/bin/git-trim
     '';
   };
-  # TODO: figure out
-  # jnv = prev.rustPlatform.buildRustPackage rec {
-  #   pname = "jnv";
-  #   version = "0.1.2";
-  #   src = inputs.jnv;
-  #   cargoLock.lockFile = "${src}/Cargo.lock";
-  # };
   nix-software-center = inputs.nix-software-center.packages.${system}.default;
   nixos-conf-editor = inputs.nixos-conf-editor.packages.${system}.default;
+  # pants = final.callPackage ./pants.nix { nix-alien = inputs.nix-alien; };
   sublime-kdl = prev.stdenvNoCC.mkDerivation {
     pname = "sublime-kdl";
     version = inputs.sublime-kdl.rev;
     src = inputs.sublime-kdl;
     installPhase = "cp -r $src $out";
   };
+  superfile = inputs.superfile.packages.${system}.default;
   uv = prev.rustPlatform.buildRustPackage rec {
     pname = "uv";
-    version = "0.1.28";
+    version = "0.1.45";
     src = inputs.uv;
     cargoLock = {
       lockFile = "${src}/Cargo.lock";
@@ -89,7 +84,7 @@
     cargoDeps = p.cargoDeps.overrideAttrs {
       name = "${p.pname}-${version}-vendor.tar.gz";
       inherit src;
-      outputHash = "sha256-UVjiqbwM2XuVtin4/dNcoXN8C0Dtrk17CpGFhX+sh6s=";
+      outputHash = "sha256-W2hyOKO2QRfuJJbQ4FWkEn9neVrKR1Q+pybxkS1gRh0=";
     };
   });
 })

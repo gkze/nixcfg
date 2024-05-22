@@ -99,7 +99,7 @@
     yawsso = { url = "github:victorskl/yawsso"; flake = false; };
 
     # Interactive JSON filter
-    jnv = { url = "github:ynqa/jnv"; flake = false; };
+    jnv = { url = "github:ynqa/jnv/v0.2.2"; flake = false; };
 
     # Alacritty themes
     alacritty-theme = { url = "github:alacritty/alacritty-theme"; flake = false; };
@@ -126,6 +126,12 @@
 
     # Browser Neovim client
     firenvim = { url = "github:glacambre/firenvim"; flake = false; };
+
+    # Aesthetic modern terminal file manager
+    superfile = {
+      url = "github:MHNightCat/superfile";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs:
