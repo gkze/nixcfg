@@ -267,6 +267,8 @@ in
           libreoffice
           # Unofficial userspace driver for HID++ Logitech devices
           logiops
+          # Run unpatched binaries on Nix/NixOS
+          nix-alien
           # TODO: TBD if works on macOS
           signal-desktop
           # Logitech device manager
@@ -437,8 +439,6 @@ in
       # Only install Hack Nerd Font, since the entire package / font repository
       # is quite large
       (nerdfonts.override { fonts = [ "Hack" ]; })
-      # Run unpatched binaries on Nix/NixOS
-      nix-alien
       # Modern developer workflow system
       # pants
       # PostgreSQL Language Server
