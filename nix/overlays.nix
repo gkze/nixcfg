@@ -49,10 +49,15 @@
       lockFile = "${src}/Cargo.lock";
       allowBuiltinFetchGit = true;
     };
-    buildInputs = [ prev.openssl ];
-    cargoHash = "";
+    buildInputs = [ prev.openssl ]
+      ++ (with prev; lib.lists.optional stdenv.isDarwin
+      (with darwin.apple_sdk.frameworks; [ Security SystemConfiguration ]));
     doCheck = false;
-    nativeBuildInputs = with prev; [ cmake pkg-config final.rust-bin.stable.latest.default ];
+    nativeBuildInputs = with final; [
+      cmake
+      pkg-config
+      rust-bin.stable.latest.default
+    ];
     OPENSSL_NO_VENDOR = 1;
   };
   vimPlugins = prev.vimPlugins.extend (_: _: {
