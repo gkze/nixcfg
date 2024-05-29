@@ -43,7 +43,7 @@
   superfile = inputs.superfile.packages.${system}.default;
   uv = prev.rustPlatform.buildRustPackage rec {
     pname = "uv";
-    version = "0.1.45";
+    version = "0.2.5";
     src = inputs.uv;
     cargoLock = {
       lockFile = "${src}/Cargo.lock";
@@ -89,7 +89,7 @@
     cargoDeps = p.cargoDeps.overrideAttrs {
       name = "${p.pname}-${version}-vendor.tar.gz";
       inherit src;
-      outputHash = "sha256-W2hyOKO2QRfuJJbQ4FWkEn9neVrKR1Q+pybxkS1gRh0=";
+      outputHash = "sha256-nU3ylm/otvgSnikVmeG3/fctgwowhW6z15fPpIHMVQo=";
     };
   });
 })
