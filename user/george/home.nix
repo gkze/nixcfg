@@ -432,7 +432,7 @@ in
       # Additional useful utilities (a la coreutils)
       moreutils
       # Neovim Rust GUI
-      neovide
+      (if pkgs.stdenv.isLinux then neovide else neovide.overrideAttrs { version = "0.12.2"; })
       # Nerd Fonts
       # - https://www.nerdfonts.com/
       # - https://github.com/ryanoasis/nerd-fonts
