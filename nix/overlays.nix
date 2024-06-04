@@ -83,13 +83,4 @@
     src = inputs.yawsso;
     doCheck = false;
   };
-  zellij = prev.zellij.overrideAttrs (p: rec {
-    version = "0.41.0";
-    src = inputs.zellij;
-    cargoDeps = p.cargoDeps.overrideAttrs {
-      name = "${p.pname}-${version}-vendor.tar.gz";
-      inherit src;
-      outputHash = "sha256-nU3ylm/otvgSnikVmeG3/fctgwowhW6z15fPpIHMVQo=";
-    };
-  });
 })

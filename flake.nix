@@ -83,9 +83,6 @@
     # Hardware-specific settings
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
 
-    # Terminal multiplexer / workspace manager
-    zellij = { url = "github:zellij-org/zellij"; flake = false; };
-
     # Vim text alignment plugin
     mini-align = { url = "github:echasnovski/mini.align"; flake = false; };
 
