@@ -660,7 +660,6 @@ in
     # Terminal multiplexer / workspace manager
     zellij = {
       enable = true;
-      package = pkgs.zellij;
       settings = {
         # TODO: set dynamically, or better yet figure out how to get Alacritty
         # to respect custom GTK themes
@@ -931,7 +930,7 @@ in
             useLibuvFileWatcher = true;
           };
           sourceSelector.winbar = true;
-          window.mappings = { "<A-S-{>" = "prev_source"; "<A-S-}>" = "next_source"; };
+          window.mappings = { "<A-{>" = "prev_source"; "<A-}>" = "next_source"; };
         };
         # Display colors for color codes
         nvim-colorizer = {
@@ -1134,10 +1133,10 @@ in
         { action = ":"; key = ";"; }
         { action = ":AerialToggle<CR>"; key = "<leader>a"; }
         { action = ":Bdelete<CR>"; key = "<A-x>"; }
-        { action = ":BufferLineCycleNext<CR>"; key = "<A-S-}>"; }
-        { action = ":BufferLineCyclePrev<CR>"; key = "<A-S-{>"; }
-        { action = ":BufferLineMoveNext<CR>"; key = "<A-S-)>"; }
-        { action = ":BufferLineMovePrev<CR>"; key = "<A-S-(>"; }
+        { action = ":BufferLineCycleNext<CR>"; key = "<A-}>"; }
+        { action = ":BufferLineCyclePrev<CR>"; key = "<A-{>"; }
+        { action = ":BufferLineMoveNext<CR>"; key = "<A-)>"; }
+        { action = ":BufferLineMovePrev<CR>"; key = "<A-(>"; }
         { action = ":DiffviewClose<CR>"; key = "<leader>D"; }
         { action = ":DiffviewOpen<CR>"; key = "<leader>d"; }
         { action = ":IncRename "; key = "<leader>rn"; }
@@ -1164,7 +1163,7 @@ in
         { action = ":nohlsearch<CR>"; key = "<leader>c"; }
         { action = ":set invlist<CR>"; key = "<C-l>"; }
         { action = ":sort<CR>"; key = "<S-s>"; }
-        { action = ":wall<CR>"; key = "<A-S-W>"; }
+        { action = ":wall<CR>"; key = "<A-W>"; }
         { action = ":wincmd h<CR>"; key = "<leader>h"; }
         { action = ":wincmd j<CR>"; key = "<leader>j"; }
         { action = ":wincmd k<CR>"; key = "<leader>k"; }
