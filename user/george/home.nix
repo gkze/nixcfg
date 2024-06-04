@@ -688,7 +688,12 @@ in
           integrations = {
             aerial = true;
             alpha = true;
-            barbecue = { alt_background = true; bold_basename = true; dim_context = true; dim_dirname = true; };
+            barbecue = {
+              alt_background = true;
+              bold_basename = true;
+              dim_context = true;
+              dim_dirname = true;
+            };
             cmp = true;
             dap = { enabled = true; enable_ui = true; };
             gitsigns = true;
@@ -716,6 +721,8 @@ in
         cursorline = true;
         # Highlight cursor column
         cursorcolumn = true;
+        # Mouse
+        mouse = "a";
         # Rulers at 80 and 100 characters
         # Line numbers
         number = true;
@@ -837,7 +844,7 @@ in
             #   enable = true;
             #   settings.formatting.command = "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt";
             # };
-            nil_ls = {
+            nil-ls = {
               enable = true;
               settings.formatting.command = [ "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt" ];
             };
@@ -924,7 +931,7 @@ in
             useLibuvFileWatcher = true;
           };
           sourceSelector.winbar = true;
-          window.mappings = { "<A-{>" = "prev_source"; "<A-}>" = "next_source"; };
+          window.mappings = { "<A-S-{>" = "prev_source"; "<A-S-}>" = "next_source"; };
         };
         # Display colors for color codes
         nvim-colorizer = {
@@ -1127,13 +1134,14 @@ in
         { action = ":"; key = ";"; }
         { action = ":AerialToggle<CR>"; key = "<leader>a"; }
         { action = ":Bdelete<CR>"; key = "<A-x>"; }
-        { action = ":BufferLineCycleNext<CR>"; key = "<A-}>"; }
-        { action = ":BufferLineCyclePrev<CR>"; key = "<A-{>"; }
-        { action = ":BufferLineMoveNext<CR>"; key = "<A-)>"; }
-        { action = ":BufferLineMovePrev<CR>"; key = "<A-(>"; }
+        { action = ":BufferLineCycleNext<CR>"; key = "<A-S-}>"; }
+        { action = ":BufferLineCyclePrev<CR>"; key = "<A-S-{>"; }
+        { action = ":BufferLineMoveNext<CR>"; key = "<A-S-)>"; }
+        { action = ":BufferLineMovePrev<CR>"; key = "<A-S-(>"; }
         { action = ":DiffviewClose<CR>"; key = "<leader>D"; }
         { action = ":DiffviewOpen<CR>"; key = "<leader>d"; }
         { action = ":IncRename "; key = "<leader>rn"; }
+        { action = ":LspInfo<CR>"; key = "<C-l>i"; }
         { action = ":LspRestart<CR>"; key = "<C-l>r"; }
         { action = ":Navbuddy<CR>"; key = "<leader>s"; }
         { action = ":Neogit branch<CR>"; key = "<leader>z"; }
@@ -1152,13 +1160,13 @@ in
         { action = ":TodoTrouble<CR>"; key = "<leader>dr"; }
         { action = ":ToggleTerm direction=float<CR>"; key = "<S-f>"; } # TODO: figure out how to resize
         { action = ":ToggleTerm<CR>"; key = "<S-t>"; }
+        { action = ":TroubleToggle<CR>"; key = "<leader>p"; }
         { action = ":nohlsearch<CR>"; key = "<leader>c"; }
         { action = ":set invlist<CR>"; key = "<C-l>"; }
         { action = ":sort<CR>"; key = "<S-s>"; }
-        { action = ":wall<CR>"; key = "<A-W>"; }
+        { action = ":wall<CR>"; key = "<A-S-W>"; }
         { action = ":wincmd h<CR>"; key = "<leader>h"; }
         { action = ":wincmd j<CR>"; key = "<leader>j"; }
-        { action = ":TroubleToggle<CR>"; key = "<leader>p"; }
         { action = ":wincmd k<CR>"; key = "<leader>k"; }
         { action = ":wincmd l<CR>"; key = "<leader>l"; }
         { action = ":write<CR>"; key = "<A-w>"; }
