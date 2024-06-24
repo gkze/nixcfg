@@ -98,17 +98,20 @@
     # Alacritty themes
     alacritty-theme = { url = "github:alacritty/alacritty-theme"; flake = false; };
 
-    # Catppuccin theme for Delta
-    catppuccin-delta = { url = "github:catppuccin/delta"; flake = false; };
-
-    # Catppuccin theme for Bat
-    catppuccin-bat = { url = "github:catppuccin/bat"; flake = false; };
+    # Catppuccin theme
+    catppuccin.url = "github:catppuccin/nix";
 
     # Sublime syntax for KDL (used in bat)
     sublime-kdl = { url = "github:eugenesvk/sublime-KDL"; flake = false; };
 
     # Vim Mako (template language) syntax
     vim-bundle-mako = { url = "github:sophacles/vim-bundle-mako"; flake = false; };
+
+    # Code snapshotting plugin
+    codesnap-nvim = { url = "github:mistricky/codesnap.nvim"; flake = false; };
+
+    # Neovim database UI
+    nvim-dbee = { url = "github:kndndrj/nvim-dbee"; flake = false; };
 
     # Neovim structured editing plugin
     # TODO: fix attempt to index nil value" 
@@ -126,6 +129,8 @@
       url = "github:MHNightCat/superfile";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    gitlab-nvim = { url = "github:harrisoncramer/gitlab.nvim"; flake = false; };
   };
 
   outputs = inputs:

@@ -5,6 +5,14 @@
   ];
 
   boot = {
+    binfmt.registrations.appimage = {
+      wrapInterpreterInShell = false;
+      interpreter = "${pkgs.appimage-run}/bin/appimage-run";
+      recognitionType = "magic";
+      offset = 0;
+      mask = ''\xff\xff\xff\xff\x00\x00\x00\x00\xff\xff\xff'';
+      magicOrExtension = ''\x7fELF....AI\x02'';
+    };
     # Inter-Integrated Circuit (I2C)
     # https://en.wikipedia.org/wiki/I%C2%B2C
     # Used for communicating with external monitor(s) over DDC (Display Data
@@ -38,7 +46,6 @@
       package = pkgs.fprintd-tod;
       tod = { enable = true; driver = pkgs.libfprint-2-tod1-vfs0090; };
     };
-    auto-cpufreq.enable = true;
   };
 
   fileSystems = {
