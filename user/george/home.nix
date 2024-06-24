@@ -24,6 +24,7 @@ in
   # Home Manager modules go here
   imports = [
     inputs.nixvim.homeManagerModules.nixvim
+    inputs.catppuccin.homeManagerModules.catppuccin
     {
       darwin = {
         # https://github.com/nix-community/home-manager/issues/1341
@@ -217,9 +218,12 @@ in
 
         gtk = {
           enable = true;
-          theme = {
-            name = "Catppuccin-Frappe-Standard-Blue-Dark";
-            package = pkgs.catppuccin-gtk;
+          catppuccin = {
+            enable = true;
+            flavor = "frappe";
+            cursor = { enable = true; flavor = "frappe"; };
+            gnomeShellTheme = true;
+            icon = { enable = true; flavor = "frappe"; };
           };
         };
 
@@ -231,16 +235,16 @@ in
           lorri.enable = true;
         };
 
-        xdg.configFile = {
-          "gtk-4.0/assets".source = "${config.gtk.theme.package}/share/themes/${config.gtk.theme.name}/gtk-4.0/assets";
-          "gtk-4.0/gtk.css".source = "${config.gtk.theme.package}/share/themes/${config.gtk.theme.name}/gtk-4.0/gtk.css";
-          "gtk-4.0/gtk-dark.css".source = "${config.gtk.theme.package}/share/themes/${config.gtk.theme.name}/gtk-4.0/gtk-dark.css";
-        };
+        # xdg.configFile = {
+        #   "gtk-4.0/assets".source = "${config.gtk.theme.package}/share/themes/${config.gtk.theme.name}/gtk-4.0/assets";
+        #   "gtk-4.0/gtk.css".source = "${config.gtk.theme.package}/share/themes/${config.gtk.theme.name}/gtk-4.0/gtk.css";
+        #   "gtk-4.0/gtk-dark.css".source = "${config.gtk.theme.package}/share/themes/${config.gtk.theme.name}/gtk-4.0/gtk-dark.css";
+        # };
 
         # These are marked as unsupported on darwin
         home.packages = with pkgs; [
           # Database GUI
-          beekeeper-studio
+          # beekeeper-studio
           # Web browser
           # TODO: get TouchpadOverscrollHistoryNavigation working
           # (brave.overrideAttrs {
@@ -303,6 +307,9 @@ in
 
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
+
+  # Enable catppuccin theme
+  catppuccin = { enable = true; flavor = "frappe"; };
 
   # TODO: figure out and make NixOS-only (for now?)
   # wayland.windowManager.hyprland.enable = true;
@@ -391,8 +398,6 @@ in
     packages = with pkgs; [
       # Binary manager
       bin
-      # Color theme
-      catppuccin
       # cURL wrapper with niceties
       curlie
       # Duplicate file finder
@@ -480,8 +485,8 @@ in
         # TODO: figure out how to use custom GTK themes with Wayland
         postFixup = "wrapProgram $out/bin/alacritty --unset WAYLAND_DISPLAY";
       };
+      catppuccin = { enable = true; flavor = "frappe"; };
       settings = {
-        import = [ "${pkgs.alacritty-theme}/catppuccin_frappe.toml" ];
         font = {
           size = lib.mkDefault 12.0;
           normal.family = "Hack Nerd Font Mono";
@@ -517,6 +522,7 @@ in
         share = true;
         size = 100000;
       };
+      syntaxHighlighting.catppuccin = { enable = true; flavor = "frappe"; };
       # Placed in $ZDOTDIR/.zshrc before compinit
       initExtraBeforeCompInit = ''
         # Pre-compinit
@@ -655,11 +661,19 @@ in
       enable = true;
       enableZshIntegration = true;
       enableNushellIntegration = true;
-      settings = { add_newline = false; line_break.disabled = true; };
+      catppuccin = { enable = true; flavor = "frappe"; };
+      settings = {
+        add_newline = false;
+        line_break.disabled = true;
+        nix_shell.disabled = true;
+        nodejs.disabled = true;
+        python.disabled = true;
+      };
     };
     # Terminal multiplexer / workspace manager
     zellij = {
       enable = true;
+      catppuccin = { enable = true; flavor = "frappe"; };
       settings = {
         # TODO: set dynamically, or better yet figure out how to get Alacritty
         # to respect custom GTK themes
@@ -667,13 +681,13 @@ in
         keybinds.normal."bind \"Alt s\"".Clear = { };
         session_serialization = false;
         simplified_ui = true;
-        theme = "catppuccin-frappe";
       };
     };
     # Terminal file manager
     yazi = {
       enable = true;
       enableZshIntegration = true;
+      catppuccin = { enable = true; flavor = "frappe"; };
       settings.manager.sort_by = "alphabetical";
     };
     # Neovim configured with Nix - NEEDS TUNING
@@ -965,6 +979,11 @@ in
             };
           };
         };
+        # File finder (popup)
+        telescope = {
+          enable = true;
+          settings.defaults.layout_config.preview_width = 0.5;
+        };
         # Tree-sitter text objects
         # TODO: figure out
         treesitter-textobjects = {
@@ -1043,6 +1062,8 @@ in
         diffview.enable = true;
         # LSP & notification UI
         fidget.enable = true;
+        # Shareable file permalinks
+        gitlinker.enable = true;
         # Highlight other occurrences of word under cursor
         illuminate.enable = true;
         # Incremental rename
@@ -1065,8 +1086,8 @@ in
         nix.enable = true;
         # Automatically manage character pairs
         nvim-autopairs.enable = true;
-        # File finder (popup)
-        telescope.enable = true;
+        # File explorer
+        oil.enable = true;
         # Enable working with TODO: code comments
         todo-comments.enable = true;
         # Built-in terminal
@@ -1084,8 +1105,11 @@ in
         SchemaStore-nvim
         aerial-nvim
         bufdelete-nvim
+        codesnap-nvim
         firenvim
         git-conflict-nvim
+        gitlab-nvim
+        nvim-dbee
         nvim-surround
         nvim-treeclimber
         nvim-treesitter-textsubjects
@@ -1098,7 +1122,14 @@ in
         let
           helpers = inputs.nixvim.lib.${hostPlatform}.helpers;
           extraPluginsConfig = {
+            codesnap = {
+              code_font_family = "Hack Nerd Font Mono";
+              has_breadcrumbs = true;
+              save_path = "~/Pictures";
+              watermark = "";
+            };
             git-conflict = { };
+            gitlinker.callbacks."git.usebasis.co".__raw = "require(\"gitlinker.hosts\").get_gitlab_url";
             nvim-surround = { };
             nvim-treeclimber = { };
             overseer = { };
@@ -1130,51 +1161,52 @@ in
             ''
           ]));
       keymaps = [
-        { action = ":"; key = ";"; }
-        { action = ":AerialToggle<CR>"; key = "<leader>a"; }
-        { action = ":Bdelete<CR>"; key = "<A-x>"; }
-        { action = ":BufferLineCycleNext<CR>"; key = "<A-}>"; }
-        { action = ":BufferLineCyclePrev<CR>"; key = "<A-{>"; }
-        { action = ":BufferLineMoveNext<CR>"; key = "<A-)>"; }
-        { action = ":BufferLineMovePrev<CR>"; key = "<A-(>"; }
-        { action = ":DiffviewClose<CR>"; key = "<leader>D"; }
-        { action = ":DiffviewOpen<CR>"; key = "<leader>d"; }
-        { action = ":IncRename "; key = "<leader>rn"; }
-        { action = ":LspInfo<CR>"; key = "<C-l>i"; }
-        { action = ":LspRestart<CR>"; key = "<C-l>r"; }
-        { action = ":Navbuddy<CR>"; key = "<leader>s"; }
-        { action = ":Neogit branch<CR>"; key = "<leader>z"; }
-        { action = ":Neogit<CR>"; key = "<leader>x"; }
-        { action = ":Neotree focus<CR>"; key = "<leader>n"; }
-        { action = ":Neotree reveal<CR>"; key = "<leader>r"; }
-        { action = ":Neotree toggle buffers<CR>"; key = "<leader>b"; }
-        { action = ":Neotree toggle filesystem<CR>"; key = "<leader>t"; }
-        { action = ":Neotree toggle git_status<CR>"; key = "<leader>v"; }
-        { action = ":Telescope find_files hidden=true<CR>"; key = "<leader>F"; }
-        { action = ":Telescope find_files<CR>"; key = "<leader>f"; }
-        { action = ":Telescope keymaps<CR>"; key = "<leader>m"; }
-        { action = ":Telescope live_grep<CR>"; key = "<leader>g"; }
-        { action = ":TodoLocList<CR>"; key = "<leader>dl"; }
-        { action = ":TodoTelescope<CR>"; key = "<leader>de"; }
-        { action = ":TodoTrouble<CR>"; key = "<leader>dr"; }
-        { action = ":ToggleTerm direction=float<CR>"; key = "<S-f>"; } # TODO: figure out how to resize
-        { action = ":ToggleTerm<CR>"; key = "<S-t>"; }
-        { action = ":TroubleToggle<CR>"; key = "<leader>p"; }
-        { action = ":nohlsearch<CR>"; key = "<leader>c"; }
-        { action = ":set invlist<CR>"; key = "<C-l>"; }
-        { action = ":sort<CR>"; key = "<S-s>"; }
-        { action = ":wall<CR>"; key = "<A-W>"; }
-        { action = ":wincmd h<CR>"; key = "<leader>h"; }
-        { action = ":wincmd j<CR>"; key = "<leader>j"; }
-        { action = ":wincmd k<CR>"; key = "<leader>k"; }
-        { action = ":wincmd l<CR>"; key = "<leader>l"; }
-        { action = ":write<CR>"; key = "<A-w>"; }
-        { action = ":write<CR>"; key = "<A-w>"; }
+        { key = ";"; action = ":"; }
+        { key = "<A-(>"; action = ":BufferLineMovePrev<CR>"; }
+        { key = "<A-)>"; action = ":BufferLineMoveNext<CR>"; }
+        { key = "<A-W>"; action = ":wall<CR>"; }
+        { key = "<A-w>"; action = ":write<CR>"; }
+        { key = "<A-w>"; action = ":write<CR>"; }
+        { key = "<A-x>"; action = ":Bdelete<CR>"; }
+        { key = "<A-{>"; action = ":BufferLineCyclePrev<CR>"; }
+        { key = "<A-}>"; action = ":BufferLineCycleNext<CR>"; }
+        { key = "<C-l>"; action = ":set invlist<CR>"; }
+        { key = "<C-l>i"; action = ":LspInfo<CR>"; }
+        { key = "<C-l>r"; action = ":LspRestart<CR>"; }
+        { key = "<S-f>"; action = ":ToggleTerm direction=float<CR>"; } # TODO: figure out how to resize
+        { key = "<S-s>"; action = ":sort<CR>"; }
+        { key = "<S-t>"; action = ":ToggleTerm<CR>"; }
+        { key = "<leader>D"; action = ":DiffviewClose<CR>"; }
+        { key = "<leader>F"; action = ":Telescope find_files hidden=true<CR>"; }
+        { key = "<leader>a"; action = ":AerialToggle<CR>"; }
+        { key = "<leader>b"; action = ":Neotree toggle buffers<CR>"; }
+        { key = "<leader>c"; action = ":nohlsearch<CR>"; }
+        { key = "<leader>d"; action = ":DiffviewOpen<CR>"; }
+        { key = "<leader>de"; action = ":TodoTelescope<CR>"; }
+        { key = "<leader>dl"; action = ":TodoLocList<CR>"; }
+        { key = "<leader>dr"; action = ":TodoTrouble<CR>"; }
+        { key = "<leader>f"; action = ":Telescope find_files<CR>"; }
+        { key = "<leader>g"; action = ":Telescope live_grep<CR>"; }
+        { key = "<leader>h"; action = ":wincmd h<CR>"; }
+        { key = "<leader>j"; action = ":wincmd j<CR>"; }
+        { key = "<leader>k"; action = ":wincmd k<CR>"; }
+        { key = "<leader>l"; action = ":wincmd l<CR>"; }
+        { key = "<leader>m"; action = ":Telescope keymaps<CR>"; }
+        { key = "<leader>n"; action = ":Neotree focus<CR>"; }
+        { key = "<leader>p"; action = ":Trouble diagnostics<CR>"; }
+        { key = "<leader>r"; action = ":Neotree reveal<CR>"; }
+        { key = "<leader>rn"; action = ":IncRename "; }
+        { key = "<leader>s"; action = ":Navbuddy<CR>"; }
+        { key = "<leader>t"; action = ":Neotree toggle filesystem<CR>"; }
+        { key = "<leader>v"; action = ":Neotree toggle git_status<CR>"; }
+        { key = "<leader>x"; action = ":Neogit<CR>"; }
+        { key = "<leader>z"; action = ":Neogit branch<CR>"; }
       ];
     };
     # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
     helix = {
       enable = true;
+      catppuccin = { enable = true; flavor = "frappe"; };
       languages.language = [
         { name = "nix"; }
         { name = "python"; }
@@ -1221,11 +1253,8 @@ in
       };
       delta = {
         enable = true;
-        options = {
-          features = "catppuccin-frappe";
-          navigate = true;
-          side-by-side = true;
-        };
+        catppuccin = { enable = true; flavor = "frappe"; };
+        options = { navigate = true; side-by-side = true; };
       };
       # difftastic = { enable = true; background = "dark"; };
       extraConfig = {
@@ -1237,7 +1266,6 @@ in
         user.signingkey = meta.gpg.keys.personal;
       };
       includes = [
-        { path = "${pkgs.catppuccin-delta}/catppuccin.gitconfig"; }
         {
           path = "${config.xdg.configHome}/git/personal";
           condition = "gitdir:~/.config/nixcfg/**";
@@ -1256,6 +1284,7 @@ in
     # Git terminal UI
     gitui = {
       enable = true;
+      catppuccin = { enable = true; flavor = "frappe"; };
       keyConfig = pkgs.fetchurl {
         url = ghRaw {
           owner = "extrawurst";
@@ -1264,15 +1293,6 @@ in
           path = "vim_style_key_config.ron";
         };
         hash = "sha256-uYL9CSCOlTdW3E87I7GsgvDEwOPHoz1LIxo8DARDX1Y=";
-      };
-      theme = pkgs.fetchurl {
-        url = ghRaw {
-          owner = "catppuccin";
-          repo = "gitui";
-          rev = "39978362b2c88b636cacd55b65d2f05c45a47eb9";
-          path = "theme/frappe.ron";
-        };
-        hash = "sha256-ufqp12acsWlJlmFpjZyrjKijs40+8APloLukeAxCBRw=";
       };
     };
     # GitHub CLI
@@ -1285,21 +1305,27 @@ in
         extensions = with pkgs; [ gh-dash ];
       };
     };
+    # System monitor
+    bottom = {
+      enable = true;
+      catppuccin = { enable = true; flavor = "frappe"; };
+    };
     # Manual page interface
     man = { enable = true; generateCaches = true; };
     # FuZzy Finder - finds items in lists. Current integrations / use cases:
     # - Zsh history search
     # - Neovim file picking
-    fzf = { enable = true; enableZshIntegration = true; };
+    fzf = {
+      enable = true;
+      enableZshIntegration = true;
+      catppuccin = { enable = true; flavor = "frappe"; };
+    };
     # More robust alternative to `cat`
     bat = {
       enable = true;
       config = { style = "full"; theme = "Catppuccin Frappe"; };
+      catppuccin = { enable = true; flavor = "frappe"; };
       syntaxes.kdl = { src = pkgs.sublime-kdl; file = "KDL.sublime-syntax"; };
-      themes."Catppuccin Frappe" = {
-        src = pkgs.catppuccin-bat;
-        file = "themes/Catppuccin Frappe.tmTheme";
-      };
     };
     # `ls` alternative
     eza.enable = true;
