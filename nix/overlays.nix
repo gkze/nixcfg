@@ -9,18 +9,6 @@
     src = inputs.bin;
     vendorHash = "sha256-9kgenzKjo5Lc9JrEdXQlRocl17o4RyKrKuJAFoOEVwY=";
   };
-  catppuccin-bat = prev.stdenvNoCC.mkDerivation {
-    pname = "catppuccin-bat";
-    version = inputs.catppuccin-bat.rev;
-    src = inputs.catppuccin-bat;
-    installPhase = "cp -r $src $out";
-  };
-  catppuccin-delta = prev.stdenvNoCC.mkDerivation {
-    pname = "catppuccin-delta";
-    version = inputs.catppuccin-delta.rev;
-    src = inputs.catppuccin-delta;
-    installPhase = "cp -r $src $out";
-  };
   git-trim = prev.stdenvNoCC.mkDerivation {
     pname = "git-trim";
     version = inputs.git-trim.rev;
@@ -61,6 +49,21 @@
     OPENSSL_NO_VENDOR = 1;
   };
   vimPlugins = prev.vimPlugins.extend (_: _: {
+    # NOTE: does not work on nixbuild.net for some reason but works locally
+    codesnap-nvim = prev.vimUtils.buildVimPlugin {
+      pname = "codesnap-nvim";
+      version = inputs.codesnap-nvim.rev;
+      src = inputs.codesnap-nvim;
+      nativeBuildInputs = with prev; [ cargo rustc ];
+      buildPhase = "make";
+    };
+    gitlab-nvim = prev.vimUtils.buildVimPlugin {
+      pname = "gitlab-nvim";
+      version = inputs.gitlab-nvim.rev;
+      src = inputs.gitlab-nvim;
+      nativeBuildInputs = with prev; [ go ];
+      buildPhase = "make";
+    };
     vim-bundle-mako = prev.vimUtils.buildVimPlugin {
       pname = "vim-bundle-mako";
       version = inputs.vim-bundle-mako.rev;
@@ -70,6 +73,11 @@
       pname = "mini-align";
       version = inputs.mini-align.rev;
       src = inputs.mini-align;
+    };
+    nvim-dbee = prev.vimUtils.buildVimPlugin {
+      pname = "nvim-dbee";
+      version = inputs.nvim-dbee.rev;
+      src = inputs.nvim-dbee;
     };
     nvim-treeclimber = prev.vimUtils.buildVimPlugin {
       pname = "nvim-treeclimber";
