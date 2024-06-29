@@ -57,13 +57,6 @@
       nativeBuildInputs = with prev; [ cargo rustc ];
       buildPhase = "make";
     };
-    gitlab-nvim = prev.vimUtils.buildVimPlugin {
-      pname = "gitlab-nvim";
-      version = inputs.gitlab-nvim.rev;
-      src = inputs.gitlab-nvim;
-      nativeBuildInputs = with prev; [ go ];
-      buildPhase = "make";
-    };
     vim-bundle-mako = prev.vimUtils.buildVimPlugin {
       pname = "vim-bundle-mako";
       version = inputs.vim-bundle-mako.rev;

@@ -129,8 +129,6 @@
       url = "github:MHNightCat/superfile";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    gitlab-nvim = { url = "github:harrisoncramer/gitlab.nvim"; flake = false; };
   };
 
   outputs = inputs:
@@ -217,6 +215,7 @@
               (with inputs; [
                 nix-editor.packages.${system}.default
                 nixos-generators.packages.${system}.default
+                home-manager.packages.${system}.default
               ])
               ++ (with pkgs; [ dconf2nix nix-init nix-melt nixpkgs-fmt nurl ]);
           };

@@ -220,10 +220,11 @@ in
           enable = true;
           catppuccin = {
             enable = true;
+            accent = "blue";
             flavor = "frappe";
-            cursor = { enable = true; flavor = "frappe"; };
             gnomeShellTheme = true;
-            icon = { enable = true; flavor = "frappe"; };
+            icon = { enable = true; accent = "blue"; flavor = "frappe"; };
+            tweaks = [ "rimless" ];
           };
         };
 
@@ -305,11 +306,15 @@ in
   # User-level Nix config
   nix = { package = lib.mkForce pkgs.nixVersions.git; checkConfig = true; };
 
+  catppuccin = {
+    enable = true;
+    accent = "blue";
+    flavor = "frappe";
+    pointerCursor = { enable = true; accent = "blue"; flavor = "frappe"; };
+  };
+
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
-
-  # Enable catppuccin theme
-  catppuccin = { enable = true; flavor = "frappe"; };
 
   # TODO: figure out and make NixOS-only (for now?)
   # wayland.windowManager.hyprland.enable = true;
@@ -485,7 +490,6 @@ in
         # TODO: figure out how to use custom GTK themes with Wayland
         postFixup = "wrapProgram $out/bin/alacritty --unset WAYLAND_DISPLAY";
       };
-      catppuccin = { enable = true; flavor = "frappe"; };
       settings = {
         font = {
           size = lib.mkDefault 12.0;
@@ -522,7 +526,6 @@ in
         share = true;
         size = 100000;
       };
-      syntaxHighlighting.catppuccin = { enable = true; flavor = "frappe"; };
       # Placed in $ZDOTDIR/.zshrc before compinit
       initExtraBeforeCompInit = ''
         # Pre-compinit
@@ -661,7 +664,6 @@ in
       enable = true;
       enableZshIntegration = true;
       enableNushellIntegration = true;
-      catppuccin = { enable = true; flavor = "frappe"; };
       settings = {
         add_newline = false;
         line_break.disabled = true;
@@ -673,12 +675,15 @@ in
     # Terminal multiplexer / workspace manager
     zellij = {
       enable = true;
-      catppuccin = { enable = true; flavor = "frappe"; };
       settings = {
         # TODO: set dynamically, or better yet figure out how to get Alacritty
         # to respect custom GTK themes
         env.WAYLAND_DISPLAY = "wayland-0";
-        keybinds.normal."bind \"Alt s\"".Clear = { };
+        keybinds.normal = {
+          "bind \"Alt s\"".Clear = { };
+          "bind \"Alt L\"".GoToNextTab = { };
+          "bind \"Alt H\"".GoToPreviousTab = { };
+        };
         session_serialization = false;
         simplified_ui = true;
       };
@@ -687,7 +692,6 @@ in
     yazi = {
       enable = true;
       enableZshIntegration = true;
-      catppuccin = { enable = true; flavor = "frappe"; };
       settings.manager.sort_by = "alphabetical";
     };
     # Neovim configured with Nix - NEEDS TUNING
@@ -824,14 +828,8 @@ in
         };
         # Treesitter completion source
         cmp-treesitter.enable = true;
-        # General purpose language server - configuration
-        efmls-configs = {
-          enable = true;
-          setup = {
-            javascript.formatter = "prettier";
-            typescript.formatter = "prettier";
-          };
-        };
+        # Formatting
+        conform-nvim = { enable = true; formattersByFt.typescript = [ "prettier" ]; };
         # Git information
         gitsigns = {
           enable = true;
@@ -872,13 +870,7 @@ in
             eslint.enable = true;
             gopls.enable = true;
             html.enable = true;
-            jsonls = {
-              enable = true;
-              extraOptions.settings.json = {
-                schemas.__raw = "require(\"schemastore\").json.schemas()";
-                validate.enable = true;
-              };
-            };
+            jsonls.enable = true;
             pyright.enable = true;
             ruff-lsp.enable = false;
             rust-analyzer = {
@@ -889,37 +881,9 @@ in
             # TOML
             taplo.enable = true;
             tailwindcss.enable = true;
-            tsserver.enable = true;
+            # tsserver.enable = true;
             typos-lsp.enable = true;
-            yamlls = {
-              enable = true;
-              extraOptions.settings.yaml = {
-                customTags = [
-                  "!And"
-                  "!Base64"
-                  "!Cidr"
-                  "!Equals"
-                  "!FindInMap sequence"
-                  "!ForEach sequence"
-                  "!GetAZs"
-                  "!GetAtt"
-                  "!If"
-                  "!ImportValue"
-                  "!Join sequence"
-                  "!Not"
-                  "!Or"
-                  "!Ref Scalar"
-                  "!Ref"
-                  "!Select"
-                  "!Split"
-                  "!Sub"
-                  "!ToJsonString"
-                  "!Transform"
-                ];
-                schemaStore = { enable = false; url = ""; };
-                schemas.__raw = "require(\"schemastore\").yaml.schemas()";
-              };
-            };
+            yamlls.enable = true;
           };
         };
         # Status line (bottom)
@@ -988,6 +952,7 @@ in
         # TODO: figure out
         treesitter-textobjects = {
           enable = true;
+          lspInterop.enable = true;
           move = {
             enable = true;
             gotoNextStart = {
@@ -1050,6 +1015,8 @@ in
             };
           };
         };
+        # The TypeScript integration NeoVim deserves
+        typescript-tools = { enable = true; settings.exposeAsCodeAction = "all"; };
         # File / AST breadcrumbs
         barbecue.enable = true;
         # Code commenting
@@ -1090,8 +1057,16 @@ in
         oil.enable = true;
         # Enable working with TODO: code comments
         todo-comments.enable = true;
+        # Schemastore
+        schemastore.enable = true;
         # Built-in terminal
-        toggleterm = { enable = true; settings.size = 10; };
+        toggleterm = {
+          enable = true;
+          settings = {
+            size = 10;
+            float_opts = { height = 45; width = 170; };
+          };
+        };
         # Parser generator & incremental parsing toolkit
         treesitter = { enable = true; incrementalSelection.enable = true; };
         # Code context via Treesitter
@@ -1102,13 +1077,11 @@ in
         which-key.enable = true;
       };
       extraPlugins = with pkgs.vimPlugins; [
-        SchemaStore-nvim
         aerial-nvim
         bufdelete-nvim
         codesnap-nvim
         firenvim
         git-conflict-nvim
-        gitlab-nvim
         nvim-dbee
         nvim-surround
         nvim-treeclimber
@@ -1186,7 +1159,7 @@ in
         { key = "<leader>dl"; action = ":TodoLocList<CR>"; }
         { key = "<leader>dr"; action = ":TodoTrouble<CR>"; }
         { key = "<leader>f"; action = ":Telescope find_files<CR>"; }
-        { key = "<leader>g"; action = ":Telescope live_grep<CR>"; }
+        { key = "<leader>g"; action = ":Telescope live_grep<CR>"; options.nowait = true; }
         { key = "<leader>h"; action = ":wincmd h<CR>"; }
         { key = "<leader>j"; action = ":wincmd j<CR>"; }
         { key = "<leader>k"; action = ":wincmd k<CR>"; }
@@ -1206,7 +1179,6 @@ in
     # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
     helix = {
       enable = true;
-      catppuccin = { enable = true; flavor = "frappe"; };
       languages.language = [
         { name = "nix"; }
         { name = "python"; }
@@ -1253,7 +1225,6 @@ in
       };
       delta = {
         enable = true;
-        catppuccin = { enable = true; flavor = "frappe"; };
         options = { navigate = true; side-by-side = true; };
       };
       # difftastic = { enable = true; background = "dark"; };
@@ -1284,7 +1255,6 @@ in
     # Git terminal UI
     gitui = {
       enable = true;
-      catppuccin = { enable = true; flavor = "frappe"; };
       keyConfig = pkgs.fetchurl {
         url = ghRaw {
           owner = "extrawurst";
@@ -1308,7 +1278,6 @@ in
     # System monitor
     bottom = {
       enable = true;
-      catppuccin = { enable = true; flavor = "frappe"; };
     };
     # Manual page interface
     man = { enable = true; generateCaches = true; };
@@ -1318,13 +1287,11 @@ in
     fzf = {
       enable = true;
       enableZshIntegration = true;
-      catppuccin = { enable = true; flavor = "frappe"; };
     };
     # More robust alternative to `cat`
     bat = {
       enable = true;
       config = { style = "full"; theme = "Catppuccin Frappe"; };
-      catppuccin = { enable = true; flavor = "frappe"; };
       syntaxes.kdl = { src = pkgs.sublime-kdl; file = "KDL.sublime-syntax"; };
     };
     # `ls` alternative
