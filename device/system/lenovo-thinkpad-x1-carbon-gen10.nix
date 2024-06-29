@@ -38,6 +38,13 @@
   systemd.services.fprintd.after = [ "display-manager.service" ];
 
   services = {
+    # auto-cpufreq = {
+    #   enable = true;
+    #   settings = {
+    #     battery = { governor = "powersave"; turbo = "never"; };
+    #     charger = { governor = "performance"; turbo = "auto"; };
+    #   };
+    # };
     udev.extraRules = ''
       KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"
     '';
