@@ -14,7 +14,7 @@
 let
   inherit (builtins) listToAttrs pathExists;
   inherit (inputs.nixpkgs.lib.attrsets) optionalAttrs;
-  inherit (inputs.nixpkgs.lib) optionals;
+  inherit (inputs.nixpkgs.lib) callPackage optionals;
 
   # Construct host platform tuple from CPU architecture and OS kernel
   hostPlatform = "${arch}-${kernel}";
@@ -70,7 +70,7 @@ sysFn {
           //
           # Add system configuration for user if it exists
           optionalAttrs (pathExists ../user/${user}/system.nix)
-            (import ../user/${user}/system.nix { inherit inputs kernel user; })
+            (callPackage ../user/${user}/system.nix { inherit inputs kernel user; })
           );
         })
         users);
