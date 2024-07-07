@@ -258,6 +258,9 @@ in
           brave
           # Universal Database Tool
           dbeaver-bin
+          # Additional GNOME settings editing tool
+          # https://wiki.gnome.org/Apps/DconfEditor
+          dconf-editor
           # Display Data Channel UTILity
           ddcutil
           # Matrix client
@@ -268,6 +271,8 @@ in
           gnome-firmware
           # Gnome Network Displays
           gnome-network-displays
+          # Additional GNOME settings tool
+          gnome-tweaks
           # Productivity suite
           libreoffice
           # Unofficial userspace driver for HID++ Logitech devices
@@ -283,13 +288,6 @@ in
           # Offline documentation browser
           zeal
         ]
-        ++ (with pkgs.gnome; [
-          # Additional GNOME settings tool
-          gnome-tweaks
-          # Additional GNOME settings editing tool
-          # https://wiki.gnome.org/Apps/DconfEditor
-          dconf-editor
-        ])
         ++ (with pkgs.gnomeExtensions; [
           # Brightness control for all detected monitors
           # Currently managed manually
@@ -352,6 +350,8 @@ in
       NPM_CONFIG_USERCONFIG = npmConfigFile;
       # Set Bat as the default pager
       PAGER = "bat -p";
+      # Enable mouse support
+      LESS = "-R --mouse";
     };
 
     # Universal cross-shell aliases
@@ -826,8 +826,35 @@ in
             textAlign = "left";
           }];
         };
-        # Treesitter completion source
-        cmp-treesitter.enable = true;
+        # LSP completion
+        cmp = {
+          enable = true;
+          settings = {
+            extraOptions.autoEnableSources = true;
+            snippet.expand = ''
+              function(args)
+                require('luasnip').lsp_expand(args.body)
+              end
+            '';
+            sources = map (s: { name = s; }) [
+              "nvim_lsp_signature_help"
+              "nvim_lsp"
+              "treesitter"
+              "luasnip"
+              "path"
+              "buffer"
+            ];
+            mapping = {
+              "<C-d>" = "cmp.mapping.scroll_docs(-4)";
+              "<C-f>" = "cmp.mapping.scroll_docs(4)";
+              "<C-Space>" = "cmp.mapping.complete()";
+              "<C-e>" = "cmp.mapping.close()";
+              "<Tab>" = "cmp.mapping(cmp.mapping.select_next_item(), {'i', 's'})";
+              "<S-Tab>" = "cmp.mapping(cmp.mapping.select_prev_item(), {'i', 's'})";
+              "<CR>" = "cmp.mapping.confirm({ select = true })";
+            };
+          };
+        };
         # Formatting
         conform-nvim = { enable = true; formattersByFt.typescript = [ "prettier" ]; };
         # Git information
@@ -842,11 +869,12 @@ in
         lsp = {
           enable = true;
           keymaps.lspBuf = {
-            "gd" = "definition";
-            "gD" = "references";
-            "gt" = "type_definition";
-            "gi" = "implementation";
+            "<C-k>" = "signature_help";
             "K" = "hover";
+            "gD" = "references";
+            "gd" = "definition";
+            "gi" = "implementation";
+            "gt" = "type_definition";
           };
           servers = {
             # Nix (nil with nixpkgs-fmt)
@@ -892,12 +920,6 @@ in
           componentSeparators = { left = ""; right = ""; };
           sectionSeparators = { left = ""; right = ""; };
         };
-        # Mini library collection - alignment
-        mini.modules.align = { };
-        # Symbol navigation popup
-        navbuddy = { enable = true; lsp.autoAttach = true; };
-        # Neovim git interface
-        neogit = { enable = true; settings.integrations.diffview = true; };
         # File explorer
         neo-tree = {
           enable = true;
@@ -915,39 +937,21 @@ in
           enable = true;
           fileTypes = [{ language = "typescriptreact"; tailwind = "both"; }];
         };
-        # LSP completion
-        cmp = {
-          enable = true;
-          settings = {
-            extraOptions.autoEnableSources = true;
-            snippet.expand = ''
-              function(args)
-                require('luasnip').lsp_expand(args.body)
-              end
-            '';
-            sources = map (s: { name = s; }) [
-              "nvim_lsp"
-              "treesitter"
-              "luasnip"
-              "path"
-              "buffer"
-            ];
-            mapping = {
-              "<C-d>" = "cmp.mapping.scroll_docs(-4)";
-              "<C-f>" = "cmp.mapping.scroll_docs(4)";
-              "<C-Space>" = "cmp.mapping.complete()";
-              "<C-e>" = "cmp.mapping.close()";
-              "<Tab>" = "cmp.mapping(cmp.mapping.select_next_item(), {'i', 's'})";
-              "<S-Tab>" = "cmp.mapping(cmp.mapping.select_prev_item(), {'i', 's'})";
-              "<CR>" = "cmp.mapping.confirm({ select = true })";
-            };
-          };
-        };
         # File finder (popup)
         telescope = {
           enable = true;
           settings.defaults.layout_config.preview_width = 0.5;
         };
+        # Built-in terminal
+        toggleterm = {
+          enable = true;
+          settings = {
+            size = 10;
+            float_opts = { height = 45; width = 170; };
+          };
+        };
+        # Parser generator & incremental parsing toolkit
+        treesitter = { enable = true; incrementalSelection.enable = true; };
         # Tree-sitter text objects
         # TODO: figure out
         treesitter-textobjects = {
@@ -1019,6 +1023,10 @@ in
         typescript-tools = { enable = true; settings.exposeAsCodeAction = "all"; };
         # File / AST breadcrumbs
         barbecue.enable = true;
+        # nvim-cmp LSP signature help source
+        cmp-nvim-lsp-signature-help.enable = true;
+        # Treesitter completion source for CMP
+        cmp-treesitter.enable = true;
         # Code commenting
         comment.enable = true;
         # GitHub Copilot coding assistant
@@ -1049,26 +1057,24 @@ in
         markdown-preview.enable = true;
         # (Neo)Vim markers enhancer
         marks.enable = true;
+        # Mini library collection - alignment
+        mini.modules.align = { };
+        # Symbol navigation popup
+        navbuddy = { enable = true; lsp.autoAttach = true; };
+        # Neovim git interface
+        neogit = { enable = true; settings.integrations.diffview = true; };
         # Enable Nix language support
         nix.enable = true;
         # Automatically manage character pairs
         nvim-autopairs.enable = true;
         # File explorer
         oil.enable = true;
-        # Enable working with TODO: code comments
-        todo-comments.enable = true;
         # Schemastore
         schemastore.enable = true;
-        # Built-in terminal
-        toggleterm = {
-          enable = true;
-          settings = {
-            size = 10;
-            float_opts = { height = 45; width = 170; };
-          };
-        };
-        # Parser generator & incremental parsing toolkit
-        treesitter = { enable = true; incrementalSelection.enable = true; };
+        # Better split management
+        smart-splits.enable = true;
+        # Enable working with TODO: code comments
+        todo-comments.enable = true;
         # Code context via Treesitter
         # treesitter-context.enable = true;
         # Diagnostics, etc. 
@@ -1079,9 +1085,11 @@ in
       extraPlugins = with pkgs.vimPlugins; [
         aerial-nvim
         bufdelete-nvim
+        bufresize-nvim
         codesnap-nvim
         firenvim
         git-conflict-nvim
+        gitlab-nvim
         nvim-dbee
         nvim-surround
         nvim-treeclimber
@@ -1095,6 +1103,8 @@ in
         let
           helpers = inputs.nixvim.lib.${hostPlatform}.helpers;
           extraPluginsConfig = {
+            # TODO: enable once figured out
+            # bufresize = { };
             codesnap = {
               code_font_family = "Hack Nerd Font Mono";
               has_breadcrumbs = true;
@@ -1102,6 +1112,7 @@ in
               watermark = "";
             };
             git-conflict = { };
+            gitlab = { };
             gitlinker.callbacks."git.usebasis.co".__raw = "require(\"gitlinker.hosts\").get_gitlab_url";
             nvim-surround = { };
             nvim-treeclimber = { };
@@ -1151,6 +1162,10 @@ in
         { key = "<S-t>"; action = ":ToggleTerm<CR>"; }
         { key = "<leader>D"; action = ":DiffviewClose<CR>"; }
         { key = "<leader>F"; action = ":Telescope find_files hidden=true<CR>"; }
+        { key = "<leader>H"; action = ":wincmd 2h<CR>"; }
+        { key = "<leader>J"; action = ":wincmd 2j<CR>"; }
+        { key = "<leader>K"; action = ":wincmd 2k<CR>"; }
+        { key = "<leader>L"; action = ":wincmd 2l<CR>"; }
         { key = "<leader>a"; action = ":AerialToggle<CR>"; }
         { key = "<leader>b"; action = ":Neotree toggle buffers<CR>"; }
         { key = "<leader>c"; action = ":nohlsearch<CR>"; }
