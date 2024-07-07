@@ -49,6 +49,11 @@
     OPENSSL_NO_VENDOR = 1;
   };
   vimPlugins = prev.vimPlugins.extend (_: _: {
+    bufresize-nvim = prev.vimUtils.buildVimPlugin {
+      pname = "bufresize-nvim";
+      version = inputs.bufresize-nvim.rev;
+      src = inputs.bufresize-nvim;
+    };
     # NOTE: does not work on nixbuild.net for some reason but works locally
     codesnap-nvim = prev.vimUtils.buildVimPlugin {
       pname = "codesnap-nvim";
@@ -57,6 +62,22 @@
       nativeBuildInputs = with prev; [ cargo rustc ];
       buildPhase = "make";
     };
+    gitlab-nvim =
+      let
+        gitlabNvimGo = prev.buildGoModule {
+          pname = "gitlab-nvim-go";
+          version = inputs.gitlab-nvim.rev;
+          src = inputs.gitlab-nvim;
+          vendorHash = "sha256-wAykbCAL77vTmLMsa7DaIpzCFMkDBRM6BriSQN+TXmQ=";
+        };
+      in
+      prev.vimUtils.buildVimPlugin {
+        pname = "gitlab-nvim";
+        version = inputs.gitlab-nvim.rev;
+        src = inputs.gitlab-nvim;
+        nativeBuildInputs = with prev; [ go gitlabNvimGo ];
+        buildPhase = "mkdir -p $out && cp ${gitlabNvimGo}/bin/cmd $out/bin";
+      };
     vim-bundle-mako = prev.vimUtils.buildVimPlugin {
       pname = "vim-bundle-mako";
       version = inputs.vim-bundle-mako.rev;
