@@ -124,6 +124,12 @@
     # Browser Neovim client
     firenvim = { url = "github:glacambre/firenvim"; flake = false; };
 
+    # Neovim proportional buffer dimensions
+    bufresize-nvim = { url = "github:kwkarlwang/bufresize.nvim"; flake = false; };
+
+    # GitLab Neovim Plugin
+    gitlab-nvim = { url = "github:harrisoncramer/gitlab.nvim"; flake = false; };
+
     # Aesthetic modern terminal file manager
     superfile = {
       url = "github:MHNightCat/superfile";
