@@ -241,6 +241,11 @@ in
         #   "gtk-4.0/gtk.css".source = "${config.gtk.theme.package}/share/themes/${config.gtk.theme.name}/gtk-4.0/gtk.css";
         #   "gtk-4.0/gtk-dark.css".source = "${config.gtk.theme.package}/share/themes/${config.gtk.theme.name}/gtk-4.0/gtk-dark.css";
         # };
+        catppuccin.pointerCursor = {
+          enable = true;
+          accent = "blue";
+          flavor = "frappe";
+        };
 
         # These are marked as unsupported on darwin
         home.packages = with pkgs; [
@@ -304,12 +309,7 @@ in
   # User-level Nix config
   nix = { package = lib.mkForce pkgs.nixVersions.git; checkConfig = true; };
 
-  catppuccin = {
-    enable = true;
-    accent = "blue";
-    flavor = "frappe";
-    pointerCursor = { enable = true; accent = "blue"; flavor = "frappe"; };
-  };
+  catppuccin = { enable = true; accent = "blue"; flavor = "frappe"; };
 
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
