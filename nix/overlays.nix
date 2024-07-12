@@ -75,6 +75,12 @@
         pname = "gitlab-nvim";
         version = inputs.gitlab-nvim.rev;
         src = inputs.gitlab-nvim;
+        buildInputs = with prev.vimPlugins; [
+          diffview-nvim
+          dressing-nvim
+          nui-nvim
+          plenary-nvim
+        ];
         nativeBuildInputs = with prev; [ go gitlabNvimGo ];
         buildPhase = "mkdir -p $out && cp ${gitlabNvimGo}/bin/cmd $out/bin";
       };
@@ -105,4 +111,13 @@
     src = inputs.yawsso;
     doCheck = false;
   };
+  zellij = prev.zellij.overrideAttrs (p: rec {
+    version = "0.41.0";
+    src = inputs.zellij;
+    cargoDeps = p.cargoDeps.overrideAttrs {
+      name = "${p.pname}-${version}-vendor.tar.gz";
+      inherit src;
+      outputHash = "sha256-ZJY37IhyKZEknuJ7N5gjiugKE3rUWjoAaVTDZUJ/C4w=";
+    };
+  });
 })

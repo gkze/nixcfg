@@ -135,6 +135,11 @@
       url = "github:MHNightCat/superfile";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    zellij = {
+      url = "github:zellij-org/zellij/5b3a9b5dad481120bf9a09e916f9e5421c6c3fa4";
+      flake = false;
+    };
   };
 
   outputs = inputs:

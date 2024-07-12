@@ -714,6 +714,7 @@ in
             cmp = true;
             dap = { enabled = true; enable_ui = true; };
             gitsigns = true;
+            lsp_saga = true;
             native_lsp = { enabled = true; inlay_hints.background = true; };
             neogit = true;
             neotree = true;
@@ -951,7 +952,10 @@ in
           };
         };
         # Parser generator & incremental parsing toolkit
-        treesitter = { enable = true; incrementalSelection.enable = true; };
+        treesitter = {
+          enable = true;
+          settings.incremental_selection.enable = true;
+        };
         # Tree-sitter text objects
         # TODO: figure out
         treesitter-textobjects = {
@@ -1146,14 +1150,14 @@ in
           ]));
       keymaps = [
         { key = ";"; action = ":"; }
-        { key = "<A-(>"; action = ":BufferLineMovePrev<CR>"; }
-        { key = "<A-)>"; action = ":BufferLineMoveNext<CR>"; }
+        { key = "<A-S-(>"; action = ":BufferLineMovePrev<CR>"; }
+        { key = "<A-S-)>"; action = ":BufferLineMoveNext<CR>"; }
         { key = "<A-W>"; action = ":wall<CR>"; }
         { key = "<A-w>"; action = ":write<CR>"; }
         { key = "<A-w>"; action = ":write<CR>"; }
         { key = "<A-x>"; action = ":Bdelete<CR>"; }
-        { key = "<A-{>"; action = ":BufferLineCyclePrev<CR>"; }
-        { key = "<A-}>"; action = ":BufferLineCycleNext<CR>"; }
+        { key = "<A-S-{>"; action = ":BufferLineCyclePrev<CR>"; }
+        { key = "<A-S-}>"; action = ":BufferLineCycleNext<CR>"; }
         { key = "<C-l>"; action = ":set invlist<CR>"; }
         { key = "<C-l>i"; action = ":LspInfo<CR>"; }
         { key = "<C-l>r"; action = ":LspRestart<CR>"; }

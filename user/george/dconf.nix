@@ -1,9 +1,5 @@
 # Generated via dconf2nix: https://github.com/gvolpe/dconf2nix
-{ lib, ... }:
-
-with lib.hm.gvariant;
-
-{
+{ lib, ... }: with lib.hm.gvariant; {
   dconf.settings = {
     "apps/seahorse/listing" = {
       keyrings-selected = [ "gnupg://" ];
@@ -31,25 +27,42 @@ with lib.hm.gvariant;
     };
 
     "org/gnome/Console" = {
-      last-window-maximised = true;
+      last-window-maximised = false;
       last-window-size = mkTuple [ 1720 1156 ];
     };
 
     "org/gnome/Geary" = {
       compose-as-html = true;
       formatting-toolbar-visible = false;
-      images-trusted-domains = [ "accounts.google.com" "yourstudio.com" "doordash.com" "findyourzo.com" "usebasis.co" ];
+      images-trusted-domains = [
+        "accounts.google.com"
+        "yourstudio.com"
+        "doordash.com"
+        "findyourzo.com"
+        "usebasis.co"
+      ];
       migrated-config = true;
-      window-height = 875;
+      window-height = 1663;
       window-maximize = false;
-      window-width = 1334;
+      window-width = 2367;
     };
 
     "org/gnome/Weather" = {
-      locations = [ (mkVariant [ (mkUint32 2) (mkVariant [ "San Francisco" "KOAK" false [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ] [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ] ]) ]) ];
-      window-height = 586;
+      locations = [
+        (mkVariant [
+          (mkUint32 2)
+          (mkVariant [
+            "San Francisco"
+            "KOAK"
+            false
+            [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ]
+            [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ]
+          ])
+        ])
+      ];
+      window-height = 650;
       window-maximized = false;
-      window-width = 1211;
+      window-width = 1317;
     };
 
     "org/gnome/baobab/ui" = {
@@ -76,34 +89,72 @@ with lib.hm.gvariant;
 
     "org/gnome/calendar" = {
       active-view = "week";
-      week-view-zoom-level = 1.0;
+      week-view-zoom-level = 0.8506974059416861;
       window-maximized = true;
-      window-size = mkTuple [ 1519 1012 ];
+      window-size = mkTuple [ 1481 988 ];
     };
 
     "org/gnome/clocks" = {
-      world-clocks = [{
-        location = mkVariant [ (mkUint32 2) (mkVariant [ "San Francisco" "KOAK" true [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ] [ (mkTuple [ 0.659296885757089 (-2.136621860115334) ]) ] ]) ];
-      }
+      world-clocks = [
         {
-          location = mkVariant [ (mkUint32 2) (mkVariant [ "New York" "KNYC" true [ (mkTuple [ 0.7118034407872564 (-1.2909618758762367) ]) ] [ (mkTuple [ 0.7105980465926592 (-1.2916478949920254) ]) ] ]) ];
+          location = mkVariant [
+            (mkUint32 2)
+            (mkVariant [
+              "San Francisco"
+              "KOAK"
+              true
+              [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ]
+              [ (mkTuple [ 0.659296885757089 (-2.136621860115334) ]) ]
+            ])
+          ];
         }
         {
-          location = mkVariant [ (mkUint32 2) (mkVariant [ "Berlin" "EDDT" true [ (mkTuple [ 0.9174614159494501 0.23241968454167572 ]) ] [ (mkTuple [ 0.916588751323453 0.23387411976724018 ]) ] ]) ];
+          location = mkVariant [
+            (mkUint32 2)
+            (mkVariant [
+              "New York"
+              "KNYC"
+              true
+              [ (mkTuple [ 0.7118034407872564 (-1.2909618758762367) ]) ]
+              [ (mkTuple [ 0.7105980465926592 (-1.2916478949920254) ]) ]
+            ])
+          ];
         }
         {
-          location = mkVariant [ (mkUint32 2) (mkVariant [ "Tbilisi" "UGTB" true [ (mkTuple [ 0.727264160713368 0.7846079132187302 ]) ] [ (mkTuple [ 0.7280931921080653 0.7816166108670297 ]) ] ]) ];
-        }];
+          location = mkVariant [
+            (mkUint32 2)
+            (mkVariant [
+              "Berlin"
+              "EDDT"
+              true
+              [ (mkTuple [ 0.9174614159494501 0.23241968454167572 ]) ]
+              [ (mkTuple [ 0.916588751323453 0.23387411976724018 ]) ]
+            ])
+          ];
+        }
+        {
+          location = mkVariant [
+            (mkUint32 2)
+            (mkVariant [
+              "Tbilisi"
+              "UGTB"
+              true
+              [ (mkTuple [ 0.727264160713368 0.7846079132187302 ]) ]
+              [ (mkTuple [ 0.7280931921080653 0.7816166108670297 ]) ]
+            ])
+          ];
+        }
+      ];
     };
 
     "org/gnome/clocks/state/window" = {
       maximized = false;
-      panel-id = "world";
+      panel-id = "timer";
       size = mkTuple [ 870 690 ];
     };
 
     "org/gnome/control-center" = {
-      last-panel = "wifi";
+      last-panel = "system";
       window-state = mkTuple [ 1028 1047 false ];
     };
 
@@ -118,7 +169,24 @@ with lib.hm.gvariant;
     };
 
     "org/gnome/desktop/app-folders/folders/Utilities" = {
-      apps = [ "gnome-abrt.desktop" "gnome-system-log.desktop" "nm-connection-editor.desktop" "org.gnome.baobab.desktop" "org.gnome.Connections.desktop" "org.gnome.DejaDup.desktop" "org.gnome.Dictionary.desktop" "org.gnome.DiskUtility.desktop" "org.gnome.Evince.desktop" "org.gnome.FileRoller.desktop" "org.gnome.fonts.desktop" "org.gnome.Loupe.desktop" "org.gnome.seahorse.Application.desktop" "org.gnome.tweaks.desktop" "org.gnome.Usage.desktop" "vinagre.desktop" ];
+      apps = [
+        "gnome-abrt.desktop"
+        "gnome-system-log.desktop"
+        "nm-connection-editor.desktop"
+        "org.gnome.baobab.desktop"
+        "org.gnome.Connections.desktop"
+        "org.gnome.DejaDup.desktop"
+        "org.gnome.Dictionary.desktop"
+        "org.gnome.DiskUtility.desktop"
+        "org.gnome.Evince.desktop"
+        "org.gnome.FileRoller.desktop"
+        "org.gnome.fonts.desktop"
+        "org.gnome.Loupe.desktop"
+        "org.gnome.seahorse.Application.desktop"
+        "org.gnome.tweaks.desktop"
+        "org.gnome.Usage.desktop"
+        "vinagre.desktop"
+      ];
       categories = [ "X-GNOME-Utilities" ];
       name = "X-GNOME-Utilities.directory";
       translate = true;
@@ -151,7 +219,7 @@ with lib.hm.gvariant;
       font-antialiasing = "grayscale";
       font-hinting = "slight";
       gtk-theme = "catppuccin-frappe-blue-standard+rimless";
-      icon-theme = "catppuccin-frappe-blue-cursors";
+      icon-theme = "Papirus-Dark";
       monospace-font-name = "Hack Nerd Font Mono 11";
       overlay-scrolling = true;
       show-battery-percentage = true;
@@ -160,7 +228,32 @@ with lib.hm.gvariant;
     };
 
     "org/gnome/desktop/notifications" = {
-      application-children = [ "org-gnome-software" "gnome-network-panel" "org-gnome-calendar" "gnome-system-monitor" "gnome-power-panel" "slack" "org-gnome-evolution-alarm-notify" "org-gnome-settings" "org-gnome-nautilus" "brave-browser" "brave-kjgfgldnnfoeklkmfkjfagphfepbbdan-default" "org-gnome-baobab" "org-gnome-evince" "org-gnome-geary" "dbeaver" "alacritty" "io-podman-desktop-podmandesktop" "1password" "org-gimp-gimp" "org-gnome-characters" "code" "brave-kjgfgldnnfoeklkmfkjfagphfepbbdan-profile-2" "org-gnome-systemmonitor" ];
+      application-children = [
+        "org-gnome-software"
+        "gnome-network-panel"
+        "org-gnome-calendar"
+        "gnome-system-monitor"
+        "gnome-power-panel"
+        "slack"
+        "org-gnome-evolution-alarm-notify"
+        "org-gnome-settings"
+        "org-gnome-nautilus"
+        "brave-browser"
+        "brave-kjgfgldnnfoeklkmfkjfagphfepbbdan-default"
+        "org-gnome-baobab"
+        "org-gnome-evince"
+        "org-gnome-geary"
+        "dbeaver"
+        "alacritty"
+        "io-podman-desktop-podmandesktop"
+        "1password"
+        "org-gimp-gimp"
+        "org-gnome-characters"
+        "code"
+        "brave-kjgfgldnnfoeklkmfkjfagphfepbbdan-profile-2"
+        "org-gnome-systemmonitor"
+        "brave-fmpnliohjhemenmnlpbfagaolkdacoja-default"
+      ];
       show-banners = true;
     };
 
@@ -174,6 +267,10 @@ with lib.hm.gvariant;
 
     "org/gnome/desktop/notifications/application/brave-browser" = {
       application-id = "brave-browser.desktop";
+    };
+
+    "org/gnome/desktop/notifications/application/brave-fmpnliohjhemenmnlpbfagaolkdacoja-default" = {
+      application-id = "brave-fmpnliohjhemenmnlpbfagaolkdacoja-Default.desktop";
     };
 
     "org/gnome/desktop/notifications/application/brave-kjgfgldnnfoeklkmfkjfagphfepbbdan-default" = {
@@ -321,14 +418,22 @@ with lib.hm.gvariant;
       notify-window-height = 483;
       notify-window-paned-position = 63;
       notify-window-width = 409;
-      notify-window-x = 103;
-      notify-window-y = 103;
-      reminders-past = [ "18cb049f6671c3ed289a9c71e80c0de52da3688en9cc32c5026ff8d118bc4ac93bce35238da8eb8d2t20240624T120000n1719255000n1719255600n1719259200nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240624T120000rnDTEND;TZID=America/Los_Angeles:20240624T130000rnRRULE:FREQ=WEEKLY;BYDAY=MO,FR;WKST=SUrnEXDATE;TZID=America/Los_Angeles:20231124T120000rnEXDATE;TZID=America/Los_Angeles:20231225T120000rnEXDATE;TZID=America/Los_Angeles:20231229T120000rnEXDATE;TZID=America/Los_Angeles:20240101T120000rnEXDATE;TZID=America/Los_Angeles:20240105T120000rnEXDATE;TZID=America/Los_Angeles:20240115T120000rnEXDATE;TZID=America/Los_Angeles:20240219T120000rnEXDATE;TZID=America/Los_Angeles:20240527T120000rnDTSTAMP:20240617T170120ZrnORGANIZER;CN=jesse@usebasis.co:mailto:jesse@usebasis.cornUID:0qv2g51uk9qooa6p1p9m2kjsu9_R20231016T190000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=jesse@usebasis.co;X-NUM-GUESTS=0:mailto:jesse@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=All Team;X-NUM-GUESTS=0:mailto:team@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george@usebasis.co;X-NUM-GUESTS=0:mailto:george@usebasis.cornX-GOOGLE-CONFERENCE:https://meet.google.com/pow-unuv-btfrnCREATED:20230620T234404ZrnDESCRIPTION:As the team grows\\, it would be nice eat together as a team\\, rn so we're proposing twice-weekly lunches.<br><span><br></span><br><span>If rn you bring lunch\\, start warming it up a little earlier so you're ready at rn 12. If you're eating out\\, we'll cover your DoorDash up to $25 (don't rn forget -- you can schedule your order ahead of time)</span>\\n\\n-::~:~::~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~::~:rn ~::-\\nJoin with Google Meet: https://meet.google.com/pow-unuv-btf\\nOr rn dial: (US) +1 513-760-6079 PIN: 535859198#\\nMore phone numbers: https:rn //tel.meet/pow-unuv-btf?pin=9484659480677&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240617T170120ZrnX-LIC-ERROR;X-LIC-ERRORTYPE=VALUE-PARSE-ERROR:No value for LOCATION rn property. Removing entire property:rnSEQUENCE:0rnSTATUS:CONFIRMEDrnSUMMARY:Team LunchrnTRANSP:OPAQUErnX-EVOLUTION-CALDAV-ETAG:63854326880rnRECURRENCE-ID;TZID=America/Los_Angeles:20240624T120000rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:9cc32c5026ff8d118bc4ac93bce35238da8eb8d2rnEND:VALARMrnEND:VEVENTrn" "18cb049f6671c3ed289a9c71e80c0de52da3688end616492ad29601d566d901db330cd514c2ca1a5ft20240624T100000n1719247800n1719248400n1719252000nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240624T100000rnDTEND;TZID=America/Los_Angeles:20240624T110000rnRRULE:FREQ=WEEKLY;BYDAY=MO,FR;WKST=SUrnDTSTAMP:20240617T170120ZrnORGANIZER;CN=jesse@usebasis.co:mailto:jesse@usebasis.cornUID:cjor6rn0v3te499kon6didavua_R20240308T180000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=jesse@usebasis.co;X-NUM-GUESTS=0:mailto:jesse@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=room@usebasis.co;X-NUM-GUESTS=0:mailto:room@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george@usebasis.co;X-NUM-GUESTS=0:mailto:george@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=All Team;X-NUM-GUESTS=0:mailto:team@usebasis.cornX-GOOGLE-CONFERENCE:https://meet.google.com/mns-oimq-wkgrnCREATED:20221104T045344ZrnDESCRIPTION:-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~::~:~::-\\nJoin with Google Meet: https:rn //meet.google.com/mns-oimq-wkg\\nOr dial: (US) +1 661-772-9059 PIN: rn 652845310#\\nMore phone numbers: https:rn //tel.meet/mns-oimq-wkg?pin=8044670134175&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240617T170120ZrnX-LIC-ERROR;X-LIC-ERRORTYPE=VALUE-PARSE-ERROR:No value for LOCATION rn property. Removing entire property:rnSEQUENCE:3rnSTATUS:CONFIRMEDrnSUMMARY:Weekly standuprnTRANSP:OPAQUErnX-EVOLUTION-CALDAV-ETAG:63854326880rnRECURRENCE-ID;TZID=America/Los_Angeles:20240624T100000rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:d616492ad29601d566d901db330cd514c2ca1a5frnEND:VALARMrnEND:VEVENTrn" "18cb049f6671c3ed289a9c71e80c0de52da3688en9cc32c5026ff8d118bc4ac93bce35238da8eb8d2t20240621T120000n1718995800n1718996400n1719000000nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240621T120000rnDTEND;TZID=America/Los_Angeles:20240621T130000rnRRULE:FREQ=WEEKLY;BYDAY=MO,FR;WKST=SUrnEXDATE;TZID=America/Los_Angeles:20231124T120000rnEXDATE;TZID=America/Los_Angeles:20231225T120000rnEXDATE;TZID=America/Los_Angeles:20231229T120000rnEXDATE;TZID=America/Los_Angeles:20240101T120000rnEXDATE;TZID=America/Los_Angeles:20240105T120000rnEXDATE;TZID=America/Los_Angeles:20240115T120000rnEXDATE;TZID=America/Los_Angeles:20240219T120000rnEXDATE;TZID=America/Los_Angeles:20240527T120000rnDTSTAMP:20240617T170120ZrnORGANIZER;CN=jesse@usebasis.co:mailto:jesse@usebasis.cornUID:0qv2g51uk9qooa6p1p9m2kjsu9_R20231016T190000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=jesse@usebasis.co;X-NUM-GUESTS=0:mailto:jesse@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=All Team;X-NUM-GUESTS=0:mailto:team@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george@usebasis.co;X-NUM-GUESTS=0:mailto:george@usebasis.cornX-GOOGLE-CONFERENCE:https://meet.google.com/pow-unuv-btfrnCREATED:20230620T234404ZrnDESCRIPTION:As the team grows\\, it would be nice eat together as a team\\, rn so we're proposing twice-weekly lunches.<br><span><br></span><br><span>If rn you bring lunch\\, start warming it up a little earlier so you're ready at rn 12. If you're eating out\\, we'll cover your DoorDash up to $25 (don't rn forget -- you can schedule your order ahead of time)</span>\\n\\n-::~:~::~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~::~:rn ~::-\\nJoin with Google Meet: https://meet.google.com/pow-unuv-btf\\nOr rn dial: (US) +1 513-760-6079 PIN: 535859198#\\nMore phone numbers: https:rn //tel.meet/pow-unuv-btf?pin=9484659480677&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240617T170120ZrnX-LIC-ERROR;X-LIC-ERRORTYPE=VALUE-PARSE-ERROR:No value for LOCATION rn property. Removing entire property:rnSEQUENCE:0rnSTATUS:CONFIRMEDrnSUMMARY:Team LunchrnTRANSP:OPAQUErnX-EVOLUTION-CALDAV-ETAG:63854326880rnRECURRENCE-ID;TZID=America/Los_Angeles:20240621T120000rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:9cc32c5026ff8d118bc4ac93bce35238da8eb8d2rnEND:VALARMrnEND:VEVENTrn" "18cb049f6671c3ed289a9c71e80c0de52da3688end616492ad29601d566d901db330cd514c2ca1a5ft20240621T100000n1718988600n1718989200n1718992800nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240621T100000rnDTEND;TZID=America/Los_Angeles:20240621T110000rnRRULE:FREQ=WEEKLY;BYDAY=MO,FR;WKST=SUrnDTSTAMP:20240617T170120ZrnORGANIZER;CN=jesse@usebasis.co:mailto:jesse@usebasis.cornUID:cjor6rn0v3te499kon6didavua_R20240308T180000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=jesse@usebasis.co;X-NUM-GUESTS=0:mailto:jesse@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=room@usebasis.co;X-NUM-GUESTS=0:mailto:room@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george@usebasis.co;X-NUM-GUESTS=0:mailto:george@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=All Team;X-NUM-GUESTS=0:mailto:team@usebasis.cornX-GOOGLE-CONFERENCE:https://meet.google.com/mns-oimq-wkgrnCREATED:20221104T045344ZrnDESCRIPTION:-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~::~:~::-\\nJoin with Google Meet: https:rn //meet.google.com/mns-oimq-wkg\\nOr dial: (US) +1 661-772-9059 PIN: rn 652845310#\\nMore phone numbers: https:rn //tel.meet/mns-oimq-wkg?pin=8044670134175&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240617T170120ZrnX-LIC-ERROR;X-LIC-ERRORTYPE=VALUE-PARSE-ERROR:No value for LOCATION rn property. Removing entire property:rnSEQUENCE:3rnSTATUS:CONFIRMEDrnSUMMARY:Weekly standuprnTRANSP:OPAQUErnX-EVOLUTION-CALDAV-ETAG:63854326880rnRECURRENCE-ID;TZID=America/Los_Angeles:20240621T100000rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:d616492ad29601d566d901db330cd514c2ca1a5frnEND:VALARMrnEND:VEVENTrn" "bfed93b1acceebaa1a7b695f939477aa2833d1dfn91c47bfcb5cab58f0aa78ef7fba3aff3198d1c26t20240621n1718926200n1718928000n1719187200nBEGIN:VEVENTrnDTSTART;VALUE=DATE:20240621rnDTEND;VALUE=DATE:20240624rnDTSTAMP:20240525T191612ZrnORGANIZER;CN=Unknown Organizer:mailto:rn unknownorganizer@calendar.google.comrnUID:5rgvd564fa74221rpbkkb6ic48@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george.kontridze@gmail.com;X-NUM-GUESTS=0:mailto:rn george.kontridze@gmail.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=unknownorganizer@calendar.google.com;X-NUM-GUESTS=0:mailto:rn unknownorganizer@calendar.google.comrnCLASS:PRIVATErnCREATED:20240525T191612ZrnDESCRIPTION:To see detailed information for automatically created events rn like this one\\, use the official Google Calendar app. https:rn //g.co/calendarrnLAST-MODIFIED:20240525T191612ZrnLOCATION:Sibley | Beautiful Ocean Views & Hot Tub!\\, Sea RanchrnSEQUENCE:0rnSTATUS:CONFIRMEDrnSUMMARY:Stay at Sibley | Beautiful Ocean Views & Hot Tub!rnTRANSP:TRANSPARENTrnX-EVOLUTION-CALDAV-ETAG:63852347772rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT30MrnX-EVOLUTION-ALARM-UID:91c47bfcb5cab58f0aa78ef7fba3aff3198d1c26rnEND:VALARMrnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT7H10MrnX-EVOLUTION-ALARM-UID:c9f30f10053d446254c267969cca3d669b0dbf23rnEND:VALARMrnEND:VEVENTrn" "bfed93b1acceebaa1a7b695f939477aa2833d1dfn8a6c885449bc52e7480c7c33a9cc98ded9a90577t20240621n1718926200n1718928000n1719187200nBEGIN:VEVENTrnDTSTART;VALUE=DATE:20240621rnDTEND;VALUE=DATE:20240624rnDTSTAMP:20240619T232402ZrnORGANIZER;CN=unknownorganizer@calendar.google.com:mailto:rn unknownorganizer@calendar.google.comrnUID:buf802s2v61vfbe2mmugpmaqq8@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george.kontridze@gmail.com;X-NUM-GUESTS=0:mailto:rn george.kontridze@gmail.comrnCLASS:PRIVATErnCREATED:20240614T002457ZrnDESCRIPTION:To see detailed information for automatically created events rn like this one\\, use the official Google Calendar app. https:rn //g.co/calendar\\n\\nThis event was created from an email you received in rn Gmail. https:rn //mail.google.com/mail?extsrc=cal&plid=ACUX6DMGiPsoXtenE4PVOT042So3OzRW0Gfrn jGtI\\nrnLAST-MODIFIED:20240619T232402ZrnLOCATION:Sibley | Beautiful Ocean Views & Hot Tub\\, Sea RanchrnSEQUENCE:0rnSTATUS:CONFIRMEDrnSUMMARY:Stay at Sibley | Beautiful Ocean Views & Hot TubrnTRANSP:TRANSPARENTrnX-EVOLUTION-CALDAV-ETAG:63854522642rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT30MrnX-EVOLUTION-ALARM-UID:8a6c885449bc52e7480c7c33a9cc98ded9a90577rnEND:VALARMrnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT7H10MrnX-EVOLUTION-ALARM-UID:82c4c26ff914c47c5fce1873b0e08ab18970ee1arnEND:VALARMrnEND:VEVENTrn" "18cb049f6671c3ed289a9c71e80c0de52da3688en373eeed6b9277d2826cb6aedfa4aedb1e378aba8t20240620T130000n1718923800n1718924400n1718926200nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240620T160000rnDTEND;TZID=America/Los_Angeles:20240620T163000rnDTSTAMP:20240620T210958ZrnORGANIZER;CN=jesse@usebasis.co:mailto:jesse@usebasis.cornUID:vbarq9ftf3o32tuq9bcj250nhr_R20231128T210000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=jesse@usebasis.co;X-NUM-GUESTS=0:mailto:jesse@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=All Team;X-NUM-GUESTS=0:mailto:team@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=room@usebasis.co;X-NUM-GUESTS=0:mailto:room@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george@usebasis.co;X-NUM-GUESTS=0:mailto:george@usebasis.cornX-GOOGLE-CONFERENCE:https://meet.google.com/phb-qxft-kfernRECURRENCE-ID;TZID=America/Los_Angeles:20240620T130000rnCREATED:20231018T010056ZrnDESCRIPTION:-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~::~:~::-\\nJoin with Google Meet: https:rn //meet.google.com/phb-qxft-kfe\\nOr dial: (US) +1 650-980-4386 PIN: rn 139125139#\\nMore phone numbers: https:rn //tel.meet/phb-qxft-kfe?pin=9703345477266&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240620T210958ZrnX-LIC-ERROR;X-LIC-ERRORTYPE=VALUE-PARSE-ERROR:No value for LOCATION rn property. Removing entire property:rnSEQUENCE:2rnSTATUS:CONFIRMEDrnSUMMARY:Daily standuprnTRANSP:OPAQUErnX-EVOLUTION-CALDAV-ETAG:63854600998rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:373eeed6b9277d2826cb6aedfa4aedb1e378aba8rnEND:VALARMrnEND:VEVENTrn" "18cb049f6671c3ed289a9c71e80c0de52da3688enba261f6812648a1f09f955fe4fd4d0880a163195t20240620T130000n1718913000n1718913600n1718914500nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240620T130000rnDTEND;TZID=America/Los_Angeles:20240620T131500rnRRULE:FREQ=WEEKLY;BYDAY=TU,WE,TH;WKST=SUrnEXDATE;TZID=America/Los_Angeles:20231226T130000rnEXDATE;TZID=America/Los_Angeles:20231227T130000rnEXDATE;TZID=America/Los_Angeles:20231228T130000rnEXDATE;TZID=America/Los_Angeles:20240102T130000rnEXDATE;TZID=America/Los_Angeles:20240103T130000rnEXDATE;TZID=America/Los_Angeles:20240104T130000rnEXDATE;TZID=America/Los_Angeles:20240528T130000rnDTSTAMP:20240304T174854ZrnORGANIZER;CN=jesse@usebasis.co:mailto:jesse@usebasis.cornUID:vbarq9ftf3o32tuq9bcj250nhr_R20231128T210000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=jesse@usebasis.co;X-NUM-GUESTS=0:mailto:jesse@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=All Team;X-NUM-GUESTS=0:mailto:team@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=room@usebasis.co;X-NUM-GUESTS=0:mailto:room@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george@usebasis.co;X-NUM-GUESTS=0:mailto:george@usebasis.cornX-GOOGLE-CONFERENCE:https://meet.google.com/phb-qxft-kfernCREATED:20231018T010056ZrnDESCRIPTION:-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~::~:~::-\\nJoin with Google Meet: https:rn //meet.google.com/phb-qxft-kfe\\nOr dial: (US) +1 650-980-4386 PIN: rn 139125139#\\nMore phone numbers: https:rn //tel.meet/phb-qxft-kfe?pin=9703345477266&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240304T174854ZrnX-LIC-ERROR;X-LIC-ERRORTYPE=VALUE-PARSE-ERROR:No value for LOCATION rn property. Removing entire property:rnSEQUENCE:1rnSTATUS:CONFIRMEDrnSUMMARY:Daily standuprnTRANSP:OPAQUErnX-EVOLUTION-CALDAV-ETAG:63852606901rnRECURRENCE-ID;TZID=America/Los_Angeles:20240620T130000rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:ba261f6812648a1f09f955fe4fd4d0880a163195rnEND:VALARMrnEND:VEVENTrn" "bfed93b1acceebaa1a7b695f939477aa2833d1dfnc9f30f10053d446254c267969cca3d669b0dbf23t20240621n1718902200n1718928000n1719187200nBEGIN:VEVENTrnDTSTART;VALUE=DATE:20240621rnDTEND;VALUE=DATE:20240624rnDTSTAMP:20240525T191612ZrnORGANIZER;CN=Unknown Organizer:mailto:rn unknownorganizer@calendar.google.comrnUID:5rgvd564fa74221rpbkkb6ic48@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george.kontridze@gmail.com;X-NUM-GUESTS=0:mailto:rn george.kontridze@gmail.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=unknownorganizer@calendar.google.com;X-NUM-GUESTS=0:mailto:rn unknownorganizer@calendar.google.comrnCLASS:PRIVATErnCREATED:20240525T191612ZrnDESCRIPTION:To see detailed information for automatically created events rn like this one\\, use the official Google Calendar app. https:rn //g.co/calendarrnLAST-MODIFIED:20240525T191612ZrnLOCATION:Sibley | Beautiful Ocean Views & Hot Tub!\\, Sea RanchrnSEQUENCE:0rnSTATUS:CONFIRMEDrnSUMMARY:Stay at Sibley | Beautiful Ocean Views & Hot Tub!rnTRANSP:TRANSPARENTrnX-EVOLUTION-CALDAV-ETAG:63852347772rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT30MrnX-EVOLUTION-ALARM-UID:91c47bfcb5cab58f0aa78ef7fba3aff3198d1c26rnEND:VALARMrnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT7H10MrnX-EVOLUTION-ALARM-UID:c9f30f10053d446254c267969cca3d669b0dbf23rnEND:VALARMrnEND:VEVENTrn" "bfed93b1acceebaa1a7b695f939477aa2833d1dfn82c4c26ff914c47c5fce1873b0e08ab18970ee1at20240621n1718902200n1718928000n1719187200nBEGIN:VEVENTrnDTSTART;VALUE=DATE:20240621rnDTEND;VALUE=DATE:20240624rnDTSTAMP:20240619T232402ZrnORGANIZER;CN=unknownorganizer@calendar.google.com:mailto:rn unknownorganizer@calendar.google.comrnUID:buf802s2v61vfbe2mmugpmaqq8@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george.kontridze@gmail.com;X-NUM-GUESTS=0:mailto:rn george.kontridze@gmail.comrnCLASS:PRIVATErnCREATED:20240614T002457ZrnDESCRIPTION:To see detailed information for automatically created events rn like this one\\, use the official Google Calendar app. https:rn //g.co/calendar\\n\\nThis event was created from an email you received in rn Gmail. https:rn //mail.google.com/mail?extsrc=cal&plid=ACUX6DMGiPsoXtenE4PVOT042So3OzRW0Gfrn jGtI\\nrnLAST-MODIFIED:20240619T232402ZrnLOCATION:Sibley | Beautiful Ocean Views & Hot Tub\\, Sea RanchrnSEQUENCE:0rnSTATUS:CONFIRMEDrnSUMMARY:Stay at Sibley | Beautiful Ocean Views & Hot TubrnTRANSP:TRANSPARENTrnX-EVOLUTION-CALDAV-ETAG:63854522642rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT30MrnX-EVOLUTION-ALARM-UID:8a6c885449bc52e7480c7c33a9cc98ded9a90577rnEND:VALARMrnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT7H10MrnX-EVOLUTION-ALARM-UID:82c4c26ff914c47c5fce1873b0e08ab18970ee1arnEND:VALARMrnEND:VEVENTrn" "18cb049f6671c3ed289a9c71e80c0de52da3688enba261f6812648a1f09f955fe4fd4d0880a163195t20240619T130000n1718826600n1718827200n1718828100nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240619T130000rnDTEND;TZID=America/Los_Angeles:20240619T131500rnRRULE:FREQ=WEEKLY;BYDAY=TU,WE,TH;WKST=SUrnEXDATE;TZID=America/Los_Angeles:20231226T130000rnEXDATE;TZID=America/Los_Angeles:20231227T130000rnEXDATE;TZID=America/Los_Angeles:20231228T130000rnEXDATE;TZID=America/Los_Angeles:20240102T130000rnEXDATE;TZID=America/Los_Angeles:20240103T130000rnEXDATE;TZID=America/Los_Angeles:20240104T130000rnEXDATE;TZID=America/Los_Angeles:20240528T130000rnDTSTAMP:20240304T174854ZrnORGANIZER;CN=jesse@usebasis.co:mailto:jesse@usebasis.cornUID:vbarq9ftf3o32tuq9bcj250nhr_R20231128T210000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=jesse@usebasis.co;X-NUM-GUESTS=0:mailto:jesse@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=All Team;X-NUM-GUESTS=0:mailto:team@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=room@usebasis.co;X-NUM-GUESTS=0:mailto:room@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george@usebasis.co;X-NUM-GUESTS=0:mailto:george@usebasis.cornX-GOOGLE-CONFERENCE:https://meet.google.com/phb-qxft-kfernCREATED:20231018T010056ZrnDESCRIPTION:-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~::~:~::-\\nJoin with Google Meet: https:rn //meet.google.com/phb-qxft-kfe\\nOr dial: (US) +1 650-980-4386 PIN: rn 139125139#\\nMore phone numbers: https:rn //tel.meet/phb-qxft-kfe?pin=9703345477266&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240304T174854ZrnX-LIC-ERROR;X-LIC-ERRORTYPE=VALUE-PARSE-ERROR:No value for LOCATION rn property. Removing entire property:rnSEQUENCE:1rnSTATUS:CONFIRMEDrnSUMMARY:Daily standuprnTRANSP:OPAQUErnX-EVOLUTION-CALDAV-ETAG:63852606901rnRECURRENCE-ID;TZID=America/Los_Angeles:20240619T130000rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:ba261f6812648a1f09f955fe4fd4d0880a163195rnEND:VALARMrnEND:VEVENTrn" "bfed93b1acceebaa1a7b695f939477aa2833d1dfn715159f8e59b952d78609987504de8577894da7at20240619T130000n1718826600n1718827200n1718829000nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240619T130000rnDTEND;TZID=America/Los_Angeles:20240619T133000rnDTSTAMP:20240615T171736ZrnORGANIZER;CN=haoweic@google.com:mailto:haoweic@google.comrnUID:g065vg5aq85bto0ktpgj106uh5_R20240605T200000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=DECLINED;rn CN=george.kontridze@gmail.com;X-NUM-GUESTS=0:mailto:rn george.kontridze@gmail.comrnX-GOOGLE-CONFERENCE:https://meet.google.com/bdk-dyzk-gnqrnRECURRENCE-ID;TZID=America/Los_Angeles:20240619T130000rnCREATED:20190701T194904ZrnDESCRIPTION:This is a meeting open to the community\\, focused on the PRs rn and Issues in Kubernetes python client. <br><br>Agenda: <a href=\"https:rn //docs.google.com/document/d/1OqxDm-PWyL6-LPMfUqkWXb8kpeTtr1wwBlz5IKknmBA/rn edit?usp=sharing\" id=\"ow595\" __is_owner=\"true\">https:rn //docs.google.com/document/d/1OqxDm-PWyL6-LPMfUqkWXb8kpeTtr1wwBlz5IKknmBA/rn edit?usp=sharing</a>\\n\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-\\nJoin with Google Meet: https:rn //meet.google.com/bdk-dyzk-gnq\\nOr dial: (US) +1 260-327-1990 PIN: rn 130450#\\nMore phone numbers: https:rn //tel.meet/bdk-dyzk-gnq?pin=3844973226311&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240615T171736ZrnLOCATION:US-SVL-MP6-3-A-Grandslam (8) [GVC\\, Jamboard]rnSEQUENCE:3rnSTATUS:CONFIRMEDrnSUMMARY:[client-python] Public Bug Scrub / Issues & PR TriagernTRANSP:TRANSPARENTrnX-EVOLUTION-CALDAV-ETAG:63854155056rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:715159f8e59b952d78609987504de8577894da7arnEND:VALARMrnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT30MrnX-EVOLUTION-ALARM-UID:75c36a54a58365a8e4bbc2fa02a48098f1b843a3rnEND:VALARMrnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT2HrnX-EVOLUTION-ALARM-UID:efb3dfbc48409e226563ce3d86477e44726036b5rnEND:VALARMrnEND:VEVENTrn" "bfed93b1acceebaa1a7b695f939477aa2833d1dfn75c36a54a58365a8e4bbc2fa02a48098f1b843a3t20240619T130000n1718825400n1718827200n1718829000nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240619T130000rnDTEND;TZID=America/Los_Angeles:20240619T133000rnDTSTAMP:20240615T171736ZrnORGANIZER;CN=haoweic@google.com:mailto:haoweic@google.comrnUID:g065vg5aq85bto0ktpgj106uh5_R20240605T200000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=DECLINED;rn CN=george.kontridze@gmail.com;X-NUM-GUESTS=0:mailto:rn george.kontridze@gmail.comrnX-GOOGLE-CONFERENCE:https://meet.google.com/bdk-dyzk-gnqrnRECURRENCE-ID;TZID=America/Los_Angeles:20240619T130000rnCREATED:20190701T194904ZrnDESCRIPTION:This is a meeting open to the community\\, focused on the PRs rn and Issues in Kubernetes python client. <br><br>Agenda: <a href=\"https:rn //docs.google.com/document/d/1OqxDm-PWyL6-LPMfUqkWXb8kpeTtr1wwBlz5IKknmBA/rn edit?usp=sharing\" id=\"ow595\" __is_owner=\"true\">https:rn //docs.google.com/document/d/1OqxDm-PWyL6-LPMfUqkWXb8kpeTtr1wwBlz5IKknmBA/rn edit?usp=sharing</a>\\n\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-\\nJoin with Google Meet: https:rn //meet.google.com/bdk-dyzk-gnq\\nOr dial: (US) +1 260-327-1990 PIN: rn 130450#\\nMore phone numbers: https:rn //tel.meet/bdk-dyzk-gnq?pin=3844973226311&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240615T171736ZrnLOCATION:US-SVL-MP6-3-A-Grandslam (8) [GVC\\, Jamboard]rnSEQUENCE:3rnSTATUS:CONFIRMEDrnSUMMARY:[client-python] Public Bug Scrub / Issues & PR TriagernTRANSP:TRANSPARENTrnX-EVOLUTION-CALDAV-ETAG:63854155056rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:715159f8e59b952d78609987504de8577894da7arnEND:VALARMrnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT30MrnX-EVOLUTION-ALARM-UID:75c36a54a58365a8e4bbc2fa02a48098f1b843a3rnEND:VALARMrnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT2HrnX-EVOLUTION-ALARM-UID:efb3dfbc48409e226563ce3d86477e44726036b5rnEND:VALARMrnEND:VEVENTrn" "bfed93b1acceebaa1a7b695f939477aa2833d1dfnefb3dfbc48409e226563ce3d86477e44726036b5t20240619T130000n1718820000n1718827200n1718829000nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240619T130000rnDTEND;TZID=America/Los_Angeles:20240619T133000rnDTSTAMP:20240615T171736ZrnORGANIZER;CN=haoweic@google.com:mailto:haoweic@google.comrnUID:g065vg5aq85bto0ktpgj106uh5_R20240605T200000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=DECLINED;rn CN=george.kontridze@gmail.com;X-NUM-GUESTS=0:mailto:rn george.kontridze@gmail.comrnX-GOOGLE-CONFERENCE:https://meet.google.com/bdk-dyzk-gnqrnRECURRENCE-ID;TZID=America/Los_Angeles:20240619T130000rnCREATED:20190701T194904ZrnDESCRIPTION:This is a meeting open to the community\\, focused on the PRs rn and Issues in Kubernetes python client. <br><br>Agenda: <a href=\"https:rn //docs.google.com/document/d/1OqxDm-PWyL6-LPMfUqkWXb8kpeTtr1wwBlz5IKknmBA/rn edit?usp=sharing\" id=\"ow595\" __is_owner=\"true\">https:rn //docs.google.com/document/d/1OqxDm-PWyL6-LPMfUqkWXb8kpeTtr1wwBlz5IKknmBA/rn edit?usp=sharing</a>\\n\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-\\nJoin with Google Meet: https:rn //meet.google.com/bdk-dyzk-gnq\\nOr dial: (US) +1 260-327-1990 PIN: rn 130450#\\nMore phone numbers: https:rn //tel.meet/bdk-dyzk-gnq?pin=3844973226311&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240615T171736ZrnLOCATION:US-SVL-MP6-3-A-Grandslam (8) [GVC\\, Jamboard]rnSEQUENCE:3rnSTATUS:CONFIRMEDrnSUMMARY:[client-python] Public Bug Scrub / Issues & PR TriagernTRANSP:TRANSPARENTrnX-EVOLUTION-CALDAV-ETAG:63854155056rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:715159f8e59b952d78609987504de8577894da7arnEND:VALARMrnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT30MrnX-EVOLUTION-ALARM-UID:75c36a54a58365a8e4bbc2fa02a48098f1b843a3rnEND:VALARMrnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT2HrnX-EVOLUTION-ALARM-UID:efb3dfbc48409e226563ce3d86477e44726036b5rnEND:VALARMrnEND:VEVENTrn" "18cb049f6671c3ed289a9c71e80c0de52da3688enf33272bf0c49a6264eae047d9b2bdaeb57106033t20240618T140000n1718743800n1718744400n1718745300nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240618T140000rnDTEND;TZID=America/Los_Angeles:20240618T141500rnRRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;WKST=SUrnDTSTAMP:20240604T183132ZrnORGANIZER;CN=jesse@usebasis.co:mailto:jesse@usebasis.cornUID:5vmnq0smv7srd8558pmkd368hp@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=jesse@usebasis.co;X-NUM-GUESTS=0:mailto:jesse@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george@usebasis.co;X-NUM-GUESTS=0:mailto:george@usebasis.cornX-GOOGLE-CONFERENCE:https://meet.google.com/ees-fcix-szbrnCREATED:20231201T193148ZrnDESCRIPTION:-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~::~:~::-\\nJoin with Google Meet: https:rn //meet.google.com/ees-fcix-szb\\nOr dial: (US) +1 347-861-6310 PIN: rn 790404641#\\nMore phone numbers: https:rn //tel.meet/ees-fcix-szb?pin=9747143920112&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240604T183132ZrnX-LIC-ERROR;X-LIC-ERRORTYPE=VALUE-PARSE-ERROR:No value for LOCATION rn property. Removing entire property:rnSEQUENCE:1rnSTATUS:CONFIRMEDrnSUMMARY:George // Jesse 1:1rnTRANSP:OPAQUErnX-EVOLUTION-CALDAV-ETAG:63853401861rnRECURRENCE-ID;TZID=America/Los_Angeles:20240618T140000rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:f33272bf0c49a6264eae047d9b2bdaeb57106033rnEND:VALARMrnEND:VEVENTrn" "18cb049f6671c3ed289a9c71e80c0de52da3688en6f8c26b1bbbff96c6bc88190b20f9989980c72f1t20240618T133000n1718742000n1718742600n1718743800nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240618T133000rnDTEND;TZID=America/Los_Angeles:20240618T135000rnRRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;WKST=SUrnDTSTAMP:20240326T203013ZrnORGANIZER;CN=dante@usebasis.co:mailto:dante@usebasis.cornUID:0b5u7e66pr7tssqouvs41pndk4_R20240326T203000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=dante@usebasis.co;X-NUM-GUESTS=0:mailto:dante@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george@usebasis.co;X-NUM-GUESTS=0:mailto:george@usebasis.cornX-GOOGLE-CONFERENCE:https://meet.google.com/zsn-vngp-iamrnCREATED:20240311T164427ZrnDESCRIPTION:Setting up a recurring time for us to chat / walk.\\n\\n-::~:~::rn ~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~::rn ~:~::-\\nJoin with Google Meet: https://meet.google.com/zsn-vngp-iam\\nOr rn dial: (US) +1 304-518-2648 PIN: 171779794#\\nMore phone numbers: https:rn //tel.meet/zsn-vngp-iam?pin=1086952216780&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240326T203013ZrnX-LIC-ERROR;X-LIC-ERRORTYPE=VALUE-PARSE-ERROR:No value for LOCATION rn property. Removing entire property:rnSEQUENCE:0rnSTATUS:CONFIRMEDrnSUMMARY:George / DanternTRANSP:OPAQUErnX-EVOLUTION-CALDAV-ETAG:63849600499rnRECURRENCE-ID;TZID=America/Los_Angeles:20240618T133000rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:6f8c26b1bbbff96c6bc88190b20f9989980c72f1rnEND:VALARMrnEND:VEVENTrn" "18cb049f6671c3ed289a9c71e80c0de52da3688enba261f6812648a1f09f955fe4fd4d0880a163195t20240618T130000n1718740200n1718740800n1718741700nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240618T130000rnDTEND;TZID=America/Los_Angeles:20240618T131500rnRRULE:FREQ=WEEKLY;BYDAY=TU,WE,TH;WKST=SUrnEXDATE;TZID=America/Los_Angeles:20231226T130000rnEXDATE;TZID=America/Los_Angeles:20231227T130000rnEXDATE;TZID=America/Los_Angeles:20231228T130000rnEXDATE;TZID=America/Los_Angeles:20240102T130000rnEXDATE;TZID=America/Los_Angeles:20240103T130000rnEXDATE;TZID=America/Los_Angeles:20240104T130000rnEXDATE;TZID=America/Los_Angeles:20240528T130000rnDTSTAMP:20240304T174854ZrnORGANIZER;CN=jesse@usebasis.co:mailto:jesse@usebasis.cornUID:vbarq9ftf3o32tuq9bcj250nhr_R20231128T210000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=jesse@usebasis.co;X-NUM-GUESTS=0:mailto:jesse@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=All Team;X-NUM-GUESTS=0:mailto:team@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=room@usebasis.co;X-NUM-GUESTS=0:mailto:room@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george@usebasis.co;X-NUM-GUESTS=0:mailto:george@usebasis.cornX-GOOGLE-CONFERENCE:https://meet.google.com/phb-qxft-kfernCREATED:20231018T010056ZrnDESCRIPTION:-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~::~:~::-\\nJoin with Google Meet: https:rn //meet.google.com/phb-qxft-kfe\\nOr dial: (US) +1 650-980-4386 PIN: rn 139125139#\\nMore phone numbers: https:rn //tel.meet/phb-qxft-kfe?pin=9703345477266&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240304T174854ZrnX-LIC-ERROR;X-LIC-ERRORTYPE=VALUE-PARSE-ERROR:No value for LOCATION rn property. Removing entire property:rnSEQUENCE:1rnSTATUS:CONFIRMEDrnSUMMARY:Daily standuprnTRANSP:OPAQUErnX-EVOLUTION-CALDAV-ETAG:63852606901rnRECURRENCE-ID;TZID=America/Los_Angeles:20240618T130000rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:ba261f6812648a1f09f955fe4fd4d0880a163195rnEND:VALARMrnEND:VEVENTrn" "18cb049f6671c3ed289a9c71e80c0de52da3688en9cc32c5026ff8d118bc4ac93bce35238da8eb8d2t20240617T120000n1718650200n1718650800n1718654400nBEGIN:VEVENTrnDTSTART;TZID=America/Los_Angeles:20240617T120000rnDTEND;TZID=America/Los_Angeles:20240617T130000rnRRULE:FREQ=WEEKLY;BYDAY=MO,FR;WKST=SUrnEXDATE;TZID=America/Los_Angeles:20231124T120000rnEXDATE;TZID=America/Los_Angeles:20231225T120000rnEXDATE;TZID=America/Los_Angeles:20231229T120000rnEXDATE;TZID=America/Los_Angeles:20240101T120000rnEXDATE;TZID=America/Los_Angeles:20240105T120000rnEXDATE;TZID=America/Los_Angeles:20240115T120000rnEXDATE;TZID=America/Los_Angeles:20240219T120000rnEXDATE;TZID=America/Los_Angeles:20240527T120000rnDTSTAMP:20240617T170120ZrnORGANIZER;CN=jesse@usebasis.co:mailto:jesse@usebasis.cornUID:0qv2g51uk9qooa6p1p9m2kjsu9_R20231016T190000@google.comrnATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=jesse@usebasis.co;X-NUM-GUESTS=0:mailto:jesse@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;rn CN=All Team;X-NUM-GUESTS=0:mailto:team@usebasis.cornATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;rn CN=george@usebasis.co;X-NUM-GUESTS=0:mailto:george@usebasis.cornX-GOOGLE-CONFERENCE:https://meet.google.com/pow-unuv-btfrnCREATED:20230620T234404ZrnDESCRIPTION:As the team grows\\, it would be nice eat together as a team\\, rn so we're proposing twice-weekly lunches.<br><span><br></span><br><span>If rn you bring lunch\\, start warming it up a little earlier so you're ready at rn 12. If you're eating out\\, we'll cover your DoorDash up to $25 (don't rn forget -- you can schedule your order ahead of time)</span>\\n\\n-::~:~::~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~::~:rn ~::-\\nJoin with Google Meet: https://meet.google.com/pow-unuv-btf\\nOr rn dial: (US) +1 513-760-6079 PIN: 535859198#\\nMore phone numbers: https:rn //tel.meet/pow-unuv-btf?pin=9484659480677&hs=7\\n\\nLearn more about Meet rn at: https://support.google.com/a/users/answer/9282720\\n\\nPlease do not rn edit this section.\\n-::~:~::~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:~:rn ~:~:~:~:~:~:~:~:~:~:~:~:~::~:~::-rnLAST-MODIFIED:20240617T170120ZrnX-LIC-ERROR;X-LIC-ERRORTYPE=VALUE-PARSE-ERROR:No value for LOCATION rn property. Removing entire property:rnSEQUENCE:0rnSTATUS:CONFIRMEDrnSUMMARY:Team LunchrnTRANSP:OPAQUErnX-EVOLUTION-CALDAV-ETAG:63854326880rnRECURRENCE-ID;TZID=America/Los_Angeles:20240617T120000rnBEGIN:VALARMrnACTION:DISPLAYrnDESCRIPTION:This is an event reminderrnTRIGGER:-PT10MrnX-EVOLUTION-ALARM-UID:9cc32c5026ff8d118bc4ac93bce35238da8eb8d2rnEND:VALARMrnEND:VEVENTrn" ];
+      notify-window-x = 102;
+      notify-window-y = 102;
+      reminders-past = [ ];
     };
 
     "org/gnome/file-roller/dialogs/extract" = {
+      height = 800;
       recreate-folders = true;
       skip-newer = false;
+      width = 1000;
+    };
+
+    "org/gnome/file-roller/file-selector" = {
+      show-hidden = false;
+      sidebar-size = 300;
+      window-size = mkTuple [ (-1) (-1) ];
     };
 
     "org/gnome/file-roller/listing" = {
@@ -353,7 +458,7 @@ with lib.hm.gvariant;
       show-whose-processes = "user";
       window-height = 1111;
       window-state = mkTuple [ 1145 873 103 103 ];
-      window-width = 1315;
+      window-width = 1361;
     };
 
     "org/gnome/gnome-system-monitor/disktreenew" = {
@@ -376,7 +481,7 @@ with lib.hm.gvariant;
 
     "org/gnome/gnome-system-monitor/proctree" = {
       col-0-visible = true;
-      col-0-width = 376;
+      col-0-width = 449;
       col-1-visible = true;
       col-1-width = 62;
       col-12-visible = true;
@@ -393,7 +498,34 @@ with lib.hm.gvariant;
       col-25-width = 99;
       col-8-visible = true;
       col-8-width = 77;
-      columns-order = [ 0 1 8 2 3 4 6 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 7 ];
+      columns-order = [
+        0
+        1
+        8
+        2
+        3
+        4
+        6
+        9
+        10
+        11
+        12
+        13
+        14
+        15
+        16
+        17
+        18
+        19
+        20
+        21
+        22
+        23
+        24
+        25
+        26
+        7
+      ];
       sort-col = 0;
       sort-order = 0;
     };
@@ -413,8 +545,32 @@ with lib.hm.gvariant;
     };
 
     "org/gnome/nautilus/list-view" = {
-      default-column-order = [ "name" "size" "type" "owner" "group" "permissions" "where" "date_modified" "date_modified_with_time" "date_accessed" "date_created" "recency" "detailed_type" ];
-      default-visible-columns = [ "date_created" "date_modified" "detailed_type" "group" "name" "owner" "permissions" "size" "type" ];
+      default-column-order = [
+        "name"
+        "size"
+        "type"
+        "owner"
+        "group"
+        "permissions"
+        "where"
+        "date_modified"
+        "date_modified_with_time"
+        "date_accessed"
+        "date_created"
+        "recency"
+        "detailed_type"
+      ];
+      default-visible-columns = [
+        "date_created"
+        "date_modified"
+        "detailed_type"
+        "group"
+        "name"
+        "owner"
+        "permissions"
+        "size"
+        "type"
+      ];
       use-tree-view = true;
     };
 
@@ -425,7 +581,7 @@ with lib.hm.gvariant;
     };
 
     "org/gnome/nautilus/window-state" = {
-      initial-size = mkTuple [ 1435 887 ];
+      initial-size = mkTuple [ 1920 1166 ];
       maximized = false;
     };
 
@@ -445,7 +601,7 @@ with lib.hm.gvariant;
     };
 
     "org/gnome/portal/filechooser/brave-browser" = {
-      last-folder-path = "/home/george/Downloads";
+      last-folder-path = "/home/george/Pictures/Screenshots";
     };
 
     "org/gnome/portal/filechooser/dev/skynomads/Seabird" = {
@@ -453,6 +609,10 @@ with lib.hm.gvariant;
     };
 
     "org/gnome/portal/filechooser/gnome-network-panel" = {
+      last-folder-path = "/home/george/Downloads";
+    };
+
+    "org/gnome/portal/filechooser/io/httpie/Httpie" = {
       last-folder-path = "/home/george/Downloads";
     };
 
@@ -472,9 +632,31 @@ with lib.hm.gvariant;
 
     "org/gnome/shell" = {
       disable-user-extensions = false;
-      disabled-extensions = [ "light-style@gnome-shell-extensions.gcampax.github.com" "native-window-placement@gnome-shell-extensions.gcampax.github.com" "window-list@gnome-shell-extensions.gcampax.github.com" "workspace-indicator@gnome-shell-extensions.gcampax.github.com" ];
-      enabled-extensions = [ "user-theme@gnome-shell-extensions.gcampax.github.com" "apps-menu@gnome-shell-extensions.gcampax.github.com" "display-brightness-ddcutil@themightydeity.github.com" "drive-menu@gnome-shell-extensions.gcampax.github.com" "places-menu@gnome-shell-extensions.gcampax.github.com" "screenshot-window-sizer@gnome-shell-extensions.gcampax.github.com" "user-theme@gnome-shell-extensions.gcampax.github.com" ];
-      favorite-apps = [ "beekeeper-studio.desktop" "obsidian.desktop" "brave-browser.desktop" "Alacritty.desktop" "slack.desktop" "org.gnome.Calendar.desktop" "org.gnome.Nautilus.desktop" "org.gnome.Settings.desktop" ];
+      disabled-extensions = [
+        "light-style@gnome-shell-extensions.gcampax.github.com"
+        "native-window-placement@gnome-shell-extensions.gcampax.github.com"
+        "window-list@gnome-shell-extensions.gcampax.github.com"
+        "workspace-indicator@gnome-shell-extensions.gcampax.github.com"
+      ];
+      enabled-extensions = [
+        "user-theme@gnome-shell-extensions.gcampax.github.com"
+        "apps-menu@gnome-shell-extensions.gcampax.github.com"
+        "display-brightness-ddcutil@themightydeity.github.com"
+        "drive-menu@gnome-shell-extensions.gcampax.github.com"
+        "places-menu@gnome-shell-extensions.gcampax.github.com"
+        "screenshot-window-sizer@gnome-shell-extensions.gcampax.github.com"
+        "user-theme@gnome-shell-extensions.gcampax.github.com"
+      ];
+      favorite-apps = [
+        "obsidian.desktop"
+        "brave-browser.desktop"
+        "Alacritty.desktop"
+        "slack.desktop"
+        "org.gnome.Calendar.desktop"
+        "org.gnome.Nautilus.desktop"
+        "org.gnome.SystemMonitor.desktop"
+        "org.gnome.Settings.desktop"
+      ];
       last-selected-power-profile = "performance";
       welcome-dialog-last-shown-version = "45.5";
     };
@@ -482,7 +664,7 @@ with lib.hm.gvariant;
     "org/gnome/shell/extensions/display-brightness-ddcutil" = {
       allow-zero-brightness = true;
       button-location = 0;
-      ddcutil-binary-path = "/nix/store/bhblhjrykm00k2cc38qdhfgv714ifmbi-ddcutil-2.1.4/bin/ddcutil";
+      ddcutil-binary-path = "/nix/store/n6llfsminarz3wl9cqzinh0xdnx5zdid-ddcutil-2.1.4/bin/ddcutil";
       ddcutil-queue-ms = 130.0;
       ddcutil-sleep-multiplier = 4.0;
       decrease-brightness-shortcut = [ "<Control>MonBrightnessDown" ];
@@ -505,17 +687,69 @@ with lib.hm.gvariant;
 
     "org/gnome/shell/weather" = {
       automatic-location = true;
-      locations = [ (mkVariant [ (mkUint32 2) (mkVariant [ "San Francisco" "KOAK" false [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ] [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ] ]) ]) ];
+      locations = [
+        (mkVariant [
+          (mkUint32 2)
+          (mkVariant [
+            "San Francisco"
+            "KOAK"
+            false
+            [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ]
+            [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ]
+          ])
+        ])
+      ];
     };
 
     "org/gnome/shell/world-clocks" = {
-      locations = [ (mkVariant [ (mkUint32 2) (mkVariant [ "San Francisco" "KOAK" true [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ] [ (mkTuple [ 0.659296885757089 (-2.136621860115334) ]) ] ]) ]) (mkVariant [ (mkUint32 2) (mkVariant [ "New York" "KNYC" true [ (mkTuple [ 0.7118034407872564 (-1.2909618758762367) ]) ] [ (mkTuple [ 0.7105980465926592 (-1.2916478949920254) ]) ] ]) ]) (mkVariant [ (mkUint32 2) (mkVariant [ "Berlin" "EDDT" true [ (mkTuple [ 0.9174614159494501 0.23241968454167572 ]) ] [ (mkTuple [ 0.916588751323453 0.23387411976724018 ]) ] ]) ]) (mkVariant [ (mkUint32 2) (mkVariant [ "Tbilisi" "UGTB" true [ (mkTuple [ 0.727264160713368 0.7846079132187302 ]) ] [ (mkTuple [ 0.7280931921080653 0.7816166108670297 ]) ] ]) ]) ];
+      locations = [
+        (mkVariant [
+          (mkUint32 2)
+          (mkVariant [
+            "San Francisco"
+            "KOAK"
+            true
+            [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ]
+            [ (mkTuple [ 0.659296885757089 (-2.136621860115334) ]) ]
+          ])
+        ])
+        (mkVariant [
+          (mkUint32 2)
+          (mkVariant [
+            "New York"
+            "KNYC"
+            true
+            [ (mkTuple [ 0.7118034407872564 (-1.2909618758762367) ]) ]
+            [ (mkTuple [ 0.7105980465926592 (-1.2916478949920254) ]) ]
+          ])
+        ])
+        (mkVariant [
+          (mkUint32 2)
+          (mkVariant [
+            "Berlin"
+            "EDDT"
+            true
+            [ (mkTuple [ 0.9174614159494501 0.23241968454167572 ]) ]
+            [ (mkTuple [ 0.916588751323453 0.23387411976724018 ]) ]
+          ])
+        ])
+        (mkVariant [
+          (mkUint32 2)
+          (mkVariant [
+            "Tbilisi"
+            "UGTB"
+            true
+            [ (mkTuple [ 0.727264160713368 0.7846079132187302 ]) ]
+            [ (mkTuple [ 0.7280931921080653 0.7816166108670297 ]) ]
+          ])
+        ])
+      ];
     };
 
     "org/gnome/software" = {
-      check-timestamp = mkInt64 1719334410;
+      check-timestamp = mkInt64 1720715035;
       first-run = false;
-      flatpak-purge-timestamp = mkInt64 1719263578;
+      flatpak-purge-timestamp = mkInt64 1720744246;
       install-timestamp = mkInt64 1717698225;
       update-notification-timestamp = mkInt64 1717699403;
     };
@@ -544,8 +778,51 @@ with lib.hm.gvariant;
     };
 
     "org/gtk/settings/color-chooser" = {
-      custom-colors = [ (mkTuple [ 0.3176470588235294 0.33725490196078434 0.34509803921568627 1.0 ]) (mkTuple [ 0.9333333333333333 0.11372549019607843 0.0 1.0 ]) (mkTuple [ 0.0 0.0 0.4588235294117647 1.0 ]) (mkTuple [ 0.25882352941176473 0.8313725490196079 0.9568627450980393 1.0 ]) (mkTuple [ 0.6705882352941176 9.411764705882353e-2 0.3215686274509804 1.0 ]) (mkTuple [ 0.28627450980392155 0.6588235294117647 0.20784313725490197 1.0 ]) ];
-      selected-color = mkTuple [ true 0.8980392156862745 0.6470588235294118 3.92156862745098e-2 1.0 ];
+      custom-colors = [
+        (mkTuple [
+          0.3176470588235294
+          0.33725490196078434
+          0.34509803921568627
+          1.0
+        ])
+        (mkTuple [
+          0.9333333333333333
+          0.11372549019607843
+          0.0
+          1.0
+        ])
+        (mkTuple [
+          0.0
+          0.0
+          0.4588235294117647
+          1.0
+        ])
+        (mkTuple [
+          0.25882352941176473
+          0.8313725490196079
+          0.9568627450980393
+          1.0
+        ])
+        (mkTuple [
+          0.6705882352941176
+          9.411764705882353e-2
+          0.3215686274509804
+          1.0
+        ])
+        (mkTuple [
+          0.28627450980392155
+          0.6588235294117647
+          0.20784313725490197
+          1.0
+        ])
+      ];
+      selected-color = mkTuple [
+        true
+        0.8980392156862745
+        0.6470588235294118
+        3.92156862745098e-2
+        1.0
+      ];
     };
 
     "org/gtk/settings/file-chooser" = {
@@ -559,7 +836,7 @@ with lib.hm.gvariant;
       sort-directories-first = false;
       sort-order = "ascending";
       type-format = "category";
-      window-position = mkTuple [ 103 103 ];
+      window-position = mkTuple [ 102 102 ];
       window-size = mkTuple [ 1203 902 ];
     };
 
@@ -567,6 +844,5 @@ with lib.hm.gvariant;
       autoconnect = [ "qemu:///system" ];
       uris = [ "qemu:///system" ];
     };
-
   };
 }
