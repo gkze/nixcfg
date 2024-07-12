@@ -1,14 +1,9 @@
 # Generated via dconf2nix: https://github.com/gvolpe/dconf2nix
 { lib, ... }: with lib.hm.gvariant; {
   dconf.settings = {
-    "apps/seahorse/listing" = {
-      keyrings-selected = [ "gnupg://" ];
-    };
+    "apps/seahorse/listing" = { keyrings-selected = [ "gnupg://" ]; };
 
-    "apps/seahorse/windows/key-manager" = {
-      height = 476;
-      width = 600;
-    };
+    "apps/seahorse/windows/key-manager" = { height = 476; width = 600; };
 
     "ca/desrt/dconf-editor" = {
       saved-pathbar-path = "/org/gnome/desktop/wm/keybindings/";
@@ -18,13 +13,9 @@
       window-width = 1094;
     };
 
-    "desktop/ibus/panel/emoji" = {
-      unicode-hotkey = [ "<Control><Shift>p" ];
-    };
+    "desktop/ibus/panel/emoji" = { unicode-hotkey = [ "<Control><Shift>p" ]; };
 
-    "org/gnome/Connections" = {
-      first-run = false;
-    };
+    "org/gnome/Connections" = { first-run = false; };
 
     "org/gnome/Console" = {
       last-window-maximised = false;
@@ -369,7 +360,11 @@
     };
 
     "org/gnome/desktop/search-providers" = {
-      sort-order = [ "org.gnome.Contacts.desktop" "org.gnome.Documents.desktop" "org.gnome.Nautilus.desktop" ];
+      sort-order = [
+        "org.gnome.Contacts.desktop"
+        "org.gnome.Documents.desktop"
+        "org.gnome.Nautilus.desktop"
+      ];
     };
 
     "org/gnome/desktop/session" = {
@@ -534,8 +529,8 @@
       last-viewed-location = [ 37.76005879400782 (-122.43592813383793) ];
       map-type = "MapsStreetSource";
       transportation-type = "pedestrian";
-      window-maximized = true;
-      window-size = [ 2267 1488 ];
+      window-maximized = false;
+      window-size = [ 2448 1786 ];
       zoom-level = 17;
     };
 
@@ -657,7 +652,7 @@
         "org.gnome.SystemMonitor.desktop"
         "org.gnome.Settings.desktop"
       ];
-      last-selected-power-profile = "performance";
+      last-selected-power-profile = "power-saver";
       welcome-dialog-last-shown-version = "45.5";
     };
 
@@ -747,20 +742,16 @@
     };
 
     "org/gnome/software" = {
-      check-timestamp = mkInt64 1720715035;
+      check-timestamp = mkInt64 1720802036;
       first-run = false;
       flatpak-purge-timestamp = mkInt64 1720744246;
       install-timestamp = mkInt64 1717698225;
       update-notification-timestamp = mkInt64 1717699403;
     };
 
-    "org/gnome/system/location" = {
-      enabled = true;
-    };
+    "org/gnome/system/location" = { enabled = true; };
 
-    "org/gnome/tweaks" = {
-      show-extensions-notice = false;
-    };
+    "org/gnome/tweaks" = { show-extensions-notice = false; };
 
     "org/gtk/gtk4/settings/file-chooser" = {
       date-format = "regular";
