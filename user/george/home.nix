@@ -86,9 +86,16 @@ in
             clock-show-seconds = false;
             clock-show-weekday = true;
             color-scheme = "prefer-dark";
+            cursor-theme = "catppuccin-frappe-blue-cursors";
+            font-antialiasing = "grayscale";
+            font-hinting = "slight";
+            gtk-theme = "catppuccin-frappe-blue-standard+rimless";
+            icon-theme = "Papirus-Dark";
             monospace-font-name = "Hack Nerd Font Mono 11";
             overlay-scrolling = true;
             show-battery-percentage = true;
+            text-scaling-factor = 1.0;
+            toolkit-accessibility = false;
           };
 
           "org/gnome/desktop/peripherals/touchpad" = {
@@ -954,7 +961,15 @@ in
         # Parser generator & incremental parsing toolkit
         treesitter = {
           enable = true;
-          settings.incremental_selection.enable = true;
+          folding = true;
+          nixvimInjections = true;
+          settings = {
+            highlight = {
+              enable = true;
+              additional_vim_regex_highlighting = true;
+            };
+            incremental_selection.enable = true;
+          };
         };
         # Tree-sitter text objects
         # TODO: figure out
