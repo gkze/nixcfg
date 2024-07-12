@@ -45,13 +45,11 @@
     #     charger = { governor = "performance"; turbo = "auto"; };
     #   };
     # };
-    udev.extraRules = ''
-      KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"
-    '';
+    udev.extraRules = ''KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"'';
     fprintd = {
       enable = true;
-      package = pkgs.fprintd-tod;
-      tod = { enable = true; driver = pkgs.libfprint-2-tod1-vfs0090; };
+      # package = pkgs.fprintd-tod;
+      # tod = { enable = true; driver = pkgs.libfprint-2-tod1-goodix-550a; };
     };
   };
 
