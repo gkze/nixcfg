@@ -121,7 +121,6 @@ in
 
 
   # Sound
-  sound.enable = true;
   hardware.pulseaudio.enable = false;
   security = {
     audit.enable = true;

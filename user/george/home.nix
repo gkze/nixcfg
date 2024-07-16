@@ -299,6 +299,8 @@ in
           sysprof
           # Offline documentation browser
           zeal
+          # Fast and collaborative text editor
+          zed
         ]
         ++ (with pkgs.gnomeExtensions; [
           # Brightness control for all detected monitors
@@ -938,7 +940,7 @@ in
             useLibuvFileWatcher = true;
           };
           sourceSelector.winbar = true;
-          window.mappings = { "<A-{>" = "prev_source"; "<A-}>" = "next_source"; };
+          window.mappings = { "<A-S-{>" = "prev_source"; "<A-S-}>" = "next_source"; };
         };
         # Display colors for color codes
         nvim-colorizer = {
@@ -961,7 +963,7 @@ in
         # Parser generator & incremental parsing toolkit
         treesitter = {
           enable = true;
-          folding = true;
+          folding = false;
           nixvimInjections = true;
           settings = {
             highlight = {
