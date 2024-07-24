@@ -705,6 +705,12 @@ in
     };
     # Neovim configured with Nix - NEEDS TUNING
     nixvim = {
+      # extraConfigLuaPre = ''
+      #   require'plenary.profile'.start("profile.log")
+      # '';
+      # extraConfigLuaPost = ''
+      #   require'plenary.profile'.stop()
+      # '';
       enable = true;
       enableMan = true;
       colorschemes.catppuccin = {
@@ -847,7 +853,6 @@ in
               end
             '';
             sources = map (s: { name = s; }) [
-              "nvim_lsp_signature_help"
               "nvim_lsp"
               "treesitter"
               "luasnip"
@@ -1045,7 +1050,7 @@ in
         # File / AST breadcrumbs
         barbecue.enable = true;
         # nvim-cmp LSP signature help source
-        cmp-nvim-lsp-signature-help.enable = true;
+        # cmp-nvim-lsp-signature-help.enable = true;
         # Treesitter completion source for CMP
         cmp-treesitter.enable = true;
         # Code commenting
@@ -1103,6 +1108,18 @@ in
         # Keybinding hint viewer
         which-key.enable = true;
       };
+      autoCmd = [
+        {
+          event = [ "LspAttach" ];
+          callback.__raw = ''
+            function(args)
+              local bufnr = args.buf
+              local client = vim.lsp.get_client_by_id(args.data.client_id)
+              require("lsp_signature").on_attach({ bind = true }, bufnr)
+            end
+          '';
+        }
+      ];
       extraPlugins = with pkgs.vimPlugins; [
         aerial-nvim
         bufdelete-nvim
@@ -1111,6 +1128,7 @@ in
         firenvim
         git-conflict-nvim
         gitlab-nvim
+        lsp-signature-nvim
         nvim-dbee
         nvim-surround
         nvim-treeclimber
