@@ -130,6 +130,9 @@
     # GitLab Neovim Plugin
     gitlab-nvim = { url = "github:harrisoncramer/gitlab.nvim"; flake = false; };
 
+    # LSP signature help
+    lsp-signature-nvim = { url = "github:ray-x/lsp_signature.nvim"; flake = false; };
+
     # Aesthetic modern terminal file manager
     superfile = {
       url = "github:MHNightCat/superfile";
