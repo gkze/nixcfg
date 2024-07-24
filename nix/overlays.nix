@@ -104,6 +104,11 @@
       version = inputs.nvim-treeclimber.rev;
       src = inputs.nvim-treeclimber;
     };
+    lsp-signature-nvim = prev.vimUtils.buildVimPlugin {
+      name = "lsp-signature-nvim";
+      version = inputs.lsp-signature-nvim.rev;
+      src = inputs.lsp-signature-nvim;
+    };
   });
   yawsso = prev.python3Packages.buildPythonApplication {
     pname = "yawsso";
