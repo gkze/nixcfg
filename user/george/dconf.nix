@@ -13,9 +13,13 @@
       window-width = 1094;
     };
 
-    "desktop/ibus/panel/emoji" = { unicode-hotkey = [ "<Control><Shift>p" ]; };
+    "desktop/ibus/panel/emoji" = {
+      unicode-hotkey = [ "<Control><Shift>p" ];
+    };
 
-    "org/gnome/Connections" = { first-run = false; };
+    "org/gnome/Connections" = {
+      first-run = false;
+    };
 
     "org/gnome/Console" = {
       last-window-maximised = false;
@@ -80,7 +84,7 @@
 
     "org/gnome/calendar" = {
       active-view = "week";
-      week-view-zoom-level = 0.8506974059416861;
+      week-view-zoom-level = 0.8841730668951046;
       window-maximized = true;
       window-size = mkTuple [ 1481 988 ];
     };
@@ -145,7 +149,7 @@
     };
 
     "org/gnome/control-center" = {
-      last-panel = "system";
+      last-panel = "wifi";
       window-state = mkTuple [ 1028 1047 false ];
     };
 
@@ -244,8 +248,9 @@
         "brave-kjgfgldnnfoeklkmfkjfagphfepbbdan-profile-2"
         "org-gnome-systemmonitor"
         "brave-fmpnliohjhemenmnlpbfagaolkdacoja-default"
+        "org-gnome-fileroller"
       ];
-      show-banners = true;
+      show-banners = false;
     };
 
     "org/gnome/desktop/notifications/application/1password" = {
@@ -318,6 +323,10 @@
 
     "org/gnome/desktop/notifications/application/org-gnome-evolution-alarm-notify" = {
       application-id = "org.gnome.Evolution-alarm-notify.desktop";
+    };
+
+    "org/gnome/desktop/notifications/application/org-gnome-fileroller" = {
+      application-id = "org.gnome.FileRoller.desktop";
     };
 
     "org/gnome/desktop/notifications/application/org-gnome-geary" = {
@@ -470,7 +479,7 @@
       col-6-visible = true;
       col-6-width = 0;
       columns-order = [ 0 1 2 3 4 5 6 ];
-      sort-col = 1;
+      sort-col = 5;
       sort-order = 0;
     };
 
@@ -521,7 +530,7 @@
         26
         7
       ];
-      sort-col = 0;
+      sort-col = 15;
       sort-order = 0;
     };
 
@@ -576,7 +585,7 @@
     };
 
     "org/gnome/nautilus/window-state" = {
-      initial-size = mkTuple [ 1920 1166 ];
+      initial-size = mkTuple [ 1446 879 ];
       maximized = false;
     };
 
@@ -596,7 +605,7 @@
     };
 
     "org/gnome/portal/filechooser/brave-browser" = {
-      last-folder-path = "/home/george/Pictures/Screenshots";
+      last-folder-path = "/home/george/src/git.usebasis.co/basis/basis/tests/e2e";
     };
 
     "org/gnome/portal/filechooser/dev/skynomads/Seabird" = {
@@ -643,13 +652,13 @@
         "user-theme@gnome-shell-extensions.gcampax.github.com"
       ];
       favorite-apps = [
+        "beekeeper-studio.desktop"
         "obsidian.desktop"
         "brave-browser.desktop"
         "Alacritty.desktop"
         "slack.desktop"
         "org.gnome.Calendar.desktop"
         "org.gnome.Nautilus.desktop"
-        "org.gnome.SystemMonitor.desktop"
         "org.gnome.Settings.desktop"
       ];
       last-selected-power-profile = "power-saver";
@@ -742,16 +751,30 @@
     };
 
     "org/gnome/software" = {
-      check-timestamp = mkInt64 1720802036;
+      check-timestamp = mkInt64 1722270917;
       first-run = false;
-      flatpak-purge-timestamp = mkInt64 1720744246;
+      flatpak-purge-timestamp = mkInt64 1722238334;
       install-timestamp = mkInt64 1717698225;
       update-notification-timestamp = mkInt64 1717699403;
     };
 
-    "org/gnome/system/location" = { enabled = true; };
+    "org/gnome/system/location" = {
+      enabled = true;
+    };
 
-    "org/gnome/tweaks" = { show-extensions-notice = false; };
+    "org/gnome/tweaks" = {
+      show-extensions-notice = false;
+    };
+
+    "org/gtk/gtk4/settings/color-chooser" = {
+      selected-color = mkTuple [
+        true
+        0.2078431397676468
+        0.5176470875740051
+        0.8941176533699036
+        1.0
+      ];
+    };
 
     "org/gtk/gtk4/settings/file-chooser" = {
       date-format = "regular";
@@ -765,7 +788,7 @@
       sort-order = "ascending";
       type-format = "category";
       view-type = "list";
-      window-size = mkTuple [ 1134 677 ];
+      window-size = mkTuple [ 1570 1249 ];
     };
 
     "org/gtk/settings/color-chooser" = {
@@ -831,9 +854,20 @@
       window-size = mkTuple [ 1203 902 ];
     };
 
+    "org/virt-manager/virt-manager" = {
+      manager-window-height = 550;
+      manager-window-width = 550;
+    };
+
     "org/virt-manager/virt-manager/connections" = {
       autoconnect = [ "qemu:///system" ];
       uris = [ "qemu:///system" ];
     };
+
+    "org/virt-manager/virt-manager/vmlist-fields" = {
+      disk-usage = false;
+      network-traffic = false;
+    };
+
   };
 }
