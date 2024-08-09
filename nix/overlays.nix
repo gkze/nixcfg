@@ -9,6 +9,7 @@
     src = inputs.bin;
     vendorHash = "sha256-9kgenzKjo5Lc9JrEdXQlRocl17o4RyKrKuJAFoOEVwY=";
   };
+  dbaver-bin = inputs.dbeaver-last.legacyPackages.${system}.pkgs.dbeaver-bin;
   git-trim = prev.stdenvNoCC.mkDerivation {
     pname = "git-trim";
     version = inputs.git-trim.rev;
@@ -22,6 +23,9 @@
   nix-software-center = inputs.nix-software-center.packages.${system}.default;
   nixos-conf-editor = inputs.nixos-conf-editor.packages.${system}.default;
   # pants = final.callPackage ./pants.nix { nix-alien = inputs.nix-alien; };
+  sqruff = (prev.callPackage inputs.naersk {
+    rustc = (prev.rustChannelOf { channel = "nightly"; }).rust;
+  }).buildPackage { src = inputs.sqruff; };
   sublime-kdl = prev.stdenvNoCC.mkDerivation {
     pname = "sublime-kdl";
     version = inputs.sublime-kdl.rev;

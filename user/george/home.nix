@@ -187,11 +187,12 @@ in
             favorite-apps = [
               "beekeeper-studio.desktop"
               "obsidian.desktop"
-              "brave-browser.desktop"
+              "firefox.desktop"
               "Alacritty.desktop"
               "slack.desktop"
               "org.gnome.Calendar.desktop"
               "org.gnome.Nautilus.desktop"
+              "org.gnome.SystemMonitor.desktop"
               "org.gnome.Settings.desktop"
             ];
             last-selected-power-profile = "power-saver";
@@ -268,8 +269,10 @@ in
           #   '';
           # })
           brave
-          # Universal Database Tool
-          dbeaver-bin
+          # Universal database tool
+          # TODO: switch back to nixos-unstable once 
+          # https://github.com/NixOS/nixpkgs/pull/332937 is in nixos-unstable
+          inputs.dbeaver-next.legacyPackages.${hostPlatform}.pkgs.dbeaver-bin
           # Additional GNOME settings editing tool
           # https://wiki.gnome.org/Apps/DconfEditor
           dconf-editor
@@ -277,8 +280,6 @@ in
           ddcutil
           # Matrix client
           element-desktop
-          # Web browser
-          firefox
           # Gnome firmware update utility
           gnome-firmware
           # Gnome Network Displays
@@ -458,6 +459,8 @@ in
       # Only install Hack Nerd Font, since the entire package / font repository
       # is quite large
       (nerdfonts.override { fonts = [ "Hack" ]; })
+      # Container management
+      # podman-desktop
       # Modern developer workflow system
       # pants
       # PostgreSQL Language Server
@@ -474,6 +477,8 @@ in
       slack
       # Music streaming
       spotify
+      # Fast SQL formatter
+      sqruff
       # Aesthetic modern terminal file manager
       superfile
       # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
@@ -489,8 +494,6 @@ in
 
   # Install and configure user-level software
   programs = {
-    # Let Home Manager install and manage itself
-    home-manager.enable = true;
     # Terminal emulator
     alacritty = {
       enable = true;
@@ -516,194 +519,155 @@ in
         };
       };
     };
-    # Zsh
-    zsh = {
+    # Amazon Web Services Command Line Interface
+    awscli.enable = true;
+    # More robust alternative to `cat`
+    bat = {
       enable = true;
-      # Type directory names directly without `cd` to `cd` into them
-      autocd = true;
-      # Paths to index for the above
-      cdpath = [ srcDir ];
-      # $ZDOTDIR (https://zsh.sourceforge.io/Doc/Release/Files.html#Files)
-      dotDir = ".config/zsh";
-      enableVteIntegration = true;
-      history = {
-        expireDuplicatesFirst = true;
-        extended = true;
-        ignoreAllDups = true;
-        path = "${config.xdg.configHome}/zsh/history";
-        save = 100000;
-        share = true;
-        size = 100000;
-      };
-      # Placed in $ZDOTDIR/.zshrc before compinit
-      initExtraBeforeCompInit = ''
-        # Pre-compinit
-      ''
-      # Darwin-only Zsh configuration (pre-compinit)
-      + optionalString (kernel == "darwin") ''
-        # Enable Homebrew on macOS
-
-        # Set Homebrew prefix for M1 Mac
-        HOMEBREW_PREFIX="/opt/homebrew"
-
-        # Homebrew Zsh completion
-        fpath+="''${HOMEBREW_PREFIX}/share/zsh/site-functions"
-      '';
-      completionInit = ''
-        autoload -Uz +X compinit bashcompinit
-        for dump in ''${ZDOTDIR}/.zcompdump(N.mh+24); do
-          compinit && bashcompinit
-        done
-        compinit -C && bashcompinit -C
-      '';
-      # Any additional manual configuration goes here
-      # Placed in $ZDOTDIR/.zshrc
-      initExtra = ''
-        # Post-compinit
-        # Zsh builtins help
-        unalias &>/dev/null run-help && autoload run-help
-
-        # Load completion system, enable Bash completion compatibility
-        zmodload zsh/complist
-        autoload -Uz +X select-word-style
-        select-word-style bash
-
-        # Tune the completion system a bit
-        zstyle ':completion:*' menu select
-        bindkey -M menuselect '^[[Z' reverse-menu-complete
-        bindkey "^R" history-incremental-search-backward
-
-        # Keep elements of {,MAN}PATH unique
-        typeset -U PATH MANPATH
-      ''
-      # Darwin-only Zsh configuration (post-compinit)
-      + optionalString (kernel == "darwin") ''
-        # For the rare case we're running on an Intel Mac
-        if [[ "$(uname -m)" != "arm64" ]]; then
-          HOMEBREW_PREFIX="/usr/local"
-        fi
-
-        # Just the essentials
-        export PATH="''${HOMEBREW_PREFIX}/bin:''${PATH}"
-        export MANPATH="''${HOMEBREW_PREFIX}/share/man:''${MANPATH}"
-      '';
-      plugins = [
-        # IDE-like autocompletion
-        # {
-        #   name = "zsh-autocomplete";
-        #   src = "${pkgs.zsh-autocomplete}/share/zsh-autocomplete";
-        # }
-        # Fish-like command autosuggestions
-        {
-          name = "zsh-autosuggestions";
-          src = "${pkgs.zsh-autosuggestions}/share/zsh-autosuggestions";
-          file = "zsh-autosuggestions.zsh";
-        }
-        # Fast Syntax Highlighting
-        {
-          name = "F-Sy-H";
-          src = "${pkgs.zsh-f-sy-h}/share/zsh/site-functions";
-        }
-        # Improved Vi mode
-        {
-          name = "zsh-vi-mode";
-          src = "${pkgs.zsh-vi-mode}/share/zsh-vi-mode";
-        }
-        # Zsh Vi mode granular backward kill word
-        {
-          name = "zsh-vi-mode-backward-kill-word";
-          src = ./zsh-plugins;
-        }
-        # Use FZF for searching through history
-        {
-          name = "zsh-fzf-history-search";
-          src = "${pkgs.zsh-fzf-history-search}/share/zsh-fzf-history-search";
-        }
-        # Yank selections into system clipboard
-        # TODO: send Nixpkgs update PR
-        {
-          name = "zsh-system-clipboard";
-          src = (pkgs.fetchFromGitHub {
-            owner = "kutsan";
-            repo = "zsh-system-clipboard";
-            rev = "5f66befd96529b28767fe8a239e9c6de6d57cdc4";
-            hash = "sha256-t4xPKd9BvrH4cyq8rN/IVGcm13OJNutdZ4e+FdGbPIo=";
-          });
-        }
-        # direnv Zsh completion
-        {
-          name = "direnv";
-          src = "${pkgs.zsh-completions}/share/zsh/site-functions";
-        }
-        # Go Zsh completion
-        {
-          name = "go";
-          src = "${pkgs.zsh-completions}/share/zsh/site-functions";
-        }
-        # TODO: upstream fix to Nixpkgs
-        {
-          name = "aws";
-          src = "${pkgs.awscli2}/share/zsh/site-functions";
-          file = "_aws";
-        }
-        {
-          name = "docker";
-          src = pkgs.runCommand "_docker" { buildInputs = [ pkgs.docker ]; } ''
-            mkdir $out
-            docker completion zsh > $out/_docker
-          '';
-          file = "_docker";
-        }
-        # {
-        #   name = "bin";
-        #   src = pkgs.runCommand "_bin" { buildInputs = [ pkgs.bin ]; } ''
-        #     mkdir $out
-        #     bin completion zsh > $out/_bin
-        #   '';
-        #   file = "_bin";
-        # }
-      ];
+      config = { style = "full"; theme = "Catppuccin Frappe"; };
+      syntaxes.kdl = { src = pkgs.sublime-kdl; file = "KDL.sublime-syntax"; };
     };
-    vscode.enable = true;
-    # Modern shell that focuses on structured data
-    # TODO: tune
-    nushell.enable = true;
-    # Shell prompt
-    starship = {
+    # System monitor
+    bottom.enable = true;
+    # Executes commands when changing to a directory with an `.envrc` in it
+    # nix-direnv is a faster and persistent implementation of direnv's use_nix
+    # and use_flake
+    direnv = {
       enable = true;
+      nix-direnv.enable = true;
       enableZshIntegration = true;
-      enableNushellIntegration = true;
-      settings = {
-        add_newline = false;
-        line_break.disabled = true;
-        nix_shell.disabled = true;
-        nodejs.disabled = true;
-        python.disabled = true;
-      };
     };
-    # Terminal multiplexer / workspace manager
-    zellij = {
+    # `ls` alternative
+    eza.enable = true;
+    firefox = {
       enable = true;
-      settings = {
-        # TODO: set dynamically, or better yet figure out how to get Alacritty
-        # to respect custom GTK themes
-        env.WAYLAND_DISPLAY = "wayland-0";
-        keybinds.normal = {
-          "bind \"Alt s\"".Clear = { };
-          "bind \"Alt L\"".GoToNextTab = { };
-          "bind \"Alt H\"".GoToPreviousTab = { };
-        };
-        session_serialization = false;
-        simplified_ui = true;
-      };
-    };
-    # Terminal file manager
-    yazi = {
-      enable = true;
-      enableZshIntegration = true;
-      settings.manager.sort_by = "alphabetical";
+      package = inputs.firefox.packages.${hostPlatform}.firefox-nightly-bin;
     };
     # Neovim configured with Nix - NEEDS TUNING
+    # FuZzy Finder - finds items in lists. Current integrations / use cases:
+    # - Zsh history search
+    # - Neovim file picking
+    fzf = { enable = true; enableZshIntegration = true; };
+    # Version control
+    git = {
+      enable = true;
+      aliases = {
+        branches =
+          let
+            format = concatStringsSep "\t" [
+              "%(color:red)%(ahead-behind:HEAD)"
+              "%(color:blue)%(refname:short)"
+              "%(color:yellow)%(committerdate:relative)"
+              "%(color:default)%(describe)"
+            ];
+            header = concatStringsSep "," [
+              "Ahead"
+              "Behind"
+              "Branch Name"
+              "Last Commit"
+              "Description"
+            ];
+          in
+          concatStringsSep " " [
+            "!git for-each-ref"
+            "--color"
+            "--sort=-committerdate"
+            "--format=$'${format}'"
+            "refs/heads/"
+            "--no-merged"
+            "|"
+            "sed"
+            "'s/ /\t/'"
+            "|"
+            "column"
+            "--separator=$'\t'"
+            "--table"
+            "--table-columns='${header}'"
+          ];
+        praise = "blame";
+      };
+      delta = {
+        enable = true;
+        options = { navigate = true; side-by-side = true; };
+      };
+      # difftastic = { enable = true; background = "dark"; };
+      extraConfig = {
+        commit.gpgsign = true;
+        diff.colorMoved = "default";
+        fetch.prune = true;
+        merge.conflictstyle = "diff3";
+        rebase.pull = true;
+        user.signingkey = meta.gpg.keys.personal;
+      };
+      includes = [
+        {
+          path = "${config.xdg.configHome}/git/personal";
+          condition = "gitdir:~/.config/nixcfg/**";
+        }
+        {
+          path = "${config.xdg.configHome}/git/personal";
+          condition = "gitdir:~/${srcDir}/github.com/**";
+        }
+      ] ++ (lib.optionals (kernel == "darwin") [
+        {
+          path = "${config.xdg.configHome}/git/personal";
+          condition = "gitdir:~/iCloud\ Drive/Development/github.com/**";
+        }
+      ]);
+    };
+    # Git terminal UI
+    gitui = {
+      enable = true;
+      keyConfig = pkgs.fetchurl {
+        url = ghRaw {
+          owner = "extrawurst";
+          repo = "gitui";
+          rev = "c57543b4f884af31146eeee8a90e29ec69b6ef5e";
+          path = "vim_style_key_config.ron";
+        };
+        hash = "sha256-uYL9CSCOlTdW3E87I7GsgvDEwOPHoz1LIxo8DARDX1Y=";
+      };
+    };
+    # GitHub CLI
+    gh = {
+      enable = true;
+      settings = {
+        git_protocol = "ssh";
+        editor = "nvim";
+        prompt = "enabled";
+        extensions = with pkgs; [ gh-dash ];
+      };
+    };
+    # Go
+    go.enable = true;
+    # GnuPG
+    gpg = {
+      enable = true;
+      homedir = "${config.xdg.dataHome}/gnupg";
+      settings = {
+        auto-key-retrieve = true;
+        default-key = meta.gpg.keys.personal;
+      };
+    };
+    # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
+    helix = {
+      enable = true;
+      languages.language = [
+        { name = "nix"; }
+        { name = "python"; }
+        { name = "bash"; }
+      ];
+    };
+    # Let Home Manager install and manage itself
+    home-manager.enable = true;
+    # Right now this breaks with sandbox-exec error
+    # https://github.com/NixOS/nix/issues/4119
+    # Java (to satisfy Visual Studio Code Java extension - possibly factor out)
+    java.enable = true;
+    # JSON Querier
+    jq.enable = true;
+    # Manual page interface
+    man = { enable = true; generateCaches = true; };
     nixvim = {
       # extraConfigLuaPre = ''
       #   require'plenary.profile'.start("profile.log")
@@ -926,7 +890,26 @@ in
             tailwindcss.enable = true;
             # tsserver.enable = true;
             typos-lsp.enable = true;
-            yamlls.enable = true;
+            yamlls = {
+              enable = true;
+              extraOptions.settings.yaml.customTags = [
+                "!Base64"
+                "!Cidr"
+                "!FindInMap"
+                "!ForEach"
+                "!GetAZs"
+                "!GetAtt"
+                "!ImportValue"
+                "!Join"
+                "!Length"
+                "!Ref"
+                "!Select"
+                "!Split"
+                "!Sub"
+                "!ToJsonString"
+                "!Transform"
+              ];
+            };
           };
         };
         # Status line (bottom)
@@ -1230,161 +1213,13 @@ in
         { key = "<leader>z"; action = ":Neogit branch<CR>"; }
       ];
     };
-    # Post-modern editor https://helix-editor.com/ - NEEDS TUNING
-    helix = {
-      enable = true;
-      languages.language = [
-        { name = "nix"; }
-        { name = "python"; }
-        { name = "bash"; }
-      ];
-    };
-    # Version control
-    git = {
-      enable = true;
-      aliases = {
-        branches =
-          let
-            format = concatStringsSep "\t" [
-              "%(color:red)%(ahead-behind:HEAD)"
-              "%(color:blue)%(refname:short)"
-              "%(color:yellow)%(committerdate:relative)"
-              "%(color:default)%(describe)"
-            ];
-            header = concatStringsSep "," [
-              "Ahead"
-              "Behind"
-              "Branch Name"
-              "Last Commit"
-              "Description"
-            ];
-          in
-          concatStringsSep " " [
-            "!git for-each-ref"
-            "--color"
-            "--sort=-committerdate"
-            "--format=$'${format}'"
-            "refs/heads/"
-            "--no-merged"
-            "|"
-            "sed"
-            "'s/ /\t/'"
-            "|"
-            "column"
-            "--separator=$'\t'"
-            "--table"
-            "--table-columns='${header}'"
-          ];
-        praise = "blame";
-      };
-      delta = {
-        enable = true;
-        options = { navigate = true; side-by-side = true; };
-      };
-      # difftastic = { enable = true; background = "dark"; };
-      extraConfig = {
-        commit.gpgsign = true;
-        diff.colorMoved = "default";
-        fetch.prune = true;
-        merge.conflictstyle = "diff3";
-        rebase.pull = true;
-        user.signingkey = meta.gpg.keys.personal;
-      };
-      includes = [
-        {
-          path = "${config.xdg.configHome}/git/personal";
-          condition = "gitdir:~/.config/nixcfg/**";
-        }
-        {
-          path = "${config.xdg.configHome}/git/personal";
-          condition = "gitdir:~/${srcDir}/github.com/**";
-        }
-      ] ++ (lib.optionals (kernel == "darwin") [
-        {
-          path = "${config.xdg.configHome}/git/personal";
-          condition = "gitdir:~/iCloud\ Drive/Development/github.com/**";
-        }
-      ]);
-    };
-    # Git terminal UI
-    gitui = {
-      enable = true;
-      keyConfig = pkgs.fetchurl {
-        url = ghRaw {
-          owner = "extrawurst";
-          repo = "gitui";
-          rev = "c57543b4f884af31146eeee8a90e29ec69b6ef5e";
-          path = "vim_style_key_config.ron";
-        };
-        hash = "sha256-uYL9CSCOlTdW3E87I7GsgvDEwOPHoz1LIxo8DARDX1Y=";
-      };
-    };
-    # GitHub CLI
-    gh = {
-      enable = true;
-      settings = {
-        git_protocol = "ssh";
-        editor = "nvim";
-        prompt = "enabled";
-        extensions = with pkgs; [ gh-dash ];
-      };
-    };
-    # System monitor
-    bottom = {
-      enable = true;
-    };
-    # Manual page interface
-    man = { enable = true; generateCaches = true; };
-    # FuZzy Finder - finds items in lists. Current integrations / use cases:
-    # - Zsh history search
-    # - Neovim file picking
-    fzf = {
-      enable = true;
-      enableZshIntegration = true;
-    };
-    # More robust alternative to `cat`
-    bat = {
-      enable = true;
-      config = { style = "full"; theme = "Catppuccin Frappe"; };
-      syntaxes.kdl = { src = pkgs.sublime-kdl; file = "KDL.sublime-syntax"; };
-    };
-    # `ls` alternative
-    eza.enable = true;
-    # Executes commands when changing to a directory with an `.envrc` in it
-    # nix-direnv is a faster and persistent implementation of direnv's use_nix
-    # and use_flake
-    direnv = {
-      enable = true;
-      nix-direnv.enable = true;
-      enableZshIntegration = true;
-    };
-    # `cd` replacement that ranks frequently / recently used
-    # directories for easier shorthand access
-    zoxide = { enable = true; enableNushellIntegration = true; };
-    # JSON Querier
-    jq.enable = true;
+    # Modern shell that focuses on structured data
+    # TODO: tune
+    nushell.enable = true;
     # Nixpkgs file database
     nix-index.enable = true;
     # Alternative to `grep`
     ripgrep.enable = true;
-    # Right now this breaks with sandbox-exec error
-    # https://github.com/NixOS/nix/issues/4119
-    # Java (to satisfy Visual Studio Code Java extension - possibly factor out)
-    java.enable = true;
-    # Go
-    # TODO: debug
-    go.enable = true;
-    # # Amazon Web Services Command Line Interface
-    awscli.enable = true;
-    # GnuPG
-    gpg = {
-      enable = true;
-      homedir = "${config.xdg.dataHome}/gnupg";
-      settings = {
-        auto-key-retrieve = true;
-        default-key = meta.gpg.keys.personal;
-      };
-    };
     # Secure SHell
     ssh = {
       enable = true;
@@ -1416,6 +1251,19 @@ in
         };
       };
     };
+    # Shell prompt
+    starship = {
+      enable = true;
+      enableZshIntegration = true;
+      enableNushellIntegration = true;
+      settings = {
+        add_newline = false;
+        line_break.disabled = true;
+        nix_shell.disabled = true;
+        nodejs.disabled = true;
+        python.disabled = true;
+      };
+    };
     # Unified software upgrader
     topgrade = {
       enable = true;
@@ -1423,6 +1271,181 @@ in
         git.repos = [ srcDir ];
         misc = { assume_yes = true; cleanup = true; };
       };
+    };
+    # Visual Studio Code - code editor / IDE
+    vscode.enable = true;
+    # Terminal file manager
+    yazi = {
+      enable = true;
+      enableZshIntegration = true;
+      settings.manager.sort_by = "alphabetical";
+    };
+    # Terminal multiplexer / workspace manager
+    zellij = {
+      enable = true;
+      settings = {
+        # TODO: set dynamically, or better yet figure out how to get Alacritty
+        # to respect custom GTK themes
+        env.WAYLAND_DISPLAY = "wayland-0";
+        keybinds.normal = {
+          "bind \"Alt s\"".Clear = { };
+          "bind \"Alt L\"".GoToNextTab = { };
+          "bind \"Alt H\"".GoToPreviousTab = { };
+        };
+        session_serialization = false;
+        simplified_ui = true;
+      };
+    };
+    # `cd` replacement that ranks frequently / recently used
+    # directories for easier shorthand access
+    zoxide = { enable = true; enableNushellIntegration = true; };
+    # Zsh - a robust shell
+    zsh = {
+      enable = true;
+      # Type directory names directly without `cd` to `cd` into them
+      autocd = true;
+      # Paths to index for the above
+      cdpath = [ srcDir ];
+      # $ZDOTDIR 
+      dotDir = ".config/zsh";
+      enableVteIntegration = true;
+      history = {
+        expireDuplicatesFirst = true;
+        extended = true;
+        ignoreAllDups = true;
+        path = "${config.xdg.configHome}/zsh/history";
+        save = 100000;
+        share = true;
+        size = 100000;
+      };
+      # Placed in $ZDOTDIR/.zshrc before compinit
+      initExtraBeforeCompInit = ''
+        # Pre-compinit
+      ''
+      # Darwin-only Zsh configuration (pre-compinit)
+      + optionalString (kernel == "darwin") ''
+        # Enable Homebrew on macOS
+
+        # Set Homebrew prefix for M1 Mac
+        HOMEBREW_PREFIX="/opt/homebrew"
+
+        # Homebrew Zsh completion
+        fpath+="''${HOMEBREW_PREFIX}/share/zsh/site-functions"
+      '';
+      completionInit = ''
+        autoload -Uz +X compinit bashcompinit
+        for dump in ''${ZDOTDIR}/.zcompdump(N.mh+24); do
+          compinit && bashcompinit
+        done
+        compinit -C && bashcompinit -C
+      '';
+      # Any additional manual configuration goes here
+      # Placed in $ZDOTDIR/.zshrc
+      initExtra = ''
+        # Post-compinit
+        # Zsh builtins help
+        unalias &>/dev/null run-help && autoload run-help
+
+        # Load completion system, enable Bash completion compatibility
+        zmodload zsh/complist
+        autoload -Uz +X select-word-style
+        select-word-style bash
+
+        # Tune the completion system a bit
+        zstyle ':completion:*' menu select
+        bindkey -M menuselect '^[[Z' reverse-menu-complete
+        bindkey "^R" history-incremental-search-backward
+
+        # Keep elements of {,MAN}PATH unique
+        typeset -U PATH MANPATH
+      ''
+      # Darwin-only Zsh configuration (post-compinit)
+      + optionalString (kernel == "darwin") ''
+        # For the rare case we're running on an Intel Mac
+        if [[ "$(uname -m)" != "arm64" ]]; then
+          HOMEBREW_PREFIX="/usr/local"
+        fi
+
+        # Just the essentials
+        export PATH="''${HOMEBREW_PREFIX}/bin:''${PATH}"
+        export MANPATH="''${HOMEBREW_PREFIX}/share/man:''${MANPATH}"
+      '';
+      plugins = [
+        # IDE-like autocompletion
+        # {
+        #   name = "zsh-autocomplete";
+        #   src = "${pkgs.zsh-autocomplete}/share/zsh-autocomplete";
+        # }
+        # Fish-like command autosuggestions
+        {
+          name = "zsh-autosuggestions";
+          src = "${pkgs.zsh-autosuggestions}/share/zsh-autosuggestions";
+          file = "zsh-autosuggestions.zsh";
+        }
+        # Fast Syntax Highlighting
+        {
+          name = "F-Sy-H";
+          src = "${pkgs.zsh-f-sy-h}/share/zsh/site-functions";
+        }
+        # Improved Vi mode
+        {
+          name = "zsh-vi-mode";
+          src = "${pkgs.zsh-vi-mode}/share/zsh-vi-mode";
+        }
+        # Zsh Vi mode granular backward kill word
+        {
+          name = "zsh-vi-mode-backward-kill-word";
+          src = ./zsh-plugins;
+        }
+        # Use FZF for searching through history
+        {
+          name = "zsh-fzf-history-search";
+          src = "${pkgs.zsh-fzf-history-search}/share/zsh-fzf-history-search";
+        }
+        # Yank selections into system clipboard
+        # TODO: send Nixpkgs update PR
+        {
+          name = "zsh-system-clipboard";
+          src = (pkgs.fetchFromGitHub {
+            owner = "kutsan";
+            repo = "zsh-system-clipboard";
+            rev = "5f66befd96529b28767fe8a239e9c6de6d57cdc4";
+            hash = "sha256-t4xPKd9BvrH4cyq8rN/IVGcm13OJNutdZ4e+FdGbPIo=";
+          });
+        }
+        # direnv Zsh completion
+        {
+          name = "direnv";
+          src = "${pkgs.zsh-completions}/share/zsh/site-functions";
+        }
+        # Go Zsh completion
+        {
+          name = "go";
+          src = "${pkgs.zsh-completions}/share/zsh/site-functions";
+        }
+        # TODO: upstream fix to Nixpkgs
+        {
+          name = "aws";
+          src = "${pkgs.awscli2}/share/zsh/site-functions";
+          file = "_aws";
+        }
+        {
+          name = "docker";
+          src = pkgs.runCommand "_docker" { buildInputs = [ pkgs.docker ]; } ''
+            mkdir $out
+            docker completion zsh > $out/_docker
+          '';
+          file = "_docker";
+        }
+        # {
+        #   name = "bin";
+        #   src = pkgs.runCommand "_bin" { buildInputs = [ pkgs.bin ]; } ''
+        #     mkdir $out
+        #     bin completion zsh > $out/_bin
+        #   '';
+        #   file = "_bin";
+        # }
+      ];
     };
   };
 }
