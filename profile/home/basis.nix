@@ -18,10 +18,14 @@ in
     }.${kernel}
     {
       home.packages = with pkgs; [
+        # Amazon ECS CLI
+        amazon-ecs-cli
         # Password manager
         _1password-gui
         # Knowledge management
         obsidian
+        # AWS Systems Manager Session Manager plugin for the AWS CLI
+        ssm-session-manager-plugin
         # Yet Another AWS SSO tool
         yawsso
       ];

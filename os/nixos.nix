@@ -30,7 +30,7 @@ in
   };
 
   i18n = let locale = "en_US.UTF-8"; in {
-    inputMethod.enabled = "ibus";
+    inputMethod = { enable = true; type = "ibus"; };
     defaultLocale = locale;
     extraLocaleSettings = {
       LC_ADDRESS = locale;
@@ -117,6 +117,7 @@ in
       alsa.support32Bit = true;
       pulse.enable = true;
     };
+    thermald.enable = true;
   };
 
 
