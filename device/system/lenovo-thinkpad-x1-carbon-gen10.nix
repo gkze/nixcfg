@@ -28,8 +28,8 @@
         "xhci_pci"
       ];
       luks.devices = {
-        "luks-a3c480ba-744e-48f7-b509-fb525972d806".device = "/dev/disk/by-uuid/a3c480ba-744e-48f7-b509-fb525972d806";
-        "luks-5283c0a3-818c-4e5e-aad5-b46b75bc677f".device = "/dev/disk/by-uuid/5283c0a3-818c-4e5e-aad5-b46b75bc677f";
+        "luks-5283c0a3-818c-4e5e-aad5-b46b75bc677f".device = "/dev/nvme0n1p2";
+        "luks-a3c480ba-744e-48f7-b509-fb525972d806".device = "/dev/nvme0n1p3";
       };
     };
     loader = { efi.canTouchEfiVariables = true; systemd-boot.enable = true; };
@@ -50,19 +50,11 @@
   };
 
   fileSystems = {
-    "/" = {
-      device = "/dev/disk/by-uuid/c2e89227-23c9-4d05-926d-e0414c693801";
-      fsType = "ext4";
-    };
-    "/boot" = {
-      device = "/dev/disk/by-uuid/AFEC-5C32";
-      fsType = "vfat";
-    };
+    "/" = { device = "/dev/dm-0"; fsType = "ext4"; };
+    "/boot" = { device = "/dev/nvme0n1p1"; fsType = "vfat"; };
   };
 
-  swapDevices = [
-    { device = "/dev/disk/by-uuid/082a8004-f741-4862-8b9e-273f00ff520d"; }
-  ];
+  swapDevices = [{ device = "/dev/dm-1"; }];
 
   networking.useDHCP = lib.mkDefault true;
 

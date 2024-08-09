@@ -13,17 +13,13 @@
       window-width = 1094;
     };
 
-    "desktop/ibus/panel/emoji" = {
-      unicode-hotkey = [ "<Control><Shift>p" ];
-    };
+    "desktop/ibus/panel/emoji" = { unicode-hotkey = [ "<Control><Shift>p" ]; };
 
-    "org/gnome/Connections" = {
-      first-run = false;
-    };
+    "org/gnome/Connections" = { first-run = false; };
 
     "org/gnome/Console" = {
       last-window-maximised = false;
-      last-window-size = mkTuple [ 1720 1156 ];
+      last-window-size = mkTuple [ 1717 1153 ];
     };
 
     "org/gnome/Geary" = {
@@ -62,7 +58,7 @@
 
     "org/gnome/baobab/ui" = {
       is-maximized = false;
-      window-size = mkTuple [ 2545 2034 ];
+      window-size = mkTuple [ 2289 1868 ];
     };
 
     "org/gnome/calculator" = {
@@ -90,19 +86,18 @@
     };
 
     "org/gnome/clocks" = {
-      world-clocks = [
-        {
-          location = mkVariant [
-            (mkUint32 2)
-            (mkVariant [
-              "San Francisco"
-              "KOAK"
-              true
-              [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ]
-              [ (mkTuple [ 0.659296885757089 (-2.136621860115334) ]) ]
-            ])
-          ];
-        }
+      world-clocks = [{
+        location = mkVariant [
+          (mkUint32 2)
+          (mkVariant [
+            "San Francisco"
+            "KOAK"
+            true
+            [ (mkTuple [ 0.6583284898216201 (-2.133408063190589) ]) ]
+            [ (mkTuple [ 0.659296885757089 (-2.136621860115334) ]) ]
+          ])
+        ];
+      }
         {
           location = mkVariant [
             (mkUint32 2)
@@ -138,8 +133,7 @@
               [ (mkTuple [ 0.7280931921080653 0.7816166108670297 ]) ]
             ])
           ];
-        }
-      ];
+        }];
     };
 
     "org/gnome/clocks/state/window" = {
@@ -149,7 +143,7 @@
     };
 
     "org/gnome/control-center" = {
-      last-panel = "wifi";
+      last-panel = "applications";
       window-state = mkTuple [ 1028 1047 false ];
     };
 
@@ -249,6 +243,7 @@
         "org-gnome-systemmonitor"
         "brave-fmpnliohjhemenmnlpbfagaolkdacoja-default"
         "org-gnome-fileroller"
+        "firefox"
       ];
       show-banners = false;
     };
@@ -283,6 +278,10 @@
 
     "org/gnome/desktop/notifications/application/dbeaver" = {
       application-id = "dbeaver.desktop";
+    };
+
+    "org/gnome/desktop/notifications/application/firefox" = {
+      application-id = "firefox.desktop";
     };
 
     "org/gnome/desktop/notifications/application/gnome-network-panel" = {
@@ -458,7 +457,7 @@
       current-tab = "resources";
       maximized = false;
       network-total-in-bits = false;
-      show-dependencies = true;
+      show-dependencies = false;
       show-whose-processes = "user";
       window-height = 1111;
       window-state = mkTuple [ 1145 873 103 103 ];
@@ -585,7 +584,7 @@
     };
 
     "org/gnome/nautilus/window-state" = {
-      initial-size = mkTuple [ 1446 879 ];
+      initial-size = mkTuple [ 1582 1143 ];
       maximized = false;
     };
 
@@ -605,7 +604,7 @@
     };
 
     "org/gnome/portal/filechooser/brave-browser" = {
-      last-folder-path = "/home/george/src/git.usebasis.co/basis/basis/tests/e2e";
+      last-folder-path = "/home/george/Downloads";
     };
 
     "org/gnome/portal/filechooser/dev/skynomads/Seabird" = {
@@ -616,8 +615,16 @@
       last-folder-path = "/home/george/Downloads";
     };
 
+    "org/gnome/portal/filechooser/io/dbeaver/DBeaverCommunity" = {
+      last-folder-path = "/home/george/Downloads/junixsocket-dist-2.9.1-bin/junixsocket-dist-2.9.1/lib";
+    };
+
     "org/gnome/portal/filechooser/io/httpie/Httpie" = {
       last-folder-path = "/home/george/Downloads";
+    };
+
+    "org/gnome/portal/filechooser/org/dbgate/DbGate" = {
+      last-folder-path = "/home/george/src/git.usebasis.co/basis/banco-basis";
     };
 
     "org/gnome/portal/filechooser/slack" = {
@@ -652,23 +659,23 @@
         "user-theme@gnome-shell-extensions.gcampax.github.com"
       ];
       favorite-apps = [
-        "beekeeper-studio.desktop"
         "obsidian.desktop"
         "brave-browser.desktop"
+        "firefox.desktop"
         "Alacritty.desktop"
         "slack.desktop"
         "org.gnome.Calendar.desktop"
         "org.gnome.Nautilus.desktop"
         "org.gnome.Settings.desktop"
       ];
-      last-selected-power-profile = "power-saver";
+      last-selected-power-profile = "performance";
       welcome-dialog-last-shown-version = "45.5";
     };
 
     "org/gnome/shell/extensions/display-brightness-ddcutil" = {
       allow-zero-brightness = true;
       button-location = 0;
-      ddcutil-binary-path = "/nix/store/n6llfsminarz3wl9cqzinh0xdnx5zdid-ddcutil-2.1.4/bin/ddcutil";
+      ddcutil-binary-path = "/nix/store/5ipyjd0hicnz5img72fvanb54ikzic5x-ddcutil-2.1.4/bin/ddcutil";
       ddcutil-queue-ms = 130.0;
       ddcutil-sleep-multiplier = 4.0;
       decrease-brightness-shortcut = [ "<Control>MonBrightnessDown" ];
@@ -751,9 +758,9 @@
     };
 
     "org/gnome/software" = {
-      check-timestamp = mkInt64 1722270917;
+      check-timestamp = mkInt64 1722952876;
       first-run = false;
-      flatpak-purge-timestamp = mkInt64 1722238334;
+      flatpak-purge-timestamp = mkInt64 1722902972;
       install-timestamp = mkInt64 1717698225;
       update-notification-timestamp = mkInt64 1717699403;
     };
@@ -868,6 +875,5 @@
       disk-usage = false;
       network-traffic = false;
     };
-
   };
 }

@@ -22,7 +22,6 @@
       # "discord"
       # "docker"
       # "figma"
-      "firefox"
       # "gimp"
       "gitbutler"
       # "github"

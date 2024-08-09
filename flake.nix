@@ -143,6 +143,17 @@
       url = "github:zellij-org/zellij/5b3a9b5dad481120bf9a09e916f9e5421c6c3fa4";
       flake = false;
     };
+
+    firefox = {
+      url = "github:nix-community/flake-firefox-nightly";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    naersk.url = "github:nix-community/naersk";
+
+    sqruff = { url = "github:quarylabs/sqruff"; flake = false; };
+
+    dbeaver-next.url = "github:NixOS/nixpkgs/cbe511af766109cfedf2aa2d5076dba3b269336c";
   };
 
   outputs = inputs:
@@ -163,10 +174,12 @@
       mkNixpkgs = system: import inputs.nixpkgs {
         inherit system;
         config.allowUnfree = true;
-        overlays = [
-          inputs.devshell.overlays.default
-          inputs.nix-alien.overlays.default
-          inputs.rust-overlay.overlays.default
+        overlays = (with inputs; [
+          devshell.overlays.default
+          nix-alien.overlays.default
+          rust-overlay.overlays.default
+        ])
+        ++ [
           (import ./nix/overlays.nix { inherit inputs system; })
         ];
       };
