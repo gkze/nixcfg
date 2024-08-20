@@ -27,8 +27,7 @@ let inherit (builtins) elemAt split; in {
   # Set host platform and allow unfree and insecure software
   # https://nixos.wiki/wiki/Unfree_Software
   nixpkgs = {
-    inherit hostPlatform;
-    config = { allowUnfree = true; allowInsecure = true; };
+    inherit hostPlatform; config = { allowUnfree = true; allowInsecure = true; };
   };
 
   # Common system configuration

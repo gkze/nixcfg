@@ -3,7 +3,7 @@
 
   inputs = {
     # Use latest nixpkgs
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable-small";
 
     # Flake helper
     fp.url = "github:hercules-ci/flake-parts";
@@ -108,7 +108,7 @@
     vim-bundle-mako = { url = "github:sophacles/vim-bundle-mako"; flake = false; };
 
     # Code snapshotting plugin
-    codesnap-nvim = { url = "github:mistricky/codesnap.nvim"; flake = false; };
+    # codesnap-nvim = { url = "github:mistricky/codesnap.nvim"; flake = false; };
 
     # Neovim database UI
     nvim-dbee = { url = "github:kndndrj/nvim-dbee"; flake = false; };
@@ -140,7 +140,7 @@
     };
 
     zellij = {
-      url = "github:zellij-org/zellij/5b3a9b5dad481120bf9a09e916f9e5421c6c3fa4";
+      url = "github:zellij-org/zellij/c25166c30af05a39f189c7520e3ab0e6a50905be";
       flake = false;
     };
 
@@ -153,7 +153,9 @@
 
     sqruff = { url = "github:quarylabs/sqruff"; flake = false; };
 
-    dbeaver-next.url = "github:NixOS/nixpkgs/cbe511af766109cfedf2aa2d5076dba3b269336c";
+    # dbeaver-next.url = "github:mkg20001/nixpkgs/83c6f0d2f181e6bf95d4319625f36757b0ad1dcb";
+    #
+    # nixpkgs-next.url = "github:mkg20001/nixpkgs/83c6f0d2f181e6bf95d4319625f36757b0ad1dcb";
   };
 
   outputs = inputs:
@@ -172,8 +174,7 @@
 
       # Our Nixpkgs
       mkNixpkgs = system: import inputs.nixpkgs {
-        inherit system;
-        config.allowUnfree = true;
+        inherit system; config = { allowUnfree = true; allowInsecure = true; };
         overlays = (with inputs; [
           devshell.overlays.default
           nix-alien.overlays.default
@@ -244,7 +245,7 @@
                 nixos-generators.packages.${system}.default
                 home-manager.packages.${system}.default
               ])
-              ++ (with pkgs; [ dconf2nix nix-init nix-melt nixpkgs-fmt nurl ]);
+              ++ (with pkgs; [ dconf2nix nix-init nurl ]);
           };
 
           # For `nix run`

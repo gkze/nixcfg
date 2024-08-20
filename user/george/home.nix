@@ -187,7 +187,7 @@ in
             favorite-apps = [
               "beekeeper-studio.desktop"
               "obsidian.desktop"
-              "firefox.desktop"
+              "firefox-nightly.desktop"
               "Alacritty.desktop"
               "slack.desktop"
               "org.gnome.Calendar.desktop"
@@ -270,9 +270,7 @@ in
           # })
           brave
           # Universal database tool
-          # TODO: switch back to nixos-unstable once 
-          # https://github.com/NixOS/nixpkgs/pull/332937 is in nixos-unstable
-          inputs.dbeaver-next.legacyPackages.${hostPlatform}.pkgs.dbeaver-bin
+          dbeaver-bin
           # Additional GNOME settings editing tool
           # https://wiki.gnome.org/Apps/DconfEditor
           dconf-editor
@@ -797,14 +795,16 @@ in
         # Buffer line (top, tabs)
         bufferline = {
           enable = true;
-          diagnostics = "nvim_lsp";
-          enforceRegularTabs = false;
-          offsets = [{
-            filetype = "neo-tree";
-            text = "Neo-tree";
-            separator = true;
-            textAlign = "left";
-          }];
+          settings.options = {
+            diagnostics = "nvim_lsp";
+            enforce_regular_tabs = false;
+            offsets = [{
+              filetype = "neo-tree";
+              text = "Neo-tree";
+              separator = true;
+              textAlign = "left";
+            }];
+          };
         };
         # LSP completion
         cmp = {
@@ -1009,22 +1009,24 @@ in
             enable = true;
             lookahead = true;
             keymaps = {
+              "aC" = "@class.outer";
               "aa" = "@parameter.outer";
-              "ia" = "@parameter.inner";
+              "ab" = "@block.outer";
+              "ac" = "@call.outer";
               "af" = "@function.outer";
-              "if" = "@function.inner";
-              "ac" = "@class.outer";
-              "ic" = "@class.inner";
               "ai" = "@conditional.outer";
-              "ii" = "@conditional.inner";
               "al" = "@loop.outer";
-              "il" = "@loop.inner";
               "av" = "@assignment.outer";
+              "iC" = "@class.inner";
+              "ia" = "@parameter.inner";
+              "ib" = "@block.inner";
+              "ic" = "@call.inner";
+              "if" = "@function.inner";
+              "ii" = "@conditional.inner";
+              "il" = "@loop.inner";
               "iv" = "@assignment.inner";
               "lv" = "@assignment.lhs";
               "rv" = "@assignment.rhs";
-              "ab" = "@block.outer";
-              "ib" = "@block.inner";
             };
           };
         };
@@ -1107,7 +1109,7 @@ in
         aerial-nvim
         bufdelete-nvim
         bufresize-nvim
-        codesnap-nvim
+        # codesnap-nvim
         firenvim
         git-conflict-nvim
         gitlab-nvim
@@ -1127,12 +1129,12 @@ in
           extraPluginsConfig = {
             # TODO: enable once figured out
             # bufresize = { };
-            codesnap = {
-              code_font_family = "Hack Nerd Font Mono";
-              has_breadcrumbs = true;
-              save_path = "~/Pictures";
-              watermark = "";
-            };
+            # codesnap = {
+            #   code_font_family = "Hack Nerd Font Mono";
+            #   has_breadcrumbs = true;
+            #   save_path = "~/Pictures";
+            #   watermark = "";
+            # };
             git-conflict = { };
             gitlab = { };
             gitlinker.callbacks."git.usebasis.co".__raw = "require(\"gitlinker.hosts\").get_gitlab_url";
