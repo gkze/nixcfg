@@ -9,7 +9,6 @@
     src = inputs.bin;
     vendorHash = "sha256-9kgenzKjo5Lc9JrEdXQlRocl17o4RyKrKuJAFoOEVwY=";
   };
-  dbaver-bin = inputs.dbeaver-last.legacyPackages.${system}.pkgs.dbeaver-bin;
   git-trim = prev.stdenvNoCC.mkDerivation {
     pname = "git-trim";
     version = inputs.git-trim.rev;
@@ -59,13 +58,13 @@
       src = inputs.bufresize-nvim;
     };
     # NOTE: does not work on nixbuild.net for some reason but works locally
-    codesnap-nvim = prev.vimUtils.buildVimPlugin {
-      pname = "codesnap-nvim";
-      version = inputs.codesnap-nvim.rev;
-      src = inputs.codesnap-nvim;
-      nativeBuildInputs = with prev; [ cargo rustc ];
-      buildPhase = "make";
-    };
+    # codesnap-nvim = prev.vimUtils.buildVimPlugin {
+    #   pname = "codesnap-nvim";
+    #   version = inputs.codesnap-nvim.rev;
+    #   src = inputs.codesnap-nvim;
+    #   nativeBuildInputs = with prev; [ cargo rustc ];
+    #   buildPhase = "make";
+    # };
     gitlab-nvim =
       let
         gitlabNvimGo = prev.buildGoModule {
@@ -126,7 +125,7 @@
     cargoDeps = p.cargoDeps.overrideAttrs {
       name = "${p.pname}-${version}-vendor.tar.gz";
       inherit src;
-      outputHash = "sha256-ZJY37IhyKZEknuJ7N5gjiugKE3rUWjoAaVTDZUJ/C4w=";
+      outputHash = "sha256-0O+9Om4JA4YQW+gkoQW3t1ZaTSv3N5Tv/xP2ri3Sc2Q=";
     };
   });
 })
