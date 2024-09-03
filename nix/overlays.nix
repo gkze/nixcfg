@@ -34,21 +34,22 @@
   superfile = inputs.superfile.packages.${system}.default;
   uv = prev.rustPlatform.buildRustPackage rec {
     pname = "uv";
-    version = "0.2.5";
+    version = "0.4.3";
     src = inputs.uv;
-    cargoLock = {
-      lockFile = "${src}/Cargo.lock";
-      allowBuiltinFetchGit = true;
-    };
+    cargoLock = { lockFile = "${src}/Cargo.lock"; allowBuiltinFetchGit = true; };
     buildInputs = [ prev.openssl ]
       ++ (with prev; lib.lists.optional stdenv.isDarwin
       (with darwin.apple_sdk.frameworks; [ Security SystemConfiguration ]));
     doCheck = false;
     nativeBuildInputs = with final; [
       cmake
+      installShellFiles
       pkg-config
       rust-bin.stable.latest.default
     ];
+    postInstall = ''
+      installShellCompletion --cmd uv --zsh <($out/bin/uv generate-shell-completion zsh)
+    '';
     OPENSSL_NO_VENDOR = 1;
   };
   vimPlugins = prev.vimPlugins.extend (_: _: {
@@ -71,7 +72,7 @@
           pname = "gitlab-nvim-go";
           version = inputs.gitlab-nvim.rev;
           src = inputs.gitlab-nvim;
-          vendorHash = "sha256-wAykbCAL77vTmLMsa7DaIpzCFMkDBRM6BriSQN+TXmQ=";
+          vendorHash = "sha256-tA47W+MP6XwZxGXKbnKmV5F1wWaWOB9e1vmU2m5b9tk=";
         };
       in
       prev.vimUtils.buildVimPlugin {

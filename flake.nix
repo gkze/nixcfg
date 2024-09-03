@@ -90,7 +90,7 @@
     git-trim = { url = "github:jasonmccreary/git-trim"; flake = false; };
 
     # Rust-based Python package resolver & installed (faster pip)
-    uv = { url = "github:astral-sh/uv/0.2.5"; flake = false; };
+    uv = { url = "github:astral-sh/uv/0.4.3"; flake = false; };
 
     # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
     yawsso = { url = "github:victorskl/yawsso"; flake = false; };
@@ -153,9 +153,8 @@
 
     sqruff = { url = "github:quarylabs/sqruff"; flake = false; };
 
-    # dbeaver-next.url = "github:mkg20001/nixpkgs/83c6f0d2f181e6bf95d4319625f36757b0ad1dcb";
-    #
-    # nixpkgs-next.url = "github:mkg20001/nixpkgs/83c6f0d2f181e6bf95d4319625f36757b0ad1dcb";
+    # https://github.com/NixOS/nixpkgs/pull/335840
+    dbeaver-next.url = "github:mkg20001/nixpkgs/83c6f0d2f181e6bf95d4319625f36757b0ad1dcb";
   };
 
   outputs = inputs:
