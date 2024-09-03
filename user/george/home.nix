@@ -835,7 +835,10 @@ in
           };
         };
         # Formatting
-        conform-nvim = { enable = true; formattersByFt.typescript = [ "prettier" ]; };
+        conform-nvim = {
+          enable = true;
+          settings.formatters_by_ft.typescript = [ "prettier" ];
+        };
         # Git information
         gitsigns = {
           enable = true;
@@ -1137,7 +1140,6 @@ in
             # };
             git-conflict = { };
             gitlab = { };
-            gitlinker.callbacks."git.usebasis.co".__raw = "require(\"gitlinker.hosts\").get_gitlab_url";
             nvim-surround = { };
             nvim-treeclimber = { };
             overseer = { };
