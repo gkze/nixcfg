@@ -90,7 +90,7 @@
     git-trim = { url = "github:jasonmccreary/git-trim"; flake = false; };
 
     # Rust-based Python package resolver & installed (faster pip)
-    uv = { url = "github:astral-sh/uv/0.4.3"; flake = false; };
+    uv = { url = "github:astral-sh/uv/0.4.5"; flake = false; };
 
     # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
     yawsso = { url = "github:victorskl/yawsso"; flake = false; };

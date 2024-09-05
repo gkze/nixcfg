@@ -143,7 +143,7 @@
     };
 
     "org/gnome/control-center" = {
-      last-panel = "applications";
+      last-panel = "wifi";
       window-state = mkTuple [ 1028 1047 false ];
     };
 
@@ -244,6 +244,8 @@
         "brave-fmpnliohjhemenmnlpbfagaolkdacoja-default"
         "org-gnome-fileroller"
         "firefox"
+        "firefox-nightly"
+        "io-dbeaver-dbeavercommunity"
       ];
       show-banners = false;
     };
@@ -280,6 +282,10 @@
       application-id = "dbeaver.desktop";
     };
 
+    "org/gnome/desktop/notifications/application/firefox-nightly" = {
+      application-id = "firefox-nightly.desktop";
+    };
+
     "org/gnome/desktop/notifications/application/firefox" = {
       application-id = "firefox.desktop";
     };
@@ -294,6 +300,10 @@
 
     "org/gnome/desktop/notifications/application/gnome-system-monitor" = {
       application-id = "gnome-system-monitor.desktop";
+    };
+
+    "org/gnome/desktop/notifications/application/io-dbeaver-dbeavercommunity" = {
+      application-id = "io.dbeaver.DBeaverCommunity.desktop";
     };
 
     "org/gnome/desktop/notifications/application/io-podman-desktop-podmandesktop" = {
@@ -459,14 +469,14 @@
       network-total-in-bits = false;
       show-dependencies = false;
       show-whose-processes = "user";
-      window-height = 1111;
+      window-height = 1078;
       window-state = mkTuple [ 1145 873 103 103 ];
       window-width = 1361;
     };
 
     "org/gnome/gnome-system-monitor/disktreenew" = {
       col-0-visible = true;
-      col-0-width = 437;
+      col-0-width = 138;
       col-1-visible = true;
       col-1-width = 93;
       col-2-visible = true;
@@ -474,12 +484,12 @@
       col-3-visible = true;
       col-3-width = 73;
       col-5-visible = true;
-      col-5-width = 91;
+      col-5-width = 87;
       col-6-visible = true;
       col-6-width = 0;
       columns-order = [ 0 1 2 3 4 5 6 ];
-      sort-col = 5;
-      sort-order = 0;
+      sort-col = 0;
+      sort-order = 1;
     };
 
     "org/gnome/gnome-system-monitor/proctree" = {
@@ -584,7 +594,7 @@
     };
 
     "org/gnome/nautilus/window-state" = {
-      initial-size = mkTuple [ 1582 1143 ];
+      initial-size = mkTuple [ 2102 1869 ];
       maximized = false;
     };
 
@@ -628,10 +638,11 @@
     };
 
     "org/gnome/portal/filechooser/slack" = {
-      last-folder-path = "/home/george/Pictures/Screenshots";
+      last-folder-path = "/home/george/Downloads";
     };
 
     "org/gnome/settings-daemon/plugins/color" = {
+      night-light-enabled = false;
       night-light-last-coordinates = mkTuple [ 37.78477307139083 (-122.406) ];
     };
 
@@ -659,23 +670,24 @@
         "user-theme@gnome-shell-extensions.gcampax.github.com"
       ];
       favorite-apps = [
+        "beekeeper-studio.desktop"
         "obsidian.desktop"
-        "brave-browser.desktop"
-        "firefox.desktop"
+        "firefox-nightly.desktop"
         "Alacritty.desktop"
         "slack.desktop"
         "org.gnome.Calendar.desktop"
         "org.gnome.Nautilus.desktop"
+        "org.gnome.SystemMonitor.desktop"
         "org.gnome.Settings.desktop"
       ];
-      last-selected-power-profile = "performance";
+      last-selected-power-profile = "power-saver";
       welcome-dialog-last-shown-version = "45.5";
     };
 
     "org/gnome/shell/extensions/display-brightness-ddcutil" = {
       allow-zero-brightness = true;
       button-location = 0;
-      ddcutil-binary-path = "/nix/store/5ipyjd0hicnz5img72fvanb54ikzic5x-ddcutil-2.1.4/bin/ddcutil";
+      ddcutil-binary-path = "/nix/store/0p7yiyacqvhi6rkcj6nzg09v6i3ggv3a-ddcutil-2.1.4/bin/ddcutil";
       ddcutil-queue-ms = 130.0;
       ddcutil-sleep-multiplier = 4.0;
       decrease-brightness-shortcut = [ "<Control>MonBrightnessDown" ];
@@ -758,11 +770,11 @@
     };
 
     "org/gnome/software" = {
-      check-timestamp = mkInt64 1722952876;
+      check-timestamp = mkInt64 1725556120;
       first-run = false;
-      flatpak-purge-timestamp = mkInt64 1722902972;
+      flatpak-purge-timestamp = mkInt64 1725569157;
       install-timestamp = mkInt64 1717698225;
-      update-notification-timestamp = mkInt64 1717699403;
+      update-notification-timestamp = mkInt64 1725556509;
     };
 
     "org/gnome/system/location" = {
@@ -852,13 +864,13 @@
       show-hidden = true;
       show-size-column = true;
       show-type-column = true;
-      sidebar-width = 165;
+      sidebar-width = 166;
       sort-column = "type";
       sort-directories-first = false;
       sort-order = "ascending";
       type-format = "category";
       window-position = mkTuple [ 102 102 ];
-      window-size = mkTuple [ 1203 902 ];
+      window-size = mkTuple [ 1529 934 ];
     };
 
     "org/virt-manager/virt-manager" = {

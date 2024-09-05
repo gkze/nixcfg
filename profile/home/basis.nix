@@ -18,6 +18,8 @@ in
     }.${kernel}
     {
       home.packages = with pkgs; [
+        # Amazon ECR Credential Helper
+        amazon-ecr-credential-helper
         # Amazon ECS CLI
         amazon-ecs-cli
         # Password manager
