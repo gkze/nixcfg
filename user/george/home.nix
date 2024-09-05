@@ -310,6 +310,11 @@ in
           user-themes
         ])
         ;
+
+        programs.firefox = {
+          enable = true;
+          package = inputs.firefox.packages.${hostPlatform}.firefox-nightly-bin;
+        };
       };
     }.${kernel}
   ] ++ hmMods;
@@ -537,10 +542,6 @@ in
     };
     # `ls` alternative
     eza.enable = true;
-    firefox = {
-      enable = true;
-      package = inputs.firefox.packages.${hostPlatform}.firefox-nightly-bin;
-    };
     # Neovim configured with Nix - NEEDS TUNING
     # FuZzy Finder - finds items in lists. Current integrations / use cases:
     # - Zsh history search
