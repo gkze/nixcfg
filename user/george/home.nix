@@ -837,7 +837,10 @@ in
         # Formatting
         conform-nvim = {
           enable = true;
-          settings.formatters_by_ft.typescript = [ "prettier" ];
+          settings = {
+            formatters_by_ft.typescript = [ "prettier" ];
+            format_on_save.lsp_format = "fallback";
+          };
         };
         # Git information
         gitsigns = {
