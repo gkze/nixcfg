@@ -49,7 +49,7 @@ in
     # TODO: get working
     # programs.hyprland.enable = true;
     # https://github.com/Mic92/nix-ld
-    # nix-ld.enable = true;
+    nix-ld.enable = true;
     virt-manager.enable = true;
     ssh = {
       # TODO: improve
