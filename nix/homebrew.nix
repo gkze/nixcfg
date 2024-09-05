@@ -50,7 +50,6 @@
       "aerial"
       "appcleaner"
       "beekeeper-studio"
-      "brave-browser-beta"
       "codeedit"
       "cog"
       "cyberduck"
@@ -59,10 +58,10 @@
       # Installs via Nixpkgs but login doesn't work because probable failure of
       # element:// URI handler install
       "element"
+      "firefox@nightly"
       "hot"
       "maccy"
       "monitorcontrol"
-      "netnewswire-beta"
       "rapidapi"
       "rectangle"
       "rekordbox"
