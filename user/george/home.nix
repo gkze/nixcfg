@@ -481,7 +481,7 @@ in
       # Music streaming
       spotify
       # Fast SQL formatter
-      sqruff
+      # sqruff
       # Aesthetic modern terminal file manager
       superfile
       # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
