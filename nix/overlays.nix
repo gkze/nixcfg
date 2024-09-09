@@ -72,7 +72,7 @@
           pname = "gitlab-nvim-go";
           version = inputs.gitlab-nvim.rev;
           src = inputs.gitlab-nvim;
-          vendorHash = "sha256-tA47W+MP6XwZxGXKbnKmV5F1wWaWOB9e1vmU2m5b9tk=";
+          vendorHash = "sha256-WXzzBoyHWJZoH3GrDDUBnp4Vo2+2oWoW6ybhBduqqfw=";
         };
       in
       prev.vimUtils.buildVimPlugin {

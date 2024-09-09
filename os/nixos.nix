@@ -89,7 +89,7 @@ in
     # Automatically set timezone
     automatic-timezoned.enable = true;
     # GNOME 3 enable keyring
-    gnome.gnome-keyring.enable = true;
+    # gnome.gnome-keyring.enable = true;
     # Application distribution format
     flatpak.enable = true;
     # Firmware UPdate Daemon
@@ -98,10 +98,7 @@ in
     xserver = {
       enable = true;
       desktopManager.gnome.enable = true;
-      displayManager.gdm = {
-        enable = true;
-        banner = "Go away";
-      };
+      displayManager.gdm = { enable = true; banner = "Go away"; };
       # TODO: automate
       # When changing, run:
       # ```
