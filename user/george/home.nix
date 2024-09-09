@@ -1,4 +1,7 @@
 { config, lib, pkgs, inputs, hostPlatform, profiles, hmMods ? [ ], ... }:
+
+# TODO: figure out and make NixOS-only (for now?)
+# wayland.windowManager.hyprland.enable = true;
 let
   inherit (builtins) concatStringsSep elem elemAt readFile split;
   inherit (lib) optionalString removeSuffix;
@@ -25,6 +28,7 @@ in
   imports = [
     inputs.nixvim.homeManagerModules.nixvim
     inputs.catppuccin.homeManagerModules.catppuccin
+    # inputs.lan-mouse.homeManagerModules.default
     {
       darwin = {
         # https://github.com/nix-community/home-manager/issues/1341
@@ -315,6 +319,12 @@ in
           enable = true;
           package = inputs.firefox.packages.${hostPlatform}.firefox-nightly-bin;
         };
+
+        # wayland.windowManager.hyprland = {
+        #   enable = true;
+        #   settings = { };
+        #   plugins = { };
+        # };
       };
     }.${kernel}
   ] ++ hmMods;
@@ -326,9 +336,6 @@ in
 
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
-
-  # TODO: figure out and make NixOS-only (for now?)
-  # wayland.windowManager.hyprland.enable = true;
 
   home = {
     # This value determines the Home Manager release that your
@@ -481,7 +488,7 @@ in
       # Music streaming
       spotify
       # Fast SQL formatter
-      # sqruff
+      sqruff
       # Aesthetic modern terminal file manager
       superfile
       # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
@@ -665,6 +672,8 @@ in
     java.enable = true;
     # JSON Querier
     jq.enable = true;
+    # Virtual KVM
+    # lan-mouse = { enable = true; };
     # Manual page interface
     man = { enable = true; generateCaches = true; };
     nixvim = {

@@ -128,7 +128,7 @@
     bufresize-nvim = { url = "github:kwkarlwang/bufresize.nvim"; flake = false; };
 
     # GitLab Neovim Plugin
-    gitlab-nvim = { url = "github:harrisoncramer/gitlab.nvim"; flake = false; };
+    gitlab-nvim = { url = "github:gkze/gitlab.nvim"; flake = false; };
 
     # LSP signature help
     lsp-signature-nvim = { url = "github:ray-x/lsp_signature.nvim"; flake = false; };
@@ -139,22 +139,29 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Terminal multiplexer and workspace manager
     zellij = {
       url = "github:zellij-org/zellij/c25166c30af05a39f189c7520e3ab0e6a50905be";
       flake = false;
     };
 
+    # Web browser
     firefox = {
       url = "github:nix-community/flake-firefox-nightly";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Rust in Nix build tool
     naersk.url = "github:nix-community/naersk";
 
+    # SQL linter & formatter
     sqruff = { url = "github:quarylabs/sqruff"; flake = false; };
 
-    # https://github.com/NixOS/nixpkgs/pull/335840
-    dbeaver-next.url = "github:mkg20001/nixpkgs/83c6f0d2f181e6bf95d4319625f36757b0ad1dcb";
+    # Virtual KVM
+    # lan-mouse = {
+    #   url = "github:feschber/lan-mouse";
+    #   inputs.nixpkgs.follows = "nixpkgs";
+    # };
   };
 
   outputs = inputs:
