@@ -152,11 +152,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1725844165,
-        "narHash": "sha256-AtBhJJKiKpxEe/OS08aT5FoEgh5WFfSLfd+00vuG0qQ=",
+        "lastModified": 1725902172,
+        "narHash": "sha256-wvFuL/qmVQqaWNyELByFWCKiSPMbfA82QJiQxN8cs/M=",
         "owner": "nix-community",
         "repo": "flake-firefox-nightly",
-        "rev": "79395a77249be6d2f3a59f7505ff2cc43a2d38fc",
+        "rev": "0b043aabf820ebed345693ebd1f9a693ad68f1eb",
         "type": "github"
       },
       "original": {
@@ -489,15 +489,15 @@
     "gitlab-nvim": {
       "flake": false,
       "locked": {
-        "lastModified": 1725870223,
+        "lastModified": 1725882489,
         "narHash": "sha256-5hi1WnuSSFFSLvD9B+XOCL1hENcMJj4HrycUoO3Ar2Q=",
-        "owner": "gkze",
+        "owner": "harrisoncramer",
         "repo": "gitlab.nvim",
-        "rev": "0c74da37a6dac6e4bcf5a336c48d4d7fe7b5135b",
+        "rev": "f1faf603b07d705a4558ce334686afdc8deed215",
         "type": "github"
       },
       "original": {
-        "owner": "gkze",
+        "owner": "harrisoncramer",
         "repo": "gitlab.nvim",
         "type": "github"
       }
@@ -534,11 +534,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1725863684,
-        "narHash": "sha256-HmdTBpuCsw35Ii35JUKO6AE6nae+kJliQb0XGd4hoLE=",
+        "lastModified": 1725893417,
+        "narHash": "sha256-fj2LxTZAncL/s5NrtXe1nLfO0XDvRixtCu3kmV9jDPw=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "be47a2bdf278c57c2d05e747a13ed31cef54a037",
+        "rev": "10541f19c584fe9633c921903d8c095d5411e041",
         "type": "github"
       },
       "original": {
@@ -883,11 +883,11 @@
     },
     "nixos-hardware": {
       "locked": {
-        "lastModified": 1725716377,
-        "narHash": "sha256-7NzW9O/cAw7iWzRfh7Oo/SuSudL4a1YTKS6yoh3tMck=",
+        "lastModified": 1725885300,
+        "narHash": "sha256-5RLEnou1/GJQl+Wd+Bxaj7QY7FFQ9wjnFq1VNEaxTmc=",
         "owner": "NixOS",
         "repo": "nixos-hardware",
-        "rev": "04a1cda0c1725094a4db703cccbb956b7558f5a6",
+        "rev": "166dee4f88a7e3ba1b7a243edb1aca822f00680e",
         "type": "github"
       },
       "original": {
@@ -969,11 +969,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1725851942,
-        "narHash": "sha256-x2Z87jW80OV3gBtf53lHZSwZSUI7aDx7lh6hFMNlutM=",
+        "lastModified": 1725904829,
+        "narHash": "sha256-NwayQZXuhtMGK6xSbbe86+8xWWsdbHqSVu7qruOSX+E=",
         "owner": "nix-community",
         "repo": "nixvim",
-        "rev": "6df273540c1ec51b484fab65988761ae877c6a62",
+        "rev": "9d323f3ec7aa28d25589f43fde16fa03aa17f8d9",
         "type": "github"
       },
       "original": {
@@ -1121,11 +1121,11 @@
     "sqruff": {
       "flake": false,
       "locked": {
-        "lastModified": 1725750148,
-        "narHash": "sha256-1esm5GOYVO5QTH5f1hTy/QIOxvA4cDjL1y26Xsxsnlo=",
+        "lastModified": 1725875639,
+        "narHash": "sha256-q6+o1czrT6BD4sma/XGAfcUeNzIGbr/MmkukXtWy1pM=",
         "owner": "quarylabs",
         "repo": "sqruff",
-        "rev": "94cd01ef8d8385541a875593fafc5d39cc4b41f6",
+        "rev": "50baf9508396cc5583f65c10777af381a257e157",
         "type": "github"
       },
       "original": {
@@ -1160,11 +1160,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1725735402,
-        "narHash": "sha256-r77u8GhWuXiDxPH9PYAwT5uef1vle79lAQwQEYLSJDk=",
+        "lastModified": 1725891217,
+        "narHash": "sha256-sOp47oVhxYhY8NftvD+Xfmvvi1GdO/f7O67Iy9cSviE=",
         "owner": "MHNightCat",
         "repo": "superfile",
-        "rev": "24fe6e3ccf28e24a4a6746f4c2fb7537ddec3c32",
+        "rev": "9e4771ed335adfe31f6b2ec5ea666712c67a0e20",
         "type": "github"
       },
       "original": {
@@ -1340,16 +1340,16 @@
     "uv": {
       "flake": false,
       "locked": {
-        "lastModified": 1725483370,
-        "narHash": "sha256-FdEKt0MCO91GZ1H28myWDQfFdGBDsxmEhzaMSGwagKU=",
+        "lastModified": 1725675495,
+        "narHash": "sha256-81fxSvYRr0aSUlxYklA44emfa5E4SQBENkYAKoHAStc=",
         "owner": "astral-sh",
         "repo": "uv",
-        "rev": "42b6bfbad72eb72fb90d5b98e1f604b8390a6d79",
+        "rev": "a178051e818bb4db36c80453e588cf772c6cdca4",
         "type": "github"
       },
       "original": {
         "owner": "astral-sh",
-        "ref": "0.4.5",
+        "ref": "0.4.7",
         "repo": "uv",
         "type": "github"
       }
