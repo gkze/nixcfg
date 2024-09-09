@@ -34,7 +34,7 @@
   superfile = inputs.superfile.packages.${system}.default;
   uv = prev.rustPlatform.buildRustPackage rec {
     pname = "uv";
-    version = "0.4.3";
+    version = "0.4.7";
     src = inputs.uv;
     cargoLock = { lockFile = "${src}/Cargo.lock"; allowBuiltinFetchGit = true; };
     buildInputs = [ prev.openssl ]
