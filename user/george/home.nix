@@ -931,8 +931,10 @@ in
         # Status line (bottom)
         lualine = {
           enable = true;
-          componentSeparators = { left = ""; right = ""; };
-          sectionSeparators = { left = ""; right = ""; };
+          settings.options = {
+            component_separators = { left = ""; right = ""; };
+            section_separators = { left = ""; right = ""; };
+          };
         };
         # File explorer
         neo-tree = {
@@ -1135,6 +1137,7 @@ in
         nvim-treeclimber
         nvim-treesitter-textsubjects
         overseer-nvim
+        render-markdown-nvim
         vim-bazel
         vim-bundle-mako
         vim-jinja
@@ -1156,6 +1159,7 @@ in
             nvim-surround = { };
             nvim-treeclimber = { };
             overseer = { };
+            render-markdown = { };
             aerial = {
               autojump = true;
               filter_kind = false;
