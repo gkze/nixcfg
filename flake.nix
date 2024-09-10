@@ -3,7 +3,7 @@
 
   inputs = {
     # Use latest nixpkgs
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable-small";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # Flake helper
     fp.url = "github:hercules-ci/flake-parts";
@@ -83,67 +83,28 @@
     # Hardware-specific settings
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
 
-    # Vim text alignment plugin
-    mini-align = { url = "github:echasnovski/mini.align"; flake = false; };
-
-    # Git branch cleanup tool
-    git-trim = { url = "github:jasonmccreary/git-trim"; flake = false; };
-
-    # Rust-based Python package resolver & installed (faster pip)
-    uv = { url = "github:astral-sh/uv/0.4.7"; flake = false; };
-
-    # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
-    yawsso = { url = "github:victorskl/yawsso"; flake = false; };
+    ###
 
     # Alacritty themes
-    alacritty-theme = { url = "github:alacritty/alacritty-theme"; flake = false; };
-
-    # Catppuccin theme
-    catppuccin.url = "github:catppuccin/nix";
-
-    # Sublime syntax for KDL (used in bat)
-    sublime-kdl = { url = "github:eugenesvk/sublime-KDL"; flake = false; };
-
-    # Vim Mako (template language) syntax
-    vim-bundle-mako = { url = "github:sophacles/vim-bundle-mako"; flake = false; };
-
-    # Code snapshotting plugin
-    # codesnap-nvim = { url = "github:mistricky/codesnap.nvim"; flake = false; };
-
-    # Neovim database UI
-    nvim-dbee = { url = "github:kndndrj/nvim-dbee"; flake = false; };
-
-    # Neovim structured editing plugin
-    # TODO: fix attempt to index nil value" 
-    # @ https://github.com/Dkendal/nvim-treeclimber/blob/613daac29f134ad66ccc20f3445d35645a7fe17e/lua/nvim-treeclimber.lua#L29
-    nvim-treeclimber = { url = "github:Dkendal/nvim-treeclimber"; flake = false; };
+    alacritty-theme = {
+      url = "github:alacritty/alacritty-theme";
+      flake = false;
+    };
 
     # Binary manager
     bin = { url = "github:marcosnils/bin/v0.17.4"; flake = false; };
 
-    # Browser Neovim client
-    firenvim = { url = "github:glacambre/firenvim"; flake = false; };
-
     # Neovim proportional buffer dimensions
-    bufresize-nvim = { url = "github:kwkarlwang/bufresize.nvim"; flake = false; };
-
-    # GitLab Neovim Plugin
-    gitlab-nvim = { url = "github:harrisoncramer/gitlab.nvim"; flake = false; };
-
-    # LSP signature help
-    lsp-signature-nvim = { url = "github:ray-x/lsp_signature.nvim"; flake = false; };
-
-    # Aesthetic modern terminal file manager
-    superfile = {
-      url = "github:MHNightCat/superfile";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    # Terminal multiplexer and workspace manager
-    zellij = {
-      url = "github:zellij-org/zellij/c25166c30af05a39f189c7520e3ab0e6a50905be";
+    bufresize-nvim = {
+      url = "github:kwkarlwang/bufresize.nvim";
       flake = false;
     };
+
+    # Catppuccin theme
+    catppuccin.url = "github:catppuccin/nix";
+
+    # Code snapshotting plugin
+    # codesnap-nvim = { url = "github:mistricky/codesnap.nvim"; flake = false; };
 
     # Web browser
     firefox = {
@@ -151,17 +112,85 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Rust in Nix build tool
-    naersk.url = "github:nix-community/naersk";
+    # Browser Neovim client
+    firenvim = {
+      url = "github:glacambre/firenvim";
+      flake = false;
+    };
 
-    # SQL linter & formatter
-    sqruff = { url = "github:quarylabs/sqruff"; flake = false; };
+    # Git branch cleanup tool
+    git-trim = { url = "github:jasonmccreary/git-trim"; flake = false; };
+
+    # GitLab Neovim Plugin
+    gitlab-nvim = {
+      url = "github:harrisoncramer/gitlab.nvim";
+      flake = false;
+    };
 
     # Virtual KVM
     # lan-mouse = {
     #   url = "github:feschber/lan-mouse";
     #   inputs.nixpkgs.follows = "nixpkgs";
     # };
+
+    # LSP signature help
+    lsp-signature-nvim = {
+      url = "github:ray-x/lsp_signature.nvim";
+      flake = false;
+    };
+
+    # Vim text alignment plugin
+    mini-align = { url = "github:echasnovski/mini.align"; flake = false; };
+
+    # Rust in Nix build tool
+    naersk.url = "github:nix-community/naersk";
+
+    # Neovim database UI
+    nvim-dbee = { url = "github:kndndrj/nvim-dbee"; flake = false; };
+
+    # Neovim structured editing plugin
+    # TODO: fix attempt to index nil value" 
+    # @ https://github.com/Dkendal/nvim-treeclimber/blob/613daac29f134ad66ccc20f3445d35645a7fe17e/lua/nvim-treeclimber.lua#L29
+    nvim-treeclimber = {
+      url = "github:Dkendal/nvim-treeclimber";
+      flake = false;
+    };
+
+    # In-editor Markdown rendering for Neovi
+    render-markdown-nvim = {
+      url = "github:MeanderingProgrammer/render-markdown.nvim";
+      flake = false;
+    };
+
+    # SQL linter & formatter
+    sqruff = { url = "github:quarylabs/sqruff"; flake = false; };
+
+    # Sublime syntax for KDL (used in bat)
+    sublime-kdl = { url = "github:eugenesvk/sublime-KDL"; flake = false; };
+
+    # Aesthetic modern terminal file manager
+    superfile = {
+      url = "github:MHNightCat/superfile";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # Rust-based Python package resolver & installed (faster pip)
+    uv = { url = "github:astral-sh/uv/0.4.7"; flake = false; };
+
+    # Vim Mako (template language) syntax
+    vim-bundle-mako = {
+      url = "github:sophacles/vim-bundle-mako";
+      flake = false;
+    };
+
+    # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
+    yawsso = { url = "github:victorskl/yawsso"; flake = false; };
+
+    # Terminal multiplexer and workspace manager
+    zellij = {
+      url = "github:zellij-org/zellij/c25166c30af05a39f189c7520e3ab0e6a50905be";
+      flake = false;
+    };
   };
 
   outputs = inputs:
