@@ -1,7 +1,4 @@
 { config, lib, pkgs, inputs, hostPlatform, profiles, hmMods ? [ ], ... }:
-
-# TODO: figure out and make NixOS-only (for now?)
-# wayland.windowManager.hyprland.enable = true;
 let
   inherit (builtins) concatStringsSep elem elemAt readFile split;
   inherit (lib) optionalString removeSuffix;
@@ -75,8 +72,8 @@ in
         dconf.settings = with lib.hm.gvariant; {
           "org/gnome/desktop/background" = {
             picture-options = "zoom";
-            picture-uri = "file:///home/george/.config/background";
-            picture-uri-dark = "file:///home/george/.config/background";
+            picture-uri = "file:///home/${meta.name.user.system}/.config/background";
+            picture-uri-dark = "file:///home/${meta.name.user.system}/.config/background";
           };
 
           "org/gnome/desktop/input-sources" = {
@@ -238,6 +235,11 @@ in
             icon = { enable = true; accent = "blue"; flavor = "frappe"; };
             tweaks = [ "rimless" ];
           };
+          gtk3.extraCss = ''
+            headerbar.default-decoration button.titlebutton {
+            	padding: 0;
+            }
+          '';
         };
 
         services = {
