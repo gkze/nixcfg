@@ -297,6 +297,7 @@ in
           # Run unpatched binaries on Nix/NixOS
           nix-alien
           # TODO: TBD if works on macOS
+          (python3.withPackages (ps: with ps; [ ptpython ]))
           signal-desktop
           # Logitech device manager
           solaar
@@ -850,7 +851,12 @@ in
         conform-nvim = {
           enable = true;
           settings = {
-            formatters_by_ft.typescript = [ "prettier" ];
+            formatters_by_ft = {
+              javascript = [ "prettier" ];
+              javascriptreact = [ "prettier" ];
+              typescript = [ "prettier" ];
+              typescriptreact = [ "prettier" ];
+            };
             format_on_save.lsp_format = "fallback";
           };
         };
@@ -874,16 +880,6 @@ in
             "gt" = "type_definition";
           };
           servers = {
-            # Nix (nil with nixpkgs-fmt)
-            # TODO: determine if nil or nixd is better
-            # nixd = {
-            #   enable = true;
-            #   settings.formatting.command = "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt";
-            # };
-            nil-ls = {
-              enable = true;
-              settings.formatting.command = [ "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt" ];
-            };
             bashls.enable = true;
             # TypeScript & JavaScript
             # TODO: Re-enable at some point...
@@ -896,6 +892,17 @@ in
             gopls.enable = true;
             html.enable = true;
             jsonls.enable = true;
+            # Nix (nil with nixpkgs-fmt)
+            # TODO: determine if nil or nixd is better
+            # nixd = {
+            #   enable = true;
+            #   settings.formatting.command = "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt";
+            # };
+            nickel-ls.enable = true;
+            nil-ls = {
+              enable = true;
+              settings.formatting.command = [ "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt" ];
+            };
             pyright.enable = true;
             ruff-lsp.enable = false;
             rust-analyzer = {
