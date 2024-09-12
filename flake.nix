@@ -175,7 +175,7 @@
     };
 
     # Rust-based Python package resolver & installed (faster pip)
-    uv = { url = "github:astral-sh/uv/0.4.7"; flake = false; };
+    uv = { url = "github:astral-sh/uv/0.4.9"; flake = false; };
 
     # Vim Mako (template language) syntax
     vim-bundle-mako = {
@@ -209,7 +209,11 @@
 
       # Our Nixpkgs
       mkNixpkgs = system: import inputs.nixpkgs {
-        inherit system; config = { allowUnfree = true; allowInsecure = true; };
+        inherit system; config = {
+        allowUnfree = true;
+        allowInsecure = true;
+        permittedInsecurePackages = [ "nix-2.25.0pre20240807_cfe66dbe" ];
+      };
         overlays = (with inputs; [
           devshell.overlays.default
           nix-alien.overlays.default

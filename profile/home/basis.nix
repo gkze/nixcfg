@@ -36,17 +36,17 @@ in
           enable = true;
           settings = {
             default = { region = "us-west-2"; output = "json"; };
-            "profile development" = {
+            "profile mgmt" = {
               sso_session = "basis";
               sso_account_id = 820061307359;
               sso_role_name = "PowerUserAccess";
             };
-            "profile staging" = {
+            "profile stg" = {
               sso_session = "basis";
               sso_account_id = 905418462882;
               sso_role_name = "PowerUserAccess";
             };
-            "profile production" = {
+            "profile prd" = {
               sso_session = "basis";
               sso_account_id = 432644110438;
               sso_role_name = "PowerUserAccess";
