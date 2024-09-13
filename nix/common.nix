@@ -44,6 +44,10 @@ let inherit (builtins) elemAt split; in {
   # Install documentation from packages
   documentation = { doc.enable = true; info.enable = true; man.enable = true; };
 
-  # Create /etc/zshrc that loads the Nix environment
-  programs.zsh.enable = true;
+  programs = {
+    # Nix Helper CLI
+    nh.enable = true;
+    # Create /etc/zshrc that loads the Nix environment
+    zsh.enable = true;
+  };
 }
