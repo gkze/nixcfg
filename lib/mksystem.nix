@@ -12,9 +12,8 @@
 , ...
 }@args:
 let
-  inherit (builtins) listToAttrs pathExists;
-  inherit (inputs.nixpkgs.lib.attrsets) optionalAttrs;
-  inherit (inputs.nixpkgs.lib) callPackage optionals;
+  inherit (builtins) filter listToAttrs pathExists;
+  inherit (inputs.nixpkgs.lib) optionals;
 
   # Construct host platform tuple from CPU architecture and OS kernel
   hostPlatform = "${arch}-${kernel}";
@@ -67,14 +66,16 @@ sysFn {
               linux = "/home/${user}";
             }.${kernel};
           }
-          //
-          # Add system configuration for user if it exists
-          optionalAttrs (pathExists ../user/${user}/system.nix)
-            (callPackage ../user/${user}/system.nix { inherit inputs kernel user; })
           );
         })
         users);
     }]
+    # If a user declares a system configuration import it
+    ++ filter (e: e != null) (map
+      (u:
+        if pathExists ../user/${u}/system.nix
+        then ../user/${u}/system.nix else null)
+      users)
     # User / home environment
     ++ [
       hmMod
@@ -106,7 +107,6 @@ sysFn {
         };
       }
     ]
-    # Any additional system moduels passed
+    # Any additional system modules passed
     ++ sysMods;
 }
-
