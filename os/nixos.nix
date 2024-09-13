@@ -98,7 +98,7 @@ in
     xserver = {
       enable = true;
       desktopManager.gnome.enable = true;
-      displayManager.gdm = { enable = true; banner = "Go away"; };
+      displayManager.gdm = { enable = true; banner = "Another day another dolla"; };
       # TODO: automate
       # When changing, run:
       # ```
