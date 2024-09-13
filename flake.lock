@@ -152,11 +152,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1726144253,
-        "narHash": "sha256-eLyPTEVG1tUqZk7d4+skKxN3CouHt4DAuGRvXFvLMe0=",
+        "lastModified": 1726183256,
+        "narHash": "sha256-9Qwg8XkfTnQgtQ/DsuW0KOP3oJ5SvapIlipcx3V/rkE=",
         "owner": "nix-community",
         "repo": "flake-firefox-nightly",
-        "rev": "53380a49b2b1071cf30ffd212c6aaa038fbde058",
+        "rev": "4dc98be208c1435fc89ca62b5bcfba2e669d1d74",
         "type": "github"
       },
       "original": {
@@ -684,11 +684,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1726146727,
-        "narHash": "sha256-/FDZ7N0ttDxmu2Orzz+RuVGkVceagh/eKMzdgo3g+hQ=",
+        "lastModified": 1726168587,
+        "narHash": "sha256-4RdrCa1pldPyuEHXiN9MhMPCvkUObO517XqixSz064c=",
         "owner": "LnL7",
         "repo": "nix-darwin",
-        "rev": "9d7aebb3039fbfb93afebef53210e2999f8b7e1a",
+        "rev": "122ff62d68c9068706393001d5884b66bc0067c4",
         "type": "github"
       },
       "original": {
@@ -969,11 +969,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1726133505,
-        "narHash": "sha256-5Q7Io0J98z7UOswrruOuO/jJNduSB3PKFw/sDz0NX1A=",
+        "lastModified": 1726148694,
+        "narHash": "sha256-bR7LFVtMjiVlO2OpmDSuLQ2XQr+h+JtVFYObAbThZSs=",
         "owner": "nix-community",
         "repo": "nixvim",
-        "rev": "4697b96a0124944929ecefa09d488c7997419e43",
+        "rev": "27a0dd435dd3563f4cf9d788601fadfce8c59db6",
         "type": "github"
       },
       "original": {
@@ -1039,11 +1039,11 @@
     "render-markdown-nvim": {
       "flake": false,
       "locked": {
-        "lastModified": 1726095526,
-        "narHash": "sha256-sS9nofQ6on5BiA/w393NnPLFkdlD5JujqqnZhqxIsfU=",
+        "lastModified": 1726165713,
+        "narHash": "sha256-6EoJWKXePglg8hiErp1VOaI/xmYFonthHZL4s96fZXc=",
         "owner": "MeanderingProgrammer",
         "repo": "render-markdown.nvim",
-        "rev": "c37f698bf7c2d942b78d924be9a2aed9f5951e74",
+        "rev": "cb935afe5bb52965e2bfc11cf7b563bb159ef4f5",
         "type": "github"
       },
       "original": {
@@ -1138,11 +1138,11 @@
     "sqruff": {
       "flake": false,
       "locked": {
-        "lastModified": 1726151136,
-        "narHash": "sha256-knH/BWOavUP2cla8Tcc2Re1Jrqw0M6MWoVcy+OAH+Dw=",
+        "lastModified": 1726179784,
+        "narHash": "sha256-TPDrC6qoyjHb/nJpUfPR5+pCqOZ0EOKOhcBEP/RNPig=",
         "owner": "quarylabs",
         "repo": "sqruff",
-        "rev": "4f04d54f8584a6138a91cea5828b105e0265b5c7",
+        "rev": "d940a62efc21986dcbd78cc5ba216c70af0df102",
         "type": "github"
       },
       "original": {
