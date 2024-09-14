@@ -94,6 +94,14 @@ in
     flatpak.enable = true;
     # Firmware UPdate Daemon
     fwupd.enable = true;
+    # Sound
+    pipewire = {
+      enable = true;
+      alsa.enable = true;
+      alsa.support32Bit = true;
+      pulse.enable = true;
+    };
+    thermald.enable = true;
     # Display
     xserver = {
       enable = true;
@@ -107,14 +115,6 @@ in
       # ```
       xkb = { options = "caps:swapescape"; layout = "us"; };
     };
-    # Sound
-    pipewire = {
-      enable = true;
-      alsa.enable = true;
-      alsa.support32Bit = true;
-      pulse.enable = true;
-    };
-    thermald.enable = true;
   };
 
 
