@@ -236,9 +236,7 @@ in
             tweaks = [ "rimless" ];
           };
           gtk3.extraCss = ''
-            headerbar.default-decoration button.titlebutton {
-            	padding: 0;
-            }
+            headerbar.default-decoration button.titlebutton { padding: 0; }
           '';
         };
 
@@ -321,6 +319,18 @@ in
         programs.firefox = {
           enable = true;
           package = inputs.firefox.packages.${hostPlatform}.firefox-nightly-bin;
+          profiles.main = {
+            isDefault = true;
+            search = {
+              force = true;
+              default = "Google";
+              privateDefault = "DuckDuckGo";
+            };
+            settings = {
+              "extensions.pocket.enabled" = false;
+              "sidebar.verticalTabs" = true;
+            };
+          };
         };
 
         # wayland.windowManager.hyprland = {
@@ -426,12 +436,18 @@ in
     packages = with pkgs; [
       # Binary manager
       bin
+      # Cachix client
+      cachix
       # cURL wrapper with niceties
       curlie
       # Duplicate file finder
       czkawka
       # Disk space usage analyzer (in Rust)
       du-dust
+      # Disk Usage Analyzer
+      dua
+      # Disuk Usage/Free utility
+      duf
       # Envchain is a utility that loads environment variables from the system
       # keychain
       envchain
