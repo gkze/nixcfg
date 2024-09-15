@@ -9,6 +9,7 @@ in
 
     buildMachines = [
       {
+        protocol = "ssh-ng";
         hostName = "eu.nixbuild.net";
         system = "x86_64-linux";
         maxJobs = 100;
