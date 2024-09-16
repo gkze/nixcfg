@@ -5,6 +5,9 @@
     # Use latest nixpkgs
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
+    # Nix User Repository
+    nur.url = "github:nix-community/NUR";
+
     # Flake helper
     fp.url = "github:hercules-ci/flake-parts";
 
@@ -217,6 +220,7 @@
         overlays = (with inputs; [
           devshell.overlays.default
           nix-alien.overlays.default
+          nur.overlay
           rust-overlay.overlays.default
         ])
         ++ [
