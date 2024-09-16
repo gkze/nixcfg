@@ -15,15 +15,16 @@ in
           networkmanager-openvpn
         ];
 
-        programs.firefox.profiles.main.bookmarks = [{
-          toolbar = true;
-          bookmarks =
-            [
+        programs.firefox.profiles.main = {
+          bookmarks = [{
+            toolbar = true;
+            bookmarks = [
               { name = "Mail"; url = "https://mail.google.com/mail/u/0/#inbox"; }
               { name = "Calendar"; url = "https://calendar.google.com/calendar/u/0/r"; }
               { name = "Drive"; url = "https://drive.google.com/drive/home"; }
               { name = "Meet"; url = "https://meet.google.com/landing"; }
               { name = "JumpCloud"; url = "https://console.jumpcloud.com/userconsole#/"; }
+              { name = "Linear"; url = "https://linear.app/usebasis/team/BAS/active"; }
               {
                 name = "GitLab";
                 bookmarks = [
@@ -163,7 +164,20 @@ in
                   "https://basis-lf.sentry.io/issues/?${projectIds}&statsPeriod=24h";
               }
             ];
-        }];
+          }];
+          # Devtools break if this isn't set!
+          containersForce = true;
+          containers = {
+            "Customer User" = { color = "turquoise"; id = 1; icon = "circle"; };
+            "Profile User" = { color = "purple"; id = 2; icon = "circle"; };
+            "AWS Management" = { color = "green"; id = 3; icon = "circle"; };
+            "AWS Staging" = { color = "yellow"; id = 4; icon = "circle"; };
+            "AWS Production" = { color = "red"; id = 5; icon = "circle"; };
+          };
+          extensions = with pkgs.nur.repos.rycee.firefox-addons; [
+            onepassword-password-manager
+          ];
+        };
       };
     }.${kernel}
     {

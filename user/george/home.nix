@@ -326,7 +326,11 @@ in
               default = "Google";
               privateDefault = "DuckDuckGo";
             };
+            extensions = with pkgs.nur.repos.rycee.firefox-addons; [
+              firefox-color
+            ];
             settings = {
+              "extensions.autoDisableScopes" = 0;
               "extensions.pocket.enabled" = false;
               "sidebar.verticalTabs" = true;
             };
@@ -504,6 +508,8 @@ in
       sd
       # TODO: TBD if works on macOS
       slack
+      # Universal file manager
+      spacedrive
       # Music streaming
       spotify
       # Fast SQL formatter
