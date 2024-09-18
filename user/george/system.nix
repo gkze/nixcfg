@@ -1,6 +1,19 @@
+{ hostPlatform, ... }:
+let
+  inherit (builtins) elemAt split;
+
+  # Grab the OS kernel part of the hostPlatform tuple
+  kernel = elemAt (split "-" hostPlatform) 2;
+in
 {
+  imports = [
+    {
+      darwin = { };
+      linux = { networking.networkmanager.insertNameservers = [ "127.0.0.1" ]; };
+    }.${kernel}
+  ];
   services.coredns = {
-    enable = true;
+    enable = false;
     config = ''
       . {
         forward . 1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4
@@ -14,5 +27,4 @@
       }
     '';
   };
-  networking.networkmanager.insertNameservers = [ "127.0.0.1" ];
 }
