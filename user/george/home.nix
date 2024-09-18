@@ -324,7 +324,7 @@ in
             search = {
               force = true;
               default = "Google";
-              privateDefault = "DuckDuckGo";
+              privateDefault = "Google";
             };
             extensions = with pkgs.nur.repos.rycee.firefox-addons; [
               firefox-color
@@ -1165,7 +1165,7 @@ in
         # codesnap-nvim
         firenvim
         git-conflict-nvim
-        gitlab-nvim
+        # gitlab-nvim
         lsp-signature-nvim
         nvim-dbee
         nvim-surround
@@ -1190,7 +1190,7 @@ in
             #   watermark = "";
             # };
             git-conflict = { };
-            gitlab = { };
+            # gitlab = { };
             nvim-surround = { };
             nvim-treeclimber = { };
             overseer = { };
