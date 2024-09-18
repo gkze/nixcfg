@@ -165,15 +165,15 @@ in
               }
             ];
           }];
-          # Devtools break if this isn't set!
-          containersForce = true;
-          containers = {
-            "Customer User" = { color = "turquoise"; id = 1; icon = "circle"; };
-            "Profile User" = { color = "purple"; id = 2; icon = "circle"; };
-            "AWS Management" = { color = "green"; id = 3; icon = "circle"; };
-            "AWS Staging" = { color = "yellow"; id = 4; icon = "circle"; };
-            "AWS Production" = { color = "red"; id = 5; icon = "circle"; };
-          };
+          # This currently breaks devtools, needs to be reworked
+          # containersForce = true;
+          # containers = {
+          #   "Customer User" = { color = "turquoise"; id = 1; icon = "circle"; };
+          #   "Profile User" = { color = "purple"; id = 2; icon = "circle"; };
+          #   "AWS Management" = { color = "green"; id = 3; icon = "circle"; };
+          #   "AWS Staging" = { color = "yellow"; id = 4; icon = "circle"; };
+          #   "AWS Production" = { color = "red"; id = 5; icon = "circle"; };
+          # };
           extensions = with pkgs.nur.repos.rycee.firefox-addons; [
             onepassword-password-manager
           ];

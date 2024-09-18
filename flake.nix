@@ -125,10 +125,10 @@
     git-trim = { url = "github:jasonmccreary/git-trim"; flake = false; };
 
     # GitLab Neovim Plugin
-    gitlab-nvim = {
-      url = "github:harrisoncramer/gitlab.nvim";
-      flake = false;
-    };
+    # gitlab-nvim = {
+    #   url = "github:harrisoncramer/gitlab.nvim";
+    #   flake = false;
+    # };
 
     # Virtual KVM
     # lan-mouse = {

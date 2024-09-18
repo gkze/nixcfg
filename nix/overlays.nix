@@ -76,28 +76,28 @@
     #   buildPhase = "make";
     # };
 
-    gitlab-nvim =
-      let
-        gitlabNvimGo = prev.buildGoModule {
-          pname = "gitlab-nvim-go";
-          version = inputs.gitlab-nvim.rev;
-          src = inputs.gitlab-nvim;
-          vendorHash = "sha256-wYlFmarpITuM+s9czQwIpE1iCJje7aCe0w7/THm+524=";
-        };
-      in
-      prev.vimUtils.buildVimPlugin {
-        pname = "gitlab-nvim";
-        version = inputs.gitlab-nvim.rev;
-        src = inputs.gitlab-nvim;
-        buildInputs = with prev.vimPlugins; [
-          diffview-nvim
-          dressing-nvim
-          nui-nvim
-          plenary-nvim
-        ];
-        nativeBuildInputs = with prev; [ go gitlabNvimGo ];
-        buildPhase = "mkdir -p $out && cp ${gitlabNvimGo}/bin/cmd $out/bin";
-      };
+    # gitlab-nvim =
+    #   let
+    #     gitlabNvimGo = prev.buildGoModule {
+    #       pname = "gitlab-nvim-go";
+    #       version = inputs.gitlab-nvim.rev;
+    #       src = inputs.gitlab-nvim;
+    #       vendorHash = "sha256-wYlFmarpITuM+s9czQwIpE1iCJje7aCe0w7/THm+524=";
+    #     };
+    #   in
+    #   prev.vimUtils.buildVimPlugin {
+    #     pname = "gitlab-nvim";
+    #     version = inputs.gitlab-nvim.rev;
+    #     src = inputs.gitlab-nvim;
+    #     buildInputs = with prev.vimPlugins; [
+    #       diffview-nvim
+    #       dressing-nvim
+    #       nui-nvim
+    #       plenary-nvim
+    #     ];
+    #     nativeBuildInputs = with prev; [ go gitlabNvimGo ];
+    #     buildPhase = "mkdir -p $out && cp ${gitlabNvimGo}/bin/cmd $out/bin";
+    #   };
 
     vim-bundle-mako = prev.vimUtils.buildVimPlugin {
       pname = "vim-bundle-mako";
