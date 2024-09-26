@@ -68,36 +68,35 @@
     };
 
     # NOTE: does not work on nixbuild.net for some reason but works locally
-    # codesnap-nvim = prev.vimUtils.buildVimPlugin {
-    #   pname = "codesnap-nvim";
-    #   version = inputs.codesnap-nvim.rev;
-    #   src = inputs.codesnap-nvim;
-    #   nativeBuildInputs = with prev; [ cargo rustc ];
-    #   buildPhase = "make";
-    # };
+    codesnap-nvim = prev.vimUtils.buildVimPlugin {
+      pname = "codesnap-nvim";
+      src = inputs.codesnap-nvim;
+      version = inputs.codesnap-nvim.rev;
+      nativeBuildInputs = with prev; [ cargo rustc ];
+      buildPhase = "make";
+    };
 
-    # gitlab-nvim =
-    #   let
-    #     gitlabNvimGo = prev.buildGoModule {
-    #       pname = "gitlab-nvim-go";
-    #       version = inputs.gitlab-nvim.rev;
-    #       src = inputs.gitlab-nvim;
-    #       vendorHash = "sha256-wYlFmarpITuM+s9czQwIpE1iCJje7aCe0w7/THm+524=";
-    #     };
-    #   in
-    #   prev.vimUtils.buildVimPlugin {
-    #     pname = "gitlab-nvim";
-    #     version = inputs.gitlab-nvim.rev;
-    #     src = inputs.gitlab-nvim;
-    #     buildInputs = with prev.vimPlugins; [
-    #       diffview-nvim
-    #       dressing-nvim
-    #       nui-nvim
-    #       plenary-nvim
-    #     ];
-    #     nativeBuildInputs = with prev; [ go gitlabNvimGo ];
-    #     buildPhase = "mkdir -p $out && cp ${gitlabNvimGo}/bin/cmd $out/bin";
-    #   };
+    gitlab-nvim =
+      let
+        gitlabNvimGo = prev.buildGoModule {
+          pname = "gitlab-nvim-go";
+          # version = inputs.gitlab-nvim.rev;
+          version = "dev";
+          src = inputs.gitlab-nvim;
+          vendorHash = "sha256-wYlFmarpITuM+s9czQwIpE1iCJje7aCe0w7/THm+524=";
+        };
+      in
+      prev.vimUtils.buildVimPlugin {
+        pname = "gitlab-nvim";
+        # version = inputs.gitlab-nvim.rev;
+        version = "dev";
+        src = inputs.gitlab-nvim;
+        buildInputs = with prev.vimPlugins; [
+          plenary-nvim
+        ];
+        nativeBuildInputs = with prev; [ go gitlabNvimGo ];
+        buildPhase = "mkdir -p $out && cp ${gitlabNvimGo}/bin/cmd $out/bin";
+      };
 
     vim-bundle-mako = prev.vimUtils.buildVimPlugin {
       pname = "vim-bundle-mako";

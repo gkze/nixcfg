@@ -79,6 +79,8 @@ in
         };
       };
     };
+    # TODO: Can it integrate with GNOME?
+    # yubikey-touch-detector.enable = true;
   };
 
   virtualisation = {
@@ -123,7 +125,10 @@ in
   hardware.pulseaudio.enable = false;
   security = {
     audit.enable = true;
-    pam.services.login.enableGnomeKeyring = true;
+    pam.services = {
+      login = { enableGnomeKeyring = true; u2fAuth = true; };
+      sudo.u2fAuth = true;
+    };
     rtkit.enable = true;
   };
 
