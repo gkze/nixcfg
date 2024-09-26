@@ -45,8 +45,23 @@
     #     charger = { governor = "performance"; turbo = "auto"; };
     #   };
     # };
-    udev.extraRules = ''KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"'';
-    fprintd.enable = true;
+    udev.extraRules = ''
+      KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"
+      ACTION=="remove",\
+       ENV{ID_BUS}=="usb",\
+       ENV{ID_MODEL_ID}=="0407",\
+       ENV{ID_VENDOR_ID}=="1050",\
+       ENV{ID_VENDOR}=="Yubico",\
+       RUN+="${pkgs.systemd}/bin/loginctl lock-sessions"
+    '';
+    fprintd = {
+      enable = true;
+      package = pkgs.fprintd-tod;
+      tod = {
+        enable = true;
+        driver = pkgs.libfprint-2-tod1-vfs0090;
+      };
+    };
   };
 
   fileSystems = {
