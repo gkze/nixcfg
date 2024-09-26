@@ -107,7 +107,7 @@
     catppuccin.url = "github:catppuccin/nix";
 
     # Code snapshotting plugin
-    # codesnap-nvim = { url = "github:mistricky/codesnap.nvim"; flake = false; };
+    codesnap-nvim = { url = "github:mistricky/codesnap.nvim"; flake = false; };
 
     # Web browser
     firefox = {
@@ -125,10 +125,10 @@
     git-trim = { url = "github:jasonmccreary/git-trim"; flake = false; };
 
     # GitLab Neovim Plugin
-    # gitlab-nvim = {
-    #   url = "github:harrisoncramer/gitlab.nvim";
-    #   flake = false;
-    # };
+    gitlab-nvim = {
+      url = "github:gkze/gitlab.nvim";
+      flake = false;
+    };
 
     # Virtual KVM
     # lan-mouse = {
