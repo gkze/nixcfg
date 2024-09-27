@@ -191,7 +191,7 @@
 
     # Terminal multiplexer and workspace manager
     zellij = {
-      url = "github:zellij-org/zellij/c25166c30af05a39f189c7520e3ab0e6a50905be";
+      url = "github:zellij-org/zellij/3569daf7c9cacc1dbbec6a3813079130b4c0683c";
       flake = false;
     };
   };
