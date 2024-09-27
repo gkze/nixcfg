@@ -27,7 +27,7 @@ in
         # TODO: figure out
         # Folding
         foldlevel = 99; # Folds with a level higher than this number will be closed
-        foldcolumn = "0";
+        foldcolumn = "1";
         foldenable = true;
         foldlevelstart = -1;
         fillchars = {
@@ -50,6 +50,8 @@ in
         # Rulers at 80 and 100 characters
         # Line numbers
         number = true;
+        # Relative line numbers
+        relativenumber = true;
         # List mode (display non-printing characters)
         list = true;
         # Set printing characters for non-printing characters
@@ -108,51 +110,6 @@ in
       };
       # Editor-agnostic configuration
       editorconfig.enable = true;
-      extraConfigLua =
-        let
-          helpers = inputs.nixvim.lib.${hostPlatform}.helpers;
-          extraPluginsConfig = {
-            # TODO: enable once figured out
-            # bufresize = { };
-            codesnap = {
-              code_font_family = "Hack Nerd Font Mono";
-              has_breadcrumbs = true;
-              save_path = "~/Pictures";
-              watermark = "";
-            };
-            git-conflict = { };
-            gitlab = { };
-            nvim-surround = { };
-            nvim-treeclimber = { };
-            overseer = { };
-            render-markdown = { };
-            aerial = {
-              autojump = true;
-              filter_kind = false;
-              open_automatic = true;
-            };
-            "nvim-treesitter.configs".textsubjects = {
-              enable = true;
-              rrev_selection = ",";
-              keymaps = {
-                "." = "textsubjects-smart";
-                ";" = "textsubjects-container-outer";
-                "i;" = "textsubjects-container-inner";
-              };
-            };
-          };
-        in
-        (concatStringsSep "\n"
-          ((mapAttrsToList (n: v: "require(\"${n}\").setup(${helpers.toLuaObject v})") extraPluginsConfig)
-            ++ [
-            "if vim.g.neovide then vim.g.neovide_scale_factor = 0.7 end"
-            ''
-              lspconfig = require('lspconfig')
-              lspconfig.postgres_lsp.setup({
-                root_dir = lspconfig.util.root_pattern 'flake.nix'
-              })
-            ''
-          ]));
       plugins = {
         # Greeter (home page)
         alpha = {
@@ -370,49 +327,44 @@ in
           fileTypes = [{ language = "typescriptreact"; tailwind = "both"; }];
         };
         # Status column
-        # statuscol = {
-        #   enable = true;
-        #   settings = {
-        #     relculright = true;
-        #     segments = [
-        #       {
-        #         hl = "FoldColumn";
-        #         text = [{ __raw = "require('statuscol.builtin').foldfunc"; }];
-        #         click = "v:lua.ScFa";
-        #       }
-        #       {
-        #         text = null;
-        #         sign = {
-        #           name = [ ".*" ];
-        #           namespace = [ ".*" ];
-        #           text = [ ".*" ];
-        #           maxwidth = 2;
-        #           auto = true;
-        #         };
-        #         click = "v:lua.ScSa";
-        #       }
-        #       {
-        #         text = [
-        #           " "
-        #           { __raw = "require('statuscol.builtin').lnumfunc"; }
-        #           " "
-        #         ];
-        #         click = "v:lua.ScLa";
-        #       }
-        #       {
-        #         text = null;
-        #         sign = {
-        #           name = [ ".*" ];
-        #           maxwidth = 2;
-        #           colwidth = 1;
-        #           auto = true;
-        #           wrap = true;
-        #         };
-        #         click = "v:lua.ScSa";
-        #       }
-        #     ];
-        #   };
-        # };
+        statuscol = {
+          enable = true;
+          settings = {
+            relculright = true;
+            ft_ignore = [ "NeogitStatus" "neo-tree" "aerial" ];
+            segments = [
+              {
+                hl = "FoldColumn";
+                text = [{ __raw = "require('statuscol.builtin').foldfunc"; }];
+                click = "v:lua.ScFa";
+              }
+              {
+                text = null;
+                sign = {
+                  name = [ ".*" ];
+                  namespace = [ ".*" ];
+                  text = [ ".*" ];
+                  maxwidth = 1;
+                  colwidth = 1;
+                  auto = false;
+                };
+                click = "v:lua.ScSa";
+              }
+              { text = [ " %l %=%r " ]; click = "v:lua.ScLa"; }
+              {
+                text = null;
+                sign = {
+                  name = [ ".*" ];
+                  maxwidth = 1;
+                  colwidth = 1;
+                  auto = true;
+                  wrap = true;
+                };
+                click = "v:lua.ScSa";
+              }
+            ];
+          };
+        };
         # File finder (popup)
         telescope = {
           enable = true;
@@ -603,6 +555,51 @@ in
         vim-bundle-mako
         vim-jinja
       ];
+      extraConfigLua =
+        let
+          helpers = inputs.nixvim.lib.${hostPlatform}.helpers;
+          extraPluginsConfig = {
+            # TODO: enable once figured out
+            # bufresize = { };
+            codesnap = {
+              code_font_family = "Hack Nerd Font Mono";
+              has_breadcrumbs = true;
+              save_path = "~/Pictures";
+              watermark = "";
+            };
+            git-conflict = { };
+            gitlab = { };
+            nvim-surround = { };
+            nvim-treeclimber = { };
+            overseer = { };
+            render-markdown = { };
+            aerial = {
+              autojump = true;
+              filter_kind = false;
+              open_automatic = true;
+            };
+            "nvim-treesitter.configs".textsubjects = {
+              enable = true;
+              rrev_selection = ",";
+              keymaps = {
+                "." = "textsubjects-smart";
+                ";" = "textsubjects-container-outer";
+                "i;" = "textsubjects-container-inner";
+              };
+            };
+          };
+        in
+        (concatStringsSep "\n"
+          ((mapAttrsToList (n: v: "require(\"${n}\").setup(${helpers.toLuaObject v})") extraPluginsConfig)
+            ++ [
+            "if vim.g.neovide then vim.g.neovide_scale_factor = 0.7 end"
+            ''
+              lspconfig = require('lspconfig')
+              lspconfig.postgres_lsp.setup({
+                root_dir = lspconfig.util.root_pattern 'flake.nix'
+              })
+            ''
+          ]));
       keymaps = [
         { key = ";"; action = ":"; }
         { key = "<A-S-(>"; action = ":BufferLineMovePrev<CR>"; }
