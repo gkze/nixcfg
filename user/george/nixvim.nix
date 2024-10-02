@@ -17,8 +17,8 @@ in
       # Remap leader key to spacebar
       globals.mapleader = " ";
       # Set Space key to be leader
-      options = {
-        # Text width helper
+      opts = {
+        # Rulers at 80 and 100 characters
         colorcolumn = [ 80 100 ];
         # Highlight cursor line
         cursorline = true;
@@ -47,7 +47,6 @@ in
         };
         # Mouse
         mouse = "a";
-        # Rulers at 80 and 100 characters
         # Line numbers
         number = true;
         # Relative line numbers

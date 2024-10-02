@@ -86,7 +86,7 @@
     # Hardware-specific settings
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
 
-    ###
+    ### Non-flake inputs
 
     # Alacritty themes
     alacritty-theme = {
@@ -191,7 +191,7 @@
 
     # Terminal multiplexer and workspace manager
     zellij = {
-      url = "github:zellij-org/zellij/3569daf7c9cacc1dbbec6a3813079130b4c0683c";
+      url = "github:zellij-org/zellij/0c8787d5c9d3799b31ad2440b8ca695c8de4f9ef";
       flake = false;
     };
   };
