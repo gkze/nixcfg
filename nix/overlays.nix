@@ -149,7 +149,7 @@
     cargoDeps = p.cargoDeps.overrideAttrs {
       name = "${p.pname}-${version}-vendor.tar.gz";
       inherit src;
-      outputHash = "sha256-0O+9Om4JA4YQW+gkoQW3t1ZaTSv3N5Tv/xP2ri3Sc2Q=";
+      outputHash = "sha256-XAJ6BnxlThY57W6jjHrOmIj8T1TZP59Yr0/uK+bzWd0=";
     };
   });
 })
