@@ -6,6 +6,6 @@
     # Hand-sized out for MacBook Pro 16" so that the Alacritty window pops
     # up in the center with a bit of space left around the screen
     dimensions = { columns = 250; lines = 80; };
-    position = { x = 307; y = 286; };
+    position = { x = 307; y = 284; };
   };
 }
