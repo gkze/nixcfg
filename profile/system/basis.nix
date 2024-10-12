@@ -1,4 +1,4 @@
-{ config, pkgs, hostPlatform, ... }:
+{ hostPlatform, ... }:
 let kernel = builtins.elemAt (builtins.split "-" hostPlatform) 2; in
 {
   imports = [
