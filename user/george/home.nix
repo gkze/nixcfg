@@ -95,7 +95,6 @@ in
           lorri.enable = true;
         };
 
-
         catppuccin = {
           enable = true;
           accent = "blue";
@@ -361,7 +360,7 @@ in
       # Universal file manager
       spacedrive
       # Music streaming
-      spotify
+      # spotify
       # Fast SQL formatter
       sqruff
       # Aesthetic modern terminal file manager
