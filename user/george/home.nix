@@ -95,10 +95,12 @@ in
           lorri.enable = true;
         };
 
-        catppuccin.pointerCursor = {
+
+        catppuccin = {
           enable = true;
           accent = "blue";
           flavor = "frappe";
+          pointerCursor = { enable = true; accent = "blue"; flavor = "frappe"; };
         };
 
         # These are marked as unsupported on darwin
@@ -158,24 +160,30 @@ in
         ])
         ;
 
-        programs.firefox = {
-          enable = true;
-          package = inputs.firefox.packages.${hostPlatform}.firefox-nightly-bin;
-          profiles.main = {
-            isDefault = true;
-            search = {
-              force = true;
-              default = "Google";
-              privateDefault = "Google";
+        programs = {
+          firefox = {
+            enable = true;
+            package = inputs.firefox.packages.${hostPlatform}.firefox-nightly-bin;
+            profiles.main = {
+              isDefault = true;
+              search = {
+                force = true;
+                default = "Google";
+                privateDefault = "Google";
+              };
+              extensions = with pkgs.nur.repos.rycee.firefox-addons; [
+                firefox-color
+              ];
+              settings = {
+                "extensions.autoDisableScopes" = 0;
+                "extensions.pocket.enabled" = false;
+                "sidebar.verticalTabs" = true;
+              };
             };
-            extensions = with pkgs.nur.repos.rycee.firefox-addons; [
-              firefox-color
-            ];
-            settings = {
-              "extensions.autoDisableScopes" = 0;
-              "extensions.pocket.enabled" = false;
-              "sidebar.verticalTabs" = true;
-            };
+          };
+          foot = {
+            enable = true;
+            settings.main.include = lib.mkForce "${inputs.foot-catppuccin}/themes/catppuccin-frappe.ini";
           };
         };
 
@@ -190,8 +198,6 @@ in
 
   # User-level Nix config
   nix = { package = lib.mkForce pkgs.nixVersions.git; checkConfig = true; };
-
-  catppuccin = { enable = true; accent = "blue"; flavor = "frappe"; };
 
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
@@ -334,6 +340,8 @@ in
       # Only install Hack Nerd Font, since the entire package / font repository
       # is quite large
       (nerdfonts.override { fonts = [ "Hack" ]; })
+      # Nix Helper CLI
+      nh
       # Container management
       # podman-desktop
       # Modern developer workflow system
@@ -613,6 +621,7 @@ in
     # Terminal multiplexer / workspace manager
     zellij = {
       enable = true;
+      enableZshIntegration = true;
       settings = {
         # TODO: set dynamically, or better yet figure out how to get Alacritty
         # to respect custom GTK themes
