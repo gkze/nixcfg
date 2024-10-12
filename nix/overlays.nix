@@ -24,11 +24,13 @@
 
   nixos-conf-editor = inputs.nixos-conf-editor.packages.${system}.default;
 
-  # pants = final.callPackage ./pants.nix { nix-alien = inputs.nix-alien; };
-
   sqruff = (prev.callPackage inputs.naersk {
     rustc = prev.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
-  }).buildPackage { src = inputs.sqruff; };
+  }).buildPackage {
+    name = "sqruff";
+    version = "v0.19.1";
+    src = inputs.sqruff;
+  };
 
   sublime-kdl = prev.stdenvNoCC.mkDerivation {
     pname = "sublime-kdl";
@@ -68,13 +70,13 @@
     };
 
     # NOTE: does not work on nixbuild.net for some reason but works locally
-    codesnap-nvim = prev.vimUtils.buildVimPlugin {
-      pname = "codesnap-nvim";
-      src = inputs.codesnap-nvim;
-      version = inputs.codesnap-nvim.rev;
-      nativeBuildInputs = with prev; [ cargo rustc ];
-      buildPhase = "make";
-    };
+    # codesnap-nvim = prev.vimUtils.buildVimPlugin {
+    #   pname = "codesnap-nvim";
+    #   src = inputs.codesnap-nvim;
+    #   version = inputs.codesnap-nvim.rev;
+    #   nativeBuildInputs = with prev; [ cargo rustc ];
+    #   buildPhase = "make";
+    # };
 
     gitlab-nvim =
       let
@@ -143,13 +145,13 @@
     doCheck = false;
   };
 
-  zellij = prev.zellij.overrideAttrs (p: rec {
-    version = "0.41.0";
-    src = inputs.zellij;
-    cargoDeps = p.cargoDeps.overrideAttrs {
-      name = "${p.pname}-${version}-vendor.tar.gz";
-      inherit src;
-      outputHash = "sha256-XAJ6BnxlThY57W6jjHrOmIj8T1TZP59Yr0/uK+bzWd0=";
-    };
-  });
+  # zellij = prev.zellij.overrideAttrs (p: rec {
+  #   version = "0.41.0";
+  #   src = inputs.zellij;
+  #   cargoDeps = p.cargoDeps.overrideAttrs {
+  #     name = "${p.pname}-${version}-vendor.tar.gz";
+  #     inherit src;
+  #     outputHash = "sha256-XAJ6BnxlThY57W6jjHrOmIj8T1TZP59Yr0/uK+bzWd0=";
+  #   };
+  # });
 })

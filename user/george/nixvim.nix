@@ -257,14 +257,14 @@ in
             #   enable = true;
             #   settings.formatting.command = "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt";
             # };
-            nickel-ls.enable = true;
-            nil-ls = {
+            nickel_ls.enable = true;
+            nil_ls = {
               enable = true;
               settings.formatting.command = [ "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt" ];
             };
             pyright.enable = true;
-            ruff-lsp.enable = false;
-            rust-analyzer = {
+            ruff_lsp.enable = false;
+            rust_analyzer = {
               enable = true;
               installCargo = true;
               installRustc = true;
@@ -273,7 +273,7 @@ in
             taplo.enable = true;
             tailwindcss.enable = true;
             # tsserver.enable = true;
-            typos-lsp.enable = true;
+            typos_lsp.enable = true;
             yamlls = {
               enable = true;
               extraOptions.settings.yaml.customTags = [
@@ -385,6 +385,7 @@ in
           settings = {
             highlight = {
               enable = true;
+              disable = [ "alpha" ];
               additional_vim_regex_highlighting = true;
             };
             incremental_selection = {
@@ -521,6 +522,8 @@ in
         oil.enable = true;
         # Schemastore
         schemastore.enable = true;
+        # Global search and replace
+        spectre.enable = true;
         # Better split management
         smart-splits.enable = true;
         # Enable working with TODO: code comments
@@ -547,12 +550,14 @@ in
         nvim-dbee
         nvim-surround
         nvim-treeclimber
+        nvim-treesitter-parsers.nickel
         nvim-treesitter-textsubjects
         overseer-nvim
         render-markdown-nvim
         vim-bazel
         vim-bundle-mako
         vim-jinja
+        vim-nickel
       ];
       extraConfigLua =
         let
@@ -560,23 +565,19 @@ in
           extraPluginsConfig = {
             # TODO: enable once figured out
             # bufresize = { };
-            codesnap = {
-              code_font_family = "Hack Nerd Font Mono";
-              has_breadcrumbs = true;
-              save_path = "~/Pictures";
-              watermark = "";
-            };
+            # codesnap = {
+            #   code_font_family = "Hack Nerd Font Mono";
+            #   has_breadcrumbs = true;
+            #   save_path = "~/Pictures";
+            #   watermark = "";
+            # };
             git-conflict = { };
             gitlab = { };
             nvim-surround = { };
             nvim-treeclimber = { };
             overseer = { };
             render-markdown = { };
-            aerial = {
-              autojump = true;
-              filter_kind = false;
-              open_automatic = true;
-            };
+            aerial = { autojump = true; filter_kind = false; };
             "nvim-treesitter.configs".textsubjects = {
               enable = true;
               rrev_selection = ",";
@@ -601,14 +602,14 @@ in
           ]));
       keymaps = [
         { key = ";"; action = ":"; }
-        { key = "<A-S-(>"; action = ":BufferLineMovePrev<CR>"; }
-        { key = "<A-S-)>"; action = ":BufferLineMoveNext<CR>"; }
+        { key = "<A-(>"; action = ":BufferLineMovePrev<CR>"; }
+        { key = "<A-)>"; action = ":BufferLineMoveNext<CR>"; }
         { key = "<A-W>"; action = ":wall<CR>"; }
         { key = "<A-w>"; action = ":write<CR>"; }
         { key = "<A-w>"; action = ":write<CR>"; }
         { key = "<A-x>"; action = ":Bdelete<CR>"; }
-        { key = "<A-S-{>"; action = ":BufferLineCyclePrev<CR>"; }
-        { key = "<A-S-}>"; action = ":BufferLineCycleNext<CR>"; }
+        { key = "<A-{>"; action = ":BufferLineCyclePrev<CR>"; }
+        { key = "<A-}>"; action = ":BufferLineCycleNext<CR>"; }
         { key = "<C-l>"; action = ":set invlist<CR>"; }
         { key = "<C-l>i"; action = ":LspInfo<CR>"; }
         { key = "<C-l>r"; action = ":LspRestart<CR>"; }

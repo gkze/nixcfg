@@ -121,6 +121,9 @@
       flake = false;
     };
 
+    # GNOME Wayland-based GPU-accelerated terminal emulator - Catppuccin theme
+    foot-catppuccin = { url = "github:catppuccin/foot"; flake = false; };
+
     # Git branch cleanup tool
     git-trim = { url = "github:jasonmccreary/git-trim"; flake = false; };
 
@@ -166,7 +169,7 @@
     };
 
     # SQL linter & formatter
-    sqruff = { url = "github:quarylabs/sqruff"; flake = false; };
+    sqruff = { url = "github:quarylabs/sqruff/v0.19.1"; flake = false; };
 
     # Sublime syntax for KDL (used in bat)
     sublime-kdl = { url = "github:eugenesvk/sublime-KDL"; flake = false; };
@@ -190,10 +193,10 @@
     yawsso = { url = "github:victorskl/yawsso"; flake = false; };
 
     # Terminal multiplexer and workspace manager
-    zellij = {
-      url = "github:zellij-org/zellij/0c8787d5c9d3799b31ad2440b8ca695c8de4f9ef";
-      flake = false;
-    };
+    # zellij = {
+    #   url = "github:zellij-org/zellij/a88b34f54f053e556031c3d8873be58df45e65e2";
+    #   flake = false;
+    # };
   };
 
   outputs = inputs:

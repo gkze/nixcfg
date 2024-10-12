@@ -41,6 +41,7 @@ sysFn {
       (device != null && pathExists ../device/system/${device}.nix)
       [ ../device/system/${device}.nix ]
     # OS-specific
+    ++ (map (p: optionals (pathExists ../profile/system/${p}.nix) ../profile/system/${p}.nix) profiles)
     ++ {
       darwin = [
         # Base macOS configuration
