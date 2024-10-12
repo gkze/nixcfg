@@ -89,6 +89,7 @@ in
   };
 
   services = {
+    sshd.enable = true;
     # Automatically set timezone
     automatic-timezoned.enable = true;
     # GNOME 3 enable keyring
