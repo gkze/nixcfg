@@ -4,32 +4,35 @@ Unified configuration for macOS and Linux systems from a single point of control
 
 - **Darwin (macOS)**
 
-  Currently being used actively on my personal MacBook Pro
+    * 2021 M1 MacBook Pro
+
 
 - **Linux (NixOS)**
 
-  In development, targeting [ThinkPad X1 Carbon (Gen 10)](https://psref.lenovo.com/Detail/ThinkPad/ThinkPad_X1_Carbon_Gen_10?M=21CB00F7US)
+   * [ThinkPad X1 Carbon (Gen 10)](https://psref.lenovo.com/Detail/ThinkPad/ThinkPad_X1_Carbon_Gen_10?M=21CB00F7US)
+   * [ThinkPad X1 Carbon (Gen 12)](https://psref.lenovo.com/Detail/ThinkPad_X1_Carbon_Gen_12?M=21KC009XUS)
+
 
 ## Installation
 
 - **Darwin (macOS)**
 
-  Use the [Determinate Systems Nix Installer](https://github.com/DeterminateSystems/nix-installer)
-  to get Nix
+  * Use the [Determinate Systems Nix Installer](https://github.com/DeterminateSystems/nix-installer) to install Nix on macOS
+  * For the first run, use `nix -v run`
 
 - **Linux (nixOS)**
 
-  WIP
+  For an existing system, use `sudo nixos-rebuild switch --flake .` for the first run
+
 
 ## Usage
 
 After changes are made:
 
 ```
-nix run .#rebuild -- --flake . switch
+nh os switch -a .
 ```
 
-This app will pick the right command to run depending on the host system.
 
 ## Roadmap
 
