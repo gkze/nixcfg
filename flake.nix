@@ -75,31 +75,78 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Sublime syntax for KDL (used in bat)
-    kdl-vim = { url = "github:imsnif/kdl.vim"; flake = false; };
+    # Vim syntax for KDL (used for Zellij)
+    kdl-vim = {
+      url = "github:imsnif/kdl.vim";
+      flake = false;
+    };
 
     # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
-    yawsso = { url = "github:victorskl/yawsso"; flake = false; };
+    yawsso = {
+      url = "github:victorskl/yawsso";
+      flake = false;
+    };
   };
 
-  outputs = { nixpkgs, flakelight, devshell, treefmt-nix, ... }: flakelight ./. {
-    systems = nixpkgs.lib.systems.flakeExposed;
-    nixpkgs.config.allowUnfree = true;
-    withOverlays = [ devshell.overlays.default ];
-    devShell = { pkgs, ... }: pkgs.devshell.mkShell {
-      name = "nixcfg";
-      packages = with pkgs; [ dconf2nix nix-init nurl ];
-    };
-    formatter = pkgs: treefmt-nix.lib.mkWrapper pkgs {
-      projectRootFile = "flake.nix";
-      programs = {
-        # Python
-        ruff-check.enable = true;
-        ruff-format.enable = true;
-        # Nix
-        nixfmt.enable = true;
-        deadnix.enable = true;
-      };
-    };
-  };
+  outputs =
+    { flakelight
+    , devshell
+    , treefmt-nix
+    , ...
+    }:
+    flakelight ./. (
+      { lib, ... }:
+      {
+        systems = lib.systems.flakeExposed;
+
+        nixpkgs.config.allowUnfree = true;
+
+        withOverlays = [ devshell.overlays.default ];
+
+        devShell =
+          { pkgs, ... }:
+          pkgs.devshell.mkShell {
+            name = "nixcfg";
+            packages = with pkgs; [
+              dconf2nix
+              home-manager
+              nh
+              nix-init
+              nixos-generators
+              nurl
+            ];
+          };
+
+        formatter =
+          pkgs:
+          treefmt-nix.lib.mkWrapper pkgs {
+            projectRootFile = "flake.nix";
+            programs = {
+              # Markdown
+              mdformat.enable = true;
+              # Nix
+              nixfmt.enable = true;
+              deadnix.enable = true;
+              # Python
+              ruff-check.enable = true;
+              ruff-format.enable = true;
+              # Shell
+              shellcheck.enable = true;
+              shfmt.enable = true;
+            };
+          };
+
+        checks = { };
+
+        nixosConfigurations = {
+          mesa = {
+            system = "x86_64-linux";
+            modules = [ ];
+          };
+          jackson = { };
+        };
+
+        homeConfigurations = { };
+      }
+    );
 }
