@@ -363,8 +363,8 @@ in
           };
           sourceSelector.winbar = true;
           window.mappings = {
-            "<A-S-{>" = "prev_source";
-            "<A-S-}>" = "next_source";
+            "<A-{>" = "prev_source";
+            "<A-}>" = "next_source";
           };
         };
         # Display colors for color codes
@@ -620,7 +620,6 @@ in
         nui-nvim
         nvim-dbee
         nvim-surround
-        nvim-treeclimber
         nvim-treesitter-parsers.nickel
         nvim-treesitter-textsubjects
         overseer-nvim
@@ -645,7 +644,6 @@ in
             git-conflict = { };
             gitlab = { };
             nvim-surround = { };
-            nvim-treeclimber = { };
             overseer = { };
             render-markdown = { };
             aerial = {
