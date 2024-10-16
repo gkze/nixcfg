@@ -1,5 +1,6 @@
 # TODO: upstream to Nixpkgs
-{ inputs, system, ... }: (final: prev: {
+{ inputs, system, ... }:
+(final: prev: {
   alacritty-theme = prev.alacritty-theme.override { src = inputs.alacritty-theme; };
 
   bin = prev.buildGoModule {
@@ -24,13 +25,15 @@
 
   nixos-conf-editor = inputs.nixos-conf-editor.packages.${system}.default;
 
-  sqruff = (prev.callPackage inputs.naersk {
-    rustc = prev.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
-  }).buildPackage {
-    name = "sqruff";
-    version = "v0.19.1";
-    src = inputs.sqruff;
-  };
+  sqruff =
+    (prev.callPackage inputs.naersk {
+      rustc = prev.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
+    }).buildPackage
+      {
+        name = "sqruff";
+        version = "v0.19.1";
+        src = inputs.sqruff;
+      };
 
   sublime-kdl = prev.stdenvNoCC.mkDerivation {
     pname = "sublime-kdl";
@@ -45,10 +48,22 @@
     pname = "uv";
     version = "0.4.7";
     src = inputs.uv;
-    cargoLock = { lockFile = "${src}/Cargo.lock"; allowBuiltinFetchGit = true; };
-    buildInputs = [ prev.openssl ]
-      ++ (with prev; lib.lists.optional stdenv.isDarwin
-      (with darwin.apple_sdk.frameworks; [ Security SystemConfiguration ]));
+    cargoLock = {
+      lockFile = "${src}/Cargo.lock";
+      allowBuiltinFetchGit = true;
+    };
+    buildInputs =
+      [ prev.openssl ]
+      ++ (
+        with prev;
+        lib.lists.optional stdenv.isDarwin (
+          with darwin.apple_sdk.frameworks;
+          [
+            Security
+            SystemConfiguration
+          ]
+        )
+      );
     doCheck = false;
     nativeBuildInputs = with final; [
       cmake
@@ -62,81 +77,86 @@
     OPENSSL_NO_VENDOR = 1;
   };
 
-  vimPlugins = prev.vimPlugins.extend (_: _: {
-    bufresize-nvim = prev.vimUtils.buildVimPlugin {
-      pname = "bufresize-nvim";
-      version = inputs.bufresize-nvim.rev;
-      src = inputs.bufresize-nvim;
-    };
+  vimPlugins = prev.vimPlugins.extend (
+    _: _: {
+      bufresize-nvim = prev.vimUtils.buildVimPlugin {
+        pname = "bufresize-nvim";
+        version = inputs.bufresize-nvim.rev;
+        src = inputs.bufresize-nvim;
+      };
 
-    # NOTE: does not work on nixbuild.net for some reason but works locally
-    # codesnap-nvim = prev.vimUtils.buildVimPlugin {
-    #   pname = "codesnap-nvim";
-    #   src = inputs.codesnap-nvim;
-    #   version = inputs.codesnap-nvim.rev;
-    #   nativeBuildInputs = with prev; [ cargo rustc ];
-    #   buildPhase = "make";
-    # };
+      # NOTE: does not work on nixbuild.net for some reason but works locally
+      # codesnap-nvim = prev.vimUtils.buildVimPlugin {
+      #   pname = "codesnap-nvim";
+      #   src = inputs.codesnap-nvim;
+      #   version = inputs.codesnap-nvim.rev;
+      #   nativeBuildInputs = with prev; [ cargo rustc ];
+      #   buildPhase = "make";
+      # };
 
-    gitlab-nvim =
-      let
-        gitlabNvimGo = prev.buildGoModule {
-          pname = "gitlab-nvim-go";
+      gitlab-nvim =
+        let
+          gitlabNvimGo = prev.buildGoModule {
+            pname = "gitlab-nvim-go";
+            # version = inputs.gitlab-nvim.rev;
+            version = "dev";
+            src = inputs.gitlab-nvim;
+            vendorHash = "sha256-wYlFmarpITuM+s9czQwIpE1iCJje7aCe0w7/THm+524=";
+          };
+        in
+        prev.vimUtils.buildVimPlugin {
+          pname = "gitlab-nvim";
           # version = inputs.gitlab-nvim.rev;
           version = "dev";
           src = inputs.gitlab-nvim;
-          vendorHash = "sha256-wYlFmarpITuM+s9czQwIpE1iCJje7aCe0w7/THm+524=";
+          buildInputs = with prev.vimPlugins; [
+            plenary-nvim
+          ];
+          nativeBuildInputs = with prev; [
+            go
+            gitlabNvimGo
+          ];
+          buildPhase = "mkdir -p $out && cp ${gitlabNvimGo}/bin/cmd $out/bin";
         };
-      in
-      prev.vimUtils.buildVimPlugin {
-        pname = "gitlab-nvim";
-        # version = inputs.gitlab-nvim.rev;
-        version = "dev";
-        src = inputs.gitlab-nvim;
-        buildInputs = with prev.vimPlugins; [
-          plenary-nvim
-        ];
-        nativeBuildInputs = with prev; [ go gitlabNvimGo ];
-        buildPhase = "mkdir -p $out && cp ${gitlabNvimGo}/bin/cmd $out/bin";
+
+      vim-bundle-mako = prev.vimUtils.buildVimPlugin {
+        pname = "vim-bundle-mako";
+        version = inputs.vim-bundle-mako.rev;
+        src = inputs.vim-bundle-mako;
       };
 
-    vim-bundle-mako = prev.vimUtils.buildVimPlugin {
-      pname = "vim-bundle-mako";
-      version = inputs.vim-bundle-mako.rev;
-      src = inputs.vim-bundle-mako;
-    };
+      mini-align = prev.vimUtils.buildVimPlugin {
+        pname = "mini-align";
+        version = inputs.mini-align.rev;
+        src = inputs.mini-align;
+      };
 
-    mini-align = prev.vimUtils.buildVimPlugin {
-      pname = "mini-align";
-      version = inputs.mini-align.rev;
-      src = inputs.mini-align;
-    };
+      nvim-dbee = prev.vimUtils.buildVimPlugin {
+        pname = "nvim-dbee";
+        version = inputs.nvim-dbee.rev;
+        src = inputs.nvim-dbee;
+      };
 
-    nvim-dbee = prev.vimUtils.buildVimPlugin {
-      pname = "nvim-dbee";
-      version = inputs.nvim-dbee.rev;
-      src = inputs.nvim-dbee;
-    };
+      nvim-treeclimber = prev.vimUtils.buildVimPlugin {
+        pname = "nvim-treeclimber";
+        version = inputs.nvim-treeclimber.rev;
+        src = inputs.nvim-treeclimber;
+      };
 
-    nvim-treeclimber = prev.vimUtils.buildVimPlugin {
-      pname = "nvim-treeclimber";
-      version = inputs.nvim-treeclimber.rev;
-      src = inputs.nvim-treeclimber;
-    };
+      lsp-signature-nvim = prev.vimUtils.buildVimPlugin {
+        name = "lsp-signature-nvim";
+        version = inputs.lsp-signature-nvim.rev;
+        src = inputs.lsp-signature-nvim;
+      };
 
-    lsp-signature-nvim = prev.vimUtils.buildVimPlugin {
-      name = "lsp-signature-nvim";
-      version = inputs.lsp-signature-nvim.rev;
-      src = inputs.lsp-signature-nvim;
-    };
+      render-markdown-nvim = prev.vimUtils.buildVimPlugin {
+        name = "render-markdown-nvim";
+        version = inputs.render-markdown-nvim.rev;
+        src = inputs.render-markdown-nvim;
+      };
 
-    render-markdown-nvim = prev.vimUtils.buildVimPlugin {
-      name = "render-markdown-nvim";
-      version = inputs.render-markdown-nvim.rev;
-      src = inputs.render-markdown-nvim;
-    };
-
-  });
+    }
+  );
 
   yawsso = prev.python3Packages.buildPythonApplication {
     pname = "yawsso";

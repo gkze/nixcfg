@@ -1,6 +1,9 @@
-{ hostName, ... }: {
+{ hostName, ... }:
+{
   # Set hostname
-  networking = { inherit hostName; };
+  networking = {
+    inherit hostName;
+  };
 
   # Enable Toudh ID for sudo
   security.pam.enableSudoTouchIdAuth = true;
@@ -15,7 +18,13 @@
       Label = "limit.maxfiles";
       RunAtLoad = true;
       ServiceIPC = true;
-      ProgramArguments = [ "launchctl" "limit" "maxfiles" "1000000" "1000000" ];
+      ProgramArguments = [
+        "launchctl"
+        "limit"
+        "maxfiles"
+        "1000000"
+        "1000000"
+      ];
     };
 
     # Raise maximum running process limit
@@ -23,7 +32,13 @@
       Label = "limit.maxproc";
       RunAtLoad = true;
       ServiceIPC = true;
-      ProgramArguments = [ "launchctl" "limit" "maxproc" "1000000" "1000000" ];
+      ProgramArguments = [
+        "launchctl"
+        "limit"
+        "maxproc"
+        "1000000"
+        "1000000"
+      ];
     };
   };
 

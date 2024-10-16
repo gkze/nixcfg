@@ -1,4 +1,9 @@
-{ pkgs, lib, users, ... }:
+{
+  pkgs,
+  lib,
+  users,
+  ...
+}:
 let
   inherit (builtins) listToAttrs readFile;
   inherit (lib) removeSuffix;
@@ -13,7 +18,10 @@ in
         hostName = "eu.nixbuild.net";
         system = "x86_64-linux";
         maxJobs = 100;
-        supportedFeatures = [ "benchmark" "big-parallel" ];
+        supportedFeatures = [
+          "benchmark"
+          "big-parallel"
+        ];
       }
       # {
       #   hostName = "45.32.139.249";
@@ -27,24 +35,34 @@ in
 
   networking = {
     hostName = "mesa";
-    networkmanager = { enable = true; wifi.backend = "iwd"; };
-  };
-
-  i18n = let locale = "en_US.UTF-8"; in {
-    inputMethod = { enable = true; type = "ibus"; };
-    defaultLocale = locale;
-    extraLocaleSettings = {
-      LC_ADDRESS = locale;
-      LC_IDENTIFICATION = locale;
-      LC_MEASUREMENT = locale;
-      LC_MONETARY = locale;
-      LC_NAME = locale;
-      LC_NUMERIC = locale;
-      LC_PAPER = locale;
-      LC_TELEPHONE = locale;
-      LC_TIME = locale;
+    networkmanager = {
+      enable = true;
+      wifi.backend = "iwd";
     };
   };
+
+  i18n =
+    let
+      locale = "en_US.UTF-8";
+    in
+    {
+      inputMethod = {
+        enable = true;
+        type = "ibus";
+      };
+      defaultLocale = locale;
+      extraLocaleSettings = {
+        LC_ADDRESS = locale;
+        LC_IDENTIFICATION = locale;
+        LC_MEASUREMENT = locale;
+        LC_MONETARY = locale;
+        LC_NAME = locale;
+        LC_NUMERIC = locale;
+        LC_PAPER = locale;
+        LC_TELEPHONE = locale;
+        LC_TIME = locale;
+      };
+    };
 
   programs = {
     # TODO: get working
@@ -110,24 +128,33 @@ in
     xserver = {
       enable = true;
       desktopManager.gnome.enable = true;
-      displayManager.gdm = { enable = true; banner = "Another day another dolla"; };
+      displayManager.gdm = {
+        enable = true;
+        banner = "Another day another dolla";
+      };
       # TODO: automate
       # When changing, run:
       # ```
       # $ gsettings reset org.gnome.desktop.input-sources xkb-option
       # $ gsettings reset org.gnome.desktop.input-sources sources
       # ```
-      xkb = { options = "caps:swapescape"; layout = "us"; };
+      xkb = {
+        options = "caps:swapescape";
+        layout = "us";
+      };
     };
   };
 
-
   # Sound
   hardware.pulseaudio.enable = false;
+
   security = {
     audit.enable = true;
     pam.services = {
-      login = { enableGnomeKeyring = true; u2fAuth = true; };
+      login = {
+        enableGnomeKeyring = true;
+        u2fAuth = true;
+      };
       sudo.u2fAuth = true;
     };
     rtkit.enable = true;
@@ -152,17 +179,22 @@ in
     # Channel)
     # Currently used to set brightness
     groups.i2c = { };
-    users = listToAttrs (map
-      (u: {
+    users = listToAttrs (
+      map (u: {
         name = u;
         value = {
           description = u;
-          extraGroups = [ "docker" "i2c" "networkmanager" "wheel" ];
+          extraGroups = [
+            "docker"
+            "i2c"
+            "networkmanager"
+            "wheel"
+          ];
           isNormalUser = true;
           shell = pkgs.zsh;
         };
-      })
-      users);
+      }) users
+    );
   };
 
   # This value determines the NixOS release from which the default

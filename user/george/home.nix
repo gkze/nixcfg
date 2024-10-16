@@ -1,6 +1,21 @@
-{ config, lib, pkgs, inputs, hostPlatform, profiles, hmMods ? [ ], ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inputs,
+  hostPlatform,
+  profiles,
+  hmMods ? [ ],
+  ...
+}:
 let
-  inherit (builtins) concatStringsSep elem elemAt readFile split;
+  inherit (builtins)
+    concatStringsSep
+    elem
+    elemAt
+    readFile
+    split
+    ;
   inherit (lib) optionalString removeSuffix;
   inherit (lib.attrsets) optionalAttrs;
 
@@ -8,7 +23,12 @@ let
   kernel = elemAt (split "-" hostPlatform) 2;
 
   # Source code directory
-  srcDir = { darwin = "Development"; linux = "src"; }.${kernel};
+  srcDir =
+    {
+      darwin = "Development";
+      linux = "src";
+    }
+    .${kernel};
 
   # npm config file
   npmConfigFile = "${config.xdg.configHome}/npmrc";
@@ -17,7 +37,13 @@ let
   meta = import ./meta.nix;
 
   # Raw GitHub Content
-  ghRaw = { owner, repo, rev, path }:
+  ghRaw =
+    {
+      owner,
+      repo,
+      rev,
+      path,
+    }:
     "https://raw.githubusercontent.com/${owner}/${repo}/${rev}/${path}";
 in
 {
@@ -31,7 +57,11 @@ in
       darwin = {
         # https://github.com/nix-community/home-manager/issues/1341
         home = {
-          extraActivationPath = with pkgs; [ rsync dockutil gawk ];
+          extraActivationPath = with pkgs; [
+            rsync
+            dockutil
+            gawk
+          ];
           activation.trampolineApps = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
             ${builtins.readFile ../../lib/trampoline-apps.sh}
             fromDir="$HOME/Applications/Home Manager Apps"
@@ -64,7 +94,10 @@ in
             config = {
               Label = "org.gnupg.gpg-agent";
               RunAtLoad = true;
-              ProgramArguments = [ "${pkgs.gnupg}/bin/gpg-agent" "--server" ];
+              ProgramArguments = [
+                "${pkgs.gnupg}/bin/gpg-agent"
+                "--server"
+              ];
             };
           };
         };
@@ -79,7 +112,11 @@ in
             accent = "blue";
             flavor = "frappe";
             gnomeShellTheme = true;
-            icon = { enable = true; accent = "blue"; flavor = "frappe"; };
+            icon = {
+              enable = true;
+              accent = "blue";
+              flavor = "frappe";
+            };
             tweaks = [ "rimless" ];
           };
           gtk3.extraCss = ''
@@ -89,7 +126,10 @@ in
 
         services = {
           # Activate GPG agent on Linux
-          gpg-agent = { enable = true; pinentryPackage = pkgs.pinentry-gnome3; };
+          gpg-agent = {
+            enable = true;
+            pinentryPackage = pkgs.pinentry-gnome3;
+          };
 
           # Nix shell direnv background daemon
           lorri.enable = true;
@@ -99,65 +139,70 @@ in
           enable = true;
           accent = "blue";
           flavor = "frappe";
-          pointerCursor = { enable = true; accent = "blue"; flavor = "frappe"; };
+          pointerCursor = {
+            enable = true;
+            accent = "blue";
+            flavor = "frappe";
+          };
         };
 
         # These are marked as unsupported on darwin
-        home.packages = with pkgs; [
-          # Database GUI
-          # beekeeper-studio
-          # Web browser
-          # TODO: get TouchpadOverscrollHistoryNavigation working
-          # (brave.overrideAttrs {
-          #   postFixup = ''
-          #     extraWrapperArgs='--append-flags --enable-features=TouchpadOverscrollHistoryNavigation'
-          #     wrapProgram $out/bin/brave $extraWrapperArgs
-          #     gappsWrapperArgs+=($extraWrapperArgs)
-          #   '';
-          # })
-          brave
-          # Universal database tool
-          dbeaver-bin
-          # Additional GNOME settings editing tool
-          # https://wiki.gnome.org/Apps/DconfEditor
-          dconf-editor
-          # Display Data Channel UTILity
-          ddcutil
-          # Matrix client
-          element-desktop
-          # Gnome firmware update utility
-          gnome-firmware
-          # Gnome Network Displays
-          gnome-network-displays
-          # Additional GNOME settings tool
-          gnome-tweaks
-          # Productivity suite
-          libreoffice
-          # Unofficial userspace driver for HID++ Logitech devices
-          logiops
-          # Run unpatched binaries on Nix/NixOS
-          nix-alien
-          # TODO: TBD if works on macOS
-          (python3.withPackages (ps: with ps; [ ptpython ]))
-          signal-desktop
-          # Logitech device manager
-          solaar
-          # System Profiler
-          sysprof
-          # Offline documentation browser
-          zeal
-          # Fast and collaborative text editor
-          zed
-        ]
-        ++ (with pkgs.gnomeExtensions; [
-          # Brightness control for all detected monitors
-          # Currently managed manually
-          # TODO: needs direct nix store path to ddcutil - fix
-          brightness-control-using-ddcutil
-          # User-loadable themes from user directory
-          user-themes
-        ])
-        ;
+        home.packages =
+          with pkgs;
+          [
+            # Database GUI
+            # beekeeper-studio
+            # Web browser
+            # TODO: get TouchpadOverscrollHistoryNavigation working
+            # (brave.overrideAttrs {
+            #   postFixup = ''
+            #     extraWrapperArgs='--append-flags --enable-features=TouchpadOverscrollHistoryNavigation'
+            #     wrapProgram $out/bin/brave $extraWrapperArgs
+            #     gappsWrapperArgs+=($extraWrapperArgs)
+            #   '';
+            # })
+            brave
+            # Universal database tool
+            dbeaver-bin
+            # Additional GNOME settings editing tool
+            # https://wiki.gnome.org/Apps/DconfEditor
+            dconf-editor
+            # Display Data Channel UTILity
+            ddcutil
+            # Matrix client
+            element-desktop
+            # Gnome firmware update utility
+            gnome-firmware
+            # Gnome Network Displays
+            gnome-network-displays
+            # Additional GNOME settings tool
+            gnome-tweaks
+            # Productivity suite
+            libreoffice
+            # Unofficial userspace driver for HID++ Logitech devices
+            logiops
+            # Run unpatched binaries on Nix/NixOS
+            nix-alien
+            # TODO: TBD if works on macOS
+            (python3.withPackages (ps: with ps; [ ptpython ]))
+            signal-desktop
+            # Logitech device manager
+            solaar
+            # System Profiler
+            sysprof
+            # Offline documentation browser
+            zeal
+            # Fast and collaborative text editor
+            zed
+          ]
+          ++ (with pkgs.gnomeExtensions; [
+            # Brightness control for all detected monitors
+            # Currently managed manually
+            # TODO: needs direct nix store path to ddcutil - fix
+            brightness-control-using-ddcutil
+            # User-loadable themes from user directory
+            user-themes
+          ]);
 
         programs = {
           firefox = {
@@ -192,11 +237,15 @@ in
         #   plugins = { };
         # };
       };
-    }.${kernel}
+    }
+    .${kernel}
   ] ++ hmMods;
 
   # User-level Nix config
-  nix = { package = lib.mkForce pkgs.nixVersions.git; checkConfig = true; };
+  nix = {
+    package = lib.mkForce pkgs.nixVersions.git;
+    checkConfig = true;
+  };
 
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
@@ -213,7 +262,11 @@ in
     stateVersion = removeSuffix "\n" (readFile ../../NIXOS_VERSION);
 
     # Shell-agnostic session $PATH
-    sessionPath = [ "$HOME/.local/bin" "$HOME/.cargo/bin" "$HOME/go/bin" ];
+    sessionPath = [
+      "$HOME/.local/bin"
+      "$HOME/.cargo/bin"
+      "$HOME/go/bin"
+    ];
 
     # Shell-agnostic session environment variables
     # These only get applied on login
@@ -240,7 +293,9 @@ in
 
     # Universal cross-shell aliases
     shellAliases =
-      let ezaDefaultArgs = "-albghHistype -F --color=always --icons=always"; in
+      let
+        ezaDefaultArgs = "-albghHistype -F --color=always --icons=always";
+      in
       # Add aliases here
       {
         cr = "clear && reset";
@@ -255,31 +310,37 @@ in
       };
 
     # Files/directories for $HOME
-    file = {
-      # We explicitly set the prefix to $HOME/.local because npm operates out 
-      # of the Nix store, which is read-only
-      ${npmConfigFile}.text = ''
-        prefix = "''${HOME}/.local"
-      '';
-      # Same as above for pip
-      # TODO: figure out
-      # "${config.xdg.configHome}/pip/pip.conf".text = ''
-      #   [install]
-      #   user = true
-      # '';
-      "${config.xdg.configHome}/git/personal".text = ''
-        [user]
-          name = ${meta.name.user.github}
-          email = ${meta.emails.personal}
-      '';
-      ".local/bin" = { source = ./bin; recursive = true; executable = true; };
-    } // (optionalAttrs (elem "basis" profiles) {
-      "${config.xdg.configHome}/git/basis".text = ''
-        [user]
-          name = ${meta.name.user.system}
-          email = ${meta.emails.basis}
-      '';
-    });
+    file =
+      {
+        # We explicitly set the prefix to $HOME/.local because npm operates out 
+        # of the Nix store, which is read-only
+        ${npmConfigFile}.text = ''
+          prefix = "''${HOME}/.local"
+        '';
+        # Same as above for pip
+        # TODO: figure out
+        # "${config.xdg.configHome}/pip/pip.conf".text = ''
+        #   [install]
+        #   user = true
+        # '';
+        "${config.xdg.configHome}/git/personal".text = ''
+          [user]
+            name = ${meta.name.user.github}
+            email = ${meta.emails.personal}
+        '';
+        ".local/bin" = {
+          source = ./bin;
+          recursive = true;
+          executable = true;
+        };
+      }
+      // (optionalAttrs (elem "basis" profiles) {
+        "${config.xdg.configHome}/git/basis".text = ''
+          [user]
+            name = ${meta.name.user.system}
+            email = ${meta.emails.basis}
+        '';
+      });
 
     # Packages that should be installed to the user profile. These are just
     # installed. Programs section below both installs and configures software,
@@ -399,7 +460,11 @@ in
           # NOTE: this gets merged in with
           # device/home/lenovo-thinkpad-x1-carbon-gen10.nix#programs.alacritty.settings.shell.args
           # It comes last
-          args = [ "attach" "--create" "main" ];
+          args = [
+            "attach"
+            "--create"
+            "main"
+          ];
         };
       };
     };
@@ -408,8 +473,14 @@ in
     # More robust alternative to `cat`
     bat = {
       enable = true;
-      config = { style = "full"; theme = "Catppuccin Frappe"; };
-      syntaxes.kdl = { src = pkgs.sublime-kdl; file = "KDL.sublime-syntax"; };
+      config = {
+        style = "full";
+        theme = "Catppuccin Frappe";
+      };
+      syntaxes.kdl = {
+        src = pkgs.sublime-kdl;
+        file = "KDL.sublime-syntax";
+      };
     };
     # System monitor
     bottom.enable = true;
@@ -427,7 +498,10 @@ in
     # FuZzy Finder - finds items in lists. Current integrations / use cases:
     # - Zsh history search
     # - Neovim file picking
-    fzf = { enable = true; enableZshIntegration = true; };
+    fzf = {
+      enable = true;
+      enableZshIntegration = true;
+    };
     # Version control
     git = {
       enable = true;
@@ -468,7 +542,10 @@ in
       };
       delta = {
         enable = true;
-        options = { navigate = true; side-by-side = true; };
+        options = {
+          navigate = true;
+          side-by-side = true;
+        };
       };
       # difftastic = { enable = true; background = "dark"; };
       extraConfig = {
@@ -479,21 +556,23 @@ in
         rebase.pull = true;
         user.signingkey = meta.gpg.keys.personal;
       };
-      includes = [
-        {
-          path = "${config.xdg.configHome}/git/personal";
-          condition = "gitdir:~/.config/nixcfg/**";
-        }
-        {
-          path = "${config.xdg.configHome}/git/personal";
-          condition = "gitdir:~/${srcDir}/github.com/**";
-        }
-      ] ++ (lib.optionals (kernel == "darwin") [
-        {
-          path = "${config.xdg.configHome}/git/personal";
-          condition = "gitdir:~/iCloud\ Drive/Development/github.com/**";
-        }
-      ]);
+      includes =
+        [
+          {
+            path = "${config.xdg.configHome}/git/personal";
+            condition = "gitdir:~/.config/nixcfg/**";
+          }
+          {
+            path = "${config.xdg.configHome}/git/personal";
+            condition = "gitdir:~/${srcDir}/github.com/**";
+          }
+        ]
+        ++ (lib.optionals (kernel == "darwin") [
+          {
+            path = "${config.xdg.configHome}/git/personal";
+            condition = "gitdir:~/iCloud\ Drive/Development/github.com/**";
+          }
+        ]);
     };
     # Git terminal UI
     gitui = {
@@ -549,7 +628,10 @@ in
     # Virtual KVM
     # lan-mouse = { enable = true; };
     # Manual page interface
-    man = { enable = true; generateCaches = true; };
+    man = {
+      enable = true;
+      generateCaches = true;
+    };
     # Modern shell that focuses on structured data
     # TODO: tune
     nushell.enable = true;
@@ -606,7 +688,10 @@ in
       enable = true;
       settings = {
         git.repos = [ srcDir ];
-        misc = { assume_yes = true; cleanup = true; };
+        misc = {
+          assume_yes = true;
+          cleanup = true;
+        };
       };
     };
     # Visual Studio Code - code editor / IDE
@@ -655,19 +740,20 @@ in
         size = 100000;
       };
       # Placed in $ZDOTDIR/.zshrc before compinit
-      initExtraBeforeCompInit = ''
-        # Pre-compinit
-      ''
-      # Darwin-only Zsh configuration (pre-compinit)
-      + optionalString (kernel == "darwin") ''
-        # Enable Homebrew on macOS
+      initExtraBeforeCompInit =
+        ''
+          # Pre-compinit
+        ''
+        # Darwin-only Zsh configuration (pre-compinit)
+        + optionalString (kernel == "darwin") ''
+          # Enable Homebrew on macOS
 
-        # Set Homebrew prefix for M1 Mac
-        HOMEBREW_PREFIX="/opt/homebrew"
+          # Set Homebrew prefix for M1 Mac
+          HOMEBREW_PREFIX="/opt/homebrew"
 
-        # Homebrew Zsh completion
-        fpath+="''${HOMEBREW_PREFIX}/share/zsh/site-functions"
-      '';
+          # Homebrew Zsh completion
+          fpath+="''${HOMEBREW_PREFIX}/share/zsh/site-functions"
+        '';
       completionInit = ''
         autoload -Uz +X compinit bashcompinit
         for dump in ''${ZDOTDIR}/.zcompdump(N.mh+24); do
@@ -677,35 +763,36 @@ in
       '';
       # Any additional manual configuration goes here
       # Placed in $ZDOTDIR/.zshrc
-      initExtra = ''
-        # Post-compinit
-        # Zsh builtins help
-        unalias &>/dev/null run-help && autoload run-help
+      initExtra =
+        ''
+          # Post-compinit
+          # Zsh builtins help
+          unalias &>/dev/null run-help && autoload run-help
 
-        # Load completion system, enable Bash completion compatibility
-        zmodload zsh/complist
-        autoload -Uz +X select-word-style
-        select-word-style bash
+          # Load completion system, enable Bash completion compatibility
+          zmodload zsh/complist
+          autoload -Uz +X select-word-style
+          select-word-style bash
 
-        # Tune the completion system a bit
-        zstyle ':completion:*' menu select
-        bindkey -M menuselect '^[[Z' reverse-menu-complete
-        bindkey "^R" history-incremental-search-backward
+          # Tune the completion system a bit
+          zstyle ':completion:*' menu select
+          bindkey -M menuselect '^[[Z' reverse-menu-complete
+          bindkey "^R" history-incremental-search-backward
 
-        # Keep elements of {,MAN}PATH unique
-        typeset -U PATH MANPATH
-      ''
-      # Darwin-only Zsh configuration (post-compinit)
-      + optionalString (kernel == "darwin") ''
-        # For the rare case we're running on an Intel Mac
-        if [[ "$(uname -m)" != "arm64" ]]; then
-          HOMEBREW_PREFIX="/usr/local"
-        fi
+          # Keep elements of {,MAN}PATH unique
+          typeset -U PATH MANPATH
+        ''
+        # Darwin-only Zsh configuration (post-compinit)
+        + optionalString (kernel == "darwin") ''
+          # For the rare case we're running on an Intel Mac
+          if [[ "$(uname -m)" != "arm64" ]]; then
+            HOMEBREW_PREFIX="/usr/local"
+          fi
 
-        # Just the essentials
-        export PATH="''${HOMEBREW_PREFIX}/bin:''${PATH}"
-        export MANPATH="''${HOMEBREW_PREFIX}/share/man:''${MANPATH}"
-      '';
+          # Just the essentials
+          export PATH="''${HOMEBREW_PREFIX}/bin:''${PATH}"
+          export MANPATH="''${HOMEBREW_PREFIX}/share/man:''${MANPATH}"
+        '';
       plugins = [
         # IDE-like autocompletion
         # {
@@ -742,12 +829,14 @@ in
         # TODO: send Nixpkgs update PR
         {
           name = "zsh-system-clipboard";
-          src = (pkgs.fetchFromGitHub {
-            owner = "kutsan";
-            repo = "zsh-system-clipboard";
-            rev = "5f66befd96529b28767fe8a239e9c6de6d57cdc4";
-            hash = "sha256-t4xPKd9BvrH4cyq8rN/IVGcm13OJNutdZ4e+FdGbPIo=";
-          });
+          src = (
+            pkgs.fetchFromGitHub {
+              owner = "kutsan";
+              repo = "zsh-system-clipboard";
+              rev = "5f66befd96529b28767fe8a239e9c6de6d57cdc4";
+              hash = "sha256-t4xPKd9BvrH4cyq8rN/IVGcm13OJNutdZ4e+FdGbPIo=";
+            }
+          );
         }
         # direnv Zsh completion
         {
@@ -784,6 +873,9 @@ in
       ];
     };
     # Zsh - a robust shell
-    zoxide = { enable = true; enableNushellIntegration = true; };
+    zoxide = {
+      enable = true;
+      enableNushellIntegration = true;
+    };
   };
 }

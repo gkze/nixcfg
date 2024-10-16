@@ -1,5 +1,8 @@
 { pkgs, lib, ... }:
-let meta = import ./meta.nix; in {
+let
+  meta = import ./meta.nix;
+in
+{
   dconf.settings = with lib.hm.gvariant; {
     "org/gnome/desktop/background" = {
       picture-options = "zoom";
@@ -9,7 +12,12 @@ let meta = import ./meta.nix; in {
 
     "org/gnome/desktop/input-sources" = {
       show-all-sources = true;
-      sources = [ (mkTuple [ "xkb" "us" ]) ];
+      sources = [
+        (mkTuple [
+          "xkb"
+          "us"
+        ])
+      ];
       xkb-options = [ "caps:swapescape" ];
     };
 

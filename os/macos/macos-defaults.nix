@@ -1,4 +1,5 @@
-{ ... }: {
+{ ... }:
+{
   system = {
     # Keyboard settings
     keyboard = {

@@ -95,7 +95,10 @@
     };
 
     # Binary manager
-    bin = { url = "github:marcosnils/bin/v0.17.4"; flake = false; };
+    bin = {
+      url = "github:marcosnils/bin/v0.17.4";
+      flake = false;
+    };
 
     # Neovim proportional buffer dimensions
     bufresize-nvim = {
@@ -107,7 +110,10 @@
     catppuccin.url = "github:catppuccin/nix";
 
     # Code snapshotting plugin
-    codesnap-nvim = { url = "github:mistricky/codesnap.nvim"; flake = false; };
+    codesnap-nvim = {
+      url = "github:mistricky/codesnap.nvim";
+      flake = false;
+    };
 
     # Web browser
     firefox = {
@@ -122,10 +128,16 @@
     };
 
     # GNOME Wayland-based GPU-accelerated terminal emulator - Catppuccin theme
-    foot-catppuccin = { url = "github:catppuccin/foot"; flake = false; };
+    foot-catppuccin = {
+      url = "github:catppuccin/foot";
+      flake = false;
+    };
 
     # Git branch cleanup tool
-    git-trim = { url = "github:jasonmccreary/git-trim"; flake = false; };
+    git-trim = {
+      url = "github:jasonmccreary/git-trim";
+      flake = false;
+    };
 
     # GitLab Neovim Plugin
     gitlab-nvim = {
@@ -146,13 +158,19 @@
     };
 
     # Vim text alignment plugin
-    mini-align = { url = "github:echasnovski/mini.align"; flake = false; };
+    mini-align = {
+      url = "github:echasnovski/mini.align";
+      flake = false;
+    };
 
     # Rust in Nix build tool
     naersk.url = "github:nix-community/naersk";
 
     # Neovim database UI
-    nvim-dbee = { url = "github:kndndrj/nvim-dbee"; flake = false; };
+    nvim-dbee = {
+      url = "github:kndndrj/nvim-dbee";
+      flake = false;
+    };
 
     # Neovim structured editing plugin
     # TODO: fix attempt to index nil value" 
@@ -169,10 +187,16 @@
     };
 
     # SQL linter & formatter
-    sqruff = { url = "github:quarylabs/sqruff/v0.19.1"; flake = false; };
+    sqruff = {
+      url = "github:quarylabs/sqruff/v0.19.1";
+      flake = false;
+    };
 
     # Sublime syntax for KDL (used in bat)
-    sublime-kdl = { url = "github:eugenesvk/sublime-KDL"; flake = false; };
+    sublime-kdl = {
+      url = "github:eugenesvk/sublime-KDL";
+      flake = false;
+    };
 
     # Aesthetic modern terminal file manager
     superfile = {
@@ -181,7 +205,10 @@
     };
 
     # Rust-based Python package resolver & installed (faster pip)
-    uv = { url = "github:astral-sh/uv/0.4.9"; flake = false; };
+    uv = {
+      url = "github:astral-sh/uv/0.4.9";
+      flake = false;
+    };
 
     # Vim Mako (template language) syntax
     vim-bundle-mako = {
@@ -190,7 +217,10 @@
     };
 
     # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
-    yawsso = { url = "github:victorskl/yawsso"; flake = false; };
+    yawsso = {
+      url = "github:victorskl/yawsso";
+      flake = false;
+    };
 
     # Terminal multiplexer and workspace manager
     # zellij = {
@@ -199,7 +229,8 @@
     # };
   };
 
-  outputs = inputs:
+  outputs =
+    inputs:
     let
       # Grab some builtins into our lexical scope
       inherit (builtins) elemAt split;
@@ -214,38 +245,47 @@
       mkSystem = import ./lib/mksystem.nix;
 
       # Our Nixpkgs
-      mkNixpkgs = system: import inputs.nixpkgs {
-        inherit system; config = {
-        allowUnfree = true;
-        allowInsecure = true;
-        permittedInsecurePackages = [ "nix-2.25.0pre20240807_cfe66dbe" ];
-      };
-        overlays = (with inputs; [
-          devshell.overlays.default
-          nix-alien.overlays.default
-          nur.overlay
-          rust-overlay.overlays.default
-        ])
-        ++ [
-          (import ./nix/overlays.nix { inherit inputs system; })
-        ];
-      };
+      mkNixpkgs =
+        system:
+        import inputs.nixpkgs {
+          inherit system;
+          config = {
+            allowUnfree = true;
+            allowInsecure = true;
+            permittedInsecurePackages = [ "nix-2.25.0pre20240807_cfe66dbe" ];
+          };
+          overlays =
+            (with inputs; [
+              devshell.overlays.default
+              nix-alien.overlays.default
+              nur.overlay
+              rust-overlay.overlays.default
+            ])
+            ++ [ (import ./nix/overlays.nix { inherit inputs system; }) ];
+        };
     in
     inputs.fp.lib.mkFlake { inherit inputs; } {
       # All officially supported systems
       systems = inputs.nixpkgs.lib.systems.flakeExposed;
 
       # Attributes here have systeme above suffixed across them
-      perSystem = { system, pkgs, lib, ... }:
+      perSystem =
+        {
+          system,
+          pkgs,
+          lib,
+          ...
+        }:
         let
           # Cross-platform configuration rebuild action
           rebuild = {
             type = "app";
-            program = {
-              "darwin" = inputs.nix-darwin.packages.${system}.darwin-rebuild
-                + "/bin/darwin-rebuild";
-              "linux" = pkgs.nixos-rebuild + "/bin/nixos-rebuild";
-            }.${elemAt (split "-" system) 2};
+            program =
+              {
+                "darwin" = inputs.nix-darwin.packages.${system}.darwin-rebuild + "/bin/darwin-rebuild";
+                "linux" = pkgs.nixos-rebuild + "/bin/nixos-rebuild";
+              }
+              .${elemAt (split "-" system) 2};
           };
         in
         {
@@ -260,7 +300,7 @@
               # Python
               black.enable = true;
               # Nix
-              nixpkgs-fmt.enable = true;
+              nixfmt-rfc-style.enable = true;
               deadnix.enable = true;
               # Shell
               shellcheck.enable = true;
@@ -291,7 +331,11 @@
                 nixos-generators.packages.${system}.default
                 home-manager.packages.${system}.default
               ])
-              ++ (with pkgs; [ dconf2nix nix-init nurl ]);
+              ++ (with pkgs; [
+                dconf2nix
+                nix-init
+                nurl
+              ]);
           };
 
           # For `nix run`
@@ -335,7 +379,10 @@
       flake = {
         # Personal MacBook Pro
         darwinConfigurations.rocinante =
-          let arch = "aarch64"; kernel = "darwin"; in
+          let
+            arch = "aarch64";
+            kernel = "darwin";
+          in
           mkSystem {
             inherit inputs arch kernel;
             pkgs = mkNixpkgs "${arch}-${kernel}";
@@ -348,7 +395,10 @@
         nixosConfigurations = {
           # Basis ThinkPad X1 Carbon
           mesa =
-            let arch = "x86_64"; kernel = "linux"; in
+            let
+              arch = "x86_64";
+              kernel = "linux";
+            in
             mkSystem {
               inherit inputs arch kernel;
               pkgs = mkNixpkgs "${arch}-${kernel}";

@@ -1,4 +1,12 @@
-{ config, pkgs, lib, modulesPath, inputs, ... }: {
+{
+  config,
+  pkgs,
+  lib,
+  modulesPath,
+  inputs,
+  ...
+}:
+{
   imports = [
     (modulesPath + "/installer/scan/not-detected.nix")
     inputs.nixos-hardware.nixosModules.lenovo-thinkpad-x1-10th-gen
@@ -10,15 +18,19 @@
       interpreter = "${pkgs.appimage-run}/bin/appimage-run";
       recognitionType = "magic";
       offset = 0;
-      mask = ''\xff\xff\xff\xff\x00\x00\x00\x00\xff\xff\xff'';
-      magicOrExtension = ''\x7fELF....AI\x02'';
+      mask = "\\xff\\xff\\xff\\xff\\x00\\x00\\x00\\x00\\xff\\xff\\xff";
+      magicOrExtension = "\\x7fELF....AI\\x02";
     };
     # Inter-Integrated Circuit (I2C)
     # https://en.wikipedia.org/wiki/I%C2%B2C
     # Used for communicating with external monitor(s) over DDC (Display Data
     # Channel)
     # Currently used to set brightness
-    kernelModules = [ "i2c-dev" "kvm-intel" ];
+    kernelModules = [
+      "i2c-dev"
+      "kvm-intel"
+    ];
+    kernelParams = [ "i915.force_probe=46a6" ];
     initrd = {
       availableKernelModules = [
         "nvme"
@@ -32,7 +44,10 @@
         "luks-a3c480ba-744e-48f7-b509-fb525972d806".device = "/dev/nvme0n1p3";
       };
     };
-    loader = { efi.canTouchEfiVariables = true; systemd-boot.enable = true; };
+    loader = {
+      efi.canTouchEfiVariables = true;
+      systemd-boot.enable = true;
+    };
   };
 
   systemd.services.fprintd.after = [ "display-manager.service" ];
@@ -65,14 +80,29 @@
   };
 
   fileSystems = {
-    "/" = { device = "/dev/dm-0"; fsType = "ext4"; };
-    "/boot" = { device = "/dev/nvme0n1p1"; fsType = "vfat"; };
+    "/" = {
+      device = "/dev/dm-0";
+      fsType = "ext4";
+    };
+    "/boot" = {
+      device = "/dev/nvme0n1p1";
+      fsType = "vfat";
+    };
   };
 
-  swapDevices = [{ device = "/dev/dm-1"; }];
+  swapDevices = [ { device = "/dev/dm-1"; } ];
 
   networking.useDHCP = lib.mkDefault true;
 
   # powerManagement.cpuFreqGovernor = lib.mkDefault "powersave";
-  hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
+  hardware = {
+    cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
+    graphics = {
+      enable = true;
+      extraPackages = with pkgs; [ intel-media-driver ];
+    };
+  };
+  environment.sessionVariables = {
+    LIBVA_DRIVER_NAME = "iHD";
+  };
 }

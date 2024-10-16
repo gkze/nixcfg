@@ -1,16 +1,35 @@
-{ pkgs, hostPlatform, inputs, ... }:
-let inherit (builtins) elemAt split; in {
+{
+  pkgs,
+  hostPlatform,
+  inputs,
+  ...
+}:
+let
+  inherit (builtins) elemAt split;
+in
+{
   # Configuration for Nix itself
   nix = {
     # Perform automatic garbage collection
-    gc = { automatic = true; } // {
-      darwin.interval = { Hour = 09; Minute = 30; };
-      linux.dates = "09:30";
-    }.${elemAt (split "-" hostPlatform) 2};
+    gc =
+      {
+        automatic = true;
+      }
+      // {
+        darwin.interval = {
+          Hour = 9;
+          Minute = 30;
+        };
+        linux.dates = "09:30";
+      }
+      .${elemAt (split "-" hostPlatform) 2};
 
     settings = {
       # Enable nix command and flakes
-      experimental-features = [ "nix-command" "flakes" ];
+      experimental-features = [
+        "nix-command"
+        "flakes"
+      ];
 
       # Perform builds in a sandboxed environment
       sandbox = false;
@@ -27,7 +46,11 @@ let inherit (builtins) elemAt split; in {
   # Set host platform and allow unfree and insecure software
   # https://nixos.wiki/wiki/Unfree_Software
   nixpkgs = {
-    inherit hostPlatform; config = { allowUnfree = true; allowInsecure = true; };
+    inherit hostPlatform;
+    config = {
+      allowUnfree = true;
+      allowInsecure = true;
+    };
   };
 
   # Common system configuration
@@ -42,7 +65,11 @@ let inherit (builtins) elemAt split; in {
   };
 
   # Install documentation from packages
-  documentation = { doc.enable = true; info.enable = true; man.enable = true; };
+  documentation = {
+    doc.enable = true;
+    info.enable = true;
+    man.enable = true;
+  };
 
   programs = {
     # Create /etc/zshrc that loads the Nix environment

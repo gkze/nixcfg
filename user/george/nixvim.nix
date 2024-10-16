@@ -1,4 +1,10 @@
-{ lib, pkgs, inputs, hostPlatform, ... }:
+{
+  lib,
+  pkgs,
+  inputs,
+  hostPlatform,
+  ...
+}:
 let
   inherit (builtins) concatStringsSep;
   inherit (lib.attrsets) mapAttrsToList;
@@ -19,7 +25,10 @@ in
       # Set Space key to be leader
       opts = {
         # Rulers at 80 and 100 characters
-        colorcolumn = [ 80 100 ];
+        colorcolumn = [
+          80
+          100
+        ];
         # Highlight cursor line
         cursorline = true;
         # Highlight cursor column
@@ -92,10 +101,16 @@ in
               dim_dirname = true;
             };
             cmp = true;
-            dap = { enabled = true; enable_ui = true; };
+            dap = {
+              enabled = true;
+              enable_ui = true;
+            };
             gitsigns = true;
             lsp_saga = true;
-            native_lsp = { enabled = true; inlay_hints.background = true; };
+            native_lsp = {
+              enabled = true;
+              inlay_hints.background = true;
+            };
             neogit = true;
             neotree = true;
             telescope.enabled = true;
@@ -122,12 +137,21 @@ in
                 opts = {
                   inherit shortcut;
                   align_shortcut = "right";
-                  keymap = [ "n" shortcut ":${cmd}<CR>" { } ];
+                  keymap = [
+                    "n"
+                    shortcut
+                    ":${cmd}<CR>"
+                    { }
+                  ];
                   position = "center";
                   width = 50;
                 };
               };
-              padding = v: { type = "padding"; val = v; opts.position = "center"; };
+              padding = v: {
+                type = "padding";
+                val = v;
+                opts.position = "center";
+              };
             in
             [
               (padding 2)
@@ -141,7 +165,10 @@ in
                   "██║ ╚████║██║██╔╝ ██╗ ╚████╔╝ ██║██║ ╚═╝ ██║"
                   "╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝     ╚═╝"
                 ];
-                opts = { position = "center"; hl = "Type"; };
+                opts = {
+                  position = "center";
+                  hl = "Type";
+                };
               }
               (padding 2)
               {
@@ -160,7 +187,10 @@ in
               {
                 type = "text";
                 val = "Crankenstein";
-                opts = { position = "center"; hl = "Keyword"; };
+                opts = {
+                  position = "center";
+                  hl = "Keyword";
+                };
               }
             ];
         };
@@ -170,12 +200,14 @@ in
           settings.options = {
             diagnostics = "nvim_lsp";
             enforce_regular_tabs = false;
-            offsets = [{
-              filetype = "neo-tree";
-              text = "Neo-tree";
-              separator = true;
-              textAlign = "left";
-            }];
+            offsets = [
+              {
+                filetype = "neo-tree";
+                text = "Neo-tree";
+                separator = true;
+                textAlign = "left";
+              }
+            ];
           };
         };
         # LSP completion
@@ -260,7 +292,7 @@ in
             nickel_ls.enable = true;
             nil_ls = {
               enable = true;
-              settings.formatting.command = [ "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt" ];
+              settings.formatting.command = [ "${pkgs.nixfmt-rfc-style}/bin/nixfmt" ];
             };
             pyright.enable = true;
             ruff_lsp.enable = false;
@@ -304,8 +336,14 @@ in
         lualine = {
           enable = true;
           settings.options = {
-            component_separators = { left = ""; right = ""; };
-            section_separators = { left = ""; right = ""; };
+            component_separators = {
+              left = "";
+              right = "";
+            };
+            section_separators = {
+              left = "";
+              right = "";
+            };
           };
         };
         # File explorer
@@ -313,28 +351,46 @@ in
           enable = true;
           closeIfLastWindow = true;
           filesystem = {
-            filteredItems = { hideDotfiles = false; hideGitignored = false; };
-            followCurrentFile = { enabled = true; leaveDirsOpen = true; };
+            filteredItems = {
+              hideDotfiles = false;
+              hideGitignored = false;
+            };
+            followCurrentFile = {
+              enabled = true;
+              leaveDirsOpen = true;
+            };
             useLibuvFileWatcher = true;
           };
           sourceSelector.winbar = true;
-          window.mappings = { "<A-S-{>" = "prev_source"; "<A-S-}>" = "next_source"; };
+          window.mappings = {
+            "<A-S-{>" = "prev_source";
+            "<A-S-}>" = "next_source";
+          };
         };
         # Display colors for color codes
         nvim-colorizer = {
           enable = true;
-          fileTypes = [{ language = "typescriptreact"; tailwind = "both"; }];
+          fileTypes = [
+            {
+              language = "typescriptreact";
+              tailwind = "both";
+            }
+          ];
         };
         # Status column
         statuscol = {
           enable = true;
           settings = {
             relculright = true;
-            ft_ignore = [ "NeogitStatus" "neo-tree" "aerial" ];
+            ft_ignore = [
+              "NeogitStatus"
+              "neo-tree"
+              "aerial"
+            ];
             segments = [
               {
                 hl = "FoldColumn";
-                text = [{ __raw = "require('statuscol.builtin').foldfunc"; }];
+                text = [ { __raw = "require('statuscol.builtin').foldfunc"; } ];
                 click = "v:lua.ScFa";
               }
               {
@@ -349,7 +405,10 @@ in
                 };
                 click = "v:lua.ScSa";
               }
-              { text = [ " %l %=%r " ]; click = "v:lua.ScLa"; }
+              {
+                text = [ " %l %=%r " ];
+                click = "v:lua.ScLa";
+              }
               {
                 text = null;
                 sign = {
@@ -374,7 +433,10 @@ in
           enable = true;
           settings = {
             size = 10;
-            float_opts = { height = 45; width = 170; };
+            float_opts = {
+              height = 45;
+              width = 170;
+            };
           };
         };
         # Parser generator & incremental parsing toolkit
@@ -469,7 +531,10 @@ in
           };
         };
         # The TypeScript integration NeoVim deserves
-        typescript-tools = { enable = true; settings.exposeAsCodeAction = "all"; };
+        typescript-tools = {
+          enable = true;
+          settings.exposeAsCodeAction = "all";
+        };
         # File / AST breadcrumbs
         barbecue.enable = true;
         # nvim-cmp LSP signature help source
@@ -511,9 +576,15 @@ in
         # Mini library collection - alignment
         mini.modules.align = { };
         # Symbol navigation popup
-        navbuddy = { enable = true; lsp.autoAttach = true; };
+        navbuddy = {
+          enable = true;
+          lsp.autoAttach = true;
+        };
         # Neovim git interface
-        neogit = { enable = true; settings.integrations.diffview = true; };
+        neogit = {
+          enable = true;
+          settings.integrations.diffview = true;
+        };
         # Enable Nix language support
         nix.enable = true;
         # Automatically manage character pairs
@@ -577,7 +648,10 @@ in
             nvim-treeclimber = { };
             overseer = { };
             render-markdown = { };
-            aerial = { autojump = true; filter_kind = false; };
+            aerial = {
+              autojump = true;
+              filter_kind = false;
+            };
             "nvim-treesitter.configs".textsubjects = {
               enable = true;
               rrev_selection = ",";
@@ -589,9 +663,9 @@ in
             };
           };
         in
-        (concatStringsSep "\n"
-          ((mapAttrsToList (n: v: "require(\"${n}\").setup(${helpers.toLuaObject v})") extraPluginsConfig)
-            ++ [
+        (concatStringsSep "\n" (
+          (mapAttrsToList (n: v: ''require("${n}").setup(${helpers.toLuaObject v})'') extraPluginsConfig)
+          ++ [
             "if vim.g.neovide then vim.g.neovide_scale_factor = 0.7 end"
             ''
               lspconfig = require('lspconfig')
@@ -599,52 +673,186 @@ in
                 root_dir = lspconfig.util.root_pattern 'flake.nix'
               })
             ''
-          ]));
+          ]
+        ));
       keymaps = [
-        { key = ";"; action = ":"; }
-        { key = "<A-(>"; action = ":BufferLineMovePrev<CR>"; }
-        { key = "<A-)>"; action = ":BufferLineMoveNext<CR>"; }
-        { key = "<A-W>"; action = ":wall<CR>"; }
-        { key = "<A-w>"; action = ":write<CR>"; }
-        { key = "<A-w>"; action = ":write<CR>"; }
-        { key = "<A-x>"; action = ":Bdelete<CR>"; }
-        { key = "<A-{>"; action = ":BufferLineCyclePrev<CR>"; }
-        { key = "<A-}>"; action = ":BufferLineCycleNext<CR>"; }
-        { key = "<C-l>"; action = ":set invlist<CR>"; }
-        { key = "<C-l>i"; action = ":LspInfo<CR>"; }
-        { key = "<C-l>r"; action = ":LspRestart<CR>"; }
-        { key = "<S-f>"; action = ":ToggleTerm direction=float<CR>"; } # TODO: figure out how to resize
-        { key = "<S-s>"; action = ":sort<CR>"; }
-        { key = "<S-t>"; action = ":ToggleTerm<CR>"; }
-        { key = "<leader>D"; action = ":DiffviewClose<CR>"; }
-        { key = "<leader>F"; action = ":Telescope find_files hidden=true<CR>"; }
-        { key = "<leader>H"; action = ":wincmd 2h<CR>"; }
-        { key = "<leader>J"; action = ":wincmd 2j<CR>"; }
-        { key = "<leader>K"; action = ":wincmd 2k<CR>"; }
-        { key = "<leader>L"; action = ":wincmd 2l<CR>"; }
-        { key = "<leader>a"; action = ":AerialToggle<CR>"; }
-        { key = "<leader>b"; action = ":Neotree toggle buffers<CR>"; }
-        { key = "<leader>c"; action = ":nohlsearch<CR>"; }
-        { key = "<leader>d"; action = ":DiffviewOpen<CR>"; }
-        { key = "<leader>de"; action = ":TodoTelescope<CR>"; }
-        { key = "<leader>dl"; action = ":TodoLocList<CR>"; }
-        { key = "<leader>dr"; action = ":TodoTrouble<CR>"; }
-        { key = "<leader>f"; action = ":Telescope find_files<CR>"; }
-        { key = "<leader>g"; action = ":Telescope live_grep<CR>"; options.nowait = true; }
-        { key = "<leader>h"; action = ":wincmd h<CR>"; }
-        { key = "<leader>j"; action = ":wincmd j<CR>"; }
-        { key = "<leader>k"; action = ":wincmd k<CR>"; }
-        { key = "<leader>l"; action = ":wincmd l<CR>"; }
-        { key = "<leader>m"; action = ":Telescope keymaps<CR>"; }
-        { key = "<leader>n"; action = ":Neotree focus<CR>"; }
-        { key = "<leader>p"; action = ":Trouble diagnostics<CR>"; }
-        { key = "<leader>r"; action = ":Neotree reveal<CR>"; }
-        { key = "<leader>rn"; action = ":IncRename "; }
-        { key = "<leader>s"; action = ":Navbuddy<CR>"; }
-        { key = "<leader>t"; action = ":Neotree toggle filesystem<CR>"; }
-        { key = "<leader>v"; action = ":Neotree toggle git_status<CR>"; }
-        { key = "<leader>x"; action = ":Neogit<CR>"; }
-        { key = "<leader>z"; action = ":Neogit branch<CR>"; }
+        {
+          key = ";";
+          action = ":";
+        }
+        {
+          key = "<A-(>";
+          action = ":BufferLineMovePrev<CR>";
+        }
+        {
+          key = "<A-)>";
+          action = ":BufferLineMoveNext<CR>";
+        }
+        {
+          key = "<A-W>";
+          action = ":wall<CR>";
+        }
+        {
+          key = "<A-w>";
+          action = ":write<CR>";
+        }
+        {
+          key = "<A-w>";
+          action = ":write<CR>";
+        }
+        {
+          key = "<A-x>";
+          action = ":Bdelete<CR>";
+        }
+        {
+          key = "<A-{>";
+          action = ":BufferLineCyclePrev<CR>";
+        }
+        {
+          key = "<A-}>";
+          action = ":BufferLineCycleNext<CR>";
+        }
+        {
+          key = "<C-l>";
+          action = ":set invlist<CR>";
+        }
+        {
+          key = "<C-l>i";
+          action = ":LspInfo<CR>";
+        }
+        {
+          key = "<C-l>r";
+          action = ":LspRestart<CR>";
+        }
+        {
+          key = "<S-f>";
+          action = ":ToggleTerm direction=float<CR>";
+        } # TODO: figure out how to resize
+        {
+          key = "<S-s>";
+          action = ":sort<CR>";
+        }
+        {
+          key = "<S-t>";
+          action = ":ToggleTerm<CR>";
+        }
+        {
+          key = "<leader>D";
+          action = ":DiffviewClose<CR>";
+        }
+        {
+          key = "<leader>F";
+          action = ":Telescope find_files hidden=true<CR>";
+        }
+        {
+          key = "<leader>a";
+          action = ":AerialToggle<CR>";
+        }
+        {
+          key = "<leader>b";
+          action = ":Neotree toggle buffers<CR>";
+        }
+        {
+          key = "<leader>c";
+          action = ":nohlsearch<CR>";
+        }
+        {
+          key = "<leader>d";
+          action = ":DiffviewOpen<CR>";
+        }
+        {
+          key = "<leader>de";
+          action = ":TodoTelescope<CR>";
+        }
+        {
+          key = "<leader>dl";
+          action = ":TodoLocList<CR>";
+        }
+        {
+          key = "<leader>dr";
+          action = ":TodoTrouble<CR>";
+        }
+        {
+          key = "<leader>f";
+          action = ":Telescope find_files<CR>";
+        }
+        {
+          key = "<leader>g";
+          action = ":Telescope live_grep<CR>";
+          options.nowait = true;
+        }
+        {
+          key = "<leader>h";
+          action.__raw = ''require("smart-splits").move_cursor_left'';
+        }
+        {
+          key = "<leader>j";
+          action.__raw = ''require("smart-splits").move_cursor_down'';
+        }
+        {
+          key = "<leader>k";
+          action.__raw = ''require("smart-splits").move_cursor_up'';
+        }
+        {
+          key = "<leader>l";
+          action.__raw = ''require("smart-splits").move_cursor_right'';
+        }
+        {
+          key = "<leader>H";
+          action.__raw = ''require("smart-splits").resize_left'';
+        }
+        {
+          key = "<leader>J";
+          action.__raw = ''require("smart-splits").resize_down'';
+        }
+        {
+          key = "<leader>K";
+          action.__raw = ''require("smart-splits").resize_up'';
+        }
+        {
+          key = "<leader>L";
+          action.__raw = ''require("smart-splits").resize_right'';
+        }
+        {
+          key = "<leader>m";
+          action = ":Telescope keymaps<CR>";
+        }
+        {
+          key = "<leader>n";
+          action = ":Neotree focus<CR>";
+        }
+        {
+          key = "<leader>p";
+          action = ":Trouble diagnostics<CR>";
+        }
+        {
+          key = "<leader>r";
+          action = ":Neotree reveal<CR>";
+        }
+        {
+          key = "<leader>rn";
+          action = ":IncRename ";
+        }
+        {
+          key = "<leader>s";
+          action = ":Navbuddy<CR>";
+        }
+        {
+          key = "<leader>t";
+          action = ":Neotree toggle filesystem<CR>";
+        }
+        {
+          key = "<leader>v";
+          action = ":Neotree toggle git_status<CR>";
+        }
+        {
+          key = "<leader>x";
+          action = ":Neogit<CR>";
+        }
+        {
+          key = "<leader>z";
+          action = ":Neogit branch<CR>";
+        }
       ];
     };
   };
