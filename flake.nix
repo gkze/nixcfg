@@ -89,10 +89,11 @@
   };
 
   outputs =
-    { flakelight
-    , devshell
-    , treefmt-nix
-    , ...
+    {
+      flakelight,
+      devshell,
+      treefmt-nix,
+      ...
     }:
     flakelight ./. (
       { lib, ... }:
@@ -141,7 +142,25 @@
         nixosConfigurations = {
           mesa = {
             system = "x86_64-linux";
-            modules = [ ];
+            modules = [
+              (
+                { ... }:
+                {
+                  system.stateVersion = builtins.readFile ./NIXOS_VERSION;
+                  services.xserver = {
+                    enable = true;
+                    displayManager.gdm.enable = true;
+                    desktopManager.gnome.enable = true;
+                  };
+                  users.users = {
+                    root = {
+                      isSystemUser = true;
+                      initialPassword = "root";
+                    };
+                  };
+                }
+              )
+            ];
           };
           jackson = { };
         };
