@@ -1,5 +1,6 @@
 # Nix build output
 result
+*.qcow2
 
 # Nix direnv integration
 .direnv
