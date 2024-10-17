@@ -396,26 +396,35 @@ in
               {
                 text = null;
                 sign = {
-                  name = [ ".*" ];
-                  namespace = [ ".*" ];
-                  text = [ ".*" ];
-                  maxwidth = 2;
+                  name = [ "Diagnostic" ];
+                  maxwidth = 1;
                   colwidth = 2;
-                  auto = false;
+                  auto = true;
                 };
                 click = "v:lua.ScSa";
               }
               {
-                text = [ " %l %=%r " ];
+                text = [
+                  {
+                    __raw = ''
+                      function(_)
+                        local width = math.floor(math.log10(vim.fn.line("$")) + 1)
+
+                        return " %l %=%" .. width .. "." .. width .. "r "
+                      end
+                    '';
+                  }
+                ];
                 click = "v:lua.ScLa";
               }
               {
                 text = null;
                 sign = {
                   name = [ ".*" ];
+                  namespace = [ ".*" ];
                   maxwidth = 1;
-                  colwidth = 1;
-                  auto = false;
+                  colwidth = 2;
+                  auto = true;
                 };
                 click = "v:lua.ScSa";
               }
