@@ -326,11 +326,14 @@
           devShells.default = pkgs.devshell.mkShell {
             name = "nixcfg";
             packages =
-              (with inputs; [
-                nix-editor.packages.${system}.default
-                nixos-generators.packages.${system}.default
-                home-manager.packages.${system}.default
-              ])
+              (
+                with inputs;
+                map (p: p.packages.${system}.default) [
+                  nix-editor
+                  nixos-generators
+                  home-manager
+                ]
+              )
               ++ (with pkgs; [
                 dconf2nix
                 nix-init

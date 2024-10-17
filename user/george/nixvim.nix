@@ -399,8 +399,8 @@ in
                   name = [ ".*" ];
                   namespace = [ ".*" ];
                   text = [ ".*" ];
-                  maxwidth = 1;
-                  colwidth = 1;
+                  maxwidth = 2;
+                  colwidth = 2;
                   auto = false;
                 };
                 click = "v:lua.ScSa";
@@ -415,8 +415,7 @@ in
                   name = [ ".*" ];
                   maxwidth = 1;
                   colwidth = 1;
-                  auto = true;
-                  wrap = true;
+                  auto = false;
                 };
                 click = "v:lua.ScSa";
               }
