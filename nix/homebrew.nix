@@ -47,7 +47,7 @@
         "skype"
         # "slack"
         # "soulseek"
-        # "spotify"
+        "spotify"
         # "telegram"
         # "vagrant"
         # "visual-studio-code-insiders"

@@ -617,25 +617,27 @@ in
         # Keybinding hint viewer
         which-key.enable = true;
       };
-      extraPlugins = with pkgs.vimPlugins; [
-        aerial-nvim
-        bufdelete-nvim
-        codesnap-nvim
-        firenvim
-        git-conflict-nvim
-        gitlab-nvim
-        lsp-signature-nvim
-        nui-nvim
-        nvim-dbee
-        nvim-surround
-        nvim-treesitter-parsers.nickel
-        nvim-treesitter-textsubjects
-        overseer-nvim
-        vim-bazel
-        vim-bundle-mako
-        vim-jinja
-        vim-nickel
-      ];
+      extraPlugins =
+        with pkgs.vimPlugins;
+        [
+          aerial-nvim
+          bufdelete-nvim
+          codesnap-nvim
+          firenvim
+          git-conflict-nvim
+          gitlab-nvim
+          lsp-signature-nvim
+          nui-nvim
+          nvim-surround
+          nvim-treesitter-parsers.nickel
+          nvim-treesitter-textsubjects
+          overseer-nvim
+          vim-bazel
+          vim-bundle-mako
+          vim-jinja
+          vim-nickel
+        ]
+        ++ lib.lists.optionals (!pkgs.stdenv.isDarwin) [ nvim-dbee ];
       extraConfigLua =
         let
           helpers = inputs.nixvim.lib.${hostPlatform}.helpers;

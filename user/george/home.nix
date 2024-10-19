@@ -105,6 +105,12 @@ in
       linux = {
         imports = [ ./dconf.nix ];
 
+        catppuccin.pointerCursor = {
+          enable = true;
+          accent = "blue";
+          flavor = "frappe";
+        };
+
         gtk = {
           enable = true;
           catppuccin = {
@@ -244,11 +250,6 @@ in
     enable = true;
     accent = "blue";
     flavor = "frappe";
-    pointerCursor = {
-      enable = true;
-      accent = "blue";
-      flavor = "frappe";
-    };
   };
 
   home = {
