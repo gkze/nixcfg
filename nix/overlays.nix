@@ -44,6 +44,8 @@ in
         src = inputs.sqruff;
       };
 
+  uv = prev.uv.overrideAttrs { version = "0.4.20"; };
+
   # uv = prev.rustPlatform.buildRustPackage rec {
   #   pname = "uv";
   #   version = "0.4.7";

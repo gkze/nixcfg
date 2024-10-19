@@ -135,17 +135,6 @@ in
           lorri.enable = true;
         };
 
-        catppuccin = {
-          enable = true;
-          accent = "blue";
-          flavor = "frappe";
-          pointerCursor = {
-            enable = true;
-            accent = "blue";
-            flavor = "frappe";
-          };
-        };
-
         # These are marked as unsupported on darwin
         home.packages =
           with pkgs;
@@ -249,6 +238,18 @@ in
 
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
+
+  # System-wide Catppuccin theme
+  catppuccin = {
+    enable = true;
+    accent = "blue";
+    flavor = "frappe";
+    pointerCursor = {
+      enable = true;
+      accent = "blue";
+      flavor = "frappe";
+    };
+  };
 
   home = {
     # This value determines the Home Manager release that your
