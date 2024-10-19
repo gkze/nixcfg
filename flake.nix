@@ -83,6 +83,12 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Rust in Nix build tool
+    naersk = {
+      url = "github:nix-community/naersk";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Hardware-specific settings
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
 
@@ -96,13 +102,7 @@
 
     # Binary manager
     bin = {
-      url = "github:marcosnils/bin/v0.17.4";
-      flake = false;
-    };
-
-    # Neovim proportional buffer dimensions
-    bufresize-nvim = {
-      url = "github:kwkarlwang/bufresize.nvim";
+      url = "github:marcosnils/bin/v0.18.0";
       flake = false;
     };
 
@@ -111,7 +111,7 @@
 
     # Code snapshotting plugin
     codesnap-nvim = {
-      url = "github:mistricky/codesnap.nvim";
+      url = "github:mistricky/codesnap.nvim/v1.6.1";
       flake = false;
     };
 
@@ -133,15 +133,9 @@
       flake = false;
     };
 
-    # Git branch cleanup tool
-    git-trim = {
-      url = "github:jasonmccreary/git-trim";
-      flake = false;
-    };
-
     # GitLab Neovim Plugin
     gitlab-nvim = {
-      url = "github:gkze/gitlab.nvim";
+      url = "github:harrisoncramer/gitlab.nvim/v3.3.7";
       flake = false;
     };
 
@@ -157,32 +151,15 @@
       flake = false;
     };
 
-    # Vim text alignment plugin
-    mini-align = {
-      url = "github:echasnovski/mini.align";
+    # S3 FUSE
+    mount-s3 = {
+      url = "github:awslabs/mountpoint-s3/v1.10.0";
       flake = false;
     };
-
-    # Rust in Nix build tool
-    naersk.url = "github:nix-community/naersk";
 
     # Neovim database UI
     nvim-dbee = {
-      url = "github:kndndrj/nvim-dbee";
-      flake = false;
-    };
-
-    # Neovim structured editing plugin
-    # TODO: fix attempt to index nil value" 
-    # @ https://github.com/Dkendal/nvim-treeclimber/blob/613daac29f134ad66ccc20f3445d35645a7fe17e/lua/nvim-treeclimber.lua#L29
-    nvim-treeclimber = {
-      url = "github:Dkendal/nvim-treeclimber";
-      flake = false;
-    };
-
-    # In-editor Markdown rendering for Neovi
-    render-markdown-nvim = {
-      url = "github:MeanderingProgrammer/render-markdown.nvim";
+      url = "github:kndndrj/nvim-dbee/v0.1.9";
       flake = false;
     };
 
@@ -192,21 +169,9 @@
       flake = false;
     };
 
-    # Sublime syntax for KDL (used in bat)
+    # Sublime syntax for KDL (for bat)
     sublime-kdl = {
       url = "github:eugenesvk/sublime-KDL";
-      flake = false;
-    };
-
-    # Aesthetic modern terminal file manager
-    superfile = {
-      url = "github:MHNightCat/superfile";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    # Rust-based Python package resolver & installed (faster pip)
-    uv = {
-      url = "github:astral-sh/uv/0.4.9";
       flake = false;
     };
 
@@ -218,7 +183,7 @@
 
     # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
     yawsso = {
-      url = "github:victorskl/yawsso";
+      url = "github:victorskl/yawsso/1.2.1";
       flake = false;
     };
 

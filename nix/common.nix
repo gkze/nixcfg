@@ -1,7 +1,6 @@
 {
   pkgs,
   hostPlatform,
-  inputs,
   ...
 }:
 let
@@ -39,7 +38,7 @@ in
     package = pkgs.nixVersions.git;
 
     # Pin Nixpkgs to flake spec
-    registry.nixpkgs.flake = inputs.nixpkgs;
+    # registry.nixpkgs.flake = inputs.nixpkgs;
   };
 
   # Configuration for Nixpkgs

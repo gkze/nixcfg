@@ -399,7 +399,7 @@ in
                   name = [ "Diagnostic" ];
                   maxwidth = 1;
                   colwidth = 2;
-                  auto = true;
+                  auto = false;
                 };
                 click = "v:lua.ScSa";
               }
@@ -409,7 +409,6 @@ in
                     __raw = ''
                       function(_)
                         local width = math.floor(math.log10(vim.fn.line("$")) + 1)
-
                         return " %l %=%" .. width .. "." .. width .. "r "
                       end
                     '';
@@ -424,7 +423,7 @@ in
                   namespace = [ ".*" ];
                   maxwidth = 1;
                   colwidth = 2;
-                  auto = true;
+                  auto = false;
                 };
                 click = "v:lua.ScSa";
               }
@@ -599,6 +598,8 @@ in
         nvim-autopairs.enable = true;
         # File explorer
         oil.enable = true;
+        # Live Markdown previre
+        render-markdown.enable = true;
         # Schemastore
         schemastore.enable = true;
         # Global search and replace
@@ -619,7 +620,6 @@ in
       extraPlugins = with pkgs.vimPlugins; [
         aerial-nvim
         bufdelete-nvim
-        bufresize-nvim
         codesnap-nvim
         firenvim
         git-conflict-nvim
@@ -631,7 +631,6 @@ in
         nvim-treesitter-parsers.nickel
         nvim-treesitter-textsubjects
         overseer-nvim
-        render-markdown-nvim
         vim-bazel
         vim-bundle-mako
         vim-jinja
@@ -641,19 +640,10 @@ in
         let
           helpers = inputs.nixvim.lib.${hostPlatform}.helpers;
           extraPluginsConfig = {
-            # TODO: enable once figured out
-            # bufresize = { };
-            # codesnap = {
-            #   code_font_family = "Hack Nerd Font Mono";
-            #   has_breadcrumbs = true;
-            #   save_path = "~/Pictures";
-            #   watermark = "";
-            # };
             git-conflict = { };
             gitlab = { };
             nvim-surround = { };
             overseer = { };
-            render-markdown = { };
             aerial = {
               autojump = true;
               filter_kind = false;
@@ -672,12 +662,11 @@ in
         (concatStringsSep "\n" (
           (mapAttrsToList (n: v: ''require("${n}").setup(${helpers.toLuaObject v})'') extraPluginsConfig)
           ++ [
-            "if vim.g.neovide then vim.g.neovide_scale_factor = 0.7 end"
             ''
-              lspconfig = require('lspconfig')
-              lspconfig.postgres_lsp.setup({
-                root_dir = lspconfig.util.root_pattern 'flake.nix'
-              })
+              if vim.g.neovide then
+                vim.g.neovide_scale_factor = 0.7
+                vim.o.guifont = "Hack Nerd Font Mono:h14"
+              end
             ''
           ]
         ));

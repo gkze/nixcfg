@@ -374,8 +374,6 @@ in
       # Multiple git repository management
       # TODO: completion not working
       gita
-      # Git branch maintenance tool
-      git-trim
       # GitLab Command Line Interface
       glab
       # GRAPH VIsualiZer
@@ -478,7 +476,7 @@ in
         theme = "Catppuccin Frappe";
       };
       syntaxes.kdl = {
-        src = pkgs.sublime-kdl;
+        src = inputs.sublime-kdl;
         file = "KDL.sublime-syntax";
       };
     };

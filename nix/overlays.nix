@@ -1,25 +1,34 @@
 # TODO: upstream to Nixpkgs
 { inputs, system, ... }:
-(final: prev: {
+let
+  inherit (builtins) fromJSON readFile replaceStrings;
+  lockedFlake = fromJSON (readFile ../flake.lock);
+  normalizeName =
+    s:
+    replaceStrings
+      [
+        "."
+        "_"
+      ]
+      [
+        "-"
+        "-"
+      ]
+      s;
+in
+(_final: prev: {
   alacritty-theme = prev.alacritty-theme.override { src = inputs.alacritty-theme; };
 
-  bin = prev.buildGoModule {
-    pname = "bin";
-    version = "0.17.5";
-    src = inputs.bin;
-    vendorHash = "sha256-9kgenzKjo5Lc9JrEdXQlRocl17o4RyKrKuJAFoOEVwY=";
-  };
-
-  git-trim = prev.stdenvNoCC.mkDerivation {
-    pname = "git-trim";
-    version = inputs.git-trim.rev;
-    src = inputs.git-trim;
-    installPhase = ''
-      mkdir -p $out/bin
-      cp git-trim $out/bin
-      chmod +x $out/bin/git-trim
-    '';
-  };
+  bin =
+    let
+      binMeta = lockedFlake.nodes.bin;
+    in
+    prev.buildGoModule {
+      pname = normalizeName binMeta.locked.repo;
+      version = binMeta.original.ref;
+      src = inputs.bin;
+      vendorHash = "sha256-Nw0+kTcENp96PruQEBAdcfhubOEWSXKWGWrmWoKmgN0=";
+    };
 
   nix-software-center = inputs.nix-software-center.packages.${system}.default;
 
@@ -30,84 +39,67 @@
       rustc = prev.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
     }).buildPackage
       {
-        name = "sqruff";
-        version = "v0.19.1";
+        name = normalizeName lockedFlake.nodes.sqruff.locked.repo;
+        version = lockedFlake.nodes.sqruff.original.ref;
         src = inputs.sqruff;
       };
 
-  sublime-kdl = prev.stdenvNoCC.mkDerivation {
-    pname = "sublime-kdl";
-    version = inputs.sublime-kdl.rev;
-    src = inputs.sublime-kdl;
-    installPhase = "cp -r $src $out";
-  };
-
-  superfile = inputs.superfile.packages.${system}.default;
-
-  uv = prev.rustPlatform.buildRustPackage rec {
-    pname = "uv";
-    version = "0.4.7";
-    src = inputs.uv;
-    cargoLock = {
-      lockFile = "${src}/Cargo.lock";
-      allowBuiltinFetchGit = true;
-    };
-    buildInputs =
-      [ prev.openssl ]
-      ++ (
-        with prev;
-        lib.lists.optional stdenv.isDarwin (
-          with darwin.apple_sdk.frameworks;
-          [
-            Security
-            SystemConfiguration
-          ]
-        )
-      );
-    doCheck = false;
-    nativeBuildInputs = with final; [
-      cmake
-      installShellFiles
-      pkg-config
-      rust-bin.stable.latest.default
-    ];
-    postInstall = ''
-      installShellCompletion --cmd uv --zsh <($out/bin/uv generate-shell-completion zsh)
-    '';
-    OPENSSL_NO_VENDOR = 1;
-  };
+  # uv = prev.rustPlatform.buildRustPackage rec {
+  #   pname = "uv";
+  #   version = "0.4.7";
+  #   src = inputs.uv;
+  #   cargoLock = {
+  #     lockFile = "${src}/Cargo.lock";
+  #     allowBuiltinFetchGit = true;
+  #   };
+  #   buildInputs =
+  #     [ prev.openssl ]
+  #     ++ (
+  #       with prev;
+  #       lib.lists.optional stdenv.isDarwin (
+  #         with darwin.apple_sdk.frameworks;
+  #         [
+  #           Security
+  #           SystemConfiguration
+  #         ]
+  #       )
+  #     );
+  #   doCheck = false;
+  #   nativeBuildInputs = with final; [
+  #     cmake
+  #     installShellFiles
+  #     pkg-config
+  #     rust-bin.stable.latest.default
+  #   ];
+  #   postInstall = ''
+  #     installShellCompletion --cmd uv --zsh <($out/bin/uv generate-shell-completion zsh)
+  #   '';
+  #   OPENSSL_NO_VENDOR = 1;
+  # };
 
   vimPlugins = prev.vimPlugins.extend (
     _: _: {
       bufresize-nvim = prev.vimUtils.buildVimPlugin {
-        pname = "bufresize-nvim";
+        pname = normalizeName lockedFlake.nodes.bufresize-nvim.locked.repo;
         version = inputs.bufresize-nvim.rev;
         src = inputs.bufresize-nvim;
       };
 
-      # NOTE: does not work on nixbuild.net for some reason but works locally
-      # codesnap-nvim = prev.vimUtils.buildVimPlugin {
-      #   pname = "codesnap-nvim";
-      #   src = inputs.codesnap-nvim;
-      #   version = inputs.codesnap-nvim.rev;
-      #   nativeBuildInputs = with prev; [ cargo rustc ];
-      #   buildPhase = "make";
-      # };
-
       gitlab-nvim =
         let
+          version = lockedFlake.nodes.gitlab-nvim.original.ref;
+        in
+        let
           gitlabNvimGo = prev.buildGoModule {
-            pname = "gitlab-nvim-go";
-            # version = inputs.gitlab-nvim.rev;
-            version = "dev";
+            pname = normalizeName lockedFlake.nodes.gitlab-nvim.locked.repo;
+            inherit version;
             src = inputs.gitlab-nvim;
             vendorHash = "sha256-wYlFmarpITuM+s9czQwIpE1iCJje7aCe0w7/THm+524=";
           };
         in
         prev.vimUtils.buildVimPlugin {
-          pname = "gitlab-nvim";
-          # version = inputs.gitlab-nvim.rev;
-          version = "dev";
+          pname = normalizeName lockedFlake.nodes.gitlab-nvim.locked.repo;
+          inherit version;
           src = inputs.gitlab-nvim;
           buildInputs = with prev.vimPlugins; [
             plenary-nvim
@@ -120,47 +112,22 @@
         };
 
       vim-bundle-mako = prev.vimUtils.buildVimPlugin {
-        pname = "vim-bundle-mako";
+        pname = normalizeName lockedFlake.nodes.vim-bundle-mako.locked.repo;
         version = inputs.vim-bundle-mako.rev;
         src = inputs.vim-bundle-mako;
       };
 
-      mini-align = prev.vimUtils.buildVimPlugin {
-        pname = "mini-align";
-        version = inputs.mini-align.rev;
-        src = inputs.mini-align;
-      };
-
-      nvim-dbee = prev.vimUtils.buildVimPlugin {
-        pname = "nvim-dbee";
-        version = inputs.nvim-dbee.rev;
-        src = inputs.nvim-dbee;
-      };
-
-      nvim-treeclimber = prev.vimUtils.buildVimPlugin {
-        pname = "nvim-treeclimber";
-        version = inputs.nvim-treeclimber.rev;
-        src = inputs.nvim-treeclimber;
-      };
-
       lsp-signature-nvim = prev.vimUtils.buildVimPlugin {
-        name = "lsp-signature-nvim";
+        name = normalizeName lockedFlake.nodes.lsp-signature-nvim.locked.repo;
         version = inputs.lsp-signature-nvim.rev;
         src = inputs.lsp-signature-nvim;
       };
-
-      render-markdown-nvim = prev.vimUtils.buildVimPlugin {
-        name = "render-markdown-nvim";
-        version = inputs.render-markdown-nvim.rev;
-        src = inputs.render-markdown-nvim;
-      };
-
     }
   );
 
   yawsso = prev.python3Packages.buildPythonApplication {
-    pname = "yawsso";
-    version = "1.2.0";
+    pname = normalizeName lockedFlake.nodes.yawsso.locked.repo;
+    version = lockedFlake.nodes.yawsso.original.ref;
     src = inputs.yawsso;
     doCheck = false;
   };
