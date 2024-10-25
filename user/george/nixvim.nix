@@ -477,6 +477,7 @@ in
             enable = true;
             gotoNextStart = {
               "]]" = "@class.outer";
+              "]a" = "@attribute.outer";
               "]m" = "@function.outer";
               "]v" = "@assignment.outer";
               "]c" = "@call.outer";
@@ -485,6 +486,7 @@ in
               "]i" = "@conditional.outer";
             };
             gotoNextEnd = {
+              "]A" = "@attribute.inner";
               "]M" = "@function.outer";
               "][" = "@class.outer";
               "]V" = "@assignment.outer";
@@ -494,6 +496,7 @@ in
               "]I" = "@conditional.outer";
             };
             gotoPreviousStart = {
+              "[a" = "@attribute.outer";
               "[[" = "@class.outer";
               "[m" = "@function.outer";
               "[v" = "@assignment.outer";
@@ -503,6 +506,7 @@ in
               "[i" = "@conditional.outer";
             };
             gotoPreviousEnd = {
+              "[A" = "@attribute.outer";
               "[M" = "@function.outer";
               "[]" = "@class.outer";
               "[V" = "@assignment.outer";
@@ -542,6 +546,8 @@ in
           enable = true;
           settings.exposeAsCodeAction = "all";
         };
+        # LLM integration
+        avante.enable = true;
         # File / AST breadcrumbs
         barbecue.enable = true;
         # nvim-cmp LSP signature help source

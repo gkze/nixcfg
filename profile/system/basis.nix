@@ -6,7 +6,7 @@ in
   imports = [
     {
       darwin = { };
-      linux = { };
+      linux.programs._1password.enable = true;
     }
     .${kernel}
   ];

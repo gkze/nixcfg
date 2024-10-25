@@ -4,6 +4,9 @@ let
 
   # Grab the OS kernel part of the hostPlatform tuple
   kernel = elemAt (split "-" hostPlatform) 2;
+
+  # User metadata
+  meta = import ./meta.nix;
 in
 {
   imports = [
@@ -30,4 +33,6 @@ in
     }
     .${kernel}
   ];
+
+  nix.settings.trusted-users = [ meta.name.user.system ];
 }

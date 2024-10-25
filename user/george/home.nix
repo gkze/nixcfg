@@ -210,6 +210,30 @@ in
                 default = "Google";
                 privateDefault = "Google";
               };
+              bookmarks = [
+                {
+                  toolbar = true;
+                  bookmarks = [
+                    {
+                      name = "Nix";
+                      bookmarks = [
+                        {
+                          name = "Nix Manual";
+                          url = "https://nix.dev/manual/nix/2.24/";
+                        }
+                        {
+                          name = "Nixpkgs Manual";
+                          url = "https://nixos.org/manual/nixpkgs/unstable/";
+                        }
+                        {
+                          name = "NixOS Manual";
+                          url = "https://nixos.org/manual/nixos/unstable/";
+                        }
+                      ];
+                    }
+                  ];
+                }
+              ];
               extensions = with pkgs.nur.repos.rycee.firefox-addons; [
                 firefox-color
               ];
@@ -376,6 +400,8 @@ in
       # Multiple git repository management
       # TODO: completion not working
       gita
+      # Visual Git client with virtuale branches and first class conflicts
+      gitbutler
       # GitLab Command Line Interface
       glab
       # GRAPH VIsualiZer

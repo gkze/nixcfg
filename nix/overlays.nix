@@ -16,7 +16,7 @@ let
       ]
       s;
 in
-(_final: prev: {
+(_: prev: {
   alacritty-theme = prev.alacritty-theme.override { src = inputs.alacritty-theme; };
 
   bin =
@@ -43,8 +43,6 @@ in
         version = lockedFlake.nodes.sqruff.original.ref;
         src = inputs.sqruff;
       };
-
-  uv = prev.uv.overrideAttrs { version = "0.4.20"; };
 
   # uv = prev.rustPlatform.buildRustPackage rec {
   #   pname = "uv";

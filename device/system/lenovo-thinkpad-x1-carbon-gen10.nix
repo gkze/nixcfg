@@ -26,11 +26,21 @@
     # Used for communicating with external monitor(s) over DDC (Display Data
     # Channel)
     # Currently used to set brightness
+    consoleLogLevel = 0;
     kernelModules = [
       "i2c-dev"
       "kvm-intel"
     ];
-    kernelParams = [ "i915.force_probe=46a6" ];
+    kernelParams = [
+      "i915.force_probe=46a6"
+      "quiet"
+      "splash"
+      "boot.shell_on_fail"
+      "loglevel=3"
+      "rd.systemd.show_status=false"
+      "rd.udev.log_level=3"
+      "udev.log_priority=3"
+    ];
     initrd = {
       availableKernelModules = [
         "nvme"
@@ -43,10 +53,22 @@
         "luks-5283c0a3-818c-4e5e-aad5-b46b75bc677f".device = "/dev/nvme0n1p2";
         "luks-a3c480ba-744e-48f7-b509-fb525972d806".device = "/dev/nvme0n1p3";
       };
+      verbose = false;
     };
     loader = {
       efi.canTouchEfiVariables = true;
       systemd-boot.enable = true;
+      timeout = 0;
+    };
+    plymouth = {
+      enable = true;
+      theme = "lone";
+      themePackages = with pkgs; [
+        # By default we would install all themes
+        (adi1090x-plymouth-themes.override {
+          selected_themes = [ "lone" ];
+        })
+      ];
     };
   };
 
@@ -77,6 +99,8 @@
         driver = pkgs.libfprint-2-tod1-vfs0090;
       };
     };
+    thermald.enable = true;
+    xserver.videoDrivers = [ "modesetting" ];
   };
 
   fileSystems = {
@@ -95,11 +119,16 @@
   networking.useDHCP = lib.mkDefault true;
 
   # powerManagement.cpuFreqGovernor = lib.mkDefault "powersave";
+  powerManagement.powertop.enable = true;
+  # TODO: determine if intel graphics custom config is needed or automatic
   hardware = {
     cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
     graphics = {
       enable = true;
-      extraPackages = with pkgs; [ intel-media-driver ];
+      extraPackages = with pkgs; [
+        intel-media-driver
+        vpl-gpu-rt
+      ];
     };
   };
   environment.sessionVariables = {
