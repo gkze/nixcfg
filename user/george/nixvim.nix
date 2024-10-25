@@ -604,6 +604,8 @@ in
         nvim-autopairs.enable = true;
         # File explorer
         oil.enable = true;
+        # Undo tree visualizer
+        undotree.enable = true;
         # Live Markdown previre
         render-markdown.enable = true;
         # Schemastore
@@ -672,8 +674,8 @@ in
           ++ [
             ''
               if vim.g.neovide then
-                vim.g.neovide_scale_factor = 0.7
-                vim.o.guifont = "Hack Nerd Font Mono:h14"
+                -- vim.g.neovide_scale_factor = 0.7
+                vim.o.guifont = "Hack Nerd Font Mono:h10"
               end
             ''
           ]

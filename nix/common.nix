@@ -35,7 +35,7 @@ in
     };
 
     # Auto-upgrade nix command
-    package = pkgs.nixVersions.git;
+    package = pkgs.nixVersions.latest;
 
     # Pin Nixpkgs to flake spec
     # registry.nixpkgs.flake = inputs.nixpkgs;

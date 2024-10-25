@@ -262,7 +262,7 @@ in
 
   # User-level Nix config
   nix = {
-    package = lib.mkForce pkgs.nixVersions.git;
+    package = lib.mkForce pkgs.nixVersions.latest;
     checkConfig = true;
   };
 
