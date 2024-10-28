@@ -7,10 +7,10 @@ jobs:
   CI:
     runs-on: ubuntu-latest
     steps:
-      - name: Use GitHub Actions cache for Nix
-        uses: DeterminateSystems/magic-nix-cache-action@main
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+      - name: Use GitHub Actions cache for Nix
+        uses: DeterminateSystems/magic-nix-cache-action@main
       - name: Check out sources
         uses: actions/checkout@v4
       - name: Check that `nix fmt` does not produce a diff
