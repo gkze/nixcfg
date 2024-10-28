@@ -140,7 +140,6 @@ in
       # $ gsettings reset org.gnome.desktop.input-sources xkb-option
       # $ gsettings reset org.gnome.desktop.input-sources sources
       # ```
-      videoDrivers = [ "modesetting" ];
       xkb = {
         options = "caps:swapescape";
         layout = "us";

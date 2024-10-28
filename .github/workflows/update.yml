@@ -1,0 +1,23 @@
+---
+name: Update dependencies
+
+on:
+  workflow_dispatch: # allow manual triggering
+  schedule:
+    - cron: "3 0 * * *"
+
+jobs:
+  update:
+    runs-on: nixos/nix:latest
+    steps:
+      - name: Use GitHub Actions cache for Nix
+        uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Check out sources
+        uses: actions/checkout@v4
+      - name: Update dependencies in Flake lockfile
+        uses: DeterminateSystems/update-flake-lock@main
+        with:
+          token: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
+          sign-commits: true
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: ${{ secrets.GPG_PASSPHRASE }}

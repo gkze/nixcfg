@@ -411,6 +411,8 @@ in
       gnutar
       # Graphical Ping (ICMP)
       gping
+      # API IDE
+      hoppscotch
       # HTTP client
       httpie
       # Interactive JSON filter
@@ -728,6 +730,8 @@ in
       enableZshIntegration = true;
       settings.manager.sort_by = "alphabetical";
     };
+    # High-performance code editor
+    zed-editor.enable = true;
     # Terminal multiplexer / workspace manager
     zellij = {
       enable = true;

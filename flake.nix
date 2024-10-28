@@ -284,6 +284,10 @@
                   ];
                 };
               };
+              prettier = {
+                enable = true;
+                includes = [ "*.yml" ];
+              };
             };
           };
 

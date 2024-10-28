@@ -301,6 +301,7 @@ in
               installCargo = true;
               installRustc = true;
             };
+            scheme_langserver.enable = true;
             # TOML
             taplo.enable = true;
             tailwindcss.enable = true;
@@ -608,6 +609,8 @@ in
         undotree.enable = true;
         # Live Markdown previre
         render-markdown.enable = true;
+        # HTTP client
+        rest.enable = true;
         # Schemastore
         schemastore.enable = true;
         # Global search and replace

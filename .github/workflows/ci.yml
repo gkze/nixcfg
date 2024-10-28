@@ -1,0 +1,17 @@
+---
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  CI:
+    runs-on: nixo/nix:latest
+    steps:
+      - name: Use Use GitHub Actions cache for Nix
+        uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Check out sources
+        uses: actions/checkout@v4
+      - name: Check that `nix fmt` does not produce a diff
+        run: |
+          nix -v fmt
+          git diff --exit-code --stat HEAD
