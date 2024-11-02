@@ -85,6 +85,12 @@ in
         src = inputs.bufresize-nvim;
       };
 
+      cmp-dbee = prev.vimUtils.buildVimPlugin {
+        pname = normalizeName lockedFlake.nodes.cmp-dbee.locked.repo;
+        version = inputs.cmp-dbee.rev;
+        src = inputs.cmp-dbee;
+      };
+
       gitlab-nvim =
         let
           version = lockedFlake.nodes.gitlab-nvim.original.ref;
@@ -110,6 +116,12 @@ in
           ];
           buildPhase = "mkdir -p $out && cp ${gitlabNvimGo}/bin/cmd $out/bin";
         };
+
+      nvim-treehopper = prev.vimUtils.buildVimPlugin {
+        pname = normalizeName lockedFlake.nodes.nvim-treehopper.locked.repo;
+        version = inputs.nvim-treehopper.rev;
+        src = inputs.nvim-treehopper;
+      };
 
       vim-bundle-mako = prev.vimUtils.buildVimPlugin {
         pname = normalizeName lockedFlake.nodes.vim-bundle-mako.locked.repo;

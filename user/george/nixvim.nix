@@ -226,6 +226,7 @@ in
               "luasnip"
               "path"
               "buffer"
+              "cmp-dbee"
             ];
             mapping = {
               "<C-d>" = "cmp.mapping.scroll_docs(-4)";
@@ -249,6 +250,14 @@ in
               typescriptreact = [ "prettier" ];
             };
             format_on_save.lsp_format = "fallback";
+          };
+        };
+        # Debug Adapter Protocol
+        dap = {
+          enable = true;
+          extensions = {
+            dap-python.enable = true;
+            dap-ui.enable = true;
           };
         };
         # Git information
@@ -294,6 +303,7 @@ in
               enable = true;
               settings.formatting.command = [ "${pkgs.nixfmt-rfc-style}/bin/nixfmt" ];
             };
+            postgres_lsp.enable = true;
             pyright.enable = true;
             ruff_lsp.enable = false;
             rust_analyzer = {
@@ -545,7 +555,7 @@ in
         # The TypeScript integration NeoVim deserves
         typescript-tools = {
           enable = true;
-          settings.exposeAsCodeAction = "all";
+          settings.expose_as_code_action = "all";
         };
         # LLM integration
         avante.enable = true;
@@ -559,8 +569,6 @@ in
         comment.enable = true;
         # GitHub Copilot coding assistant
         copilot-vim.enable = true;
-        # Debug Adapter Protocol
-        dap.enable = true;
         # Diff view
         diffview.enable = true;
         # UI improvements
@@ -611,6 +619,8 @@ in
         render-markdown.enable = true;
         # HTTP client
         rest.enable = true;
+        # Tab-scoped buffers
+        scope.enable = true;
         # Schemastore
         schemastore.enable = true;
         # Global search and replace
@@ -624,15 +634,16 @@ in
         # Diagnostics, etc. 
         trouble.enable = true;
         # Icons
-        web-devicons.enable = true;
-        # Keybinding hint viewer
         which-key.enable = true;
+        # Keybinding hint viewer
+        web-devicons.enable = true;
       };
       extraPlugins =
         with pkgs.vimPlugins;
         [
           aerial-nvim
           bufdelete-nvim
+          cmp-dbee
           codesnap-nvim
           firenvim
           git-conflict-nvim
@@ -640,6 +651,7 @@ in
           lsp-signature-nvim
           nui-nvim
           nvim-surround
+          nvim-treehopper
           nvim-treesitter-parsers.nickel
           nvim-treesitter-textsubjects
           overseer-nvim
@@ -655,6 +667,7 @@ in
           extraPluginsConfig = {
             git-conflict = { };
             gitlab = { };
+            dbee = { };
             nvim-surround = { };
             overseer = { };
             aerial = {

@@ -102,12 +102,18 @@
 
     # Binary manager
     bin = {
-      url = "github:marcosnils/bin/v0.18.0";
+      url = "github:marcosnils/bin/v0.19.0";
       flake = false;
     };
 
     # Catppuccin theme
     catppuccin.url = "github:catppuccin/nix";
+
+    # nvim-cmp dbee plugin
+    cmp-dbee = {
+      url = "github:MattiasMTS/cmp-dbee";
+      flake = false;
+    };
 
     # Code snapshotting plugin
     codesnap-nvim = {
@@ -157,9 +163,9 @@
       flake = false;
     };
 
-    # Neovim database UI
-    nvim-dbee = {
-      url = "github:kndndrj/nvim-dbee/v0.1.9";
+    # Neovim: AST-based selection
+    nvim-treehopper = {
+      url = "github:mfussenegger/nvim-treehopper";
       flake = false;
     };
 

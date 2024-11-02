@@ -481,7 +481,7 @@ in
           normal.family = "Hack Nerd Font Mono";
         };
         # Launch Zellij directly instead of going through a shell
-        shell = {
+        terminal.shell = {
           program = "${pkgs.zellij}/bin/zellij";
           # Attach to session called "main" if it exists, create one named that
           # if it doesn't
