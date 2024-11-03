@@ -99,9 +99,7 @@
       { lib, ... }:
       {
         systems = lib.systems.flakeExposed;
-
         nixpkgs.config.allowUnfree = true;
-
         withOverlays = [ devshell.overlays.default ];
 
         devShell =
@@ -128,6 +126,7 @@
               # Nix
               nixfmt.enable = true;
               deadnix.enable = true;
+              statix.enable = true;
               # Python
               ruff-check.enable = true;
               ruff-format.enable = true;
@@ -143,26 +142,22 @@
           mesa = {
             system = "x86_64-linux";
             modules = [
-              (
-                { ... }:
-                {
-                  system.stateVersion = builtins.readFile ./NIXOS_VERSION;
-                  services.xserver = {
-                    enable = true;
-                    displayManager.gdm.enable = true;
-                    desktopManager.gnome.enable = true;
+              (_: {
+                system.stateVersion = builtins.readFile ./NIXOS_VERSION;
+                services.xserver = {
+                  enable = true;
+                  displayManager.gdm.enable = true;
+                  desktopManager.gnome.enable = true;
+                };
+                users.users = {
+                  root = {
+                    isSystemUser = true;
+                    initialPassword = "root";
                   };
-                  users.users = {
-                    root = {
-                      isSystemUser = true;
-                      initialPassword = "root";
-                    };
-                  };
-                }
-              )
+                };
+              })
             ];
           };
-          jackson = { };
         };
 
         homeConfigurations = { };
