@@ -419,7 +419,10 @@ in
                   {
                     __raw = ''
                       function(_)
-                        local width = math.floor(math.log10(vim.fn.line("$")) + 1)
+                        local buf = vim.api.nvim_win_get_buf(vim.g.statusline_winid)
+                        local lines = vim.api.nvim_buf_line_count(buf)
+                        local width = math.floor(math.log10(lines)) + 1
+
                         return " %l %=%" .. width .. "." .. width .. "r "
                       end
                     '';
