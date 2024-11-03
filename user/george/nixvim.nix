@@ -769,7 +769,7 @@ in
           action = ":Telescope find_files hidden=true<CR>";
         }
         {
-          key = "<leader>a";
+          key = "<leader>o";
           action = ":AerialToggle<CR>";
         }
         {
