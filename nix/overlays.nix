@@ -17,6 +17,9 @@ let
       s;
 in
 (_: prev: {
+  # TODO: remove when https://github.com/NixOS/nixpkgs/pull/353272 makes it to unstable
+  _7zz = prev._7zz.override { useUasm = true; };
+
   alacritty-theme = prev.alacritty-theme.override { src = inputs.alacritty-theme; };
 
   bin =

@@ -157,12 +157,6 @@
       flake = false;
     };
 
-    # S3 FUSE
-    mount-s3 = {
-      url = "github:awslabs/mountpoint-s3/v1.10.0";
-      flake = false;
-    };
-
     # Neovim: AST-based selection
     nvim-treehopper = {
       url = "github:mfussenegger/nvim-treehopper";
@@ -223,7 +217,6 @@
           config = {
             allowUnfree = true;
             allowInsecure = true;
-            permittedInsecurePackages = [ "nix-2.25.0pre20240807_cfe66dbe" ];
           };
           overlays =
             (with inputs; [

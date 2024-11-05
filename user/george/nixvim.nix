@@ -419,6 +419,7 @@ in
                   {
                     __raw = ''
                       function(_)
+                        -- buffer being rendered
                         local buf = vim.api.nvim_win_get_buf(vim.g.statusline_winid)
                         local lines = vim.api.nvim_buf_line_count(buf)
                         local width = math.floor(math.log10(lines)) + 1

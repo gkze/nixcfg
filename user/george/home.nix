@@ -401,7 +401,7 @@ in
       # TODO: completion not working
       gita
       # Visual Git client with virtuale branches and first class conflicts
-      gitbutler
+      # gitbutler
       # GitLab Command Line Interface
       glab
       # GRAPH VIsualiZer

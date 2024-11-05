@@ -222,7 +222,7 @@ in
     # Password manager
     _1password-gui
     # S3 filesystem in userspace
-    mountpoint-s3
+    # mountpoint-s3
     # Knowledge management
     obsidian
     # AWS Systems Manager Session Manager plugin for the AWS CLI
