@@ -740,11 +740,11 @@ in
           action = ":";
         }
         {
-          key = "<A-(>";
+          key = "<A-S-9>";
           action = ":BufferLineMovePrev<CR>";
         }
         {
-          key = "<A-)>";
+          key = "<A-S-0>";
           action = ":BufferLineMoveNext<CR>";
         }
         {
@@ -772,19 +772,19 @@ in
           action = ":tabclose<CR>";
         }
         {
-          key = "<A-{>";
+          key = "<A-S-[>";
           action = ":BufferLineCyclePrev<CR>";
         }
         {
-          key = "<A-}>";
+          key = "<A-S-]>";
           action = ":BufferLineCycleNext<CR>";
         }
         {
-          key = "<A->>";
+          key = "<A-S-.>";
           action = ":tabnext<CR>";
         }
         {
-          key = "<A-<>";
+          key = "<A-S-,>";
           action = ":tabprevious<CR>";
         }
         {
