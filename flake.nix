@@ -115,12 +115,6 @@
       flake = false;
     };
 
-    # Code snapshotting plugin
-    codesnap-nvim = {
-      url = "github:mistricky/codesnap.nvim/v1.6.1";
-      flake = false;
-    };
-
     # Web browser
     firefox = {
       url = "github:nix-community/flake-firefox-nightly";

@@ -72,6 +72,8 @@ in
           tab = ">-";
           trail = ".";
         };
+        # Update debounce
+        updatetime = 200;
         # Keep sign column rendered so that errors popping up don't trigger a
         # redraw
         signcolumn = "yes";
@@ -239,6 +241,11 @@ in
             };
           };
         };
+        # Code snapshotting
+        codesnap = {
+          enable = true;
+          settings.watermark = "";
+        };
         # Formatting
         conform-nvim = {
           enable = true;
@@ -246,6 +253,7 @@ in
             formatters_by_ft = {
               javascript = [ "prettier" ];
               javascriptreact = [ "prettier" ];
+              lua = [ "stylua" ];
               typescript = [ "prettier" ];
               typescriptreact = [ "prettier" ];
             };
@@ -291,7 +299,11 @@ in
             eslint.enable = true;
             gopls.enable = true;
             html.enable = true;
+            # TODO: needs package
+            # jinja_lsp.enable = true;
             jsonls.enable = true;
+            # TODO: needs package
+            # kulala_ls.enable = true;
             # Nix (nil with nixpkgs-fmt)
             # TODO: determine if nil or nixd is better
             # nixd = {
@@ -303,7 +315,11 @@ in
               enable = true;
               settings.formatting.command = [ "${pkgs.nixfmt-rfc-style}/bin/nixfmt" ];
             };
-            postgres_lsp.enable = true;
+            # TODO: https://github.com/supabase-community/postgres_lsp/issues/136
+            postgres_lsp = {
+              enable = true;
+              settings = { };
+            };
             pyright.enable = true;
             ruff_lsp.enable = false;
             rust_analyzer = {
@@ -312,6 +328,18 @@ in
               installRustc = true;
             };
             scheme_langserver.enable = true;
+            # TODO: figure out project-local config
+            # sqls = {
+            #   enable = true;
+            #   settings.sqls.connections = [
+            #     {
+            #       driver = "postgresql";
+            #       proto = "unix";
+            #       host = "/home/george/src/git.usebasis.co/basis/basis/.tmp/postgres/run/.s.PGSQL.5432";
+            #       dbName = "basis_dev";
+            #     }
+            #   ];
+            # };
             # TOML
             taplo.enable = true;
             tailwindcss.enable = true;
@@ -357,6 +385,11 @@ in
             };
           };
         };
+        # Symbol navigation popup
+        navbuddy = {
+          enable = true;
+          lsp.autoAttach = true;
+        };
         # File explorer
         neo-tree = {
           enable = true;
@@ -377,6 +410,11 @@ in
             "<A-{>" = "prev_source";
             "<A-}>" = "next_source";
           };
+        };
+        # Neovim git interface
+        neogit = {
+          enable = true;
+          settings.integrations.diffview = true;
         };
         # Display colors for color codes
         nvim-colorizer = {
@@ -565,6 +603,8 @@ in
         avante.enable = true;
         # File / AST breadcrumbs
         barbecue.enable = true;
+        # Buffer delete helper preserving window layout
+        bufdelete.enable = true;
         # nvim-cmp LSP signature help source
         # cmp-nvim-lsp-signature-help.enable = true;
         # Treesitter completion source for CMP
@@ -579,6 +619,10 @@ in
         dressing.enable = true;
         # LSP & notification UI
         fidget.enable = true;
+        # Neovim within text input on web pages
+        firenvim.enable = true;
+        # Git conflict resolution tooling
+        git-conflict.enable = true;
         # Shareable file permalinks
         gitlinker.enable = true;
         # Highlight other occurrences of word under cursor
@@ -591,6 +635,8 @@ in
         luasnip.enable = true;
         # LSP formatting
         lsp-format.enable = true;
+        # LSP signature help
+        lsp-signature.enable = true;
         # LSP pictograms
         lspkind.enable = true;
         # Multi-faceted LSP UX improvements
@@ -601,20 +647,14 @@ in
         marks.enable = true;
         # Mini library collection - alignment
         mini.modules.align = { };
-        # Symbol navigation popup
-        navbuddy = {
-          enable = true;
-          lsp.autoAttach = true;
-        };
-        # Neovim git interface
-        neogit = {
-          enable = true;
-          settings.integrations.diffview = true;
-        };
         # Enable Nix language support
         nix.enable = true;
+        # UI component library
+        nui.enable = true;
         # Automatically manage character pairs
         nvim-autopairs.enable = true;
+        # Character (sequence) pair helper
+        nvim-surround.enable = true;
         # File explorer
         oil.enable = true;
         # Undo tree visualizer
@@ -646,15 +686,10 @@ in
         with pkgs.vimPlugins;
         [
           aerial-nvim
-          bufdelete-nvim
           cmp-dbee
-          codesnap-nvim
-          firenvim
-          git-conflict-nvim
           gitlab-nvim
-          lsp-signature-nvim
-          nui-nvim
-          nvim-surround
+          kulala-nvim
+          neoconf-nvim
           nvim-treehopper
           nvim-treesitter-parsers.nickel
           nvim-treesitter-textsubjects
@@ -669,7 +704,6 @@ in
         let
           helpers = inputs.nixvim.lib.${hostPlatform}.helpers;
           extraPluginsConfig = {
-            git-conflict = { };
             gitlab = { };
             dbee = { };
             nvim-surround = { };
@@ -730,6 +764,14 @@ in
           action = ":Bdelete<CR>";
         }
         {
+          key = "<A-T>";
+          action = ":tabnew<CR>";
+        }
+        {
+          key = "<A-X>";
+          action = ":tabclose<CR>";
+        }
+        {
           key = "<A-{>";
           action = ":BufferLineCyclePrev<CR>";
         }
@@ -738,7 +780,15 @@ in
           action = ":BufferLineCycleNext<CR>";
         }
         {
-          key = "<C-l>";
+          key = "<A->>";
+          action = ":tabnext<CR>";
+        }
+        {
+          key = "<A-<>";
+          action = ":tabprevious<CR>";
+        }
+        {
+          key = "<C-l>c";
           action = ":set invlist<CR>";
         }
         {
