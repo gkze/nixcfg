@@ -78,10 +78,6 @@ in
                       url = "https://git.usebasis.co/basis/connect";
                     }
                     {
-                      name = "basis/back-office";
-                      url = "https://git.usebasis.co/basis/back-office";
-                    }
-                    {
                       name = "basis/point";
                       url = "https://git.usebasis.co/basis/point";
                     }
@@ -194,6 +190,10 @@ in
                     in
                     "https://basis-lf.sentry.io/issues/?${projectIds}&statsPeriod=24h";
                 }
+                {
+                  name = "Finicity OpenAPI Docs";
+                  url = "https://developer.mastercard.com/open-banking-us/documentation/api-reference/";
+                }
               ];
             }
           ];
@@ -268,6 +268,9 @@ in
           condition = "gitdir:~/${srcDir}/git.usebasis.co/**";
         }
       ];
+    };
+    nixvim.config.plugins.gitlinker.callbacks = {
+      "git.usebasis.co" = "get_gitlab_type_url";
     };
   };
   services.syncthing = {

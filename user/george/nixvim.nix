@@ -268,6 +268,24 @@ in
             dap-ui.enable = true;
           };
         };
+        # Shareable file permalinks
+        gitlinker = {
+          enable = true;
+          mappings = "<C-c>l";
+          callbacks = {
+            "bitbucket.org" = "get_bitbucket_type_url";
+            "codeberg.org" = "get_gitea_type_url";
+            "git.kernel.org" = "get_cgit_type_url";
+            "git.launchpad.net" = "get_launchpad_type_url";
+            "git.savannah.gnu.org" = "get_cgit_type_url";
+            "git.sr.ht" = "get_srht_type_url";
+            "github.com" = "get_github_type_url";
+            "gitlab.com" = "get_gitlab_type_url";
+            "repo.or.cz" = "get_repoorcz_type_url";
+            "try.gitea.io" = "get_gitea_type_url";
+            "try.gogs.io" = "get_gogs_type_url";
+          };
+        };
         # Git information
         gitsigns = {
           enable = true;
@@ -407,8 +425,8 @@ in
           };
           sourceSelector.winbar = true;
           window.mappings = {
-            "<A-{>" = "prev_source";
-            "<A-}>" = "next_source";
+            "<A-S-[>" = "prev_source";
+            "<A-S-]>" = "next_source";
           };
         };
         # Neovim git interface
@@ -531,42 +549,42 @@ in
             gotoNextStart = {
               "]]" = "@class.outer";
               "]a" = "@attribute.outer";
-              "]m" = "@function.outer";
-              "]v" = "@assignment.outer";
-              "]c" = "@call.outer";
               "]b" = "@block.outer";
-              "]s" = "@statement.outer";
+              "]c" = "@call.outer";
+              "]f" = "@function.outer";
               "]i" = "@conditional.outer";
+              "]s" = "@statement.outer";
+              "]v" = "@assignment.outer";
             };
             gotoNextEnd = {
               "]A" = "@attribute.inner";
-              "]M" = "@function.outer";
-              "][" = "@class.outer";
-              "]V" = "@assignment.outer";
-              "]C" = "@call.outer";
               "]B" = "@block.outer";
-              "]S" = "@statement.outer";
+              "]C" = "@call.outer";
+              "]F" = "@function.outer";
               "]I" = "@conditional.outer";
+              "]S" = "@statement.outer";
+              "]V" = "@assignment.outer";
+              "][" = "@class.outer";
             };
             gotoPreviousStart = {
-              "[a" = "@attribute.outer";
               "[[" = "@class.outer";
-              "[m" = "@function.outer";
-              "[v" = "@assignment.outer";
-              "[c" = "@call.outer";
+              "[a" = "@attribute.outer";
               "[b" = "@block.outer";
-              "[s" = "@statement.outer";
+              "[c" = "@call.outer";
+              "[f" = "@function.outer";
               "[i" = "@conditional.outer";
+              "[s" = "@statement.outer";
+              "[v" = "@assignment.outer";
             };
             gotoPreviousEnd = {
               "[A" = "@attribute.outer";
-              "[M" = "@function.outer";
-              "[]" = "@class.outer";
-              "[V" = "@assignment.outer";
-              "[C" = "@call.outer";
               "[B" = "@block.outer";
-              "[S" = "@statement.outer";
+              "[C" = "@call.outer";
+              "[F" = "@function.outer";
               "[I" = "@conditional.outer";
+              "[S" = "@statement.outer";
+              "[V" = "@assignment.outer";
+              "[]" = "@class.outer";
             };
           };
           select = {
@@ -623,8 +641,6 @@ in
         firenvim.enable = true;
         # Git conflict resolution tooling
         git-conflict.enable = true;
-        # Shareable file permalinks
-        gitlinker.enable = true;
         # Highlight other occurrences of word under cursor
         illuminate.enable = true;
         # Incremental rename

@@ -179,7 +179,12 @@ in
             # Run unpatched binaries on Nix/NixOS
             nix-alien
             # TODO: TBD if works on macOS
-            (python3.withPackages (ps: with ps; [ ptpython ]))
+            (python3.withPackages (
+              ps: with ps; [
+                catppuccin
+                ptpython
+              ]
+            ))
             signal-desktop
             # Logitech device manager
             solaar
@@ -187,8 +192,6 @@ in
             sysprof
             # Offline documentation browser
             zeal
-            # Fast and collaborative text editor
-            zed
           ]
           ++ (with pkgs.gnomeExtensions; [
             # Brightness control for all detected monitors
@@ -359,6 +362,7 @@ in
           recursive = true;
           executable = true;
         };
+        "${config.xdg.configHome}/ptpython/config.py".source = ./config/ptpython.py;
       }
       // (optionalAttrs (elem "basis" profiles) {
         "${config.xdg.configHome}/git/basis".text = ''
@@ -731,7 +735,14 @@ in
       settings.manager.sort_by = "alphabetical";
     };
     # High-performance code editor
-    zed-editor.enable = true;
+    zed-editor = {
+      enable = true;
+      userSettings = {
+        vim_mode = true;
+        ui_font_size = 14;
+        buffer_font_size = 12;
+      };
+    };
     # Terminal multiplexer / workspace manager
     zellij = {
       enable = true;
