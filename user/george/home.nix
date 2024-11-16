@@ -913,7 +913,7 @@ in
         # }
       ];
     };
-    # Zsh - a robust shell
+    # Fast directory jumper
     zoxide = {
       enable = true;
       enableNushellIntegration = true;

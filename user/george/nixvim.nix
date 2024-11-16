@@ -326,7 +326,9 @@ in
             # TODO: determine if nil or nixd is better
             # nixd = {
             #   enable = true;
-            #   settings.formatting.command = "${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt";
+            #   settings = {
+            #     formatting.command = [ "${pkgs.nixfmt-rfc-style}/bin/nixfmt" ];
+            #   };
             # };
             nickel_ls.enable = true;
             nil_ls = {
@@ -905,7 +907,7 @@ in
           action.__raw = ''require("smart-splits").resize_right'';
         }
         {
-          key = "<leader>m";
+          key = "<leader>k";
           action = ":Telescope keymaps<CR>";
         }
         {
@@ -921,7 +923,7 @@ in
           action = ":Neotree reveal<CR>";
         }
         {
-          key = "<leader>rn";
+          key = "<leader>m";
           action = ":IncRename ";
         }
         {
