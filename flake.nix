@@ -19,6 +19,12 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Manage user configuration and home directories
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Unified polyglot source formatter
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
@@ -64,8 +70,6 @@
     # commit due to lack of tags / recent releases
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
 
-    ### Non-flake inputs ###
-
     # Catppuccin theme
     catppuccin.url = "github:catppuccin/nix";
 
@@ -74,6 +78,8 @@
       url = "github:nix-community/flake-firefox-nightly";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    ### Non-flake inputs ###
 
     # Vim syntax for KDL (used for Zellij)
     kdl-vim = {
@@ -90,6 +96,7 @@
 
   outputs =
     {
+      self,
       flakelight,
       devshell,
       treefmt-nix,
@@ -98,12 +105,20 @@
     flakelight ./. (
       { lib, ... }:
       {
+        nixDir = ./.;
         systems = lib.systems.flakeExposed;
         nixpkgs.config.allowUnfree = true;
-        withOverlays = [ devshell.overlays.default ];
+        withOverlays = [
+          self.overlays.default
+          devshell.overlays.default
+        ];
+        nixDirAliases = {
+          darwinConfigurations = [ "macos" ];
+          homeConfigurations = [ "home" ];
+        };
 
         devShell =
-          { pkgs, ... }:
+          pkgs:
           pkgs.devshell.mkShell {
             name = "nixcfg";
             packages = with pkgs; [
@@ -137,30 +152,6 @@
           };
 
         checks = { };
-
-        nixosConfigurations = {
-          mesa = {
-            system = "x86_64-linux";
-            modules = [
-              (_: {
-                system.stateVersion = builtins.readFile ./NIXOS_VERSION;
-                services.xserver = {
-                  enable = true;
-                  displayManager.gdm.enable = true;
-                  desktopManager.gnome.enable = true;
-                };
-                users.users = {
-                  root = {
-                    isSystemUser = true;
-                    initialPassword = "root";
-                  };
-                };
-              })
-            ];
-          };
-        };
-
-        homeConfigurations = { };
       }
     );
 }
