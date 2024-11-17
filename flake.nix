@@ -209,8 +209,8 @@
         import inputs.nixpkgs {
           inherit system;
           config = {
-            allowUnfree = true;
             allowInsecure = true;
+            allowUnfree = true;
           };
           overlays =
             (with inputs; [

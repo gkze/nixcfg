@@ -286,6 +286,11 @@ in
             "try.gogs.io" = "get_gogs_type_url";
           };
         };
+        # Git worktree integration
+        # TODO: figure out
+        git-worktree = {
+          enable = true;
+        };
         # Git information
         gitsigns = {
           enable = true;
@@ -907,7 +912,7 @@ in
           action.__raw = ''require("smart-splits").resize_right'';
         }
         {
-          key = "<leader>k";
+          key = "<leader>m";
           action = ":Telescope keymaps<CR>";
         }
         {
@@ -919,11 +924,11 @@ in
           action = ":Trouble diagnostics<CR>";
         }
         {
-          key = "<leader>r";
+          key = "<leader>e";
           action = ":Neotree reveal<CR>";
         }
         {
-          key = "<leader>m";
+          key = "<leader>r";
           action = ":IncRename ";
         }
         {

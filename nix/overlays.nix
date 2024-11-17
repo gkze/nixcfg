@@ -17,9 +17,6 @@ let
       s;
 in
 (_: prev: {
-  # TODO: remove when https://github.com/NixOS/nixpkgs/pull/353272 makes it to unstable
-  _7zz = prev._7zz.override { useUasm = true; };
-
   alacritty-theme = prev.alacritty-theme.override { src = inputs.alacritty-theme; };
 
   bin =
@@ -36,49 +33,6 @@ in
   nix-software-center = inputs.nix-software-center.packages.${system}.default;
 
   nixos-conf-editor = inputs.nixos-conf-editor.packages.${system}.default;
-
-  sqruff =
-    (prev.callPackage inputs.naersk {
-      rustc = prev.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
-    }).buildPackage
-      {
-        name = normalizeName lockedFlake.nodes.sqruff.locked.repo;
-        version = lockedFlake.nodes.sqruff.original.ref;
-        src = inputs.sqruff;
-      };
-
-  # uv = prev.rustPlatform.buildRustPackage rec {
-  #   pname = "uv";
-  #   version = "0.4.7";
-  #   src = inputs.uv;
-  #   cargoLock = {
-  #     lockFile = "${src}/Cargo.lock";
-  #     allowBuiltinFetchGit = true;
-  #   };
-  #   buildInputs =
-  #     [ prev.openssl ]
-  #     ++ (
-  #       with prev;
-  #       lib.lists.optional stdenv.isDarwin (
-  #         with darwin.apple_sdk.frameworks;
-  #         [
-  #           Security
-  #           SystemConfiguration
-  #         ]
-  #       )
-  #     );
-  #   doCheck = false;
-  #   nativeBuildInputs = with final; [
-  #     cmake
-  #     installShellFiles
-  #     pkg-config
-  #     rust-bin.stable.latest.default
-  #   ];
-  #   postInstall = ''
-  #     installShellCompletion --cmd uv --zsh <($out/bin/uv generate-shell-completion zsh)
-  #   '';
-  #   OPENSSL_NO_VENDOR = 1;
-  # };
 
   vimPlugins = prev.vimPlugins.extend (
     _: _: {
