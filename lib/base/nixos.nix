@@ -2,14 +2,22 @@
   lib,
   src,
   inputs,
-  hostName,
+  hostname,
   modulesPath,
   ...
 }:
 {
-  imports = [ "${modulesPath}/virtualisation/qemu-vm.nix" ];
+  imports = [
+    "${modulesPath}/virtualisation/qemu-vm.nix"
+    "${modulesPath}/installer/cd-dvd/iso-image.nix"
+  ];
 
-  networking.hostName = hostName;
+  isoImage = {
+    makeEfiBootable = true;
+    makeUsbBootable = true;
+  };
+
+  networking.hostName = hostname;
 
   nix =
     let

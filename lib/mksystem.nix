@@ -4,36 +4,29 @@
   outputs,
   arch ? "x86_64",
   kernel ? "linux",
-  hostName ? "nixos",
-  users ? { },
+  users ? [ ],
   systemModules ? [ ],
   ...
 }:
 let
   system = "${arch}-${kernel}";
+
   homePath =
     {
       darwin = "/Users";
       linux = "/home";
     }
     .${kernel};
+
   specialArgs = {
     inherit
       inputs
       outputs
       src
-      hostName
       homePath
       ;
   };
-  homeManagerConfig = {
-    home-manager = {
-      inherit users;
-      extraSpecialArgs = specialArgs;
-      useGlobalPkgs = true;
-      useUserPackages = true;
-    };
-  };
+
   homeManagerModule =
     with inputs;
     {
@@ -41,27 +34,38 @@ let
       linux = home-manager.nixosModules.home-manager;
     }
     .${kernel};
+
+  homeManagerConfig = {
+    home-manager = {
+      inherit users;
+      extraSpecialArgs = specialArgs;
+      sharedModules = [ "${src}/lib/base/home.nix" ];
+      useGlobalPkgs = true;
+      useUserPackages = true;
+    };
+  };
+
   baseSystemModule =
     {
-      darwin = ../macos/_base.nix;
-      linux = ../nixos/_base.nix;
+      darwin = "${src}/lib/base/macos.nix";
+      linux = "${src}/lib/base/nixos.nix";
     }
     .${kernel};
+
   mkSystem =
     with inputs;
     {
       darwin = nix-darwin.lib.darwinSystem;
-      linux = nixpkgs.lib.nixosSystem;
+      # have to do this in order to leverage flakelight benefits
+      linux = args: args;
     }
     .${kernel};
 in
 mkSystem {
   inherit system specialArgs;
-  modules =
-    [ baseSystemModule ]
-    ++ systemModules
-    ++ [
-      homeManagerModule
-      homeManagerConfig
-    ];
+  modules = [
+    baseSystemModule
+    homeManagerModule
+    homeManagerConfig
+  ] ++ systemModules;
 }
