@@ -108,10 +108,12 @@
         nixDir = ./.;
         systems = lib.systems.flakeExposed;
         nixpkgs.config.allowUnfree = true;
+
         withOverlays = [
-          self.overlays.default
           devshell.overlays.default
+          self.overlays.default
         ];
+
         nixDirAliases = {
           darwinConfigurations = [ "macos" ];
           homeConfigurations = [ "home" ];

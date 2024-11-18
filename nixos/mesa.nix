@@ -1,8 +1,7 @@
 { src, ... }@args:
-import ../lib/mksystem.nix (
+import "${src}/lib/mksystem.nix" (
   args
   // {
-    hostName = "mesa";
     systemModules = [
       (
         { homePath, ... }:
@@ -17,6 +16,6 @@ import ../lib/mksystem.nix (
         }
       )
     ];
-    users.george = import "${src}/home/george.nix";
+    users.george = import ../home/george.nix;
   }
 )
