@@ -66,7 +66,7 @@
     gawk
     git
     glab
-    gpg
+    gnupg
     gnused
     gnutar
     jq
@@ -77,18 +77,10 @@
     ripgrep
     rsync
     slack
-    ssh
-    trdsql
+    openssh
     tmux
     wl-clipboard
   ];
-
-  programs = {
-    man = {
-      enable = true;
-      generateCaches = true;
-    };
-  };
 
   time.timeZone = "America/Los_Angeles";
 

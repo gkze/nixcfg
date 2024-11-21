@@ -1,15 +1,20 @@
-{ src, pkgs, ... }@args:
+{ src, ... }@args:
 import "${src}/lib/mksystem.nix" (
   args
   // {
     systemModules = [
       (
-        { modulesPath, ... }:
+        {
+          homePath,
+          modulesPath,
+          pkgs,
+          ...
+        }:
         {
           imports = [ "${modulesPath}/virtualisation/qemu-vm.nix" ];
 
           services = {
-            spice-vdagent.enable = true;
+            spice-vdagentd.enable = true;
             spice-webdavd.enable = true;
             qemuGuest.enable = true;
           };
@@ -22,8 +27,16 @@ import "${src}/lib/mksystem.nix" (
               "-m 2048"
             ];
           };
+
+          users.users.vmtest = {
+            isNormalUser = true;
+            home = "${homePath}/george";
+            extraGroups = [ "wheel" ];
+            initialPassword = "george";
+          };
         }
       )
     ];
+    users = { };
   }
 )
