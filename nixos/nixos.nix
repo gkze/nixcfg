@@ -30,9 +30,9 @@ import "${src}/lib/mksystem.nix" (
 
           users.users.vmtest = {
             isNormalUser = true;
-            home = "${homePath}/george";
+            home = "${homePath}/vmtest";
             extraGroups = [ "wheel" ];
-            initialPassword = "george";
+            initialPassword = "vmtest";
           };
         }
       )
