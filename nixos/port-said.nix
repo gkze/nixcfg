@@ -7,16 +7,16 @@ import "${src}/lib/mksystem.nix" (
         { homePath, ... }:
         {
           services.xserver.desktopManager.gnome.enable = true;
-          users.users.george = {
+          users.users.jesse = {
             isNormalUser = true;
-            home = "${homePath}/george";
+            home = "${homePath}/jesse";
             extraGroups = [ "wheel" ];
-            initialPassword = "george";
+            initialPassword = "jesse";
           };
         }
       )
     ];
 
-    users.george = import ../home/george.nix;
+    users.jesse = import ../home/jesse.nix;
   }
 )

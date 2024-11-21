@@ -4,13 +4,12 @@
   inputs,
   hostname,
   modulesPath,
+  pkgs,
+  system,
   ...
 }:
 {
-  imports = [
-    "${modulesPath}/virtualisation/qemu-vm.nix"
-    "${modulesPath}/installer/cd-dvd/iso-image.nix"
-  ];
+  imports = [ "${modulesPath}/installer/cd-dvd/iso-image.nix" ];
 
   isoImage = {
     makeEfiBootable = true;
@@ -33,6 +32,64 @@
       ];
     };
 
+  nixpkgs = {
+    hostPlatform = system;
+    config = {
+      allowFree = true;
+      allowInsecure = false;
+    };
+  };
+
+  boot = {
+    binfmt.registrations.appimage = {
+      wrapInterpreterInShell = false;
+      interpreter = "${pkgs.appimage-run}/bin/appimage-run";
+      recognitionType = "magic";
+      offset = 0;
+      mask = "\\xff\\xff\\xff\\xff\\x00\\x00\\x00\\x00\\xff\\xff\\xff";
+      magicOrExtension = "\\x7fELF....AI\\x02";
+    };
+  };
+
+  documentation = {
+    doc.enable = true;
+    info.enable = true;
+    man.enable = true;
+  };
+
+  environment.systemPackages = with pkgs; [
+    awscli
+    curl
+    dasel
+    fd
+    file
+    gawk
+    git
+    glab
+    gpg
+    gnused
+    gnutar
+    jq
+    less
+    moreutils
+    neovim
+    nh
+    ripgrep
+    rsync
+    slack
+    ssh
+    trdsql
+    tmux
+    wl-clipboard
+  ];
+
+  programs = {
+    man = {
+      enable = true;
+      generateCaches = true;
+    };
+  };
+
   time.timeZone = "America/Los_Angeles";
 
   services.xserver = {
@@ -44,11 +101,6 @@
 
   users.users.root = {
     isSystemUser = true;
-    initialPassword = "root";
+    # initialPassword = "root";
   };
-
-  virtualisation.qemu.options = [
-    "-device virtio-vga"
-    "-m 2048"
-  ];
 }

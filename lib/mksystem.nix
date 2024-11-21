@@ -24,16 +24,11 @@ let
       outputs
       src
       homePath
+      system
       ;
   };
 
-  homeManagerModule =
-    with inputs;
-    {
-      darwin = home-manager.darwinModules.home-manager;
-      linux = home-manager.nixosModules.home-manager;
-    }
-    .${kernel};
+  homeManagerModule = inputs.home-manager.nixosModules.home-manager;
 
   homeManagerConfig = {
     home-manager = {
@@ -45,21 +40,9 @@ let
     };
   };
 
-  baseSystemModule =
-    {
-      darwin = "${src}/lib/base/macos.nix";
-      linux = "${src}/lib/base/nixos.nix";
-    }
-    .${kernel};
+  baseSystemModule = "${src}/lib/base/nixos.nix";
 
-  mkSystem =
-    with inputs;
-    {
-      darwin = nix-darwin.lib.darwinSystem;
-      # have to do this in order to leverage flakelight benefits
-      linux = args: args;
-    }
-    .${kernel};
+  mkSystem = args: args;
 in
 mkSystem {
   inherit system specialArgs;

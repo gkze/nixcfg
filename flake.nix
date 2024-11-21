@@ -5,17 +5,11 @@
     ### Flake inputs ###
 
     # Use latest nixpkgs
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
 
     # Flake modularization library
     flakelight = {
       url = "github:nix-community/flakelight";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    # Manage macOS configuration
-    nix-darwin = {
-      url = "github:LnL7/nix-darwin";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -37,12 +31,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Neovim configured with Nix
-    nixvim = {
-      url = "github:nix-community/nixvim";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     # Declarative disk partitioning
     disko = {
       url = "github:nix-community/disko";
@@ -61,37 +49,9 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     # Hardware-specific settings. Have to track maser or pin to specific
     # commit due to lack of tags / recent releases
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
-
-    # Catppuccin theme
-    catppuccin.url = "github:catppuccin/nix";
-
-    # Web browser
-    firefox = {
-      url = "github:nix-community/flake-firefox-nightly";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    ### Non-flake inputs ###
-
-    # Vim syntax for KDL (used for Zellij)
-    kdl-vim = {
-      url = "github:imsnif/kdl.vim";
-      flake = false;
-    };
-
-    # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
-    yawsso = {
-      url = "github:victorskl/yawsso";
-      flake = false;
-    };
   };
 
   outputs =
@@ -115,7 +75,7 @@
         ];
 
         nixDirAliases = {
-          darwinConfigurations = [ "macos" ];
+	  nixosConfigurations = [ "nixos" ];
           homeConfigurations = [ "home" ];
         };
 
@@ -144,9 +104,6 @@
               nixfmt.enable = true;
               deadnix.enable = true;
               statix.enable = true;
-              # Python
-              ruff-check.enable = true;
-              ruff-format.enable = true;
               # Shell
               shellcheck.enable = true;
               shfmt.enable = true;
