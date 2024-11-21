@@ -17,6 +17,7 @@ import "${src}/lib/mksystem.nix" (
             spice-vdagentd.enable = true;
             spice-webdavd.enable = true;
             qemuGuest.enable = true;
+            xserver.desktopManager.gnome.enable = true;
           };
 
           virtualisation = {
