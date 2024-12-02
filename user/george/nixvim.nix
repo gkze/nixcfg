@@ -560,6 +560,7 @@ in
               "]c" = "@call.outer";
               "]f" = "@function.outer";
               "]i" = "@conditional.outer";
+              "]p" = "@parameter.outer";
               "]s" = "@statement.outer";
               "]v" = "@assignment.outer";
             };
@@ -569,6 +570,7 @@ in
               "]C" = "@call.outer";
               "]F" = "@function.outer";
               "]I" = "@conditional.outer";
+              "]P" = "@parameter.outer";
               "]S" = "@statement.outer";
               "]V" = "@assignment.outer";
               "][" = "@class.outer";
@@ -580,6 +582,7 @@ in
               "[c" = "@call.outer";
               "[f" = "@function.outer";
               "[i" = "@conditional.outer";
+              "[p" = "@parameter.outer";
               "[s" = "@statement.outer";
               "[v" = "@assignment.outer";
             };
@@ -589,6 +592,7 @@ in
               "[C" = "@call.outer";
               "[F" = "@function.outer";
               "[I" = "@conditional.outer";
+              "[P" = "@parameter.outer";
               "[S" = "@statement.outer";
               "[V" = "@assignment.outer";
               "[]" = "@class.outer";
@@ -648,6 +652,8 @@ in
         firenvim.enable = true;
         # Git conflict resolution tooling
         git-conflict.enable = true;
+        # Hex editing
+        hex.enable = true;
         # Highlight other occurrences of word under cursor
         illuminate.enable = true;
         # Incremental rename
@@ -698,7 +704,7 @@ in
         todo-comments.enable = true;
         # Code context via Treesitter
         # treesitter-context.enable = true;
-        # Diagnostics, etc. 
+        # Diagnostics, etc.
         trouble.enable = true;
         # Icons
         which-key.enable = true;

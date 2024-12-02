@@ -72,6 +72,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    nixos-appstream-data = {
+      url = "github:snowfallorg/nixos-appstream-data";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Graphical NixOS configuration editor
     nixos-conf-editor = {
       url = "github:vlinkz/nixos-conf-editor";
@@ -157,15 +162,15 @@
       flake = false;
     };
 
-    # SQL linter & formatter
-    sqruff = {
-      url = "github:quarylabs/sqruff/v0.19.1";
-      flake = false;
-    };
-
     # Sublime syntax for KDL (for bat)
     sublime-kdl = {
       url = "github:eugenesvk/sublime-KDL";
+      flake = false;
+    };
+
+    # SQL against CSV, LTSV, JSON, YAML, and TBLN
+    trdsql = {
+      url = "github:noborus/trdsql";
       flake = false;
     };
 

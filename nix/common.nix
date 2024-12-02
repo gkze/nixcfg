@@ -1,5 +1,7 @@
 {
+  inputs,
   pkgs,
+  lib,
   hostPlatform,
   ...
 }:
@@ -8,38 +10,42 @@ let
 in
 {
   # Configuration for Nix itself
-  nix = {
-    # Perform automatic garbage collection
-    gc =
-      {
-        automatic = true;
-      }
-      // {
-        darwin.interval = {
-          Hour = 9;
-          Minute = 30;
-        };
-        linux.dates = "09:30";
-      }
-      .${elemAt (split "-" hostPlatform) 2};
+  nix =
+    let
+      flakeInputs = lib.filterAttrs (_: lib.isType "flake") inputs;
+    in
+    {
+      # Perform automatic garbage collection
+      gc =
+        {
+          automatic = true;
+        }
+        // {
+          darwin.interval = {
+            Hour = 9;
+            Minute = 30;
+          };
+          linux.dates = "09:30";
+        }
+        .${elemAt (split "-" hostPlatform) 2};
 
-    settings = {
-      # Enable nix command and flakes
-      experimental-features = [
-        "nix-command"
-        "flakes"
-      ];
+      settings = {
+        # Enable nix command and flakes
+        experimental-features = [
+          "nix-command"
+          "flakes"
+        ];
+      };
 
-      # Perform builds in a sandboxed environment
-      sandbox = false;
+      channel.enable = false;
+
+      # Auto-upgrade nix command
+      package = pkgs.nixVersions.latest;
+
+      # Pin Nixpkgs to flake spec
+      registry = lib.mapAttrs (_: flake: { inherit flake; }) flakeInputs;
+      nixPath = lib.mapAttrsToList (n: _: "${n}=flake:${n}") flakeInputs;
     };
-
-    # Auto-upgrade nix command
-    package = pkgs.nixVersions.latest;
-
-    # Pin Nixpkgs to flake spec
-    # registry.nixpkgs.flake = inputs.nixpkgs;
-  };
 
   # Configuration for Nixpkgs
   # Set host platform and allow unfree and insecure software

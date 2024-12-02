@@ -167,6 +167,8 @@ in
     nix-software-center
     # Nix configuration editor GUI
     nixos-conf-editor
+    # vhost-user virtio-fs device backend written in Rust
+    virtiofsd
   ];
 
   # Define a user account. Don't forget to set a password with ‘passwd’.

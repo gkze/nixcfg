@@ -2,7 +2,7 @@
 { inputs, system, ... }:
 let
   inherit (builtins) fromJSON readFile replaceStrings;
-  lockedFlake = fromJSON (readFile ../flake.lock);
+  nodes = (fromJSON (readFile ../flake.lock)).nodes;
   normalizeName =
     s:
     replaceStrings
@@ -21,7 +21,7 @@ in
 
   bin =
     let
-      binMeta = lockedFlake.nodes.bin;
+      binMeta = nodes.bin;
     in
     prev.buildGoModule {
       pname = normalizeName binMeta.locked.repo;
@@ -30,38 +30,70 @@ in
       vendorHash = "sha256-Nw0+kTcENp96PruQEBAdcfhubOEWSXKWGWrmWoKmgN0=";
     };
 
-  nix-software-center = inputs.nix-software-center.packages.${system}.default;
+  nix-software-center = inputs.nix-software-center.packages.${system}.default.overrideAttrs {
+    buildInputs = with prev; [
+      adwaita-icon-theme
+      desktop-file-utils
+      gdk-pixbuf
+      glib
+      gtk4
+      gtksourceview5
+      inputs.nixos-appstream-data.packages.${system}.nixos-appstream-data
+      libadwaita
+      libxml2
+      openssl
+      wayland
+    ];
+  };
 
-  nixos-conf-editor = inputs.nixos-conf-editor.packages.${system}.default;
+  nixos-conf-editor = inputs.nixos-conf-editor.packages.${system}.default.overrideAttrs {
+    buildInputs = with prev; [
+      adwaita-icon-theme
+      gdk-pixbuf
+      glib
+      gtk4
+      gtksourceview5
+      libadwaita
+      openssl
+      vte-gtk4
+    ];
+  };
+
+  trdsql = prev.buildGoModule {
+    pname = normalizeName nodes.trdsql.locked.repo;
+    version = inputs.trdsql.rev;
+    src = inputs.trdsql;
+    vendorHash = "sha256-PoIa58vdDPYGL9mjEeudRYqPfvvr3W+fX5c+NgRIoLg=";
+  };
 
   vimPlugins = prev.vimPlugins.extend (
     _: _: {
       bufresize-nvim = prev.vimUtils.buildVimPlugin {
-        pname = normalizeName lockedFlake.nodes.bufresize-nvim.locked.repo;
+        pname = normalizeName nodes.bufresize-nvim.locked.repo;
         version = inputs.bufresize-nvim.rev;
         src = inputs.bufresize-nvim;
       };
 
       cmp-dbee = prev.vimUtils.buildVimPlugin {
-        pname = normalizeName lockedFlake.nodes.cmp-dbee.locked.repo;
+        pname = normalizeName nodes.cmp-dbee.locked.repo;
         version = inputs.cmp-dbee.rev;
         src = inputs.cmp-dbee;
       };
 
       gitlab-nvim =
         let
-          version = lockedFlake.nodes.gitlab-nvim.original.ref;
+          version = nodes.gitlab-nvim.original.ref;
         in
         let
           gitlabNvimGo = prev.buildGoModule {
-            pname = normalizeName lockedFlake.nodes.gitlab-nvim.locked.repo;
+            pname = normalizeName nodes.gitlab-nvim.locked.repo;
             inherit version;
             src = inputs.gitlab-nvim;
             vendorHash = "sha256-wYlFmarpITuM+s9czQwIpE1iCJje7aCe0w7/THm+524=";
           };
         in
         prev.vimUtils.buildVimPlugin {
-          pname = normalizeName lockedFlake.nodes.gitlab-nvim.locked.repo;
+          pname = normalizeName nodes.gitlab-nvim.locked.repo;
           inherit version;
           src = inputs.gitlab-nvim;
           buildInputs = with prev.vimPlugins; [
@@ -75,19 +107,19 @@ in
         };
 
       nvim-treehopper = prev.vimUtils.buildVimPlugin {
-        pname = normalizeName lockedFlake.nodes.nvim-treehopper.locked.repo;
+        pname = normalizeName nodes.nvim-treehopper.locked.repo;
         version = inputs.nvim-treehopper.rev;
         src = inputs.nvim-treehopper;
       };
 
       vim-bundle-mako = prev.vimUtils.buildVimPlugin {
-        pname = normalizeName lockedFlake.nodes.vim-bundle-mako.locked.repo;
+        pname = normalizeName nodes.vim-bundle-mako.locked.repo;
         version = inputs.vim-bundle-mako.rev;
         src = inputs.vim-bundle-mako;
       };
 
       lsp-signature-nvim = prev.vimUtils.buildVimPlugin {
-        name = normalizeName lockedFlake.nodes.lsp-signature-nvim.locked.repo;
+        name = normalizeName nodes.lsp-signature-nvim.locked.repo;
         version = inputs.lsp-signature-nvim.rev;
         src = inputs.lsp-signature-nvim;
       };
@@ -95,8 +127,8 @@ in
   );
 
   yawsso = prev.python3Packages.buildPythonApplication {
-    pname = normalizeName lockedFlake.nodes.yawsso.locked.repo;
-    version = lockedFlake.nodes.yawsso.original.ref;
+    pname = normalizeName nodes.yawsso.locked.repo;
+    version = nodes.yawsso.original.ref;
     src = inputs.yawsso;
     doCheck = false;
   };

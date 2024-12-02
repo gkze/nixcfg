@@ -270,7 +270,10 @@ in
   };
 
   # Automatically discover installed fonts
-  fonts.fontconfig.enable = true;
+  fonts = {
+    fontconfig.enable = true;
+    packages = with pkgs; [ nerd-fonts.hack ];
+  };
 
   # System-wide Catppuccin theme
   catppuccin = {
@@ -341,7 +344,7 @@ in
     # Files/directories for $HOME
     file =
       {
-        # We explicitly set the prefix to $HOME/.local because npm operates out 
+        # We explicitly set the prefix to $HOME/.local because npm operates out
         # of the Nix store, which is read-only
         ${npmConfigFile}.text = ''
           prefix = "''${HOME}/.local"
@@ -384,6 +387,8 @@ in
       curlie
       # Duplicate file finder
       czkawka
+      # DAta SELector - CLI for JSON, YAML, TOML, XML, and CSV
+      dasel
       # Disk space usage analyzer (in Rust)
       du-dust
       # Disk Usage Analyzer
@@ -426,12 +431,6 @@ in
       moreutils
       # Neovim Rust GUI
       (if pkgs.stdenv.isLinux then neovide else neovide.overrideAttrs { version = "0.12.2"; })
-      # Nerd Fonts
-      # - https://www.nerdfonts.com/
-      # - https://github.com/ryanoasis/nerd-fonts
-      # Only install Hack Nerd Font, since the entire package / font repository
-      # is quite large
-      (nerdfonts.override { fonts = [ "Hack" ]; })
       # Nix Helper CLI
       nh
       # Container management
@@ -460,12 +459,16 @@ in
       superfile
       # Code counter - enable after https://github.com/NixOS/nixpkgs/pull/268563
       tokei
+      # SQL against CSV, LTSV, JSON, YAML, and TBLN
+      trdsql
       # Rust-based Python package resolver & installed (faster pip)
       uv
       # Alternative to `watch`
       viddy
       # Wayland Clipboard
       wl-clipboard
+      # YAML Query tool
+      yq-go
     ];
   };
 
@@ -741,12 +744,12 @@ in
         vim_mode = true;
         ui_font_size = 14;
         buffer_font_size = 12;
+        theme = "Catppuccin Frappé";
       };
     };
     # Terminal multiplexer / workspace manager
     zellij = {
       enable = true;
-      enableZshIntegration = true;
       settings = {
         # TODO: set dynamically, or better yet figure out how to get Alacritty
         # to respect custom GTK themes
@@ -768,7 +771,7 @@ in
       autocd = true;
       # Paths to index for the above
       cdpath = [ srcDir ];
-      # $ZDOTDIR 
+      # $ZDOTDIR
       dotDir = ".config/zsh";
       enableVteIntegration = true;
       history = {
