@@ -270,10 +270,7 @@ in
   };
 
   # Automatically discover installed fonts
-  fonts = {
-    fontconfig.enable = true;
-    packages = with pkgs; [ nerd-fonts.hack ];
-  };
+  fonts.fontconfig.enable = true;
 
   # System-wide Catppuccin theme
   catppuccin = {
