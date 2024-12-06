@@ -275,7 +275,9 @@ in
         name = "Hack Nerd Font Mono";
       };
       sizes = {
-        desktop = 8;
+        applications = 10;
+        desktop = 10;
+        popups = 10;
         terminal = 9;
       };
     };
