@@ -60,6 +60,10 @@
       systemd-boot.enable = true;
       timeout = 0;
     };
+    tmp = {
+      useTmpfs = true;
+      cleanOnBoot = true;
+    };
     plymouth = {
       enable = true;
       theme = "lone";

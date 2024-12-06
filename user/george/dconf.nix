@@ -1,15 +1,6 @@
 { pkgs, lib, ... }:
-let
-  meta = import ./meta.nix;
-in
 {
   dconf.settings = with lib.hm.gvariant; {
-    "org/gnome/desktop/background" = {
-      picture-options = "zoom";
-      picture-uri = "file:///home/${meta.name.user.system}/.config/background";
-      picture-uri-dark = "file:///home/${meta.name.user.system}/.config/background";
-    };
-
     "org/gnome/desktop/input-sources" = {
       show-all-sources = true;
       sources = [
@@ -25,13 +16,8 @@ in
       clock-format = "12h";
       clock-show-seconds = false;
       clock-show-weekday = true;
-      color-scheme = "prefer-dark";
-      cursor-theme = "catppuccin-frappe-blue-cursors";
       font-antialiasing = "grayscale";
       font-hinting = "slight";
-      gtk-theme = "catppuccin-frappe-blue-standard+rimless";
-      icon-theme = "Papirus-Dark";
-      monospace-font-name = "Hack Nerd Font Mono 11";
       overlay-scrolling = true;
       show-battery-percentage = true;
       text-scaling-factor = 1.0;

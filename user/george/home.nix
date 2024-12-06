@@ -50,7 +50,7 @@ in
   # Home Manager modules go here
   imports = [
     inputs.nixvim.homeManagerModules.nixvim
-    inputs.catppuccin.homeManagerModules.catppuccin
+    inputs.stylix.homeManagerModules.stylix
     ./nixvim.nix
     # inputs.lan-mouse.homeManagerModules.default
     {
@@ -105,26 +105,8 @@ in
       linux = {
         imports = [ ./dconf.nix ];
 
-        catppuccin.pointerCursor = {
-          enable = true;
-          accent = "blue";
-          flavor = "frappe";
-        };
-
         gtk = {
           enable = true;
-          catppuccin = {
-            enable = true;
-            accent = "blue";
-            flavor = "frappe";
-            gnomeShellTheme = true;
-            icon = {
-              enable = true;
-              accent = "blue";
-              flavor = "frappe";
-            };
-            tweaks = [ "rimless" ];
-          };
           gtk3.extraCss = ''
             headerbar.default-decoration button.titlebutton { padding: 0; }
           '';
@@ -181,8 +163,8 @@ in
             # TODO: TBD if works on macOS
             (python3.withPackages (
               ps: with ps; [
-                catppuccin
                 ptpython
+                catppuccin
               ]
             ))
             signal-desktop
@@ -247,10 +229,6 @@ in
               };
             };
           };
-          foot = {
-            enable = true;
-            settings.main.include = lib.mkForce "${inputs.foot-catppuccin}/themes/catppuccin-frappe.ini";
-          };
         };
 
         # wayland.windowManager.hyprland = {
@@ -269,15 +247,44 @@ in
     checkConfig = true;
   };
 
+  # System-wide stylng
+  stylix = {
+    enable = true;
+    base16Scheme = "${pkgs.base16-schemes}/share/themes/catppuccin-frappe.yaml";
+    polarity = "dark";
+    iconTheme = {
+      enable = true;
+      package = pkgs.papirus-icon-theme;
+      dark = "Papirus-Dark";
+    };
+    cursor = {
+      package = pkgs.catppuccin-cursors.frappeBlue;
+      name = "catppuccin-frappe-blue-cursors";
+    };
+    fonts = {
+      serif = {
+        package = pkgs.cantarell-fonts;
+        name = "Cantarell";
+      };
+      sansSerif = {
+        package = pkgs.cantarell-fonts;
+        name = "Cantarell";
+      };
+      monospace = {
+        package = pkgs.nerd-fonts.hack;
+        name = "Hack Nerd Font Mono";
+      };
+      sizes = {
+        desktop = 8;
+        terminal = 9;
+      };
+    };
+    image = ./wallpaper.jpeg;
+    targets.nixvim.enable = false;
+  };
+
   # Automatically discover installed fonts
   fonts.fontconfig.enable = true;
-
-  # System-wide Catppuccin theme
-  catppuccin = {
-    enable = true;
-    accent = "blue";
-    flavor = "frappe";
-  };
 
   home = {
     # This value determines the Home Manager release that your
@@ -363,6 +370,10 @@ in
           executable = true;
         };
         "${config.xdg.configHome}/ptpython/config.py".source = ./config/ptpython.py;
+        "${config.xdg.configHome}/bat/themes" = {
+          source = "${inputs.catppuccin-bat}/themes";
+          recursive = true;
+        };
       }
       // (optionalAttrs (elem "basis" profiles) {
         "${config.xdg.configHome}/git/basis".text = ''
@@ -482,10 +493,10 @@ in
         postFixup = "wrapProgram $out/bin/alacritty --unset WAYLAND_DISPLAY";
       };
       settings = {
-        font = {
-          size = lib.mkDefault 12.0;
-          normal.family = "Hack Nerd Font Mono";
-        };
+        # font = {
+        #   size = lib.mkDefault 12.0;
+        #   normal.family = "Hack Nerd Font Mono";
+        # };
         # Launch Zellij directly instead of going through a shell
         terminal.shell = {
           program = "${pkgs.zellij}/bin/zellij";
@@ -509,7 +520,7 @@ in
       enable = true;
       config = {
         style = "full";
-        theme = "Catppuccin Frappe";
+        theme = lib.mkForce "Catppuccin Frappe";
       };
       syntaxes.kdl = {
         src = inputs.sublime-kdl;
@@ -584,6 +595,7 @@ in
       # difftastic = { enable = true; background = "dark"; };
       extraConfig = {
         commit.gpgsign = true;
+        delta.features = lib.mkForce "catppuccin-frappe";
         diff.colorMoved = "default";
         fetch.prune = true;
         merge.conflictstyle = "diff3";
@@ -592,6 +604,7 @@ in
       };
       includes =
         [
+          { path = "${inputs.catppuccin-delta}/catppuccin.gitconfig"; }
           {
             path = "${config.xdg.configHome}/git/personal";
             condition = "gitdir:~/.config/nixcfg/**";

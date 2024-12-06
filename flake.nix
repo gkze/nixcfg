@@ -97,6 +97,12 @@
     # Hardware-specific settings
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
 
+    # System-wide styling
+    stylix = {
+      url = "github:danth/stylix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     ### Non-flake inputs
 
     # Alacritty themes
@@ -111,8 +117,15 @@
       flake = false;
     };
 
-    # Catppuccin theme
-    catppuccin.url = "github:catppuccin/nix";
+    catppuccin-bat = {
+      url = "github:catppuccin/bat";
+      flake = false;
+    };
+
+    catppuccin-delta = {
+      url = "github:catppuccin/delta";
+      flake = false;
+    };
 
     # nvim-cmp dbee plugin
     cmp-dbee = {
@@ -129,12 +142,6 @@
     # Browser Neovim client
     firenvim = {
       url = "github:glacambre/firenvim";
-      flake = false;
-    };
-
-    # GNOME Wayland-based GPU-accelerated terminal emulator - Catppuccin theme
-    foot-catppuccin = {
-      url = "github:catppuccin/foot";
       flake = false;
     };
 
