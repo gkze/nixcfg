@@ -228,7 +228,7 @@
             (with inputs; [
               devshell.overlays.default
               nix-alien.overlays.default
-              nur.overlay
+              nur.overlays.default
               rust-overlay.overlays.default
             ])
             ++ [ (import ./nix/overlays.nix { inherit inputs system; }) ];
