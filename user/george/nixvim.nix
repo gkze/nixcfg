@@ -444,12 +444,7 @@ in
         # Display colors for color codes
         nvim-colorizer = {
           enable = true;
-          fileTypes = [
-            {
-              language = "typescriptreact";
-              tailwind = "both";
-            }
-          ];
+          fileTypes.typescriptreact.tailwind = "both";
         };
         # Status column
         statuscol = {

@@ -107,7 +107,7 @@ in
 
         gtk = {
           enable = true;
-          gtk3.extraCss = ''
+          gtk3.extraCss = lib.mkForce ''
             headerbar.default-decoration button.titlebutton { padding: 0; }
           '';
         };
@@ -275,9 +275,9 @@ in
         name = "Hack Nerd Font Mono";
       };
       sizes = {
-        applications = 10;
-        desktop = 10;
-        popups = 10;
+        applications = 11;
+        desktop = 11;
+        popups = 11;
         terminal = 9;
       };
     };
