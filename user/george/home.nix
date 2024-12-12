@@ -160,6 +160,8 @@ in
             logiops
             # Run unpatched binaries on Nix/NixOS
             nix-alien
+            # Nix Helper CLI
+            nh
             # TODO: TBD if works on macOS
             (python3.withPackages (
               ps: with ps; [
@@ -443,8 +445,6 @@ in
       (if pkgs.stdenv.isLinux then neovide else neovide.overrideAttrs { version = "0.12.2"; })
       # Hack Nerd Font
       nerd-fonts.hack
-      # Nix Helper CLI
-      nh
       # Container management
       # podman-desktop
       # Modern developer workflow system
