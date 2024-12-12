@@ -355,7 +355,7 @@ in
               installCargo = true;
               installRustc = true;
             };
-            scheme_langserver.enable = true;
+            scheme_langserver.enable = !pkgs.stdenv.isDarwin;
             # TODO: figure out project-local config
             # sqls = {
             #   enable = true;
