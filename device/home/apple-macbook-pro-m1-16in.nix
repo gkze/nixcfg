@@ -1,4 +1,4 @@
-{ ... }:
+{ lib, ... }:
 {
   # MacBook Pro specific Alacritty settings via Home Manager
   programs.alacritty.settings.window = {
@@ -15,4 +15,7 @@
       y = 284;
     };
   };
+
+  # Bump up terminal font size for better readability on the 16" screen
+  stylix.fonts.sizes.terminal = lib.mkForce 11;
 }

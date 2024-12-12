@@ -74,7 +74,7 @@ in
     pname = normalizeName nodes.trdsql.locked.repo;
     version = inputs.trdsql.rev;
     src = inputs.trdsql;
-    vendorHash = "sha256-PoIa58vdDPYGL9mjEeudRYqPfvvr3W+fX5c+NgRIoLg=";
+    vendorHash = "sha256-EnMs32/gbStmgHv0eTsuBUOqtYWe+96mLKmApFn1/yw=";
   };
 
   vimPlugins = prev.vimPlugins.extend (
