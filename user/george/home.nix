@@ -107,7 +107,7 @@ in
 
         gtk = {
           enable = true;
-          gtk3.extraCss = lib.mkForce ''
+          gtk3.extraCss = ''
             headerbar.default-decoration button.titlebutton { padding: 0; }
           '';
         };

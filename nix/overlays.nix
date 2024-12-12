@@ -30,6 +30,17 @@ in
       vendorHash = "sha256-Nw0+kTcENp96PruQEBAdcfhubOEWSXKWGWrmWoKmgN0=";
     };
 
+  jinja-lsp =
+    (prev.callPackage inputs.naersk {
+      rustc = prev.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
+    }).buildPackage
+      {
+        name = normalizeName nodes.jinja-lsp.locked.repo;
+        version = inputs.jinja-lsp.rev;
+        src = inputs.jinja-lsp;
+        CARGO_BUILD_RUSTFLAGS = "-Zunstable-options";
+      };
+
   nix-software-center = inputs.nix-software-center.packages.${system}.default.overrideAttrs {
     buildInputs = with prev; [
       adwaita-icon-theme

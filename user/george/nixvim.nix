@@ -322,8 +322,11 @@ in
             eslint.enable = true;
             gopls.enable = true;
             html.enable = true;
-            # TODO: needs package
-            # jinja_lsp.enable = true;
+            jinja_lsp = {
+              enable = true;
+              package = pkgs.jinja-lsp;
+              extraOptions = { };
+            };
             jsonls.enable = true;
             # TODO: needs package
             # kulala_ls.enable = true;

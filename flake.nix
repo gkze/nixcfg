@@ -151,6 +151,12 @@
       flake = false;
     };
 
+    # Jinja2 language server
+    jinja-lsp = {
+      url = "github:uros-5/jinja-lsp";
+      flake = false;
+    };
+
     # Virtual KVM
     # lan-mouse = {
     #   url = "github:feschber/lan-mouse";
