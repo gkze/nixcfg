@@ -255,7 +255,7 @@ in
     base16Scheme = "${pkgs.base16-schemes}/share/themes/catppuccin-frappe.yaml";
     polarity = "dark";
     iconTheme = {
-      enable = true;
+      enable = !pkgs.stdenv.isDarwin;
       package = pkgs.papirus-icon-theme;
       dark = "Papirus-Dark";
     };
