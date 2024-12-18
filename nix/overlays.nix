@@ -123,6 +123,12 @@ in
         src = inputs.nvim-treehopper;
       };
 
+      treewalker-nvim = prev.vimUtils.buildVimPlugin {
+        pname = normalizeName nodes.treewalker-nvim.locked.repo;
+        version = inputs.treewalker-nvim.rev;
+        src = inputs.treewalker-nvim;
+      };
+
       vim-bundle-mako = prev.vimUtils.buildVimPlugin {
         pname = normalizeName nodes.vim-bundle-mako.locked.repo;
         version = inputs.vim-bundle-mako.rev;

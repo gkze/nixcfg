@@ -216,6 +216,14 @@ in
                           name = "NixOS Manual";
                           url = "https://nixos.org/manual/nixos/unstable/";
                         }
+                        {
+                          name = "NixOS Wiki";
+                          url = "https://wiki.nixos.org/wiki/Main_Page";
+                        }
+                        {
+                          name = "NixOS Wiki";
+                          url = "https://wiki.nixos.org/wiki/Main_Page";
+                        }
                       ];
                     }
                   ];
@@ -603,6 +611,7 @@ in
         merge.conflictstyle = "diff3";
         rebase.pull = true;
         user.signingkey = meta.gpg.keys.personal;
+        url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
       };
       includes =
         [

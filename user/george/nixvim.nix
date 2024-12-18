@@ -399,6 +399,11 @@ in
             };
           };
         };
+        # LSP signature help
+        lsp-signature = {
+          enable = true;
+          settings.hint_scheme = "String";
+        };
         # Status line (bottom)
         lualine = {
           enable = true;
@@ -648,6 +653,8 @@ in
         fidget.enable = true;
         # Neovim within text input on web pages
         firenvim.enable = true;
+        # Git tools
+        fugitive.enable = true;
         # Git conflict resolution tooling
         git-conflict.enable = true;
         # Hex editing
@@ -662,8 +669,6 @@ in
         luasnip.enable = true;
         # LSP formatting
         lsp-format.enable = true;
-        # LSP signature help
-        lsp-signature.enable = true;
         # LSP pictograms
         lspkind.enable = true;
         # Multi-faceted LSP UX improvements
@@ -713,6 +718,7 @@ in
         with pkgs.vimPlugins;
         [
           aerial-nvim
+          bufresize-nvim
           cmp-dbee
           gitlab-nvim
           kulala-nvim
@@ -721,6 +727,7 @@ in
           nvim-treesitter-parsers.nickel
           nvim-treesitter-textsubjects
           overseer-nvim
+          treewalker-nvim
           vim-bazel
           vim-bundle-mako
           vim-jinja
@@ -731,6 +738,9 @@ in
         let
           helpers = inputs.nixvim.lib.${hostPlatform}.helpers;
           extraPluginsConfig = {
+            # TODO: need a solution for keeping buffer / window sizes intact when resizing
+            # surrounding terminal
+            # bufresize = { };
             gitlab = { };
             dbee = { };
             nvim-surround = { };
@@ -767,55 +777,67 @@ in
           action = ":";
         }
         {
-          key = "<A-S-9>";
+          key = "<leader-S>[";
           action = ":BufferLineMovePrev<CR>";
         }
         {
-          key = "<A-S-0>";
+          key = "<leader-S>]";
           action = ":BufferLineMoveNext<CR>";
         }
         {
-          key = "<A-W>";
+          key = "<leader>w";
+          action = ":write<CR>";
+        }
+        {
+          key = "<leader>W";
           action = ":wall<CR>";
         }
         {
-          key = "<A-w>";
-          action = ":write<CR>";
-        }
-        {
-          key = "<A-w>";
-          action = ":write<CR>";
-        }
-        {
-          key = "<A-x>";
+          key = "<leader>x";
           action = ":Bdelete<CR>";
         }
         {
-          key = "<A-T>";
+          key = "<leader>T";
           action = ":tabnew<CR>";
         }
         {
-          key = "<A-X>";
+          key = "<leader>C";
           action = ":tabclose<CR>";
         }
         {
-          key = "<A-S-[>";
+          key = "<leader>[";
           action = ":BufferLineCyclePrev<CR>";
         }
         {
-          key = "<A-S-]>";
+          key = "<leader>]";
           action = ":BufferLineCycleNext<CR>";
         }
         {
-          key = "<A-S-.>";
+          key = "<leader>\>";
           action = ":tabnext<CR>";
         }
         {
-          key = "<A-S-,>";
+          key = "<leader>\<";
           action = ":tabprevious<CR>";
         }
         {
-          key = "<C-l>c";
+          key = "<C-A-h>";
+          action = ":Treewalker Left<CR>";
+        }
+        {
+          key = "<C-A-j>";
+          action = ":Treewalker Down<CR>";
+        }
+        {
+          key = "<C-A-k>";
+          action = ":Treewalker Up<CR>";
+        }
+        {
+          key = "<C-A-l>";
+          action = ":Treewalker Right<CR>";
+        }
+        {
+          key = "<leader-l>t";
           action = ":set invlist<CR>";
         }
         {
@@ -827,61 +849,52 @@ in
           action = ":LspRestart<CR>";
         }
         {
-          key = "<S-f>";
-          action = ":ToggleTerm direction=float<CR>";
-        } # TODO: figure out how to resize
-        {
           key = "<S-s>";
-          action = ":sort<CR>";
-        }
-        {
-          key = "<S-t>";
-          action = ":ToggleTerm<CR>";
-        }
-        {
-          key = "<leader>D";
-          action = ":DiffviewClose<CR>";
-        }
-        {
-          key = "<leader>F";
-          action = ":Telescope find_files hidden=true<CR>";
-        }
-        {
-          key = "<leader>o";
-          action = ":AerialToggle<CR>";
-        }
-        {
-          key = "<leader>b";
-          action = ":Neotree toggle buffers<CR>";
+          action = ":'<,'>sort<CR>";
         }
         {
           key = "<leader>c";
-          action = ":nohlsearch<CR>";
+          action = ":ToggleTerm<CR>";
         }
         {
           key = "<leader>d";
           action = ":DiffviewOpen<CR>";
         }
         {
-          key = "<leader>de";
-          action = ":TodoTelescope<CR>";
-        }
-        {
-          key = "<leader>dl";
-          action = ":TodoLocList<CR>";
-        }
-        {
-          key = "<leader>dr";
-          action = ":TodoTrouble<CR>";
+          key = "<leader>D";
+          action = ":DiffviewClose<CR>";
         }
         {
           key = "<leader>f";
           action = ":Telescope find_files<CR>";
         }
         {
-          key = "<leader>g";
+          key = "<leader>F";
+          action = ":Telescope find_files hidden=true<CR>";
+        }
+        {
+          key = "<leader>G";
           action = ":Telescope live_grep<CR>";
-          options.nowait = true;
+        }
+        {
+          key = "<leader>at";
+          action = ":AerialToggle<CR>";
+        }
+        {
+          key = "<leader>ao";
+          action = ":AerialToggle<CR>";
+        }
+        {
+          key = "<leader>aO";
+          action = ":AerialOpenAll<CR>";
+        }
+        {
+          key = "<leader>aC";
+          action = ":AerialCloseAll<CR>";
+        }
+        {
+          key = "<leader>z";
+          action = ":nohlsearch<CR>";
         }
         {
           key = "<leader>h";
@@ -920,7 +933,7 @@ in
           action = ":Telescope keymaps<CR>";
         }
         {
-          key = "<leader>n";
+          key = "<leader>s";
           action = ":Neotree focus<CR>";
         }
         {
@@ -936,7 +949,7 @@ in
           action = ":IncRename ";
         }
         {
-          key = "<leader>s";
+          key = "<leader>n";
           action = ":Navbuddy<CR>";
         }
         {
@@ -948,11 +961,11 @@ in
           action = ":Neotree toggle git_status<CR>";
         }
         {
-          key = "<leader>x";
+          key = "<leader>gc";
           action = ":Neogit<CR>";
         }
         {
-          key = "<leader>z";
+          key = "<leader>gb";
           action = ":Neogit branch<CR>";
         }
       ];

@@ -117,6 +117,12 @@
       flake = false;
     };
 
+    # Neovim buffer resize plugin
+    bufresize-nvim = {
+      url = "github:kwkarlwang/bufresize.nvim";
+      flake = false;
+    };
+
     catppuccin-bat = {
       url = "github:catppuccin/bat";
       flake = false;
@@ -184,6 +190,12 @@
     # SQL against CSV, LTSV, JSON, YAML, and TBLN
     trdsql = {
       url = "github:noborus/trdsql";
+      flake = false;
+    };
+
+    # Neovim Treesitter-based code navigation
+    treewalker-nvim = {
+      url = "github:aaronik/treewalker.nvim";
       flake = false;
     };
 
