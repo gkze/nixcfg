@@ -158,6 +158,8 @@ in
             libreoffice
             # Unofficial userspace driver for HID++ Logitech devices
             logiops
+            # Linux manual pages
+            man-pages
             # Run unpatched binaries on Nix/NixOS
             nix-alien
             # Nix Helper CLI

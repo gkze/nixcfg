@@ -214,22 +214,25 @@ in
     }
     .${kernel}
   ];
-  home.packages = with pkgs; [
-    # Amazon ECR Credential Helper
-    amazon-ecr-credential-helper
-    # Amazon ECS CLI
-    amazon-ecs-cli
-    # Password manager
-    _1password-gui
-    # S3 filesystem in userspace
-    # mountpoint-s3
-    # Knowledge management
-    obsidian
-    # AWS Systems Manager Session Manager plugin for the AWS CLI
-    ssm-session-manager-plugin
-    # Yet Another AWS SSO tool
-    yawsso
-  ];
+  home = {
+    file.".docker/config.json".text = builtins.toJSON { credsStore = "ecr-login"; };
+    packages = with pkgs; [
+      # Amazon ECR Credential Helper
+      amazon-ecr-credential-helper
+      # Amazon ECS CLI
+      amazon-ecs-cli
+      # Password manager
+      _1password-gui
+      # S3 filesystem in userspace
+      # mountpoint-s3
+      # Knowledge management
+      obsidian
+      # AWS Systems Manager Session Manager plugin for the AWS CLI
+      ssm-session-manager-plugin
+      # Yet Another AWS SSO tool
+      yawsso
+    ];
+  };
   programs = {
     awscli = {
       enable = true;

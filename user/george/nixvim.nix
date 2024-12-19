@@ -79,15 +79,15 @@ in
         signcolumn = "yes";
       };
       autoCmd = [
-        {
-          event = [ "LspAttach" ];
-          callback.__raw = ''
-            function(args)
-              local client = vim.lsp.get_client_by_id(args.data.client_id)
-              require("lsp_signature").on_attach({ bind = true }, args.buf)
-            end
-          '';
-        }
+        # {
+        #   event = [ "LspAttach" ];
+        #   callback.__raw = ''
+        #     function(args)
+        #       local client = vim.lsp.get_client_by_id(args.data.client_id)
+        #       require("lsp_signature").on_attach({ bind = true }, args.buf)
+        #     end
+        #   '';
+        # }
       ];
       colorschemes.catppuccin = {
         enable = true;
@@ -102,7 +102,7 @@ in
               dim_context = true;
               dim_dirname = true;
             };
-            cmp = true;
+            # cmp = true;
             dap = {
               enabled = true;
               enable_ui = true;
@@ -212,35 +212,73 @@ in
             ];
           };
         };
-        # LSP completion
-        cmp = {
+        blink-cmp = {
           enable = true;
           settings = {
-            extraOptions.autoEnableSources = true;
-            snippet.expand = ''
-              function(args)
-                require('luasnip').lsp_expand(args.body)
-              end
-            '';
-            sources = map (s: { name = s; }) [
-              "nvim_lsp"
-              "treesitter"
-              "luasnip"
-              "path"
-              "buffer"
-              "cmp-dbee"
-            ];
-            mapping = {
-              "<C-d>" = "cmp.mapping.scroll_docs(-4)";
-              "<C-f>" = "cmp.mapping.scroll_docs(4)";
-              "<C-Space>" = "cmp.mapping.complete()";
-              "<C-e>" = "cmp.mapping.close()";
-              "<Tab>" = "cmp.mapping(cmp.mapping.select_next_item(), {'i', 's'})";
-              "<S-Tab>" = "cmp.mapping(cmp.mapping.select_prev_item(), {'i', 's'})";
-              "<CR>" = "cmp.mapping.confirm({ select = true })";
+            completion = {
+              trigger.prefetch_on_insert = true;
             };
+            documentation = {
+              auto_show = true;
+              auto_show_delay_ms = 100;
+            };
+            keymap = {
+              "<Enter>" = [
+                "select_and_accept"
+                "fallback"
+              ];
+              "<Tab>" = [
+                "select_next"
+                "fallback"
+              ];
+              "<S-Tab>" = [
+                "select_prev"
+                "fallback"
+              ];
+              "<C-d>" = [ "scroll_documentation_down" ];
+              "<C-f>" = [ "scroll_documentation_up" ];
+              "<C-Tab>" = [
+                "snippet_forward"
+                "fallback"
+              ];
+              "<C-S-Tab>" = [
+                "snippet_backward"
+                "fallback"
+              ];
+            };
+            signature.enabled = true;
           };
         };
+        # LSP completion
+        # cmp = {
+        #   enable = true;
+        #
+        #   settings = {
+        #     extraOptions.autoEnableSources = true;
+        #     snippet.expand = ''
+        #       function(args)
+        #         require('luasnip').lsp_expand(args.body)
+        #       end
+        #     '';
+        #     sources = map (s: { name = s; }) [
+        #       "nvim_lsp"
+        #       "treesitter"
+        #       "luasnip"
+        #       "path"
+        #       "buffer"
+        #       "cmp-dbee"
+        #     ];
+        #     mapping = {
+        #       "<C-d>" = "cmp.mapping.scroll_docs(-4)";
+        #       "<C-f>" = "cmp.mapping.scroll_docs(4)";
+        #       "<C-Space>" = "cmp.mapping.complete()";
+        #       "<C-e>" = "cmp.mapping.close()";
+        #       "<Tab>" = "cmp.mapping(cmp.mapping.select_next_item(), {'i', 's'})";
+        #       "<S-Tab>" = "cmp.mapping(cmp.mapping.select_prev_item(), {'i', 's'})";
+        #       "<CR>" = "cmp.mapping.confirm({ select = true })";
+        #     };
+        #   };
+        # };
         # Code snapshotting
         codesnap = {
           enable = true;
@@ -302,13 +340,21 @@ in
         # Language Server Protocol client
         lsp = {
           enable = true;
-          keymaps.lspBuf = {
-            "<C-k>" = "signature_help";
-            "K" = "hover";
-            "gD" = "references";
-            "gd" = "definition";
-            "gi" = "implementation";
-            "gt" = "type_definition";
+          keymaps = {
+            extra = [
+              {
+                action = "<CMD>Lspsaga hover_doc<Enter>";
+                key = "K";
+              }
+            ];
+            lspBuf = {
+              "<C-k>" = "signature_help";
+              # "K" = "hover";
+              "gD" = "references";
+              "gd" = "definition";
+              "gi" = "implementation";
+              "gt" = "type_definition";
+            };
           };
           servers = {
             bashls.enable = true;
@@ -400,10 +446,10 @@ in
           };
         };
         # LSP signature help
-        lsp-signature = {
-          enable = true;
-          settings.hint_scheme = "String";
-        };
+        # lsp-signature = {
+        #   enable = true;
+        #   settings.hint_scheme = "String";
+        # };
         # Status line (bottom)
         lualine = {
           enable = true;
@@ -638,9 +684,9 @@ in
         # Buffer delete helper preserving window layout
         bufdelete.enable = true;
         # nvim-cmp LSP signature help source
-        # cmp-nvim-lsp-signature-help.enable = true;
+        # cmp-nvim-lsp-signature-help = { enable = true;  };
         # Treesitter completion source for CMP
-        cmp-treesitter.enable = true;
+        # cmp-treesitter = { enable = true;  };
         # Code commenting
         comment.enable = true;
         # GitHub Copilot coding assistant
@@ -705,8 +751,6 @@ in
         smart-splits.enable = true;
         # Enable working with TODO: code comments
         todo-comments.enable = true;
-        # Code context via Treesitter
-        # treesitter-context.enable = true;
         # Diagnostics, etc.
         trouble.enable = true;
         # Icons
@@ -719,7 +763,7 @@ in
         [
           aerial-nvim
           bufresize-nvim
-          cmp-dbee
+          # cmp-dbee
           gitlab-nvim
           kulala-nvim
           neoconf-nvim
@@ -777,11 +821,11 @@ in
           action = ":";
         }
         {
-          key = "<leader-S>[";
+          key = "<leader>{";
           action = ":BufferLineMovePrev<CR>";
         }
         {
-          key = "<leader-S>]";
+          key = "<leader>}";
           action = ":BufferLineMoveNext<CR>";
         }
         {
@@ -837,7 +881,7 @@ in
           action = ":Treewalker Right<CR>";
         }
         {
-          key = "<leader-l>t";
+          key = "<leader>i";
           action = ":set invlist<CR>";
         }
         {
@@ -878,10 +922,6 @@ in
         }
         {
           key = "<leader>at";
-          action = ":AerialToggle<CR>";
-        }
-        {
-          key = "<leader>ao";
           action = ":AerialToggle<CR>";
         }
         {
