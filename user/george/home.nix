@@ -68,6 +68,7 @@ in
             toDir="$HOME/Applications/Home Manager Trampolines"
             sync_trampolines "$fromDir" "$toDir"
           '';
+          packages = [ inputs.nh-plus.packages.${hostPlatform}.nh ];
         };
         # User-local launchd agents
         launchd.agents = {
@@ -164,13 +165,6 @@ in
             nix-alien
             # Nix Helper CLI
             nh
-            # TODO: TBD if works on macOS
-            (python3.withPackages (
-              ps: with ps; [
-                ptpython
-                catppuccin
-              ]
-            ))
             signal-desktop
             # Logitech device manager
             solaar
@@ -455,6 +449,8 @@ in
       (if pkgs.stdenv.isLinux then neovide else neovide.overrideAttrs { version = "0.12.2"; })
       # Hack Nerd Font
       nerd-fonts.hack
+      # Knowledge management
+      obsidian
       # Container management
       # podman-desktop
       # Modern developer workflow system
@@ -463,6 +459,13 @@ in
       postgres-lsp
       # Alternative to `ps`
       procs
+      # TODO: TBD if works on macOS
+      (python3.withPackages (
+        ps: with ps; [
+          ptpython
+          catppuccin
+        ]
+      ))
       # Rust toolchain manager
       rustup
       # Synhronization utility

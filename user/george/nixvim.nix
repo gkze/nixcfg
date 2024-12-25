@@ -786,7 +786,6 @@ in
             # surrounding terminal
             # bufresize = { };
             gitlab = { };
-            dbee = { };
             nvim-surround = { };
             overseer = { };
             aerial = {
@@ -802,7 +801,7 @@ in
                 "i;" = "textsubjects-container-inner";
               };
             };
-          };
+          } // (lib.attrsets.optionalAttrs (!pkgs.stdenv.isDarwin) { dbee = { }; });
         in
         (concatStringsSep "\n" (
           (mapAttrsToList (n: v: ''require("${n}").setup(${helpers.toLuaObject v})'') extraPluginsConfig)

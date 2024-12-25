@@ -175,6 +175,12 @@
       flake = false;
     };
 
+    # Neovim buffer resize plugin
+    nh-plus = {
+      url = "github:ToyVo/nh_plus";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Neovim: AST-based selection
     nvim-treehopper = {
       url = "github:mfussenegger/nvim-treehopper";
