@@ -2,62 +2,51 @@
   description = "Universe";
 
   inputs = {
-    ### Flake inputs ###
-
-    # Use latest nixpkgs
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixos-hardware.url = "github:NixOS/nixos-hardware/master";
 
-    # Flake modularization library
     flakelight = {
       url = "github:nix-community/flakelight";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Manage macOS configuration
-    nix-darwin = {
-      url = "github:LnL7/nix-darwin";
+    flakelight-darwin = {
+      url = "github:cmacrae/flakelight-darwin";
+      inputs.flakelight.follows = "flakelight";
+    };
+
+    mac-app-util = {
+      url = "github:hraban/mac-app-util";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Manage user configuration and home directories
     home-manager = {
-      url = "github:nix-community/home-manager";
+      url = "github:nix-community/home-manager/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Unified polyglot source formatter
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Nix development shell helper
     devshell = {
       url = "github:numtide/devshell";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Neovim configured with Nix
+    nh = {
+      url = "github:viperML/nh/master";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     nixvim = {
       url = "github:nix-community/nixvim";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Declarative disk partitioning
-    disko = {
-      url = "github:nix-community/disko";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    # NixOS-specific "app store" GUI
-    nix-software-center = {
-      url = "github:vlinkz/nix-software-center";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    # Graphical NixOS configuration editor
-    nixos-conf-editor = {
-      url = "github:vlinkz/nixos-conf-editor";
+    stylix = {
+      url = "github:danth/stylix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -66,30 +55,53 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Hardware-specific settings. Have to track maser or pin to specific
-    # commit due to lack of tags / recent releases
-    nixos-hardware.url = "github:NixOS/nixos-hardware/master";
-
-    # Catppuccin theme
-    catppuccin.url = "github:catppuccin/nix";
-
-    # Web browser
     firefox = {
       url = "github:nix-community/flake-firefox-nightly";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    ### Non-flake inputs ###
+    nix-homebrew = {
+      url = "github:zhaofengli-wip/nix-homebrew";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
-    # Vim syntax for KDL (used for Zellij)
+    homebrew-core = {
+      url = "github:homebrew/homebrew-core";
+      flake = false;
+    };
+
+    homebrew-cask = {
+      url = "github:homebrew/homebrew-cask";
+      flake = false;
+    };
+
+    homebrew-bundle = {
+      url = "github:homebrew/homebrew-bundle";
+      flake = false;
+    };
+
+    bufresize-nvim = {
+      url = "github:kwkarlwang/bufresize.nvim";
+      flake = false;
+    };
+
+    treewalker-nvim = {
+      url = "github:aaronik/treewalker.nvim";
+      flake = false;
+    };
+
+    catppuccin-delta = {
+      url = "github:catppuccin/delta";
+      flake = false;
+    };
+
     kdl-vim = {
       url = "github:imsnif/kdl.vim";
       flake = false;
     };
 
-    # Yet Another AWS SSO - sync AWS SSO session to legacy v1 creds
-    yawsso = {
-      url = "github:victorskl/yawsso";
+    zsh-system-clipboard = {
+      url = "github:kutsan/zsh-system-clipboard";
       flake = false;
     };
   };
@@ -98,62 +110,91 @@
     {
       self,
       flakelight,
+      flakelight-darwin,
       devshell,
       treefmt-nix,
       ...
-    }:
+    }@inputs:
     flakelight ./. (
       { lib, ... }:
       {
+        inherit inputs;
+
         nixDir = ./.;
-        systems = lib.systems.flakeExposed;
+        systems = lib.mkForce [
+          "aarch64-darwin"
+          "x86_64-linux"
+        ];
         nixpkgs.config.allowUnfree = true;
+        imports = [ flakelight-darwin.flakelightModules.default ];
 
         withOverlays = [
           devshell.overlays.default
           self.overlays.default
         ];
 
-        nixDirAliases = {
-          darwinConfigurations = [ "macos" ];
-          homeConfigurations = [ "home" ];
-        };
-
         devShell =
           pkgs:
           pkgs.devshell.mkShell {
             name = "nixcfg";
-            packages = with pkgs; [
-              dconf2nix
-              home-manager
-              nh
-              nix-init
-              nixos-generators
-              nurl
-            ];
+            packages =
+              with pkgs;
+              [
+                home-manager
+                nh
+                nix-init
+                nixos-generators
+                nurl
+              ]
+              ++ lib.lists.optional pkgs.stdenv.isLinux dconf2nix;
           };
 
         formatter =
           pkgs:
-          treefmt-nix.lib.mkWrapper pkgs {
-            projectRootFile = "flake.nix";
-            programs = {
-              # Markdown
-              mdformat.enable = true;
-              # Nix
-              nixfmt.enable = true;
-              deadnix.enable = true;
-              statix.enable = true;
-              # Python
-              ruff-check.enable = true;
-              ruff-format.enable = true;
-              # Shell
-              shellcheck.enable = true;
-              shfmt.enable = true;
-            };
-          };
+          with treefmt-nix.lib;
+          let
+            shInclude = [
+              ".envrc"
+              "misc/yabai-center"
+            ];
+            inherit
+              (evalModule pkgs {
+                projectRootFile = "flake.nix";
+                programs = {
+                  mdformat.enable = true;
+                  nixfmt.enable = true;
+                  deadnix.enable = true;
+                  statix.enable = true;
+                  ruff-check.enable = true;
+                  ruff-format.enable = true;
+                  shellcheck = {
+                    enable = true;
+                    includes = shInclude;
+                  };
+                  shfmt = {
+                    enable = true;
+                    includes = shInclude;
+                  };
+                };
+              })
+              config
+              ;
+          in
+          mkWrapper pkgs (
+            config
+            // {
+              build.wrapper = pkgs.writeShellScriptBin "treefmt-nix" ''
+                exec ${config.build.wrapper}/bin/treefmt --no-cache "$@"
+              '';
+            }
+          );
 
-        checks = { };
+        checks.formatting = lib.mkForce (
+          { lib, outputs', ... }:
+          ''
+            ${lib.getExe outputs'.formatter} .
+          ''
+        );
       }
     );
 }
