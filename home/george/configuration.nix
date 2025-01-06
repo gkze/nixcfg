@@ -1,0 +1,203 @@
+{
+  config,
+  pkgs,
+  slib,
+  system,
+  userMeta,
+  ...
+}@args:
+{
+  imports = map (mod: import mod args) [
+    {
+      darwin = ./darwin.nix;
+      linux = ./nixos.nix;
+    }
+    .${slib.kernel system}
+    ./git.nix
+    ./go.nix
+    ./nixvim.nix
+    ./packages.nix
+    ./python.nix
+    ./stylix.nix
+    ./zsh.nix
+  ];
+
+  home = {
+    sessionPath = [
+      "$HOME/.cargo/bin"
+      "$HOME/.local/bin"
+    ];
+    sessionVariables = {
+      DELTA_PAGER = "bat -p";
+      EDITOR = "nvim";
+      MANPAGER = "sh -c 'col -bx | bat -plman'";
+      MANROFFOPT = "-c";
+      NIX_PAGER = "bat -p";
+      PAGER = "bat -p";
+      LESS = "-R --mouse";
+    };
+    shellAliases =
+      let
+        ezaDefaultArgs = "-albghHistype -F --color=always --icons=always";
+      in
+      {
+        cr = "clear && reset";
+        ezap = "eza ${ezaDefaultArgs}";
+        ezat = "eza ${ezaDefaultArgs} --tree";
+        jaws = "function() { aws $@ | jq -r '.' }";
+        ne = "cd ~/.config/nixcfg && nvim";
+        nv = "nvim";
+        zc = "zellij action clear";
+        zj = "zellij";
+        zq = "zellij kill-all-sessions --yes && zellij delete-all-sessions --force --yes";
+      };
+  };
+
+  languages = {
+    go.enable = true;
+    python.enable = true;
+  };
+
+  programs = {
+    alacritty = {
+      enable = true;
+      settings = {
+        terminal.shell = {
+          program = "${pkgs.zellij}/bin/zellij";
+          args = [
+            "attach"
+            "--create"
+            "main"
+          ];
+        };
+      };
+    };
+    awscli.enable = true;
+    bat.enable = true;
+    bottom.enable = true;
+    direnv = {
+      enable = true;
+      nix-direnv.enable = true;
+      enableZshIntegration = true;
+    };
+    eza.enable = true;
+    fzf = {
+      enable = true;
+      enableZshIntegration = true;
+    };
+    fd.enable = true;
+    gitui = {
+      enable = true;
+      keyConfig = pkgs.fetchurl {
+        url = slib.ghRaw {
+          owner = "extrawurst";
+          repo = "gitui";
+          rev = "27e28d5f5141be43648b93dc05a164a08dd4ef96";
+          path = "vim_style_key_config.ron";
+        };
+        hash = "sha256-uYL9CSCOlTdW3E87I7GsgvDEwOPHoz1LIxo8DARDX1Y=";
+      };
+    };
+    gh = {
+      enable = true;
+      settings = {
+        git_protocol = "ssh";
+        editor = "nvim";
+        prompt = "enabled";
+        extensions = with pkgs; [ gh-dash ];
+      };
+    };
+    gpg = {
+      enable = true;
+      homedir = "${config.xdg.dataHome}/gnupg";
+      settings = {
+        auto-key-retrieve = true;
+        default-key = userMeta.gpg.keys.personal;
+      };
+    };
+    helix = {
+      enable = true;
+      languages.language = [
+        { name = "nix"; }
+        { name = "python"; }
+        { name = "bash"; }
+      ];
+    };
+    home-manager.enable = true;
+    jq.enable = true;
+    man = {
+      enable = true;
+      generateCaches = true;
+    };
+    nushell.enable = true;
+    nix-index.enable = true;
+    ripgrep.enable = true;
+    ssh = {
+      enable = true;
+      compression = true;
+      forwardAgent = true;
+      hashKnownHosts = true;
+      matchBlocks = {
+        "github.com".user = "git";
+        "*".extraOptions = {
+          AddKeysToAgent = "yes";
+          LogLevel = "ERROR";
+          StrictHostKeyChecking = "no";
+        };
+      };
+    };
+    starship = {
+      enable = true;
+      enableZshIntegration = true;
+      enableNushellIntegration = true;
+      settings = {
+        add_newline = false;
+        line_break.disabled = true;
+        nix_shell.disabled = true;
+        nodejs.disabled = true;
+        python.disabled = true;
+      };
+    };
+    topgrade = {
+      enable = true;
+      settings = {
+        git.repos = [ (slib.srcDirBase system) ];
+        misc = {
+          assume_yes = true;
+          cleanup = true;
+        };
+      };
+    };
+    vscode.enable = true;
+    yazi = {
+      enable = true;
+      enableZshIntegration = true;
+      settings.manager.sort_by = "alphabetical";
+    };
+    zed-editor = {
+      enable = true;
+      userSettings = {
+        vim_mode = true;
+        ui_font_size = 14;
+        buffer_font_size = 12;
+        theme = "Catppuccin Frappé";
+      };
+    };
+    zellij = {
+      enable = true;
+      settings = {
+        keybinds.normal = {
+          "bind \"Alt s\"".Clear = { };
+          "bind \"Alt L\"".GoToNextTab = { };
+          "bind \"Alt H\"".GoToPreviousTab = { };
+        };
+        session_serialization = false;
+        simplified_ui = true;
+      };
+    };
+    zoxide = {
+      enable = true;
+      enableNushellIntegration = true;
+    };
+  };
+}
