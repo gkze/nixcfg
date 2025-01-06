@@ -5,7 +5,10 @@
     base16Scheme = "${base16-schemes}/share/themes/catppuccin-frappe.yaml";
     polarity = "dark";
     image = ./wallpaper.jpeg;
-    targets.nixvim.enable = false;
+    targets = {
+      bat.enable = false;
+      nixvim.enable = false;
+    };
     iconTheme = {
       enable = !stdenv.isDarwin;
       package = papirus-icon-theme;

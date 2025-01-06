@@ -4,11 +4,18 @@
     enable = true;
     enableRosetta = true;
     user = "george";
-    taps = with inputs; {
-      "homebrew/homebrew-core" = homebrew-core;
-      "homebrew/homebrew-cask" = homebrew-cask;
-      "homebrew/homebrew-bundle" = homebrew-bundle;
-    };
+    taps = builtins.listToAttrs (
+      map
+        (comp: {
+          name = "homebrew/homebrew-${comp}";
+          value = inputs."homebrew-${comp}";
+        })
+        [
+          "core"
+          "cask"
+          "bundle"
+        ]
+    );
     mutableTaps = false;
   };
 }

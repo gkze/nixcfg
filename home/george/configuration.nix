@@ -1,5 +1,6 @@
 {
   config,
+  inputs,
   pkgs,
   slib,
   system,
@@ -23,6 +24,18 @@
   ];
 
   home = {
+    file.".gnupg/gpg-agent.conf".text =
+      let
+        prog =
+          {
+            darwin = "${pkgs.pinentry_mac}/bin/pinentry-mac";
+            linux = "${pkgs.pinentry}/bin/pinentry";
+          }
+          .${slib.kernel pkgs.stdenv.hostPlatform.system};
+      in
+      ''
+        pinentry-program ${prog}
+      '';
     sessionPath = [
       "$HOME/.cargo/bin"
       "$HOME/.local/bin"
@@ -73,7 +86,14 @@
       };
     };
     awscli.enable = true;
-    bat.enable = true;
+    bat = {
+      enable = true;
+      themes."Catppuccin Frappe" = {
+        src = inputs.catppuccin-bat;
+        file = "themes/Catppuccin Frappe.tmTheme";
+      };
+      config.theme = "Catppuccin Frappe";
+    };
     bottom.enable = true;
     direnv = {
       enable = true;
@@ -176,12 +196,7 @@
     };
     zed-editor = {
       enable = true;
-      userSettings = {
-        vim_mode = true;
-        ui_font_size = 14;
-        buffer_font_size = 12;
-        theme = "Catppuccin Frappé";
-      };
+      userSettings.vim_mode = true;
     };
     zellij = {
       enable = true;
