@@ -19,12 +19,13 @@ let
   inherit (lib.lists) optionals;
   inherit (lib.attrsets) optionalAttrs;
 
-in
-rec {
-  flakeLock = (fromJSON (readFile ./flake.lock)).nodes;
-  modulesPath = "${src}/modules";
   maybePath = p: if pathExists p then p else null;
   userMetaPath = u: maybePath "${src}/home/${u}/meta.nix";
+  modulesPath = "${src}/modules";
+in
+rec {
+  inherit modulesPath;
+  flakeLock = (fromJSON (readFile ./flake.lock)).nodes;
   userMetaIfExists =
     user:
     let

@@ -90,6 +90,11 @@
       flake = false;
     };
 
+    catppuccin-bat = {
+      url = "github:catppuccin/bat";
+      flake = false;
+    };
+
     catppuccin-delta = {
       url = "github:catppuccin/delta";
       flake = false;

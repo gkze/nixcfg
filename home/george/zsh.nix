@@ -1,16 +1,11 @@
 {
   config,
   inputs,
-  lib,
   pkgs,
   slib,
   system,
   ...
 }:
-let
-  inherit (lib) optionalString;
-  kernel = slib.kernel system;
-in
 {
   programs.zsh = {
     enable = true;
@@ -27,12 +22,6 @@ in
       share = true;
       size = 100000;
     };
-    initExtraBeforeCompInit =
-      ''''
-      + optionalString (kernel == "darwin") ''
-        HOMEBREW_PREFIX="/opt/homebrew"
-        fpath+="''${HOMEBREW_PREFIX}/share/zsh/site-functions"
-      '';
     completionInit = ''
       autoload -Uz +X compinit bashcompinit
       for dump in ''${ZDOTDIR}/.zcompdump(N.mh+24); do
@@ -40,25 +29,16 @@ in
       done
       compinit -C && bashcompinit -C
     '';
-    initExtra =
-      ''
-        unalias &>/dev/null run-help && autoload run-help
-        zmodload zsh/complist
-        autoload -Uz +X select-word-style
-        select-word-style bash
-        zstyle ':completion:*' menu select
-        bindkey -M menuselect '^[[Z' reverse-menu-complete
-        bindkey "^R" history-incremental-search-backward
-        typeset -U PATH MANPATH
-      ''
-      # Darwin-only Zsh configuration (post-compinit)
-      + optionalString (kernel == "darwin") ''
-        if [[ "$(uname -m)" != "arm64" ]]; then
-          HOMEBREW_PREFIX="/usr/local"
-        fi
-        export PATH="''${HOMEBREW_PREFIX}/bin:''${PATH}"
-        export MANPATH="''${HOMEBREW_PREFIX}/share/man:''${MANPATH}"
-      '';
+    initExtra = ''
+      unalias &>/dev/null run-help && autoload run-help
+      zmodload zsh/complist zsh/zle
+      autoload -U select-word-style
+      select-word-style shell
+      zstyle ':completion:*' menu select
+      bindkey -M menuselect '^[[Z' reverse-menu-complete
+      bindkey "^R" history-incremental-search-backward
+      typeset -U PATH MANPATH
+    '';
     plugins = with pkgs; [
       {
         name = "zsh-autosuggestions";
@@ -80,6 +60,14 @@ in
       {
         name = "zsh-system-clipboard";
         src = inputs.zsh-system-clipboard;
+      }
+      {
+        name = "zsh-vi-mode-backward-kill-word";
+        src = "${src}/misc/zsh-plugins";
+      }
+      {
+        name = "zsh-vi-mode-system-clipboard";
+        src = "${src}/misc/zsh-plugins";
       }
       {
         name = "direnv";

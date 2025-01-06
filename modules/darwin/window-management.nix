@@ -4,6 +4,7 @@
     (stdenvNoCC.mkDerivation {
       name = "yabai-center";
       src = "${src}/misc/yabai-center";
+      buildInputs = [ yabai ];
       dontUnpack = true;
       installPhase = ''
         mkdir -p $out/bin
@@ -15,9 +16,7 @@
   services = {
     sketchybar = {
       enable = false;
-      config = ''
-
-      '';
+      config = '''';
     };
     skhd = {
       enable = true;

@@ -22,7 +22,6 @@
       httpie
       jnv
       moreutils
-      # TODO: figure out
       nerd-fonts.hack
       nh
       obsidian
@@ -40,5 +39,5 @@
       viddy
       yq-go
     ]
-    ++ lib.lists.optional pkgs.stdenv.isLinux [ wl-clipboard ];
+    ++ lib.lists.optional pkgs.stdenv.isLinux wl-clipboard;
 }
