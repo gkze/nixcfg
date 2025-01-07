@@ -127,6 +127,21 @@
         extensions = with pkgs; [ gh-dash ];
       };
     };
+    ghostty = {
+      enable = false;
+      enableZshIntegration = true;
+      installBatSyntax = true;
+      installVimSyntax = true;
+      settings = {
+        font-family = "Hack Nerd Font Mono";
+        font-size = 12;
+        macos-option-as-alt = "left";
+        keybind = "alt+left=unbind";
+        theme = "catppuccin-frappe";
+        window-height = 80;
+        window-width = 220;
+      };
+    };
     gpg = {
       enable = true;
       homedir = "${config.xdg.dataHome}/gnupg";
@@ -181,6 +196,10 @@
     topgrade = {
       enable = true;
       settings = {
+        misc.disable = [
+          "brew_cask"
+          "brew_formula"
+        ];
         git.repos = [ (slib.srcDirBase system) ];
         misc = {
           assume_yes = true;
