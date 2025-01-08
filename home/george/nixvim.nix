@@ -598,17 +598,13 @@ in
         with pkgs.vimPlugins;
         [
           aerial-nvim
-          # bufresize-nvim
-          # gitlab-nvim
           kulala-nvim
           neoconf-nvim
-          # nvim-treehopper
           nvim-treesitter-parsers.nickel
           nvim-treesitter-textsubjects
           overseer-nvim
           treewalker-nvim
           vim-bazel
-          # vim-bundle-mako
           vim-jinja
           vim-nickel
         ]

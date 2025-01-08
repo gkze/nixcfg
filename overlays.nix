@@ -28,6 +28,28 @@ in
       );
     });
 
+    stars =
+      let
+        flakeRef = outputs.lib.flakeLock.stars;
+      in
+      prev.buildGoModule {
+        pname = normalizeName flakeRef.original.repo;
+        version = flakeRef.original.ref;
+        src = inputs.stars;
+        vendorHash = "sha256-wWX0P/xysioCCUS3M2ZIKd8i34Li/ANbgcql3oSE6yc=";
+      };
+
+    trdsql =
+      let
+        flakeRef = outputs.lib.flakeLock.trdsql;
+      in
+      prev.buildGoModule {
+        pname = normalizeName flakeRef.original.repo;
+        version = flakeRef.original.ref;
+        src = inputs.trdsql;
+        vendorHash = "sha256-PoIa58vdDPYGL9mjEeudRYqPfvvr3W+fX5c+NgRIoLg=";
+      };
+
     vimPlugins = prev.vimPlugins.extend (
       _: _: {
         treewalker-nvim = prev.vimUtils.buildVimPlugin {

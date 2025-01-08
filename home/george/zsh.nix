@@ -69,14 +69,10 @@
         name = "zsh-vi-mode-system-clipboard";
         src = "${src}/misc/zsh-plugins";
       }
-      {
-        name = "direnv";
-        src = "${zsh-completions}/share/zsh/site-functions";
-      }
-      {
-        name = "go";
-        src = "${zsh-completions}/share/zsh/site-functions";
-      }
+      # {
+      #   name = "direnv";
+      #   src = "${zsh-completions}/share/zsh/site-functions";
+      # }
     ];
   };
 }
