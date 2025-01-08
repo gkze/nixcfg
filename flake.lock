@@ -1029,7 +1029,9 @@
         "nixpkgs": "nixpkgs_2",
         "nixvim": "nixvim",
         "rust-overlay": "rust-overlay",
+        "stars": "stars",
         "stylix": "stylix",
+        "trdsql": "trdsql",
         "treefmt-nix": "treefmt-nix_2",
         "treewalker-nvim": "treewalker-nvim",
         "zsh-system-clipboard": "zsh-system-clipboard"
@@ -1052,6 +1054,23 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "stars": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1649353621,
+        "narHash": "sha256-quMqXW3O4MYD1rOB8n4F54Lwcel8uH6UI7tBVZnalhM=",
+        "owner": "gkze",
+        "repo": "gh-stars",
+        "rev": "397be40eba57fc0f6a83a6dd27cb2a642066bb8c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "gkze",
+        "ref": "v0.19.24",
+        "repo": "gh-stars",
         "type": "github"
       }
     },
@@ -1213,6 +1232,23 @@
       "original": {
         "owner": "tinted-theming",
         "repo": "base16-zed",
+        "type": "github"
+      }
+    },
+    "trdsql": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1730084060,
+        "narHash": "sha256-MkjQAOIXnydEmOFnnYrvE2TF2I0GqSrSRUAjd+/hHwc=",
+        "owner": "noborus",
+        "repo": "trdsql",
+        "rev": "bb8987b875311b5a39657bd654fc12522f92b706",
+        "type": "github"
+      },
+      "original": {
+        "owner": "noborus",
+        "ref": "v1.1.0",
+        "repo": "trdsql",
         "type": "github"
       }
     },
