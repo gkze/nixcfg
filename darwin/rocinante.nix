@@ -1,19 +1,18 @@
 {
   inputs,
   outputs,
-  pkgsFor,
+  lib,
   ...
 }:
 with outputs.lib;
 with inputs;
 let
   user = "george";
-  system = "aarch64-darwin";
   inherit (builtins) baseNameOf;
-  inherit (pkgsFor.${system}.lib) removeSuffix;
+  inherit (lib) removeSuffix;
 in
 mkSystem {
-  inherit system;
+  system = "aarch64-darwin";
   hostname = removeSuffix ".nix" (baseNameOf ./.);
   users = [ user ];
   homeModules = [ "${modulesPath}/home/macbook-pro-16in.nix" ];

@@ -24,18 +24,29 @@
   ];
 
   home = {
-    file.".gnupg/gpg-agent.conf".text =
-      let
-        prog =
-          {
-            darwin = "${pkgs.pinentry_mac}/bin/pinentry-mac";
-            linux = "${pkgs.pinentry}/bin/pinentry";
-          }
-          .${slib.kernel pkgs.stdenv.hostPlatform.system};
-      in
-      ''
-        pinentry-program ${prog}
+    file = {
+      ".gnupg/gpg-agent.conf".text =
+        let
+          prog =
+            {
+              darwin = "${pkgs.pinentry_mac}/bin/pinentry-mac";
+              linux = "${pkgs.pinentry}/bin/pinentry";
+            }
+            .${slib.kernel pkgs.stdenv.hostPlatform.system};
+        in
+        ''
+          pinentry-program ${prog}
+        '';
+      "${config.xdg.configHome}/ghostty/config".text = ''
+        font-family = Hack Nerd Font Mono
+        font-size = 12
+        macos-option-as-alt = left
+        keybind = alt+left=unbind
+        theme = catppuccin-frappe
+        window-height = 80
+        window-width = 220
       '';
+    };
     sessionPath = [
       "$HOME/.cargo/bin"
       "$HOME/.local/bin"
