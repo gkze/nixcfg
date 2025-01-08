@@ -374,7 +374,10 @@ in
         };
         neogit = {
           enable = true;
-          settings.integrations.diffview = true;
+          settings = {
+            process_spinner = false;
+            integrations.diffview = true;
+          };
         };
         colorizer = {
           enable = true;
