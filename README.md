@@ -4,12 +4,13 @@ Unified configuration for macOS and Linux systems from a single point of control
 
 - **Darwin (macOS)**
 
-  - 2021 M1 MacBook Pro
+  - 2021 M1 Max MacBook Pro (16")
+  - 2024 M4 Max MacBook Pro (16") (WIP)
+
 
 - **Linux (NixOS)**
 
-  - [ThinkPad X1 Carbon (Gen 10)](https://psref.lenovo.com/Detail/ThinkPad/ThinkPad_X1_Carbon_Gen_10?M=21CB00F7US)
-  - [ThinkPad X1 Carbon (Gen 12)](https://psref.lenovo.com/Detail/ThinkPad_X1_Carbon_Gen_12?M=21KC009XUS)
+  - HP ZBook Firefly 14 G7 (WIP)
 
 ## Installation
 
@@ -18,16 +19,19 @@ Unified configuration for macOS and Linux systems from a single point of control
   - Use the [Determinate Systems Nix Installer](https://github.com/DeterminateSystems/nix-installer) to install Nix on macOS
   - For the first run, use `nix -v run`
 
+
 - **Linux (nixOS)**
 
-  For an existing system, use `sudo nixos-rebuild switch --flake .` for the first run
+  For an existing system, use `sudo nixos-rebuild switch --flake .`
+  
+  (fresh install instruction wip)
 
 ## Usage
 
 After changes are made:
 
 ```
-nh os switch -a .
+nh (os|darwin) switch -a . # os for NixOS, darwin for macOS
 ```
 
 ## Roadmap
