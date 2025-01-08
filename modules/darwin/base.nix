@@ -1,5 +1,6 @@
 { pkgs, ... }:
 {
+  imports = [ ./dock.nix ];
   system = {
     keyboard = {
       enableKeyMapping = true;
