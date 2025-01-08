@@ -370,10 +370,7 @@ in
             useLibuvFileWatcher = true;
           };
           sourceSelector.winbar = true;
-          window.mappings = {
-            "<leader>[" = "prev_source";
-            "<leader>]" = "next_source";
-          };
+          window.mappings.Z = "expand_all";
         };
         neogit = {
           enable = true;

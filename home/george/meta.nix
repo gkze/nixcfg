@@ -9,5 +9,5 @@
   emails = {
     personal = "george.kontridze@gmail.com";
   };
-  gpg.keys.personal = "9578FF9AB0BDE622307E7E833A7266FAC0D2F08D";
+  gpg.keys.personal = "9746796E8D0F781FE91F31E7794655896402BD6E";
 }

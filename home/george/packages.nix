@@ -14,10 +14,10 @@
       gawk
       gita
       glab
-      graphviz
       gnused
       gnutar
       gping
+      graphviz
       hoppscotch
       httpie
       jnv
@@ -26,9 +26,14 @@
       nh
       obsidian
       procs
-      rustup
       rsync
+      rustup
       sd
+      sequoia-chameleon-gnupg
+      sequoia-sq
+      sequoia-sqop
+      sequoia-sqv
+      sequoia-wot
       slack
       spacedrive
       superfile
