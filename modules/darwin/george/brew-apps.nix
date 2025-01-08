@@ -1,6 +1,13 @@
 {
   homebrew = {
-    casks = [ "spotify" ];
+    casks = [
+      "appcleaner"
+      "arc"
+      "ghostty@tip"
+      "logi-options+"
+      "notion"
+      "spotify"
+    ];
     masApps = {
       "AdGuard for Safari" = 1440147259;
       "Apple Configurator" = 1037126344;

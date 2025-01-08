@@ -86,6 +86,13 @@ rec {
         (userConfigPath username)
       ] ++ modules;
     };
+  impMaybeWithArgs =
+    path: args:
+    let
+      imported = import path;
+      inherit (builtins) isFunction;
+    in
+    if isFunction imported then imported args else imported;
   mkSystem =
     {
       homeModules ? [ ],
@@ -133,11 +140,13 @@ rec {
                       modArgs = args // { username = user; } // userMetaIfExists user;
                     in
                     {
-                      imports = map (mod: import mod modArgs) [
-                        "${modulesPath}/home/base.nix"
-                        "${modulesPath}/home/${kernel system}.nix"
-                        "${src}/home/${user}/configuration.nix"
-                      ];
+                      imports =
+                        map (mod: impMaybeWithArgs mod modArgs) [
+                          "${modulesPath}/home/base.nix"
+                          "${modulesPath}/home/${kernel system}.nix"
+                          "${src}/home/${user}/configuration.nix"
+                        ]
+                        ++ homeModules;
                     };
                 }) users
               );

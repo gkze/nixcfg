@@ -1,6 +1,7 @@
 {
   config,
   inputs,
+  pkgs,
   slib,
   system,
   userMeta,
@@ -65,10 +66,11 @@ in
       delta.features = "catppuccin-frappe";
       diff.colorMoved = "default";
       fetch.prune = true;
+      gpg.program = "${pkgs.sequoia-chameleon-gnupg}/bin/gpg-sq";
       merge.conflictstyle = "diff3";
       rebase.pull = true;
-      user.signingkey = userMeta.gpg.keys.personal;
       url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
+      user.signingkey = userMeta.gpg.keys.personal;
     };
     includes = [
       { path = "${inputs.catppuccin-delta}/catppuccin.gitconfig"; }
