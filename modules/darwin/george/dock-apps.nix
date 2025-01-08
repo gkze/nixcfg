@@ -10,6 +10,14 @@
       { path = "/Applications/Ghostty.app"; }
       { path = "/Applications/Spotify.app/"; }
       { path = "/System/Applications/System Settings.app"; }
+      {
+        path = "/Applications";
+        section = "others";
+      }
+      {
+        path = "/Users/george/Downloads";
+        section = "others";
+      }
     ];
   };
 }

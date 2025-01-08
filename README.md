@@ -7,7 +7,6 @@ Unified configuration for macOS and Linux systems from a single point of control
   - 2021 M1 Max MacBook Pro (16")
   - 2024 M4 Max MacBook Pro (16") (WIP)
 
-
 - **Linux (NixOS)**
 
   - HP ZBook Firefly 14 G7 (WIP)
@@ -19,11 +18,10 @@ Unified configuration for macOS and Linux systems from a single point of control
   - Use the [Determinate Systems Nix Installer](https://github.com/DeterminateSystems/nix-installer) to install Nix on macOS
   - For the first run, use `nix -v run`
 
-
 - **Linux (nixOS)**
 
   For an existing system, use `sudo nixos-rebuild switch --flake .`
-  
+
   (fresh install instruction wip)
 
 ## Usage
