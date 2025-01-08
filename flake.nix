@@ -93,8 +93,18 @@
       flake = false;
     };
 
+    stars = {
+      url = "github:gkze/gh-stars/v0.19.24";
+      flake = false;
+    };
+
     treewalker-nvim = {
       url = "github:aaronik/treewalker.nvim";
+      flake = false;
+    };
+
+    trdsql = {
+      url = "github:noborus/trdsql/v1.1.0";
       flake = false;
     };
 

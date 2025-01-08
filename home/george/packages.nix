@@ -36,10 +36,10 @@
       sequoia-wot
       slack
       spacedrive
+      stars
       superfile
       tokei
-      # TODO: overlay
-      # trdsql
+      trdsql
       uv
       viddy
       yq-go
