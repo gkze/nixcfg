@@ -16,7 +16,6 @@ in
       default = stdenv.isDarwin;
       example = false;
     };
-
     local.dock.entries = mkOption {
       description = "Entries on the Dock";
       type =
@@ -37,7 +36,6 @@ in
       default = [ ];
     };
   };
-
   config = mkIf (cfg.enable && builtins.length cfg.entries > 0) (
     let
       normalize = path: if hasSuffix ".app" path then path + "/" else path;
