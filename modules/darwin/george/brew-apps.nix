@@ -4,6 +4,7 @@
       "airfoil"
       "appcleaner"
       "arc"
+      "cursor"
       "ghostty@tip"
       "logi-options+"
       "notion"
