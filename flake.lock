@@ -1034,6 +1034,7 @@
         "trdsql": "trdsql",
         "treefmt-nix": "treefmt-nix_2",
         "treewalker-nvim": "treewalker-nvim",
+        "vim-bundle-mako": "vim-bundle-mako",
         "zsh-system-clipboard": "zsh-system-clipboard"
       }
     },
@@ -1306,6 +1307,22 @@
       "original": {
         "owner": "aaronik",
         "repo": "treewalker.nvim",
+        "type": "github"
+      }
+    },
+    "vim-bundle-mako": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1649201414,
+        "narHash": "sha256-q5PgPAKjyjLUuKvK6S1m8huQ1G7SoFvq9bmQmlMoS1g=",
+        "owner": "sophacles",
+        "repo": "vim-bundle-mako",
+        "rev": "09d2a93b1a853972ccfca44495d597c717789232",
+        "type": "github"
+      },
+      "original": {
+        "owner": "sophacles",
+        "repo": "vim-bundle-mako",
         "type": "github"
       }
     },

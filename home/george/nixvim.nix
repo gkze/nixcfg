@@ -605,6 +605,7 @@ in
           overseer-nvim
           treewalker-nvim
           vim-bazel
+          vim-bundle-mako
           vim-jinja
           vim-nickel
         ]

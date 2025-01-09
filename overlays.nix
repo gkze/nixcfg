@@ -57,6 +57,12 @@ in
           version = inputs.treewalker-nvim.rev;
           src = inputs.treewalker-nvim;
         };
+
+        vim-bundle-mako = prev.vimUtils.buildVimPlugin {
+          pname = normalizeName outputs.lib.flakeLock.vim-bundle-mako.original.repo;
+          version = inputs.vim-bundle-mako.rev;
+          src = inputs.vim-bundle-mako;
+        };
       }
     );
   };
