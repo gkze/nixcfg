@@ -39,7 +39,7 @@
         '';
       "${config.xdg.configHome}/ghostty/config".text = ''
         font-family = Hack Nerd Font Mono
-        font-size = 12
+        font-size = 11
         macos-option-as-alt = left
         keybind = alt+left=unbind
         theme = catppuccin-frappe
