@@ -52,6 +52,10 @@ in
 
     vimPlugins = prev.vimPlugins.extend (
       _: _: {
+        blink-cmp = prev.vimPlugins.blink-cmp.overrideAttrs {
+          src = inputs.blink-cmp;
+        };
+
         treewalker-nvim = prev.vimUtils.buildVimPlugin {
           pname = normalizeName outputs.lib.flakeLock.treewalker-nvim.original.repo;
           version = inputs.treewalker-nvim.rev;

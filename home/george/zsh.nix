@@ -32,9 +32,9 @@
     initExtra = ''
       unalias &>/dev/null run-help && autoload run-help
       zmodload zsh/complist zsh/zle
-      autoload -U select-word-style
-      select-word-style shell
       zstyle ':completion:*' menu select
+      autoload -Uz +X select-word-style
+      select-word-style bash
       bindkey -M menuselect '^[[Z' reverse-menu-complete
       bindkey "^R" history-incremental-search-backward
       typeset -U PATH MANPATH

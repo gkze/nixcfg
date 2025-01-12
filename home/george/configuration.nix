@@ -199,9 +199,6 @@
       settings = {
         add_newline = false;
         line_break.disabled = true;
-        nix_shell.disabled = true;
-        nodejs.disabled = true;
-        python.disabled = true;
       };
     };
     topgrade = {

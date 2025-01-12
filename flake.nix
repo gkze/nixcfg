@@ -59,6 +59,10 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    blink-cmp = {
+      url = "github:Saghen/blink.cmp/main";
+      flake = false;
+    };
     bufresize-nvim = {
       url = "github:kwkarlwang/bufresize.nvim";
       flake = false;
@@ -156,10 +160,7 @@
           pkgs:
           with treefmt-nix.lib;
           let
-            shInclude = [
-              ".envrc"
-              "misc/yabai-center"
-            ];
+            shInclude = [ ".envrc" ];
             inherit
               (evalModule pkgs {
                 projectRootFile = "flake.nix";
@@ -187,7 +188,7 @@
             config
             // {
               build.wrapper = pkgs.writeShellScriptBin "treefmt-nix" ''
-                exec ${config.build.wrapper}/bin/treefmt --no-cache "$@"
+                exec ${lib.getExe config.build.wrapper} --no-cache "$@"
               '';
             }
           );
