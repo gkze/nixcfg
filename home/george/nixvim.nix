@@ -219,12 +219,27 @@ in
         conform-nvim = {
           enable = true;
           settings = {
+            formatters =
+              let
+                ruff_cmd = lib.getExe pkgs.ruff;
+              in
+              {
+                prettier.command = lib.getExe pkgs.nodePackages_latest.prettier;
+                ruff_fix.command = ruff_cmd;
+                ruff_format.command = ruff_cmd;
+                ruff_organize_imports.command = ruff_cmd;
+              };
             formatters_by_ft = {
               javascript = [ "prettier" ];
               javascriptreact = [ "prettier" ];
               lua = [ "stylua" ];
               typescript = [ "prettier" ];
               typescriptreact = [ "prettier" ];
+              python = [
+                "ruff_fix"
+                "ruff_format"
+                "ruff_organize_imports"
+              ];
             };
             format_on_save.lsp_format = "fallback";
           };
@@ -302,7 +317,7 @@ in
               settings = { };
             };
             pyright.enable = true;
-            ruff_lsp.enable = false;
+            ruff.enable = false;
             rust_analyzer = {
               enable = true;
               installCargo = true;
@@ -314,27 +329,27 @@ in
             typos_lsp.enable = true;
             yamlls = {
               enable = true;
-              extraOptions.settings.yaml.customTags = [
-                "!And sequence"
-                "!Base64 scalar"
-                "!Cidr scalar"
-                "!Condition scalar"
-                "!Equals sequence"
-                "!FindInMap sequence"
-                "!GetAZs scalar"
-                "!GetAtt scalar"
-                "!GetAtt sequence"
-                "!If sequence"
-                "!ImportValue scalar"
-                "!Join sequence"
-                "!Not sequence"
-                "!Or sequence"
-                "!Ref scalar"
-                "!Select sequence"
-                "!Split sequence"
-                "!Sub scalar"
-                "!Transform mapping"
-              ];
+              # extraOptions.settings.yaml.customTags = [
+              #   "!And sequence"
+              #   "!Base64 scalar"
+              #   "!Cidr scalar"
+              #   "!Condition scalar"
+              #   "!Equals sequence"
+              #   "!FindInMap sequence"
+              #   "!GetAZs scalar"
+              #   "!GetAtt scalar"
+              #   "!GetAtt sequence"
+              #   "!If sequence"
+              #   "!ImportValue scalar"
+              #   "!Join sequence"
+              #   "!Not sequence"
+              #   "!Or sequence"
+              #   "!Ref scalar"
+              #   "!Select sequence"
+              #   "!Split sequence"
+              #   "!Sub scalar"
+              #   "!Transform mapping"
+              # ];
             };
           };
         };
@@ -443,7 +458,25 @@ in
         };
         telescope = {
           enable = true;
-          settings.defaults.layout_config.preview_width = 0.5;
+          settings.defaults = {
+            layout_config.preview_width = 0.5;
+            mappings.i."<CR>".__raw = ''
+              function(prompt_bufnr)
+                local picker = require('telescope.actions.state').get_current_picker(prompt_bufnr)
+                local multi = picker:get_multi_selection()
+                if not vim.tbl_isempty(multi) then
+                  require('telescope.actions').close(prompt_bufnr)
+                  for _, j in pairs(multi) do
+                    if j.path ~= nil then
+                      vim.cmd(string.format('%s %s', 'edit', j.path))
+                    end
+                  end
+                else
+                  require('telescope.actions').select_default(prompt_bufnr)
+                end
+              end
+            '';
+          };
         };
         toggleterm = {
           enable = true;

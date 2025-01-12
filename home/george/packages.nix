@@ -7,12 +7,14 @@
       curlie
       czkawka
       dasel
+      dbeaver-bin
       du-dust
       dua
       duf
       file
       gawk
       gita
+      gitbutler
       glab
       gnused
       gnutar
