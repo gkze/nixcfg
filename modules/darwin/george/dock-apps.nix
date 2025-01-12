@@ -9,6 +9,7 @@
       { path = "/Applications/Arc.app"; }
       { path = "/Applications/Ghostty.app"; }
       { path = "/Applications/Spotify.app/"; }
+      { path = "/Applications/Notion.app"; }
       { path = "/System/Applications/System Settings.app"; }
       {
         path = "/Applications";

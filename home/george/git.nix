@@ -1,6 +1,7 @@
 {
   config,
   inputs,
+  lib,
   pkgs,
   slib,
   system,
@@ -43,10 +44,10 @@ in
           "refs/heads/"
           "--no-merged"
           "|"
-          "sed"
+          "${lib.getExe pkgs.gnused}"
           "'s/ /\t/'"
           "|"
-          "column"
+          "${pkgs.util-linux}/bin/column"
           "--separator=$'\t'"
           "--table"
           "--table-columns='${header}'"
