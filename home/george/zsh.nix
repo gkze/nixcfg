@@ -23,11 +23,8 @@
       size = 100000;
     };
     completionInit = ''
-      autoload -Uz +X compinit bashcompinit
-      for dump in ''${ZDOTDIR}/.zcompdump(N.mh+24); do
-        compinit && bashcompinit
-      done
-      compinit -C && bashcompinit -C
+      autoload -U compinit bashcompinit
+      compinit && bashcompinit
     '';
     initExtra = ''
       unalias &>/dev/null run-help && autoload run-help
@@ -69,10 +66,19 @@
         name = "zsh-vi-mode-system-clipboard";
         src = "${src}/misc/zsh-plugins";
       }
-      # {
-      #   name = "direnv";
-      #   src = "${zsh-completions}/share/zsh/site-functions";
-      # }
+      {
+        name = "docker";
+        src = runCommand "_docker" { buildInputs = [ docker ]; } ''
+          mkdir $out
+          docker completion zsh > $out/_docker
+        '';
+        file = "_docker";
+      }
+      {
+        name = "aws";
+        src = "${pkgs.awscli2}/share/zsh/site-functions";
+        file = "_aws";
+      }
     ];
   };
 }

@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  slib,
   ...
 }:
 with lib;
@@ -25,8 +26,19 @@ in
     };
   };
 
-  config = mkIf cfg.enable {
-    home.packages = with pkgs; [ (python3.withPackages cfg.packages) ];
-    xdg.configFile."ptpython/config.py".source = ./ptpython.py;
-  };
+  config =
+    let
+      configPath =
+        {
+          darwin = "Library/Application Support";
+          linux = ".config";
+        }
+        .${slib.kernel pkgs.stdenv.hostPlatform.system};
+    in
+    mkIf cfg.enable {
+      home = {
+        file."${configPath}/ptpython/config.py".source = ./ptpython.py;
+        packages = with pkgs; [ (python3.withPackages cfg.packages) ];
+      };
+    };
 }
