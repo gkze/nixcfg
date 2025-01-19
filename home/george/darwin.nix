@@ -1,4 +1,7 @@
-{ pkgs, ... }:
+{ config, pkgs, ... }:
+let
+  localZshSiteFuncsPath = "zsh/site-functions";
+in
 {
   launchd.agents = {
     ssh-add = {
@@ -26,4 +29,14 @@
       };
     };
   };
+
+  xdg.dataFile.${localZshSiteFuncsPath} = {
+    source = pkgs.homebrew-zsh-completion;
+    recursive = true;
+    executable = true;
+  };
+
+  programs.zsh.initExtraBeforeCompInit = ''
+    fpath+=${config.xdg.dataHome}/${localZshSiteFuncsPath}
+  '';
 }

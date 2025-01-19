@@ -46,6 +46,11 @@
         window-height = 80
         window-width = 220
       '';
+      ".local/bin" = {
+        source = ./bin;
+        recursive = true;
+        executable = true;
+      };
     };
     sessionPath = [
       "$HOME/.cargo/bin"
@@ -99,6 +104,10 @@
     awscli.enable = true;
     bat = {
       enable = true;
+      syntaxes.kdl = {
+        src = pkgs.sublime-kdl;
+        file = "KDL1.sublime-syntax";
+      };
       themes."Catppuccin Frappe" = {
         src = inputs.catppuccin-bat;
         file = "themes/Catppuccin Frappe.tmTheme";

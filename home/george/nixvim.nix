@@ -21,6 +21,7 @@ in
         ];
         cursorline = true;
         cursorcolumn = true;
+        exrc = true;
         foldlevel = 99;
         foldcolumn = "1";
         foldenable = true;
@@ -307,6 +308,7 @@ in
             #   package = pkgs.jinja-lsp;
             # };
             jsonls.enable = true;
+            lua_ls.enable = true;
             nickel_ls.enable = true;
             nil_ls = {
               enable = true;
@@ -603,6 +605,7 @@ in
         illuminate.enable = true;
         inc-rename.enable = true;
         indent-blankline.enable = true;
+        lazydev.enable = true;
         luasnip.enable = true;
         lsp-format.enable = true;
         lspkind.enable = true;

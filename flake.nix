@@ -23,6 +23,10 @@
       url = "github:numtide/devshell";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    blink-cmp = {
+      url = "github:Saghen/blink.cmp/main";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     firefox = {
       url = "github:nix-community/flake-firefox-nightly";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -59,10 +63,6 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    blink-cmp = {
-      url = "github:Saghen/blink.cmp/main";
-      flake = false;
-    };
     bufresize-nvim = {
       url = "github:kwkarlwang/bufresize.nvim";
       flake = false;
@@ -89,6 +89,10 @@
     };
     kdl-vim = {
       url = "github:imsnif/kdl.vim";
+      flake = false;
+    };
+    sublime-kdl = {
+      url = "github:eugenesvk/sublime-kdl/2.0.2";
       flake = false;
     };
     stars = {
@@ -160,7 +164,14 @@
           pkgs:
           with treefmt-nix.lib;
           let
-            shInclude = [ ".envrc" ];
+            ruffInclude = map (p: "home/george/${p}") [
+              "bin/git-ignore"
+              "ptpython.py"
+            ];
+            shInclude = [
+              ".envrc"
+              "misc/zsh-plugins/*.zsh"
+            ];
             inherit
               (evalModule pkgs {
                 projectRootFile = "flake.nix";
@@ -169,8 +180,14 @@
                   nixfmt.enable = true;
                   deadnix.enable = true;
                   statix.enable = true;
-                  ruff-check.enable = true;
-                  ruff-format.enable = true;
+                  ruff-check = {
+                    enable = true;
+                    includes = ruffInclude;
+                  };
+                  ruff-format = {
+                    enable = true;
+                    includes = ruffInclude;
+                  };
                   shellcheck = {
                     enable = true;
                     includes = shInclude;

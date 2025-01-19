@@ -12,11 +12,18 @@ let
   inherit (builtins) concatStringsSep;
 in
 {
-  home.file."${config.xdg.configHome}/git/personal".text = ''
-    [user]
-      name = ${userMeta.name.user.github}
-      email = ${userMeta.emails.personal}
-  '';
+  home.file = {
+    "${config.xdg.configHome}/git/personal".text = ''
+      [user]
+        name = ${userMeta.name.user.github}
+        email = ${userMeta.emails.personal}
+    '';
+    "${config.xdg.configHome}/git/town".text = ''
+      [user]
+        name = ${userMeta.name.user.github}
+        email = ${userMeta.emails.town}
+    '';
+  };
   programs.git = {
     enable = true;
     aliases = {
@@ -73,20 +80,24 @@ in
       url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
       user.signingkey = userMeta.gpg.keys.personal;
     };
-    includes = [
-      { path = "${inputs.catppuccin-delta}/catppuccin.gitconfig"; }
-      {
-        path = "${config.xdg.configHome}/git/personal";
-        condition = "gitdir:${config.xdg.configHome}/nixcfg/**";
-      }
-      {
-        path = "${config.xdg.configHome}/git/personal";
-        condition = "gitdir:${config.xdg.configHome}/nixcfg-v2/**";
-      }
-      {
-        path = "${config.xdg.configHome}/git/personal";
-        condition = "gitdir:~/${slib.srcDirBase system}/github.com/**";
-      }
-    ];
+    includes =
+      let
+        srcDirBase = slib.srcDirBase system;
+      in
+      [
+        { path = "${inputs.catppuccin-delta}/catppuccin.gitconfig"; }
+        {
+          path = "${config.xdg.configHome}/git/personal";
+          condition = "gitdir:${config.xdg.configHome}/nixcfg/**";
+        }
+        {
+          path = "${config.xdg.configHome}/git/personal";
+          condition = "gitdir:~/${srcDirBase}/github.com/**";
+        }
+        {
+          path = "${config.xdg.configHome}/git/town";
+          condition = "gitdir:~/${srcDirBase}/github.com/townco/**";
+        }
+      ];
   };
 }

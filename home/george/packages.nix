@@ -4,6 +4,7 @@
     with pkgs;
     [
       cachix
+      coreutils
       curlie
       czkawka
       dasel
