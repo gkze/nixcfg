@@ -2,5 +2,5 @@
 outputs.lib.mkHome {
   system = "aarch64-darwin";
   username = "george";
-  modules = [ "${outputs.lib.modulesPath}/home/macbook-pro-m1-16in.nix" ];
+  modules = [ "${outputs.lib.modulesPath}/home/macbook-pro-16in.nix" ];
 }
