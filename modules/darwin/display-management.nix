@@ -8,8 +8,8 @@
     skhd = {
       enable = true;
       skhdConfig = ''
-        cmd + shift - return : open -a /Applications/Arc.app
-        cmd - return : open -a /Applications/Ghostty.app
+        alt + shift - return : open -a /Applications/Arc.app
+        alt - return : open -a /Applications/Ghostty.app
       '';
     };
   };

@@ -5,6 +5,27 @@ let
 in
 {
   default = _: prev: {
+    blink-cmp = inputs.blink-cmp.packages.default;
+
+    homebrew-zsh-completion = prev.stdenvNoCC.mkDerivation {
+      name = "brew-zsh-compmletion";
+      src = builtins.fetchurl {
+        url = outputs.lib.ghRaw {
+          owner = "Homebrew";
+          repo = "brew";
+          rev = "9260c966b1e941e37f1895511a1ee6771124be6b";
+          path = "completions/zsh/_brew";
+        };
+        sha256 = "1b0azwfh578hz0vrj9anqx1blf6cmrm6znyd6my45yydaga6s9d1";
+      };
+      dontUnpack = true;
+      installPhase = ''
+        mkdir $out/
+        cp -r $src $out/_brew
+        chmod +x $out/_brew
+      '';
+    };
+
     nh = prev.nh.overrideAttrs (oldAttrs: rec {
       version = outputs.lib.flakeLock.nh.original.ref;
       src = inputs.nh;
@@ -23,10 +44,24 @@ in
         prev.lib.const {
           inherit src;
           name = "${oldAttrs.pname}-${version}-vendor.tar.gz";
-          outputHash = "sha256-s5nq3/IDF0DnWXlqoTSjyOZfjtce+MzdRMWwUKzw2UE=";
+          outputHash = "sha256-cQDYuYqNJ4BND0P2oiwz1dqL7RxfqhL2Nk4NNAsIhOw=";
         }
       );
     });
+
+    # https://github.com/NixOS/nixpkgs/pull/374697
+    ruff = prev.ruff.overrideAttrs { checkFlags = [ ]; };
+
+    sublime-kdl =
+      let
+        flakeRef = outputs.lib.flakeLock.sublime-kdl;
+      in
+      prev.stdenvNoCC.mkDerivation {
+        pname = normalizeName flakeRef.original.repo;
+        version = flakeRef.original.ref;
+        src = inputs.sublime-kdl;
+        installPhase = "cp -r $src $out";
+      };
 
     stars =
       let
@@ -52,10 +87,6 @@ in
 
     vimPlugins = prev.vimPlugins.extend (
       _: _: {
-        blink-cmp = prev.vimPlugins.blink-cmp.overrideAttrs {
-          src = inputs.blink-cmp;
-        };
-
         treewalker-nvim = prev.vimUtils.buildVimPlugin {
           pname = normalizeName outputs.lib.flakeLock.treewalker-nvim.original.repo;
           version = inputs.treewalker-nvim.rev;
