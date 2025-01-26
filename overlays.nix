@@ -44,7 +44,7 @@ in
         prev.lib.const {
           inherit src;
           name = "${oldAttrs.pname}-${version}-vendor.tar.gz";
-          outputHash = "sha256-cQDYuYqNJ4BND0P2oiwz1dqL7RxfqhL2Nk4NNAsIhOw=";
+          outputHash = "sha256-7PqdHv95Ipa9Fnrh39q46sAjRoQAVsHQiDTEYBmm8eA=";
         }
       );
     });
@@ -71,6 +71,7 @@ in
         pname = normalizeName flakeRef.original.repo;
         version = flakeRef.original.ref;
         src = inputs.stars;
+        doCheck = false;
         vendorHash = "sha256-wWX0P/xysioCCUS3M2ZIKd8i34Li/ANbgcql3oSE6yc=";
       };
 

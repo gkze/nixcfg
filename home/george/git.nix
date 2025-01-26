@@ -74,7 +74,7 @@ in
       delta.features = "catppuccin-frappe";
       diff.colorMoved = "default";
       fetch.prune = true;
-      gpg.program = "${pkgs.sequoia-chameleon-gnupg}/bin/gpg-sq";
+      gpg.program = lib.getExe pkgs.sequoia-chameleon-gnupg;
       merge.conflictstyle = "diff3";
       rebase.pull = true;
       url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
