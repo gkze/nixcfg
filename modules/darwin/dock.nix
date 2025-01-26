@@ -1,13 +1,14 @@
 {
   config,
-  pkgs,
   lib,
+  pkgs,
   ...
 }:
 with lib;
 let
   cfg = config.local.dock;
   inherit (pkgs) stdenv dockutil;
+  dockutilExe = lib.getExe dockutil;
 in
 {
   options = {
@@ -72,16 +73,16 @@ in
       wantURIs = concatMapStrings (entry: "${entryURI entry.path}\n") cfg.entries;
       createEntries = concatMapStrings (
         entry:
-        "${dockutil}/bin/dockutil --no-restart --add '${entry.path}' --section ${entry.section} ${entry.options}\n"
+        "${dockutilExe} --no-restart --add '${entry.path}' --section ${entry.section} ${entry.options}\n"
       ) cfg.entries;
     in
     {
       system.activationScripts.postUserActivation.text = ''
         echo >&2 "Setting up the Dock..."
-        haveURIs="$(${dockutil}/bin/dockutil --list | ${pkgs.coreutils}/bin/cut -f2)"
+        haveURIs="$(${dockutilExe} --list | ${dockutilExe} -f2)"
         if ! diff -wu <(echo -n "$haveURIs") <(echo -n '${wantURIs}') >&2 ; then
           echo >&2 "Resetting Dock."
-          ${dockutil}/bin/dockutil --no-restart --remove all
+          ${dockutilExe} --no-restart --remove all
           ${createEntries}
           killall Dock
         else

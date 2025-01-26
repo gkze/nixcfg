@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ lib, pkgs, ... }:
 {
   services = {
     sketchybar = {
@@ -8,6 +8,7 @@
     skhd = {
       enable = true;
       skhdConfig = ''
+        alt + shift - c : open -a /Applications/Cursor.app
         alt + shift - return : open -a /Applications/Arc.app
         alt - return : open -a /Applications/Ghostty.app
       '';
@@ -21,6 +22,6 @@
 
   system.activationScripts.skhd-reload = {
     enable = true;
-    text = "${pkgs.skhd}/bin/skhd --reload";
+    text = "${lib.getExe pkgs.skhd} --reload";
   };
 }

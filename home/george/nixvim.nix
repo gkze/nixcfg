@@ -21,6 +21,7 @@ in
         ];
         cursorline = true;
         cursorcolumn = true;
+        expandtab = true;
         exrc = true;
         foldlevel = 99;
         foldcolumn = "1";
@@ -55,7 +56,10 @@ in
           trail = ".";
         };
         updatetime = 200;
+        shiftwidth = 4;
         signcolumn = "yes";
+        softtabstop = 4;
+        tabstop = 4;
       };
       colorschemes.catppuccin = {
         enable = true;
@@ -180,6 +184,7 @@ in
           enable = true;
           settings = {
             completion = {
+              ghost_text.enabled = true;
               trigger.prefetch_on_insert = true;
               documentation = {
                 auto_show = true;
@@ -231,16 +236,17 @@ in
                 ruff_organize_imports.command = ruff_cmd;
               };
             formatters_by_ft = {
+              html = [ "prettier" ];
               javascript = [ "prettier" ];
               javascriptreact = [ "prettier" ];
               lua = [ "stylua" ];
-              typescript = [ "prettier" ];
-              typescriptreact = [ "prettier" ];
               python = [
                 "ruff_fix"
                 "ruff_format"
                 "ruff_organize_imports"
               ];
+              typescript = [ "prettier" ];
+              typescriptreact = [ "prettier" ];
             };
             format_on_save.lsp_format = "fallback";
           };
@@ -300,19 +306,24 @@ in
             cssls.enable = true;
             dockerls.enable = true;
             efm.enable = true;
-            eslint.enable = true;
             gopls.enable = true;
             html.enable = true;
             # jinja_lsp = {
             #   enable = true;
             #   package = pkgs.jinja-lsp;
             # };
-            jsonls.enable = true;
+            jsonls = {
+              enable = true;
+              extraOptions.settings.json = {
+                schemas.__raw = "require('schemastore').json.schemas()";
+                validate.enable = true;
+              };
+            };
             lua_ls.enable = true;
             nickel_ls.enable = true;
             nil_ls = {
               enable = true;
-              settings.formatting.command = [ "${pkgs.nixfmt-rfc-style}/bin/nixfmt" ];
+              settings.formatting.command = [ (lib.getExe pkgs.nixfmt-rfc-style) ];
             };
             postgres_lsp = {
               enable = true;
@@ -458,6 +469,11 @@ in
             ];
           };
         };
+        schemastore = {
+          enable = true;
+          json.enable = false;
+          yaml.enable = true;
+        };
         telescope = {
           enable = true;
           settings.defaults = {
@@ -594,7 +610,6 @@ in
         barbecue.enable = true;
         bufdelete.enable = true;
         comment.enable = true;
-        copilot-vim.enable = true;
         diffview.enable = true;
         dressing.enable = true;
         fidget.enable = true;
@@ -617,12 +632,12 @@ in
         nui.enable = true;
         nvim-autopairs.enable = true;
         nvim-surround.enable = true;
+        octo.enable = true;
         oil.enable = true;
         undotree.enable = true;
         render-markdown.enable = true;
         rest.enable = true;
         scope.enable = true;
-        schemastore.enable = true;
         spectre.enable = true;
         smart-splits.enable = true;
         todo-comments.enable = true;
