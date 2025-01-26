@@ -1,6 +1,7 @@
 {
   config,
   inputs,
+  lib,
   pkgs,
   slib,
   system,
@@ -29,8 +30,8 @@
         let
           prog =
             {
-              darwin = "${pkgs.pinentry_mac}/bin/pinentry-mac";
-              linux = "${pkgs.pinentry}/bin/pinentry";
+              darwin = lib.getExe pkgs.pinentry_mac;
+              linux = lib.getExe pkgs.pinentry;
             }
             .${slib.kernel pkgs.stdenv.hostPlatform.system};
         in
@@ -92,7 +93,7 @@
       enable = true;
       settings = {
         terminal.shell = {
-          program = "${pkgs.zellij}/bin/zellij";
+          program = lib.getExe pkgs.zellij;
           args = [
             "attach"
             "--create"
@@ -216,6 +217,7 @@
         misc.disable = [
           "brew_cask"
           "brew_formula"
+          "home_manager"
         ];
         git.repos = [ (slib.srcDirBase system) ];
         misc = {
