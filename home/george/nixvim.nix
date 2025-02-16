@@ -227,13 +227,13 @@ in
           settings = {
             formatters =
               let
-                ruff_cmd = lib.getExe pkgs.ruff;
+                ruffCmd = lib.getExe pkgs.ruff;
               in
               {
                 prettier.command = lib.getExe pkgs.nodePackages_latest.prettier;
-                ruff_fix.command = ruff_cmd;
-                ruff_format.command = ruff_cmd;
-                ruff_organize_imports.command = ruff_cmd;
+                ruff_fix.command = ruffCmd;
+                ruff_format.command = ruffCmd;
+                ruff_organize_imports.command = ruffCmd;
               };
             formatters_by_ft = {
               html = [ "prettier" ];
@@ -251,13 +251,9 @@ in
             format_on_save.lsp_format = "fallback";
           };
         };
-        dap = {
-          enable = true;
-          extensions = {
-            dap-python.enable = true;
-            dap-ui.enable = true;
-          };
-        };
+        dap.enable = true;
+        dap-python.enable = true;
+        dap-ui.enable = true;
         gitlinker = {
           enable = true;
           mappings = "<C-c>l";

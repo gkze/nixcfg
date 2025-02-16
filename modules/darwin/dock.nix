@@ -7,7 +7,7 @@
 with lib;
 let
   cfg = config.local.dock;
-  inherit (pkgs) stdenv dockutil;
+  inherit (pkgs) stdenv coreutils dockutil;
   dockutilExe = lib.getExe dockutil;
 in
 {
@@ -79,7 +79,7 @@ in
     {
       system.activationScripts.postUserActivation.text = ''
         echo >&2 "Setting up the Dock..."
-        haveURIs="$(${dockutilExe} --list | ${dockutilExe} -f2)"
+        haveURIs="$(${dockutilExe} --list | ${coreutils}/bin/cut -f2)"
         if ! diff -wu <(echo -n "$haveURIs") <(echo -n '${wantURIs}') >&2 ; then
           echo >&2 "Resetting Dock."
           ${dockutilExe} --no-restart --remove all

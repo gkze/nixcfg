@@ -1,7 +1,6 @@
 { inputs, outputs, ... }:
 let
-  inherit (builtins) replaceStrings;
-  normalizeName = s: replaceStrings [ "." "_" ] [ "-" "-" ] s;
+  normalizeName = s: builtins.replaceStrings [ "." "_" ] [ "-" "-" ] s;
 in
 {
   default = _: prev: {
@@ -40,17 +39,11 @@ in
         installShellCompletion completions/*
       '';
 
-      cargoDeps = oldAttrs.cargoDeps.overrideAttrs (
-        prev.lib.const {
-          inherit src;
-          name = "${oldAttrs.pname}-${version}-vendor.tar.gz";
-          outputHash = "sha256-7PqdHv95Ipa9Fnrh39q46sAjRoQAVsHQiDTEYBmm8eA=";
-        }
-      );
+      cargoDeps = prev.rustPlatform.fetchCargoVendor {
+        inherit src;
+        hash = "sha256-9bS25sVb8WBvO8HOCi1eN1aesWC352r6ydKJe2ldV4U=";
+      };
     });
-
-    # https://github.com/NixOS/nixpkgs/pull/374697
-    ruff = prev.ruff.overrideAttrs { checkFlags = [ ]; };
 
     sublime-kdl =
       let

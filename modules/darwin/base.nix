@@ -38,8 +38,6 @@
 
   security.pam.enableSudoTouchIdAuth = true;
 
-  services.nix-daemon.enable = true;
-
   launchd.daemons = {
     maxfiles.serviceConfig = {
       Label = "limit.maxfiles";
@@ -76,5 +74,5 @@
     };
   };
 
-  system.stateVersion = 4;
+  system.stateVersion = 6;
 }

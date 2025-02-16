@@ -35,6 +35,9 @@
       bindkey -M menuselect '^[[Z' reverse-menu-complete
       bindkey "^R" history-incremental-search-backward
       typeset -U PATH MANPATH
+
+      # TODO: find a better place for this
+      compdef _gpg gpg-sq
     '';
     plugins = with pkgs; [
       {
