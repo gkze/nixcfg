@@ -238,6 +238,7 @@
     };
     zellij = {
       enable = true;
+      enableZshIntegration = false;
       settings = {
         keybinds.normal = {
           "bind \"Alt s\"".Clear = { };
