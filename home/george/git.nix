@@ -99,7 +99,7 @@ in
         }
       ];
     signing = {
-      format = "openpgp";
+      format = lib.mkForce "openpgp";
       signer = lib.getExe pkgs.sequoia-chameleon-gnupg;
     };
   };

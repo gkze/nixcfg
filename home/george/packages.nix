@@ -6,6 +6,7 @@
       ast-grep
       cachix
       coreutils
+      csvlens
       curlie
       czkawka
       dasel
