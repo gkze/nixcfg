@@ -13,7 +13,6 @@
         [
           "core"
           "cask"
-          "bundle"
         ]
     );
     mutableTaps = false;
