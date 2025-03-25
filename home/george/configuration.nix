@@ -232,10 +232,10 @@
       enableZshIntegration = true;
       settings.manager.sort_by = "alphabetical";
     };
-    zed-editor = {
-      enable = true;
-      userSettings.vim_mode = true;
-    };
+    # zed-editor = {
+    #   enable = true;
+    #   userSettings.vim_mode = true;
+    # };
     zellij = {
       enable = true;
       enableZshIntegration = false;

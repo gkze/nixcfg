@@ -5,7 +5,7 @@
     [
       ast-grep
       cachix
-      coreutils
+      (coreutils.override { minimal = false; })
       csvlens
       curlie
       czkawka
@@ -26,10 +26,10 @@
       hoppscotch
       httpie
       jnv
+      mdq
       moreutils
       nerd-fonts.hack
       nh
-      obsidian
       procs
       rsync
       rustup

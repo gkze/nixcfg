@@ -10,6 +10,7 @@
       nixvim.enable = false;
       # https://github.com/danth/stylix/issues/865
       gnome-text-editor.enable = false;
+      vscode.enable = false;
     };
     iconTheme = {
       enable = !stdenv.isDarwin;
