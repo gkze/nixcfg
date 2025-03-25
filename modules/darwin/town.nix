@@ -1,5 +1,9 @@
 {
   homebrew = {
+    casks = [
+      "1password"
+      "1password-cli"
+    ];
     masApps = {
       "Microsoft Word" = 462054704;
       "Microsoft Outlook" = 985367838;

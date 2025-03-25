@@ -602,7 +602,8 @@ in
           enable = true;
           settings.expose_as_code_action = "all";
         };
-        avante.enable = true;
+        # TODO: re-enable
+        avante.enable = false;
         barbecue.enable = true;
         bufdelete.enable = true;
         comment.enable = true;

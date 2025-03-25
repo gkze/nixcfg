@@ -1,7 +1,6 @@
 {
   homebrew = {
     casks = [
-      "1password"
       "airfoil"
       "appcleaner"
       "arc"
@@ -23,6 +22,7 @@
       "rapidapi"
       "slack"
       "spotify"
+      "zed@preview"
     ];
     masApps = {
       "AdGuard for Safari" = 1440147259;

@@ -25,7 +25,9 @@ in
       '';
     };
 
-    nh = prev.nh.overrideAttrs (oldAttrs: rec {
+    mdq = (prev.callPackage inputs.naersk { }).buildPackage { src = inputs.mdq; };
+
+    nh = prev.nh.overrideAttrs rec {
       version = outputs.lib.flakeLock.nh.original.ref;
       src = inputs.nh;
 
@@ -41,9 +43,9 @@ in
 
       cargoDeps = prev.rustPlatform.fetchCargoVendor {
         inherit src;
-        hash = "sha256-sE0aNNrnF/l75whiyQ2AeMfTC2w/g5xMDAUxleZkeik=";
+        hash = "sha256-GnRLUV5dyQgcjBBQXzjW0dvfHqIrlBlIup4b7oL8InI=";
       };
-    });
+    };
 
     sublime-kdl =
       let
@@ -66,6 +68,19 @@ in
         src = inputs.stars;
         doCheck = false;
         vendorHash = "sha256-wWX0P/xysioCCUS3M2ZIKd8i34Li/ANbgcql3oSE6yc=";
+      };
+
+    turbo-unwrapped =
+      let
+        flakeRef = outputs.lib.flakeLock.turbo;
+      in
+      prev.turbo-unwrapped.overrideAttrs rec {
+        src = inputs.turbo;
+        version = flakeRef.original.ref;
+        cargoDeps = prev.rustPlatform.fetchCargoVendor {
+          inherit src;
+          hash = "sha256-pngzlmkntTCv5/aw1UNbDGNQOVtMgFZHc2woj6R0vys=";
+        };
       };
 
     trdsql =
