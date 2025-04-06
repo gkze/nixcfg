@@ -90,12 +90,12 @@ in
           condition = "gitdir:${config.xdg.configHome}/nixcfg/**";
         }
         {
-          path = "${config.xdg.configHome}/git/personal";
-          condition = "gitdir:~/${srcDirBase}/github.com/**";
-        }
-        {
           path = "${config.xdg.configHome}/git/town";
           condition = "gitdir:~/${srcDirBase}/github.com/townco/**";
+        }
+        {
+          path = "${config.xdg.configHome}/git/personal";
+          condition = "gitdir:~/${srcDirBase}/github.com/**";
         }
       ];
     signing = {
