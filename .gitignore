@@ -7,3 +7,6 @@ result
 
 # Needed for formatting .vscode/settings.json
 !.vscode/
+
+# Ruff cache
+.ruff_cache/

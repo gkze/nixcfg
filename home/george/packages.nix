@@ -3,9 +3,9 @@
   home.packages =
     with pkgs;
     [
+      (coreutils.override { minimal = false; })
       ast-grep
       cachix
-      (coreutils.override { minimal = false; })
       csvlens
       curlie
       czkawka
@@ -23,6 +23,7 @@
       gnutar
       gping
       graphviz
+      grex
       hoppscotch
       httpie
       jnv
@@ -47,6 +48,7 @@
       trdsql
       uv
       viddy
+      xan
       yq-go
     ]
     ++ lib.lists.optional pkgs.stdenv.isLinux wl-clipboard;
