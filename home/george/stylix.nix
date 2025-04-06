@@ -9,8 +9,10 @@
       bat.enable = false;
       nixvim.enable = false;
       # https://github.com/danth/stylix/issues/865
-      gnome-text-editor.enable = false;
+      gnome-text-editor.enable = pkgs.stdenv.isLinux;
       vscode.enable = false;
+      gnome.enable = pkgs.stdenv.isLinux;
+      gtk.enable = pkgs.stdenv.isLinux;
     };
     iconTheme = {
       enable = !stdenv.isDarwin;
@@ -18,8 +20,9 @@
       dark = "Papirus-Dark";
     };
     cursor = {
-      package = catppuccin-cursors.frappeBlue;
       name = "catppuccin-frappe-blue-cursors";
+      package = catppuccin-cursors.frappeBlue;
+      size = 11;
     };
     fonts = {
       serif = {

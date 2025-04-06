@@ -120,6 +120,7 @@
       enable = true;
       nix-direnv.enable = true;
       enableZshIntegration = true;
+      config.warn_timeout = 0;
     };
     eza.enable = true;
     fzf = {
@@ -246,6 +247,7 @@
           "bind \"Alt H\"".GoToPreviousTab = { };
         };
         session_serialization = false;
+        show_startup_tips = false;
         simplified_ui = true;
       };
     };

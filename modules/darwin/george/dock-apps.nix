@@ -9,6 +9,7 @@
       { path = "/Applications/Arc.app"; }
       { path = "/Applications/Ghostty.app"; }
       { path = "/Applications/Cursor.app"; }
+      { path = "/Applications/DataGrip.app"; }
       { path = "/Applications/Notion.app"; }
       { path = "/Applications/Figma.app"; }
       { path = "/Applications/Linear.app"; }
