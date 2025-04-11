@@ -70,30 +70,6 @@ in
         vendorHash = "sha256-wWX0P/xysioCCUS3M2ZIKd8i34Li/ANbgcql3oSE6yc=";
       };
 
-    turbo-unwrapped =
-      let
-        flakeRef = outputs.lib.flakeLock.turbo;
-      in
-      prev.turbo-unwrapped.overrideAttrs rec {
-        src = inputs.turbo;
-        version = flakeRef.original.ref;
-        cargoDeps = prev.rustPlatform.fetchCargoVendor {
-          inherit src;
-          hash = "sha256-pngzlmkntTCv5/aw1UNbDGNQOVtMgFZHc2woj6R0vys=";
-        };
-      };
-
-    trdsql =
-      let
-        flakeRef = outputs.lib.flakeLock.trdsql;
-      in
-      prev.buildGoModule {
-        pname = normalizeName flakeRef.original.repo;
-        version = flakeRef.original.ref;
-        src = inputs.trdsql;
-        vendorHash = "sha256-PoIa58vdDPYGL9mjEeudRYqPfvvr3W+fX5c+NgRIoLg=";
-      };
-
     vimPlugins = prev.vimPlugins.extend (
       _: _: {
         treewalker-nvim = prev.vimUtils.buildVimPlugin {
