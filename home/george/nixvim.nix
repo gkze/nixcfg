@@ -301,7 +301,8 @@ in
             biome.enable = false;
             cssls.enable = true;
             dockerls.enable = true;
-            efm.enable = true;
+            # Testing Taplo
+            # efm.enable = true;
             gopls.enable = true;
             html.enable = true;
             # jinja_lsp = {
@@ -333,7 +334,13 @@ in
               installRustc = true;
             };
             scheme_langserver.enable = !pkgs.stdenv.isDarwin;
-            taplo.enable = true;
+            taplo = {
+              enable = true;
+              settings.formatting = {
+                reorder_keys = true;
+                reorder_arrays = true;
+              };
+            };
             tailwindcss.enable = true;
             typos_lsp.enable = true;
             yamlls = {
@@ -403,11 +410,9 @@ in
             integrations.diffview = true;
           };
         };
-        colorizer = {
+        highlight-colors = {
           enable = true;
-          settings = {
-            fileTypes.typescriptreact.tailwind = "both";
-          };
+          settings.enable_tailwind = true;
         };
         statuscol = {
           enable = true;
@@ -506,7 +511,12 @@ in
           enable = true;
           folding = true;
           nixvimInjections = true;
+          grammarPackages = builtins.filter (
+            p: p.pname != "ocamllex-grammar"
+          ) pkgs.vimPlugins.nvim-treesitter.passthru.allGrammars;
           settings = {
+            auto_install = true;
+            ensure_installed = "all";
             highlight = {
               enable = true;
               disable = [ "alpha" ];

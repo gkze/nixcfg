@@ -3,7 +3,6 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nixpkgs-neovim-0-10-3.url = "github:NixOS/nixpkgs/21808d22b1cda1898b71cf1a1beb524a97add2c4";
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
     nix-darwin = {
       url = "github:LnL7/nix-darwin";
@@ -46,16 +45,15 @@
     };
     nix-homebrew = {
       url = "github:zhaofengli-wip/nix-homebrew";
-      inputs = {
-        # TODO: remove after https://github.com/zhaofengli/nix-homebrew/pull/71
-        # lands
-        brew-src.url = "github:Homebrew/brew/4.4.25";
-        nixpkgs.follows = "nixpkgs";
-      };
+      inputs.nixpkgs.follows = "nixpkgs";
     };
     nixvim = {
       url = "github:nix-community/nixvim";
-      inputs.nixpkgs.follows = "nixpkgs-neovim-0-10-3";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    red = {
+      url = "github:gkze/red";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -109,16 +107,8 @@
       url = "github:gkze/gh-stars/v0.19.24";
       flake = false;
     };
-    trdsql = {
-      url = "github:noborus/trdsql/v1.1.0";
-      flake = false;
-    };
     treewalker-nvim = {
       url = "github:aaronik/treewalker.nvim";
-      flake = false;
-    };
-    turbo = {
-      url = "github:vercel/turbo/v2.4.5-canary.4";
       flake = false;
     };
     vim-bundle-mako = {
@@ -155,6 +145,7 @@
 
         withOverlays = [
           devshell.overlays.default
+          inputs.red.overlays.default
           self.overlays.default
         ];
 

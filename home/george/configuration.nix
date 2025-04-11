@@ -218,7 +218,6 @@
         misc.disable = [
           "brew_cask"
           "brew_formula"
-          "home_manager"
         ];
         git.repos = [ (slib.srcDirBase system) ];
         misc = {

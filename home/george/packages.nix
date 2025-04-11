@@ -7,6 +7,7 @@
       ast-grep
       cachix
       csvlens
+      curl
       curlie
       czkawka
       dasel
@@ -17,7 +18,7 @@
       file
       gawk
       gita
-      gitbutler
+      # gitbutler
       glab
       gnused
       gnutar
@@ -32,6 +33,7 @@
       nerd-fonts.hack
       nh
       procs
+      red-reddit-cli
       rsync
       rustup
       sd
@@ -40,6 +42,7 @@
       sequoia-sqop
       sequoia-sqv
       sequoia-wot
+      signal-desktop
       slack
       spacedrive
       stars
