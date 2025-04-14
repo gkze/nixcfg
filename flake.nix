@@ -4,6 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
+    neovim-nightly-overlay = {
+      url = "github:nix-community/neovim-nightly-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     nix-darwin = {
       url = "github:LnL7/nix-darwin";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -91,6 +95,10 @@
       url = "github:imsnif/kdl.vim";
       flake = false;
     };
+    mas = {
+      url = "https://github.com/mas-cli/mas/releases/download/v2.0.0/mas-2.0.0.pkg";
+      flake = false;
+    };
     mdq = {
       url = "github:yshavit/mdq";
       flake = false;
@@ -145,6 +153,7 @@
 
         withOverlays = [
           devshell.overlays.default
+          inputs.neovim-nightly-overlay.overlays.default
           inputs.red.overlays.default
           self.overlays.default
         ];
@@ -158,6 +167,7 @@
               [
                 home-manager
                 nh
+                nil
                 nix-init
                 nixos-generators
                 nurl

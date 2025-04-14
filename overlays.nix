@@ -25,6 +25,11 @@ in
       '';
     };
 
+    mas = prev.mas.overrideAttrs {
+      src = inputs.mas;
+      version = "2.0.0";
+    };
+
     mdq = (prev.callPackage inputs.naersk { }).buildPackage { src = inputs.mdq; };
 
     nh = prev.nh.overrideAttrs rec {

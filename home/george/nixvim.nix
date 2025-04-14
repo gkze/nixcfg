@@ -440,20 +440,7 @@ in
                 click = "v:lua.ScSa";
               }
               {
-                text = [
-                  {
-                    __raw = ''
-                      function(_)
-                        -- buffer being rendered
-                        local buf = vim.api.nvim_win_get_buf(vim.g.statusline_winid)
-                        local lines = vim.api.nvim_buf_line_count(buf)
-                        local width = math.floor(math.log10(lines)) + 1
-
-                        return " %l %=%" .. width .. "." .. width .. "r "
-                      end
-                    '';
-                  }
-                ];
+                text = [ " %{v:lnum} %=%{v:relnum} " ];
                 click = "v:lua.ScLa";
               }
               {
@@ -511,12 +498,7 @@ in
           enable = true;
           folding = true;
           nixvimInjections = true;
-          grammarPackages = builtins.filter (
-            p: p.pname != "ocamllex-grammar"
-          ) pkgs.vimPlugins.nvim-treesitter.passthru.allGrammars;
           settings = {
-            auto_install = true;
-            ensure_installed = "all";
             highlight = {
               enable = true;
               disable = [ "alpha" ];
