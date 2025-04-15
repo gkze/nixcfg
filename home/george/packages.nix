@@ -25,7 +25,6 @@
       gping
       graphviz
       grex
-      hoppscotch
       httpie
       jnv
       mdq
@@ -44,6 +43,7 @@
       sequoia-wot
       signal-desktop
       slack
+      slack-cli
       spacedrive
       stars
       superfile
