@@ -5,6 +5,7 @@
       { path = "/System/Applications/Calendar.app"; }
       { path = "/System/Applications/Messages.app"; }
       { path = "/Applications/Slack.app"; }
+      { path = "/Applications/1Password.app"; }
       { path = "/Applications/Arc.app"; }
       { path = "/Applications/Ghostty.app"; }
       { path = "/Applications/Cursor.app"; }
