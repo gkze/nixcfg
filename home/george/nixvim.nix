@@ -440,7 +440,19 @@ in
                 click = "v:lua.ScSa";
               }
               {
-                text = [ " %{v:lnum} %=%{v:relnum} " ];
+                text = [
+                  {
+                    __raw = ''
+                      function(_)
+                        if vim.bo.filetype == "alpha" then
+                          return ""
+                        end
+
+                        return " %{v:lnum} %=%{v:relnum} "
+                      end
+                    '';
+                  }
+                ];
                 click = "v:lua.ScLa";
               }
               {
