@@ -26,6 +26,6 @@ mkSystem {
     { nix-homebrew = { inherit user; }; }
     "${modulesPath}/darwin/george/brew-apps.nix"
     "${modulesPath}/darwin/town.nix"
-    "${modulesPath}/darwin/george/dock-apps.nix"
+    "${modulesPath}/darwin/george/town-dock-apps.nix"
   ];
 }
