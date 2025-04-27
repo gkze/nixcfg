@@ -21,6 +21,7 @@
       "loom"
       "notion"
       "rapidapi"
+      "signal@beta"
       "slack"
       "spotify"
       "zed@preview"
