@@ -12,10 +12,10 @@ in
         url = outputs.lib.ghRaw {
           owner = "Homebrew";
           repo = "brew";
-          rev = "9260c966b1e941e37f1895511a1ee6771124be6b";
+          rev = "5fb70f5a5795bd7c29ea0e136bac5ba2d471729a";
           path = "completions/zsh/_brew";
         };
-        sha256 = "1b0azwfh578hz0vrj9anqx1blf6cmrm6znyd6my45yydaga6s9d1";
+        sha256 = "sha256:1b8wjkdmqrwip97hmfhq3fckqpkanps1335795srr9r7rhq3d6mm";
       };
       dontUnpack = true;
       installPhase = ''
@@ -23,11 +23,6 @@ in
         cp -r $src $out/_brew
         chmod +x $out/_brew
       '';
-    };
-
-    mas = prev.mas.overrideAttrs {
-      src = inputs.mas;
-      version = "2.0.0";
     };
 
     mdq = (prev.callPackage inputs.naersk { }).buildPackage { src = inputs.mdq; };
@@ -48,7 +43,7 @@ in
 
       cargoDeps = prev.rustPlatform.fetchCargoVendor {
         inherit src;
-        hash = "sha256-GnRLUV5dyQgcjBBQXzjW0dvfHqIrlBlIup4b7oL8InI=";
+        hash = "sha256-MqvYDCtj6omYpwhKvWkI5CRz8ZpT8OLj7SazJUzVtc8=";
       };
     };
 

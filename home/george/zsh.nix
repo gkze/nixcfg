@@ -1,3 +1,4 @@
+{ lib, ... }:
 {
   config,
   inputs,
@@ -26,7 +27,7 @@
       autoload -U compinit bashcompinit
       compinit && bashcompinit
     '';
-    initExtra = ''
+    initContent = lib.mkOrder 550 ''
       unalias &>/dev/null run-help && autoload run-help
       zmodload zsh/complist zsh/zle
       zstyle ':completion:*' menu select

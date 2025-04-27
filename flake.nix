@@ -95,10 +95,6 @@
       url = "github:imsnif/kdl.vim";
       flake = false;
     };
-    mas = {
-      url = "https://github.com/mas-cli/mas/releases/download/v2.0.0/mas-2.0.0.pkg";
-      flake = false;
-    };
     mdq = {
       url = "github:yshavit/mdq";
       flake = false;
