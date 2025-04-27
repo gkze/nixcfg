@@ -226,7 +226,7 @@
         };
       };
     };
-    vscode.enable = true;
+    vscode.enable = false;
     yazi = {
       enable = true;
       enableZshIntegration = true;

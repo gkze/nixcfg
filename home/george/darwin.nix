@@ -1,4 +1,9 @@
-{ config, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   localZshSiteFuncsPath = "zsh/site-functions";
 in
@@ -36,7 +41,7 @@ in
     executable = true;
   };
 
-  programs.zsh.initExtraBeforeCompInit = ''
+  programs.zsh.initContent = lib.mkOrder 550 ''
     fpath+=${config.xdg.dataHome}/${localZshSiteFuncsPath}
   '';
 }

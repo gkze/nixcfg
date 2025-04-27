@@ -3,9 +3,11 @@
   home.packages =
     with pkgs;
     [
+      # gitbutler
       (coreutils.override { minimal = false; })
       ast-grep
       cachix
+      claude-code
       csvlens
       curl
       curlie
@@ -18,7 +20,6 @@
       file
       gawk
       gita
-      # gitbutler
       glab
       gnused
       gnutar
@@ -27,6 +28,8 @@
       grex
       httpie
       jnv
+      killport
+      mas
       mdq
       moreutils
       nerd-fonts.hack
@@ -41,7 +44,6 @@
       sequoia-sqop
       sequoia-sqv
       sequoia-wot
-      signal-desktop
       slack
       slack-cli
       spacedrive
@@ -49,9 +51,12 @@
       superfile
       tokei
       trdsql
+      tree
       uv
       viddy
       xan
+      xq-xml
+      xz
       yq-go
     ]
     ++ lib.lists.optional pkgs.stdenv.isLinux wl-clipboard;
