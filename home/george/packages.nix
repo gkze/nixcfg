@@ -32,6 +32,7 @@
       mas
       mdq
       moreutils
+      mountpoint-s3
       nerd-fonts.hack
       nh
       procs
