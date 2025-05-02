@@ -95,8 +95,20 @@
       url = "github:imsnif/kdl.vim";
       flake = false;
     };
+    macfuse = {
+      url = "github:macfuse/library";
+      flake = false;
+    };
+    markdown-table-formatter = {
+      url = "github:nvuillam/markdown-table-formatter";
+      flake = false;
+    };
     mdq = {
       url = "github:yshavit/mdq";
+      flake = false;
+    };
+    mountpoint-s3 = {
+      url = "github:awslabs/mountpoint-s3";
       flake = false;
     };
     naersk = {
@@ -104,7 +116,7 @@
       flake = false;
     };
     sublime-kdl = {
-      url = "github:eugenesvk/sublime-kdl/2.0.2";
+      url = "github:eugenesvk/sublime-kdl/2.0.5";
       flake = false;
     };
     stars = {
@@ -187,7 +199,6 @@
               (evalModule pkgs {
                 projectRootFile = "flake.nix";
                 programs = {
-                  mdformat.enable = true;
                   nixfmt.enable = true;
                   deadnix.enable = true;
                   statix.enable = true;
@@ -207,6 +218,17 @@
                     enable = true;
                     includes = shInclude;
                   };
+                };
+                settings.formatter."markdown-table-formatter" = with pkgs; {
+                  command = "${
+                    python3.withPackages (
+                      ps: with ps; [
+                        mdformat
+                        mdformat-tables
+                      ]
+                    )
+                  }/bin/mdformat";
+                  includes = [ "*.md" ];
                 };
               })
               config
