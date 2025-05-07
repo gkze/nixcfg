@@ -43,7 +43,7 @@ in
             inherit (mounts3Ref.original) repo;
             inherit (mounts3Ref.locked) rev;
             fetchSubmodules = true;
-            hash = "sha256-w1cHuM0zAjfDjn4rywDSMRuctF9WSwjAupl+yCn9O5M=";
+            hash = "sha256-U2uG+yPlQkqfb3Zefaqjp5Vp8q4KR1PVvqV9LzkBHFk=";
           };
           singleStep = true;
           buildInputs = with prev; [ fuse ];
