@@ -11,7 +11,7 @@
       "dash"
       "datagrip"
       "docker"
-      "domzilla-caffeine"
+      # "domzilla-caffeine"
       "figma"
       "framer"
       "ghostty@tip"

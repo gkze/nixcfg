@@ -3,6 +3,7 @@
     casks = [
       "1password"
       "1password-cli"
+      "cleanshot"
       "warp"
     ];
     masApps = {
