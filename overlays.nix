@@ -35,7 +35,6 @@ in
       mountpoint-s3 =
         let
           mounts3Ref = outputs.lib.flakeLock.mountpoint-s3;
-          # macfuseRef = outputs.lib.flakeLock.macfuse;
         in
         naersk'.buildPackage {
           src = prev.fetchFromGitHub {
@@ -43,7 +42,7 @@ in
             inherit (mounts3Ref.original) repo;
             inherit (mounts3Ref.locked) rev;
             fetchSubmodules = true;
-            hash = "sha256-U2uG+yPlQkqfb3Zefaqjp5Vp8q4KR1PVvqV9LzkBHFk=";
+            hash = "sha256-uV0umUoJkYgmjWjv8GMnk5TRRbCCJS1ut3VV1HvkaAw=";
           };
           singleStep = true;
           buildInputs = with prev; [ fuse ];
@@ -54,7 +53,7 @@ in
         };
 
       nh = prev.nh.overrideAttrs rec {
-        version = outputs.lib.flakeLock.nh.original.ref;
+        version = outputs.lib.flakeLock.nh.locked.rev;
         src = inputs.nh;
 
         preFixup = ''
@@ -69,7 +68,7 @@ in
 
         cargoDeps = prev.rustPlatform.fetchCargoVendor {
           inherit src;
-          hash = "sha256-cNYPxM2DOLdyq0YcZ0S/WIa3gAx7aTzPp7Zhbtu4PKg=";
+          hash = "sha256-cNYPxM2DOLdyq0YcZ0S/WIa3gAx7aTzPp7Zhbtu4PKg";
         };
       };
 

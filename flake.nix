@@ -44,7 +44,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     nh = {
-      url = "github:viperML/nh/master";
+      url = "github:viperML/nh/e7eebb59a10df6400925c9b7fb9251491c3de864";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     nix-homebrew = {
