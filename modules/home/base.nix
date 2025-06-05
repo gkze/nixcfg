@@ -11,7 +11,7 @@
 {
   imports = with inputs; [
     nixvim.homeManagerModules.nixvim
-    stylix.homeManagerModules.stylix
+    stylix.homeModules.stylix
   ];
   fonts.fontconfig.enable = true;
   home = {

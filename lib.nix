@@ -113,6 +113,7 @@ rec {
       inherit system;
       specialArgs = {
         inherit inputs src system;
+        primaryUser = elemAt users 0;
       } // { slib = outputs.lib; };
       modules =
         [
