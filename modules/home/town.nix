@@ -2,7 +2,10 @@
 {
   home.packages = with pkgs; [ google-cloud-sdk ];
   programs = {
-    topgrade.settings.misc.disable = [ "gcloud" ];
+    topgrade.settings.misc.disable = [
+      "gcloud"
+      "uv"
+    ];
     zsh.plugins = with pkgs; [
       {
         name = "op";

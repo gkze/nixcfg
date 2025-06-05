@@ -8,7 +8,7 @@ with lib;
 let
   cfg = config.local.dock;
   inherit (pkgs) stdenv coreutils dockutil;
-  dockutilExe = lib.getExe dockutil;
+  dockutilExe = "sudo -u ${config.system.primaryUser} ${lib.getExe dockutil}";
 in
 {
   options = {
@@ -77,7 +77,7 @@ in
       ) cfg.entries;
     in
     {
-      system.activationScripts.postUserActivation.text = ''
+      system.activationScripts.postActivation.text = ''
         echo >&2 "Setting up the Dock..."
         haveURIs="$(${dockutilExe} --list | ${coreutils}/bin/cut -f2)"
         if ! diff -wu <(echo -n "$haveURIs") <(echo -n '${wantURIs}') >&2 ; then
