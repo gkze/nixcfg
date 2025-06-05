@@ -10,7 +10,6 @@ in
     in
     {
       blink-cmp = inputs.blink-cmp.packages.default;
-
       homebrew-zsh-completion = prev.stdenvNoCC.mkDerivation {
         name = "brew-zsh-compmletion";
         src = builtins.fetchurl {
@@ -51,26 +50,6 @@ in
             pkg-config
           ];
         };
-
-      nh = prev.nh.overrideAttrs rec {
-        version = outputs.lib.flakeLock.nh.locked.rev;
-        src = inputs.nh;
-
-        preFixup = ''
-          mkdir completions
-
-          for sh in bash zsh fish; do
-            $out/bin/nh completions $sh > completions/nh.$sh
-          done
-
-          installShellCompletion completions/*
-        '';
-
-        cargoDeps = prev.rustPlatform.fetchCargoVendor {
-          inherit src;
-          hash = "sha256-cNYPxM2DOLdyq0YcZ0S/WIa3gAx7aTzPp7Zhbtu4PKg";
-        };
-      };
 
       sublime-kdl =
         let

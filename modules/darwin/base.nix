@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, primaryUser, ... }:
 {
   imports = [ ./dock.nix ];
   system = {
@@ -34,6 +34,8 @@
       };
       trackpad.Clicking = true;
     };
+    inherit primaryUser;
+    stateVersion = 6;
   };
 
   security.pam.services.sudo_local.touchIdAuth = true;
@@ -73,6 +75,4 @@
       upgrade = true;
     };
   };
-
-  system.stateVersion = 6;
 }
