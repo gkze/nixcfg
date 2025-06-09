@@ -327,7 +327,7 @@ in
               settings = { };
             };
             pyright.enable = true;
-            ruff.enable = false;
+            ruff.enable = true;
             rust_analyzer = {
               enable = true;
               installCargo = true;
