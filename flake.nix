@@ -18,7 +18,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flakelight-darwin = {
-      url = "github:cmacrae/flakelight-darwin";
+      url = "github:gkze/flakelight-darwin";
       inputs = {
         flakelight.follows = "flakelight";
         nix-darwin.follows = "nix-darwin";

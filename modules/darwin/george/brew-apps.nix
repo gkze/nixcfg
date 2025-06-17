@@ -6,6 +6,7 @@
       "arc"
       "chatgpt"
       "claude"
+      "container"
       "cursor"
       "cyberduck"
       "dash"
