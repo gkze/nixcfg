@@ -4,6 +4,7 @@
   programs = {
     topgrade.settings.misc.disable = [
       "gcloud"
+      "jetbrains_datagrip"
       "uv"
     ];
     zsh.plugins = with pkgs; [
