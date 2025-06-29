@@ -11,7 +11,7 @@
       "cyberduck"
       "dash"
       "datagrip"
-      "docker"
+      "docker-desktop"
       "figma"
       "framer"
       "ghostty@tip"
@@ -30,6 +30,7 @@
       "spotify"
       "yaak@beta"
       "zed@preview"
+      "zen@twilight"
       # "domzilla-caffeine"
     ];
     masApps = {
