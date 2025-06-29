@@ -14,7 +14,6 @@
         "com.apple.trackpad.scaling" = 2.0;
       };
       SoftwareUpdate.AutomaticallyInstallMacOSUpdates = true;
-      alf.allowdownloadsignedenabled = 0;
       dock = {
         autohide = true;
         autohide-delay = 0.0;
@@ -37,6 +36,8 @@
     inherit primaryUser;
     stateVersion = 6;
   };
+
+  networking.applicationFirewall.allowSignedApp = true;
 
   security.pam.services.sudo_local.touchIdAuth = true;
 

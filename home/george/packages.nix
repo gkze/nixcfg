@@ -35,6 +35,7 @@
       mountpoint-s3
       nerd-fonts.hack
       nh
+      nodejs_latest
       procs
       red-reddit-cli
       rsync
