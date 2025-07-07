@@ -4,7 +4,7 @@
       "1password"
       "1password-cli"
       "cleanshot"
-      "tailscale"
+      "tailscale-app"
       "warp"
     ];
     masApps = {
