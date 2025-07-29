@@ -22,6 +22,7 @@
       "logi-options+"
       "loom"
       "macfuse"
+      "nordvpn"
       "notion"
       "postman"
       "rapidapi"

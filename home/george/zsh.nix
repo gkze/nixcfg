@@ -12,7 +12,7 @@
     enable = true;
     autocd = true;
     cdpath = [ (slib.srcDirBase system) ];
-    dotDir = ".config/zsh";
+    dotDir = "${config.xdg.configHome}/zsh";
     enableVteIntegration = true;
     history = {
       expireDuplicatesFirst = true;
