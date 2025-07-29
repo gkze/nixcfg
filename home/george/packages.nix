@@ -4,6 +4,7 @@
     with pkgs;
     [
       # gitbutler
+      # superfile
       (coreutils.override { minimal = false; })
       ast-grep
       cachix
@@ -28,6 +29,7 @@
       grex
       httpie
       jnv
+      jo
       killport
       mas
       mdq
@@ -50,7 +52,6 @@
       slack-cli
       spacedrive
       stars
-      superfile
       tokei
       trdsql
       tree

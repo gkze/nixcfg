@@ -77,7 +77,7 @@
         jaws = "function() { aws $@ | jq -r '.' }";
         ne = "cd ~/.config/nixcfg && nvim";
         nv = "nvim";
-        zc = "[[ -v CURSOR_TRACE_ID || -v VSCODE_INJECTION ]] && clear || zellij action clear";
+        zc = "[[ \"$(printenv)\" =~ \"VSCODE_|CURSOR_\" ]] && clear || zellij action clear";
         zj = "zellij";
         zq = "zellij kill-all-sessions --yes && zellij delete-all-sessions --force --yes";
       };

@@ -16,7 +16,7 @@ in
           url = outputs.lib.ghRaw {
             owner = "Homebrew";
             repo = "brew";
-            rev = "5fb70f5a5795bd7c29ea0e136bac5ba2d471729a";
+            rev = "37f1e48538e6c00e10ab90f095c55988e259c82f";
             path = "completions/zsh/_brew";
           };
           sha256 = "sha256:1b8wjkdmqrwip97hmfhq3fckqpkanps1335795srr9r7rhq3d6mm";
