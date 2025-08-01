@@ -1,11 +1,14 @@
+{ pkgs, ... }:
 {
+  environment.systemPackages = with pkgs; [
+    _1password-cli
+    tailscale
+    warp-terminal
+  ];
   homebrew = {
     casks = [
       "1password"
-      "1password-cli"
       "cleanshot"
-      "tailscale-app"
-      "warp"
     ];
     masApps = {
       "Microsoft Word" = 462054704;
