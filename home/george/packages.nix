@@ -3,30 +3,38 @@
   home.packages =
     with pkgs;
     [
-      # gitbutler
       # superfile
       (coreutils.override { minimal = false; })
+      appcleaner
+      arc-browser
       ast-grep
       cachix
+      chatgpt
       claude-code
+      container
       csvlens
       curl
       curlie
+      cyberduck
       czkawka
       dasel
+      dasht
       dbeaver-bin
+      discord
       du-dust
       dua
       duf
       file
       gawk
       gita
+      gitbutler
       glab
       gnused
       gnutar
       gping
       graphviz
       grex
+      hoppscotch
       httpie
       jnv
       jo
@@ -37,8 +45,12 @@
       mountpoint-s3
       nerd-fonts.hack
       nh
+      nix-output-monitor
       nodejs_latest
+      notion-app
+      postman
       procs
+      rapidapi
       red-reddit-cli
       rsync
       rustup
@@ -50,7 +62,9 @@
       sequoia-wot
       slack
       slack-cli
+      sloth-app
       spacedrive
+      spotify
       stars
       tokei
       trdsql

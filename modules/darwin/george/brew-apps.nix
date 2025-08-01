@@ -2,34 +2,20 @@
   homebrew = {
     casks = [
       "airfoil"
-      "appcleaner"
-      "arc"
-      "chatgpt"
-      "claude"
-      "container"
       "cursor"
-      "cyberduck"
-      "dash"
       "datagrip"
       "docker-desktop"
       "figma"
       "framer"
       "ghostty@tip"
-      "gitbutler"
+      "ghostty@tip"
       "google-drive"
-      "hoppscotch"
       "linear-linear"
       "logi-options+"
       "loom"
       "macfuse"
       "nordvpn"
-      "notion"
-      "postman"
-      "rapidapi"
       "signal@beta"
-      "slack"
-      "sloth"
-      "spotify"
       "visual-studio-code@insiders"
       "yaak@beta"
       "zed@preview"
@@ -42,7 +28,7 @@
       "Apple Configurator" = 1037126344;
       "JSONPeep" = 1458969831;
       "Shazam: Identify Songs" = 897118787;
-      "Twitter" = 1482454543;
+      # "Twitter" = 1482454543;
       "Xcode" = 497799835;
     };
   };
