@@ -624,7 +624,6 @@ in
         lazydev.enable = true;
         luasnip.enable = true;
         lsp-format.enable = true;
-        lspkind.enable = true;
         lspsaga.enable = true;
         markdown-preview.enable = true;
         marks.enable = true;
@@ -681,7 +680,8 @@ in
                 "i;" = "textsubjects-container-inner";
               };
             };
-          } // (lib.attrsets.optionalAttrs (!pkgs.stdenv.isDarwin) { dbee = { }; });
+          }
+          // (lib.attrsets.optionalAttrs (!pkgs.stdenv.isDarwin) { dbee = { }; });
         in
         concatStringsSep "\n" (
           (mapAttrsToList (n: v: ''require("${n}").setup(${helpers.toLuaObject v})'') extraPluginsConfig)

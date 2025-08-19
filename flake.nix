@@ -149,7 +149,10 @@
           "aarch64-darwin"
           "x86_64-linux"
         ];
-        nixpkgs.config.allowUnfree = true;
+        nixpkgs.config = {
+          allowUnfree = true;
+          permittedInsecurePackages = [ "arc-browser-1.106.0-66192" ];
+        };
         imports = [ flakelight-darwin.flakelightModules.default ];
 
         withOverlays = [

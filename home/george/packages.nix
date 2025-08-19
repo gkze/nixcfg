@@ -5,11 +5,8 @@
     [
       # superfile
       (coreutils.override { minimal = false; })
-      appcleaner
-      arc-browser
       ast-grep
       cachix
-      chatgpt
       claude-code
       container
       csvlens
@@ -18,7 +15,6 @@
       cyberduck
       czkawka
       dasel
-      dasht
       dbeaver-bin
       discord
       du-dust
@@ -26,8 +22,8 @@
       duf
       file
       gawk
+      git-who
       gita
-      gitbutler
       glab
       gnused
       gnutar
@@ -43,11 +39,13 @@
       mdq
       moreutils
       mountpoint-s3
+      neovide
       nerd-fonts.hack
       nh
+      nil
       nix-output-monitor
+      nixfmt-rfc-style
       nodejs_latest
-      notion-app
       postman
       procs
       rapidapi
@@ -62,7 +60,6 @@
       sequoia-wot
       slack
       slack-cli
-      sloth-app
       spacedrive
       spotify
       stars
@@ -76,5 +73,13 @@
       xz
       yq-go
     ]
-    ++ lib.lists.optional pkgs.stdenv.isLinux wl-clipboard;
+    ++ lib.lists.optional pkgs.stdenv.isLinux wl-clipboard
+    ++ lib.lists.optionals pkgs.stdenv.isDarwin [
+      appcleaner
+      arc-browser
+      chatgpt
+      container
+      notion-app
+      sloth-app
+    ];
 }

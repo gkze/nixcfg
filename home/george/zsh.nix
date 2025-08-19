@@ -14,6 +14,7 @@
     cdpath = [ (slib.srcDirBase system) ];
     dotDir = "${config.xdg.configHome}/zsh";
     enableVteIntegration = true;
+    # setOptions = [ "EXTENDED_GLOB" ];
     history = {
       expireDuplicatesFirst = true;
       extended = true;

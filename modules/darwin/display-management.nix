@@ -1,4 +1,9 @@
-{ lib, pkgs, ... }:
+{
+  primaryUser,
+  lib,
+  pkgs,
+  ...
+}:
 {
   services = {
     sketchybar = {
@@ -9,7 +14,7 @@
       enable = true;
       skhdConfig = ''
         alt + shift - c : open -a /Applications/Cursor.app
-        alt + shift - return : open -a /Applications/Arc.app
+        alt + shift - return : open -a /Users/${primaryUser}/Applications/Home Manager Apps/Arc.app
         alt - return : open -a /Applications/Ghostty.app
       '';
     };

@@ -15,18 +15,17 @@
       flakeInputs = lib.filterAttrs (_: lib.isType "flake") inputs;
     in
     {
-      gc =
-        {
-          automatic = true;
-        }
-        // {
-          darwin.interval = {
-            Hour = 9;
-            Minute = 30;
-          };
-          linux.dates = "09:30";
-        }
-        .${slib.kernel system};
+      gc = {
+        automatic = true;
+      }
+      // {
+        darwin.interval = {
+          Hour = 9;
+          Minute = 30;
+        };
+        linux.dates = "09:30";
+      }
+      .${slib.kernel system};
       settings = {
         experimental-features = [
           "nix-command"
