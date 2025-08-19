@@ -10,7 +10,7 @@
 }:
 {
   imports = with inputs; [
-    nixvim.homeManagerModules.nixvim
+    nixvim.homeModules.nixvim
     stylix.homeModules.stylix
   ];
   fonts.fontconfig.enable = true;

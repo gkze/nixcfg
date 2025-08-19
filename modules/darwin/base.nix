@@ -70,6 +70,7 @@
 
   homebrew = {
     enable = pkgs.stdenv.isDarwin;
+    global.autoUpdate = true;
     onActivation = {
       autoUpdate = true;
       cleanup = "zap";
