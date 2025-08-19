@@ -2,6 +2,7 @@
   homebrew = {
     casks = [
       "airfoil"
+      "claude"
       "cursor"
       "datagrip"
       "docker-desktop"

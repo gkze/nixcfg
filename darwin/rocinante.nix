@@ -21,7 +21,8 @@ mkSystem {
     nix-homebrew.darwinModules.nix-homebrew
     "${modulesPath}/darwin/homebrew.nix"
     { nix-homebrew = { inherit user; }; }
-    "${modulesPath}/darwin/george/brew-apps.nix"
-    "${modulesPath}/darwin/george/dock-apps.nix"
+    "${modulesPath}/darwin/${user}/shell.nix"
+    "${modulesPath}/darwin/${user}/brew-apps.nix"
+    "${modulesPath}/darwin/${user}/dock-apps.nix"
   ];
 }
