@@ -3,6 +3,7 @@
   home.packages =
     with pkgs;
     [
+      # gitbutler
       # superfile
       (coreutils.override { minimal = false; })
       ast-grep
@@ -20,6 +21,7 @@
       du-dust
       dua
       duf
+      element-desktop
       file
       gawk
       git-who

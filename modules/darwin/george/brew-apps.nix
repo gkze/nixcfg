@@ -10,6 +10,7 @@
       "framer"
       "ghostty@tip"
       "ghostty@tip"
+      "gitbutler"
       "google-drive"
       "linear-linear"
       "logi-options+"
