@@ -254,6 +254,7 @@ in
         dap.enable = true;
         dap-python.enable = true;
         dap-ui.enable = true;
+        fzf-lua.enable = true;
         gitlinker = {
           enable = true;
           mappings = "<C-c>l";
