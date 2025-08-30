@@ -31,6 +31,14 @@
           "nix-command"
           "flakes"
         ];
+        substituters = [
+          "https://gkze.cachix.org"
+          "https://cache.nixos.org/"
+        ];
+        trusted-public-keys = [
+          "gkze.cachix.org-1:vO2wq3fAFvRL1TA7R02JnU/R5iKGhoHMLGYbnzPRJjI="
+          "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+        ];
       };
       channel.enable = false;
       package = pkgs.nixVersions.latest;

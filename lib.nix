@@ -79,12 +79,14 @@ rec {
           ;
         pkgs = pkgsFor.${system};
         slib = outputs.lib;
-      } // userMetaIfExists username;
+      }
+      // userMetaIfExists username;
       modules = [
         "${modulesPath}/home/base.nix"
         "${modulesPath}/home/${kernel system}.nix"
         (userConfigPath username)
-      ] ++ modules;
+      ]
+      ++ modules;
     };
   impMaybeWithArgs =
     path: args:
@@ -114,45 +116,47 @@ rec {
       specialArgs = {
         inherit inputs src system;
         primaryUser = elemAt users 0;
-      } // { slib = outputs.lib; };
-      modules =
-        [
-          "${modulesPath}/common.nix"
-          "${modulesPath}/${kernel system}/base.nix"
-        ]
-        ++ systemModules
-        ++ optionals (length homeModules > 0) [
-          inputs.home-manager."${hmEntryPoint}Modules".home-manager
-          {
-            home-manager = {
-              useGlobalPkgs = true;
-              useUserPackages = true;
-              extraSpecialArgs = {
-                inherit inputs src system;
-                slib = outputs.lib;
-                pkgs = pkgsFor.${system};
-              };
-              users = listToAttrs (
-                map (user: {
-                  name = user;
-                  value =
-                    args:
-                    let
-                      modArgs = args // { username = user; } // userMetaIfExists user;
-                    in
-                    {
-                      imports =
-                        map (mod: impMaybeWithArgs mod modArgs) [
-                          "${modulesPath}/home/base.nix"
-                          "${modulesPath}/home/${kernel system}.nix"
-                          "${src}/home/${user}/configuration.nix"
-                        ]
-                        ++ homeModules;
-                    };
-                }) users
-              );
+      }
+      // {
+        slib = outputs.lib;
+      };
+      modules = [
+        "${modulesPath}/common.nix"
+        "${modulesPath}/${kernel system}/base.nix"
+      ]
+      ++ systemModules
+      ++ optionals (length homeModules > 0) [
+        inputs.home-manager."${hmEntryPoint}Modules".home-manager
+        {
+          home-manager = {
+            useGlobalPkgs = true;
+            useUserPackages = true;
+            extraSpecialArgs = {
+              inherit inputs src system;
+              slib = outputs.lib;
+              pkgs = pkgsFor.${system};
             };
-          }
-        ];
+            users = listToAttrs (
+              map (user: {
+                name = user;
+                value =
+                  args:
+                  let
+                    modArgs = args // { username = user; } // userMetaIfExists user;
+                  in
+                  {
+                    imports =
+                      map (mod: impMaybeWithArgs mod modArgs) [
+                        "${modulesPath}/home/base.nix"
+                        "${modulesPath}/home/${kernel system}.nix"
+                        "${src}/home/${user}/configuration.nix"
+                      ]
+                      ++ homeModules;
+                  };
+              }) users
+            );
+          };
+        }
+      ];
     };
 }
