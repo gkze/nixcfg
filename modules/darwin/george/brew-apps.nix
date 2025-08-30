@@ -13,7 +13,10 @@
       "gitbutler"
       "google-drive"
       "linear-linear"
-      "logi-options+"
+      # brew 4.6.5 gained a `rename` function and logi-options+ uses it so
+      # until nix-homebrew.inputs.brew-src is updated to that and made work
+      # this will not be installed
+      # "logi-options+"
       "loom"
       "macfuse"
       "nordvpn"

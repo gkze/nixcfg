@@ -151,7 +151,7 @@
         ];
         nixpkgs.config = {
           allowUnfree = true;
-          permittedInsecurePackages = [ "arc-browser-1.106.0-66192" ];
+          permittedInsecurePackages = [ "arc-browser-1.109.0-67185" ];
         };
         imports = [ flakelight-darwin.flakelightModules.default ];
 

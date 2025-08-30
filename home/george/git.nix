@@ -79,6 +79,7 @@ in
       url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
       user.signingkey = userMeta.gpg.keys.personal;
     };
+    ignores = [ ".direnv" ];
     includes =
       let
         srcDirBase = slib.srcDirBase system;
@@ -98,6 +99,7 @@ in
           condition = "gitdir:~/${srcDirBase}/github.com/**";
         }
       ];
+    lfs.enable = true;
     signing = {
       format = lib.mkForce "openpgp";
       signer = lib.getExe pkgs.sequoia-chameleon-gnupg;

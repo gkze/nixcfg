@@ -36,6 +36,7 @@
       httpie
       jnv
       jo
+      jujutsu
       killport
       mas
       mdq
