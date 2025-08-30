@@ -1,14 +1,14 @@
-{ inputs, ... }:
+{ inputs, primaryUser, ... }:
 {
   nix-homebrew = {
     enable = true;
     enableRosetta = true;
-    user = "george";
+    user = primaryUser;
     taps = builtins.listToAttrs (
       map
-        (comp: {
-          name = "homebrew/homebrew-${comp}";
-          value = inputs."homebrew-${comp}";
+        (tap: {
+          name = "homebrew/homebrew-${tap}";
+          value = inputs."homebrew-${tap}";
         })
         [
           "core"

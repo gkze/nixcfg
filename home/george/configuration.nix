@@ -116,6 +116,7 @@
       config.theme = "Catppuccin Frappe";
     };
     bottom.enable = true;
+    bun.enable = true;
     direnv = {
       enable = true;
       nix-direnv.enable = true;
@@ -191,11 +192,14 @@
     ripgrep.enable = true;
     ssh = {
       enable = true;
-      compression = true;
-      forwardAgent = true;
-      hashKnownHosts = true;
+      enableDefaultConfig = false;
       matchBlocks = {
-        "github.com".user = "git";
+        "github.com" = {
+          compression = true;
+          forwardAgent = true;
+          hashKnownHosts = true;
+          user = "git";
+        };
         "*".extraOptions = {
           AddKeysToAgent = "yes";
           LogLevel = "ERROR";

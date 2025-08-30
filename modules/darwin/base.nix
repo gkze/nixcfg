@@ -1,4 +1,9 @@
-{ pkgs, primaryUser, ... }:
+{
+  config,
+  pkgs,
+  primaryUser,
+  ...
+}:
 {
   imports = [ ./dock.nix ];
   system = {
@@ -76,5 +81,6 @@
       cleanup = "zap";
       upgrade = true;
     };
+    taps = builtins.attrNames config.nix-homebrew.taps;
   };
 }
