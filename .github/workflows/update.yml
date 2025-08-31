@@ -26,5 +26,6 @@ jobs:
       - uses: DeterminateSystems/update-flake-lock@main
         with:
           token: "${{ secrets.GITHUB_TOKEN }}"
+      - run: brew install 1password-cli
       - run: nix build .#darwinConfigurations.argus.system
       - run: nix build .#darwinConfigurations.rocinante.system
