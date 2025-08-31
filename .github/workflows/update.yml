@@ -2,37 +2,27 @@
 name: Nightly Flake Update
 
 on:
-  schedule:
-    # Run nightly at 2 AM UTC
-    - cron: "0 2 * * *"
+  # schedule:
+  #   - cron: "0 2 * * *"
   workflow_dispatch:
 
 jobs:
   update-and-build:
+    permissions:
+      contents: write
+      id-token: write
+      issues: write
+      pull-requests: write
+
     runs-on: macos-15
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Setup Cachix
-        uses: cachix/cachix-action@v15
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - uses: cachix/cachix-action@v15
         with:
-          name: gkze
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-
-      - name: Update flake inputs
-        uses: DeterminateSystems/update-flake-lock@main
-        with:
-          commit-msg: "flake: update inputs"
-          pr-body: "Automated nightly flake input updates."
-          pr-title: "flake: update inputs"
-          token: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
-
-      - name: Build and cache argus system
-        run: nix build .#darwinConfigurations.argus.system --print-build-logs
-
-      - name: Build and cache rocinante system
-        run: nix build .#darwinConfigurations.rocinante.system --print-build-logs
+          name: mycache
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - uses: DeterminateSystems/update-flake-lock@main
+      - run: nix build .#darwinConfigurations.argus.system
+      - run: nix build .#darwinConfigurations.rocinante.system
