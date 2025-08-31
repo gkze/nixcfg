@@ -27,8 +27,9 @@ jobs:
         uses: DeterminateSystems/update-flake-lock@main
         with:
           commit-msg: "flake: update inputs"
-          pr-title: "flake: update inputs"
           pr-body: "Automated nightly flake input updates."
+          pr-title: "flake: update inputs"
+          token: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
 
       - name: Build and cache argus system
         run: nix build .#darwinConfigurations.argus.system --print-build-logs
