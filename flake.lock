@@ -1155,6 +1155,22 @@
         "type": "github"
       }
     },
+    "pantsbuild-tap": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1737417141,
+        "narHash": "sha256-WYTP6QNCxfvCYhfQ6u05ucvjys8WWNiSM8Cf8c8ifqE=",
+        "owner": "pantsbuild",
+        "repo": "homebrew-tap",
+        "rev": "43c7ca7119d649c59387eadead0d7b45a16ff770",
+        "type": "github"
+      },
+      "original": {
+        "owner": "pantsbuild",
+        "repo": "homebrew-tap",
+        "type": "github"
+      }
+    },
     "pre-commit": {
       "inputs": {
         "flake-compat": "flake-compat_6",
@@ -1282,6 +1298,7 @@
         "nixos-hardware": "nixos-hardware",
         "nixpkgs": "nixpkgs_2",
         "nixvim": "nixvim",
+        "pantsbuild-tap": "pantsbuild-tap",
         "red": "red",
         "rust-overlay": "rust-overlay",
         "stars": "stars",
