@@ -1,6 +1,5 @@
 {
   homebrew = {
-    taps = [ "pantsbuild/tap" ];
     casks = [
       "1password"
       "1password-cli"

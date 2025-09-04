@@ -108,6 +108,10 @@
       url = "github:nix-community/naersk";
       flake = false;
     };
+    pantsbuild-tap = {
+      url = "github:pantsbuild/homebrew-tap";
+      flake = false;
+    };
     sublime-kdl = {
       url = "github:eugenesvk/sublime-kdl/2.0.5";
       flake = false;
