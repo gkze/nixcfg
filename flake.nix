@@ -149,14 +149,14 @@
         inherit inputs;
 
         nixDir = ./.;
+
         systems = lib.mkForce [
           "aarch64-darwin"
           "x86_64-linux"
         ];
-        nixpkgs.config = {
-          allowUnfree = true;
-          permittedInsecurePackages = [ "arc-browser-1.109.0-67185" ];
-        };
+
+        nixpkgs.config.allowUnfree = true;
+
         imports = [ flakelight-darwin.flakelightModules.default ];
 
         withOverlays = [

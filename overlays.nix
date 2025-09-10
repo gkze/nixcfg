@@ -75,7 +75,45 @@ in
         };
 
       vimPlugins = prev.vimPlugins.extend (
-        _: _: {
+        f: p: {
+          aerial-nvim = p.aerial-nvim.overrideAttrs {
+            nvimSkipModules = [
+              "resession.extensions.aerial"
+              "aerial"
+              "aerial.nav_view"
+              "aerial.fzf"
+              "aerial.fzf-lua"
+              "aerial.actions"
+              "aerial.autocommands"
+              "aerial.backends.markdown"
+              "aerial.backends.init"
+              "aerial.backends.treesitter.init"
+              "aerial.backends.treesitter.helpers"
+              "aerial.backends.treesitter.extensions"
+              "aerial.backends.lsp.init"
+              "aerial.backends.lsp.callbacks"
+              "aerial.backends.lsp.util"
+              "aerial.backends.man"
+              "aerial.backends.asciidoc"
+              "aerial.backends.util"
+              "aerial.fold"
+              "aerial.highlight"
+              "aerial.keymap_util"
+              "aerial.config"
+              "aerial.layout"
+              "aerial.window"
+              "aerial.data"
+              "aerial.tree"
+              "aerial.snacks"
+              "aerial.command"
+              "aerial.util"
+              "aerial.render"
+              "aerial.loading"
+              "aerial.navigation"
+              "aerial.nav_actions"
+            ];
+          };
+
           treewalker-nvim = prev.vimUtils.buildVimPlugin {
             pname = normalizeName outputs.lib.flakeLock.treewalker-nvim.original.repo;
             version = inputs.treewalker-nvim.rev;

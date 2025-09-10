@@ -7,7 +7,7 @@
       { path = "/System/Applications/Messages.app"; }
       { path = "/Users/${primaryUser}/Applications/Home Manager Apps/Slack.app"; }
       { path = "/Applications/1Password.app"; }
-      { path = "/Users/${primaryUser}/Applications/Home Manager Apps/Arc.app"; }
+      { path = "/Applications/Arc.app"; }
       { path = "/Applications/Ghostty.app"; }
       { path = "/Applications/Cursor.app"; }
       { path = "/Applications/Visual Studio Code - Insiders.app"; }
