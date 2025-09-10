@@ -79,7 +79,6 @@
     ++ lib.lists.optional pkgs.stdenv.isLinux wl-clipboard
     ++ lib.lists.optionals pkgs.stdenv.isDarwin [
       appcleaner
-      arc-browser
       chatgpt
       container
       notion-app
