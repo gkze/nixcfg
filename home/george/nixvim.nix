@@ -323,6 +323,10 @@ in
               enable = true;
               settings.formatting.command = [ (lib.getExe pkgs.nixfmt-rfc-style) ];
             };
+            # nixd = {
+            #   enable = true;
+            #   settings.formatting.command = [ (lib.getExe pkgs.nixfmt-rfc-style) ];
+            # };
             postgres_lsp = {
               enable = true;
               settings = { };
