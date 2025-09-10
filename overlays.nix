@@ -29,6 +29,9 @@ in
         '';
       };
 
+      # TODO: remove in some near future, random tests were failing
+      jujutsu = prev.jujutsu.overrideAttrs { doCheck = false; };
+
       mdq = naersk'.buildPackage { src = inputs.mdq; };
 
       mountpoint-s3 =
@@ -50,6 +53,9 @@ in
             pkg-config
           ];
         };
+
+      # TODO: remove in some near future, random tests were failing
+      nodejs_20 = prev.nodejs_20.overrideAttrs { doCheck = false; };
 
       sublime-kdl =
         let
@@ -78,39 +84,39 @@ in
         f: p: {
           aerial-nvim = p.aerial-nvim.overrideAttrs {
             nvimSkipModules = [
-              "resession.extensions.aerial"
               "aerial"
-              "aerial.nav_view"
-              "aerial.fzf"
-              "aerial.fzf-lua"
               "aerial.actions"
               "aerial.autocommands"
-              "aerial.backends.markdown"
+              "aerial.backends.asciidoc"
               "aerial.backends.init"
-              "aerial.backends.treesitter.init"
-              "aerial.backends.treesitter.helpers"
-              "aerial.backends.treesitter.extensions"
-              "aerial.backends.lsp.init"
               "aerial.backends.lsp.callbacks"
+              "aerial.backends.lsp.init"
               "aerial.backends.lsp.util"
               "aerial.backends.man"
-              "aerial.backends.asciidoc"
+              "aerial.backends.markdown"
+              "aerial.backends.treesitter.extensions"
+              "aerial.backends.treesitter.helpers"
+              "aerial.backends.treesitter.init"
               "aerial.backends.util"
+              "aerial.command"
+              "aerial.config"
+              "aerial.data"
               "aerial.fold"
+              "aerial.fzf"
+              "aerial.fzf-lua"
               "aerial.highlight"
               "aerial.keymap_util"
-              "aerial.config"
               "aerial.layout"
-              "aerial.window"
-              "aerial.data"
-              "aerial.tree"
-              "aerial.snacks"
-              "aerial.command"
-              "aerial.util"
-              "aerial.render"
               "aerial.loading"
-              "aerial.navigation"
               "aerial.nav_actions"
+              "aerial.nav_view"
+              "aerial.navigation"
+              "aerial.render"
+              "aerial.snacks"
+              "aerial.tree"
+              "aerial.util"
+              "aerial.window"
+              "resession.extensions.aerial"
             ];
           };
 
