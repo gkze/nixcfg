@@ -165,21 +165,6 @@ in
               }
             ];
         };
-        bufferline = {
-          enable = true;
-          settings.options = {
-            diagnostics = "nvim_lsp";
-            enforce_regular_tabs = false;
-            offsets = [
-              {
-                filetype = "neo-tree";
-                text = "Neo-tree";
-                separator = true;
-                textAlign = "left";
-              }
-            ];
-          };
-        };
         blink-cmp = {
           enable = true;
           settings = {
@@ -218,6 +203,21 @@ in
             signature.enabled = true;
           };
         };
+        bufferline = {
+          enable = true;
+          settings.options = {
+            diagnostics = "nvim_lsp";
+            enforce_regular_tabs = false;
+            offsets = [
+              {
+                filetype = "neo-tree";
+                text = "Neo-tree";
+                separator = true;
+                textAlign = "left";
+              }
+            ];
+          };
+        };
         codesnap = {
           enable = true;
           settings.watermark = "";
@@ -251,10 +251,6 @@ in
             format_on_save.lsp_format = "fallback";
           };
         };
-        dap.enable = true;
-        dap-python.enable = true;
-        dap-ui.enable = true;
-        fzf-lua.enable = true;
         gitlinker = {
           enable = true;
           mappings = "<C-c>l";
@@ -272,13 +268,16 @@ in
             "try.gogs.io" = "get_gogs_type_url";
           };
         };
-        git-worktree.enable = true;
         gitsigns = {
           enable = true;
           settings = {
             current_line_blame = true;
             current_line_blame_opts.delay = 300;
           };
+        };
+        highlight-colors = {
+          enable = true;
+          settings.enable_tailwind = true;
         };
         lsp = {
           enable = true;
@@ -415,9 +414,10 @@ in
             integrations.diffview = true;
           };
         };
-        highlight-colors = {
+        schemastore = {
           enable = true;
-          settings.enable_tailwind = true;
+          json.enable = false;
+          yaml.enable = true;
         };
         statuscol = {
           enable = true;
@@ -473,11 +473,6 @@ in
               }
             ];
           };
-        };
-        schemastore = {
-          enable = true;
-          json.enable = false;
-          yaml.enable = true;
         };
         telescope = {
           enable = true;
@@ -612,53 +607,59 @@ in
           settings.expose_as_code_action = "all";
         };
         # TODO: re-enable
+        aerial.enable = true;
         avante.enable = false;
         barbecue.enable = true;
         bufdelete.enable = true;
         comment.enable = true;
+        dap-python.enable = true;
+        dap-ui.enable = true;
+        dap.enable = true;
         diffview.enable = true;
         dressing.enable = true;
         fidget.enable = true;
         firenvim.enable = true;
         fugitive.enable = true;
+        fzf-lua.enable = true;
         git-conflict.enable = true;
+        git-worktree.enable = true;
         hex.enable = true;
         illuminate.enable = true;
         inc-rename.enable = true;
         indent-blankline.enable = true;
+        # kulala.enable = true;
         lazydev.enable = true;
-        luasnip.enable = true;
         lsp-format.enable = true;
         lspsaga.enable = true;
+        luasnip.enable = true;
         markdown-preview.enable = true;
         marks.enable = true;
         mini.modules.align = { };
+        neoconf.enable = true;
         nix.enable = true;
         nui.enable = true;
         nvim-autopairs.enable = true;
         nvim-surround.enable = true;
         octo.enable = true;
         oil.enable = true;
-        undotree.enable = true;
+        orgmode.enable = true;
+        overseer.enable = true;
         render-markdown.enable = true;
         rest.enable = true;
         scope.enable = true;
-        spectre.enable = true;
         smart-splits.enable = true;
+        spectre.enable = true;
         todo-comments.enable = true;
         trouble.enable = true;
-        which-key.enable = true;
+        undotree.enable = true;
         web-devicons.enable = true;
+        which-key.enable = true;
       };
       extraPlugins =
         with pkgs.vimPlugins;
         [
-          aerial-nvim
-          kulala-nvim
-          neoconf-nvim
           nvim-treesitter-parsers.nickel
           nvim-treesitter-textsubjects
-          overseer-nvim
           treewalker-nvim
           vim-bazel
           vim-bundle-mako
@@ -672,10 +673,6 @@ in
           extraPluginsConfig = {
             nvim-surround = { };
             overseer = { };
-            aerial = {
-              autojump = true;
-              filter_kind = false;
-            };
             "nvim-treesitter.configs".textsubjects = {
               enable = true;
               rrev_selection = ",";
