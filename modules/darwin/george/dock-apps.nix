@@ -1,8 +1,7 @@
 { primaryUser, ... }:
 {
-  local.dock = {
-    enable = true;
-    entries = [
+  system.defaults.dock = {
+    persistent-apps = [
       { path = "/System/Applications/Calendar.app"; }
       { path = "/System/Applications/Messages.app"; }
       { path = "/Users/${primaryUser}/Applications/Home Manager Apps/Slack.app"; }
@@ -15,14 +14,11 @@
       { path = "/Applications/Linear.app"; }
       { path = "/Users/${primaryUser}/Applications/Home Manager Apps/Spotify.app"; }
       { path = "/System/Applications/System Settings.app"; }
-      {
-        path = "/Applications";
-        section = "others";
-      }
-      {
-        path = "/Users/george/Downloads";
-        section = "others";
-      }
+    ];
+    persistent-others = [
+      "/Applications"
+      "/Applications/Utilities"
+      "/Users/${primaryUser}/Downloads"
     ];
   };
 }
