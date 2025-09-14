@@ -114,7 +114,12 @@ rec {
     {
       inherit system;
       specialArgs = {
-        inherit inputs src system;
+        inherit
+          inputs
+          outputs
+          src
+          system
+          ;
         primaryUser = elemAt users 0;
       }
       // {
@@ -132,7 +137,12 @@ rec {
             useGlobalPkgs = true;
             useUserPackages = true;
             extraSpecialArgs = {
-              inherit inputs src system;
+              inherit
+                inputs
+                outputs
+                src
+                system
+                ;
               slib = outputs.lib;
               pkgs = pkgsFor.${system};
             };
