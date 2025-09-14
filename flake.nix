@@ -160,10 +160,10 @@
         imports = [ flakelight-darwin.flakelightModules.default ];
 
         withOverlays = [
+          self.overlays.default
           devshell.overlays.default
           inputs.neovim-nightly-overlay.overlays.default
           inputs.red.overlays.default
-          self.overlays.default
         ];
 
         devShell =
