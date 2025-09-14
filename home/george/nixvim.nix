@@ -1,5 +1,6 @@
 {
   config,
+  outputs,
   lib,
   pkgs,
   ...
@@ -13,6 +14,7 @@ in
     config = {
       enable = true;
       enableMan = true;
+      nixpkgs.overlays = [ outputs.overlays.default ];
       globals.mapleader = " ";
       opts = {
         colorcolumn = [
@@ -606,8 +608,10 @@ in
           enable = true;
           settings.expose_as_code_action = "all";
         };
-        # TODO: re-enable
-        aerial.enable = true;
+        aerial = {
+          enable = true;
+          settings.filter_kind = false;
+        };
         avante.enable = false;
         barbecue.enable = true;
         bufdelete.enable = true;
