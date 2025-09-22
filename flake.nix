@@ -113,7 +113,7 @@
       flake = false;
     };
     sublime-kdl = {
-      url = "github:eugenesvk/sublime-kdl/2.0.5";
+      url = "github:eugenesvk/sublime-kdl/2.0.6";
       flake = false;
     };
     stars = {

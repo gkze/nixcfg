@@ -47,6 +47,7 @@
       nh
       nil
       nix-output-monitor
+      nix-tree
       nixfmt-rfc-style
       nodejs_latest
       postman
@@ -76,7 +77,7 @@
       xz
       yq-go
     ]
-    ++ lib.lists.optional pkgs.stdenv.isLinux wl-clipboard
+    ++ lib.lists.optionals pkgs.stdenv.isLinux [ wl-clipboard ]
     ++ lib.lists.optionals pkgs.stdenv.isDarwin [
       appcleaner
       chatgpt
