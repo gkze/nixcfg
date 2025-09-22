@@ -242,11 +242,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1758457981,
-        "narHash": "sha256-cAPbYnG5LLi6ACPNSX8M8mBc16Aakc7352gDQ65j4OU=",
+        "lastModified": 1758544622,
+        "narHash": "sha256-F8hZvWFJelbBaVeLMfD/sybYs0KNwMvpYowNNwe5XjM=",
         "owner": "nix-community",
         "repo": "flake-firefox-nightly",
-        "rev": "f4d2352ffe76e77e71e810e3e7d7e0608d53f083",
+        "rev": "28b13fb77c13e4285d9e944690490608087b4383",
         "type": "github"
       },
       "original": {
@@ -530,11 +530,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1758403037,
-        "narHash": "sha256-pzpEf+RxQaMDjS7NvSP2PR6Agx7laGOVvZS+xPDCAUQ=",
+        "lastModified": 1758545328,
+        "narHash": "sha256-pfpkdGpyElcT5z+YSSy+X106YC97z0MS+qwccRun238=",
         "owner": "nix-community",
         "repo": "flakelight",
-        "rev": "9fc84ae72bde87978109561369a9ef0c165ad7c4",
+        "rev": "f91cf90022050ce062df915383964ec6c6f70c33",
         "type": "github"
       },
       "original": {
@@ -716,11 +716,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1758464306,
-        "narHash": "sha256-i56XRXqjwJRdVYmpzVUQ0ktqBBHqNzQHQMQvFRF/acQ=",
+        "lastModified": 1758545873,
+        "narHash": "sha256-0VP5cVd6DyibHNPC/IJ5Ut+KuNYUeKmr5ltzf+IcpjA=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "939e91e1cff1f99736c5b02529658218ed819a2a",
+        "rev": "de5369834ff1f75246c46be89ef993392e961c26",
         "type": "github"
       },
       "original": {
@@ -732,11 +732,11 @@
     "homebrew-cask": {
       "flake": false,
       "locked": {
-        "lastModified": 1758504178,
-        "narHash": "sha256-GtaLcCBWmnkpeOQyywdaazySB1/tUOuVuHgbZVhkwOw=",
+        "lastModified": 1758551905,
+        "narHash": "sha256-y78ECZhlQYXa3TNqC3aZI7TD6gQ/DGzhnHQuJJxHO8k=",
         "owner": "homebrew",
         "repo": "homebrew-cask",
-        "rev": "a8f972f709ece4aa48896d3f64d9e9b4b51f2c12",
+        "rev": "ea2db4772eaf83149bbfe8736fc3ec76d7475817",
         "type": "github"
       },
       "original": {
@@ -748,11 +748,11 @@
     "homebrew-core": {
       "flake": false,
       "locked": {
-        "lastModified": 1758500263,
-        "narHash": "sha256-zz8DFHZGJbhgwZbLkLOlj3AzI00wvS51SX8otGPyGxw=",
+        "lastModified": 1758551911,
+        "narHash": "sha256-41JrAeaMbyO0FveyjJpAjLk3LEMaCqFm3b+S5Jv7ydI=",
         "owner": "homebrew",
         "repo": "homebrew-core",
-        "rev": "e885969cd983ef8e9fd780a31f6e396b6b15beb4",
+        "rev": "5ee928e8f50cc637f5b89bf96f82167832c98df3",
         "type": "github"
       },
       "original": {
@@ -1094,11 +1094,11 @@
         "systems": "systems_4"
       },
       "locked": {
-        "lastModified": 1758459270,
-        "narHash": "sha256-r2VA33WYfxDJyWmJeo0TmPPrk9yGS9WWb/kld0e7X+I=",
+        "lastModified": 1758551108,
+        "narHash": "sha256-3KArqJcnrcEr1M3QsBG7NZRQSxVNFI3In+9MHdVmUKY=",
         "owner": "nix-community",
         "repo": "nixvim",
-        "rev": "92ba37a3e8c25d470f9affe8d5f36f2cfb21e5dd",
+        "rev": "f828dead7723e7680b09929b9886225389d0370b",
         "type": "github"
       },
       "original": {
@@ -1334,11 +1334,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1758422215,
-        "narHash": "sha256-JvF5SXhp1wBHbfEVAWgJCDVSO8iknfDqXfqMch5YWg0=",
+        "lastModified": 1758508617,
+        "narHash": "sha256-kx2uELmVnAbiekj/YFfWR26OXqXedImkhe2ocnbumTA=",
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "6f3988eb5885f1e2efa874a480d91de09a7f9f0b",
+        "rev": "d2bac276ac7e669a1f09c48614538a37e3eb6d0f",
         "type": "github"
       },
       "original": {
@@ -1401,16 +1401,16 @@
     "sublime-kdl": {
       "flake": false,
       "locked": {
-        "lastModified": 1737465230,
-        "narHash": "sha256-GpcDF/MYfMVIK3PoWT833jPjh85JkSDi1mu3bQedh4U=",
+        "lastModified": 1738074246,
+        "narHash": "sha256-nl69Wlvt0sFtWH3F5jJ6GtqTcuzcpBscWA6N325ryxo=",
         "owner": "eugenesvk",
         "repo": "sublime-kdl",
-        "rev": "177cbccd7bc982b66ef71c2ed9e4fbdb45a5a6cf",
+        "rev": "d09d3bd5cfeb40b57b9296e5a12ae4de63611fae",
         "type": "github"
       },
       "original": {
         "owner": "eugenesvk",
-        "ref": "2.0.5",
+        "ref": "2.0.6",
         "repo": "sublime-kdl",
         "type": "github"
       }
