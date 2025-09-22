@@ -6,8 +6,7 @@
       { app = "/System/Applications/Messages.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Slack.app"; }
       { app = "/Applications/1Password.app"; }
-      { app = "/Applications/Arc.app"; }
-      { app = "/Applications/Dia.app"; }
+      { app = "/Applications/Twilight.app"; }
       { app = "/Applications/Ghostty.app"; }
       { app = "/Applications/Cursor.app"; }
       { app = "/Applications/Visual Studio Code - Insiders.app"; }

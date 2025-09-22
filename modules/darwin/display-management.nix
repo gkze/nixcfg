@@ -9,7 +9,7 @@
       enable = true;
       skhdConfig = ''
         alt + shift - c : open -a /Applications/Cursor.app
-        alt + shift - return : open -a /Applications/Arc.app
+        alt + shift - return : open -a /Applications/Twilight.app"
         alt - return : open -a /Applications/Ghostty.app
       '';
     };
