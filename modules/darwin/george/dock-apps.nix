@@ -2,18 +2,18 @@
 {
   system.defaults.dock = {
     persistent-apps = [
-      { path = "/System/Applications/Calendar.app"; }
-      { path = "/System/Applications/Messages.app"; }
-      { path = "/Users/${primaryUser}/Applications/Home Manager Apps/Slack.app"; }
-      { path = "/Applications/Twilight.app"; }
-      { path = "/Applications/Ghostty.app"; }
-      { path = "/Applications/Cursor.app"; }
-      { path = "/Applications/DataGrip.app"; }
-      { path = "/Users/${primaryUser}/Applications/Home Manager Apps/Notion.app"; }
-      { path = "/Applications/Figma.app"; }
-      { path = "/Applications/Linear.app"; }
-      { path = "/Users/${primaryUser}/Applications/Home Manager Apps/Spotify.app"; }
-      { path = "/System/Applications/System Settings.app"; }
+      { app = "/System/Applications/Calendar.app"; }
+      { app = "/System/Applications/Messages.app"; }
+      { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Slack.app"; }
+      { app = "/Applications/Twilight.app"; }
+      { app = "/Applications/Ghostty.app"; }
+      { app = "/Applications/Cursor.app"; }
+      { app = "/Applications/DataGrip.app"; }
+      { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Notion.app"; }
+      { app = "/Applications/Figma.app"; }
+      { app = "/Applications/Linear.app"; }
+      { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Spotify.app"; }
+      { app = "/System/Applications/System Settings.app"; }
     ];
     persistent-others = [
       "/Applications"
