@@ -241,6 +241,7 @@ in
               html = [ "prettier" ];
               javascript = [ "prettier" ];
               javascriptreact = [ "prettier" ];
+              json = [ "jq" ];
               lua = [ "stylua" ];
               python = [
                 "ruff_fix"
