@@ -238,10 +238,10 @@ in
                 ruff_organize_imports.command = ruffCmd;
               };
             formatters_by_ft = {
-              html = [ "prettier" ];
-              javascript = [ "prettier" ];
-              javascriptreact = [ "prettier" ];
-              json = [ "jq" ];
+              html = [ "biome" ];
+              javascript = [ "biome" ];
+              javascriptreact = [ "biome" ];
+              json = [ "biome" ];
               lua = [ "stylua" ];
               python = [
                 "ruff_fix"

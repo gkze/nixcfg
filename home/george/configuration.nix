@@ -60,11 +60,11 @@
     sessionVariables = {
       DELTA_PAGER = "bat -p";
       EDITOR = "nvim";
+      LESS = "-R --mouse";
       MANPAGER = "sh -c 'col -bx | bat -plman'";
       MANROFFOPT = "-c";
       NIX_PAGER = "bat -p";
       PAGER = "bat -p";
-      LESS = "-R --mouse";
     };
     shellAliases =
       let
@@ -211,14 +211,18 @@
       enable = true;
       enableZshIntegration = true;
       enableNushellIntegration = true;
-      settings = {
-        add_newline = false;
-        # gcloud.disabled = true;
-        line_break.disabled = true;
-        # nix_shell.disabled = true;
-        # nodejs.disabled = true;
-        # python.disabled = true;
-      };
+      settings =
+        let
+          format = "[$symbol($version(-$name) )]($style)";
+        in
+        {
+          add_newline = false;
+          gcloud.format = "[$symbol$account(@$domain)(\($region\))]($style) ";
+          line_break.disabled = true;
+          nix_shell.format = "[$symbol$state( \($name\))]($style) ";
+          nodejs = { inherit format; };
+          python = { inherit format; };
+        };
     };
     topgrade = {
       enable = true;
@@ -256,6 +260,7 @@
         session_serialization = false;
         show_startup_tips = false;
         simplified_ui = true;
+        scroll_buffer_size = 1000000;
       };
     };
     zoxide = {
