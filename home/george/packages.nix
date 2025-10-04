@@ -8,7 +8,6 @@
       (coreutils.override { minimal = false; })
       ast-grep
       cachix
-      claude-code
       container
       csvlens
       curl
@@ -38,6 +37,7 @@
       jo
       jujutsu
       killport
+      less
       mas
       mdq
       moreutils

@@ -4,6 +4,7 @@
       "airfoil"
       "arc"
       "claude"
+      "claude-code"
       "codeedit"
       "cursor"
       "datagrip"
