@@ -130,7 +130,8 @@
     };
     fd.enable = true;
     gitui = {
-      enable = true;
+      # TODO: re-enable later
+      enable = false;
       keyConfig = pkgs.fetchurl {
         url = slib.ghRaw {
           owner = "extrawurst";

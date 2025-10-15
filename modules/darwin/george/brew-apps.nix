@@ -1,5 +1,6 @@
 {
   homebrew = {
+    brews = [ "codex" ];
     casks = [
       "airfoil"
       "arc"
@@ -11,6 +12,7 @@
       "docker-desktop"
       "figma"
       "framer"
+      "gemini"
       "ghostty@tip"
       "ghostty@tip"
       "gitbutler"

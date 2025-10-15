@@ -256,19 +256,21 @@ in
         };
         gitlinker = {
           enable = true;
-          mappings = "<C-c>l";
-          callbacks = {
-            "bitbucket.org" = "get_bitbucket_type_url";
-            "codeberg.org" = "get_gitea_type_url";
-            "git.kernel.org" = "get_cgit_type_url";
-            "git.launchpad.net" = "get_launchpad_type_url";
-            "git.savannah.gnu.org" = "get_cgit_type_url";
-            "git.sr.ht" = "get_srht_type_url";
-            "github.com" = "get_github_type_url";
-            "gitlab.com" = "get_gitlab_type_url";
-            "repo.or.cz" = "get_repoorcz_type_url";
-            "try.gitea.io" = "get_gitea_type_url";
-            "try.gogs.io" = "get_gogs_type_url";
+          settings = {
+            callbacks = {
+              "bitbucket.org" = "get_bitbucket_type_url";
+              "codeberg.org" = "get_gitea_type_url";
+              "git.kernel.org" = "get_cgit_type_url";
+              "git.launchpad.net" = "get_launchpad_type_url";
+              "git.savannah.gnu.org" = "get_cgit_type_url";
+              "git.sr.ht" = "get_srht_type_url";
+              "github.com" = "get_github_type_url";
+              "gitlab.com" = "get_gitlab_type_url";
+              "repo.or.cz" = "get_repoorcz_type_url";
+              "try.gitea.io" = "get_gitea_type_url";
+              "try.gogs.io" = "get_gogs_type_url";
+            };
+            opts.mappings = "<C-c>l";
           };
         };
         gitsigns = {
@@ -391,24 +393,27 @@ in
         };
         navbuddy = {
           enable = true;
-          lsp.autoAttach = true;
+          settings.lsp.auto_attach = true;
         };
         neo-tree = {
           enable = true;
-          closeIfLastWindow = true;
-          filesystem = {
-            filteredItems = {
-              hideDotfiles = false;
-              hideGitignored = false;
+          settings = {
+            close_if_last_window = true;
+            filesystem = {
+              filtered_items = {
+                hide_dotfiles = false;
+                hide_gitignored = false;
+                hide_ignored = false;
+                hide_hidden = false;
+              };
+              follow_current_file = {
+                enabled = true;
+                leave_dirs_open = true;
+              };
+              use_libuv_file_watcher = true;
             };
-            followCurrentFile = {
-              enabled = true;
-              leaveDirsOpen = true;
-            };
-            useLibuvFileWatcher = true;
+            source_selector.winbar = true;
           };
-          sourceSelector.winbar = true;
-          window.mappings.Z = "expand_all_nodes";
         };
         neogit = {
           enable = true;

@@ -7,6 +7,7 @@
       # superfile
       (coreutils.override { minimal = false; })
       ast-grep
+      biome
       cachix
       container
       csvlens
