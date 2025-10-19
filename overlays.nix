@@ -17,13 +17,14 @@ in
         doCheck = false;
 
         nativeBuildInputs = [ prev.installShellFiles ];
-        # postInstall = ''
-        #   export HOME=$(mktemp -d)
-        #   installShellCompletion --cmd beads \
-        #     --bash <($out/bin/bd completion bash) \
-        #     --fish <($out/bin/bd completion fish) \
-        #     --zsh <($out/bin/bd completion zsh)
-        # '';
+        postInstall = ''
+          export HOME=$(mktemp -d)
+          $out/bin/bd init
+          installShellCompletion --cmd beads \
+            --bash <($out/bin/bd completion bash) \
+            --fish <($out/bin/bd completion fish) \
+            --zsh <($out/bin/bd completion zsh)
+        '';
       };
 
       beads-mcp =
@@ -122,44 +123,7 @@ in
         };
 
       vimPlugins = prev.vimPlugins.extend (
-        f: p: {
-          aerial-nvim = p.aerial-nvim.overrideAttrs {
-            nvimSkipModules = [ "aerial.fzf-lua" ];
-          };
-
-          octo-nvim = p.octo-nvim.overrideAttrs {
-            nvimSkipModules = [
-              "octo.pickers.fzf-lua.entry_maker"
-              "octo.pickers.fzf-lua.pickers.actions"
-              "octo.pickers.fzf-lua.pickers.assigned_labels"
-              "octo.pickers.fzf-lua.pickers.assignees"
-              "octo.pickers.fzf-lua.pickers.changed_files"
-              "octo.pickers.fzf-lua.pickers.commits"
-              "octo.pickers.fzf-lua.pickers.gists"
-              "octo.pickers.fzf-lua.pickers.issue_templates"
-              "octo.pickers.fzf-lua.pickers.issues"
-              "octo.pickers.fzf-lua.pickers.labels"
-              "octo.pickers.fzf-lua.pickers.notifications"
-              "octo.pickers.fzf-lua.pickers.pending_threads"
-              "octo.pickers.fzf-lua.pickers.project_cards"
-              "octo.pickers.fzf-lua.pickers.project_cards_v2"
-              "octo.pickers.fzf-lua.pickers.project_columns"
-              "octo.pickers.fzf-lua.pickers.project_columns_v2"
-              "octo.pickers.fzf-lua.pickers.prs"
-              "octo.pickers.fzf-lua.pickers.repos"
-              "octo.pickers.fzf-lua.pickers.review_commits"
-              "octo.pickers.fzf-lua.pickers.search"
-              "octo.pickers.fzf-lua.pickers.users"
-              "octo.pickers.fzf-lua.provider"
-            ];
-          };
-
-          treewalker-nvim = prev.vimUtils.buildVimPlugin {
-            pname = normalizeName outputs.lib.flakeLock.treewalker-nvim.original.repo;
-            version = inputs.treewalker-nvim.rev;
-            src = inputs.treewalker-nvim;
-          };
-
+        _: _: {
           vim-bundle-mako = prev.vimUtils.buildVimPlugin {
             pname = normalizeName outputs.lib.flakeLock.vim-bundle-mako.original.repo;
             version = inputs.vim-bundle-mako.rev;
