@@ -14,6 +14,9 @@ in
     config = {
       enable = true;
       enableMan = true;
+      files."ftplugin/json.lua".opts = {
+        shiftwidth = 2;
+      };
       nixpkgs.overlays = [ outputs.overlays.default ];
       globals.mapleader = " ";
       opts = {
@@ -303,7 +306,7 @@ in
           };
           servers = {
             bashls.enable = true;
-            biome.enable = false;
+            biome.enable = true;
             cssls.enable = true;
             dockerls.enable = true;
             # Testing Taplo

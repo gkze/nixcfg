@@ -1,12 +1,12 @@
 {
   homebrew = {
-    brews = [ "codex" ];
     casks = [
       "airfoil"
       "arc"
       "claude"
       "claude-code"
       "codeedit"
+      "codex"
       "cursor"
       "datagrip"
       "docker-desktop"
@@ -27,10 +27,10 @@
       "zed@preview"
       "zen@twilight"
       # "domzilla-caffeine"
+      # "logi-options+"
       # brew 4.6.5 gained a `rename` function and logi-options+ uses it so
       # this will not be installed
       # until nix-homebrew.inputs.brew-src is updated to that and made work
-      # "logi-options+"
     ];
     masApps = {
       "AdGuard for Safari" = 1440147259;

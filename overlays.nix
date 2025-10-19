@@ -9,7 +9,48 @@ in
       naersk' = prev.callPackage inputs.naersk { };
     in
     {
+      beads = prev.buildGoModule {
+        name = "beads";
+        src = inputs.beads;
+        subPackages = [ "cmd/bd" ];
+        vendorHash = "sha256-9xtp1ZG7aYXatz02PDTmSRXwBDaW0kM7AMQa1RUau4U=";
+        doCheck = false;
+
+        nativeBuildInputs = [ prev.installShellFiles ];
+        # postInstall = ''
+        #   export HOME=$(mktemp -d)
+        #   installShellCompletion --cmd beads \
+        #     --bash <($out/bin/bd completion bash) \
+        #     --fish <($out/bin/bd completion fish) \
+        #     --zsh <($out/bin/bd completion zsh)
+        # '';
+      };
+
+      beads-mcp =
+        with inputs;
+        let
+          pyprojNix = pyproject-nix;
+          workspace = uv2nix.lib.workspace.loadWorkspace {
+            workspaceRoot = "${beads}/integrations/beads-mcp";
+          };
+          pySet = (prev.callPackage pyprojNix.build.packages { python = prev.python313; }).overrideScope (
+            prev.lib.composeManyExtensions [
+              pyproject-build-systems.overlays.default
+              (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+            ]
+          );
+        in
+        (prev.callPackages pyprojNix.build.util { }).mkApplication {
+          venv = pySet.mkVirtualEnv "beads-mcp" workspace.deps.all // {
+            meta.mainProgram = "beads-mcp";
+          };
+          package = pySet.beads-mcp;
+        };
+
       blink-cmp = inputs.blink-cmp.packages.default;
+
+      claude-code = prev.claude-code.overrideAttrs { version = "2.0.20"; };
+
       homebrew-zsh-completion = prev.stdenvNoCC.mkDerivation {
         name = "brew-zsh-compmletion";
         src = builtins.fetchurl {

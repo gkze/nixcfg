@@ -68,13 +68,18 @@ in
         side-by-side = true;
       };
     };
-    # difftastic = { enable = true; background = "dark"; };
+    # difftastic = {
+    #   enable = true;
+    #   enableAsDifftool = true;
+    #   options.background = "dark";
+    # };
     extraConfig = {
       commit.gpgsign = true;
       delta.features = "catppuccin-frappe";
       diff.colorMoved = "default";
       fetch.prune = true;
-      merge.conflictstyle = "diff3";
+      init.defaultBranch = "main";
+      # merge.conflictstyle = "diff3";
       rebase.pull = true;
       url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
       user.signingkey = userMeta.gpg.keys.personal;
