@@ -18,9 +18,12 @@
       "gitbutler"
       "google-drive"
       "linear-linear"
+      "logi-options+"
       "loom"
+      "macai"
       "macfuse"
       "nordvpn"
+      "rio"
       "signal@beta"
       "visual-studio-code@insiders"
       "wave"
@@ -28,7 +31,6 @@
       "zed@preview"
       "zen@twilight"
       # "domzilla-caffeine"
-      "logi-options+"
     ];
     masApps = {
       "AdGuard for Safari" = 1440147259;

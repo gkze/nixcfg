@@ -34,12 +34,16 @@ in
           workspace = uv2nix.lib.workspace.loadWorkspace {
             workspaceRoot = "${beads}/integrations/beads-mcp";
           };
-          pySet = (prev.callPackage pyprojNix.build.packages { python = prev.python313; }).overrideScope (
-            prev.lib.composeManyExtensions [
-              pyproject-build-systems.overlays.default
-              (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
-            ]
-          );
+          pySet =
+            (prev.callPackage pyprojNix.build.packages {
+              python = prev.python313;
+            }).overrideScope
+              (
+                prev.lib.composeManyExtensions [
+                  pyproject-build-systems.overlays.default
+                  (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+                ]
+              );
         in
         (prev.callPackages pyprojNix.build.util { }).mkApplication {
           venv = pySet.mkVirtualEnv "beads-mcp" workspace.deps.all // {
