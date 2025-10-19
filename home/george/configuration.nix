@@ -188,6 +188,7 @@
       enable = true;
       generateCaches = true;
     };
+    mergiraf.enable = true;
     nushell.enable = true;
     nix-index.enable = true;
     ripgrep.enable = true;
@@ -214,7 +215,7 @@
       enableNushellIntegration = true;
       settings =
         let
-          format = "[$symbol($version(-$name) )]($style)";
+          format = "[$symbol($version(-$name) )]($style) ";
         in
         {
           add_newline = false;
