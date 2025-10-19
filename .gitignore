@@ -10,3 +10,6 @@ result
 
 # Ruff cache
 .ruff_cache/
+
+# Claude
+.claude/settings.local.json
