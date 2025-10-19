@@ -28,6 +28,10 @@
       url = "github:numtide/devshell";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    beads = {
+      url = "github:steveyegge/beads";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     blink-cmp = {
       url = "github:Saghen/blink.cmp/main";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -48,6 +52,16 @@
       url = "github:nix-community/nixvim";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    pyproject-build-systems = {
+      url = "github:pyproject-nix/build-system-pkgs";
+      inputs.pyproject-nix.follows = "pyproject-nix";
+      inputs.uv2nix.follows = "uv2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    pyproject-nix = {
+      url = "github:pyproject-nix/pyproject.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     red = {
       url = "github:gkze/red";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -62,6 +76,11 @@
     };
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    uv2nix = {
+      url = "github:pyproject-nix/uv2nix";
+      inputs.pyproject-nix.follows = "pyproject-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     bufresize-nvim = {
@@ -160,10 +179,10 @@
         imports = [ flakelight-darwin.flakelightModules.default ];
 
         withOverlays = [
-          self.overlays.default
           devshell.overlays.default
           inputs.neovim-nightly-overlay.overlays.default
           inputs.red.overlays.default
+          self.overlays.default
         ];
 
         devShell =

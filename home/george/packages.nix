@@ -7,6 +7,8 @@
       # superfile
       (coreutils.override { minimal = false; })
       ast-grep
+      beads
+      beads-mcp
       biome
       cachix
       container
