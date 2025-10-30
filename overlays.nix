@@ -13,10 +13,11 @@ in
         name = "beads";
         src = inputs.beads;
         subPackages = [ "cmd/bd" ];
-        vendorHash = "sha256-9xtp1ZG7aYXatz02PDTmSRXwBDaW0kM7AMQa1RUau4U=";
+        vendorHash = "sha256-DJqTiLGLZNGhHXag50gHFXTVXCBdj8ytbYbPL3QAq8M=";
         doCheck = false;
 
         nativeBuildInputs = [ prev.installShellFiles ];
+
         postInstall = ''
           export HOME=$(mktemp -d)
           $out/bin/bd init
@@ -31,8 +32,15 @@ in
         with inputs;
         let
           pyprojNix = pyproject-nix;
+          uv = prev.lib.getExe prev.uv;
+          python = prev.lib.getExe prev.python313;
           workspace = uv2nix.lib.workspace.loadWorkspace {
-            workspaceRoot = "${beads}/integrations/beads-mcp";
+            workspaceRoot = prev.stdenv.mkDerivation {
+              name = "beads-mcp-locked";
+              src = "${beads}/integrations/beads-mcp";
+              buildPhase = "UV_PYTHON=${python} ${uv} -n lock";
+              installPhase = "cp -r . $out";
+            };
           };
           pySet =
             (prev.callPackage pyprojNix.build.packages {
@@ -52,9 +60,10 @@ in
           package = pySet.beads-mcp;
         };
 
-      blink-cmp = inputs.blink-cmp.packages.default;
-
-      claude-code = prev.claude-code.overrideAttrs { version = "2.0.20"; };
+      cargo-nextest = prev.cargo-nextest.overrideAttrs (old: {
+        # https://github.com/NixOS/nixpkgs/pull/456256
+        patches = old.patches ++ [ ./patches/cargo-nextest-no-dtrace-macos.patch ];
+      });
 
       homebrew-zsh-completion = prev.stdenvNoCC.mkDerivation {
         name = "brew-zsh-compmletion";
@@ -75,11 +84,6 @@ in
         '';
       };
 
-      # TODO: remove in some near future, random tests were failing
-      jujutsu = prev.jujutsu.overrideAttrs { doCheck = false; };
-
-      mdq = naersk'.buildPackage { src = inputs.mdq; };
-
       mountpoint-s3 =
         let
           mounts3Ref = outputs.lib.flakeLock.mountpoint-s3;
@@ -99,9 +103,6 @@ in
             pkg-config
           ];
         };
-
-      # TODO: remove in some near future, random tests were failing
-      nodejs_20 = prev.nodejs_20.overrideAttrs { doCheck = false; };
 
       sublime-kdl =
         let

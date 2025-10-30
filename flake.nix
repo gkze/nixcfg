@@ -4,7 +4,9 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
-    nix-homebrew.url = "github:zhaofengli-wip/nix-homebrew";
+    # https://github.com/zhaofengli/nix-homebrew/pull/117
+    # nix-homebrew.url = "github:zhaofengli/nix-homebrew";
+    nix-homebrew.url = "github:Yeradon/nix-homebrew";
     neovim-nightly-overlay = {
       url = "github:nix-community/neovim-nightly-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -28,14 +30,6 @@
       url = "github:numtide/devshell";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    beads = {
-      url = "github:steveyegge/beads";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    blink-cmp = {
-      url = "github:Saghen/blink.cmp/main";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     firefox = {
       url = "github:nix-community/flake-firefox-nightly";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -46,7 +40,8 @@
     };
     mac-app-util = {
       url = "github:hraban/mac-app-util";
-      inputs.nixpkgs.follows = "nixpkgs";
+      # TODO: re-enable once SBCL on Darwin is fixed
+      # inputs.nixpkgs.follows = "nixpkgs";
     };
     nixvim = {
       url = "github:nix-community/nixvim";
@@ -82,6 +77,10 @@
       url = "github:pyproject-nix/uv2nix";
       inputs.pyproject-nix.follows = "pyproject-nix";
       inputs.nixpkgs.follows = "nixpkgs";
+    };
+    beads = {
+      url = "github:steveyegge/beads/v0.17.7";
+      flake = false;
     };
     bufresize-nvim = {
       url = "github:kwkarlwang/bufresize.nvim";

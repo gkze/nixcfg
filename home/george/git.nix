@@ -24,90 +24,93 @@ in
         email = ${userMeta.emails.town}
     '';
   };
-  programs.git = {
-    enable = true;
-    aliases = {
-      branches =
-        let
-          format = concatStringsSep "\t" [
-            "%(color:red)%(ahead-behind:HEAD)"
-            "%(color:blue)%(refname:short)"
-            "%(color:yellow)%(committerdate:relative)"
-            "%(color:default)%(describe)"
-          ];
-          header = concatStringsSep "," [
-            "Ahead"
-            "Behind"
-            "Branch Name"
-            "Last Commit"
-            "Description"
-          ];
-        in
-        concatStringsSep " " [
-          "!git for-each-ref"
-          "--color"
-          "--sort=-committerdate"
-          "--format=$'${format}'"
-          "refs/heads/"
-          "--no-merged"
-          "|"
-          "${lib.getExe pkgs.gnused}"
-          "'s/ /\t/'"
-          "|"
-          "${pkgs.util-linux}/bin/column"
-          "--separator=$'\t'"
-          "--table"
-          "--table-columns='${header}'"
-        ];
-      praise = "blame";
-    };
+  programs = {
     delta = {
       enable = true;
+      enableGitIntegration = true;
       options = {
         navigate = true;
         side-by-side = true;
       };
     };
-    # difftastic = {
-    #   enable = true;
-    #   enableAsDifftool = true;
-    #   options.background = "dark";
-    # };
-    extraConfig = {
-      commit.gpgsign = true;
-      delta.features = "catppuccin-frappe";
-      diff.colorMoved = "default";
-      fetch.prune = true;
-      init.defaultBranch = "main";
-      # merge.conflictstyle = "diff3";
-      rebase.pull = true;
-      url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
-      user.signingkey = userMeta.gpg.keys.personal;
-    };
-    ignores = [ ".direnv" ];
-    includes =
-      let
-        srcDirBase = slib.srcDirBase system;
-      in
-      [
-        { path = "${inputs.catppuccin-delta}/catppuccin.gitconfig"; }
-        {
-          path = "${config.xdg.configHome}/git/personal";
-          condition = "gitdir:${config.xdg.configHome}/nixcfg/**";
-        }
-        {
-          path = "${config.xdg.configHome}/git/town";
-          condition = "gitdir:~/${srcDirBase}/github.com/townco/**";
-        }
-        {
-          path = "${config.xdg.configHome}/git/personal";
-          condition = "gitdir:~/${srcDirBase}/github.com/**";
-        }
-      ];
-    lfs.enable = true;
-    signing = {
-      format = lib.mkForce "openpgp";
-      signer = lib.getExe pkgs.sequoia-chameleon-gnupg;
+    git = {
+      enable = true;
+      settings = {
+        commit.gpgsign = true;
+        delta.features = "catppuccin-frappe";
+        diff.colorMoved = "default";
+        fetch.prune = true;
+        init.defaultBranch = "main";
+        # merge.conflictstyle = "diff3";
+        rebase.pull = true;
+        url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
+        user.signingkey = userMeta.gpg.keys.personal;
+        alias = {
+          branches =
+            let
+              format = concatStringsSep "\t" [
+                "%(color:red)%(ahead-behind:HEAD)"
+                "%(color:blue)%(refname:short)"
+                "%(color:yellow)%(committerdate:relative)"
+                "%(color:default)%(describe)"
+              ];
+              header = concatStringsSep "," [
+                "Ahead"
+                "Behind"
+                "Branch Name"
+                "Last Commit"
+                "Description"
+              ];
+            in
+            concatStringsSep " " [
+              "!git for-each-ref"
+              "--color"
+              "--sort=-committerdate"
+              "--format=$'${format}'"
+              "refs/heads/"
+              "--no-merged"
+              "|"
+              "${lib.getExe pkgs.gnused}"
+              "'s/ /\t/'"
+              "|"
+              "${pkgs.util-linux}/bin/column"
+              "--separator=$'\t'"
+              "--table"
+              "--table-columns='${header}'"
+            ];
+          praise = "blame";
+        };
+      };
+      # difftastic = {
+      #   enable = true;
+      #   enableAsDifftool = true;
+      #   options.background = "dark";
+      # };
+      ignores = [ ".direnv" ];
+      includes =
+        let
+          srcDirBase = slib.srcDirBase system;
+        in
+        [
+          { path = "${inputs.catppuccin-delta}/catppuccin.gitconfig"; }
+          {
+            path = "${config.xdg.configHome}/git/personal";
+            condition = "gitdir:${config.xdg.configHome}/nixcfg/**";
+          }
+          {
+            path = "${config.xdg.configHome}/git/town";
+            condition = "gitdir:~/${srcDirBase}/github.com/townco/**";
+          }
+          {
+            path = "${config.xdg.configHome}/git/personal";
+            condition = "gitdir:~/${srcDirBase}/github.com/**";
+          }
+        ];
+      lfs.enable = true;
+      signing = {
+        format = lib.mkForce "openpgp";
+        signer = lib.getExe pkgs.sequoia-chameleon-gnupg;
+      };
     };
   };
 }

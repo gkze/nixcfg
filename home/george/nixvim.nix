@@ -235,6 +235,7 @@ in
                 ruffCmd = lib.getExe pkgs.ruff;
               in
               {
+                biome.command = lib.getExe pkgs.biome;
                 prettier.command = lib.getExe pkgs.nodePackages_latest.prettier;
                 ruff_fix.command = ruffCmd;
                 ruff_format.command = ruffCmd;
@@ -254,7 +255,6 @@ in
               typescript = [ "prettier" ];
               typescriptreact = [ "prettier" ];
             };
-            format_on_save.lsp_format = "fallback";
           };
         };
         gitlinker = {
@@ -319,6 +319,7 @@ in
             # };
             jsonls = {
               enable = true;
+              settings.format.enable = false;
               extraOptions.settings.json = {
                 schemas.__raw = "require('schemastore').json.schemas()";
                 validate.enable = true;
@@ -540,76 +541,78 @@ in
         };
         treesitter-textobjects = {
           enable = true;
-          lspInterop.enable = true;
-          move = {
-            enable = true;
-            gotoNextStart = {
-              "]]" = "@class.outer";
-              "]a" = "@attribute.outer";
-              "]b" = "@block.outer";
-              "]c" = "@call.outer";
-              "]f" = "@function.outer";
-              "]i" = "@conditional.outer";
-              "]p" = "@parameter.outer";
-              "]s" = "@statement.outer";
-              "]v" = "@assignment.outer";
+          settings = {
+            lsp_interop.enable = true;
+            move = {
+              enable = true;
+              gotoNextStart = {
+                "]]" = "@class.outer";
+                "]a" = "@attribute.outer";
+                "]b" = "@block.outer";
+                "]c" = "@call.outer";
+                "]f" = "@function.outer";
+                "]i" = "@conditional.outer";
+                "]p" = "@parameter.outer";
+                "]s" = "@statement.outer";
+                "]v" = "@assignment.outer";
+              };
+              gotoNextEnd = {
+                "]A" = "@attribute.inner";
+                "]B" = "@block.outer";
+                "]C" = "@call.outer";
+                "]F" = "@function.outer";
+                "]I" = "@conditional.outer";
+                "]P" = "@parameter.outer";
+                "]S" = "@statement.outer";
+                "]V" = "@assignment.outer";
+                "][" = "@class.outer";
+              };
+              gotoPreviousStart = {
+                "[[" = "@class.outer";
+                "[a" = "@attribute.outer";
+                "[b" = "@block.outer";
+                "[c" = "@call.outer";
+                "[f" = "@function.outer";
+                "[i" = "@conditional.outer";
+                "[p" = "@parameter.outer";
+                "[s" = "@statement.outer";
+                "[v" = "@assignment.outer";
+              };
+              gotoPreviousEnd = {
+                "[A" = "@attribute.outer";
+                "[B" = "@block.outer";
+                "[C" = "@call.outer";
+                "[F" = "@function.outer";
+                "[I" = "@conditional.outer";
+                "[P" = "@parameter.outer";
+                "[S" = "@statement.outer";
+                "[V" = "@assignment.outer";
+                "[]" = "@class.outer";
+              };
             };
-            gotoNextEnd = {
-              "]A" = "@attribute.inner";
-              "]B" = "@block.outer";
-              "]C" = "@call.outer";
-              "]F" = "@function.outer";
-              "]I" = "@conditional.outer";
-              "]P" = "@parameter.outer";
-              "]S" = "@statement.outer";
-              "]V" = "@assignment.outer";
-              "][" = "@class.outer";
-            };
-            gotoPreviousStart = {
-              "[[" = "@class.outer";
-              "[a" = "@attribute.outer";
-              "[b" = "@block.outer";
-              "[c" = "@call.outer";
-              "[f" = "@function.outer";
-              "[i" = "@conditional.outer";
-              "[p" = "@parameter.outer";
-              "[s" = "@statement.outer";
-              "[v" = "@assignment.outer";
-            };
-            gotoPreviousEnd = {
-              "[A" = "@attribute.outer";
-              "[B" = "@block.outer";
-              "[C" = "@call.outer";
-              "[F" = "@function.outer";
-              "[I" = "@conditional.outer";
-              "[P" = "@parameter.outer";
-              "[S" = "@statement.outer";
-              "[V" = "@assignment.outer";
-              "[]" = "@class.outer";
-            };
-          };
-          select = {
-            enable = true;
-            lookahead = true;
-            keymaps = {
-              "aC" = "@class.outer";
-              "aa" = "@parameter.outer";
-              "ab" = "@block.outer";
-              "ac" = "@call.outer";
-              "af" = "@function.outer";
-              "ai" = "@conditional.outer";
-              "al" = "@loop.outer";
-              "av" = "@assignment.outer";
-              "iC" = "@class.inner";
-              "ia" = "@parameter.inner";
-              "ib" = "@block.inner";
-              "ic" = "@call.inner";
-              "if" = "@function.inner";
-              "ii" = "@conditional.inner";
-              "il" = "@loop.inner";
-              "iv" = "@assignment.inner";
-              "lv" = "@assignment.lhs";
-              "rv" = "@assignment.rhs";
+            select = {
+              enable = true;
+              lookahead = true;
+              keymaps = {
+                "aC" = "@class.outer";
+                "aa" = "@parameter.outer";
+                "ab" = "@block.outer";
+                "ac" = "@call.outer";
+                "af" = "@function.outer";
+                "ai" = "@conditional.outer";
+                "al" = "@loop.outer";
+                "av" = "@assignment.outer";
+                "iC" = "@class.inner";
+                "ia" = "@parameter.inner";
+                "ib" = "@block.inner";
+                "ic" = "@call.inner";
+                "if" = "@function.inner";
+                "ii" = "@conditional.inner";
+                "il" = "@loop.inner";
+                "iv" = "@assignment.inner";
+                "lv" = "@assignment.lhs";
+                "rv" = "@assignment.rhs";
+              };
             };
           };
         };

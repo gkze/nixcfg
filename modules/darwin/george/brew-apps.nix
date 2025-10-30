@@ -1,5 +1,6 @@
 {
   homebrew = {
+    brews = [ "gemini-cli" ];
     casks = [
       "airfoil"
       "arc"
@@ -12,12 +13,12 @@
       "docker-desktop"
       "figma"
       "framer"
-      "gemini"
-      "ghostty@tip"
       "ghostty@tip"
       "gitbutler"
       "google-drive"
+      "keepingyouawake"
       "linear-linear"
+      "lm-studio"
       "logi-options+"
       "loom"
       "macai"
@@ -30,7 +31,6 @@
       "yaak@beta"
       "zed@preview"
       "zen@twilight"
-      # "domzilla-caffeine"
     ];
     masApps = {
       "AdGuard for Safari" = 1440147259;
