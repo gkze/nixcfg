@@ -20,7 +20,7 @@
       dasel
       dbeaver-bin
       discord
-      du-dust
+      dust
       dua
       duf
       element-desktop

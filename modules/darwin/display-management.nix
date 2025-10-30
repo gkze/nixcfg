@@ -7,17 +7,18 @@
     };
     skhd = {
       enable = true;
-      skhdConfig = ''
-        alt + shift - c : open -a /Applications/Cursor.app
-        alt + shift - return : open -a /Applications/Twilight.app"
-        alt - return : open -a /Applications/Ghostty.app
-      '';
+      # skhdConfig = ''
+      #   ctrl + alt - c : open -a /Applications/Cursor.app
+      #   ctrl + alt - g : open -a /Applications/Ghostty.app
+      #   ctrl + alt - t : open -a /Applications/Twilight.app
+      #   ctrl + alt - z : open -a "/Applications/Zed Preview.app"
+      # '';
     };
   };
 
-  homebrew.casks = [
-    "betterdisplay"
-    "rectangle"
+  environment.systemPackages = with pkgs; [
+    betterdisplay
+    rectangle
   ];
 
   system.activationScripts.skhd-reload = {
