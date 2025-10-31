@@ -7,12 +7,12 @@
     };
     skhd = {
       enable = true;
-      # skhdConfig = ''
-      #   ctrl + alt - c : open -a /Applications/Cursor.app
-      #   ctrl + alt - g : open -a /Applications/Ghostty.app
-      #   ctrl + alt - t : open -a /Applications/Twilight.app
-      #   ctrl + alt - z : open -a "/Applications/Zed Preview.app"
-      # '';
+      skhdConfig = ''
+        alt + shift - c : open /Applications/Cursor.app
+        alt + shift - g : open /Applications/Ghostty.app
+        alt + shift - t : open /Applications/Twilight.app
+        alt + shift - z : open "/Applications/Zed Preview.app"
+      '';
     };
   };
 
