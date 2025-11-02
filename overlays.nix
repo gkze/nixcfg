@@ -31,7 +31,6 @@ in
       beads-mcp =
         with inputs;
         let
-          pyprojNix = pyproject-nix;
           uv = prev.lib.getExe prev.uv;
           python = prev.lib.getExe prev.python313;
           workspace = uv2nix.lib.workspace.loadWorkspace {
@@ -43,7 +42,7 @@ in
             };
           };
           pySet =
-            (prev.callPackage pyprojNix.build.packages {
+            (prev.callPackage pyproject-nix.build.packages {
               python = prev.python313;
             }).overrideScope
               (
@@ -53,7 +52,7 @@ in
                 ]
               );
         in
-        (prev.callPackages pyprojNix.build.util { }).mkApplication {
+        (prev.callPackages pyproject-nix.build.util { }).mkApplication {
           venv = pySet.mkVirtualEnv "beads-mcp" workspace.deps.all // {
             meta.mainProgram = "beads-mcp";
           };
