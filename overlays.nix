@@ -60,11 +60,6 @@ in
           package = pySet.beads-mcp;
         };
 
-      cargo-nextest = prev.cargo-nextest.overrideAttrs (old: {
-        # https://github.com/NixOS/nixpkgs/pull/456256
-        patches = old.patches ++ [ ./patches/cargo-nextest-no-dtrace-macos.patch ];
-      });
-
       homebrew-zsh-completion = prev.stdenvNoCC.mkDerivation {
         name = "brew-zsh-compmletion";
         src = builtins.fetchurl {
