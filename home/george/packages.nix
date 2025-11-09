@@ -85,6 +85,7 @@
       appcleaner
       chatgpt
       container
+      iina
       notion-app
       sloth-app
     ];
