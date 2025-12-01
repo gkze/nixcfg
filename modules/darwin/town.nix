@@ -4,6 +4,7 @@
       "1password"
       "1password-cli"
       "cleanshot"
+      "freelens"
       "google-chrome"
       "pants"
       "tailscale"

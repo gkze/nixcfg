@@ -40,7 +40,7 @@
         '';
       "${config.xdg.configHome}/ghostty/config".text = ''
         font-family = Hack Nerd Font Mono
-        font-size = 11
+        font-size = 12
         macos-option-as-alt = left
         keybind = alt+left=unbind
         theme = Catppuccin Frappe
@@ -219,6 +219,7 @@
         in
         {
           add_newline = false;
+          aws.disabled = true;
           gcloud.format = "[$symbol$account(@$domain)(\($region\))]($style) ";
           line_break.disabled = true;
           nix_shell.format = "[$symbol$state( \($name\))]($style) ";

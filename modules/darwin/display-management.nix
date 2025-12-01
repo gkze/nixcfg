@@ -6,7 +6,7 @@
       config = '''';
     };
     skhd = {
-      enable = true;
+      enable = false;
       skhdConfig = ''
         alt + shift - c : open /Applications/Cursor.app
         alt + shift - g : open /Applications/Ghostty.app

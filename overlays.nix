@@ -13,14 +13,14 @@ in
         name = "beads";
         src = inputs.beads;
         subPackages = [ "cmd/bd" ];
-        vendorHash = "sha256-DJqTiLGLZNGhHXag50gHFXTVXCBdj8ytbYbPL3QAq8M=";
+        vendorHash = "sha256-5p4bHTBB6X30FosIn6rkMDJoap8tOvB7bLmVKsy09D8=";
         doCheck = false;
 
         nativeBuildInputs = [ prev.installShellFiles ];
 
         postInstall = ''
-          export HOME=$(mktemp -d)
-          $out/bin/bd init
+          # export HOME=$(mktemp -d)
+          # $out/bin/bd init
           installShellCompletion --cmd beads \
             --bash <($out/bin/bd completion bash) \
             --fish <($out/bin/bd completion fish) \
@@ -58,6 +58,8 @@ in
           };
           package = pySet.beads-mcp;
         };
+
+      fish = prev.fish.overrideAttrs { doCheck = false; };
 
       homebrew-zsh-completion = prev.stdenvNoCC.mkDerivation {
         name = "brew-zsh-compmletion";

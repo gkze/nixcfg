@@ -104,7 +104,7 @@ in
       plugins = {
         alpha = {
           enable = true;
-          layout =
+          settings.layout =
             let
               button = val: shortcut: cmd: {
                 type = "button";
