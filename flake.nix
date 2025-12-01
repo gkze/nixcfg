@@ -2,7 +2,8 @@
   description = "Universe";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/f04cb2ce24525ac95426ab0e0be99d785275d9bf";
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
     # https://github.com/zhaofengli/nix-homebrew/pull/117
     # nix-homebrew.url = "github:zhaofengli/nix-homebrew";
@@ -35,7 +36,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     home-manager = {
-      url = "github:nix-community/home-manager";
+      url = "github:nix-community/home-manager/release-25.11";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mac-app-util = {
@@ -79,7 +80,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     beads = {
-      url = "github:steveyegge/beads/v0.17.7";
+      url = "github:steveyegge/beads/v0.27.0";
       flake = false;
     };
     bufresize-nvim = {
