@@ -1,4 +1,7 @@
 { primaryUser, pkgs, ... }:
 {
-  users.users.${primaryUser}.shell = pkgs.zsh;
+  users.users.${primaryUser} = {
+    uid = 501;
+    shell = pkgs.zsh;
+  };
 }

@@ -19,10 +19,11 @@
       czkawka
       dasel
       dbeaver-bin
+      deno
       discord
-      dust
       dua
       duf
+      dust
       element-desktop
       file
       gawk

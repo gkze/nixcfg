@@ -35,16 +35,34 @@ in
     };
     git = {
       enable = true;
+      # difftastic = {
+      #   enable = true;
+      #   enableAsDifftool = true;
+      #   options.background = "dark";
+      # };
+      ignores = [ ".direnv" ];
+      includes =
+        let
+          srcDirBase = slib.srcDirBase system;
+        in
+        [
+          { path = "${inputs.catppuccin-delta}/catppuccin.gitconfig"; }
+          {
+            path = "${config.xdg.configHome}/git/personal";
+            condition = "gitdir:${config.xdg.configHome}/nixcfg/**";
+          }
+          {
+            path = "${config.xdg.configHome}/git/town";
+            condition = "gitdir:~/${srcDirBase}/github.com/townco/**";
+          }
+          {
+            path = "${config.xdg.configHome}/git/personal";
+            condition = "gitdir:~/${srcDirBase}/github.com/**";
+          }
+        ];
+      lfs.enable = true;
       settings = {
-        commit.gpgsign = true;
-        delta.features = "catppuccin-frappe";
-        diff.colorMoved = "default";
-        fetch.prune = true;
-        init.defaultBranch = "main";
         # merge.conflictstyle = "diff3";
-        rebase.pull = true;
-        url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
-        user.signingkey = userMeta.gpg.keys.personal;
         alias = {
           branches =
             let
@@ -80,33 +98,15 @@ in
             ];
           praise = "blame";
         };
+        commit.gpgsign = true;
+        delta.features = "catppuccin-frappe";
+        diff.colorMoved = "default";
+        fetch.prune = true;
+        init.defaultBranch = "main";
+        rebase.pull = true;
+        url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
+        user.signingkey = userMeta.gpg.keys.personal;
       };
-      # difftastic = {
-      #   enable = true;
-      #   enableAsDifftool = true;
-      #   options.background = "dark";
-      # };
-      ignores = [ ".direnv" ];
-      includes =
-        let
-          srcDirBase = slib.srcDirBase system;
-        in
-        [
-          { path = "${inputs.catppuccin-delta}/catppuccin.gitconfig"; }
-          {
-            path = "${config.xdg.configHome}/git/personal";
-            condition = "gitdir:${config.xdg.configHome}/nixcfg/**";
-          }
-          {
-            path = "${config.xdg.configHome}/git/town";
-            condition = "gitdir:~/${srcDirBase}/github.com/townco/**";
-          }
-          {
-            path = "${config.xdg.configHome}/git/personal";
-            condition = "gitdir:~/${srcDirBase}/github.com/**";
-          }
-        ];
-      lfs.enable = true;
       signing = {
         format = lib.mkForce "openpgp";
         signer = lib.getExe pkgs.sequoia-chameleon-gnupg;
