@@ -1,7 +1,6 @@
 {
   config,
   lib,
-  pkgs,
   ...
 }:
 with lib;
@@ -13,12 +12,12 @@ in
   config = mkIf cfg.enable {
     programs = {
       go.enable = cfg.enable;
-      zsh.plugins = [
-        {
-          name = "go";
-          src = "${pkgs.zsh-completions}/share/zsh/site-functions";
-        }
-      ];
+      # zsh.plugins = with pkgs; [
+      #   {
+      #     name = "go";
+      #     src = "${src}/misc/zsh-plugins";
+      #   }
+      # ];
     };
     home.sessionPath = [ "${config.home.homeDirectory}/go/bin" ];
   };

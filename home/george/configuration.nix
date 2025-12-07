@@ -58,6 +58,7 @@
       "$HOME/.local/bin"
     ];
     sessionVariables = {
+      BAT_PAGER = "less -R";
       DELTA_PAGER = "bat -p";
       EDITOR = "nvim";
       LESS = "-R --mouse";
@@ -188,7 +189,8 @@
       enable = true;
       generateCaches = true;
     };
-    mergiraf.enable = true;
+    # TODO: a bit funky, figure out better
+    mergiraf.enable = false;
     nushell.enable = true;
     nix-index.enable = true;
     ripgrep.enable = true;

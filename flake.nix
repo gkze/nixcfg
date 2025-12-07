@@ -2,11 +2,8 @@
   description = "Universe";
 
   inputs = {
-    # nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nixpkgs.url = "github:NixOS/nixpkgs/f04cb2ce24525ac95426ab0e0be99d785275d9bf";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
-    # https://github.com/zhaofengli/nix-homebrew/pull/117
-    # nix-homebrew.url = "github:zhaofengli/nix-homebrew";
     nix-homebrew.url = "github:Yeradon/nix-homebrew";
     neovim-nightly-overlay = {
       url = "github:nix-community/neovim-nightly-overlay";
@@ -36,7 +33,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     home-manager = {
-      url = "github:nix-community/home-manager/release-25.11";
+      url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mac-app-util = {
@@ -80,7 +77,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     beads = {
-      url = "github:steveyegge/beads/v0.27.0";
+      url = "github:steveyegge/beads/v0.29.0";
       flake = false;
     };
     bufresize-nvim = {
@@ -139,6 +136,10 @@
       url = "github:gkze/gh-stars/v0.19.24";
       flake = false;
     };
+    tclint = {
+      url = "github:nmoroze/tclint";
+      flake = false;
+    };
     treewalker-nvim = {
       url = "github:aaronik/treewalker.nvim";
       flake = false;
@@ -149,6 +150,10 @@
     };
     zsh-system-clipboard = {
       url = "github:kutsan/zsh-system-clipboard";
+      flake = false;
+    };
+    zsh-completions = {
+      url = "github:zsh-users/zsh-completions";
       flake = false;
     };
   };
