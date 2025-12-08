@@ -58,7 +58,6 @@
       "$HOME/.local/bin"
     ];
     sessionVariables = {
-      BAT_PAGER = "less -R";
       DELTA_PAGER = "bat -p";
       EDITOR = "nvim";
       LESS = "-R --mouse";
