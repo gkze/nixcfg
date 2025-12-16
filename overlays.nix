@@ -13,7 +13,7 @@ in
         name = "beads";
         src = inputs.beads;
         subPackages = [ "cmd/bd" ];
-        vendorHash = "sha256-5p4bHTBB6X30FosIn6rkMDJoap8tOvB7bLmVKsy09D8=";
+        vendorHash = "sha256-RJ8LMS2kdKvvkpsL7RcDnSyMfwsGKiMb/qpeLUvXZfA=";
         doCheck = false;
 
         nativeBuildInputs = [ prev.installShellFiles ];
@@ -58,8 +58,6 @@ in
           };
           package = pySet.beads-mcp;
         };
-
-      fish = prev.fish.overrideAttrs { doCheck = false; };
 
       homebrew-zsh-completion = prev.stdenvNoCC.mkDerivation {
         name = "brew-zsh-compmletion";
@@ -124,7 +122,38 @@ in
         };
 
       vimPlugins = prev.vimPlugins.extend (
-        _: _: {
+        _: vprev: {
+          codesnap-nvim = vprev.codesnap-nvim.overrideAttrs (old: {
+            postPatch =
+              let
+                # Fix cpath pollution bug - the original code adds the full dylib FILE PATH to package.cpath
+                # but cpath expects directory PATTERNS like "/path/?.so". This polluted cpath breaks other
+                # C modules like blink.cmp. Replace with proper cpath pattern for the lib directory.
+                moduleLuaOld = ''
+                  package.cpath = path_utils.join(";", package.cpath, generator_path)'';
+                moduleLuaNew = ''
+                  local lib_dir = vim.fn.fnamemodify(generator_path, ":h")
+                  package.cpath = package.cpath .. ";" .. lib_dir .. sep .. "lib?." .. module.get_lib_extension()'';
+
+                # Fix fetch.ensure_lib() - nixpkgs hardcodes the lib path but the function still tries to
+                # mkdir/download/write in the nix store. Simplify to just return the path since lib is pre-built.
+                fetchLuaOld = ''
+                  function fetch.ensure_lib()'';
+                fetchLuaNew = ''
+                  function fetch.ensure_lib()
+                    return "${vprev.codesnap-nvim.passthru.codesnap-lib}/lib/libgenerator.dylib"
+                  end
+                  function fetch._original_ensure_lib()'';
+              in
+              (old.postPatch or "") + ''
+                substituteInPlace lua/codesnap/module.lua \
+                  --replace-fail '${moduleLuaOld}' '${moduleLuaNew}'
+
+                substituteInPlace lua/codesnap/fetch.lua \
+                  --replace-fail '${fetchLuaOld}' '${fetchLuaNew}'
+              '';
+          });
+
           vim-bundle-mako = prev.vimUtils.buildVimPlugin {
             pname = normalizeName outputs.lib.flakeLock.vim-bundle-mako.original.repo;
             version = inputs.vim-bundle-mako.rev;
