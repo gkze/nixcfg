@@ -77,7 +77,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     beads = {
-      url = "github:steveyegge/beads/v0.29.0";
+      url = "github:steveyegge/beads/v0.30.0";
       flake = false;
     };
     bufresize-nvim = {
