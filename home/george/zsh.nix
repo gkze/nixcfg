@@ -1,9 +1,10 @@
-{ lib, ... }:
 {
   config,
   inputs,
+  lib,
   pkgs,
   slib,
+  src,
   system,
   ...
 }:
@@ -38,7 +39,6 @@
       bindkey "^R" history-incremental-search-backward
       typeset -U PATH MANPATH
 
-      # TODO: find a better place for this
       compdef _gpg gpg-sq
     '';
     plugins = with pkgs; [

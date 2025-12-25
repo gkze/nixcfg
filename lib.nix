@@ -88,13 +88,6 @@ rec {
       ]
       ++ modules;
     };
-  impMaybeWithArgs =
-    path: args:
-    let
-      imported = import path;
-      inherit (builtins) isFunction;
-    in
-    if isFunction imported then imported args else imported;
   mkSystem =
     {
       homeModules ? [ ],
@@ -149,20 +142,18 @@ rec {
             users = listToAttrs (
               map (user: {
                 name = user;
-                value =
-                  args:
-                  let
-                    modArgs = args // { username = user; } // userMetaIfExists user;
-                  in
-                  {
-                    imports =
-                      map (mod: impMaybeWithArgs mod modArgs) [
-                        "${modulesPath}/home/base.nix"
-                        "${modulesPath}/home/${kernel system}.nix"
-                        "${src}/home/${user}/configuration.nix"
-                      ]
-                      ++ homeModules;
-                  };
+                value = {
+                  _module.args = {
+                    username = user;
+                  }
+                  // userMetaIfExists user;
+                  imports = [
+                    "${modulesPath}/home/base.nix"
+                    "${modulesPath}/home/${kernel system}.nix"
+                    "${src}/home/${user}/configuration.nix"
+                  ]
+                  ++ homeModules;
+                };
               }) users
             );
           };

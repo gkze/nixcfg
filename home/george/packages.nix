@@ -4,8 +4,8 @@
     with pkgs;
     [
       # gitbutler
-      # superfile
       (coreutils.override { minimal = false; })
+      amp-cli
       ast-grep
       beads
       beads-mcp
@@ -71,6 +71,8 @@
       spacedrive
       spotify
       stars
+      superfile
+      toad
       tokei
       trdsql
       tree

@@ -39,6 +39,7 @@
     mac-app-util = {
       url = "github:hraban/mac-app-util";
       # TODO: re-enable once SBCL on Darwin is fixed
+      # gitlab.common-lisp.net returns HTML (bot protection) instead of tar.gz
       # inputs.nixpkgs.follows = "nixpkgs";
     };
     nixvim = {
@@ -77,7 +78,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     beads = {
-      url = "github:steveyegge/beads/v0.30.0";
+      url = "github:steveyegge/beads/v0.32.1";
       flake = false;
     };
     bufresize-nvim = {
@@ -138,6 +139,10 @@
     };
     tclint = {
       url = "github:nmoroze/tclint";
+      flake = false;
+    };
+    toad = {
+      url = "github:batrachianai/toad";
       flake = false;
     };
     treewalker-nvim = {
@@ -204,7 +209,7 @@
                 nixos-generators
                 nurl
               ]
-              ++ lib.lists.optional pkgs.stdenv.isLinux dconf2nix;
+              ++ lib.optional pkgs.stdenv.isLinux dconf2nix;
           };
 
         formatter =
