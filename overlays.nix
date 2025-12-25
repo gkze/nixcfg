@@ -13,7 +13,8 @@ in
         name = "beads";
         src = inputs.beads;
         subPackages = [ "cmd/bd" ];
-        vendorHash = "sha256-RJ8LMS2kdKvvkpsL7RcDnSyMfwsGKiMb/qpeLUvXZfA=";
+        vendorHash = "sha256-yX/JxptZodKCGggdQVKynhcLnqJ+NydfU23N25eX3Ps=";
+        proxyVendor = true;
         doCheck = false;
 
         nativeBuildInputs = [ prev.installShellFiles ];
@@ -121,31 +122,68 @@ in
           vendorHash = "sha256-wWX0P/xysioCCUS3M2ZIKd8i34Li/ANbgcql3oSE6yc=";
         };
 
+      toad =
+        with inputs;
+        let
+          uv = prev.lib.getExe prev.uv;
+          python = prev.lib.getExe prev.python314;
+          workspace = uv2nix.lib.workspace.loadWorkspace {
+            workspaceRoot = prev.stdenv.mkDerivation {
+              name = "toad-relocked";
+              src = toad;
+              buildPhase = "UV_PYTHON=${python} ${uv} -n lock";
+              installPhase = "cp -r . $out";
+            };
+          };
+
+          pySet =
+            (prev.callPackage pyproject-nix.build.packages {
+              python = prev.python314;
+            }).overrideScope
+              (
+                prev.lib.composeManyExtensions [
+                  pyproject-build-systems.overlays.default
+                  (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+                ]
+              );
+        in
+        (prev.callPackages pyproject-nix.build.util { }).mkApplication {
+          venv = pySet.mkVirtualEnv "batrachian-toad" workspace.deps.all // {
+            meta.mainProgram = "toad";
+          };
+          package = pySet.batrachian-toad;
+        };
+
+      # Extend vimPlugins with fixes and custom plugins
       vimPlugins = prev.vimPlugins.extend (
         _: vprev: {
+          # codesnap-nvim: Screenshot plugin for Neovim
+          # Requires patches to work correctly with Nix-built native library:
           codesnap-nvim = vprev.codesnap-nvim.overrideAttrs (old: {
             postPatch =
               let
-                # Fix cpath pollution bug - the original code adds the full dylib FILE PATH to package.cpath
-                # but cpath expects directory PATTERNS like "/path/?.so". This polluted cpath breaks other
-                # C modules like blink.cmp. Replace with proper cpath pattern for the lib directory.
-                moduleLuaOld = ''
-                  package.cpath = path_utils.join(";", package.cpath, generator_path)'';
+                # Bug 1: cpath pollution
+                # The original code adds the full dylib FILE PATH to package.cpath, but cpath
+                # expects directory PATTERNS like "/path/?.so". This pollutes the cpath and
+                # breaks other C modules (e.g., blink.cmp). Fix: use proper cpath pattern.
+                moduleLuaOld = ''package.cpath = path_utils.join(";", package.cpath, generator_path)'';
                 moduleLuaNew = ''
                   local lib_dir = vim.fn.fnamemodify(generator_path, ":h")
                   package.cpath = package.cpath .. ";" .. lib_dir .. sep .. "lib?." .. module.get_lib_extension()'';
 
-                # Fix fetch.ensure_lib() - nixpkgs hardcodes the lib path but the function still tries to
-                # mkdir/download/write in the nix store. Simplify to just return the path since lib is pre-built.
-                fetchLuaOld = ''
-                  function fetch.ensure_lib()'';
+                # Bug 2: fetch.ensure_lib() tries to write to Nix store
+                # Nixpkgs pre-builds and hardcodes the lib path, but the original function
+                # still attempts mkdir/download/write operations in the read-only store.
+                # Fix: short-circuit to return the pre-built library path directly.
+                fetchLuaOld = ''function fetch.ensure_lib()'';
                 fetchLuaNew = ''
                   function fetch.ensure_lib()
                     return "${vprev.codesnap-nvim.passthru.codesnap-lib}/lib/libgenerator.dylib"
                   end
                   function fetch._original_ensure_lib()'';
               in
-              (old.postPatch or "") + ''
+              (old.postPatch or "")
+              + ''
                 substituteInPlace lua/codesnap/module.lua \
                   --replace-fail '${moduleLuaOld}' '${moduleLuaNew}'
 

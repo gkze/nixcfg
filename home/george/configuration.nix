@@ -7,14 +7,14 @@
   system,
   userMeta,
   ...
-}@args:
+}:
 {
-  imports = map (mod: import mod args) [
+  imports = [
     {
-      darwin = ./darwin.nix;
-      linux = ./nixos.nix;
-    }
-    .${slib.kernel system}
+        darwin = ./darwin.nix;
+        linux = ./nixos.nix;
+      }
+      .${slib.kernel system}
     ./git.nix
     ./go.nix
     ./nixvim.nix
@@ -130,8 +130,7 @@
     };
     fd.enable = true;
     gitui = {
-      # TODO: re-enable later
-      enable = false;
+      enable = true;
       keyConfig = pkgs.fetchurl {
         url = slib.ghRaw {
           owner = "extrawurst";
@@ -188,8 +187,7 @@
       enable = true;
       generateCaches = true;
     };
-    # TODO: a bit funky, figure out better
-    mergiraf.enable = false;
+    mergiraf.enable = true;
     nushell.enable = true;
     nix-index.enable = true;
     ripgrep.enable = true;
