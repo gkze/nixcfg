@@ -85,8 +85,7 @@ in
         in
         naersk'.buildPackage {
           src = prev.fetchFromGitHub {
-            inherit (mounts3Ref.original) owner;
-            inherit (mounts3Ref.original) repo;
+            inherit (mounts3Ref.original) owner repo;
             inherit (mounts3Ref.locked) rev;
             fetchSubmodules = true;
             hash = "sha256-uV0umUoJkYgmjWjv8GMnk5TRRbCCJS1ut3VV1HvkaAw=";
@@ -144,6 +143,12 @@ in
                 prev.lib.composeManyExtensions [
                   pyproject-build-systems.overlays.default
                   (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+                  (f: p: {
+                    watchdog = p.watchdog.overrideAttrs (old: {
+                      buildInputs = (old.buildInputs or [ ]) ++ [ f.setuptools ];
+                      nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ f.setuptools ];
+                    });
+                  })
                 ]
               );
         in
