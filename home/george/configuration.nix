@@ -11,10 +11,10 @@
 {
   imports = [
     {
-        darwin = ./darwin.nix;
-        linux = ./nixos.nix;
-      }
-      .${slib.kernel system}
+      darwin = ./darwin.nix;
+      linux = ./nixos.nix;
+    }
+    .${slib.kernel system}
     ./git.nix
     ./go.nix
     ./nixvim.nix

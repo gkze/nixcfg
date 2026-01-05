@@ -14,9 +14,7 @@ in
     config = {
       enable = true;
       enableMan = true;
-      files."ftplugin/json.lua".opts = {
-        shiftwidth = 2;
-      };
+      files."ftplugin/json.lua".opts.shiftwidth = 2;
       nixpkgs.overlays = [ outputs.overlays.default ];
       globals.mapleader = " ";
       opts = {
@@ -520,7 +518,7 @@ in
         };
         treesitter = {
           enable = true;
-          folding = true;
+          folding.enable = true;
           nixvimInjections = true;
           settings = {
             highlight = {
