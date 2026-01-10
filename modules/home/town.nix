@@ -3,10 +3,10 @@
   home.packages = with pkgs; [ google-cloud-sdk ];
   programs = {
     topgrade.settings.misc.disable = [
-      "bun"
-      "gcloud"
-      "jetbrains_datagrip"
-      "uv"
+      # "bun"
+      # "gcloud"
+      # "jetbrains_datagrip"
+      # "uv"
     ];
     zsh.plugins = with pkgs; [
       {
