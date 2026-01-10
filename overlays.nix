@@ -139,10 +139,7 @@ in
             workspaceRoot = prev.stdenv.mkDerivation {
               name = "toad-relocked";
               src = toad;
-              nativeBuildInputs = [ prev.dasel ];
               buildPhase = ''
-                # Remove local path dependency on textual (expects ../textual to exist)
-                dasel delete -f pyproject.toml 'tool.uv.sources.textual'
                 UV_PYTHON=${python} ${uv} -n lock
               '';
               installPhase = "cp -r . $out";

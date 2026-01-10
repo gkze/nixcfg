@@ -1,0 +1,7 @@
+keys:
+  - &george 9746796E8D0F781FE91F31E7794655896402BD6E
+creation_rules:
+  - path_regex: secrets\.yaml$
+    key_groups:
+      - pgp:
+          - *george
