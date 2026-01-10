@@ -24,8 +24,73 @@
     ./zsh.nix
   ];
 
+  sops = {
+    gnupg.home = config.programs.gpg.homedir;
+    defaultSopsFile = ../../secrets.yaml;
+    secrets.github_token = { };
+    templates."zed-settings.json" = {
+      content = builtins.toJSON {
+        context_servers = {
+          mcp-server-github = {
+            enabled = true;
+            settings = {
+              github_personal_access_token = config.sops.placeholder.github_token;
+            };
+          };
+        };
+        agent = {
+          dock = "right";
+          inline_assistant_model = {
+            provider = "anthropic";
+            model = "claude-opus-4-5-20251101";
+          };
+          default_model = {
+            provider = "anthropic";
+            model = "claude-opus-4-5-20251101";
+          };
+          model_parameters = [ ];
+        };
+        buffer_font_family = "Hack Nerd Font Mono";
+        buffer_font_size = 12.0;
+        format_on_save = "on";
+        icon_theme = "Catppuccin Frappé";
+        minimap.show = "always";
+        outline_panel.dock = "right";
+        show_whitespaces = "all";
+        theme = {
+          mode = "system";
+          light = "One Light";
+          dark = "Catppuccin Frappé";
+        };
+        ui_font_size = 15.0;
+        vim_mode = true;
+        wrap_guides = [
+          80
+          100
+        ];
+      };
+      path = "${config.xdg.configHome}/zed/settings.json";
+    };
+  };
+
   home = {
     file = {
+      "${config.xdg.configHome}/zed/keymap.json".text = builtins.toJSON [
+        {
+          context = "Terminal";
+          bindings = {
+            "shift-enter" = [
+              "terminal::SendText"
+              "\u001b\r"
+            ];
+          };
+        }
+        {
+          bindings = {
+            "alt-~" = "terminal_panel::ToggleFocus";
+          };
+        }
+      ];
       ".gnupg/gpg-agent.conf".text =
         let
           prog =
@@ -246,10 +311,7 @@
       enableZshIntegration = true;
       settings.manager.sort_by = "alphabetical";
     };
-    # zed-editor = {
-    #   enable = true;
-    #   userSettings.vim_mode = true;
-    # };
+    zed-editor.enable = false;
     zellij = {
       enable = true;
       enableZshIntegration = false;

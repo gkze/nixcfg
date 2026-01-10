@@ -25,6 +25,7 @@
       "macai"
       "macfuse"
       "nordvpn"
+      "opencode-desktop"
       "rio"
       "signal@beta"
       "visual-studio-code@insiders"
