@@ -34,9 +34,7 @@
         context_servers = {
           mcp-server-github = {
             enabled = true;
-            settings = {
-              github_personal_access_token = config.sops.placeholder.github_token;
-            };
+            settings.github_personal_access_token = config.sops.placeholder.github_token;
           };
         };
         agent = {
@@ -296,8 +294,8 @@
       enable = true;
       settings = {
         misc.disable = [
-          "brew_cask"
-          "brew_formula"
+          # "brew_cask"
+          # "brew_formula"
         ];
         git.repos = [ (slib.srcDirBase system) ];
         misc = {
