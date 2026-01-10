@@ -54,6 +54,7 @@
       nix-tree
       nixfmt-rfc-style
       nodejs_latest
+      opencode
       postman
       procs
       rapidapi

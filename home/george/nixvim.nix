@@ -317,6 +317,7 @@ in
             # };
             jsonls = {
               enable = true;
+              # Use Biome formatter instead to avoid LSP conflicts
               settings.format.enable = false;
               extraOptions.settings.json = {
                 schemas.__raw = "require('schemastore').json.schemas()";
@@ -674,10 +675,10 @@ in
         with pkgs.vimPlugins;
         [
           nvim-treesitter-parsers.nickel
-          nvim-treesitter-textsubjects
+          # nvim-treesitter-textsubjects # disabled: incompatible with newer nvim-treesitter API
           treewalker-nvim
           vim-bazel
-          vim-bundle-mako
+          # vim-bundle-mako
           vim-jinja
           vim-nickel
         ]
@@ -688,15 +689,7 @@ in
           extraPluginsConfig = {
             nvim-surround = { };
             overseer = { };
-            "nvim-treesitter.configs".textsubjects = {
-              enable = true;
-              rrev_selection = ",";
-              keymaps = {
-                "." = "textsubjects-smart";
-                ";" = "textsubjects-container-outer";
-                "i;" = "textsubjects-container-inner";
-              };
-            };
+            # nvim-treesitter-textsubjects disabled: incompatible with newer nvim-treesitter API
           }
           // (lib.attrsets.optionalAttrs (!pkgs.stdenv.isDarwin) { dbee = { }; });
         in

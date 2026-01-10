@@ -13,7 +13,7 @@ in
         name = "beads";
         src = inputs.beads;
         subPackages = [ "cmd/bd" ];
-        vendorHash = "sha256-yX/JxptZodKCGggdQVKynhcLnqJ+NydfU23N25eX3Ps=";
+        vendorHash = "sha256-wazPS6KYcW2y8JGqqYvejYGD+nd0cdEJBmsN4pB8l6s=";
         proxyVendor = true;
         doCheck = false;
 
@@ -98,6 +98,15 @@ in
           ];
         };
 
+      opencode =
+        let
+          flakeRef = outputs.lib.flakeLock.opencode;
+        in
+        prev.opencode.overrideAttrs {
+          src = inputs.opencode;
+          version = flakeRef.original.ref;
+        };
+
       sublime-kdl =
         let
           flakeRef = outputs.lib.flakeLock.sublime-kdl;
@@ -130,7 +139,12 @@ in
             workspaceRoot = prev.stdenv.mkDerivation {
               name = "toad-relocked";
               src = toad;
-              buildPhase = "UV_PYTHON=${python} ${uv} -n lock";
+              nativeBuildInputs = [ prev.dasel ];
+              buildPhase = ''
+                # Remove local path dependency on textual (expects ../textual to exist)
+                dasel delete -f pyproject.toml 'tool.uv.sources.textual'
+                UV_PYTHON=${python} ${uv} -n lock
+              '';
               installPhase = "cp -r . $out";
             };
           };

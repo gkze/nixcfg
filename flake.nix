@@ -40,10 +40,14 @@
       url = "github:hraban/mac-app-util";
       # TODO: re-enable once SBCL on Darwin is fixed
       # gitlab.common-lisp.net returns HTML (bot protection) instead of tar.gz
-      # inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
     nixvim = {
       url = "github:nix-community/nixvim";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    opencode = {
+      url = "github:anomalyco/opencode/v1.1.11";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     pyproject-build-systems = {
@@ -78,7 +82,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     beads = {
-      url = "github:steveyegge/beads/v0.32.1";
+      url = "github:steveyegge/beads/v0.46.0";
       flake = false;
     };
     bufresize-nvim = {

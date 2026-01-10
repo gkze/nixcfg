@@ -105,7 +105,8 @@ in
         init.defaultBranch = "main";
         rebase.pull = true;
         url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
-        user.signingkey = userMeta.gpg.keys.personal;
+        # exclamation auto selects signing subkey
+        user.signingkey = "${userMeta.gpg.keys.personal}!";
       };
       signing = {
         format = lib.mkForce "openpgp";
