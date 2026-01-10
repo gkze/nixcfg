@@ -27,6 +27,7 @@
   sops = {
     gnupg.home = config.programs.gpg.homedir;
     defaultSopsFile = ../../secrets.yaml;
+    environment.PATH = lib.mkForce (lib.makeBinPath [ pkgs.coreutils ] + ":/usr/bin:/sbin");
     secrets.github_token = { };
     templates."zed-settings.json" = {
       content = builtins.toJSON {
