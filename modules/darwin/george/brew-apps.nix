@@ -1,11 +1,9 @@
 {
   homebrew = {
-    brews = [
-      "gemini-cli"
-      "opencode"
-    ];
+    brews = [ "gemini-cli" ];
     casks = [
       "airfoil"
+      "antigravity"
       "arc"
       "claude"
       "claude-code"

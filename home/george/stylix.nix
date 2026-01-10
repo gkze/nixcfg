@@ -14,7 +14,7 @@
       gnome.enable = pkgs.stdenv.isLinux;
       gtk.enable = pkgs.stdenv.isLinux;
     };
-    iconTheme = {
+    icons = {
       enable = !stdenv.isDarwin;
       package = papirus-icon-theme;
       dark = "Papirus-Dark";
