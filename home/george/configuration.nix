@@ -311,7 +311,6 @@
       enableZshIntegration = true;
       settings.manager.sort_by = "alphabetical";
     };
-    zed-editor.enable = false;
     zellij = {
       enable = true;
       enableZshIntegration = false;

@@ -10,5 +10,5 @@
     personal = "george.kontridze@gmail.com";
     town = "george@town.com";
   };
-  gpg.keys.personal = "9746796E8D0F781FE91F31E7794655896402BD6E";
+  gpg.keys.personal = "4FE536354F4B603BD260AD33EF550412DBEBCE71";
 }
