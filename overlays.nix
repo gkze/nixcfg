@@ -20,9 +20,7 @@ in
         nativeBuildInputs = [ prev.installShellFiles ];
 
         postInstall = ''
-          # export HOME=$(mktemp -d)
-          # $out/bin/bd init
-          installShellCompletion --cmd beads \
+          installShellCompletion --cmd bd \
             --bash <($out/bin/bd completion bash) \
             --fish <($out/bin/bd completion fish) \
             --zsh <($out/bin/bd completion zsh)
