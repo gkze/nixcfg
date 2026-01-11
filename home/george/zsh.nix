@@ -40,6 +40,9 @@
       typeset -U PATH MANPATH
 
       compdef _gpg gpg-sq
+
+      # GPG pinentry support
+      export GPG_TTY=$(tty)
     '';
     plugins = with pkgs; [
       {
