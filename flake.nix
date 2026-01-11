@@ -32,6 +32,10 @@
       url = "github:nix-community/flake-firefox-nightly";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -52,9 +56,11 @@
     };
     pyproject-build-systems = {
       url = "github:pyproject-nix/build-system-pkgs";
-      inputs.pyproject-nix.follows = "pyproject-nix";
-      inputs.uv2nix.follows = "uv2nix";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        pyproject-nix.follows = "pyproject-nix";
+        uv2nix.follows = "uv2nix";
+        nixpkgs.follows = "nixpkgs";
+      };
     };
     pyproject-nix = {
       url = "github:pyproject-nix/pyproject.nix";
@@ -177,6 +183,7 @@
       flakelight,
       flakelight-darwin,
       devshell,
+      git-hooks,
       treefmt-nix,
       ...
     }@inputs:
@@ -205,6 +212,44 @@
 
         devShell =
           pkgs:
+          let
+            ruffFiles = "(home/george/bin/git-ignore|home/george/ptpython\\.py)";
+            shFiles = "(\\.envrc|misc/zsh-plugins/.*\\.zsh)";
+            pre-commit-check = git-hooks.lib.${pkgs.system}.run {
+              src = ./.;
+              package = pkgs.prek;
+              hooks = {
+                # Nix
+                nixfmt.enable = true;
+                deadnix.enable = true;
+                statix.enable = true;
+                # Python
+                ruff = {
+                  enable = true;
+                  files = ruffFiles;
+                };
+                ruff-format = {
+                  enable = true;
+                  files = ruffFiles;
+                };
+                # Shell
+                shellcheck = {
+                  enable = true;
+                  files = shFiles;
+                };
+                shfmt = {
+                  enable = true;
+                  files = shFiles;
+                };
+                # Markdown
+                mdformat.enable = true;
+                # General
+                check-merge-conflicts.enable = true;
+                end-of-file-fixer.enable = true;
+                trim-trailing-whitespace.enable = true;
+              };
+            };
+          in
           pkgs.devshell.mkShell {
             name = "nixcfg";
             packages =
@@ -216,8 +261,11 @@
                 nix-init
                 nixos-generators
                 nurl
+                prek
               ]
-              ++ lib.optional pkgs.stdenv.isLinux dconf2nix;
+              ++ lib.optional pkgs.stdenv.isLinux dconf2nix
+              ++ pre-commit-check.enabledPackages;
+            devshell.startup.pre-commit.text = pre-commit-check.shellHook;
           };
 
         formatter =

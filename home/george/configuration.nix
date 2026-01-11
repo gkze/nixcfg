@@ -90,7 +90,7 @@
           };
         }
       ];
-      ".gnupg/gpg-agent.conf".text =
+      "${config.programs.gpg.homedir}/gpg-agent.conf".text =
         let
           prog =
             {
