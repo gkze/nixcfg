@@ -13,6 +13,10 @@
       url = "github:nix-darwin/nix-darwin";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    nix-rosetta-builder = {
+      url = "github:cpick/nix-rosetta-builder";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     flakelight = {
       url = "github:nix-community/flakelight";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -51,7 +55,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     opencode = {
-      url = "github:anomalyco/opencode/v1.1.20";
+      url = "github:anomalyco/opencode/v1.1.21";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     pyproject-build-systems = {
@@ -92,7 +96,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     beads = {
-      url = "github:steveyegge/beads/v0.47.0";
+      url = "github:steveyegge/beads/v0.47.1";
       flake = false;
     };
     bufresize-nvim = {

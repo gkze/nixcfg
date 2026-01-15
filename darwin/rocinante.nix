@@ -24,5 +24,7 @@ mkSystem {
     "${modulesPath}/darwin/${user}/shell.nix"
     "${modulesPath}/darwin/${user}/brew-apps.nix"
     "${modulesPath}/darwin/${user}/dock-apps.nix"
+    # To bootstrap: temporarily replace with { nix.linux-builder.enable = true; }
+    nix-rosetta-builder.darwinModules.default
   ];
 }

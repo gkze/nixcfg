@@ -328,11 +328,11 @@ in
             nickel_ls.enable = true;
             nil_ls = {
               enable = true;
-              settings.formatting.command = [ (lib.getExe pkgs.nixfmt-rfc-style) ];
+              settings.formatting.command = [ (lib.getExe pkgs.nixfmt) ];
             };
             # nixd = {
             #   enable = true;
-            #   settings.formatting.command = [ (lib.getExe pkgs.nixfmt-rfc-style) ];
+            #   settings.formatting.command = [ (lib.getExe pkgs.nixfmt) ];
             # };
             postgres_lsp = {
               enable = true;

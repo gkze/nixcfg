@@ -44,14 +44,6 @@
       package = pkgs.nixVersions.latest;
       registry = lib.mapAttrs (_: flake: { inherit flake; }) flakeInputs;
       nixPath = lib.mapAttrsToList (n: _: "${n}=flake:${n}") flakeInputs;
-      # linux-builder = {
-      #   enable = true;
-      #   systems = [
-      #     "x86_64-linux"
-      #     "aarch64-linux"
-      #   ];
-      #   config.boot.binfmt.emulatedSystems = [ "x86_64-linux" ];
-      # };
     };
 
   nixpkgs = {
