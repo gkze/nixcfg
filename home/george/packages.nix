@@ -52,9 +52,8 @@
       nil
       nix-output-monitor
       nix-tree
-      nixfmt-rfc-style
+      nixfmt
       nodejs_latest
-      opencode
       postman
       procs
       rapidapi

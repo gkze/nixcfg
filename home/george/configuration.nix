@@ -31,35 +31,35 @@
     secrets.github_token = { };
     templates."zed-settings.json" = {
       content = builtins.toJSON {
+        agent = {
+          default_model = {
+            model = "claude-opus-4-5-20251101";
+            provider = "anthropic";
+          };
+          dock = "right";
+          inline_assistant_model = {
+            model = "claude-opus-4-5-20251101";
+            provider = "anthropic";
+          };
+          model_parameters = [ ];
+        };
+        buffer_font_family = "Hack Nerd Font Mono";
+        buffer_font_size = 12.0;
         context_servers = {
           mcp-server-github = {
             enabled = true;
             settings.github_personal_access_token = config.sops.placeholder.github_token;
           };
         };
-        agent = {
-          dock = "right";
-          inline_assistant_model = {
-            provider = "anthropic";
-            model = "claude-opus-4-5-20251101";
-          };
-          default_model = {
-            provider = "anthropic";
-            model = "claude-opus-4-5-20251101";
-          };
-          model_parameters = [ ];
-        };
-        buffer_font_family = "Hack Nerd Font Mono";
-        buffer_font_size = 12.0;
         format_on_save = "on";
         icon_theme = "Catppuccin Frappé";
         minimap.show = "always";
         outline_panel.dock = "right";
         show_whitespaces = "all";
         theme = {
-          mode = "system";
-          light = "One Light";
           dark = "Catppuccin Frappé";
+          light = "One Light";
+          mode = "system";
         };
         ui_font_size = 15.0;
         vim_mode = true;
@@ -102,15 +102,6 @@
         ''
           pinentry-program ${prog}
         '';
-      "${config.xdg.configHome}/ghostty/config".text = ''
-        font-family = Hack Nerd Font Mono
-        font-size = 12
-        macos-option-as-alt = left
-        keybind = alt+left=unbind
-        theme = Catppuccin Frappe
-        window-height = 80
-        window-width = 220
-      '';
       ".local/bin" = {
         source = ./bin;
         recursive = true;
@@ -214,21 +205,20 @@
         extensions = with pkgs; [ gh-dash ];
       };
     };
-    # ghostty = {
-    #   enable = false;
-    #   enableZshIntegration = true;
-    #   installBatSyntax = true;
-    #   installVimSyntax = true;
-    #   settings = {
-    #     font-family = "Hack Nerd Font Mono";
-    #     font-size = 12;
-    #     macos-option-as-alt = "left";
-    #     keybind = "alt+left=unbind";
-    #     theme = "";
-    #     window-height = 80;
-    #     window-width = 220;
-    #   };
-    # };
+    ghostty = {
+      enable = true;
+      package = null; # installed via Homebrew on macOS
+      enableZshIntegration = true;
+      settings = {
+        font-family = "Hack Nerd Font Mono";
+        font-size = 12;
+        macos-option-as-alt = "left";
+        keybind = "alt+left=unbind";
+        theme = "Catppuccin Frappe";
+        window-height = 80;
+        window-width = 220;
+      };
+    };
     gpg = {
       enable = true;
       homedir = "${config.xdg.dataHome}/gnupg";
@@ -254,6 +244,11 @@
     mergiraf.enable = true;
     nushell.enable = true;
     nix-index.enable = true;
+    opencode = {
+      enable = true;
+      # MCP config is managed via sops template for secret injection
+      # See sops.templates."opencode-config.json"
+    };
     ripgrep.enable = true;
     ssh = {
       enable = true;
@@ -295,7 +290,8 @@
       settings = {
         misc.disable = [
           # "brew_cask"
-          # "brew_formula"
+          "brew_formula"
+          "cursor"
         ];
         git.repos = [ (slib.srcDirBase system) ];
         misc = {

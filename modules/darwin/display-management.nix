@@ -3,7 +3,7 @@
   services = {
     sketchybar = {
       enable = false;
-      config = '''';
+      config = "";
     };
     skhd = {
       enable = false;

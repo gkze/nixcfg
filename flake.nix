@@ -51,7 +51,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     opencode = {
-      url = "github:anomalyco/opencode/v1.1.11";
+      url = "github:anomalyco/opencode/v1.1.20";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     pyproject-build-systems = {
@@ -92,7 +92,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     beads = {
-      url = "github:steveyegge/beads/v0.46.0";
+      url = "github:steveyegge/beads/v0.47.0";
       flake = false;
     };
     bufresize-nvim = {
@@ -236,10 +236,12 @@
                 shellcheck = {
                   enable = true;
                   files = shFiles;
+                  excludes = [ "misc/zsh-plugins/go\\.plugin\\.zsh" ];
                 };
                 shfmt = {
                   enable = true;
                   files = shFiles;
+                  excludes = [ "misc/zsh-plugins/go\\.plugin\\.zsh" ];
                 };
                 # Markdown
                 mdformat.enable = true;
@@ -298,10 +300,12 @@
                   shellcheck = {
                     enable = true;
                     includes = shInclude;
+                    excludes = [ "misc/zsh-plugins/go.plugin.zsh" ];
                   };
                   shfmt = {
                     enable = true;
                     includes = shInclude;
+                    excludes = [ "misc/zsh-plugins/go.plugin.zsh" ];
                   };
                 };
                 settings.formatter."markdown-table-formatter" = with pkgs; {

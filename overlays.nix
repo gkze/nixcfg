@@ -13,7 +13,7 @@ in
         name = "beads";
         src = inputs.beads;
         subPackages = [ "cmd/bd" ];
-        vendorHash = "sha256-wazPS6KYcW2y8JGqqYvejYGD+nd0cdEJBmsN4pB8l6s=";
+        vendorHash = "sha256-u5+mc5UK+AotMcVj/XJTnFGecOZyuJ5i8yrjZhFZr5k=";
         proxyVendor = true;
         doCheck = false;
 
@@ -98,11 +98,17 @@ in
 
       opencode =
         let
-          flakeRef = outputs.lib.flakeLock.opencode;
+          pkg = inputs.opencode.packages.${prev.system}.default;
         in
-        prev.opencode.overrideAttrs {
-          src = inputs.opencode;
-          version = flakeRef.original.ref;
+        prev.symlinkJoin {
+          name = "opencode-with-completions";
+          paths = [ pkg ];
+          postBuild = ''
+            mkdir -p $out/share/zsh/site-functions
+            HOME=$(mktemp -d) SHELL=${prev.lib.getExe prev.zsh} \
+              ${prev.lib.getExe pkg} \
+              completion > $out/share/zsh/site-functions/_opencode
+          '';
         };
 
       sublime-kdl =
@@ -189,7 +195,7 @@ in
                 # Nixpkgs pre-builds and hardcodes the lib path, but the original function
                 # still attempts mkdir/download/write operations in the read-only store.
                 # Fix: short-circuit to return the pre-built library path directly.
-                fetchLuaOld = ''function fetch.ensure_lib()'';
+                fetchLuaOld = "function fetch.ensure_lib()";
                 fetchLuaNew = ''
                   function fetch.ensure_lib()
                     return "${vprev.codesnap-nvim.passthru.codesnap-lib}/lib/libgenerator.dylib"

@@ -4,7 +4,7 @@
   programs = {
     topgrade.settings.misc.disable = [
       # "bun"
-      # "gcloud"
+      "gcloud"
       # "jetbrains_datagrip"
       # "uv"
     ];

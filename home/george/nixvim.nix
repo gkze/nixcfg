@@ -318,8 +318,8 @@ in
             jsonls = {
               enable = true;
               # Use Biome formatter instead to avoid LSP conflicts
-              settings.format.enable = false;
               extraOptions.settings.json = {
+                format.enable = false;
                 schemas.__raw = "require('schemastore').json.schemas()";
                 validate.enable = true;
               };
