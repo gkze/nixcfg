@@ -64,10 +64,10 @@ in
           url = outputs.lib.ghRaw {
             owner = "Homebrew";
             repo = "brew";
-            rev = "37f1e48538e6c00e10ab90f095c55988e259c82f";
+            rev = "f7d42ae69317274b615369dddeb1c6694250c759";
             path = "completions/zsh/_brew";
           };
-          sha256 = "sha256:1ankljjhbhcfnjvgaz5bh6m132slndwplfhk3ry5214hz71nvlf0";
+          sha256 = "sha256:1mazf005nkidbq74rnzskal02dxryvfl7v3gyyjz1i6g0gv0pmxr";
         };
         dontUnpack = true;
         installPhase = ''
