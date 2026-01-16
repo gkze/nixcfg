@@ -337,14 +337,21 @@ in
           };
           # Override postPatch for 0.18.3 (code changed from 0.15.10)
           postPatch = ''
-            tauriConfRelease="crates/gitbutler-tauri/tauri.conf.release.json"
-            # Set version, disable updater artifacts, and remove externalBin placeholder
-            jq '.version = "${version}" | .bundle.createUpdaterArtifacts = false | del(.bundle.externalBin)' "$tauriConfRelease" | sponge "$tauriConfRelease"
+            tauriConf="crates/gitbutler-tauri/tauri.conf.release.json"
 
-            tomlq -ti 'del(.lints) | del(.workspace.lints)' "$cargoDepsCopy"/gix*/Cargo.toml
+            # Set version, disable updater artifacts, remove externalBin
+            jq '
+              .version = "${version}" |
+              .bundle.createUpdaterArtifacts = false |
+              del(.bundle.externalBin)
+            ' "$tauriConf" | sponge "$tauriConf"
+
+            tomlq -ti 'del(.lints) | del(.workspace.lints)' \
+              "$cargoDepsCopy"/gix*/Cargo.toml
 
             substituteInPlace apps/desktop/src/lib/backend/tauri.ts \
-              --replace-fail 'checkUpdate = tauriCheck;' 'checkUpdate = () => null;'
+              --replace-fail 'checkUpdate = tauriCheck;' \
+              'checkUpdate = () => null;'
           '';
           # Disable tests - snapshot tests fail due to date differences (25y ago vs 26y ago)
           doCheck = false;
