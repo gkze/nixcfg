@@ -561,6 +561,23 @@
         "type": "github"
       }
     },
+    "gemini-cli": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1768396922,
+        "narHash": "sha256-PqftnXy7pOY7teBHXzVH1mMECnximQwyYvgxqPH/Ulw=",
+        "owner": "google-gemini",
+        "repo": "gemini-cli",
+        "rev": "b56a1115949d23e75cfa6c3671c05897533f1ebd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "google-gemini",
+        "ref": "v0.24.0",
+        "repo": "gemini-cli",
+        "type": "github"
+      }
+    },
     "git-hooks": {
       "inputs": {
         "flake-compat": "flake-compat_2",
@@ -1324,6 +1341,7 @@
         "firefox": "firefox",
         "flakelight": "flakelight",
         "flakelight-darwin": "flakelight-darwin",
+        "gemini-cli": "gemini-cli",
         "git-hooks": "git-hooks",
         "home-manager": "home-manager",
         "homebrew-cask": "homebrew-cask",

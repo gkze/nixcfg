@@ -103,6 +103,7 @@
   };
 
   programs = {
+    # Programs with configuration (alphabetical)
     alacritty = {
       enable = true;
       settings = {
@@ -116,7 +117,6 @@
         };
       };
     };
-    awscli.enable = true;
     bat = {
       enable = true;
       syntaxes.kdl = {
@@ -129,32 +129,15 @@
       };
       config.theme = "Catppuccin Frappe";
     };
-    bottom.enable = true;
-    bun.enable = true;
-    codex.enable = true;
     direnv = {
       enable = true;
       nix-direnv.enable = true;
       enableZshIntegration = true;
       config.warn_timeout = 0;
     };
-    eza.enable = true;
     fzf = {
       enable = true;
       enableZshIntegration = true;
-    };
-    fd.enable = true;
-    gitui = {
-      enable = true;
-      keyConfig = pkgs.fetchurl {
-        url = slib.ghRaw {
-          owner = "extrawurst";
-          repo = "gitui";
-          rev = "27e28d5f5141be43648b93dc05a164a08dd4ef96";
-          path = "vim_style_key_config.ron";
-        };
-        hash = "sha256-uYL9CSCOlTdW3E87I7GsgvDEwOPHoz1LIxo8DARDX1Y=";
-      };
     };
     gh = {
       enable = true;
@@ -179,6 +162,18 @@
         window-width = 220;
       };
     };
+    gitui = {
+      enable = true;
+      keyConfig = pkgs.fetchurl {
+        url = slib.ghRaw {
+          owner = "extrawurst";
+          repo = "gitui";
+          rev = "27e28d5f5141be43648b93dc05a164a08dd4ef96";
+          path = "vim_style_key_config.ron";
+        };
+        hash = "sha256-uYL9CSCOlTdW3E87I7GsgvDEwOPHoz1LIxo8DARDX1Y=";
+      };
+    };
     gpg = {
       enable = true;
       homedir = "${config.xdg.dataHome}/gnupg";
@@ -195,21 +190,15 @@
         { name = "bash"; }
       ];
     };
-    home-manager.enable = true;
-    jq.enable = true;
     man = {
       enable = true;
       generateCaches = true;
     };
-    mergiraf.enable = true;
-    nushell.enable = true;
-    nix-index.enable = true;
     opencode = {
       enable = true;
       # MCP config is managed via sops template for secret injection
       # See sops.templates."opencode-config.json"
     };
-    ripgrep.enable = true;
     ssh = {
       enable = true;
       enableDefaultConfig = false;
@@ -260,7 +249,6 @@
         };
       };
     };
-    vscode.enable = false;
     yazi = {
       enable = true;
       enableZshIntegration = true;
@@ -285,5 +273,29 @@
       enable = true;
       enableNushellIntegration = true;
     };
+
+    # Simple enable-only programs (alphabetical)
+    awscli.enable = true;
+    bottom.enable = true;
+    bun.enable = true;
+    codex.enable = true;
+    discord.enable = true;
+    element-desktop.enable = true;
+    eza.enable = true;
+    fd.enable = true;
+    gemini-cli.enable = true;
+    home-manager.enable = true;
+    jq.enable = true;
+    jujutsu.enable = true;
+    less.enable = true;
+    mergiraf.enable = true;
+    neovide.enable = true;
+    nh.enable = true;
+    nix-index.enable = true;
+    nushell.enable = true;
+    ripgrep.enable = true;
+    superfile.enable = true;
+    uv.enable = true;
+    vscode.enable = false;
   };
 }

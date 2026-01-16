@@ -119,6 +119,10 @@
       url = "github:openai/codex/rust-v0.86.0";
       flake = false;
     };
+    gemini-cli = {
+      url = "github:google-gemini/gemini-cli/v0.24.0";
+      flake = false;
+    };
     catppuccin-delta = {
       url = "github:catppuccin/delta";
       flake = false;

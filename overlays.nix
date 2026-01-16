@@ -217,6 +217,21 @@ in
           };
         };
 
+      gemini-cli =
+        let
+          version = builtins.replaceStrings [ "v" ] [ "" ] outputs.lib.flakeLock.gemini-cli.original.ref;
+          npmDepsHash = "sha256-1hHPXYgeinK7SxF9yvQBCHYO7H1htnED3ot7wFzHDn0=";
+        in
+        prev.gemini-cli.overrideAttrs {
+          inherit version;
+          src = inputs.gemini-cli;
+          inherit npmDepsHash;
+          npmDeps = prev.fetchNpmDeps {
+            src = inputs.gemini-cli;
+            hash = npmDepsHash;
+          };
+        };
+
       sentry-cli =
         let
           version = outputs.lib.flakeLock.sentry-cli.original.ref;

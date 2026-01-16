@@ -21,11 +21,9 @@
       dasel
       dbeaver-bin
       deno
-      discord
       dua
       duf
       dust
-      element-desktop
       file
       gawk
       git-who
@@ -40,16 +38,12 @@
       httpie
       jnv
       jo
-      jujutsu
       killport
-      less
       mas
       mdq
       moreutils
       mountpoint-s3
-      neovide
       nerd-fonts.hack
-      nh
       nil
       nix-output-monitor
       nix-tree
@@ -73,12 +67,10 @@
       spacedrive
       spotify
       stars
-      superfile
       toad
       tokei
       trdsql
       tree
-      uv
       viddy
       xan
       xq-xml

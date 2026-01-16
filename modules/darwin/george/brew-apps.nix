@@ -1,6 +1,5 @@
 {
   homebrew = {
-    brews = [ "gemini-cli" ];
     casks = [
       "airfoil"
       "antigravity"
