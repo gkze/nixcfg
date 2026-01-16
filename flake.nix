@@ -237,7 +237,7 @@
         devShell =
           pkgs:
           let
-            ruffFiles = "(home/george/bin/git-ignore|home/george/ptpython\\.py)";
+            ruffFiles = "(\\.py$|home/george/bin/git-ignore)";
             shFiles = "(\\.envrc|misc/zsh-plugins/.*\\.zsh)";
             pre-commit-check = git-hooks.lib.${pkgs.system}.run {
               src = ./.;
@@ -300,9 +300,9 @@
           pkgs:
           with treefmt-nix.lib;
           let
-            ruffInclude = map (p: "home/george/${p}") [
-              "bin/git-ignore"
-              "ptpython.py"
+            ruffInclude = [
+              "*.py"
+              "home/george/bin/git-ignore"
             ];
             shInclude = [
               ".envrc"

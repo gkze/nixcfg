@@ -82,7 +82,9 @@
       appcleaner
       chatgpt
       container
+      google-chrome
       iina
+      jetbrains.datagrip
       notion-app
       sloth-app
     ];

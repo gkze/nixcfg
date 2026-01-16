@@ -8,7 +8,7 @@
       { app = "/Applications/Twilight.app"; }
       { app = "/Applications/Ghostty.app"; }
       { app = "/Applications/Zed Preview.app"; }
-      { app = "/Applications/DataGrip.app"; }
+      { app = "/Users/${primaryUser}/Applications/Home Manager Apps/DataGrip.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Notion.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Spotify.app"; }
       { app = "/System/Applications/System Settings.app"; }

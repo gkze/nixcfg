@@ -5,7 +5,6 @@
       "1password-cli"
       "cleanshot"
       "freelens"
-      "google-chrome"
       "pants"
       "tailscale"
       "warp@preview"

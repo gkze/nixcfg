@@ -252,6 +252,24 @@ in
           };
         };
 
+      google-chrome =
+        let
+          info = (builtins.fromJSON (builtins.readFile ./sources.json)).google-chrome;
+          urls = {
+            aarch64-darwin = "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg";
+            x86_64-darwin = "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg";
+            x86_64-linux = "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb";
+          };
+          inherit (prev.stdenv.hostPlatform) system;
+        in
+        prev.google-chrome.overrideAttrs {
+          inherit (info) version;
+          src = prev.fetchurl {
+            url = urls.${system};
+            hash = info.hashes.${system};
+          };
+        };
+
       gemini-cli =
         let
           version = builtins.replaceStrings [ "v" ] [ "" ] outputs.lib.flakeLock.gemini-cli.original.ref;
@@ -281,9 +299,30 @@ in
           buildInputs = old.buildInputs or [ ] ++ [ prev.curl ];
         });
 
+      jetbrains = prev.jetbrains // {
+        datagrip =
+          let
+            info = (builtins.fromJSON (builtins.readFile ./sources.json)).datagrip;
+            inherit (prev.stdenv.hostPlatform) system;
+            urls = {
+              aarch64-darwin = "https://download.jetbrains.com/datagrip/datagrip-${info.version}-aarch64.dmg";
+              x86_64-darwin = "https://download.jetbrains.com/datagrip/datagrip-${info.version}.dmg";
+              aarch64-linux = "https://download.jetbrains.com/datagrip/datagrip-${info.version}-aarch64.tar.gz";
+              x86_64-linux = "https://download.jetbrains.com/datagrip/datagrip-${info.version}.tar.gz";
+            };
+          in
+          prev.jetbrains.datagrip.overrideAttrs {
+            inherit (info) version;
+            src = prev.fetchurl {
+              url = urls.${system};
+              hash = info.hashes.${system};
+            };
+          };
+      };
+
       vscode-insiders =
         let
-          info = builtins.fromJSON (builtins.readFile ./vscode.lock.json);
+          info = (builtins.fromJSON (builtins.readFile ./sources.json)).vscode-insiders;
           inherit (info) version;
           hash = info.hashes.${prev.stdenv.hostPlatform.system};
           plat =

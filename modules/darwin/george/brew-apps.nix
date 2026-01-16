@@ -8,7 +8,6 @@
       "claude-code"
       "codeedit"
       "cursor"
-      "datagrip"
       "docker-desktop"
       "figma"
       "framer"
