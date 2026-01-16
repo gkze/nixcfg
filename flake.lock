@@ -930,6 +930,23 @@
         "type": "github"
       }
     },
+    "nix-manipulator": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1757161990,
+        "narHash": "sha256-UjY6uemzAiDHq/cBI5iFAxCnzg/Oy3aztNrqiAaZ2mY=",
+        "owner": "hoh",
+        "repo": "nix-manipulator",
+        "rev": "aa9b2ae30b90cdd8a76ad78643510d2b3721dbf2",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hoh",
+        "ref": "0.1.3",
+        "repo": "nix-manipulator",
+        "type": "github"
+      }
+    },
     "nix-rosetta-builder": {
       "inputs": {
         "nixos-generators": "nixos-generators",
@@ -1356,6 +1373,7 @@
         "neovim-nightly-overlay": "neovim-nightly-overlay",
         "nix-darwin": "nix-darwin",
         "nix-homebrew": "nix-homebrew",
+        "nix-manipulator": "nix-manipulator",
         "nix-rosetta-builder": "nix-rosetta-builder",
         "nixos-hardware": "nixos-hardware",
         "nixpkgs": "nixpkgs_4",

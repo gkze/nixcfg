@@ -125,6 +125,41 @@ in
           ];
         };
 
+      nix-manipulator =
+        with inputs;
+        let
+          version = outputs.lib.flakeLock.nix-manipulator.original.ref;
+          uv = prev.lib.getExe prev.uv;
+          python = prev.lib.getExe prev.python313;
+          workspace = uv2nix.lib.workspace.loadWorkspace {
+            workspaceRoot = prev.stdenv.mkDerivation {
+              name = "nix-manipulator-locked";
+              src = nix-manipulator;
+              buildPhase = ''
+                export SETUPTOOLS_SCM_PRETEND_VERSION=${version}
+                UV_PYTHON=${python} ${uv} -n lock
+              '';
+              installPhase = "cp -r . $out";
+            };
+          };
+          pySet =
+            (prev.callPackage pyproject-nix.build.packages {
+              python = prev.python313;
+            }).overrideScope
+              (
+                prev.lib.composeManyExtensions [
+                  pyproject-build-systems.overlays.default
+                  (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+                ]
+              );
+        in
+        (prev.callPackages pyproject-nix.build.util { }).mkApplication {
+          venv = pySet.mkVirtualEnv "nix-manipulator" workspace.deps.all // {
+            meta.mainProgram = "nima";
+          };
+          package = pySet.nix-manipulator;
+        };
+
       opencode =
         let
           pkg = inputs.opencode.packages.${prev.system}.default;
@@ -245,6 +280,30 @@ in
           };
           buildInputs = old.buildInputs or [ ] ++ [ prev.curl ];
         });
+
+      vscode-insiders =
+        let
+          info = builtins.fromJSON (builtins.readFile ./vscode.lock.json);
+          inherit (info) version;
+          hash = info.hashes.${prev.stdenv.hostPlatform.system};
+          plat =
+            {
+              aarch64-darwin = "darwin-arm64";
+              aarch64-linux = "linux-arm64";
+              x86_64-darwin = "darwin";
+              x86_64-linux = "linux-x64";
+            }
+            .${prev.stdenv.hostPlatform.system};
+          archive_fmt = if prev.stdenv.hostPlatform.isDarwin then "zip" else "tar.gz";
+        in
+        (prev.vscode.override { isInsiders = true; }).overrideAttrs {
+          inherit version;
+          src = prev.fetchurl {
+            name = "VSCode-insiders-${version}-${plat}.${archive_fmt}";
+            url = "https://update.code.visualstudio.com/${version}/${plat}/insider";
+            inherit hash;
+          };
+        };
 
       # Extend vimPlugins with fixes and custom plugins
       vimPlugins = prev.vimPlugins.extend (

@@ -175,6 +175,10 @@
       url = "github:nmoroze/tclint";
       flake = false;
     };
+    nix-manipulator = {
+      url = "github:hoh/nix-manipulator/0.1.3";
+      flake = false;
+    };
     toad = {
       url = "github:batrachianai/toad/v0.5.32";
       flake = false;
@@ -281,6 +285,7 @@
                 nh
                 nil
                 nix-init
+                nix-manipulator
                 nixos-generators
                 nurl
                 prek

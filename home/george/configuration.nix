@@ -296,6 +296,9 @@
     ripgrep.enable = true;
     superfile.enable = true;
     uv.enable = true;
-    vscode.enable = false;
+    vscode = {
+      enable = true;
+      package = pkgs.vscode-insiders;
+    };
   };
 }

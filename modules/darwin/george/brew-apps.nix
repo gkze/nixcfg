@@ -26,7 +26,6 @@
       "opencode-desktop"
       "rio"
       "signal@beta"
-      "visual-studio-code@insiders"
       "wave"
       "yaak@beta"
       "zed@preview"
