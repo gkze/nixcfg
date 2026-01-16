@@ -10,7 +10,7 @@
       { app = "/Applications/Ghostty.app"; }
       { app = "/Applications/Zed Preview.app"; }
       { app = "/Applications/Cursor.app"; }
-      { app = "/Applications/Visual Studio Code - Insiders.app"; }
+      { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Visual Studio Code - Insiders.app"; }
       { app = "/Applications/DataGrip.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Notion.app"; }
       { app = "/Applications/Figma.app"; }
