@@ -8,7 +8,7 @@
     skhd = {
       enable = false;
       skhdConfig = ''
-        alt + shift - c : open /Applications/Cursor.app
+        alt + shift - c : open ~/Applications/Home\ Manager\ Apps/Cursor.app
         alt + shift - g : open /Applications/Ghostty.app
         alt + shift - t : open /Applications/Twilight.app
         alt + shift - z : open "/Applications/Zed Preview.app"
