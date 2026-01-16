@@ -12,11 +12,10 @@
       beads-mcp
       biome
       cachix
-      container
+      code-cursor
       csvlens
       curl
       curlie
-      cyberduck
       czkawka
       dasel
       dbeaver-bin
@@ -36,10 +35,10 @@
       grex
       hoppscotch
       httpie
+      jetbrains.datagrip
       jnv
       jo
       killport
-      mas
       mdq
       moreutils
       mountpoint-s3
@@ -51,7 +50,6 @@
       nodejs_latest
       postman
       procs
-      rapidapi
       red-reddit-cli
       rsync
       rustup
@@ -82,10 +80,12 @@
       appcleaner
       chatgpt
       container
+      cyberduck
       google-chrome
       iina
-      jetbrains.datagrip
+      mas
       notion-app
+      rapidapi
       sloth-app
     ];
 }

@@ -7,7 +7,6 @@
       "claude"
       "claude-code"
       "codeedit"
-      "cursor"
       "docker-desktop"
       "figma"
       "framer"

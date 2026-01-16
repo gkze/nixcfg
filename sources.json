@@ -1,38 +1,48 @@
 {
-  "google-chrome": {
-    "version": "144.0.7559.60",
-    "hashes": {
-      "aarch64-darwin": "sha256-Kxt8MrW5ANGAID0L9B/dTA56iE1E+AFp3ym1wqKrqvE=",
-      "x86_64-darwin": "sha256-Kxt8MrW5ANGAID0L9B/dTA56iE1E+AFp3ym1wqKrqvE=",
-      "x86_64-linux": "sha256-N2y+St4UuUWOqc9O40p+sBV4Bx8Ivloq7GGUICp6dSY="
-    }
-  },
-  "vscode-insiders": {
-    "version": "1.109.0-insider",
-    "hashes": {
-      "aarch64-darwin": "sha256:8ac66d23fd3db9a55c18c0561982a5fafa483874bada72cca173943b3d8e8d47",
-      "aarch64-linux": "sha256:18d6373ba3fd5641b3340c64eecbe4a75b6420861cd35424906c78ddbe95dfd6",
-      "x86_64-darwin": "sha256:22a1b9d21fb6bf8eea10d163d8962c9a0914c5de74b707777677a4015791a148",
-      "x86_64-linux": "sha256:a6659149afed3f022b62bf988376ec5dd0716473bc596c71da787df7608898f3"
-    }
-  },
-  "datagrip": {
-    "version": "2025.3.3",
-    "hashes": {
-      "aarch64-darwin": "sha256-QwPJLy4Hv0FJErVTUDirG1iDn8noMlnyk4Zmk0uqZnQ=",
-      "x86_64-darwin": "sha256-JQfAVG4N2UFlQtyWF2GjHzozwOPGi6elInOSQyBf7js=",
-      "aarch64-linux": "sha256-MWqkJiZ7ElSPLv0BT1dcszFbbZOr2Ub7gRrN2bUG1BY=",
-      "x86_64-linux": "sha256-cV0shZxezpvllsM4aUJPLw+PzvSxqy44F5WE10VA764="
-    }
-  },
   "chatgpt": {
-    "version": "1.2026.006",
     "hashes": {
       "aarch64-darwin": "sha256-xs4AZSbj9wuxkGhw2JyFvaPt6W9ZkL+ab0FmjYvTR8Y=",
       "x86_64-darwin": "sha256-xs4AZSbj9wuxkGhw2JyFvaPt6W9ZkL+ab0FmjYvTR8Y="
     },
     "urls": {
       "darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.006_1768086529.dmg"
-    }
+    },
+    "version": "1.2026.006"
+  },
+  "code-cursor": {
+    "commit": "cf8353edc265f5e46b798bfb276861d0bf3bf129",
+    "hashes": {
+      "aarch64-darwin": "sha256-ZHxvA+iDluib9PLl5ilthdd0Z+xT+w9OSD25vySc9wI=",
+      "aarch64-linux": "sha256-2l9ppSze2nkvAfszblkhMSl+QhGENNe62AlgCcXBhfM=",
+      "x86_64-darwin": "sha256-Jl6t4oHC6nqOGDKUvvfViPgKJzpG2vpvht4JMBLHzVk=",
+      "x86_64-linux": "sha256-o/NIEtSOlUl67g18mWDG4M0thPA4VIfiWudv0Xiov08="
+    },
+    "version": "2.3.35"
+  },
+  "datagrip": {
+    "hashes": {
+      "aarch64-darwin": "sha256-QwPJLy4Hv0FJErVTUDirG1iDn8noMlnyk4Zmk0uqZnQ=",
+      "aarch64-linux": "sha256-MWqkJiZ7ElSPLv0BT1dcszFbbZOr2Ub7gRrN2bUG1BY=",
+      "x86_64-darwin": "sha256-JQfAVG4N2UFlQtyWF2GjHzozwOPGi6elInOSQyBf7js=",
+      "x86_64-linux": "sha256-cV0shZxezpvllsM4aUJPLw+PzvSxqy44F5WE10VA764="
+    },
+    "version": "2025.3.3"
+  },
+  "google-chrome": {
+    "hashes": {
+      "aarch64-darwin": "sha256-Kxt8MrW5ANGAID0L9B/dTA56iE1E+AFp3ym1wqKrqvE=",
+      "x86_64-darwin": "sha256-Kxt8MrW5ANGAID0L9B/dTA56iE1E+AFp3ym1wqKrqvE=",
+      "x86_64-linux": "sha256-N2y+St4UuUWOqc9O40p+sBV4Bx8Ivloq7GGUICp6dSY="
+    },
+    "version": "144.0.7559.60"
+  },
+  "vscode-insiders": {
+    "hashes": {
+      "aarch64-darwin": "sha256:8ac66d23fd3db9a55c18c0561982a5fafa483874bada72cca173943b3d8e8d47",
+      "aarch64-linux": "sha256:18d6373ba3fd5641b3340c64eecbe4a75b6420861cd35424906c78ddbe95dfd6",
+      "x86_64-darwin": "sha256:22a1b9d21fb6bf8eea10d163d8962c9a0914c5de74b707777677a4015791a148",
+      "x86_64-linux": "sha256:a6659149afed3f022b62bf988376ec5dd0716473bc596c71da787df7608898f3"
+    },
+    "version": "1.109.0-insider"
   }
 }
