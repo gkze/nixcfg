@@ -1,6 +1,7 @@
 { inputs, outputs, ... }:
 let
   normalizeName = s: builtins.replaceStrings [ "." "_" ] [ "-" "-" ] s;
+  dedupCargoLockScript = ./misc/dedup_cargo_lock.py;
 in
 {
   default =
@@ -252,6 +253,19 @@ in
           };
         };
 
+      chatgpt =
+        let
+          info = (builtins.fromJSON (builtins.readFile ./sources.json)).chatgpt;
+          inherit (prev.stdenv.hostPlatform) system;
+        in
+        prev.chatgpt.overrideAttrs {
+          inherit (info) version;
+          src = prev.fetchurl {
+            url = info.urls.darwin;
+            hash = info.hashes.${system};
+          };
+        };
+
       google-chrome =
         let
           info = (builtins.fromJSON (builtins.readFile ./sources.json)).google-chrome;
@@ -284,6 +298,57 @@ in
             hash = npmDepsHash;
           };
         };
+
+      gitbutler =
+        let
+          version = "0.18.3";
+          pnpmDepsHash = "sha256-R1EYyMy0oVX9G6GYrjIsWx7J9vfkdM4fLlydteVsi7E=";
+
+          # Patch source to remove duplicate git sources from Cargo.lock
+          # GitButler's Cargo.lock has some crates from both crates.io AND git,
+          # which causes "File exists" errors during cargo vendor
+          patchedSrc = prev.stdenvNoCC.mkDerivation {
+            name = "gitbutler-src-deduped";
+            src = inputs.gitbutler;
+            nativeBuildInputs = [ prev.python3 ];
+            patchPhase = ''
+              python3 ${dedupCargoLockScript} Cargo.lock
+            '';
+            installPhase = ''
+              cp -r . $out
+            '';
+          };
+        in
+        prev.gitbutler.overrideAttrs (old: {
+          inherit version;
+          src = patchedSrc;
+          # Our dedup script replaces the nixpkgs Cargo.lock patch
+          patches = [ ];
+          cargoDeps = prev.rustPlatform.fetchCargoVendor {
+            src = patchedSrc;
+            hash = "sha256-2Qh26vhtKaJAmedjgMNf0rMQGslMk9qCO5Qz+NOK4Ys=";
+          };
+          pnpmDeps = prev.fetchPnpmDeps {
+            inherit (old) pname;
+            inherit version;
+            src = patchedSrc;
+            fetcherVersion = 2;
+            hash = pnpmDepsHash;
+          };
+          # Override postPatch for 0.18.3 (code changed from 0.15.10)
+          postPatch = ''
+            tauriConfRelease="crates/gitbutler-tauri/tauri.conf.release.json"
+            # Set version, disable updater artifacts, and remove externalBin placeholder
+            jq '.version = "${version}" | .bundle.createUpdaterArtifacts = false | del(.bundle.externalBin)' "$tauriConfRelease" | sponge "$tauriConfRelease"
+
+            tomlq -ti 'del(.lints) | del(.workspace.lints)' "$cargoDepsCopy"/gix*/Cargo.toml
+
+            substituteInPlace apps/desktop/src/lib/backend/tauri.ts \
+              --replace-fail 'checkUpdate = tauriCheck;' 'checkUpdate = () => null;'
+          '';
+          # Disable tests - snapshot tests fail due to date differences (25y ago vs 26y ago)
+          doCheck = false;
+        });
 
       sentry-cli =
         let

@@ -42,10 +42,29 @@ SOURCES_FILE = get_sources_file()
 # =============================================================================
 
 
+def fetch_url(url: str, user_agent: str | None = None) -> bytes:
+    """Fetch content from a URL with optional user agent."""
+    req = urllib.request.Request(url)
+    if user_agent:
+        req.add_header("User-Agent", user_agent)
+    with urllib.request.urlopen(req) as response:
+        return response.read()
+
+
 def fetch_json(url: str) -> dict:
     """Fetch and parse JSON from a URL."""
-    with urllib.request.urlopen(url) as response:
-        return json.loads(response.read().decode())
+    return json.loads(fetch_url(url).decode())
+
+
+def _nix_hash_to_sri(hash_value: str) -> str:
+    """Convert any nix hash format (base32, hex) to SRI format."""
+    result = subprocess.run(
+        ["nix", "hash", "convert", "--hash-algo", "sha256", "--to", "sri", hash_value],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
 
 
 def compute_sri_hash(url: str) -> str:
@@ -57,25 +76,12 @@ def compute_sri_hash(url: str) -> str:
         check=True,
     )
     base32_hash = result.stdout.strip().split("\n")[-1]
-
-    result = subprocess.run(
-        ["nix", "hash", "convert", "--hash-algo", "sha256", "--to", "sri", base32_hash],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout.strip()
+    return _nix_hash_to_sri(base32_hash)
 
 
 def hex_to_sri(hex_hash: str) -> str:
     """Convert hex sha256 hash to SRI format."""
-    result = subprocess.run(
-        ["nix", "hash", "convert", "--hash-algo", "sha256", "--to", "sri", hex_hash],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout.strip()
+    return _nix_hash_to_sri(hex_hash)
 
 
 # =============================================================================
@@ -86,12 +92,29 @@ def hex_to_sri(hex_hash: str) -> str:
 UPDATERS: dict[str, type["Updater"]] = {}
 
 
+def _print_hash(platform: str, sri: str, note: str | None = None) -> None:
+    """Print hash in consistent format."""
+    if note:
+        print(f"  {platform}: {note}")
+    else:
+        print(f"  {platform}: {sri[:32]}...")
+
+
+@dataclass
+class VersionInfo:
+    """Version and metadata fetched from upstream."""
+
+    version: str
+    metadata: dict  # Updater-specific data (URLs, checksums, release info, etc.)
+
+
 @dataclass
 class UpdateResult:
     """Result of an update check."""
 
     version: str
     hashes: dict[str, str]
+    urls: dict[str, str] | None = None  # Optional platform -> URL mapping
 
 
 class Updater(ABC):
@@ -105,26 +128,82 @@ class Updater(ABC):
             UPDATERS[cls.name] = cls
 
     @abstractmethod
-    def fetch_version(self) -> str:
-        """Fetch the latest version string."""
+    def fetch_latest(self) -> VersionInfo:
+        """Fetch the latest version and any metadata needed for hashes."""
 
     @abstractmethod
-    def fetch_hashes(self, version: str) -> dict[str, str]:
+    def fetch_hashes(self, info: VersionInfo) -> dict[str, str]:
         """Fetch hashes for all platforms. Returns {nix_platform: sri_hash}."""
+
+    def build_result(self, info: VersionInfo, hashes: dict[str, str]) -> UpdateResult:
+        """Build UpdateResult from version info and hashes. Override to add URLs."""
+        return UpdateResult(version=info.version, hashes=hashes)
 
     def update(self, current: dict) -> UpdateResult | None:
         """Check for updates. Returns UpdateResult or None if up-to-date."""
         print(f"Fetching latest {self.name} version...")
-        version = self.fetch_version()
+        info = self.fetch_latest()
 
-        print(f"Latest version: {version}")
-        if current.get("version") == version:
+        print(f"Latest version: {info.version}")
+        if current.get("version") == info.version:
             print("Already at latest version")
             return None
 
         print("Fetching hashes for all platforms...")
-        hashes = self.fetch_hashes(version)
-        return UpdateResult(version=version, hashes=hashes)
+        hashes = self.fetch_hashes(info)
+        return self.build_result(info, hashes)
+
+
+# =============================================================================
+# Specialized Updater Base Classes
+# =============================================================================
+
+
+class ChecksumProvidedUpdater(Updater):
+    """Base for sources that provide checksums in their API (no download needed)."""
+
+    PLATFORMS: dict[str, str]  # nix_platform -> api_key
+
+    @abstractmethod
+    def fetch_checksums(self, info: VersionInfo) -> dict[str, str]:
+        """Return {nix_platform: hex_hash} from API metadata."""
+
+    def fetch_hashes(self, info: VersionInfo) -> dict[str, str]:
+        """Convert API checksums to SRI format."""
+        hashes = {}
+        for platform, hex_hash in self.fetch_checksums(info).items():
+            sri = hex_to_sri(hex_hash)
+            hashes[platform] = sri
+            _print_hash(platform, sri)
+        return hashes
+
+
+class DownloadHashUpdater(Updater):
+    """Base for sources requiring download to compute hash, with URL deduplication."""
+
+    PLATFORMS: dict[str, str]  # nix_platform -> download_url or template
+
+    @abstractmethod
+    def get_download_url(self, platform: str, info: VersionInfo) -> str:
+        """Return download URL for a platform."""
+
+    def fetch_hashes(self, info: VersionInfo) -> dict[str, str]:
+        """Compute hashes by downloading, deduplicating identical URLs."""
+        hashes = {}
+        seen_urls: dict[str, str] = {}
+
+        for platform in self.PLATFORMS:
+            url = self.get_download_url(platform, info)
+            if url in seen_urls:
+                hashes[platform] = seen_urls[url]
+                _print_hash(platform, seen_urls[url], "(same as above)")
+            else:
+                sri = compute_sri_hash(url)
+                hashes[platform] = sri
+                seen_urls[url] = sri
+                _print_hash(platform, sri)
+
+        return hashes
 
 
 # =============================================================================
@@ -132,7 +211,7 @@ class Updater(ABC):
 # =============================================================================
 
 
-class GoogleChromeUpdater(Updater):
+class GoogleChromeUpdater(DownloadHashUpdater):
     """Update Google Chrome to latest stable version."""
 
     name = "google-chrome"
@@ -144,29 +223,16 @@ class GoogleChromeUpdater(Updater):
         "x86_64-linux": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb",
     }
 
-    def fetch_version(self) -> str:
+    def fetch_latest(self) -> VersionInfo:
         url = "https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Mac&num=1"
         data = fetch_json(url)
-        return data[0]["version"]
+        return VersionInfo(version=data[0]["version"], metadata={})
 
-    def fetch_hashes(self, version: str) -> dict[str, str]:
-        hashes = {}
-        seen_urls: dict[str, str] = {}  # Cache for duplicate URLs (darwin universal)
-
-        for platform, url in self.PLATFORMS.items():
-            if url in seen_urls:
-                hashes[platform] = seen_urls[url]
-                print(f"  {platform}: (same as above)")
-            else:
-                sri = compute_sri_hash(url)
-                hashes[platform] = sri
-                seen_urls[url] = sri
-                print(f"  {platform}: {sri[:32]}...")
-
-        return hashes
+    def get_download_url(self, platform: str, info: VersionInfo) -> str:
+        return self.PLATFORMS[platform]
 
 
-class DataGripUpdater(Updater):
+class DataGripUpdater(ChecksumProvidedUpdater):
     """Update DataGrip to latest stable version."""
 
     name = "datagrip"
@@ -181,30 +247,82 @@ class DataGripUpdater(Updater):
         "x86_64-linux": "linux",
     }
 
-    def _fetch_release_info(self) -> dict:
+    def fetch_latest(self) -> VersionInfo:
         data = fetch_json(self.API_URL)
-        return data["DG"][0]
+        release = data["DG"][0]
+        return VersionInfo(version=release["version"], metadata={"release": release})
 
-    def fetch_version(self) -> str:
-        return self._fetch_release_info()["version"]
-
-    def fetch_hashes(self, version: str) -> dict[str, str]:
-        release = self._fetch_release_info()
-        hashes = {}
-
+    def fetch_checksums(self, info: VersionInfo) -> dict[str, str]:
+        release = info.metadata["release"]
+        checksums = {}
         for nix_platform, jb_key in self.PLATFORMS.items():
             checksum_url = release["downloads"][jb_key]["checksumLink"]
             with urllib.request.urlopen(checksum_url) as response:
                 # Format: "hexhash *filename"
                 hex_hash = response.read().decode().split()[0]
-            sri = hex_to_sri(hex_hash)
-            hashes[nix_platform] = sri
-            print(f"  {nix_platform}: {sri[:32]}...")
-
-        return hashes
+            checksums[nix_platform] = hex_hash
+        return checksums
 
 
-class VSCodeInsidersUpdater(Updater):
+class ChatGPTUpdater(DownloadHashUpdater):
+    """Update ChatGPT desktop app to latest version using Sparkle appcast."""
+
+    name = "chatgpt"
+
+    APPCAST_URL = (
+        "https://persistent.oaistatic.com/sidekick/public/sparkle_public_appcast.xml"
+    )
+
+    # Both darwin platforms use the same universal binary
+    PLATFORMS = {
+        "aarch64-darwin": "darwin",
+        "x86_64-darwin": "darwin",
+    }
+
+    def fetch_latest(self) -> VersionInfo:
+        """Fetch version and download URL from Sparkle appcast XML."""
+        import xml.etree.ElementTree as ET
+
+        # Use Sparkle user agent to avoid 403
+        xml_data = fetch_url(self.APPCAST_URL, user_agent="Sparkle/2.0").decode()
+
+        root = ET.fromstring(xml_data)
+        # Get the first (latest) item
+        item = root.find(".//item")
+        if item is None:
+            raise RuntimeError("No items found in appcast")
+
+        # Sparkle namespace
+        ns = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+
+        version_elem = item.find("sparkle:shortVersionString", ns)
+        if version_elem is None or version_elem.text is None:
+            raise RuntimeError("No version found in appcast")
+
+        enclosure = item.find("enclosure")
+        if enclosure is None:
+            raise RuntimeError("No enclosure found in appcast")
+
+        url = enclosure.get("url")
+        if url is None:
+            raise RuntimeError("No URL found in enclosure")
+
+        return VersionInfo(version=version_elem.text, metadata={"url": url})
+
+    def get_download_url(self, platform: str, info: VersionInfo) -> str:
+        print(f"  URL: {info.metadata['url']}")
+        return info.metadata["url"]
+
+    def build_result(self, info: VersionInfo, hashes: dict[str, str]) -> UpdateResult:
+        """Include the versioned URL in the result."""
+        return UpdateResult(
+            version=info.version,
+            hashes=hashes,
+            urls={"darwin": info.metadata["url"]},
+        )
+
+
+class VSCodeInsidersUpdater(ChecksumProvidedUpdater):
     """Update VS Code Insiders to latest version."""
 
     name = "vscode-insiders"
@@ -221,19 +339,21 @@ class VSCodeInsidersUpdater(Updater):
         url = f"https://update.code.visualstudio.com/api/update/{api_platform}/insider/latest"
         return fetch_json(url)
 
-    def fetch_version(self) -> str:
-        first_platform = next(iter(self.PLATFORMS.values()))
-        info = self._fetch_platform_info(first_platform)
-        return info["productVersion"]
+    def fetch_latest(self) -> VersionInfo:
+        # Fetch info for all platforms upfront to avoid repeated API calls
+        platform_info = {}
+        for nix_platform, api_platform in self.PLATFORMS.items():
+            platform_info[nix_platform] = self._fetch_platform_info(api_platform)
+        # Use first platform's version (all should be the same)
+        version = platform_info[next(iter(self.PLATFORMS))]["productVersion"]
+        return VersionInfo(version=version, metadata={"platform_info": platform_info})
 
-    def fetch_hashes(self, version: str) -> dict[str, str]:
-        hashes = {}
-        for platform, api_platform in self.PLATFORMS.items():
-            info = self._fetch_platform_info(api_platform)
-            sri = hex_to_sri(info["sha256hash"])
-            hashes[platform] = sri
-            print(f"  {platform}: {sri[:32]}...")
-        return hashes
+    def fetch_checksums(self, info: VersionInfo) -> dict[str, str]:
+        platform_info = info.metadata["platform_info"]
+        return {
+            platform: platform_info[platform]["sha256hash"]
+            for platform in self.PLATFORMS
+        }
 
 
 # =============================================================================
@@ -269,7 +389,10 @@ def update_source(name: str, sources: dict) -> bool:
         result = updater_cls().update(current)
         if result is None:
             return False
-        sources[name] = {"version": result.version, "hashes": result.hashes}
+        entry = {"version": result.version, "hashes": result.hashes}
+        if result.urls:
+            entry["urls"] = result.urls
+        sources[name] = entry
         return True
     except Exception as e:
         print(f"Error updating {name}: {e}")

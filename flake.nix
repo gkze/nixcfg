@@ -123,6 +123,10 @@
       url = "github:google-gemini/gemini-cli/v0.24.0";
       flake = false;
     };
+    gitbutler = {
+      url = "github:gitbutlerapp/gitbutler/release/0.18.3";
+      flake = false;
+    };
     catppuccin-delta = {
       url = "github:catppuccin/delta";
       flake = false;

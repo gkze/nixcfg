@@ -24,5 +24,15 @@
       "aarch64-linux": "sha256-MWqkJiZ7ElSPLv0BT1dcszFbbZOr2Ub7gRrN2bUG1BY=",
       "x86_64-linux": "sha256-cV0shZxezpvllsM4aUJPLw+PzvSxqy44F5WE10VA764="
     }
+  },
+  "chatgpt": {
+    "version": "1.2026.006",
+    "hashes": {
+      "aarch64-darwin": "sha256-xs4AZSbj9wuxkGhw2JyFvaPt6W9ZkL+ab0FmjYvTR8Y=",
+      "x86_64-darwin": "sha256-xs4AZSbj9wuxkGhw2JyFvaPt6W9ZkL+ab0FmjYvTR8Y="
+    },
+    "urls": {
+      "darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.006_1768086529.dmg"
+    }
   }
 }

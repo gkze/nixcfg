@@ -3,7 +3,7 @@
   home.packages =
     with pkgs;
     [
-      # gitbutler
+      gitbutler
       (coreutils.override { minimal = false; })
       amp-cli
       axiom-cli

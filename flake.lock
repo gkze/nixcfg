@@ -600,6 +600,23 @@
         "type": "github"
       }
     },
+    "gitbutler": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1765816230,
+        "narHash": "sha256-N/xs63QjqEgDXAOEZpzBRl1QrwDlcYyFWSyNlku6tKw=",
+        "owner": "gitbutlerapp",
+        "repo": "gitbutler",
+        "rev": "336abf747563a05d1d9b64c40200fbf7f1f0a4d8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "gitbutlerapp",
+        "ref": "release/0.18.3",
+        "repo": "gitbutler",
+        "type": "github"
+      }
+    },
     "gitignore": {
       "inputs": {
         "nixpkgs": [
@@ -1360,6 +1377,7 @@
         "flakelight-darwin": "flakelight-darwin",
         "gemini-cli": "gemini-cli",
         "git-hooks": "git-hooks",
+        "gitbutler": "gitbutler",
         "home-manager": "home-manager",
         "homebrew-cask": "homebrew-cask",
         "homebrew-core": "homebrew-core",
