@@ -624,6 +624,16 @@ in
           settings.filter_kind = false;
         };
         avante.enable = false;
+        codecompanion = {
+          enable = true;
+          settings = {
+            strategies = {
+              chat.adapter = "anthropic";
+              inline.adapter = "anthropic";
+              agent.adapter = "anthropic";
+            };
+          };
+        };
         barbecue.enable = true;
         bufdelete.enable = true;
         comment.enable = true;
@@ -896,6 +906,28 @@ in
         {
           key = "<leader>gb";
           action = ":Neogit branch<CR>";
+        }
+        # CodeCompanion
+        {
+          key = "<leader>cc";
+          action = ":CodeCompanionChat Toggle<CR>";
+          options.desc = "Toggle CodeCompanion chat";
+        }
+        {
+          key = "<leader>ca";
+          action = ":CodeCompanionActions<CR>";
+          options.desc = "CodeCompanion actions";
+        }
+        {
+          key = "<leader>ci";
+          action = ":CodeCompanion<CR>";
+          options.desc = "CodeCompanion inline";
+        }
+        {
+          key = "ga";
+          action = ":CodeCompanionChat Add<CR>";
+          mode = "v";
+          options.desc = "Add selection to chat";
         }
       ];
     };

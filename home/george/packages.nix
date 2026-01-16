@@ -6,6 +6,7 @@
       # gitbutler
       (coreutils.override { minimal = false; })
       amp-cli
+      axiom-cli
       ast-grep
       beads
       beads-mcp
@@ -61,6 +62,7 @@
       rsync
       rustup
       sd
+      sentry-cli
       sequoia-chameleon-gnupg
       sequoia-sq
       sequoia-sqop

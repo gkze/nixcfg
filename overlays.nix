@@ -9,6 +9,35 @@ in
       naersk' = prev.callPackage inputs.naersk { };
     in
     {
+      axiom-cli =
+        let
+          flakeRef = outputs.lib.flakeLock.axiom-cli;
+        in
+        prev.buildGoModule {
+          pname = "axiom-cli";
+          version = flakeRef.original.ref;
+          src = inputs.axiom-cli;
+          subPackages = [ "cmd/axiom" ];
+          vendorHash = "sha256-ULiXQxJl8hqWUY04cyjXWUefPoC5DoeZ2kcQEcefbWQ=";
+          doCheck = false;
+
+          nativeBuildInputs = [ prev.installShellFiles ];
+
+          postInstall = ''
+            installShellCompletion --cmd axiom \
+              --bash <($out/bin/axiom completion bash) \
+              --fish <($out/bin/axiom completion fish) \
+              --zsh <($out/bin/axiom completion zsh)
+          '';
+
+          meta = with prev.lib; {
+            description = "The power of Axiom on the command line";
+            homepage = "https://github.com/axiomhq/cli";
+            license = licenses.mit;
+            mainProgram = "axiom";
+          };
+        };
+
       beads = prev.buildGoModule {
         name = "beads";
         src = inputs.beads;
@@ -173,6 +202,34 @@ in
           };
           package = pySet.batrachian-toad;
         };
+
+      codex =
+        let
+          version = builtins.replaceStrings [ "rust-v" ] [ "" ] outputs.lib.flakeLock.codex.original.ref;
+        in
+        prev.codex.overrideAttrs {
+          inherit version;
+          src = inputs.codex;
+          sourceRoot = "source/codex-rs";
+          cargoDeps = prev.rustPlatform.fetchCargoVendor {
+            src = "${inputs.codex}/codex-rs";
+            hash = "sha256-Ryr5mFc+StT1d+jBtRsrOzMtyEJf7W1HbMbnC84ps4s=";
+          };
+        };
+
+      sentry-cli =
+        let
+          version = outputs.lib.flakeLock.sentry-cli.original.ref;
+        in
+        prev.sentry-cli.overrideAttrs (old: {
+          inherit version;
+          src = inputs.sentry-cli;
+          cargoDeps = prev.rustPlatform.fetchCargoVendor {
+            src = inputs.sentry-cli;
+            hash = "sha256-PUQ55pNiLEI5qxykA/j7RsykKJRTUGOGf2JBLacFGBo=";
+          };
+          buildInputs = old.buildInputs or [ ] ++ [ prev.curl ];
+        });
 
       # Extend vimPlugins with fixes and custom plugins
       vimPlugins = prev.vimPlugins.extend (

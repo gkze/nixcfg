@@ -78,6 +78,10 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    sentry-cli = {
+      url = "github:getsentry/sentry-cli/3.1.0";
+      flake = false;
+    };
     sops-nix = {
       url = "github:Mic92/sops-nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -95,6 +99,10 @@
       inputs.pyproject-nix.follows = "pyproject-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    axiom-cli = {
+      url = "github:axiomhq/cli/v0.14.7";
+      flake = false;
+    };
     beads = {
       url = "github:steveyegge/beads/v0.47.1";
       flake = false;
@@ -105,6 +113,10 @@
     };
     catppuccin-bat = {
       url = "github:catppuccin/bat";
+      flake = false;
+    };
+    codex = {
+      url = "github:openai/codex/rust-v0.86.0";
       flake = false;
     };
     catppuccin-delta = {
@@ -160,7 +172,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad";
+      url = "github:batrachianai/toad/v0.5.32";
       flake = false;
     };
     treewalker-nvim = {
@@ -268,6 +280,7 @@
                 nixos-generators
                 nurl
                 prek
+                sops
               ]
               ++ lib.optional pkgs.stdenv.isLinux dconf2nix
               ++ pre-commit-check.enabledPackages;

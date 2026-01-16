@@ -8,7 +8,6 @@
       "claude"
       "claude-code"
       "codeedit"
-      "codex"
       "cursor"
       "datagrip"
       "docker-desktop"
