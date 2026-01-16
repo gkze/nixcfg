@@ -144,6 +144,7 @@ rec {
       extraSpecialArgs = {
         inherit
           inputs
+          outputs
           src
           system
           username

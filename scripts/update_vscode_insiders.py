@@ -9,8 +9,12 @@ import json
 import urllib.request
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).parent
-DATA_FILE = SCRIPT_DIR.parent / "vscode.lock.json"
+# When run via `nix run`, use current directory; otherwise use script location
+if "nix/store" in str(Path(__file__)):
+    DATA_FILE = Path.cwd() / "vscode.lock.json"
+else:
+    SCRIPT_DIR = Path(__file__).parent
+    DATA_FILE = SCRIPT_DIR.parent / "vscode.lock.json"
 
 # Map Nix platform names to Microsoft's API platform names
 PLATFORMS = {
