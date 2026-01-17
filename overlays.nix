@@ -420,6 +420,20 @@ in
         };
       };
 
+    zed-editor =
+      let
+        version = builtins.replaceStrings [ "v" "-pre" ] [ "" "" ]
+          outputs.lib.flakeLock.zed-editor.original.ref;
+      in
+      prev.zed-editor.overrideAttrs {
+        inherit version;
+        src = inputs.zed-editor;
+        cargoDeps = prev.rustPlatform.fetchCargoVendor {
+          src = inputs.zed-editor;
+          hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        };
+      };
+
     # Extend vimPlugins with fixes and custom plugins
     vimPlugins = prev.vimPlugins.extend (
       _: vprev: {

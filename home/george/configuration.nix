@@ -300,5 +300,9 @@
       enable = true;
       package = pkgs.vscode-insiders;
     };
+    zed-editor = {
+      enable = true;
+      package = pkgs.zed-editor;
+    };
   };
 }

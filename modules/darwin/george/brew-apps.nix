@@ -25,7 +25,6 @@
       "signal@beta"
       "wave"
       "yaak@beta"
-      "zed@preview"
       "zen@twilight"
     ];
     masApps = {
