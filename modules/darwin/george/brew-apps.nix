@@ -25,8 +25,8 @@
       "signal@beta"
       "wave"
       "yaak@beta"
-      "zed@preview"
       "zen@twilight"
+      "zed@preview"
     ];
     masApps = {
       "AdGuard for Safari" = 1440147259;

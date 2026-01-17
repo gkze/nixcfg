@@ -1,4 +1,11 @@
 {
+  "conductor": {
+    "hashes": {
+      "aarch64-darwin": "sha256-Uq+8jSzcYDqBv+rSqPIvicr1zfBoGLKmPPTOtHmFGek=",
+      "x86_64-darwin": "sha256-61+MRXXsHdRB4j/EgFPPd3xgeDHU9pLMk0RxKKVoPrg="
+    },
+    "version": "0.31.1"
+  },
   "chatgpt": {
     "hashes": {
       "aarch64-darwin": "sha256-xs4AZSbj9wuxkGhw2JyFvaPt6W9ZkL+ab0FmjYvTR8Y=",

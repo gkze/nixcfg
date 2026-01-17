@@ -83,161 +83,6 @@ in
         package = pySet.beads-mcp;
       };
 
-    homebrew-zsh-completion = prev.stdenvNoCC.mkDerivation {
-      name = "brew-zsh-compmletion";
-      src = builtins.fetchurl {
-        url = outputs.lib.ghRaw {
-          owner = "Homebrew";
-          repo = "brew";
-          rev = "f7d42ae69317274b615369dddeb1c6694250c759";
-          path = "completions/zsh/_brew";
-        };
-        sha256 = "sha256:1mazf005nkidbq74rnzskal02dxryvfl7v3gyyjz1i6g0gv0pmxr";
-      };
-      dontUnpack = true;
-      installPhase = ''
-        mkdir $out/
-        cp -r $src $out/_brew
-        chmod +x $out/_brew
-      '';
-    };
-
-    mountpoint-s3 = prev.mountpoint-s3.overrideAttrs (old: {
-      buildInputs =
-        prev.lib.optionals prev.stdenv.hostPlatform.isDarwin [ prev.macfuse-stubs ]
-        ++ prev.lib.optionals prev.stdenv.hostPlatform.isLinux [ prev.fuse3 ];
-      meta = old.meta // {
-        platforms = prev.lib.platforms.unix;
-      };
-    });
-
-    nix-manipulator =
-      with inputs;
-      let
-        version = outputs.lib.flakeLock.nix-manipulator.original.ref;
-        uv = prev.lib.getExe prev.uv;
-        python = prev.lib.getExe prev.python313;
-        workspace = uv2nix.lib.workspace.loadWorkspace {
-          workspaceRoot = prev.stdenv.mkDerivation {
-            name = "nix-manipulator-locked";
-            src = nix-manipulator;
-            buildPhase = ''
-              export SETUPTOOLS_SCM_PRETEND_VERSION=${version}
-              UV_PYTHON=${python} ${uv} -n lock
-            '';
-            installPhase = "cp -r . $out";
-          };
-        };
-        pySet =
-          (prev.callPackage pyproject-nix.build.packages {
-            python = prev.python313;
-          }).overrideScope
-            (
-              prev.lib.composeManyExtensions [
-                pyproject-build-systems.overlays.default
-                (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
-              ]
-            );
-      in
-      (prev.callPackages pyproject-nix.build.util { }).mkApplication {
-        venv = pySet.mkVirtualEnv "nix-manipulator" workspace.deps.all // {
-          meta.mainProgram = "nima";
-        };
-        package = pySet.nix-manipulator;
-      };
-
-    opencode =
-      let
-        pkg = inputs.opencode.packages.${prev.system}.default;
-      in
-      prev.symlinkJoin {
-        name = "opencode-with-completions";
-        paths = [ pkg ];
-        postBuild = ''
-          mkdir -p $out/share/zsh/site-functions
-          HOME=$(mktemp -d) SHELL=${prev.lib.getExe prev.zsh} \
-            ${prev.lib.getExe pkg} \
-            completion > $out/share/zsh/site-functions/_opencode
-        '';
-      };
-
-    sublime-kdl =
-      let
-        flakeRef = outputs.lib.flakeLock.sublime-kdl;
-      in
-      prev.stdenvNoCC.mkDerivation {
-        pname = normalizeName flakeRef.original.repo;
-        version = flakeRef.original.ref;
-        src = inputs.sublime-kdl;
-        installPhase = "cp -r $src $out";
-      };
-
-    stars =
-      let
-        flakeRef = outputs.lib.flakeLock.stars;
-      in
-      prev.buildGoModule {
-        pname = normalizeName flakeRef.original.repo;
-        version = flakeRef.original.ref;
-        src = inputs.stars;
-        doCheck = false;
-        vendorHash = "sha256-wWX0P/xysioCCUS3M2ZIKd8i34Li/ANbgcql3oSE6yc=";
-      };
-
-    toad =
-      with inputs;
-      let
-        uv = prev.lib.getExe prev.uv;
-        python = prev.lib.getExe prev.python314;
-        workspace = uv2nix.lib.workspace.loadWorkspace {
-          workspaceRoot = prev.stdenv.mkDerivation {
-            name = "toad-relocked";
-            src = toad;
-            buildPhase = ''
-              UV_PYTHON=${python} ${uv} -n lock
-            '';
-            installPhase = "cp -r . $out";
-          };
-        };
-
-        pySet =
-          (prev.callPackage pyproject-nix.build.packages {
-            python = prev.python314;
-          }).overrideScope
-            (
-              prev.lib.composeManyExtensions [
-                pyproject-build-systems.overlays.default
-                (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
-                (f: p: {
-                  watchdog = p.watchdog.overrideAttrs (old: {
-                    buildInputs = (old.buildInputs or [ ]) ++ [ f.setuptools ];
-                    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ f.setuptools ];
-                  });
-                })
-              ]
-            );
-      in
-      (prev.callPackages pyproject-nix.build.util { }).mkApplication {
-        venv = pySet.mkVirtualEnv "batrachian-toad" workspace.deps.all // {
-          meta.mainProgram = "toad";
-        };
-        package = pySet.batrachian-toad;
-      };
-
-    codex =
-      let
-        version = builtins.replaceStrings [ "rust-v" ] [ "" ] outputs.lib.flakeLock.codex.original.ref;
-      in
-      prev.codex.overrideAttrs {
-        inherit version;
-        src = inputs.codex;
-        sourceRoot = "source/codex-rs";
-        cargoDeps = prev.rustPlatform.fetchCargoVendor {
-          src = "${inputs.codex}/codex-rs";
-          hash = "sha256-Ryr5mFc+StT1d+jBtRsrOzMtyEJf7W1HbMbnC84ps4s=";
-        };
-      };
-
     chatgpt =
       let
         info = (builtins.fromJSON (builtins.readFile ./sources.json)).chatgpt;
@@ -270,22 +115,73 @@ in
         };
       };
 
-    google-chrome =
+    codex =
       let
-        info = (builtins.fromJSON (builtins.readFile ./sources.json)).google-chrome;
-        urls = {
-          aarch64-darwin = "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg";
-          x86_64-darwin = "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg";
-          x86_64-linux = "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb";
-        };
-        inherit (prev.stdenv.hostPlatform) system;
+        version = builtins.replaceStrings [ "rust-v" ] [ "" ] outputs.lib.flakeLock.codex.original.ref;
       in
-      prev.google-chrome.overrideAttrs {
+      prev.codex.overrideAttrs {
+        inherit version;
+        src = inputs.codex;
+        sourceRoot = "source/codex-rs";
+        cargoDeps = prev.rustPlatform.fetchCargoVendor {
+          src = "${inputs.codex}/codex-rs";
+          hash = "sha256-Ryr5mFc+StT1d+jBtRsrOzMtyEJf7W1HbMbnC84ps4s=";
+        };
+      };
+
+    conductor =
+      let
+        info = (builtins.fromJSON (builtins.readFile ./sources.json)).conductor;
+        inherit (prev.stdenv.hostPlatform) system;
+        arch = if system == "aarch64-darwin" then "aarch64" else "x86_64";
+        urls = {
+          aarch64-darwin = "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-aarch64";
+          x86_64-darwin = "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-x86_64";
+        };
+      in
+      prev.stdenvNoCC.mkDerivation {
+        pname = "conductor";
         inherit (info) version;
+
         src = prev.fetchurl {
+          name = "Conductor_${info.version}_${arch}.dmg";
           url = urls.${system};
           hash = info.hashes.${system};
         };
+
+        nativeBuildInputs = [ prev.undmg ];
+
+        sourceRoot = ".";
+
+        installPhase = ''
+          runHook preInstall
+
+          mkdir -p "$out/Applications"
+          mkdir -p "$out/bin"
+          cp -a Conductor.app "$out/Applications"
+          ln -s "$out/Applications/Conductor.app/Contents/MacOS/Conductor" "$out/bin/conductor"
+
+          runHook postInstall
+        '';
+
+        meta = with prev.lib; {
+          description = "Run a team of coding agents on your Mac";
+          homepage = "https://www.conductor.build/";
+          license = licenses.unfree;
+          platforms = platforms.darwin;
+          sourceProvenance = with sourceTypes; [ binaryNativeCode ];
+          mainProgram = "conductor";
+        };
+      };
+
+    crush =
+      let
+        version = builtins.replaceStrings [ "v" ] [ "" ] outputs.lib.flakeLock.crush.original.ref;
+      in
+      prev.crush.overrideAttrs {
+        inherit version;
+        src = inputs.crush;
+        vendorHash = "sha256-sV5Whc6K9D7TX3V0ZxaIx0IM7qOinh4IZq0N+rHnUbw=";
       };
 
     gemini-cli =
@@ -293,12 +189,11 @@ in
         version = builtins.replaceStrings [ "v" ] [ "" ] outputs.lib.flakeLock.gemini-cli.original.ref;
         npmDepsHash = "sha256-1hHPXYgeinK7SxF9yvQBCHYO7H1htnED3ot7wFzHDn0=";
       in
-      prev.gemini-cli.overrideAttrs {
-        inherit version;
+      prev.gemini-cli.overrideAttrs rec {
+        inherit version npmDepsHash;
         src = inputs.gemini-cli;
-        inherit npmDepsHash;
         npmDeps = prev.fetchNpmDeps {
-          src = inputs.gemini-cli;
+          inherit src;
           hash = npmDepsHash;
         };
       };
@@ -361,19 +256,42 @@ in
         doCheck = false;
       });
 
-    sentry-cli =
+    google-chrome =
       let
-        version = outputs.lib.flakeLock.sentry-cli.original.ref;
-      in
-      prev.sentry-cli.overrideAttrs (old: {
-        inherit version;
-        src = inputs.sentry-cli;
-        cargoDeps = prev.rustPlatform.fetchCargoVendor {
-          src = inputs.sentry-cli;
-          hash = "sha256-PUQ55pNiLEI5qxykA/j7RsykKJRTUGOGf2JBLacFGBo=";
+        info = (builtins.fromJSON (builtins.readFile ./sources.json)).google-chrome;
+        urls = {
+          aarch64-darwin = "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg";
+          x86_64-darwin = "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg";
+          x86_64-linux = "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb";
         };
-        buildInputs = old.buildInputs or [ ] ++ [ prev.curl ];
-      });
+        inherit (prev.stdenv.hostPlatform) system;
+      in
+      prev.google-chrome.overrideAttrs {
+        inherit (info) version;
+        src = prev.fetchurl {
+          url = urls.${system};
+          hash = info.hashes.${system};
+        };
+      };
+
+    homebrew-zsh-completion = prev.stdenvNoCC.mkDerivation {
+      name = "brew-zsh-compmletion";
+      src = builtins.fetchurl {
+        url = outputs.lib.ghRaw {
+          owner = "Homebrew";
+          repo = "brew";
+          rev = "f7d42ae69317274b615369dddeb1c6694250c759";
+          path = "completions/zsh/_brew";
+        };
+        sha256 = "sha256:1mazf005nkidbq74rnzskal02dxryvfl7v3gyyjz1i6g0gv0pmxr";
+      };
+      dontUnpack = true;
+      installPhase = ''
+        mkdir $out/
+        cp -r $src $out/_brew
+        chmod +x $out/_brew
+      '';
+    };
 
     jetbrains = prev.jetbrains // {
       datagrip =
@@ -396,28 +314,140 @@ in
         };
     };
 
-    vscode-insiders =
+    mountpoint-s3 = prev.mountpoint-s3.overrideAttrs (old: {
+      buildInputs =
+        prev.lib.optionals prev.stdenv.hostPlatform.isDarwin [ prev.macfuse-stubs ]
+        ++ prev.lib.optionals prev.stdenv.hostPlatform.isLinux [ prev.fuse3 ];
+      meta = old.meta // {
+        platforms = prev.lib.platforms.unix;
+      };
+    });
+
+    nix-manipulator =
+      with inputs;
       let
-        info = (builtins.fromJSON (builtins.readFile ./sources.json)).vscode-insiders;
-        inherit (info) version;
-        hash = info.hashes.${prev.stdenv.hostPlatform.system};
-        plat =
-          {
-            aarch64-darwin = "darwin-arm64";
-            aarch64-linux = "linux-arm64";
-            x86_64-darwin = "darwin";
-            x86_64-linux = "linux-x64";
-          }
-          .${prev.stdenv.hostPlatform.system};
-        archive_fmt = if prev.stdenv.hostPlatform.isDarwin then "zip" else "tar.gz";
-      in
-      (prev.vscode.override { isInsiders = true; }).overrideAttrs {
-        inherit version;
-        src = prev.fetchurl {
-          name = "VSCode-insiders-${version}-${plat}.${archive_fmt}";
-          url = "https://update.code.visualstudio.com/${version}/${plat}/insider";
-          inherit hash;
+        version = outputs.lib.flakeLock.nix-manipulator.original.ref;
+        uv = prev.lib.getExe prev.uv;
+        python = prev.lib.getExe prev.python313;
+        workspace = uv2nix.lib.workspace.loadWorkspace {
+          workspaceRoot = prev.stdenv.mkDerivation {
+            name = "nix-manipulator-locked";
+            src = nix-manipulator;
+            buildPhase = ''
+              export SETUPTOOLS_SCM_PRETEND_VERSION=${version}
+              UV_PYTHON=${python} ${uv} -n lock
+            '';
+            installPhase = "cp -r . $out";
+          };
         };
+        pySet =
+          (prev.callPackage pyproject-nix.build.packages {
+            python = prev.python313;
+          }).overrideScope
+            (
+              prev.lib.composeManyExtensions [
+                pyproject-build-systems.overlays.default
+                (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+              ]
+            );
+      in
+      (prev.callPackages pyproject-nix.build.util { }).mkApplication {
+        venv = pySet.mkVirtualEnv "nix-manipulator" workspace.deps.all // {
+          meta.mainProgram = "nima";
+        };
+        package = pySet.nix-manipulator;
+      };
+
+    opencode =
+      let
+        pkg = inputs.opencode.packages.${prev.system}.default;
+      in
+      prev.symlinkJoin {
+        name = "opencode-with-completions";
+        paths = [ pkg ];
+        postBuild = ''
+          mkdir -p $out/share/zsh/site-functions
+          HOME=$(mktemp -d) SHELL=${prev.lib.getExe prev.zsh} \
+            ${prev.lib.getExe pkg} \
+            completion > $out/share/zsh/site-functions/_opencode
+        '';
+      };
+
+    sentry-cli =
+      let
+        version = outputs.lib.flakeLock.sentry-cli.original.ref;
+      in
+      prev.sentry-cli.overrideAttrs (old: {
+        inherit version;
+        src = inputs.sentry-cli;
+        cargoDeps = prev.rustPlatform.fetchCargoVendor {
+          src = inputs.sentry-cli;
+          hash = "sha256-PUQ55pNiLEI5qxykA/j7RsykKJRTUGOGf2JBLacFGBo=";
+        };
+        buildInputs = old.buildInputs or [ ] ++ [ prev.curl ];
+      });
+
+    stars =
+      let
+        flakeRef = outputs.lib.flakeLock.stars;
+      in
+      prev.buildGoModule {
+        pname = normalizeName flakeRef.original.repo;
+        version = flakeRef.original.ref;
+        src = inputs.stars;
+        doCheck = false;
+        vendorHash = "sha256-wWX0P/xysioCCUS3M2ZIKd8i34Li/ANbgcql3oSE6yc=";
+      };
+
+    sublime-kdl =
+      let
+        flakeRef = outputs.lib.flakeLock.sublime-kdl;
+      in
+      prev.stdenvNoCC.mkDerivation {
+        pname = normalizeName flakeRef.original.repo;
+        version = flakeRef.original.ref;
+        src = inputs.sublime-kdl;
+        installPhase = "cp -r $src $out";
+      };
+
+    toad =
+      with inputs;
+      let
+        uv = prev.lib.getExe prev.uv;
+        python = prev.lib.getExe prev.python314;
+        workspace = uv2nix.lib.workspace.loadWorkspace {
+          workspaceRoot = prev.stdenv.mkDerivation {
+            name = "toad-relocked";
+            src = toad;
+            buildPhase = ''
+              UV_PYTHON=${python} ${uv} -n lock
+            '';
+            installPhase = "cp -r . $out";
+          };
+        };
+
+        pySet =
+          (prev.callPackage pyproject-nix.build.packages {
+            python = prev.python314;
+          }).overrideScope
+            (
+              prev.lib.composeManyExtensions [
+                pyproject-build-systems.overlays.default
+                (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+                (f: p: {
+                  watchdog = p.watchdog.overrideAttrs (old: {
+                    buildInputs = (old.buildInputs or [ ]) ++ [ f.setuptools ];
+                    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ f.setuptools ];
+                  });
+                })
+              ]
+            );
+      in
+      (prev.callPackages pyproject-nix.build.util { }).mkApplication {
+        venv = pySet.mkVirtualEnv "batrachian-toad" workspace.deps.all // {
+          meta.mainProgram = "toad";
+        };
+        package = pySet.batrachian-toad;
       };
 
     # Extend vimPlugins with fixes and custom plugins
@@ -465,5 +495,68 @@ in
         };
       }
     );
+
+    vscode-insiders =
+      let
+        info = (builtins.fromJSON (builtins.readFile ./sources.json)).vscode-insiders;
+        inherit (info) version;
+        hash = info.hashes.${prev.stdenv.hostPlatform.system};
+        plat =
+          {
+            aarch64-darwin = "darwin-arm64";
+            aarch64-linux = "linux-arm64";
+            x86_64-darwin = "darwin";
+            x86_64-linux = "linux-x64";
+          }
+          .${prev.stdenv.hostPlatform.system};
+        archive_fmt = if prev.stdenv.hostPlatform.isDarwin then "zip" else "tar.gz";
+      in
+      (prev.vscode.override { isInsiders = true; }).overrideAttrs {
+        inherit version;
+        src = prev.fetchurl {
+          name = "VSCode-insiders-${version}-${plat}.${archive_fmt}";
+          url = "https://update.code.visualstudio.com/${version}/${plat}/insider";
+          inherit hash;
+        };
+      };
+
+    # zed-editor =
+    #   let
+    #     version = "0.219.4";
+    #   in
+    #   prev.zed-editor.overrideAttrs {
+    #     inherit version;
+    #     src = inputs.zed-editor;
+    #     cargoDeps = prev.rustPlatform.fetchCargoVendor {
+    #       src = inputs.zed-editor;
+    #       hash = "sha256-adHfP57EpqCOo8HSpuG1JTV6qNljz282PYgR32cCuxE=";
+    #       # Remove package with broken Cargo.toml
+    #       # see: https://github.com/NixOS/nixpkgs/pull/445924#issuecomment-3334648753
+    #       postBuild = ''
+    #         rm -r $out/git/*/candle-book/
+    #       '';
+    #     };
+    #   };
+
+    # zed-editor-preview =
+    #   let
+    #     version = "0.220.1-pre";
+    #   in
+    #   prev.zed-editor.overrideAttrs (old: rec {
+    #     pname = "zed-preview";
+    #     inherit version;
+    #     src = inputs.zed-editor-preview;
+    #     cargoDeps = prev.rustPlatform.fetchCargoVendor {
+    #       inherit src;
+    #       hash = "sha256-7OAzoGBsZQvZq+g9mvYdTDtpoxpm4J0SA1m0CL75jag=";
+    #       postBuild = ''
+    #         rm -r $out/git/*/candle-book/
+    #       '';
+    #     };
+    #     # Use preview bundle metadata (icon, identifier) and app name
+    #     installPhase =
+    #       builtins.replaceStrings [ "bundle-stable" "Zed.app" ] [ "bundle-preview" "Zed Preview.app" ]
+    #         old.installPhase;
+    #   });
   };
 }

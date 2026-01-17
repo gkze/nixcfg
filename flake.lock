@@ -205,6 +205,23 @@
         "type": "github"
       }
     },
+    "crush": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1768599606,
+        "narHash": "sha256-wLa+4FY2p4NcRyATW3b69ANHuN/Td1qIenRg9W0h4a0=",
+        "owner": "charmbracelet",
+        "repo": "crush",
+        "rev": "307b3a645a03c5a178a0ad0775f3421afe505f93",
+        "type": "github"
+      },
+      "original": {
+        "owner": "charmbracelet",
+        "ref": "v0.33.2",
+        "repo": "crush",
+        "type": "github"
+      }
+    },
     "devshell": {
       "inputs": {
         "nixpkgs": [
@@ -1371,6 +1388,7 @@
         "catppuccin-bat": "catppuccin-bat",
         "catppuccin-delta": "catppuccin-delta",
         "codex": "codex",
+        "crush": "crush",
         "devshell": "devshell",
         "firefox": "firefox",
         "flakelight": "flakelight",

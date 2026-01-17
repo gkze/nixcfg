@@ -119,6 +119,10 @@
       url = "github:openai/codex/rust-v0.86.0";
       flake = false;
     };
+    crush = {
+      url = "github:charmbracelet/crush/v0.33.2";
+      flake = false;
+    };
     gemini-cli = {
       url = "github:google-gemini/gemini-cli/v0.24.0";
       flake = false;
@@ -195,6 +199,14 @@
       url = "github:sophacles/vim-bundle-mako";
       flake = false;
     };
+    # zed-editor = {
+    #   url = "github:zed-industries/zed/v0.219.4";
+    #   flake = false;
+    # };
+    # zed-editor-preview = {
+    #   url = "github:zed-industries/zed/v0.220.1-pre";
+    #   flake = false;
+    # };
     zsh-system-clipboard = {
       url = "github:kutsan/zsh-system-clipboard";
       flake = false;

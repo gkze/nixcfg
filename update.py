@@ -322,6 +322,46 @@ class ChatGPTUpdater(DownloadHashUpdater):
         )
 
 
+class ConductorUpdater(DownloadHashUpdater):
+    """Update Conductor to latest version from CrabNebula CDN."""
+
+    name = "conductor"
+
+    # nix platform -> CrabNebula platform
+    PLATFORMS = {
+        "aarch64-darwin": "dmg-aarch64",
+        "x86_64-darwin": "dmg-x86_64",
+    }
+
+    BASE_URL = "https://cdn.crabnebula.app/download/melty/conductor/latest/platform"
+
+    def fetch_latest(self) -> VersionInfo:
+        """Fetch version from Content-Disposition header of the download."""
+        import re
+
+        # Follow redirects to get the final Content-Disposition header
+        url = f"{self.BASE_URL}/dmg-aarch64"
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req) as response:
+            # Get final URL after redirects
+            final_url = response.geturl()
+
+        # Fetch headers from the final URL
+        req = urllib.request.Request(final_url, method="HEAD")
+        with urllib.request.urlopen(req) as response:
+            disposition = response.headers.get("Content-Disposition", "")
+
+        # Parse version from filename like "Conductor_0.31.1_aarch64.dmg"
+        match = re.search(r"Conductor_([0-9.]+)_", disposition)
+        if not match:
+            raise RuntimeError(f"Could not parse version from: {disposition}")
+
+        return VersionInfo(version=match.group(1), metadata={})
+
+    def get_download_url(self, platform: str, info: VersionInfo) -> str:
+        return f"{self.BASE_URL}/{self.PLATFORMS[platform]}"
+
+
 class VSCodeInsidersUpdater(ChecksumProvidedUpdater):
     """Update VS Code Insiders to latest version."""
 
