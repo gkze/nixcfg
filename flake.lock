@@ -1413,6 +1413,7 @@
         "treewalker-nvim": "treewalker-nvim",
         "uv2nix": "uv2nix_2",
         "vim-bundle-mako": "vim-bundle-mako",
+        "zed-editor": "zed-editor",
         "zsh-completions": "zsh-completions",
         "zsh-system-clipboard": "zsh-system-clipboard"
       }
@@ -1885,6 +1886,23 @@
       "original": {
         "owner": "sophacles",
         "repo": "vim-bundle-mako",
+        "type": "github"
+      }
+    },
+    "zed-editor": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1768482712,
+        "narHash": "sha256-1sJREPXPYZ2Cn40tzgmgJVZzZpEtB+c5DmwVakWwFKk=",
+        "owner": "zed-industries",
+        "repo": "zed",
+        "rev": "343bc39b5257227ddc9fb92490834350cf5ecf85",
+        "type": "github"
+      },
+      "original": {
+        "owner": "zed-industries",
+        "ref": "v0.220.1-pre",
+        "repo": "zed",
         "type": "github"
       }
     },
