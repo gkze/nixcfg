@@ -1,6 +1,7 @@
 {
   homebrew = {
     casks = [
+      "1password"
       "cleanshot"
       "freelens"
       "pants"
