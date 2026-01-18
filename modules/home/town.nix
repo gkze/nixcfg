@@ -1,6 +1,10 @@
 { pkgs, ... }:
 {
-  home.packages = with pkgs; [ google-cloud-sdk ];
+  home.packages = with pkgs; [
+    _1password-cli
+    _1password-gui
+    google-cloud-sdk
+  ];
   programs = {
     topgrade.settings.misc.disable = [
       # "bun"
