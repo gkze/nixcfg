@@ -7,7 +7,7 @@
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Slack.app"; }
       { app = "/Applications/Twilight.app"; }
       { app = "/Applications/Ghostty.app"; }
-      { app = "/Applications/Zed Preview.app"; }
+      { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Zed Nightly.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/DataGrip.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Notion.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Spotify.app"; }

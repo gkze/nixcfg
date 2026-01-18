@@ -199,14 +199,10 @@
       url = "github:sophacles/vim-bundle-mako";
       flake = false;
     };
-    # zed-editor = {
-    #   url = "github:zed-industries/zed/v0.219.4";
-    #   flake = false;
-    # };
-    # zed-editor-preview = {
-    #   url = "github:zed-industries/zed/v0.220.1-pre";
-    #   flake = false;
-    # };
+    zed = {
+      url = "github:zed-industries/zed";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     zsh-system-clipboard = {
       url = "github:kutsan/zsh-system-clipboard";
       flake = false;

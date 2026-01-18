@@ -520,43 +520,7 @@ in
         };
       };
 
-    # zed-editor =
-    #   let
-    #     version = "0.219.4";
-    #   in
-    #   prev.zed-editor.overrideAttrs {
-    #     inherit version;
-    #     src = inputs.zed-editor;
-    #     cargoDeps = prev.rustPlatform.fetchCargoVendor {
-    #       src = inputs.zed-editor;
-    #       hash = "sha256-adHfP57EpqCOo8HSpuG1JTV6qNljz282PYgR32cCuxE=";
-    #       # Remove package with broken Cargo.toml
-    #       # see: https://github.com/NixOS/nixpkgs/pull/445924#issuecomment-3334648753
-    #       postBuild = ''
-    #         rm -r $out/git/*/candle-book/
-    #       '';
-    #     };
-    #   };
-
-    # zed-editor-preview =
-    #   let
-    #     version = "0.220.1-pre";
-    #   in
-    #   prev.zed-editor.overrideAttrs (old: rec {
-    #     pname = "zed-preview";
-    #     inherit version;
-    #     src = inputs.zed-editor-preview;
-    #     cargoDeps = prev.rustPlatform.fetchCargoVendor {
-    #       inherit src;
-    #       hash = "sha256-7OAzoGBsZQvZq+g9mvYdTDtpoxpm4J0SA1m0CL75jag=";
-    #       postBuild = ''
-    #         rm -r $out/git/*/candle-book/
-    #       '';
-    #     };
-    #     # Use preview bundle metadata (icon, identifier) and app name
-    #     installPhase =
-    #       builtins.replaceStrings [ "bundle-stable" "Zed.app" ] [ "bundle-preview" "Zed Preview.app" ]
-    #         old.installPhase;
-    #   });
+    # Use upstream Zed flake for nightly builds (includes Cachix binary cache)
+    zed-editor-nightly = inputs.zed.packages.${prev.stdenv.hostPlatform.system}.default;
   };
 }

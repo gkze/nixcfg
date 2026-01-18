@@ -11,9 +11,9 @@
     zsh.plugins = with pkgs; [
       {
         name = "op";
-        src = runCommand "_op" { } ''
+        src = runCommand "_op" { buildInputs = [ _1password-cli ]; } ''
           mkdir $out
-          HOME=$(mktemp -d) /opt/homebrew/bin/op completion zsh > $out/_op
+          HOME=$(mktemp -d) op completion zsh > $out/_op
         '';
         file = "_op";
       }

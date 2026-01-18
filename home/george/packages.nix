@@ -3,15 +3,15 @@
   home.packages =
     with pkgs;
     [
-      gitbutler
       (coreutils.override { minimal = false; })
       amp-cli
-      axiom-cli
       ast-grep
+      axiom-cli
       beads
       beads-mcp
       biome
       cachix
+      cargo-update
       code-cursor
       csvlens
       curl
@@ -27,6 +27,7 @@
       gawk
       git-who
       gita
+      gitbutler
       glab
       gnused
       gnutar

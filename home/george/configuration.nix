@@ -212,7 +212,7 @@
         "*".extraOptions = {
           AddKeysToAgent = "yes";
           LogLevel = "ERROR";
-          StrictHostKeyChecking = "no";
+          StrictHostKeyChecking = "accept-new"; # Accept new keys, but alert on changes (MITM protection)
         };
       };
     };
@@ -249,6 +249,10 @@
         };
       };
     };
+    vscode = {
+      enable = true;
+      package = pkgs.vscode-insiders;
+    };
     yazi = {
       enable = true;
       enableZshIntegration = true;
@@ -268,6 +272,10 @@
         simplified_ui = true;
         scroll_buffer_size = 1000000;
       };
+    };
+    zed-editor = {
+      enable = true;
+      package = pkgs.zed-editor-nightly;
     };
     zoxide = {
       enable = true;
@@ -296,10 +304,5 @@
     ripgrep.enable = true;
     superfile.enable = true;
     uv.enable = true;
-    vscode = {
-      enable = true;
-      package = pkgs.vscode-insiders;
-    };
-    zed-editor.enable = true;
   };
 }

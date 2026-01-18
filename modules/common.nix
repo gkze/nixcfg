@@ -50,7 +50,7 @@
     hostPlatform = system;
     config = {
       allowUnfree = true;
-      allowInsecure = true;
+      # Per-package insecure overrides should be used instead of global allowInsecure
     };
   };
 
