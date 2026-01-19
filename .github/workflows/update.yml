@@ -8,13 +8,34 @@ on:
 
 jobs:
   update-and-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: argus
+            os: macos-15
+            build: .#darwinConfigurations.argus.system
+            needs_brew: true
+            update_lock: true
+          - name: rocinante
+            os: macos-15
+            build: .#darwinConfigurations.rocinante.system
+            needs_brew: true
+            update_lock: false
+          - name: linux
+            os: ubuntu-24.04
+            build: .#apps.x86_64-linux.update
+            needs_brew: false
+            update_lock: false
+
     permissions:
       contents: write
       id-token: write
       issues: write
       pull-requests: write
 
-    runs-on: macos-15
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
 
     steps:
       - uses: actions/checkout@v4
@@ -24,8 +45,9 @@ jobs:
           name: gkze
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
       - uses: DeterminateSystems/update-flake-lock@main
+        if: matrix.update_lock
         with:
           token: "${{ secrets.GITHUB_TOKEN }}"
       - run: brew install 1password-cli
-      - run: nix build .#darwinConfigurations.argus.system
-      - run: nix build .#darwinConfigurations.rocinante.system
+        if: matrix.needs_brew
+      - run: nix build ${{ matrix.build }}
