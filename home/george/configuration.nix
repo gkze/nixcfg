@@ -60,6 +60,7 @@
         ''
           pinentry-program ${prog}
         '';
+      "${config.xdg.configHome}/home-manager/home.nix".source = ../standalone-home.nix;
       ".local/bin" = {
         source = ./bin;
         recursive = true;
@@ -165,15 +166,14 @@
     };
     gitui = {
       enable = true;
-      keyConfig = pkgs.fetchurl {
-        url = slib.ghRaw {
-          owner = "extrawurst";
-          repo = "gitui";
-          rev = "27e28d5f5141be43648b93dc05a164a08dd4ef96";
-          path = "vim_style_key_config.ron";
+      keyConfig =
+        let
+          source = slib.sourceHashEntry "gitui-key-config" "sha256";
+        in
+        pkgs.fetchurl {
+          inherit (source) url;
+          inherit (source) hash;
         };
-        hash = "sha256-uYL9CSCOlTdW3E87I7GsgvDEwOPHoz1LIxo8DARDX1Y=";
-      };
     };
     gpg = {
       enable = true;

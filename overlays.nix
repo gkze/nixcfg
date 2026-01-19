@@ -14,7 +14,7 @@ in
         version = flakeRef.original.ref;
         src = inputs.axiom-cli;
         subPackages = [ "cmd/axiom" ];
-        vendorHash = "sha256-ULiXQxJl8hqWUY04cyjXWUefPoC5DoeZ2kcQEcefbWQ=";
+        vendorHash = outputs.lib.sourceHash "axiom-cli" "vendorHash";
         doCheck = false;
 
         nativeBuildInputs = [ prev.installShellFiles ];
@@ -38,7 +38,7 @@ in
       name = "beads";
       src = inputs.beads;
       subPackages = [ "cmd/bd" ];
-      vendorHash = "sha256-u5+mc5UK+AotMcVj/XJTnFGecOZyuJ5i8yrjZhFZr5k=";
+      vendorHash = outputs.lib.sourceHash "beads" "vendorHash";
       proxyVendor = true;
       doCheck = false;
 
@@ -125,7 +125,7 @@ in
         sourceRoot = "source/codex-rs";
         cargoDeps = prev.rustPlatform.fetchCargoVendor {
           src = "${inputs.codex}/codex-rs";
-          hash = "sha256-Ryr5mFc+StT1d+jBtRsrOzMtyEJf7W1HbMbnC84ps4s=";
+          hash = outputs.lib.sourceHash "codex" "cargoHash";
         };
       };
 
@@ -181,13 +181,13 @@ in
       prev.crush.overrideAttrs {
         inherit version;
         src = inputs.crush;
-        vendorHash = "sha256-sV5Whc6K9D7TX3V0ZxaIx0IM7qOinh4IZq0N+rHnUbw=";
+        vendorHash = outputs.lib.sourceHash "crush" "vendorHash";
       };
 
     gemini-cli =
       let
         version = builtins.replaceStrings [ "v" ] [ "" ] outputs.lib.flakeLock.gemini-cli.original.ref;
-        npmDepsHash = "sha256-1hHPXYgeinK7SxF9yvQBCHYO7H1htnED3ot7wFzHDn0=";
+        npmDepsHash = outputs.lib.sourceHash "gemini-cli" "npmDepsHash";
       in
       prev.gemini-cli.overrideAttrs rec {
         inherit version npmDepsHash;
@@ -274,24 +274,23 @@ in
         };
       };
 
-    homebrew-zsh-completion = prev.stdenvNoCC.mkDerivation {
-      name = "brew-zsh-compmletion";
-      src = builtins.fetchurl {
-        url = outputs.lib.ghRaw {
-          owner = "Homebrew";
-          repo = "brew";
-          rev = "f7d42ae69317274b615369dddeb1c6694250c759";
-          path = "completions/zsh/_brew";
+    homebrew-zsh-completion =
+      let
+        source = outputs.lib.sourceHashEntry "homebrew-zsh-completion" "sha256";
+      in
+      prev.stdenvNoCC.mkDerivation {
+        name = "brew-zsh-compmletion";
+        src = builtins.fetchurl {
+          inherit (source) url;
+          sha256 = source.hash;
         };
-        sha256 = "sha256:1mazf005nkidbq74rnzskal02dxryvfl7v3gyyjz1i6g0gv0pmxr";
+        dontUnpack = true;
+        installPhase = ''
+          mkdir $out/
+          cp -r $src $out/_brew
+          chmod +x $out/_brew
+        '';
       };
-      dontUnpack = true;
-      installPhase = ''
-        mkdir $out/
-        cp -r $src $out/_brew
-        chmod +x $out/_brew
-      '';
-    };
 
     jetbrains = prev.jetbrains // {
       datagrip =
@@ -382,7 +381,7 @@ in
         src = inputs.sentry-cli;
         cargoDeps = prev.rustPlatform.fetchCargoVendor {
           src = inputs.sentry-cli;
-          hash = "sha256-PUQ55pNiLEI5qxykA/j7RsykKJRTUGOGf2JBLacFGBo=";
+          hash = outputs.lib.sourceHash "sentry-cli" "cargoHash";
         };
         buildInputs = old.buildInputs or [ ] ++ [ prev.curl ];
       });

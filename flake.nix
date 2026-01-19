@@ -55,8 +55,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     opencode = {
-      url = "github:anomalyco/opencode/v1.1.21";
-      inputs.nixpkgs.follows = "nixpkgs";
+      # Note: Don't follow nixpkgs - opencode requires specific bun version
+      # that may differ from nixpkgs-unstable (e.g., bun 1.3.5 vs 1.3.6)
+      # Pinned to commit before nix overhaul (dac099a) which broke shell completions
+      url = "github:anomalyco/opencode/5009f10";
     };
     pyproject-build-systems = {
       url = "github:pyproject-nix/build-system-pkgs";

@@ -1,10 +1,23 @@
 {
-  "conductor": {
-    "hashes": {
-      "aarch64-darwin": "sha256-Uq+8jSzcYDqBv+rSqPIvicr1zfBoGLKmPPTOtHmFGek=",
-      "x86_64-darwin": "sha256-61+MRXXsHdRB4j/EgFPPd3xgeDHU9pLMk0RxKKVoPrg="
-    },
-    "version": "0.31.1"
+  "axiom-cli": {
+    "hashes": [
+      {
+        "drvType": "buildGoModule",
+        "hash": "sha256-ULiXQxJl8hqWUY04cyjXWUefPoC5DoeZ2kcQEcefbWQ=",
+        "hashType": "vendorHash"
+      }
+    ],
+    "input": "axiom-cli"
+  },
+  "beads": {
+    "hashes": [
+      {
+        "drvType": "buildGoModule",
+        "hash": "sha256-u5+mc5UK+AotMcVj/XJTnFGecOZyuJ5i8yrjZhFZr5k=",
+        "hashType": "vendorHash"
+      }
+    ],
+    "input": "beads"
   },
   "chatgpt": {
     "hashes": {
@@ -26,6 +39,33 @@
     },
     "version": "2.3.35"
   },
+  "codex": {
+    "hashes": [
+      {
+        "drvType": "fetchCargoVendor",
+        "hash": "sha256-Ryr5mFc+StT1d+jBtRsrOzMtyEJf7W1HbMbnC84ps4s=",
+        "hashType": "cargoHash"
+      }
+    ],
+    "input": "codex"
+  },
+  "conductor": {
+    "hashes": {
+      "aarch64-darwin": "sha256-rZQ4U/0aOKpGeBaykNqoIlB+McHyFqPG1MGSz4l/2YE=",
+      "x86_64-darwin": "sha256-neTzc3QduZqp1KHmGyeA9HOaxibLkzsSxE7n2wGSuO4="
+    },
+    "version": "0.31.2"
+  },
+  "crush": {
+    "hashes": [
+      {
+        "drvType": "buildGoModule",
+        "hash": "sha256-sV5Whc6K9D7TX3V0ZxaIx0IM7qOinh4IZq0N+rHnUbw=",
+        "hashType": "vendorHash"
+      }
+    ],
+    "input": "crush"
+  },
   "datagrip": {
     "hashes": {
       "aarch64-darwin": "sha256-QwPJLy4Hv0FJErVTUDirG1iDn8noMlnyk4Zmk0uqZnQ=",
@@ -35,6 +75,26 @@
     },
     "version": "2025.3.3"
   },
+  "gemini-cli": {
+    "hashes": [
+      {
+        "drvType": "fetchNpmDeps",
+        "hash": "sha256-1hHPXYgeinK7SxF9yvQBCHYO7H1htnED3ot7wFzHDn0=",
+        "hashType": "npmDepsHash"
+      }
+    ],
+    "input": "gemini-cli"
+  },
+  "gitui-key-config": {
+    "hashes": [
+      {
+        "drvType": "fetchurl",
+        "hash": "sha256-uYL9CSCOlTdW3E87I7GsgvDEwOPHoz1LIxo8DARDX1Y=",
+        "hashType": "sha256",
+        "url": "https://raw.githubusercontent.com/extrawurst/gitui/8876c1d0f616d55a0c0957683781fd32af815ae3/vim_style_key_config.ron"
+      }
+    ]
+  },
   "google-chrome": {
     "hashes": {
       "aarch64-darwin": "sha256-Kxt8MrW5ANGAID0L9B/dTA56iE1E+AFp3ym1wqKrqvE=",
@@ -42,6 +102,26 @@
       "x86_64-linux": "sha256-N2y+St4UuUWOqc9O40p+sBV4Bx8Ivloq7GGUICp6dSY="
     },
     "version": "144.0.7559.60"
+  },
+  "homebrew-zsh-completion": {
+    "hashes": [
+      {
+        "drvType": "fetchurl",
+        "hash": "sha256-udcL9gPPxPCl92/sQ932uTcBqJr620wOXi1OWwBwX9U=",
+        "hashType": "sha256",
+        "url": "https://raw.githubusercontent.com/Homebrew/brew/d2ef5bedf260fc1cf47967b8ba9e50b4700ff5e7/completions/zsh/_brew"
+      }
+    ]
+  },
+  "sentry-cli": {
+    "hashes": [
+      {
+        "drvType": "fetchCargoVendor",
+        "hash": "sha256-PUQ55pNiLEI5qxykA/j7RsykKJRTUGOGf2JBLacFGBo=",
+        "hashType": "cargoHash"
+      }
+    ],
+    "input": "sentry-cli"
   },
   "vscode-insiders": {
     "hashes": {

@@ -10,13 +10,14 @@ let
   inherit (builtins)
     elemAt
     fromJSON
+    hasAttr
     length
     listToAttrs
     pathExists
     readFile
     split
     ;
-  inherit (lib.lists) optionals;
+  inherit (lib.lists) findFirst optionals;
   inherit (lib.attrsets) optionalAttrs;
 
   maybePath = p: if pathExists p then p else null;
@@ -26,6 +27,27 @@ in
 rec {
   inherit modulesPath;
   flakeLock = (fromJSON (readFile ./flake.lock)).nodes;
+  sources = fromJSON (readFile ./sources.json);
+
+  sourceEntry =
+    name: if hasAttr name sources then sources.${name} else throw "sources.json missing entry: ${name}";
+
+  sourceHashEntry =
+    name: hashType:
+    let
+      entry = sourceEntry name;
+      hashes = entry.hashes or [ ];
+      match = findFirst (hash: hash.hashType == hashType) null hashes;
+    in
+    if match == null then throw "sources.json missing ${hashType} for ${name}" else match;
+
+  sourceHash = name: hashType: (sourceHashEntry name hashType).hash;
+  sourceUrl =
+    name: hashType:
+    let
+      entry = sourceHashEntry name hashType;
+    in
+    entry.url or (throw "sources.json missing url for ${name}:${hashType}");
 
   # Convert a Nix value to JSONC format with trailing commas
   toJSONC =
