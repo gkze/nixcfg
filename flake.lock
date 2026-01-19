@@ -909,11 +909,11 @@
     "homebrew-cask": {
       "flake": false,
       "locked": {
-        "lastModified": 1768840232,
-        "narHash": "sha256-0Vdub4NawTl8Iy5AJvEotdQtr3D9td3k8Lbvfgsm+EU=",
+        "lastModified": 1768843231,
+        "narHash": "sha256-tu2r5wXkMmBDoh/Yk7glgXoxg61d3wVqvpSImaa8a5A=",
         "owner": "homebrew",
         "repo": "homebrew-cask",
-        "rev": "092f6426fb2c736710798909a91813a90eb1c4d7",
+        "rev": "9f585eece1820f43b8e3464cdfdd3b1574af4aaf",
         "type": "github"
       },
       "original": {
@@ -925,11 +925,11 @@
     "homebrew-core": {
       "flake": false,
       "locked": {
-        "lastModified": 1768838293,
-        "narHash": "sha256-4DCwsedokvixDL1xOTXwc7LNmP9IhGJHqcZdfBQ90Bc=",
+        "lastModified": 1768846910,
+        "narHash": "sha256-ka6ACk6a1nSigNo8DZVvOz/FPjoCxQcYjoN6ylIz0gI=",
         "owner": "homebrew",
         "repo": "homebrew-core",
-        "rev": "81f89364d554c32f0dfd7b889b49e4c07c3c6eb9",
+        "rev": "dcab4136d34d0e7f742814188142299da4333db4",
         "type": "github"
       },
       "original": {
@@ -2167,11 +2167,11 @@
         "rust-overlay": "rust-overlay_3"
       },
       "locked": {
-        "lastModified": 1768837060,
-        "narHash": "sha256-PXpuRjiiBjTrEp/FBZJz7zUSQLguC4jMAVmAbZogsqM=",
+        "lastModified": 1768842313,
+        "narHash": "sha256-Gab2J2uMK8OgcA6T6DovvDzcrq1PQzjBCQ6mfiGAxSU=",
         "owner": "zed-industries",
         "repo": "zed",
-        "rev": "384c8e647829eb7e95fcbc9ade22e8061649dbb1",
+        "rev": "67183203732fffe70769b71980029c7e278c5943",
         "type": "github"
       },
       "original": {
