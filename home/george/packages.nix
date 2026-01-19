@@ -63,7 +63,6 @@
       sequoia-sqv
       sequoia-wot
       slack
-      slack-cli
       spacedrive
       spotify
       toad
