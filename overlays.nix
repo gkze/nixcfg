@@ -387,18 +387,6 @@ in
         buildInputs = old.buildInputs or [ ] ++ [ prev.curl ];
       });
 
-    stars =
-      let
-        flakeRef = outputs.lib.flakeLock.stars;
-      in
-      prev.buildGoModule {
-        pname = normalizeName flakeRef.original.repo;
-        version = flakeRef.original.ref;
-        src = inputs.stars;
-        doCheck = false;
-        vendorHash = "sha256-wWX0P/xysioCCUS3M2ZIKd8i34Li/ANbgcql3oSE6yc=";
-      };
-
     sublime-kdl =
       let
         flakeRef = outputs.lib.flakeLock.sublime-kdl;

@@ -14,6 +14,7 @@
       cargo-update
       code-cursor
       csvlens
+      curator
       curl
       curlie
       czkawka
@@ -65,7 +66,6 @@
       slack-cli
       spacedrive
       spotify
-      stars
       toad
       tokei
       trdsql

@@ -15,7 +15,7 @@ mkSystem {
   system = "aarch64-darwin";
   hostname = removeSuffix ".nix" (baseNameOf ./.);
   users = [ user ];
-  homeModules = [ "${modulesPath}/home/macbook-pro-16in.nix" ];
+  homeModules = [ ];
   systemModules = [
     "${modulesPath}/darwin/display-management.nix"
     nix-homebrew.darwinModules.nix-homebrew

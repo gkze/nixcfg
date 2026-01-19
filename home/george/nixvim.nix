@@ -688,6 +688,7 @@ in
           # nvim-treesitter-textsubjects # disabled: incompatible with newer nvim-treesitter API
           nvim-treesitter.queries.ecma # Required for JS/TS keyword highlighting (inherited queries)
           nvim-treesitter.queries.jsx # Required for JSX/TSX highlighting (inherited queries)
+          opencode-nvim
           treewalker-nvim
           vim-bazel
           # vim-bundle-mako
@@ -708,6 +709,10 @@ in
         concatStringsSep "\n" (
           (mapAttrsToList (n: v: ''require("${n}").setup(${helpers.toLuaObject v})'') extraPluginsConfig)
           ++ [
+            ''
+              vim.g.opencode_opts = vim.g.opencode_opts or {}
+              vim.o.autoread = true
+            ''
             ''
               if vim.g.neovide then
                 -- vim.g.neovide_scale_factor = 0.7
@@ -930,6 +935,21 @@ in
           action = ":CodeCompanionChat Add<CR>";
           mode = "v";
           options.desc = "Add selection to chat";
+        }
+        {
+          key = "<leader>ua";
+          action.__raw = ''function() require("opencode").ask("@this: ", { submit = true }) end'';
+          options.desc = "Opencode ask";
+        }
+        {
+          key = "<leader>us";
+          action.__raw = ''function() require("opencode").select() end'';
+          options.desc = "Opencode select";
+        }
+        {
+          key = "<leader>ut";
+          action.__raw = ''function() require("opencode").toggle() end'';
+          options.desc = "Opencode toggle";
         }
       ];
     };

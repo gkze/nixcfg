@@ -119,6 +119,10 @@
       url = "github:openai/codex/rust-v0.86.0";
       flake = false;
     };
+    curator = {
+      url = "github:gkze/curator/v0.1.6";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     crush = {
       url = "github:charmbracelet/crush/v0.33.2";
       flake = false;
@@ -175,10 +179,6 @@
       url = "github:eugenesvk/sublime-kdl/2.0.6";
       flake = false;
     };
-    stars = {
-      url = "github:gkze/gh-stars/v0.19.24";
-      flake = false;
-    };
     tclint = {
       url = "github:nmoroze/tclint";
       flake = false;
@@ -211,6 +211,10 @@
       url = "github:zsh-users/zsh-completions";
       flake = false;
     };
+    # ghostty-shaders = {
+    #   url = "github:0xhckr/ghostty-shaders";
+    #   flake = false;
+    # };
   };
 
   outputs =
@@ -230,6 +234,8 @@
 
         nixDir = ./.;
 
+        nixDirAliases.homeConfigurations = [ "home" ];
+
         systems = lib.mkForce [
           "aarch64-darwin"
           "x86_64-linux"
@@ -239,8 +245,11 @@
 
         imports = [ flakelight-darwin.flakelightModules.default ];
 
+        homeConfigurations.george = import ./home/george { outputs = self; };
+
         withOverlays = [
           devshell.overlays.default
+          inputs.curator.overlays.default
           inputs.neovim-nightly-overlay.overlays.default
           inputs.red.overlays.default
           self.overlays.default
