@@ -20,7 +20,6 @@
       "macai"
       "macfuse"
       "nordvpn"
-      "opencode-desktop"
       "rio"
       "signal@beta"
       "wave"

@@ -1339,22 +1339,6 @@
         "type": "github"
       }
     },
-    "nixpkgs_5": {
-      "locked": {
-        "lastModified": 1768783163,
-        "narHash": "sha256-tLj4KcRDLakrlpvboTJDKsrp6z2XLwyQ4Zmo+w8KsY4=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "bde09022887110deb780067364a0818e89258968",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "ref": "nixpkgs-unstable",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
     "nixvim": {
       "inputs": {
         "flake-parts": "flake-parts_3",
@@ -1404,19 +1388,20 @@
     },
     "opencode": {
       "inputs": {
-        "nixpkgs": "nixpkgs_5"
+        "nixpkgs": [
+          "nixpkgs"
+        ]
       },
       "locked": {
-        "lastModified": 1768859727,
-        "narHash": "sha256-3PpnLiVB+MxnWmdKolUpQ9BQf7nzzRQhoTsL8m0eIBA=",
+        "lastModified": 1768873334,
+        "narHash": "sha256-WwSYIUzAnu52UsJxeoYtP6SX4Exnkab6F7G6+ZC41ws=",
         "owner": "anomalyco",
         "repo": "opencode",
-        "rev": "1ee8a9c0b2211dad0008bc8291185a98ded8f3dd",
+        "rev": "088b537657a5826ad77e2b9ddef190e5e54e0b12",
         "type": "github"
       },
       "original": {
         "owner": "anomalyco",
-        "ref": "v1.1.26",
         "repo": "opencode",
         "type": "github"
       }
