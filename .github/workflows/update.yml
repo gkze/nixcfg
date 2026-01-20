@@ -7,36 +7,26 @@ on:
   workflow_dispatch:
 
 jobs:
-  update-and-build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: argus
-            os: macos-15
-            command: nix build .#darwinConfigurations.argus.system
-            needs_brew: true
-            update_lock: true
-          - name: rocinante
-            os: macos-15
-            command: nix build .#darwinConfigurations.rocinante.system
-            needs_brew: true
-            update_lock: false
-          - name: linux
-            os: ubuntu-24.04
-            command: nix run .#update -- --list
-            needs_brew: false
-            update_lock: false
-
+  update-lock:
+    runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
       id-token: write
-      issues: write
-      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - run: nix flake update
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flake-lock
+          path: flake.lock
 
-    runs-on: ${{ matrix.os }}
-    name: ${{ matrix.name }}
-
+  argus:
+    needs: update-lock
+    runs-on: macos-15
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/determinate-nix-action@v3
@@ -44,10 +34,70 @@ jobs:
         with:
           name: gkze
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
-      - uses: DeterminateSystems/update-flake-lock@main
-        if: matrix.update_lock
+      - uses: actions/download-artifact@v4
         with:
-          token: "${{ secrets.GITHUB_TOKEN }}"
+          name: flake-lock
+          path: .
       - run: brew install 1password-cli
-        if: matrix.needs_brew
-      - run: ${{ matrix.command }}
+      - run: nix build .#darwinConfigurations.argus.system
+
+  rocinante:
+    needs: update-lock
+    runs-on: macos-15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - uses: cachix/cachix-action@v15
+        with:
+          name: gkze
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: flake-lock
+          path: .
+      - run: brew install 1password-cli
+      - run: nix build .#darwinConfigurations.rocinante.system
+
+  linux:
+    needs: update-lock
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - uses: cachix/cachix-action@v15
+        with:
+          name: gkze
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: flake-lock
+          path: .
+      - run: nix run .#update -- --list
+
+  create-pr:
+    needs: [update-lock, argus, rocinante]
+    if: ${{ needs.argus.result == 'success' && needs.rocinante.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: flake-lock
+          path: .
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: update_flake_lock_action
+          delete-branch: true
+          title: "flake.lock: Update"
+          commit-message: "flake.lock: Update"
+          body: |
+            Automated changes by the Nightly Flake Update workflow.
