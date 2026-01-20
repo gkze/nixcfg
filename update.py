@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "aiohttp",
+# ]
+# ///
 """Update source versions and hashes in sources.json.
 
 Usage:
@@ -14,20 +20,27 @@ and computing hashes from upstream release channels.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import re
-import subprocess
+import select
+import shutil
+import shlex
+import time
 import sys
-import urllib.error
+import termios
+import tty
 import urllib.parse
-import urllib.request
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, AsyncIterator, Iterable, Mapping
+
+import aiohttp
 
 
 # =============================================================================
@@ -52,55 +65,148 @@ FLAKE_LOCK_FILE = get_repo_file("flake.lock")
 
 
 DEFAULT_TIMEOUT = 30
-
-
-def _resolve_hash_workers(total: int) -> int:
-    try:
-        configured = int(os.environ.get("UPDATE_HASH_WORKERS", "4"))
-    except ValueError:
-        configured = 4
-    return max(1, min(configured, total))
+DEFAULT_LOG_TAIL_LINES = 10
+DEFAULT_RENDER_INTERVAL = 0.05
+DEFAULT_USER_AGENT = "update.py"
 
 
 def _resolve_timeout(timeout: float | None) -> float:
     return DEFAULT_TIMEOUT if timeout is None else timeout
 
 
-def _open_url(
-    url: str,
-    *,
-    user_agent: str | None = None,
-    timeout: float | None = None,
-    method: str = "GET",
-) -> Any:
-    req = urllib.request.Request(url, method=method)
-    if user_agent:
-        req.add_header("User-Agent", user_agent)
+def _resolve_log_tail_lines(lines: int | None) -> int:
+    if lines is not None:
+        return max(1, lines)
     try:
-        return urllib.request.urlopen(req, timeout=_resolve_timeout(timeout))
-    except urllib.error.HTTPError as err:
-        error_body = err.read().decode(errors="ignore").strip()
-        detail = f"HTTP {err.code} {err.reason}"
-        if error_body:
-            detail = f"{detail}\n{error_body}"
-        raise RuntimeError(f"Request to {url} failed: {detail}") from err
-    except urllib.error.URLError as err:
-        raise RuntimeError(f"Request to {url} failed: {err.reason}") from err
+        configured = int(
+            os.environ.get("UPDATE_LOG_TAIL_LINES", DEFAULT_LOG_TAIL_LINES)
+        )
+    except ValueError:
+        configured = DEFAULT_LOG_TAIL_LINES
+    return max(1, configured)
 
 
-def fetch_url(
-    url: str, *, user_agent: str | None = None, timeout: float | None = None
-) -> bytes:
-    """Fetch content from a URL with optional user agent."""
-    with _open_url(url, user_agent=user_agent, timeout=timeout) as response:
-        return response.read()
+def _read_cursor_row() -> int | None:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return None
+    fd = sys.stdin.fileno()
+    try:
+        original = termios.tcgetattr(fd)
+    except termios.error:
+        return None
+    try:
+        tty.setcbreak(fd)
+        sys.stdout.write("\x1b[6n")
+        sys.stdout.flush()
+        response = ""
+        start = time.monotonic()
+        while time.monotonic() - start < 0.05:
+            ready, _, _ = select.select([fd], [], [], 0.05)
+            if not ready:
+                continue
+            response += os.read(fd, 32).decode(errors="ignore")
+            if "R" in response:
+                break
+        match = re.search(r"\x1b\[(\d+);(\d+)R", response)
+        if match:
+            return int(match.group(1))
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, original)
+    return None
 
 
-def fetch_url_with_headers(
-    url: str, *, user_agent: str | None = None, timeout: float | None = None
-) -> tuple[bytes, Mapping[str, str]]:
-    with _open_url(url, user_agent=user_agent, timeout=timeout) as response:
-        return response.read(), response.headers
+class TerminalInfo:
+    @staticmethod
+    def size() -> os.terminal_size:
+        return shutil.get_terminal_size(fallback=(120, 20))
+
+    @classmethod
+    def width(cls) -> int:
+        return cls.size().columns
+
+    @classmethod
+    def height(cls) -> int:
+        return cls.size().lines
+
+    @classmethod
+    def panel_height(cls) -> int:
+        override = os.environ.get("UPDATE_PANEL_HEIGHT")
+        if override:
+            try:
+                return max(1, int(override))
+            except ValueError:
+                pass
+        height = cls.height()
+        row = _read_cursor_row()
+        if row is None:
+            return max(1, height - 1)
+        return max(1, height - row + 1)
+
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def _sanitize_log_line(line: str) -> str:
+    line = line.replace("\r", "")
+    line = _ANSI_ESCAPE_RE.sub("", line)
+    return line
+
+
+def _truncate_command(text: str, max_len: int = 80) -> str:
+    escaped = text.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
+    if len(escaped) <= max_len:
+        return escaped
+    suffix = " [...]"
+    trimmed = escaped[: max(0, max_len - len(suffix))].rstrip()
+    return f"{trimmed}{suffix}"
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    args: list[str]
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+class UpdateEventKind(StrEnum):
+    STATUS = "status"
+    COMMAND_START = "command_start"
+    LINE = "line"
+    COMMAND_END = "command_end"
+    VALUE = "value"
+    RESULT = "result"
+    ERROR = "error"
+
+
+@dataclass(frozen=True)
+class UpdateEvent:
+    source: str
+    kind: UpdateEventKind
+    message: str | None = None
+    stream: str | None = None
+    payload: Any | None = None
+
+
+@dataclass
+class ValueDrain:
+    value: Any | None = None
+
+
+async def drain_value_events(
+    events: AsyncIterator[UpdateEvent], drain: ValueDrain
+) -> AsyncIterator[UpdateEvent]:
+    async for event in events:
+        if event.kind == UpdateEventKind.VALUE:
+            drain.value = event.payload
+        else:
+            yield event
+
+
+def _require_value(drain: ValueDrain, error: str) -> Any:
+    if drain.value is None:
+        raise RuntimeError(error)
+    return drain.value
 
 
 def _check_github_rate_limit(headers: Mapping[str, str], url: str) -> None:
@@ -122,74 +228,205 @@ def _check_github_rate_limit(headers: Mapping[str, str], url: str) -> None:
     )
 
 
-def fetch_json(
-    url: str, *, user_agent: str | None = None, timeout: float | None = None
+async def _request(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    user_agent: str | None = None,
+    timeout: float | None = None,
+    method: str = "GET",
+) -> tuple[bytes, Mapping[str, str]]:
+    headers = {}
+    if user_agent:
+        headers["User-Agent"] = user_agent
+    timeout_config = aiohttp.ClientTimeout(total=_resolve_timeout(timeout))
+    async with session.request(
+        method, url, headers=headers, timeout=timeout_config, allow_redirects=True
+    ) as response:
+        payload = await response.read()
+        if response.status >= 400:
+            error_body = payload.decode(errors="ignore").strip()
+            detail = f"HTTP {response.status} {response.reason}"
+            if error_body:
+                detail = f"{detail}\n{error_body}"
+            raise RuntimeError(f"Request to {url} failed: {detail}")
+        return payload, response.headers
+
+
+async def fetch_url(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    user_agent: str | None = None,
+    timeout: float | None = None,
+) -> bytes:
+    payload, _headers = await _request(
+        session, url, user_agent=user_agent, timeout=timeout
+    )
+    return payload
+
+
+async def fetch_json(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    user_agent: str | None = None,
+    timeout: float | None = None,
 ) -> dict:
     """Fetch and parse JSON from a URL."""
     if url.startswith("https://api.github.com/"):
-        payload, headers = fetch_url_with_headers(
-            url, user_agent=user_agent, timeout=timeout
+        payload, headers = await _request(
+            session, url, user_agent=user_agent, timeout=timeout
         )
         _check_github_rate_limit(headers, url)
     else:
-        payload = fetch_url(url, user_agent=user_agent, timeout=timeout)
+        payload = await fetch_url(session, url, user_agent=user_agent, timeout=timeout)
     try:
         return json.loads(payload.decode())
     except json.JSONDecodeError as err:
         raise RuntimeError(f"Invalid JSON response from {url}: {err}") from err
 
 
-def _format_command_output(result: subprocess.CompletedProcess[str]) -> str:
-    chunks = []
-    if result.stdout:
-        chunks.append(f"stdout:\n{result.stdout.strip()}")
-    if result.stderr:
-        chunks.append(f"stderr:\n{result.stderr.strip()}")
-    return "\n".join(chunks) if chunks else "(no output)"
-
-
-def run_command(
+async def stream_command(
     args: list[str],
     *,
-    purpose: str,
-    check: bool = True,
-    print_output: bool = False,
-) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(args, capture_output=True, text=True)
-    if check and result.returncode != 0:
-        raise RuntimeError(
-            f"{purpose} failed (exit {result.returncode}).\n{_format_command_output(result)}"
-        )
-    if print_output:
-        if result.stdout:
-            print(result.stdout.strip())
-        if result.stderr:
-            print(result.stderr.strip(), file=sys.stderr)
-    return result
+    source: str,
+) -> AsyncIterator[UpdateEvent]:
+    command_text = _truncate_command(shlex.join(args))
+    yield UpdateEvent(
+        source=source,
+        kind=UpdateEventKind.COMMAND_START,
+        message=command_text,
+        payload=args,
+    )
+
+    process = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
+
+    async def pump(
+        stream: asyncio.StreamReader | None, label: str, store: list[str]
+    ) -> None:
+        if stream is None:
+            await queue.put((label, None))
+            return
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode(errors="replace")
+            store.append(text)
+            await queue.put((label, text))
+        await queue.put((label, None))
+
+    tasks = [
+        asyncio.create_task(pump(process.stdout, "stdout", stdout_chunks)),
+        asyncio.create_task(pump(process.stderr, "stderr", stderr_chunks)),
+    ]
+
+    done_streams = 0
+    while done_streams < len(tasks):
+        label, text = await queue.get()
+        if text is None:
+            done_streams += 1
+            continue
+        sanitized = _sanitize_log_line(text.rstrip("\n"))
+        if sanitized:
+            yield UpdateEvent(
+                source=source,
+                kind=UpdateEventKind.LINE,
+                message=sanitized,
+                stream=label,
+            )
+
+    await asyncio.gather(*tasks)
+    returncode = await process.wait()
+    result = CommandResult(
+        args=args,
+        returncode=returncode,
+        stdout="".join(stdout_chunks),
+        stderr="".join(stderr_chunks),
+    )
+    yield UpdateEvent(source=source, kind=UpdateEventKind.COMMAND_END, payload=result)
 
 
-def _nix_hash_to_sri(hash_value: str) -> str:
+async def run_command(
+    args: list[str], *, source: str, error: str
+) -> AsyncIterator[UpdateEvent]:
+    result_drain = ValueDrain()
+    async for event in stream_command(args, source=source):
+        if event.kind == UpdateEventKind.COMMAND_END:
+            result_drain.value = event.payload
+        yield event
+    result = _require_value(result_drain, error)
+    yield UpdateEvent(source=source, kind=UpdateEventKind.VALUE, payload=result)
+
+
+async def convert_nix_hash_to_sri(
+    source: str, hash_value: str
+) -> AsyncIterator[UpdateEvent]:
     """Convert any nix hash format (base32, hex) to SRI format."""
-    result = run_command(
-        ["nix", "hash", "convert", "--hash-algo", "sha256", "--to", "sri", hash_value],
-        purpose="nix hash convert",
+    result_drain = ValueDrain()
+    async for event in drain_value_events(
+        run_command(
+            [
+                "nix",
+                "hash",
+                "convert",
+                "--hash-algo",
+                "sha256",
+                "--to",
+                "sri",
+                hash_value,
+            ],
+            source=source,
+            error="nix hash convert did not return output",
+        ),
+        result_drain,
+    ):
+        yield event
+    result = _require_value(result_drain, "nix hash convert did not return output")
+    yield UpdateEvent(
+        source=source,
+        kind=UpdateEventKind.VALUE,
+        payload=result.stdout.strip(),
     )
-    return result.stdout.strip()
 
 
-def compute_sri_hash(url: str) -> str:
+async def compute_sri_hash(source: str, url: str) -> AsyncIterator[UpdateEvent]:
     """Compute SRI hash for a URL using nix-prefetch-url."""
-    result = run_command(
-        ["nix-prefetch-url", "--type", "sha256", url],
-        purpose=f"nix-prefetch-url for {url}",
-    )
+    result_drain = ValueDrain()
+    async for event in drain_value_events(
+        run_command(
+            ["nix-prefetch-url", "--type", "sha256", url],
+            source=source,
+            error="nix-prefetch-url did not return output",
+        ),
+        result_drain,
+    ):
+        yield event
+    result = _require_value(result_drain, "nix-prefetch-url did not return output")
     base32_hash = result.stdout.strip().split("\n")[-1]
-    return _nix_hash_to_sri(base32_hash)
+    async for event in convert_nix_hash_to_sri(source, base32_hash):
+        yield event
 
 
-def hex_to_sri(hex_hash: str) -> str:
-    """Convert hex sha256 hash to SRI format."""
-    return _nix_hash_to_sri(hex_hash)
+async def compute_url_hashes(
+    source: str, urls: Iterable[str]
+) -> AsyncIterator[UpdateEvent]:
+    hashes: dict[str, str] = {}
+    for url in dict.fromkeys(urls):
+        sri_drain = ValueDrain()
+        async for event in drain_value_events(compute_sri_hash(source, url), sri_drain):
+            yield event
+        sri_value = _require_value(sri_drain, "Missing hash output")
+        hashes[url] = sri_value
+    yield UpdateEvent(source=source, kind=UpdateEventKind.VALUE, payload=hashes)
 
 
 def load_flake_lock() -> dict:
@@ -247,13 +484,15 @@ def nixpkgs_expr() -> str:
     return f"import ({flake_fetch_expr(node)}) {{ system = builtins.currentSystem; }}"
 
 
-def update_flake_input(input_name: str) -> None:
+async def update_flake_input(
+    input_name: str, *, source: str
+) -> AsyncIterator[UpdateEvent]:
     """Update a flake input in flake.lock."""
-    run_command(
+    async for event in stream_command(
         ["nix", "flake", "lock", "--update-input", input_name],
-        purpose=f"nix flake lock --update-input {input_name}",
-        print_output=True,
-    )
+        source=source,
+    ):
+        yield event
 
 
 def _extract_nix_hash(output: str) -> str:
@@ -265,103 +504,136 @@ def _extract_nix_hash(output: str) -> str:
         output,
     )
     if fallback_match:
-        return _nix_hash_to_sri(fallback_match.group(1))
+        return fallback_match.group(1)
     raise RuntimeError(f"Could not find hash in nix output:\n{output.strip()}")
 
 
-def compute_fixed_output_hash(expr: str) -> str:
+async def compute_fixed_output_hash(
+    source: str, expr: str
+) -> AsyncIterator[UpdateEvent]:
     """Compute hash by running a nix expression with lib.fakeHash."""
-    result = run_command(
-        ["nix", "build", "--no-link", "--impure", "--expr", expr],
-        purpose="nix build",
-        check=False,
-    )
+    result_drain = ValueDrain()
+    async for event in drain_value_events(
+        run_command(
+            [
+                "nix",
+                "build",
+                "-L",
+                "--verbose",
+                "--no-link",
+                "--impure",
+                "--expr",
+                expr,
+            ],
+            source=source,
+            error="nix build did not return output",
+        ),
+        result_drain,
+    ):
+        yield event
+    result = _require_value(result_drain, "nix build did not return output")
     if result.returncode == 0:
         raise RuntimeError(
             "Expected nix build to fail with hash mismatch, but it succeeded"
         )
-    return _extract_nix_hash(result.stderr + result.stdout)
+    hash_value = _extract_nix_hash(result.stderr + result.stdout)
+    if hash_value.startswith("sha256-"):
+        yield UpdateEvent(source=source, kind=UpdateEventKind.VALUE, payload=hash_value)
+        return
+    async for event in convert_nix_hash_to_sri(source, hash_value):
+        yield event
 
 
-def _flake_expr_prelude() -> str:
+def _build_nix_expr(body: str) -> str:
+    """Build a nix expression with nixpkgs prelude."""
     return f"""
       let
         pkgs = {nixpkgs_expr()};
       in
+        {body}
     """
 
 
-def compute_go_vendor_hash(
+async def compute_go_vendor_hash(
+    source: str,
     input_name: str,
     *,
     pname: str,
     version: str,
     subpackages: list[str] | None = None,
     proxy_vendor: bool = False,
-) -> str:
+) -> AsyncIterator[UpdateEvent]:
     subpackages_expr = ""
     if subpackages:
         quoted = " ".join(f'"{sp}"' for sp in subpackages)
         subpackages_expr = f"subPackages = [ {quoted} ];"
     proxy_expr = "proxyVendor = true;" if proxy_vendor else ""
     src_expr = flake_fetch_expr(get_flake_input_node(input_name))
-    expr = f"""
-    {_flake_expr_prelude()}
-      pkgs.buildGoModule {{
-        pname = \"{pname}\";
-        version = \"{version}\";
+    expr = _build_nix_expr(f"""pkgs.buildGoModule {{
+        pname = "{pname}";
+        version = "{version}";
         src = {src_expr};
         {subpackages_expr}
         {proxy_expr}
         vendorHash = pkgs.lib.fakeHash;
-      }}
-    """
-    return compute_fixed_output_hash(expr)
+      }}""")
+    async for event in compute_fixed_output_hash(source, expr):
+        yield event
 
 
-def compute_cargo_vendor_hash(input_name: str, *, subdir: str | None = None) -> str:
+async def compute_cargo_vendor_hash(
+    source: str, input_name: str, *, subdir: str | None = None
+) -> AsyncIterator[UpdateEvent]:
     src_expr = flake_fetch_expr(get_flake_input_node(input_name))
     if subdir:
         src_expr = f'"${{{src_expr}}}/{subdir}"'
-    expr = f"""
-    {_flake_expr_prelude()}
-      pkgs.rustPlatform.fetchCargoVendor {{
+    expr = _build_nix_expr(f"""pkgs.rustPlatform.fetchCargoVendor {{
         src = {src_expr};
         hash = pkgs.lib.fakeHash;
-      }}
-    """
-    return compute_fixed_output_hash(expr)
+      }}""")
+    async for event in compute_fixed_output_hash(source, expr):
+        yield event
 
 
-def compute_npm_deps_hash(input_name: str) -> str:
+async def compute_npm_deps_hash(
+    source: str, input_name: str
+) -> AsyncIterator[UpdateEvent]:
     src_expr = flake_fetch_expr(get_flake_input_node(input_name))
-    expr = f"""
-    {_flake_expr_prelude()}
-      pkgs.fetchNpmDeps {{
+    expr = _build_nix_expr(f"""pkgs.fetchNpmDeps {{
         src = {src_expr};
         hash = pkgs.lib.fakeHash;
-      }}
-    """
-    return compute_fixed_output_hash(expr)
+      }}""")
+    async for event in compute_fixed_output_hash(source, expr):
+        yield event
 
 
 def github_raw_url(owner: str, repo: str, rev: str, path: str) -> str:
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{rev}/{path}"
 
 
-def fetch_github_default_branch(owner: str, repo: str) -> str:
-    data = fetch_json(
+async def fetch_github_default_branch(
+    session: aiohttp.ClientSession, owner: str, repo: str
+) -> str:
+    data = await fetch_json(
+        session,
         f"https://api.github.com/repos/{owner}/{repo}",
-        user_agent="update.py",
+        user_agent=DEFAULT_USER_AGENT,
         timeout=DEFAULT_TIMEOUT,
     )
     return data["default_branch"]
 
 
-def fetch_github_latest_commit(owner: str, repo: str, path: str, branch: str) -> str:
+async def fetch_github_latest_commit(
+    session: aiohttp.ClientSession, owner: str, repo: str, path: str, branch: str
+) -> str:
     encoded_path = urllib.parse.quote(path)
-    url = f"https://api.github.com/repos/{owner}/{repo}/commits?path={encoded_path}&sha={branch}&per_page=1"
-    data = fetch_json(url, user_agent="update.py", timeout=DEFAULT_TIMEOUT)
+    url = (
+        f"https://api.github.com/repos/{owner}/{repo}/commits"
+        f"?path={encoded_path}&sha={branch}&per_page=1"
+    )
+    data = await fetch_json(
+        session, url, user_agent=DEFAULT_USER_AGENT, timeout=DEFAULT_TIMEOUT
+    )
     if not data:
         raise RuntimeError(f"No commits found for {owner}/{repo}:{path}")
     return data[0]["sha"]
@@ -390,14 +662,6 @@ def make_hash_entry(
 
 # Registry populated automatically via __init_subclass__
 UPDATERS: dict[str, type["Updater"]] = {}
-
-
-def _print_hash(platform: str, sri: str, note: str | None = None) -> None:
-    """Print hash in consistent format."""
-    if note:
-        print(f"  {platform}: {note}")
-    else:
-        print(f"  {platform}: {sri[:32]}...")
 
 
 @dataclass(frozen=True)
@@ -437,26 +701,50 @@ SourceHashes = dict[str, str] | list[HashEntry]
 
 
 @dataclass(frozen=True)
+class HashCollection:
+    entries: list[HashEntry] | None = None
+    mapping: dict[str, str] | None = None
+
+    @classmethod
+    def from_value(cls, value: SourceHashes | "HashCollection") -> "HashCollection":
+        if isinstance(value, HashCollection):
+            return value
+        if isinstance(value, list):
+            entries = [
+                item if isinstance(item, HashEntry) else HashEntry.from_dict(item)
+                for item in value
+            ]
+            return cls(entries=entries)
+        if isinstance(value, dict):
+            return cls(mapping=dict(value))
+        raise TypeError("Source entry 'hashes' must be a list or dict")
+
+    def to_json(self) -> dict[str, Any] | list[dict[str, Any]]:
+        if self.entries is not None:
+            return [hash_entry.to_dict() for hash_entry in self.entries]
+        if self.mapping is not None:
+            return dict(self.mapping)
+        return {}
+
+
+@dataclass(frozen=True)
 class SourceEntry:
     """Normalized schema for sources.json entries."""
 
-    hashes: SourceHashes
+    hashes: HashCollection
     version: str | None = None
     input: str | None = None
     urls: dict[str, str] | None = None
     commit: str | None = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "hashes", HashCollection.from_value(self.hashes))
+
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "SourceEntry":
         if "hashes" not in data:
             raise ValueError("Source entry is missing 'hashes'")
-        hashes_value = data["hashes"]
-        if isinstance(hashes_value, list):
-            hashes = [HashEntry.from_dict(item) for item in hashes_value]
-        elif isinstance(hashes_value, dict):
-            hashes = dict(hashes_value)
-        else:
-            raise TypeError("Source entry 'hashes' must be a list or dict")
+        hashes = HashCollection.from_value(data["hashes"])
         return cls(
             hashes=hashes,
             version=data.get("version"),
@@ -466,13 +754,7 @@ class SourceEntry:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        entry: dict[str, Any] = {
-            "hashes": (
-                [hash_entry.to_dict() for hash_entry in self.hashes]
-                if isinstance(self.hashes, list)
-                else self.hashes
-            )
-        }
+        entry: dict[str, Any] = {"hashes": self.hashes.to_json()}
         if self.version is not None:
             entry["version"] = self.version
         if self.input is not None:
@@ -508,7 +790,7 @@ class SourcesFile:
         return {name: entry.to_dict() for name, entry in self.entries.items()}
 
     def save(self, path: Path) -> None:
-        path.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
+        path.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n")
 
 
 @dataclass
@@ -539,32 +821,94 @@ class Updater(ABC):
             UPDATERS[cls.name] = cls
 
     @abstractmethod
-    def fetch_latest(self) -> VersionInfo:
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch the latest version and any metadata needed for hashes."""
 
     @abstractmethod
-    def fetch_hashes(self, info: VersionInfo) -> SourceHashes:
+    def fetch_hashes(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> AsyncIterator[UpdateEvent]:
         """Fetch hashes for the source."""
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
         """Build UpdateResult from version info and hashes. Override to customize."""
-        entry = SourceEntry(version=info.version, hashes=hashes)
+        entry = SourceEntry(
+            version=info.version, hashes=HashCollection.from_value(hashes)
+        )
         return UpdateResult(entry=entry)
 
-    def update(self, current: SourceEntry | None) -> UpdateResult | None:
-        """Check for updates. Returns UpdateResult or None if up-to-date."""
-        print(f"Fetching latest {self.name} version...")
-        info = self.fetch_latest()
+    def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:
+        return current is not None and current.version == info.version
 
-        print(f"Latest version: {info.version}")
-        current_version = current.version if current else None
-        if current_version == info.version:
-            print("Already at latest version")
+    def _build_result_or_none(
+        self,
+        current: SourceEntry | None,
+        info: VersionInfo,
+        hashes: SourceHashes,
+    ) -> UpdateResult | None:
+        result = self.build_result(info, hashes)
+        if current is not None and result.entry == current:
             return None
+        return result
 
-        print("Fetching hashes for all platforms...")
-        hashes = self.fetch_hashes(info)
-        return self.build_result(info, hashes)
+    async def update_stream(
+        self, current: SourceEntry | None, session: aiohttp.ClientSession
+    ) -> AsyncIterator[UpdateEvent]:
+        """Check for updates. Yields UpdateEvent stream and final result."""
+        yield UpdateEvent(
+            source=self.name,
+            kind=UpdateEventKind.STATUS,
+            message=f"Fetching latest {self.name} version...",
+        )
+        info = await self.fetch_latest(session)
+
+        yield UpdateEvent(
+            source=self.name,
+            kind=UpdateEventKind.STATUS,
+            message=f"Latest version: {info.version}",
+        )
+        if self._is_latest(current, info):
+            yield UpdateEvent(
+                source=self.name,
+                kind=UpdateEventKind.STATUS,
+                message="Already at latest version",
+            )
+            yield UpdateEvent(
+                source=self.name,
+                kind=UpdateEventKind.RESULT,
+                payload=None,
+            )
+            return
+
+        yield UpdateEvent(
+            source=self.name,
+            kind=UpdateEventKind.STATUS,
+            message="Fetching hashes for all platforms...",
+        )
+        hashes_drain = ValueDrain()
+        async for event in drain_value_events(
+            self.fetch_hashes(info, session), hashes_drain
+        ):
+            yield event
+        hashes = _require_value(hashes_drain, "Missing hash output")
+        result = self._build_result_or_none(current, info, hashes)
+        if result is None:
+            yield UpdateEvent(
+                source=self.name,
+                kind=UpdateEventKind.STATUS,
+                message="No updates needed.",
+            )
+            yield UpdateEvent(
+                source=self.name,
+                kind=UpdateEventKind.RESULT,
+                payload=None,
+            )
+            return
+        yield UpdateEvent(
+            source=self.name,
+            kind=UpdateEventKind.RESULT,
+            payload=result,
+        )
 
 
 # =============================================================================
@@ -578,17 +922,30 @@ class ChecksumProvidedUpdater(Updater):
     PLATFORMS: dict[str, str]  # nix_platform -> api_key
 
     @abstractmethod
-    def fetch_checksums(self, info: VersionInfo) -> dict[str, str]:
+    async def fetch_checksums(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> dict[str, str]:
         """Return {nix_platform: hex_hash} from API metadata."""
 
-    def fetch_hashes(self, info: VersionInfo) -> dict[str, str]:
+    async def fetch_hashes(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> AsyncIterator[UpdateEvent]:
         """Convert API checksums to SRI format."""
-        hashes = {}
-        for platform, hex_hash in self.fetch_checksums(info).items():
-            sri = hex_to_sri(hex_hash)
-            hashes[platform] = sri
-            _print_hash(platform, sri)
-        return hashes
+        hashes: dict[str, str] = {}
+        checksums = await self.fetch_checksums(info, session)
+        for platform, hex_hash in checksums.items():
+            sri_drain = ValueDrain()
+            async for event in drain_value_events(
+                convert_nix_hash_to_sri(self.name, hex_hash), sri_drain
+            ):
+                yield event
+            sri_value = _require_value(sri_drain, "Missing checksum conversion output")
+            hashes[platform] = sri_value
+        yield UpdateEvent(
+            source=self.name,
+            kind=UpdateEventKind.VALUE,
+            payload=hashes,
+        )
 
 
 class DownloadHashUpdater(Updater):
@@ -600,44 +957,30 @@ class DownloadHashUpdater(Updater):
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         """Return download URL for a platform."""
 
-    def fetch_hashes(self, info: VersionInfo) -> dict[str, str]:
+    async def fetch_hashes(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> AsyncIterator[UpdateEvent]:
         """Compute hashes by downloading, deduplicating identical URLs."""
-        hashes: dict[str, str] = {}
         platform_urls = {
             platform: self.get_download_url(platform, info)
             for platform in self.PLATFORMS
         }
-        unique_urls: list[str] = []
-        for url in platform_urls.values():
-            if url not in unique_urls:
-                unique_urls.append(url)
+        hashes_drain = ValueDrain()
+        async for event in drain_value_events(
+            compute_url_hashes(self.name, platform_urls.values()), hashes_drain
+        ):
+            yield event
+        hashes_by_url = _require_value(hashes_drain, "Missing hash output")
 
-        hashes_by_url: dict[str, str] = {}
-        max_workers = _resolve_hash_workers(len(unique_urls))
-        if max_workers == 1 or len(unique_urls) == 1:
-            for url in unique_urls:
-                hashes_by_url[url] = compute_sri_hash(url)
-        else:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_map = {
-                    executor.submit(compute_sri_hash, url): url for url in unique_urls
-                }
-                for future in as_completed(future_map):
-                    url = future_map[future]
-                    hashes_by_url[url] = future.result()
-
-        seen_urls: set[str] = set()
-        for platform in self.PLATFORMS:
-            url = platform_urls[platform]
-            sri = hashes_by_url[url]
-            hashes[platform] = sri
-            if url in seen_urls:
-                _print_hash(platform, sri, "(same as above)")
-            else:
-                _print_hash(platform, sri)
-                seen_urls.add(url)
-
-        return hashes
+        hashes: dict[str, str] = {
+            platform: hashes_by_url[platform_urls[platform]]
+            for platform in self.PLATFORMS
+        }
+        yield UpdateEvent(
+            source=self.name,
+            kind=UpdateEventKind.VALUE,
+            payload=hashes,
+        )
 
 
 class HashEntryUpdater(Updater):
@@ -646,24 +989,66 @@ class HashEntryUpdater(Updater):
     input_name: str | None = None
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
-        entry = SourceEntry(hashes=hashes, input=self.input_name)
+        entry = SourceEntry(
+            hashes=HashCollection.from_value(hashes), input=self.input_name
+        )
         return UpdateResult(entry=entry)
+
+    async def _emit_single_hash_entry(
+        self,
+        events: AsyncIterator[UpdateEvent],
+        *,
+        error: str,
+        drv_type: str,
+        hash_type: str,
+    ) -> AsyncIterator[UpdateEvent]:
+        hash_drain = ValueDrain()
+        async for event in drain_value_events(events, hash_drain):
+            yield event
+        hash_value = _require_value(hash_drain, error)
+        yield UpdateEvent(
+            source=self.name,
+            kind=UpdateEventKind.VALUE,
+            payload=[make_hash_entry(drv_type, hash_type, hash_value)],
+        )
 
 
 class FlakeInputHashUpdater(HashEntryUpdater):
     """Base for hashes derived from flake inputs."""
 
     input_name: str | None = None
+    drv_type: str
+    hash_type: str
 
     def __init__(self):
         if self.input_name is None:
             self.input_name = self.name
 
-    def fetch_latest(self) -> VersionInfo:
-        input_name = self.input_name or self.name
-        node = get_flake_input_node(input_name)
+    @property
+    def _input(self) -> str:
+        """Return input_name, guaranteed non-None after __init__."""
+        assert self.input_name is not None
+        return self.input_name
+
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        node = get_flake_input_node(self._input)
         version = get_flake_input_version(node)
         return VersionInfo(version=version, metadata={"node": node})
+
+    @abstractmethod
+    def _compute_hash(self, info: VersionInfo) -> AsyncIterator[UpdateEvent]:
+        """Return async iterator that yields hash computation events."""
+
+    async def fetch_hashes(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> AsyncIterator[UpdateEvent]:
+        async for event in self._emit_single_hash_entry(
+            self._compute_hash(info),
+            error=f"Missing {self.hash_type} output",
+            drv_type=self.drv_type,
+            hash_type=self.hash_type,
+        ):
+            yield event
 
 
 class GoVendorHashUpdater(FlakeInputHashUpdater):
@@ -673,16 +1058,15 @@ class GoVendorHashUpdater(FlakeInputHashUpdater):
     subpackages: list[str] | None = None
     proxy_vendor: bool = False
 
-    def fetch_hashes(self, info: VersionInfo) -> list[HashEntry]:
-        input_name = self.input_name or self.name
-        hash_value = compute_go_vendor_hash(
-            input_name,
+    def _compute_hash(self, info: VersionInfo) -> AsyncIterator[UpdateEvent]:
+        return compute_go_vendor_hash(
+            self.name,
+            self._input,
             pname=self.pname or self.name,
             version=info.version,
             subpackages=self.subpackages,
             proxy_vendor=self.proxy_vendor,
         )
-        return [make_hash_entry(self.drv_type, self.hash_type, hash_value)]
 
 
 class CargoVendorHashUpdater(FlakeInputHashUpdater):
@@ -690,20 +1074,16 @@ class CargoVendorHashUpdater(FlakeInputHashUpdater):
     hash_type = "cargoHash"
     subdir: str | None = None
 
-    def fetch_hashes(self, info: VersionInfo) -> list[HashEntry]:
-        input_name = self.input_name or self.name
-        hash_value = compute_cargo_vendor_hash(input_name, subdir=self.subdir)
-        return [make_hash_entry(self.drv_type, self.hash_type, hash_value)]
+    def _compute_hash(self, info: VersionInfo) -> AsyncIterator[UpdateEvent]:
+        return compute_cargo_vendor_hash(self.name, self._input, subdir=self.subdir)
 
 
 class NpmDepsHashUpdater(FlakeInputHashUpdater):
     drv_type = "fetchNpmDeps"
     hash_type = "npmDepsHash"
 
-    def fetch_hashes(self, info: VersionInfo) -> list[HashEntry]:
-        input_name = self.input_name or self.name
-        hash_value = compute_npm_deps_hash(input_name)
-        return [make_hash_entry(self.drv_type, self.hash_type, hash_value)]
+    def _compute_hash(self, info: VersionInfo) -> AsyncIterator[UpdateEvent]:
+        return compute_npm_deps_hash(self.name, self._input)
 
 
 # =============================================================================
@@ -718,15 +1098,29 @@ class GitHubRawFileUpdater(HashEntryUpdater):
     repo: str
     path: str
 
-    def fetch_latest(self) -> VersionInfo:
-        branch = fetch_github_default_branch(self.owner, self.repo)
-        rev = fetch_github_latest_commit(self.owner, self.repo, self.path, branch)
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        branch = await fetch_github_default_branch(session, self.owner, self.repo)
+        rev = await fetch_github_latest_commit(
+            session, self.owner, self.repo, self.path, branch
+        )
         return VersionInfo(version=rev, metadata={"rev": rev, "branch": branch})
 
-    def fetch_hashes(self, info: VersionInfo) -> list[HashEntry]:
+    async def fetch_hashes(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> AsyncIterator[UpdateEvent]:
         url = github_raw_url(self.owner, self.repo, info.metadata["rev"], self.path)
-        hash_value = compute_sri_hash(url)
-        return [make_hash_entry("fetchurl", "sha256", hash_value, url=url)]
+        hashes_drain = ValueDrain()
+        async for event in drain_value_events(
+            compute_url_hashes(self.name, [url]), hashes_drain
+        ):
+            yield event
+        hashes_by_url = _require_value(hashes_drain, "Missing hash output")
+        hash_value = hashes_by_url[url]
+        yield UpdateEvent(
+            source=self.name,
+            kind=UpdateEventKind.VALUE,
+            payload=[make_hash_entry("fetchurl", "sha256", hash_value, url=url)],
+        )
 
 
 class HomebrewZshCompletionUpdater(GitHubRawFileUpdater):
@@ -755,9 +1149,9 @@ class GoogleChromeUpdater(DownloadHashUpdater):
         "x86_64-linux": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb",
     }
 
-    def fetch_latest(self) -> VersionInfo:
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         url = "https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Mac&num=1"
-        data = fetch_json(url)
+        data = await fetch_json(session, url)
         return VersionInfo(version=data[0]["version"], metadata={})
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
@@ -779,20 +1173,21 @@ class DataGripUpdater(ChecksumProvidedUpdater):
         "x86_64-linux": "linux",
     }
 
-    def fetch_latest(self) -> VersionInfo:
-        data = fetch_json(self.API_URL)
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        data = await fetch_json(session, self.API_URL)
         release = data["DG"][0]
         return VersionInfo(version=release["version"], metadata={"release": release})
 
-    def fetch_checksums(self, info: VersionInfo) -> dict[str, str]:
+    async def fetch_checksums(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> dict[str, str]:
         release = info.metadata["release"]
         checksums = {}
         for nix_platform, jb_key in self.PLATFORMS.items():
             checksum_url = release["downloads"][jb_key]["checksumLink"]
             # Format: "hexhash *filename"
-            hex_hash = (
-                fetch_url(checksum_url, timeout=DEFAULT_TIMEOUT).decode().split()[0]
-            )
+            payload = await fetch_url(session, checksum_url, timeout=DEFAULT_TIMEOUT)
+            hex_hash = payload.decode().split()[0]
             checksums[nix_platform] = hex_hash
         return checksums
 
@@ -812,14 +1207,18 @@ class ChatGPTUpdater(DownloadHashUpdater):
         "x86_64-darwin": "darwin",
     }
 
-    def fetch_latest(self) -> VersionInfo:
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch version and download URL from Sparkle appcast XML."""
         import xml.etree.ElementTree as ET
 
         # Use Sparkle user agent to avoid 403
-        xml_data = fetch_url(
-            self.APPCAST_URL, user_agent="Sparkle/2.0", timeout=DEFAULT_TIMEOUT
-        ).decode()
+        xml_payload = await fetch_url(
+            session,
+            self.APPCAST_URL,
+            user_agent="Sparkle/2.0",
+            timeout=DEFAULT_TIMEOUT,
+        )
+        xml_data = xml_payload.decode()
 
         root = ET.fromstring(xml_data)
         # Get the first (latest) item
@@ -845,14 +1244,13 @@ class ChatGPTUpdater(DownloadHashUpdater):
         return VersionInfo(version=version_elem.text, metadata={"url": url})
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
-        print(f"  URL: {info.metadata['url']}")
         return info.metadata["url"]
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
         """Include the versioned URL in the result."""
         entry = SourceEntry(
             version=info.version,
-            hashes=hashes,
+            hashes=HashCollection.from_value(hashes),
             urls={"darwin": info.metadata["url"]},
         )
         return UpdateResult(entry=entry)
@@ -871,19 +1269,15 @@ class ConductorUpdater(DownloadHashUpdater):
 
     BASE_URL = "https://cdn.crabnebula.app/download/melty/conductor/latest/platform"
 
-    def fetch_latest(self) -> VersionInfo:
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch version from Content-Disposition header of the download."""
         import re
 
-        # Follow redirects to get the final Content-Disposition header
         url = f"{self.BASE_URL}/dmg-aarch64"
-        with _open_url(url, method="HEAD", timeout=DEFAULT_TIMEOUT) as response:
-            # Get final URL after redirects
-            final_url = response.geturl()
-
-        # Fetch headers from the final URL
-        with _open_url(final_url, method="HEAD", timeout=DEFAULT_TIMEOUT) as response:
-            disposition = response.headers.get("Content-Disposition", "")
+        _payload, headers = await _request(
+            session, url, method="HEAD", timeout=DEFAULT_TIMEOUT
+        )
+        disposition = headers.get("Content-Disposition", "")
 
         # Parse version from filename like "Conductor_0.31.1_aarch64.dmg"
         match = re.search(r"Conductor_([0-9.]+)_", disposition)
@@ -909,15 +1303,19 @@ class VSCodeInsidersUpdater(ChecksumProvidedUpdater):
         "x86_64-linux": "linux-x64",
     }
 
-    def _fetch_platform_info(self, api_platform: str) -> dict:
+    async def _fetch_platform_info(
+        self, session: aiohttp.ClientSession, api_platform: str
+    ) -> dict:
         url = f"https://update.code.visualstudio.com/api/update/{api_platform}/insider/latest"
-        return fetch_json(url)
+        return await fetch_json(session, url)
 
-    def fetch_latest(self) -> VersionInfo:
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         # Fetch info for all platforms upfront to avoid repeated API calls
         platform_info = {}
         for nix_platform, api_platform in self.PLATFORMS.items():
-            platform_info[nix_platform] = self._fetch_platform_info(api_platform)
+            platform_info[nix_platform] = await self._fetch_platform_info(
+                session, api_platform
+            )
 
         versions = {
             platform: info["productVersion"] for platform, info in platform_info.items()
@@ -928,7 +1326,9 @@ class VSCodeInsidersUpdater(ChecksumProvidedUpdater):
         version = unique_versions.pop()
         return VersionInfo(version=version, metadata={"platform_info": platform_info})
 
-    def fetch_checksums(self, info: VersionInfo) -> dict[str, str]:
+    async def fetch_checksums(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> dict[str, str]:
         platform_info = info.metadata["platform_info"]
         return {
             platform: platform_info[platform]["sha256hash"]
@@ -977,53 +1377,335 @@ def save_sources(sources: SourcesFile) -> None:
     sources.save(SOURCES_FILE)
 
 
-def update_source(
+@dataclass
+class SourceState:
+    status: str = "pending"
+    tail: deque[str] = field(default_factory=deque)
+    active_commands: int = 0
+
+
+@dataclass
+class RenderState:
+    lines_rendered: int = 0
+    panel_height: int = 0
+
+
+def _is_tty() -> bool:
+    term = os.environ.get("TERM", "")
+    return sys.stdout.isatty() and term.lower() not in {"", "dumb"}
+
+
+def _fit_to_width(text: str, width: int) -> str:
+    if width <= 0:
+        return text
+    # Reserve the last column to avoid line wrapping on some terminals.
+    return text[: max(0, width - 1)]
+
+
+def _format_header_line(
+    name: str,
+    status: str,
+    *,
+    width: int,
+    is_tty: bool,
+    bold_prefix: str,
+    bold_suffix: str,
+) -> str:
+    header_plain = _fit_to_width(f"{name}: {status}", width)
+    if is_tty and header_plain:
+        name_len = min(len(name), len(header_plain))
+        return (
+            f"{bold_prefix}{header_plain[:name_len]}{bold_suffix}"
+            f"{header_plain[name_len:]}"
+        )
+    return header_plain
+
+
+def _format_detail_line(
+    line: str,
+    *,
+    width: int,
+    is_tty: bool,
+    dim_prefix: str,
+    dim_suffix: str,
+) -> str:
+    entry = _fit_to_width(f"  {line}", width)
+    if is_tty:
+        return f"{dim_prefix}{entry}{dim_suffix}"
+    return entry
+
+
+@dataclass(frozen=True)
+class RenderStyle:
+    bold_prefix: str
+    bold_suffix: str
+    dim_prefix: str
+    dim_suffix: str
+
+
+class Renderer:
+    def __init__(
+        self,
+        states: dict[str, SourceState],
+        order: list[str],
+        *,
+        is_tty: bool,
+        panel_height: int | None = None,
+    ) -> None:
+        self.states = states
+        self.order = order
+        self.is_tty = is_tty
+        self.style = RenderStyle(
+            bold_prefix="\x1b[1m" if is_tty else "",
+            bold_suffix="\x1b[0m" if is_tty else "",
+            dim_prefix="\x1b[2m" if is_tty else "",
+            dim_suffix="\x1b[0m" if is_tty else "",
+        )
+        self.render_state = RenderState(
+            panel_height=TerminalInfo.panel_height()
+            if panel_height is None
+            else panel_height
+        )
+        self.last_render = 0.0
+        self.needs_render = False
+
+    def request_render(self) -> None:
+        if self.is_tty:
+            self.needs_render = True
+
+    def render_if_due(self, now: float) -> None:
+        if not self.is_tty or not self.needs_render:
+            return
+        if now - self.last_render >= DEFAULT_RENDER_INTERVAL:
+            self.render()
+            self.last_render = now
+            self.needs_render = False
+
+    def finalize(self) -> None:
+        if self.is_tty and self.needs_render:
+            self.render()
+
+    def render(self) -> None:
+        if not self.is_tty:
+            return
+        width = TerminalInfo.width()
+        style = self.style
+        max_visible = self.render_state.panel_height
+        lines: list[str] = []
+        for name in self.order:
+            if len(lines) >= max_visible:
+                break
+            state = self.states[name]
+            status = state.status or "pending"
+            lines.append(
+                _format_header_line(
+                    name,
+                    status,
+                    width=width,
+                    is_tty=self.is_tty,
+                    bold_prefix=style.bold_prefix,
+                    bold_suffix=style.bold_suffix,
+                )
+            )
+            if len(lines) >= max_visible:
+                break
+            if state.active_commands > 0:
+                for line in state.tail:
+                    if len(lines) >= max_visible:
+                        break
+                    lines.append(
+                        _format_detail_line(
+                            line,
+                            width=width,
+                            is_tty=self.is_tty,
+                            dim_prefix=style.dim_prefix,
+                            dim_suffix=style.dim_suffix,
+                        )
+                    )
+        if self.render_state.lines_rendered > 1:
+            sys.stdout.write(f"\x1b[{self.render_state.lines_rendered - 1}A")
+        sys.stdout.write("\r\x1b[J")
+        sys.stdout.write("\n".join(lines))
+        self.render_state.lines_rendered = len(lines)
+        sys.stdout.flush()
+
+
+async def _consume_events(
+    queue: asyncio.Queue[UpdateEvent | None],
+    order: list[str],
+    sources: SourcesFile,
+    *,
+    max_lines: int,
+    is_tty: bool,
+) -> tuple[bool, int]:
+    states = {
+        name: SourceState(status="pending", tail=deque(maxlen=max_lines))
+        for name in order
+    }
+    updated = False
+    errors = 0
+    renderer = Renderer(states, order, is_tty=is_tty)
+
+    while True:
+        event = await queue.get()
+        if event is None:
+            break
+        state = states.get(event.source)
+        if state is None:
+            continue
+
+        if event.kind == UpdateEventKind.STATUS:
+            state.status = event.message or state.status
+            if not is_tty and event.message:
+                print(f"[{event.source}] {event.message}")
+        elif event.kind == UpdateEventKind.COMMAND_START:
+            state.active_commands += 1
+            if event.message:
+                state.status = event.message
+            if state.active_commands == 1:
+                state.tail.clear()
+            if not is_tty and event.message:
+                print(f"[{event.source}] {event.message}")
+        elif event.kind == UpdateEventKind.LINE:
+            label = event.stream or "stdout"
+            message = event.message or ""
+            line_text = f"[{label}] {message}" if label else message
+            if state.active_commands > 0:
+                if not state.tail or state.tail[-1] != line_text:
+                    state.tail.append(line_text)
+            if not is_tty:
+                print(f"[{event.source}][{label}] {message}")
+        elif event.kind == UpdateEventKind.COMMAND_END:
+            state.active_commands = max(0, state.active_commands - 1)
+            if state.active_commands == 0:
+                state.tail.clear()
+            if not is_tty:
+                result = event.payload
+                if isinstance(result, CommandResult):
+                    print(
+                        f"[{event.source}] command finished (exit {result.returncode})"
+                    )
+        elif event.kind == UpdateEventKind.RESULT:
+            result = event.payload
+            if result is not None:
+                sources.entries[event.source] = result.entry
+                updated = True
+                state.status = "Updated."
+            elif not state.status:
+                state.status = "No updates needed."
+        elif event.kind == UpdateEventKind.ERROR:
+            errors += 1
+            message = event.message or "Unknown error"
+            state.status = f"Error: {message}"
+            state.active_commands = 0
+            state.tail.clear()
+            if not is_tty:
+                print(f"[{event.source}] Error: {message}", file=sys.stderr)
+
+        renderer.request_render()
+        renderer.render_if_due(time.monotonic())
+
+    renderer.finalize()
+
+    return updated, errors
+
+
+async def _update_source_task(
     name: str,
     sources: SourcesFile,
     *,
-    update_input: bool = False,
-    raise_on_error: bool = False,
-) -> bool:
-    """Update a single source. Returns True if updated."""
-    if name not in UPDATERS:
-        message = f"Error: Unknown source '{name}'"
-        if raise_on_error:
-            raise ValueError(message)
-        print(message)
-        print(f"Available sources: {', '.join(UPDATERS.keys())}")
-        return False
-
-    print(f"\n{'=' * 60}")
-    print(f"Updating {name}")
-    print("=" * 60)
-
+    update_input: bool,
+    session: aiohttp.ClientSession,
+    update_input_lock: asyncio.Lock,
+    queue: asyncio.Queue[UpdateEvent | None],
+) -> None:
     current = sources.entries.get(name)
     updater = UPDATERS[name]()
     input_name = getattr(updater, "input_name", None)
 
     try:
+        await queue.put(
+            UpdateEvent(
+                source=name,
+                kind=UpdateEventKind.STATUS,
+                message="Starting update",
+            )
+        )
         if update_input and input_name:
-            print(f"Updating flake input '{input_name}'...")
-            update_flake_input(input_name)
+            await queue.put(
+                UpdateEvent(
+                    source=name,
+                    kind=UpdateEventKind.STATUS,
+                    message=f"Updating flake input '{input_name}'...",
+                )
+            )
+            async with update_input_lock:
+                async for event in update_flake_input(input_name, source=name):
+                    await queue.put(event)
 
-        result = updater.update(current)
-        if result is None:
-            return False
-        entry = result.entry
-        if current is not None and entry == current:
-            print("No updates needed.")
-            return False
-        sources.entries[name] = entry
-        return True
-    except Exception as e:
-        message = f"Error updating {name}: {e}"
-        if raise_on_error:
-            raise RuntimeError(message) from e
-        print(message)
-        return False
+        async for event in updater.update_stream(current, session):
+            await queue.put(event)
+    except Exception as exc:
+        await queue.put(
+            UpdateEvent(source=name, kind=UpdateEventKind.ERROR, message=str(exc))
+        )
 
 
-def main():
+async def _run_updates(args: argparse.Namespace) -> int:
+    if args.list:
+        print("Available sources:")
+        for name in UPDATERS:
+            print(f"  {name}")
+        return 0
+
+    if not args.source and not args.all:
+        print("No source specified. Use --all or provide a source name.")
+        return 1
+
+    if not args.all and args.source not in UPDATERS:
+        print(f"Error: Unknown source '{args.source}'")
+        print(f"Available sources: {', '.join(UPDATERS.keys())}")
+        return 1
+
+    sources = load_sources()
+    names = list(UPDATERS.keys()) if args.all else [args.source]
+    max_lines = _resolve_log_tail_lines(None)
+    is_tty = _is_tty()
+
+    async with aiohttp.ClientSession() as session:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        update_input_lock = asyncio.Lock()
+        tasks = [
+            asyncio.create_task(
+                _update_source_task(
+                    name,
+                    sources,
+                    update_input=args.update_input,
+                    session=session,
+                    update_input_lock=update_input_lock,
+                    queue=queue,
+                )
+            )
+            for name in names
+        ]
+        consumer = asyncio.create_task(
+            _consume_events(queue, names, sources, max_lines=max_lines, is_tty=is_tty)
+        )
+        await asyncio.gather(*tasks)
+        await queue.put(None)
+        updated, errors = await consumer
+
+    if updated:
+        save_sources(sources)
+        print(f"\nUpdated {SOURCES_FILE}")
+        print("Run: nh darwin switch --no-nom .")
+    else:
+        print("\nNo updates needed.")
+
+    return 1 if errors else 0
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Update source versions and hashes",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1041,37 +1723,7 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.list:
-        print("Available sources:")
-        for name in UPDATERS:
-            print(f"  {name}")
-        return
-
-    if not args.source and not args.all:
-        parser.print_help()
-        return
-
-    sources = load_sources()
-    updated = False
-
-    if args.all:
-        for name in UPDATERS:
-            if update_source(name, sources, update_input=args.update_input):
-                updated = True
-    else:
-        updated = update_source(
-            args.source,
-            sources,
-            update_input=args.update_input,
-            raise_on_error=True,
-        )
-
-    if updated:
-        save_sources(sources)
-        print(f"\nUpdated {SOURCES_FILE}")
-        print("Run: nh darwin switch --no-nom .")
-    else:
-        print("\nNo updates needed.")
+    raise SystemExit(asyncio.run(_run_updates(args)))
 
 
 if __name__ == "__main__":

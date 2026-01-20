@@ -1,3 +1,3 @@
 {
-  update = { python3, ... }: "${python3}/bin/python3 ${./update.py}";
+  update = { update-script, ... }: "${update-script}/bin/update";
 }

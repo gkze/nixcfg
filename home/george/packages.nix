@@ -13,6 +13,7 @@
       cachix
       cargo-update
       code-cursor
+      crush
       csvlens
       curator
       curl

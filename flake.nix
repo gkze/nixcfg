@@ -58,7 +58,7 @@
       # Note: Don't follow nixpkgs - opencode requires specific bun version
       # that may differ from nixpkgs-unstable (e.g., bun 1.3.5 vs 1.3.6)
       # Pinned to commit before nix overhaul (dac099a) which broke shell completions
-      url = "github:anomalyco/opencode/5009f10";
+      url = "github:anomalyco/opencode/v1.1.26";
     };
     pyproject-build-systems = {
       url = "github:pyproject-nix/build-system-pkgs";
@@ -255,6 +255,24 @@
           inputs.neovim-nightly-overlay.overlays.default
           inputs.red.overlays.default
           self.overlays.default
+          (
+            _: prev:
+            let
+              inherit (inputs.pyproject-nix.lib) scripts;
+              script = scripts.loadScript {
+                name = "update";
+                script = ./update.py;
+              };
+            in
+            {
+              update-script = prev.writeScriptBin script.name (
+                scripts.renderWithPackages {
+                  inherit script;
+                  python = prev.python313;
+                }
+              );
+            }
+          )
         ];
 
         devShell =
@@ -298,6 +316,21 @@
                 trim-trailing-whitespace.enable = true;
               };
             };
+            editorWorkspace = inputs.uv2nix.lib.workspace.loadWorkspace {
+              workspaceRoot = ./.;
+            };
+            editorPython = pkgs.python313;
+            editorPySet =
+              (pkgs.callPackage inputs.pyproject-nix.build.packages {
+                python = editorPython;
+              }).overrideScope
+                (
+                  lib.composeManyExtensions [
+                    inputs.pyproject-build-systems.overlays.default
+                    (editorWorkspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+                  ]
+                );
+            editorVenv = editorPySet.mkVirtualEnv "nixcfg-editor" { aiohttp = [ ]; };
           in
           pkgs.devshell.mkShell {
             name = "nixcfg";
@@ -315,8 +348,15 @@
                 sops
               ]
               ++ lib.optional pkgs.stdenv.isLinux dconf2nix
-              ++ pre-commit-check.enabledPackages;
+              ++ pre-commit-check.enabledPackages
+              ++ [ editorVenv ];
             devshell.startup.pre-commit.text = pre-commit-check.shellHook;
+            devshell.startup.editor-venv.text = ''
+              if [ -e .venv ] && [ ! -L .venv ]; then
+                rm -rf .venv
+              fi
+              ln -sfn ${editorVenv} .venv
+            '';
           };
 
         formatter =
