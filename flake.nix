@@ -211,6 +211,10 @@
       url = "github:zsh-users/zsh-completions";
       flake = false;
     };
+    lumen = {
+      url = "github:jnsahaj/lumen/v2.18.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     # ghostty-shaders = {
     #   url = "github:0xhckr/ghostty-shaders";
     #   flake = false;
@@ -250,6 +254,7 @@
         withOverlays = [
           devshell.overlays.default
           inputs.curator.overlays.default
+          inputs.lumen.overlays.default
           inputs.neovim-nightly-overlay.overlays.default
           inputs.red.overlays.default
           self.overlays.default

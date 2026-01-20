@@ -28,26 +28,58 @@
     gnupg.home = config.programs.gpg.homedir;
     defaultSopsFile = ../../secrets.yaml;
     environment.PATH = lib.mkForce (lib.makeBinPath [ pkgs.coreutils ] + ":/usr/bin:/sbin");
+    secrets.github_pat = { };
+    templates."zed-settings.json" = {
+      path = "${config.xdg.configHome}/zed/settings.json";
+      content = builtins.toJSON {
+        agent = {
+          default_model = {
+            model = "claude-opus-4-5-20251101";
+            provider = "anthropic";
+          };
+          dock = "right";
+          inline_assistant_model = {
+            model = "claude-opus-4-5-20251101";
+            provider = "anthropic";
+          };
+          model_parameters = [ ];
+        };
+        buffer_font_family = "Hack Nerd Font Mono";
+        buffer_font_size = 12.0;
+        context_servers = {
+          mcp-server-github = {
+            enabled = true;
+            settings = {
+              github_personal_access_token = config.sops.placeholder.github_pat;
+            };
+          };
+        };
+        format_on_save = "on";
+        icon_theme = "Catppuccin Frappe";
+        minimap = {
+          show = "always";
+        };
+        outline_panel = {
+          dock = "right";
+        };
+        show_whitespaces = "all";
+        theme = {
+          dark = "Catppuccin Frappé";
+          light = "One Light";
+          mode = "system";
+        };
+        ui_font_size = 15.0;
+        vim_mode = true;
+        wrap_guides = [
+          80
+          100
+        ];
+      };
+    };
   };
 
   home = {
     file = {
-      "${config.xdg.configHome}/zed/keymap.json".text = builtins.toJSON [
-        {
-          context = "Terminal";
-          bindings = {
-            "shift-enter" = [
-              "terminal::SendText"
-              "\u001b\r"
-            ];
-          };
-        }
-        {
-          bindings = {
-            "alt-~" = "terminal_panel::ToggleFocus";
-          };
-        }
-      ];
       "${config.programs.gpg.homedir}/gpg-agent.conf".text =
         let
           prog =
@@ -277,6 +309,22 @@
     zed-editor = {
       enable = true;
       package = pkgs.zed-editor-nightly;
+      userKeymaps = [
+        {
+          context = "Terminal";
+          bindings = {
+            "shift-enter" = [
+              "terminal::SendText"
+              "\u001b\r"
+            ];
+          };
+        }
+        {
+          bindings = {
+            "alt-~" = "terminal_panel::ToggleFocus";
+          };
+        }
+      ];
     };
     zoxide = {
       enable = true;

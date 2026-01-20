@@ -385,15 +385,25 @@ in
       sentry-cli =
         let
           version = outputs.lib.flakeLock.sentry-cli.original.ref;
+          # Filter out iOS test fixtures with code-signed .xcarchive bundles
+          # These cause nix-store --optimise to fail on macOS due to
+          # code signature protections on _CodeSignature/CodeResources files
+          filteredSrc = prev.runCommand "sentry-cli-src-filtered" { } ''
+            cp -r ${inputs.sentry-cli} $out
+            chmod -R u+w $out
+            rm -rf $out/tests/integration/_fixtures/build/*.xcarchive
+          '';
         in
         prev.sentry-cli.overrideAttrs (old: {
           inherit version;
-          src = inputs.sentry-cli;
+          src = filteredSrc;
           cargoDeps = prev.rustPlatform.fetchCargoVendor {
-            src = inputs.sentry-cli;
+            src = filteredSrc;
             hash = outputs.lib.sourceHash "sentry-cli" "cargoHash";
           };
           buildInputs = old.buildInputs or [ ] ++ [ prev.curl ];
+          # Disable tests that depend on xcarchive fixtures we removed
+          doCheck = false;
         });
 
       sublime-kdl =

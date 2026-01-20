@@ -42,6 +42,7 @@
       jnv
       jo
       killport
+      lumen
       mdq
       moreutils
       mountpoint-s3
@@ -51,6 +52,7 @@
       nix-tree
       nixfmt
       nodejs_latest
+      opencode
       postman
       procs
       red-reddit-cli
