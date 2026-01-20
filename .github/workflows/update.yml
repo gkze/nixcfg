@@ -28,6 +28,36 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - name: Free disk space
+        run: |
+          echo "=== Before cleanup ==="
+          df -h /
+
+          # Remove Xcode versions (keeps only 16.2) - saves ~60-80 GB
+          sudo rm -rf /Applications/Xcode_15.0.1.app
+          sudo rm -rf /Applications/Xcode_15.1.app
+          sudo rm -rf /Applications/Xcode_15.2.app
+          sudo rm -rf /Applications/Xcode_15.3.app
+          sudo rm -rf /Applications/Xcode_15.4.app
+          sudo rm -rf /Applications/Xcode_16.0.app
+          sudo rm -rf /Applications/Xcode_16.1.app
+
+          # Remove all simulators - saves ~20-30 GB
+          sudo rm -rf ~/Library/Developer/CoreSimulator
+          xcrun simctl delete all 2>/dev/null || true
+
+          # Remove Android SDK - saves ~15-20 GB
+          sudo rm -rf ~/Library/Android/sdk
+
+          # Remove .NET - saves ~8-10 GB
+          sudo rm -rf /usr/local/share/dotnet
+
+          # Remove cached tool versions - saves ~5-8 GB
+          sudo rm -rf ~/hostedtoolcache
+
+          echo "=== After cleanup ==="
+          df -h /
+
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/determinate-nix-action@v3
       - uses: cachix/cachix-action@v15
@@ -48,6 +78,36 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - name: Free disk space
+        run: |
+          echo "=== Before cleanup ==="
+          df -h /
+
+          # Remove Xcode versions (keeps only 16.2) - saves ~60-80 GB
+          sudo rm -rf /Applications/Xcode_15.0.1.app
+          sudo rm -rf /Applications/Xcode_15.1.app
+          sudo rm -rf /Applications/Xcode_15.2.app
+          sudo rm -rf /Applications/Xcode_15.3.app
+          sudo rm -rf /Applications/Xcode_15.4.app
+          sudo rm -rf /Applications/Xcode_16.0.app
+          sudo rm -rf /Applications/Xcode_16.1.app
+
+          # Remove all simulators - saves ~20-30 GB
+          sudo rm -rf ~/Library/Developer/CoreSimulator
+          xcrun simctl delete all 2>/dev/null || true
+
+          # Remove Android SDK - saves ~15-20 GB
+          sudo rm -rf ~/Library/Android/sdk
+
+          # Remove .NET - saves ~8-10 GB
+          sudo rm -rf /usr/local/share/dotnet
+
+          # Remove cached tool versions - saves ~5-8 GB
+          sudo rm -rf ~/hostedtoolcache
+
+          echo "=== After cleanup ==="
+          df -h /
+
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/determinate-nix-action@v3
       - uses: cachix/cachix-action@v15
