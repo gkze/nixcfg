@@ -378,9 +378,7 @@ in
 
       opencode = inputs.opencode.packages.${prev.system}.opencode.overrideAttrs opencodeBunPatch;
 
-      opencode-desktop =
-        inputs.opencode.packages.${prev.system}.opencode-desktop.overrideAttrs
-          opencodeBunPatch;
+      opencode-desktop = inputs.opencode.packages.${prev.system}.desktop.overrideAttrs opencodeBunPatch;
 
       sentry-cli =
         let

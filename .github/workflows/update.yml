@@ -3,7 +3,7 @@ name: Nightly Flake Update
 
 on:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "0 11 * * *" # 3:00 AM PST / 4:00 AM PDT
   workflow_dispatch:
 
 jobs:

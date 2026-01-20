@@ -53,6 +53,7 @@
       nixfmt
       nodejs_latest
       opencode
+      opencode-desktop
       postman
       procs
       red-reddit-cli
@@ -88,7 +89,6 @@
       iina
       mas
       notion-app
-      # opencode-desktop  # Using Homebrew - upstream flake has unfixable bun version mismatch
       rapidapi
       sloth-app
     ];
