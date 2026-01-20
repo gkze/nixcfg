@@ -151,10 +151,84 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+      - uses: DeterminateSystems/determinate-nix-action@v3
       - uses: actions/download-artifact@v4
         with:
           name: flake-lock
           path: .
+      - name: Generate flake lock diff
+        id: diff
+        run: |
+          # Generate the diff between current HEAD and the updated flake.lock
+          diff_output=$(nix run nixpkgs#nvd -- diff \
+            "$(nix flake metadata --json . | jq -r '.path')" \
+            "$(nix flake metadata --json . --reference-lock-file flake.lock | jq -r '.path')" \
+            2>/dev/null || true)
+
+          # Use nix flake metadata to generate a cleaner diff
+          # Get the old lock file from git
+          git show HEAD:flake.lock > /tmp/old-flake.lock
+
+          # Generate diff using a script
+          diff_body=$(python3 << 'PYTHON'
+          import json
+          from datetime import datetime, timezone
+
+          with open('/tmp/old-flake.lock') as f:
+              old_lock = json.load(f)
+          with open('flake.lock') as f:
+              new_lock = json.load(f)
+
+          def get_input_info(nodes, name):
+              if name not in nodes:
+                  return None
+              node = nodes[name]
+              locked = node.get('locked', {})
+              rev = locked.get('rev', '')[:7] if locked.get('rev') else ''
+              owner = locked.get('owner', '')
+              repo = locked.get('repo', '')
+              ref = node.get('original', {}).get('ref', '')
+              type_ = locked.get('type', 'github')
+              last_modified = locked.get('lastModified', 0)
+              date = datetime.fromtimestamp(last_modified, tz=timezone.utc).strftime('%Y-%m-%d') if last_modified else ''
+              source = f"{type_}:{owner}/{repo}/{rev}"
+              if ref:
+                  source = f"{type_}:{owner}/{repo}/{ref}/{rev}"
+              return {'rev': rev, 'source': source, 'date': date, 'owner': owner, 'repo': repo, 'ref': ref}
+
+          old_nodes = old_lock.get('nodes', {})
+          new_nodes = new_lock.get('nodes', {})
+
+          all_inputs = set(old_nodes.keys()) | set(new_nodes.keys())
+          all_inputs.discard('root')
+
+          updates = []
+          for name in sorted(all_inputs):
+              old_info = get_input_info(old_nodes, name)
+              new_info = get_input_info(new_nodes, name)
+              if old_info and new_info and old_info['rev'] != new_info['rev']:
+                  updates.append((name, old_info, new_info))
+
+          if updates:
+              print("Flake lock file updates:\n")
+              for name, old, new in updates:
+                  print(f"• Updated input '{name}':")
+                  print(f"    'github:{old['owner']}/{old['repo']}/{old['rev']}' ({old['date']})")
+                  print(f"  → 'github:{new['owner']}/{new['repo']}/{new['rev']}' ({new['date']})")
+          else:
+              print("No input changes detected.")
+          PYTHON
+          )
+
+          # Write to output file and set as output
+          echo "$diff_body" > /tmp/pr-body.txt
+
+          # Handle multiline output for GitHub Actions
+          {
+            echo 'body<<EOF'
+            echo "$diff_body"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
       - uses: peter-evans/create-pull-request@v7
         with:
           branch: update_flake_lock_action
@@ -163,3 +237,13 @@ jobs:
           commit-message: "flake.lock: Update"
           body: |
             Automated changes by the Nightly Flake Update workflow.
+
+            ```
+            ${{ steps.diff.outputs.body }}
+            ```
+
+            ### Running GitHub Actions on this PR
+
+            GitHub Actions will not run workflows on pull requests which are opened by a GitHub Action.
+
+            **To run GitHub Actions workflows on this PR, close and re-open this pull request.**
