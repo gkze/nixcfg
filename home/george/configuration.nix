@@ -30,7 +30,9 @@
     environment.PATH = lib.mkForce (lib.makeBinPath [ pkgs.coreutils ] + ":/usr/bin:/sbin");
     secrets.github_pat = { };
     templates."zed-settings.json" = {
-      path = "${config.xdg.configHome}/zed/settings.json";
+      # Rendered to sops-managed location, then copied by activation script
+      # so the file is editable from Zed
+      mode = "0644";
       content = builtins.toJSON {
         agent = {
           default_model = {
@@ -79,6 +81,12 @@
   };
 
   home = {
+    activation.copyZedSettings = lib.hm.dag.entryAfter [ "sops-nix" ] ''
+      # Copy sops-rendered template to zed config (editable, not symlinked)
+      ${lib.getExe' pkgs.coreutils "install"} -m 644 \
+        "${config.sops.templates."zed-settings.json".path}" \
+        "${config.xdg.configHome}/zed/settings.json"
+    '';
     file = {
       "${config.programs.gpg.homedir}/gpg-agent.conf".text =
         let
