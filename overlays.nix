@@ -11,15 +11,19 @@ in
         nativeBuildInputs =
           (old.nativeBuildInputs or [ ])
           ++ (with prev; [
+            findutils
             jq
             moreutils
             bun
           ]);
         postPatch = ''
-          jq \
-            --arg bunVersion $(bun -v | tr -d '\n') \
-            '.packageManager = "bun@\($bunVersion)"' package.json \
-            | sponge package.json
+          # Update all package.json files with packageManager field to use current bun version
+          bunVersion=$(bun -v | tr -d '\n')
+          find . -name 'package.json' -exec sh -c '
+            if jq -e ".packageManager" "$1" >/dev/null 2>&1; then
+              jq --arg bunVersion "'"$bunVersion"'" ".packageManager = \"bun@\(\$bunVersion)\"" "$1" | sponge "$1"
+            fi
+          ' _ {} \;
         '';
       };
     in
@@ -336,6 +340,9 @@ in
         buildInputs =
           prev.lib.optionals prev.stdenv.hostPlatform.isDarwin [ prev.macfuse-stubs ]
           ++ prev.lib.optionals prev.stdenv.hostPlatform.isLinux [ prev.fuse3 ];
+        # Disable tests on Darwin - they require macFUSE to be installed at
+        # /usr/local/lib/libfuse.2.dylib which isn't available in sandbox
+        doCheck = !prev.stdenv.hostPlatform.isDarwin;
         meta = old.meta // {
           platforms = prev.lib.platforms.unix;
         };
@@ -378,7 +385,22 @@ in
 
       opencode = inputs.opencode.packages.${prev.system}.opencode.overrideAttrs opencodeBunPatch;
 
-      opencode-desktop = inputs.opencode.packages.${prev.system}.desktop.overrideAttrs opencodeBunPatch;
+      opencode-desktop = inputs.opencode.packages.${prev.system}.desktop.overrideAttrs (
+        old:
+        (opencodeBunPatch old)
+        // {
+          # Override preBuild to use our patched opencode instead of upstream's
+          preBuild = ''
+            cp -a ${old.node_modules}/{node_modules,packages} .
+            chmod -R u+w node_modules packages
+            patchShebangs node_modules
+            patchShebangs packages/desktop/node_modules
+
+            mkdir -p packages/desktop/src-tauri/sidecars
+            cp ${final.opencode}/bin/opencode packages/desktop/src-tauri/sidecars/opencode-cli-${prev.stdenv.hostPlatform.rust.rustcTarget}
+          '';
+        }
+      );
 
       sentry-cli =
         let
