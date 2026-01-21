@@ -3,8 +3,8 @@
     "hashes": [
       {
         "drvType": "buildGoModule",
-        "hashType": "vendorHash",
-        "hash": "sha256-ULiXQxJl8hqWUY04cyjXWUefPoC5DoeZ2kcQEcefbWQ="
+        "hash": "sha256-ULiXQxJl8hqWUY04cyjXWUefPoC5DoeZ2kcQEcefbWQ=",
+        "hashType": "vendorHash"
       }
     ],
     "input": "axiom-cli"
@@ -13,8 +13,8 @@
     "hashes": [
       {
         "drvType": "buildGoModule",
-        "hashType": "vendorHash",
-        "hash": "sha256-u5+mc5UK+AotMcVj/XJTnFGecOZyuJ5i8yrjZhFZr5k="
+        "hash": "sha256-u5+mc5UK+AotMcVj/XJTnFGecOZyuJ5i8yrjZhFZr5k=",
+        "hashType": "vendorHash"
       }
     ],
     "input": "beads"
@@ -24,27 +24,27 @@
       "aarch64-darwin": "sha256-xs4AZSbj9wuxkGhw2JyFvaPt6W9ZkL+ab0FmjYvTR8Y=",
       "x86_64-darwin": "sha256-xs4AZSbj9wuxkGhw2JyFvaPt6W9ZkL+ab0FmjYvTR8Y="
     },
-    "version": "1.2026.006",
     "urls": {
       "darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.006_1768086529.dmg"
-    }
+    },
+    "version": "1.2026.006"
   },
   "code-cursor": {
+    "commit": "2ca326e0d1ce10956aea33d54c0e2d8c13c58a32",
     "hashes": {
-      "aarch64-darwin": "sha256-ZHxvA+iDluib9PLl5ilthdd0Z+xT+w9OSD25vySc9wI=",
-      "aarch64-linux": "sha256-2l9ppSze2nkvAfszblkhMSl+QhGENNe62AlgCcXBhfM=",
-      "x86_64-darwin": "sha256-Jl6t4oHC6nqOGDKUvvfViPgKJzpG2vpvht4JMBLHzVk=",
-      "x86_64-linux": "sha256-o/NIEtSOlUl67g18mWDG4M0thPA4VIfiWudv0Xiov08="
+      "aarch64-darwin": "sha256-ejhhXRhNTMh9n2cPkpNC0msk4Z1OFD2EzxwkJYw92XU=",
+      "aarch64-linux": "sha256-0D0IbkUyvCyCbf8apO7WG3KrcCEgv2TLNRjFOD8mcgU=",
+      "x86_64-darwin": "sha256-/GcQppfoBS9rIksQ/wYYH9Is7Sw2ZnjoW1Tk0hN8Y7g=",
+      "x86_64-linux": "sha256-ItUgknMzSDeXxN3Yi/pz2wZoz7vVVqx9nGXuGmbHbXc="
     },
-    "version": "2.3.35",
-    "commit": "cf8353edc265f5e46b798bfb276861d0bf3bf129"
+    "version": "2.3.41"
   },
   "codex": {
     "hashes": [
       {
         "drvType": "fetchCargoVendor",
-        "hashType": "cargoHash",
-        "hash": "sha256-Ryr5mFc+StT1d+jBtRsrOzMtyEJf7W1HbMbnC84ps4s="
+        "hash": "sha256-Ryr5mFc+StT1d+jBtRsrOzMtyEJf7W1HbMbnC84ps4s=",
+        "hashType": "cargoHash"
       }
     ],
     "input": "codex"
@@ -60,8 +60,8 @@
     "hashes": [
       {
         "drvType": "buildGoModule",
-        "hashType": "vendorHash",
-        "hash": "sha256-sV5Whc6K9D7TX3V0ZxaIx0IM7qOinh4IZq0N+rHnUbw="
+        "hash": "sha256-sV5Whc6K9D7TX3V0ZxaIx0IM7qOinh4IZq0N+rHnUbw=",
+        "hashType": "vendorHash"
       }
     ],
     "input": "crush"
@@ -79,8 +79,8 @@
     "hashes": [
       {
         "drvType": "fetchNpmDeps",
-        "hashType": "npmDepsHash",
-        "hash": "sha256-1hHPXYgeinK7SxF9yvQBCHYO7H1htnED3ot7wFzHDn0="
+        "hash": "sha256-1hHPXYgeinK7SxF9yvQBCHYO7H1htnED3ot7wFzHDn0=",
+        "hashType": "npmDepsHash"
       }
     ],
     "input": "gemini-cli"
@@ -89,26 +89,26 @@
     "hashes": [
       {
         "drvType": "fetchurl",
-        "hashType": "sha256",
         "hash": "sha256-uYL9CSCOlTdW3E87I7GsgvDEwOPHoz1LIxo8DARDX1Y=",
+        "hashType": "sha256",
         "url": "https://raw.githubusercontent.com/extrawurst/gitui/8876c1d0f616d55a0c0957683781fd32af815ae3/vim_style_key_config.ron"
       }
     ]
   },
   "google-chrome": {
     "hashes": {
-      "aarch64-darwin": "sha256-Kxt8MrW5ANGAID0L9B/dTA56iE1E+AFp3ym1wqKrqvE=",
-      "x86_64-darwin": "sha256-Kxt8MrW5ANGAID0L9B/dTA56iE1E+AFp3ym1wqKrqvE=",
-      "x86_64-linux": "sha256-N2y+St4UuUWOqc9O40p+sBV4Bx8Ivloq7GGUICp6dSY="
+      "aarch64-darwin": "sha256-gogtUrrA8MUlIpp9NCdco2XDbo/Zf/HGAE37nUTrLYg=",
+      "x86_64-darwin": "sha256-gogtUrrA8MUlIpp9NCdco2XDbo/Zf/HGAE37nUTrLYg=",
+      "x86_64-linux": "sha256-tPM+bbT3AreOPZdeHfO2ktBXvFGicH1+oz/a2R+MbEE="
     },
-    "version": "144.0.7559.60"
+    "version": "144.0.7559.97"
   },
   "homebrew-zsh-completion": {
     "hashes": [
       {
         "drvType": "fetchurl",
-        "hashType": "sha256",
         "hash": "sha256-6ZsViDo5DMh7VGIN+bqpXuegV1gpu34ZKitVRYnjnf0=",
+        "hashType": "sha256",
         "url": "https://raw.githubusercontent.com/Homebrew/brew/84dd40dc2ff554852eeb50c18dd0dc33cb1723b5/completions/zsh/_brew"
       }
     ]
@@ -117,8 +117,8 @@
     "hashes": [
       {
         "drvType": "fetchCargoVendor",
-        "hashType": "cargoHash",
-        "hash": "sha256-PUQ55pNiLEI5qxykA/j7RsykKJRTUGOGf2JBLacFGBo="
+        "hash": "sha256-PUQ55pNiLEI5qxykA/j7RsykKJRTUGOGf2JBLacFGBo=",
+        "hashType": "cargoHash"
       }
     ],
     "input": "sentry-cli"

@@ -1364,6 +1364,63 @@ class SentryCliUpdater(CargoVendorHashUpdater):
     name = "sentry-cli"
 
 
+class CodeCursorUpdater(DownloadHashUpdater):
+    """Update Cursor editor to latest stable version."""
+
+    name = "code-cursor"
+
+    API_BASE = "https://www.cursor.com/api/download"
+
+    # nix platform -> Cursor API platform
+    PLATFORMS = {
+        "aarch64-darwin": "darwin-arm64",
+        "x86_64-darwin": "darwin-x64",
+        "aarch64-linux": "linux-arm64",
+        "x86_64-linux": "linux-x64",
+    }
+
+    async def _fetch_platform_info(
+        self, session: aiohttp.ClientSession, api_platform: str
+    ) -> dict:
+        url = f"{self.API_BASE}?platform={api_platform}&releaseTrack=stable"
+        return await fetch_json(session, url)
+
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        # Fetch info for all platforms - they share version but have different URLs
+        platform_info = {}
+        for nix_platform, api_platform in self.PLATFORMS.items():
+            platform_info[nix_platform] = await self._fetch_platform_info(
+                session, api_platform
+            )
+
+        # Verify all platforms have the same version and commit
+        versions = {info["version"] for info in platform_info.values()}
+        commits = {info["commitSha"] for info in platform_info.values()}
+        if len(versions) != 1:
+            raise RuntimeError(f"Cursor version mismatch across platforms: {versions}")
+        if len(commits) != 1:
+            raise RuntimeError(f"Cursor commit mismatch across platforms: {commits}")
+
+        version = versions.pop()
+        commit = commits.pop()
+        return VersionInfo(
+            version=version,
+            metadata={"commit": commit, "platform_info": platform_info},
+        )
+
+    def get_download_url(self, platform: str, info: VersionInfo) -> str:
+        return info.metadata["platform_info"][platform]["downloadUrl"]
+
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
+        """Include commit SHA in the result."""
+        entry = SourceEntry(
+            version=info.version,
+            commit=info.metadata["commit"],
+            hashes=HashCollection.from_value(hashes),
+        )
+        return UpdateResult(entry=entry)
+
+
 # =============================================================================
 # Main
 # =============================================================================

@@ -6,10 +6,13 @@
     polarity = "dark";
     image = ./wallpaper.jpeg;
     targets = {
+      # Disabled: using catppuccin-bat theme directly in bat config
       bat.enable = false;
+      # Disabled: nixvim has its own colorscheme config (catppuccin)
       nixvim.enable = false;
       # https://github.com/danth/stylix/issues/865
       gnome-text-editor.enable = pkgs.stdenv.isLinux;
+      # Disabled: VS Code manages themes via extensions
       vscode.enable = false;
       gnome.enable = pkgs.stdenv.isLinux;
       gtk.enable = pkgs.stdenv.isLinux;

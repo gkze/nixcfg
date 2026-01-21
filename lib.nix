@@ -154,6 +154,43 @@ rec {
       path,
     }:
     "https://raw.githubusercontent.com/${owner}/${repo}/${rev}/${path}";
+  # Shared module args for home-manager configurations
+  mkHomeModuleArgs =
+    { system, username }:
+    {
+      inherit
+        inputs
+        outputs
+        src
+        system
+        username
+        ;
+      slib = outputs.lib;
+    }
+    // userMetaIfExists username;
+
+  # External home-manager modules from flake inputs
+  homeExternalModules = [
+    inputs.nixvim.homeModules.nixvim
+    inputs.sops-nix.homeManagerModules.sops
+    inputs.stylix.homeModules.stylix
+  ];
+
+  # Shared module list for home-manager configurations
+  mkHomeModules =
+    {
+      system,
+      username,
+      extraModules ? [ ],
+    }:
+    homeExternalModules
+    ++ [
+      "${modulesPath}/home/base.nix"
+      "${modulesPath}/home/${kernel system}.nix"
+      (userConfigPath username)
+    ]
+    ++ extraModules;
+
   mkHome =
     {
       modules ? [ ],
@@ -163,24 +200,13 @@ rec {
     }:
     {
       inherit system;
-      extraSpecialArgs = {
-        inherit
-          inputs
-          outputs
-          src
-          system
-          username
-          ;
+      extraSpecialArgs = mkHomeModuleArgs { inherit system username; } // {
         pkgs = pkgsFor.${system};
-        slib = outputs.lib;
-      }
-      // userMetaIfExists username;
-      modules = [
-        "${modulesPath}/home/base.nix"
-        "${modulesPath}/home/${kernel system}.nix"
-        (userConfigPath username)
-      ]
-      ++ modules;
+      };
+      modules = mkHomeModules {
+        inherit system username;
+        extraModules = modules;
+      };
     };
   mkSystem =
     {
@@ -241,12 +267,11 @@ rec {
                     username = user;
                   }
                   // userMetaIfExists user;
-                  imports = [
-                    "${modulesPath}/home/base.nix"
-                    "${modulesPath}/home/${kernel system}.nix"
-                    "${src}/home/${user}/configuration.nix"
-                  ]
-                  ++ homeModules;
+                  imports = mkHomeModules {
+                    inherit system;
+                    username = user;
+                    extraModules = homeModules;
+                  };
                 };
               }) users
             );

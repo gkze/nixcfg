@@ -100,7 +100,7 @@
         ''
           pinentry-program ${prog}
         '';
-      "${config.xdg.configHome}/home-manager/home.nix".source = ../standalone-home.nix;
+      "${config.xdg.configHome}/home-manager/home.nix".source = ../../standalone-home.nix;
       ".local/bin" = {
         source = ./bin;
         recursive = true;
@@ -301,6 +301,7 @@
     };
     zellij = {
       enable = true;
+      # Disabled: auto-attach behavior is disruptive; prefer manual invocation
       enableZshIntegration = false;
       settings = {
         keybinds.normal = {

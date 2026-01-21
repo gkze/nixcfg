@@ -389,6 +389,9 @@ in
         old:
         (opencodeBunPatch old)
         // {
+          # Use dev config instead of prod (gets dev icon + "OpenCode Dev" name)
+          tauriBuildFlags = [ "--no-sign" ];
+
           # Override preBuild to use our patched opencode instead of upstream's
           preBuild = ''
             cp -a ${old.node_modules}/{node_modules,packages} .
@@ -557,7 +560,7 @@ in
           };
         };
 
-      # Use upstream Zed flake for nightly builds (includes Cachix binary cache)
-      zed-editor-nightly = inputs.zed.packages.${prev.stdenv.hostPlatform.system}.default;
+      # Zed editor nightly from upstream flake
+      zed-editor-nightly = inputs.zed.packages.${prev.system}.default;
     };
 }

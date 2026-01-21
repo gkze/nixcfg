@@ -1,5 +1,4 @@
 {
-  inputs,
   lib,
   pkgs,
   slib,
@@ -9,11 +8,7 @@
   ...
 }:
 {
-  imports = with inputs; [
-    nixvim.homeModules.nixvim
-    sops-nix.homeManagerModules.sops
-    stylix.homeModules.stylix
-  ];
+  # External modules (nixvim, sops-nix, stylix) are imported via lib.mkHomeModules
   fonts.fontconfig.enable = true;
   home = {
     homeDirectory = lib.mkForce "${slib.homeDirBase system}/${username}";

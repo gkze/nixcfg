@@ -120,7 +120,7 @@
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.1.6";
+      url = "github:gkze/curator/v0.1.7";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {

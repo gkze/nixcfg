@@ -652,6 +652,7 @@ in
         illuminate.enable = true;
         inc-rename.enable = true;
         indent-blankline.enable = true;
+        # Disabled: using rest.nvim instead (see rest.enable below)
         # kulala.enable = true;
         lazydev.enable = true;
         lsp-format.enable = true;

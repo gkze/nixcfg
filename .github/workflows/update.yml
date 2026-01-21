@@ -21,9 +21,13 @@ jobs:
           name: flake-lock
           path: flake.lock
 
-  argus:
+  darwin:
     needs: update-lock
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [argus, rocinante]
     permissions:
       contents: read
       id-token: write
@@ -33,27 +37,18 @@ jobs:
           echo "=== Before cleanup ==="
           df -h /
 
-          # Remove Xcode versions (keeps only 16.2) - saves ~60-80 GB
-          sudo rm -rf /Applications/Xcode_15.0.1.app
-          sudo rm -rf /Applications/Xcode_15.1.app
-          sudo rm -rf /Applications/Xcode_15.2.app
-          sudo rm -rf /Applications/Xcode_15.3.app
-          sudo rm -rf /Applications/Xcode_15.4.app
-          sudo rm -rf /Applications/Xcode_16.0.app
-          sudo rm -rf /Applications/Xcode_16.1.app
+          # Keep only the latest Xcode, remove all others - saves ~60-80 GB
+          latest_xcode=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          for xcode in /Applications/Xcode*.app; do
+            [[ "$xcode" != "$latest_xcode" ]] && sudo rm -rf "$xcode"
+          done
 
           # Remove all simulators - saves ~20-30 GB
           sudo rm -rf ~/Library/Developer/CoreSimulator
           xcrun simctl delete all 2>/dev/null || true
 
-          # Remove Android SDK - saves ~15-20 GB
-          sudo rm -rf ~/Library/Android/sdk
-
-          # Remove .NET - saves ~8-10 GB
-          sudo rm -rf /usr/local/share/dotnet
-
-          # Remove cached tool versions - saves ~5-8 GB
-          sudo rm -rf ~/hostedtoolcache
+          # Remove Android SDK, .NET, and cached tools - saves ~30-40 GB
+          sudo rm -rf ~/Library/Android/sdk /usr/local/share/dotnet ~/hostedtoolcache
 
           echo "=== After cleanup ==="
           df -h /
@@ -68,60 +63,8 @@ jobs:
         with:
           name: flake-lock
           path: .
-      - run: brew install --cask macfuse
-      - run: brew install 1password-cli
-      - run: nix build .#darwinConfigurations.argus.system
-
-  rocinante:
-    needs: update-lock
-    runs-on: macos-15
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Free disk space
-        run: |
-          echo "=== Before cleanup ==="
-          df -h /
-
-          # Remove Xcode versions (keeps only 16.2) - saves ~60-80 GB
-          sudo rm -rf /Applications/Xcode_15.0.1.app
-          sudo rm -rf /Applications/Xcode_15.1.app
-          sudo rm -rf /Applications/Xcode_15.2.app
-          sudo rm -rf /Applications/Xcode_15.3.app
-          sudo rm -rf /Applications/Xcode_15.4.app
-          sudo rm -rf /Applications/Xcode_16.0.app
-          sudo rm -rf /Applications/Xcode_16.1.app
-
-          # Remove all simulators - saves ~20-30 GB
-          sudo rm -rf ~/Library/Developer/CoreSimulator
-          xcrun simctl delete all 2>/dev/null || true
-
-          # Remove Android SDK - saves ~15-20 GB
-          sudo rm -rf ~/Library/Android/sdk
-
-          # Remove .NET - saves ~8-10 GB
-          sudo rm -rf /usr/local/share/dotnet
-
-          # Remove cached tool versions - saves ~5-8 GB
-          sudo rm -rf ~/hostedtoolcache
-
-          echo "=== After cleanup ==="
-          df -h /
-
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/determinate-nix-action@v3
-      - uses: cachix/cachix-action@v15
-        with:
-          name: gkze
-          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
-      - uses: actions/download-artifact@v4
-        with:
-          name: flake-lock
-          path: .
-      - run: brew install --cask macfuse
-      - run: brew install 1password-cli
-      - run: nix build .#darwinConfigurations.rocinante.system
+      - run: brew install --cask macfuse && brew install 1password-cli
+      - run: nix build .#darwinConfigurations.${{ matrix.host }}.system
 
   linux:
     needs: update-lock
@@ -143,8 +86,8 @@ jobs:
       - run: nix run .#update -- --list
 
   create-pr:
-    needs: [update-lock, argus, rocinante]
-    if: ${{ needs.argus.result == 'success' && needs.rocinante.result == 'success' }}
+    needs: [update-lock, darwin, linux]
+    if: ${{ needs.darwin.result == 'success' && needs.linux.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -159,69 +102,8 @@ jobs:
       - name: Generate flake lock diff
         id: diff
         run: |
-          # Generate the diff between current HEAD and the updated flake.lock
-          diff_output=$(nix run nixpkgs#nvd -- diff \
-            "$(nix flake metadata --json . | jq -r '.path')" \
-            "$(nix flake metadata --json . --reference-lock-file flake.lock | jq -r '.path')" \
-            2>/dev/null || true)
-
-          # Use nix flake metadata to generate a cleaner diff
-          # Get the old lock file from git
           git show HEAD:flake.lock > /tmp/old-flake.lock
-
-          # Generate diff using a script
-          diff_body=$(python3 << 'PYTHON'
-          import json
-          from datetime import datetime, timezone
-
-          with open('/tmp/old-flake.lock') as f:
-              old_lock = json.load(f)
-          with open('flake.lock') as f:
-              new_lock = json.load(f)
-
-          def get_input_info(nodes, name):
-              if name not in nodes:
-                  return None
-              node = nodes[name]
-              locked = node.get('locked', {})
-              rev = locked.get('rev', '')[:7] if locked.get('rev') else ''
-              owner = locked.get('owner', '')
-              repo = locked.get('repo', '')
-              ref = node.get('original', {}).get('ref', '')
-              type_ = locked.get('type', 'github')
-              last_modified = locked.get('lastModified', 0)
-              date = datetime.fromtimestamp(last_modified, tz=timezone.utc).strftime('%Y-%m-%d') if last_modified else ''
-              source = f"{type_}:{owner}/{repo}/{rev}"
-              if ref:
-                  source = f"{type_}:{owner}/{repo}/{ref}/{rev}"
-              return {'rev': rev, 'source': source, 'date': date, 'owner': owner, 'repo': repo, 'ref': ref}
-
-          old_nodes = old_lock.get('nodes', {})
-          new_nodes = new_lock.get('nodes', {})
-
-          all_inputs = set(old_nodes.keys()) | set(new_nodes.keys())
-          all_inputs.discard('root')
-
-          updates = []
-          for name in sorted(all_inputs):
-              old_info = get_input_info(old_nodes, name)
-              new_info = get_input_info(new_nodes, name)
-              if old_info and new_info and old_info['rev'] != new_info['rev']:
-                  updates.append((name, old_info, new_info))
-
-          if updates:
-              print("Flake lock file updates:\n")
-              for name, old, new in updates:
-                  print(f"• Updated input '{name}':")
-                  print(f"    'github:{old['owner']}/{old['repo']}/{old['rev']}' ({old['date']})")
-                  print(f"  → 'github:{new['owner']}/{new['repo']}/{new['rev']}' ({new['date']})")
-          else:
-              print("No input changes detected.")
-          PYTHON
-          )
-
-          # Write to output file and set as output
-          echo "$diff_body" > /tmp/pr-body.txt
+          diff_body=$(python3 .github/scripts/flake_lock_diff.py /tmp/old-flake.lock flake.lock)
 
           # Handle multiline output for GitHub Actions
           {
@@ -231,6 +113,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - uses: peter-evans/create-pull-request@v7
         with:
+          sign-commits: true
           branch: update_flake_lock_action
           delete-branch: true
           title: "flake.lock: Update"
