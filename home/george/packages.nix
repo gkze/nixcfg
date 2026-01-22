@@ -29,10 +29,10 @@
       gawk
       git-who
       gita
-      gitbutler
       glab
       gnused
       gnutar
+      gogcli
       gping
       graphviz
       grex

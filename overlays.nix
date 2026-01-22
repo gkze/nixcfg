@@ -1,12 +1,139 @@
 { inputs, outputs, ... }:
 let
   normalizeName = s: builtins.replaceStrings [ "." "_" ] [ "-" "-" ] s;
-  dedupCargoLockScript = ./misc/dedup_cargo_lock.py;
+
+  # Helper to strip version prefixes from flake refs
+  stripVersionPrefix = s: builtins.replaceStrings [ "rust-v" "v" ] [ "" "" ] s;
+
+  # Get version from flake lock, stripping common prefixes
+  getFlakeVersion = name: stripVersionPrefix outputs.lib.flakeLock.${name}.original.ref;
+
+  # Pre-parsed sources.json for all packages
+  sources = builtins.fromJSON (builtins.readFile ./sources.json);
 in
 {
   default =
     final: prev:
     let
+      inherit (prev.stdenv.hostPlatform) system;
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # Helper: Override a package with version/src from sources.json
+      # ─────────────────────────────────────────────────────────────────────────
+      mkSourceOverride =
+        name: pkg:
+        let
+          info = sources.${name};
+        in
+        pkg.overrideAttrs {
+          inherit (info) version;
+          src = prev.fetchurl {
+            url = info.urls.${system} or info.urls.darwin;
+            hash = info.hashes.${system};
+          };
+        };
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # Helper: Build a Go CLI package with shell completions
+      # ─────────────────────────────────────────────────────────────────────────
+      mkGoCliPackage =
+        {
+          pname,
+          input,
+          subPackages,
+          cmdName ? pname,
+          version ? null,
+          meta ? { },
+          ...
+        }@args:
+        let
+          flakeRef = outputs.lib.flakeLock.${pname};
+          finalVersion =
+            if version != null then version else stripVersionPrefix (flakeRef.original.ref or "");
+        in
+        prev.buildGoModule (
+          {
+            inherit pname subPackages;
+            version = finalVersion;
+            src = input;
+            vendorHash = outputs.lib.sourceHash pname "vendorHash";
+            doCheck = false;
+            nativeBuildInputs = [ prev.installShellFiles ];
+            postInstall = ''
+              installShellCompletion --cmd ${cmdName} \
+                --bash <($out/bin/${cmdName} completion bash) \
+                --fish <($out/bin/${cmdName} completion fish) \
+                --zsh <($out/bin/${cmdName} completion zsh)
+            '';
+            meta =
+              with prev.lib;
+              {
+                mainProgram = cmdName;
+              }
+              // meta;
+          }
+          // (builtins.removeAttrs args [
+            "pname"
+            "input"
+            "subPackages"
+            "cmdName"
+            "version"
+            "meta"
+          ])
+        );
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # Helper: Build a Python package using uv2nix
+      # ─────────────────────────────────────────────────────────────────────────
+      mkUv2nixPackage =
+        {
+          name,
+          src,
+          pythonVersion ? prev.python313,
+          mainProgram,
+          packageName ? name,
+          venvName ? name,
+          extraBuildPhase ? "",
+          extraOverlays ? [ ],
+        }:
+        let
+          uv = prev.lib.getExe prev.uv;
+          python = prev.lib.getExe pythonVersion;
+          workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
+            workspaceRoot = prev.stdenv.mkDerivation {
+              name = "${name}-locked";
+              inherit src;
+              buildPhase = ''
+                ${extraBuildPhase}
+                UV_PYTHON=${python} ${uv} -n lock
+              '';
+              installPhase = "cp -r . $out";
+            };
+          };
+          pySet =
+            (prev.callPackage inputs.pyproject-nix.build.packages {
+              python = pythonVersion;
+            }).overrideScope
+              (
+                prev.lib.composeManyExtensions (
+                  [
+                    inputs.pyproject-build-systems.overlays.default
+                    (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+                  ]
+                  ++ extraOverlays
+                )
+              );
+        in
+        (prev.callPackages inputs.pyproject-nix.build.util { }).mkApplication {
+          venv = pySet.mkVirtualEnv venvName workspace.deps.all // {
+            meta.mainProgram = mainProgram;
+          };
+          package = pySet.${packageName};
+        };
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # Helper: Patch opencode packages for bun version compatibility
+      # ─────────────────────────────────────────────────────────────────────────
       opencodeBunPatch = old: {
         nativeBuildInputs =
           (old.nativeBuildInputs or [ ])
@@ -28,119 +155,98 @@ in
       };
     in
     {
-      axiom-cli =
-        let
-          flakeRef = outputs.lib.flakeLock.axiom-cli;
-        in
-        prev.buildGoModule {
-          pname = "axiom-cli";
-          version = flakeRef.original.ref;
-          src = inputs.axiom-cli;
-          subPackages = [ "cmd/axiom" ];
-          vendorHash = outputs.lib.sourceHash "axiom-cli" "vendorHash";
-          doCheck = false;
+      # ═══════════════════════════════════════════════════════════════════════════
+      # Go CLI Packages
+      # ═══════════════════════════════════════════════════════════════════════════
 
-          nativeBuildInputs = [ prev.installShellFiles ];
-
-          postInstall = ''
-            installShellCompletion --cmd axiom \
-              --bash <($out/bin/axiom completion bash) \
-              --fish <($out/bin/axiom completion fish) \
-              --zsh <($out/bin/axiom completion zsh)
-          '';
-
-          meta = with prev.lib; {
-            description = "The power of Axiom on the command line";
-            homepage = "https://github.com/axiomhq/cli";
-            license = licenses.mit;
-            mainProgram = "axiom";
-          };
+      axiom-cli = mkGoCliPackage {
+        pname = "axiom-cli";
+        input = inputs.axiom-cli;
+        subPackages = [ "cmd/axiom" ];
+        cmdName = "axiom";
+        meta = with prev.lib; {
+          description = "The power of Axiom on the command line";
+          homepage = "https://github.com/axiomhq/cli";
+          license = licenses.mit;
         };
+      };
 
-      beads = prev.buildGoModule {
-        name = "beads";
-        src = inputs.beads;
+      beads = mkGoCliPackage {
+        pname = "beads";
+        input = inputs.beads;
         subPackages = [ "cmd/bd" ];
-        vendorHash = outputs.lib.sourceHash "beads" "vendorHash";
+        cmdName = "bd";
+        version = "0.0.0"; # beads doesn't have version tags
         proxyVendor = true;
-        doCheck = false;
+      };
 
-        nativeBuildInputs = [ prev.installShellFiles ];
+      gogcli = mkGoCliPackage {
+        pname = "gogcli";
+        input = inputs.gogcli;
+        subPackages = [ "cmd/gog" ];
+        cmdName = "gog";
+        meta = with prev.lib; {
+          description = "Google Suite CLI: Gmail, GCal, GDrive, GContacts";
+          homepage = "https://github.com/steipete/gogcli";
+          license = licenses.mit;
+        };
+      };
 
-        postInstall = ''
-          installShellCompletion --cmd bd \
-            --bash <($out/bin/bd completion bash) \
-            --fish <($out/bin/bd completion fish) \
-            --zsh <($out/bin/bd completion zsh)
+      # ═══════════════════════════════════════════════════════════════════════════
+      # Python (uv2nix) Packages
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      beads-mcp = mkUv2nixPackage {
+        name = "beads-mcp";
+        src = "${inputs.beads}/integrations/beads-mcp";
+        mainProgram = "beads-mcp";
+      };
+
+      nix-manipulator = mkUv2nixPackage {
+        name = "nix-manipulator";
+        src = inputs.nix-manipulator;
+        mainProgram = "nima";
+        extraBuildPhase = ''
+          export SETUPTOOLS_SCM_PRETEND_VERSION=${getFlakeVersion "nix-manipulator"}
         '';
       };
 
-      beads-mcp =
-        with inputs;
-        let
-          uv = prev.lib.getExe prev.uv;
-          python = prev.lib.getExe prev.python313;
-          workspace = uv2nix.lib.workspace.loadWorkspace {
-            workspaceRoot = prev.stdenv.mkDerivation {
-              name = "beads-mcp-locked";
-              src = "${beads}/integrations/beads-mcp";
-              buildPhase = "UV_PYTHON=${python} ${uv} -n lock";
-              installPhase = "cp -r . $out";
-            };
-          };
-          pySet =
-            (prev.callPackage pyproject-nix.build.packages {
-              python = prev.python313;
-            }).overrideScope
-              (
-                prev.lib.composeManyExtensions [
-                  pyproject-build-systems.overlays.default
-                  (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
-                ]
-              );
-        in
-        (prev.callPackages pyproject-nix.build.util { }).mkApplication {
-          venv = pySet.mkVirtualEnv "beads-mcp" workspace.deps.all // {
-            meta.mainProgram = "beads-mcp";
-          };
-          package = pySet.beads-mcp;
-        };
+      toad = mkUv2nixPackage {
+        name = "toad";
+        src = inputs.toad;
+        pythonVersion = prev.python314;
+        mainProgram = "toad";
+        packageName = "batrachian-toad";
+        venvName = "batrachian-toad";
+        extraOverlays = [
+          (f: p: {
+            watchdog = p.watchdog.overrideAttrs (old: {
+              buildInputs = (old.buildInputs or [ ]) ++ [ f.setuptools ];
+              nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ f.setuptools ];
+            });
+          })
+        ];
+      };
 
-      chatgpt =
-        let
-          info = (builtins.fromJSON (builtins.readFile ./sources.json)).chatgpt;
-          inherit (prev.stdenv.hostPlatform) system;
-        in
-        prev.chatgpt.overrideAttrs {
-          inherit (info) version;
-          src = prev.fetchurl {
-            url = info.urls.darwin;
-            hash = info.hashes.${system};
-          };
-        };
+      # ═══════════════════════════════════════════════════════════════════════════
+      # sources.json Overrides (simple version + src updates)
+      # ═══════════════════════════════════════════════════════════════════════════
 
-      code-cursor =
-        let
-          info = (builtins.fromJSON (builtins.readFile ./sources.json)).code-cursor;
-          inherit (prev.stdenv.hostPlatform) system;
-          urls = {
-            aarch64-darwin = "https://downloads.cursor.com/production/${info.commit}/darwin/arm64/Cursor-darwin-arm64.dmg";
-            x86_64-darwin = "https://downloads.cursor.com/production/${info.commit}/darwin/x64/Cursor-darwin-x64.dmg";
-            aarch64-linux = "https://downloads.cursor.com/production/${info.commit}/linux/arm64/Cursor-${info.version}-aarch64.AppImage";
-            x86_64-linux = "https://downloads.cursor.com/production/${info.commit}/linux/x64/Cursor-${info.version}-x86_64.AppImage";
-          };
-        in
-        prev.code-cursor.overrideAttrs {
-          inherit (info) version;
-          src = prev.fetchurl {
-            url = urls.${system};
-            hash = info.hashes.${system};
-          };
-        };
+      chatgpt = mkSourceOverride "chatgpt" prev.chatgpt;
+      code-cursor = mkSourceOverride "code-cursor" prev.code-cursor;
+      google-chrome = mkSourceOverride "google-chrome" prev.google-chrome;
+
+      jetbrains = prev.jetbrains // {
+        datagrip = mkSourceOverride "datagrip" prev.jetbrains.datagrip;
+      };
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # Other Packages (with custom logic)
+      # ═══════════════════════════════════════════════════════════════════════════
 
       codex =
         let
-          version = builtins.replaceStrings [ "rust-v" ] [ "" ] outputs.lib.flakeLock.codex.original.ref;
+          version = getFlakeVersion "codex";
         in
         prev.codex.overrideAttrs {
           inherit version;
@@ -154,13 +260,8 @@ in
 
       conductor =
         let
-          info = (builtins.fromJSON (builtins.readFile ./sources.json)).conductor;
-          inherit (prev.stdenv.hostPlatform) system;
+          info = sources.conductor;
           arch = if system == "aarch64-darwin" then "aarch64" else "x86_64";
-          urls = {
-            aarch64-darwin = "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-aarch64";
-            x86_64-darwin = "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-x86_64";
-          };
         in
         prev.stdenvNoCC.mkDerivation {
           pname = "conductor";
@@ -168,7 +269,7 @@ in
 
           src = prev.fetchurl {
             name = "Conductor_${info.version}_${arch}.dmg";
-            url = urls.${system};
+            url = info.urls.${system};
             hash = info.hashes.${system};
           };
 
@@ -199,7 +300,7 @@ in
 
       crush =
         let
-          version = builtins.replaceStrings [ "v" ] [ "" ] outputs.lib.flakeLock.crush.original.ref;
+          version = getFlakeVersion "crush";
         in
         prev.crush.overrideAttrs {
           inherit version;
@@ -209,93 +310,28 @@ in
 
       gemini-cli =
         let
-          version = builtins.replaceStrings [ "v" ] [ "" ] outputs.lib.flakeLock.gemini-cli.original.ref;
+          version = getFlakeVersion "gemini-cli";
           npmDepsHash = outputs.lib.sourceHash "gemini-cli" "npmDepsHash";
-        in
-        prev.gemini-cli.overrideAttrs rec {
-          inherit version npmDepsHash;
-          src = inputs.gemini-cli;
           npmDeps = prev.fetchNpmDeps {
-            inherit src;
+            src = inputs.gemini-cli;
             hash = npmDepsHash;
           };
-        };
-
-      gitbutler =
-        let
-          version = "0.18.3";
-          pnpmDepsHash = "sha256-R1EYyMy0oVX9G6GYrjIsWx7J9vfkdM4fLlydteVsi7E=";
-
-          # Patch source to remove duplicate git sources from Cargo.lock
-          # GitButler's Cargo.lock has some crates from both crates.io AND git,
-          # which causes "File exists" errors during cargo vendor
-          patchedSrc = prev.stdenvNoCC.mkDerivation {
-            name = "gitbutler-src-deduped";
-            src = inputs.gitbutler;
-            nativeBuildInputs = [ prev.python3 ];
-            patchPhase = ''
-              python3 ${dedupCargoLockScript} Cargo.lock
-            '';
-            installPhase = ''
-              cp -r . $out
-            '';
-          };
         in
-        prev.gitbutler.overrideAttrs (old: {
-          inherit version;
-          src = patchedSrc;
-          # Our dedup script replaces the nixpkgs Cargo.lock patch
-          patches = [ ];
-          cargoDeps = prev.rustPlatform.fetchCargoVendor {
-            src = patchedSrc;
-            hash = "sha256-2Qh26vhtKaJAmedjgMNf0rMQGslMk9qCO5Qz+NOK4Ys=";
-          };
-          pnpmDeps = prev.fetchPnpmDeps {
-            inherit (old) pname;
-            inherit version;
-            src = patchedSrc;
-            fetcherVersion = 2;
-            hash = pnpmDepsHash;
-          };
-          # Override postPatch for 0.18.3 (code changed from 0.15.10)
-          postPatch = ''
-            tauriConf="crates/gitbutler-tauri/tauri.conf.release.json"
-
-            # Set version, disable updater artifacts, remove externalBin
-            jq '
-              .version = "${version}" |
-              .bundle.createUpdaterArtifacts = false |
-              del(.bundle.externalBin)
-            ' "$tauriConf" | sponge "$tauriConf"
-
-            tomlq -ti 'del(.lints) | del(.workspace.lints)' \
-              "$cargoDepsCopy"/gix*/Cargo.toml
-
-            substituteInPlace apps/desktop/src/lib/backend/tauri.ts \
-              --replace-fail 'checkUpdate = tauriCheck;' \
-              'checkUpdate = () => null;'
+        prev.gemini-cli.overrideAttrs (oldAttrs: {
+          inherit version npmDepsHash npmDeps;
+          src = inputs.gemini-cli;
+          disallowedReferences = [
+            npmDeps
+            prev.nodejs_22.python
+          ];
+          # Remove files that reference python to keep it out of the closure
+          postInstall = (oldAttrs.postInstall or "") + ''
+            rm -rf $out/share/gemini-cli/node_modules/keytar/build
           '';
-          # Disable tests - snapshot tests fail due to date differences (25y ago vs 26y ago)
-          doCheck = false;
         });
 
-      google-chrome =
-        let
-          info = (builtins.fromJSON (builtins.readFile ./sources.json)).google-chrome;
-          urls = {
-            aarch64-darwin = "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg";
-            x86_64-darwin = "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg";
-            x86_64-linux = "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb";
-          };
-          inherit (prev.stdenv.hostPlatform) system;
-        in
-        prev.google-chrome.overrideAttrs {
-          inherit (info) version;
-          src = prev.fetchurl {
-            url = urls.${system};
-            hash = info.hashes.${system};
-          };
-        };
+      # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
+      # See bead nixcfg-uec for technical details
 
       homebrew-zsh-completion =
         let
@@ -315,27 +351,6 @@ in
           '';
         };
 
-      jetbrains = prev.jetbrains // {
-        datagrip =
-          let
-            info = (builtins.fromJSON (builtins.readFile ./sources.json)).datagrip;
-            inherit (prev.stdenv.hostPlatform) system;
-            urls = {
-              aarch64-darwin = "https://download.jetbrains.com/datagrip/datagrip-${info.version}-aarch64.dmg";
-              x86_64-darwin = "https://download.jetbrains.com/datagrip/datagrip-${info.version}.dmg";
-              aarch64-linux = "https://download.jetbrains.com/datagrip/datagrip-${info.version}-aarch64.tar.gz";
-              x86_64-linux = "https://download.jetbrains.com/datagrip/datagrip-${info.version}.tar.gz";
-            };
-          in
-          prev.jetbrains.datagrip.overrideAttrs {
-            inherit (info) version;
-            src = prev.fetchurl {
-              url = urls.${system};
-              hash = info.hashes.${system};
-            };
-          };
-      };
-
       mountpoint-s3 = prev.mountpoint-s3.overrideAttrs (old: {
         buildInputs =
           prev.lib.optionals prev.stdenv.hostPlatform.isDarwin [ prev.macfuse-stubs ]
@@ -348,44 +363,9 @@ in
         };
       });
 
-      nix-manipulator =
-        with inputs;
-        let
-          version = outputs.lib.flakeLock.nix-manipulator.original.ref;
-          uv = prev.lib.getExe prev.uv;
-          python = prev.lib.getExe prev.python313;
-          workspace = uv2nix.lib.workspace.loadWorkspace {
-            workspaceRoot = prev.stdenv.mkDerivation {
-              name = "nix-manipulator-locked";
-              src = nix-manipulator;
-              buildPhase = ''
-                export SETUPTOOLS_SCM_PRETEND_VERSION=${version}
-                UV_PYTHON=${python} ${uv} -n lock
-              '';
-              installPhase = "cp -r . $out";
-            };
-          };
-          pySet =
-            (prev.callPackage pyproject-nix.build.packages {
-              python = prev.python313;
-            }).overrideScope
-              (
-                prev.lib.composeManyExtensions [
-                  pyproject-build-systems.overlays.default
-                  (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
-                ]
-              );
-        in
-        (prev.callPackages pyproject-nix.build.util { }).mkApplication {
-          venv = pySet.mkVirtualEnv "nix-manipulator" workspace.deps.all // {
-            meta.mainProgram = "nima";
-          };
-          package = pySet.nix-manipulator;
-        };
+      opencode = inputs.opencode.packages.${system}.opencode.overrideAttrs opencodeBunPatch;
 
-      opencode = inputs.opencode.packages.${prev.system}.opencode.overrideAttrs opencodeBunPatch;
-
-      opencode-desktop = inputs.opencode.packages.${prev.system}.desktop.overrideAttrs (
+      opencode-desktop = inputs.opencode.packages.${system}.desktop.overrideAttrs (
         old:
         (opencodeBunPatch old)
         // {
@@ -407,15 +387,23 @@ in
 
       sentry-cli =
         let
-          version = outputs.lib.flakeLock.sentry-cli.original.ref;
+          version = getFlakeVersion "sentry-cli";
           # Filter out iOS test fixtures with code-signed .xcarchive bundles
           # These cause nix-store --optimise to fail on macOS due to
           # code signature protections on _CodeSignature/CodeResources files
-          filteredSrc = prev.runCommand "sentry-cli-src-filtered" { } ''
-            cp -r ${inputs.sentry-cli} $out
-            chmod -R u+w $out
-            rm -rf $out/tests/integration/_fixtures/build/*.xcarchive
-          '';
+          # Note: There are xcarchives in multiple locations:
+          #   - tests/integration/_fixtures/build/archive.xcarchive
+          #   - apple-catalog-parsing/.../Resources/test.xcarchive
+          # Using lib.cleanSourceWith to filter at evaluation time avoids keeping
+          # the original source with code-signed files as a build dependency
+          filteredSrc = prev.lib.cleanSourceWith {
+            src = inputs.sentry-cli;
+            name = "sentry-cli-src-filtered";
+            filter =
+              path: _type:
+              # Check if any path component is an xcarchive directory
+              !(builtins.match ".*\\.xcarchive.*" path != null);
+          };
         in
         prev.sentry-cli.overrideAttrs (old: {
           inherit version;
@@ -438,46 +426,6 @@ in
           version = flakeRef.original.ref;
           src = inputs.sublime-kdl;
           installPhase = "cp -r $src $out";
-        };
-
-      toad =
-        with inputs;
-        let
-          uv = prev.lib.getExe prev.uv;
-          python = prev.lib.getExe prev.python314;
-          workspace = uv2nix.lib.workspace.loadWorkspace {
-            workspaceRoot = prev.stdenv.mkDerivation {
-              name = "toad-relocked";
-              src = toad;
-              buildPhase = ''
-                UV_PYTHON=${python} ${uv} -n lock
-              '';
-              installPhase = "cp -r . $out";
-            };
-          };
-
-          pySet =
-            (prev.callPackage pyproject-nix.build.packages {
-              python = prev.python314;
-            }).overrideScope
-              (
-                prev.lib.composeManyExtensions [
-                  pyproject-build-systems.overlays.default
-                  (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
-                  (f: p: {
-                    watchdog = p.watchdog.overrideAttrs (old: {
-                      buildInputs = (old.buildInputs or [ ]) ++ [ f.setuptools ];
-                      nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ f.setuptools ];
-                    });
-                  })
-                ]
-              );
-        in
-        (prev.callPackages pyproject-nix.build.util { }).mkApplication {
-          venv = pySet.mkVirtualEnv "batrachian-toad" workspace.deps.all // {
-            meta.mainProgram = "toad";
-          };
-          package = pySet.batrachian-toad;
         };
 
       # Extend vimPlugins with fixes and custom plugins
@@ -538,9 +486,9 @@ in
 
       vscode-insiders =
         let
-          info = (builtins.fromJSON (builtins.readFile ./sources.json)).vscode-insiders;
+          info = sources.vscode-insiders;
           inherit (info) version;
-          hash = info.hashes.${prev.stdenv.hostPlatform.system};
+          hash = info.hashes.${system};
           plat =
             {
               aarch64-darwin = "darwin-arm64";
@@ -548,19 +496,19 @@ in
               x86_64-darwin = "darwin";
               x86_64-linux = "linux-x64";
             }
-            .${prev.stdenv.hostPlatform.system};
+            .${system};
           archive_fmt = if prev.stdenv.hostPlatform.isDarwin then "zip" else "tar.gz";
         in
         (prev.vscode.override { isInsiders = true; }).overrideAttrs {
           inherit version;
           src = prev.fetchurl {
             name = "VSCode-insiders-${version}-${plat}.${archive_fmt}";
-            url = "https://update.code.visualstudio.com/${version}/${plat}/insider";
+            url = info.urls.${system};
             inherit hash;
           };
         };
 
       # Zed editor nightly from upstream flake
-      zed-editor-nightly = inputs.zed.packages.${prev.system}.default;
+      zed-editor-nightly = inputs.zed.packages.${system}.default;
     };
 }

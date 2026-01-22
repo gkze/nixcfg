@@ -116,7 +116,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.86.0";
+      url = "github:openai/codex/rust-v0.88.0";
       flake = false;
     };
     curator = {
@@ -124,15 +124,16 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.33.2";
+      url = "github:charmbracelet/crush/v0.34.0";
       flake = false;
     };
     gemini-cli = {
-      url = "github:google-gemini/gemini-cli/v0.24.0";
+      url = "github:google-gemini/gemini-cli/v0.25.0";
       flake = false;
     };
-    gitbutler = {
-      url = "github:gitbutlerapp/gitbutler/release/0.18.3";
+    # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
+    gogcli = {
+      url = "github:steipete/gogcli/v0.9.0";
       flake = false;
     };
     catppuccin-delta = {
@@ -188,7 +189,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad/v0.5.32";
+      url = "github:batrachianai/toad/v0.5.34";
       flake = false;
     };
     treewalker-nvim = {
@@ -333,10 +334,14 @@
                     (editorWorkspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
                   ]
                 );
-            editorVenv = editorPySet.mkVirtualEnv "nixcfg-editor" { aiohttp = [ ]; };
+            editorVenv = editorPySet.mkVirtualEnv "nixcfg-venv" {
+              aiohttp = [ ];
+              pydantic = [ ];
+            };
           in
           pkgs.devshell.mkShell {
             name = "nixcfg";
+
             packages =
               with pkgs;
               [
@@ -353,13 +358,16 @@
               ++ lib.optional pkgs.stdenv.isLinux dconf2nix
               ++ pre-commit-check.enabledPackages
               ++ [ editorVenv ];
-            devshell.startup.pre-commit.text = pre-commit-check.shellHook;
-            devshell.startup.editor-venv.text = ''
-              if [ -e .venv ] && [ ! -L .venv ]; then
-                rm -rf .venv
-              fi
-              ln -sfn ${editorVenv} .venv
-            '';
+
+            devshell.startup = {
+              pre-commit.text = pre-commit-check.shellHook;
+              editor-venv.text = ''
+                if [ -e .venv ] && [ ! -L .venv ]; then
+                  rm -rf .venv
+                fi
+                ln -sfn ${editorVenv} .venv
+              '';
+            };
           };
 
         formatter =

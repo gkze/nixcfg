@@ -3,6 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = [
 #   "aiohttp",
+#   "pydantic>=2.0",
 # ]
 # ///
 """Update source versions and hashes in sources.json.
@@ -11,7 +12,18 @@ Usage:
     ./update.py <source>                 Update a specific source
     ./update.py <source> --update-input  Update and refresh flake input
     ./update.py --all                    Update all sources
+    ./update.py --all --force            Force update even if recently checked
+    ./update.py --all --continue-on-error  Continue if individual sources fail
     ./update.py --list                   List available sources
+    ./update.py --validate               Validate sources.json
+    ./update.py --schema                 Output JSON schema for sources.json
+    ./update.py --json                   Output results as JSON
+    ./update.py --quiet                  Suppress progress output
+
+Environment Variables:
+    UPDATE_CACHE_TTL_HOURS    Cache TTL in hours (default: 6)
+    UPDATE_LOG_TAIL_LINES     Number of log lines to show (default: 10)
+    UPDATE_PANEL_HEIGHT       Terminal panel height override
 
 Sources are defined with custom update logic for fetching latest versions
 and computing hashes from upstream release channels.
@@ -32,15 +44,17 @@ import sys
 import termios
 import tty
 import urllib.parse
+import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, AsyncIterator, Iterable, Mapping
+from typing import Annotated, Any, AsyncIterator, Iterable, Literal, Mapping
 
 import aiohttp
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # =============================================================================
@@ -58,6 +72,20 @@ def get_repo_file(filename: str) -> Path:
 SOURCES_FILE = get_repo_file("sources.json")
 FLAKE_LOCK_FILE = get_repo_file("flake.lock")
 
+# Cache TTL: skip update check if lastChecked is within this window
+DEFAULT_CACHE_TTL_HOURS = 6
+
+
+def _get_cache_ttl_hours() -> int:
+    """Get cache TTL from environment or use default."""
+    env_ttl = os.environ.get("UPDATE_CACHE_TTL_HOURS")
+    if env_ttl:
+        try:
+            return max(0, int(env_ttl))
+        except ValueError:
+            pass
+    return DEFAULT_CACHE_TTL_HOURS
+
 
 # =============================================================================
 # Utilities
@@ -68,6 +96,8 @@ DEFAULT_TIMEOUT = 30
 DEFAULT_LOG_TAIL_LINES = 10
 DEFAULT_RENDER_INTERVAL = 0.05
 DEFAULT_USER_AGENT = "update.py"
+DEFAULT_RETRIES = 3
+DEFAULT_RETRY_BACKOFF = 1.0
 
 
 def _resolve_timeout(timeout: float | None) -> float:
@@ -235,22 +265,46 @@ async def _request(
     user_agent: str | None = None,
     timeout: float | None = None,
     method: str = "GET",
+    retries: int = DEFAULT_RETRIES,
+    backoff: float = DEFAULT_RETRY_BACKOFF,
 ) -> tuple[bytes, Mapping[str, str]]:
     headers = {}
     if user_agent:
         headers["User-Agent"] = user_agent
     timeout_config = aiohttp.ClientTimeout(total=_resolve_timeout(timeout))
-    async with session.request(
-        method, url, headers=headers, timeout=timeout_config, allow_redirects=True
-    ) as response:
-        payload = await response.read()
-        if response.status >= 400:
-            error_body = payload.decode(errors="ignore").strip()
-            detail = f"HTTP {response.status} {response.reason}"
-            if error_body:
-                detail = f"{detail}\n{error_body}"
-            raise RuntimeError(f"Request to {url} failed: {detail}")
-        return payload, response.headers
+
+    last_error: Exception | None = None
+    for attempt in range(retries):
+        try:
+            async with session.request(
+                method,
+                url,
+                headers=headers,
+                timeout=timeout_config,
+                allow_redirects=True,
+            ) as response:
+                payload = await response.read()
+                if response.status >= 400:
+                    error_body = payload.decode(errors="ignore").strip()
+                    detail = f"HTTP {response.status} {response.reason}"
+                    if error_body:
+                        detail = f"{detail}\n{error_body}"
+                    # Don't retry client errors (4xx), only server errors (5xx)
+                    if response.status < 500:
+                        raise RuntimeError(f"Request to {url} failed: {detail}")
+                    last_error = RuntimeError(f"Request to {url} failed: {detail}")
+                else:
+                    return payload, response.headers
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            last_error = e
+
+        # Exponential backoff before retry
+        if attempt < retries - 1:
+            await asyncio.sleep(backoff * (2**attempt))
+
+    raise RuntimeError(
+        f"Request to {url} failed after {retries} attempts: {last_error}"
+    )
 
 
 async def fetch_url(
@@ -554,6 +608,15 @@ def _build_nix_expr(body: str) -> str:
     """
 
 
+async def _compute_nixpkgs_hash(
+    source: str, expr_body: str
+) -> AsyncIterator[UpdateEvent]:
+    """Compute hash for a nixpkgs expression that uses lib.fakeHash."""
+    expr = _build_nix_expr(expr_body)
+    async for event in compute_fixed_output_hash(source, expr):
+        yield event
+
+
 async def compute_go_vendor_hash(
     source: str,
     input_name: str,
@@ -569,15 +632,17 @@ async def compute_go_vendor_hash(
         subpackages_expr = f"subPackages = [ {quoted} ];"
     proxy_expr = "proxyVendor = true;" if proxy_vendor else ""
     src_expr = flake_fetch_expr(get_flake_input_node(input_name))
-    expr = _build_nix_expr(f"""pkgs.buildGoModule {{
+    async for event in _compute_nixpkgs_hash(
+        source,
+        f"""pkgs.buildGoModule {{
         pname = "{pname}";
         version = "{version}";
         src = {src_expr};
         {subpackages_expr}
         {proxy_expr}
         vendorHash = pkgs.lib.fakeHash;
-      }}""")
-    async for event in compute_fixed_output_hash(source, expr):
+      }}""",
+    ):
         yield event
 
 
@@ -587,11 +652,13 @@ async def compute_cargo_vendor_hash(
     src_expr = flake_fetch_expr(get_flake_input_node(input_name))
     if subdir:
         src_expr = f'"${{{src_expr}}}/{subdir}"'
-    expr = _build_nix_expr(f"""pkgs.rustPlatform.fetchCargoVendor {{
+    async for event in _compute_nixpkgs_hash(
+        source,
+        f"""pkgs.rustPlatform.fetchCargoVendor {{
         src = {src_expr};
         hash = pkgs.lib.fakeHash;
-      }}""")
-    async for event in compute_fixed_output_hash(source, expr):
+      }}""",
+    ):
         yield event
 
 
@@ -599,11 +666,13 @@ async def compute_npm_deps_hash(
     source: str, input_name: str
 ) -> AsyncIterator[UpdateEvent]:
     src_expr = flake_fetch_expr(get_flake_input_node(input_name))
-    expr = _build_nix_expr(f"""pkgs.fetchNpmDeps {{
+    async for event in _compute_nixpkgs_hash(
+        source,
+        f"""pkgs.fetchNpmDeps {{
         src = {src_expr};
         hash = pkgs.lib.fakeHash;
-      }}""")
-    async for event in compute_fixed_output_hash(source, expr):
+      }}""",
+    ):
         yield event
 
 
@@ -663,134 +732,240 @@ def make_hash_entry(
 # Registry populated automatically via __init_subclass__
 UPDATERS: dict[str, type["Updater"]] = {}
 
+# SRI hash pattern for validation
+_SRI_HASH_PATTERN = re.compile(r"^sha256-[A-Za-z0-9+/]+=*$")
 
-@dataclass(frozen=True)
-class HashEntry:
-    """Single hash entry for sources.json."""
+# Valid Nix platforms
+NixPlatform = Literal[
+    "aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux", "darwin"
+]
 
-    drv_type: str
-    hash_type: str
+# Valid derivation types
+DrvType = Literal["buildGoModule", "fetchCargoVendor", "fetchNpmDeps", "fetchurl"]
+
+# Valid hash types
+HashType = Literal["vendorHash", "cargoHash", "npmDepsHash", "sha256"]
+
+
+def _validate_sri_hash(value: str) -> str:
+    """Validate that a hash is in SRI format."""
+    if not _SRI_HASH_PATTERN.match(value):
+        raise ValueError(f"Hash must be in SRI format (sha256-...): {value!r}")
+    return value
+
+
+# Type alias for SRI hash with validation
+SriHash = Annotated[str, Field(pattern=r"^sha256-[A-Za-z0-9+/]+=*$")]
+
+
+class HashEntry(BaseModel):
+    """Single hash entry for sources.json (flake-input-based sources)."""
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+    drv_type: DrvType = Field(alias="drvType")
+    hash_type: HashType = Field(alias="hashType")
     hash: str
     url: str | None = None
     urls: dict[str, str] | None = None
 
+    @field_validator("hash")
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "HashEntry":
-        return cls(
-            drv_type=str(data["drvType"]),
-            hash_type=str(data["hashType"]),
-            hash=str(data["hash"]),
-            url=data.get("url"),
-            urls=data.get("urls"),
-        )
+    def validate_hash(cls, v: str) -> str:
+        return _validate_sri_hash(v)
 
     def to_dict(self) -> dict[str, Any]:
-        entry: dict[str, Any] = {
+        """Serialize to JSON-compatible dict with camelCase keys."""
+        result: dict[str, Any] = {
             "drvType": self.drv_type,
             "hashType": self.hash_type,
             "hash": self.hash,
         }
         if self.url is not None:
-            entry["url"] = self.url
+            result["url"] = self.url
         if self.urls is not None:
-            entry["urls"] = self.urls
-        return entry
+            result["urls"] = self.urls
+        return result
 
 
+# Type for hashes - either list of entries or platform->hash mapping
 SourceHashes = dict[str, str] | list[HashEntry]
 
 
-@dataclass(frozen=True)
-class HashCollection:
+class HashCollection(BaseModel):
+    """Collection of hashes - either structured entries or platform mapping."""
+
+    model_config = ConfigDict(extra="forbid")
+
     entries: list[HashEntry] | None = None
     mapping: dict[str, str] | None = None
 
+    @model_validator(mode="before")
     @classmethod
-    def from_value(cls, value: SourceHashes | "HashCollection") -> "HashCollection":
-        if isinstance(value, HashCollection):
-            return value
-        if isinstance(value, list):
-            entries = [
-                item if isinstance(item, HashEntry) else HashEntry.from_dict(item)
-                for item in value
-            ]
-            return cls(entries=entries)
-        if isinstance(value, dict):
-            return cls(mapping=dict(value))
-        raise TypeError("Source entry 'hashes' must be a list or dict")
+    def parse_input(cls, data: Any) -> dict[str, Any]:
+        """Parse raw input into entries or mapping."""
+        if isinstance(data, dict):
+            if "entries" in data or "mapping" in data:
+                return data
+            # Platform -> hash mapping
+            for platform, hash_value in data.items():
+                _validate_sri_hash(hash_value)
+            return {"mapping": data}
+        if isinstance(data, list):
+            return {"entries": data}
+        if isinstance(data, HashCollection):
+            return {"entries": data.entries, "mapping": data.mapping}
+        raise ValueError("Hashes must be a list or dict")
 
     def to_json(self) -> dict[str, Any] | list[dict[str, Any]]:
+        """Serialize to JSON-compatible format."""
         if self.entries is not None:
-            return [hash_entry.to_dict() for hash_entry in self.entries]
+            return [entry.to_dict() for entry in self.entries]
         if self.mapping is not None:
             return dict(self.mapping)
         return {}
 
+    def primary_hash(self) -> str | None:
+        """Return the first/primary hash for display purposes."""
+        if self.entries and len(self.entries) == 1:
+            return self.entries[0].hash
+        if self.mapping:
+            values = list(self.mapping.values())
+            if len(set(values)) == 1:
+                return values[0]
+        return None
 
-@dataclass(frozen=True)
-class SourceEntry:
-    """Normalized schema for sources.json entries."""
+
+class SourceEntry(BaseModel):
+    """A source package entry in sources.json."""
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        extra="forbid",
+    )
 
     hashes: HashCollection
     version: str | None = None
     input: str | None = None
     urls: dict[str, str] | None = None
-    commit: str | None = None
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "hashes", HashCollection.from_value(self.hashes))
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "SourceEntry":
-        if "hashes" not in data:
-            raise ValueError("Source entry is missing 'hashes'")
-        hashes = HashCollection.from_value(data["hashes"])
-        return cls(
-            hashes=hashes,
-            version=data.get("version"),
-            input=data.get("input"),
-            urls=data.get("urls"),
-            commit=data.get("commit"),
-        )
+    commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+    last_checked: datetime | None = Field(default=None, alias="lastChecked")
 
     def to_dict(self) -> dict[str, Any]:
-        entry: dict[str, Any] = {"hashes": self.hashes.to_json()}
+        """Serialize to JSON-compatible dict with camelCase keys."""
+        result: dict[str, Any] = {"hashes": self.hashes.to_json()}
         if self.version is not None:
-            entry["version"] = self.version
+            result["version"] = self.version
         if self.input is not None:
-            entry["input"] = self.input
+            result["input"] = self.input
         if self.urls is not None:
-            entry["urls"] = self.urls
+            result["urls"] = self.urls
         if self.commit is not None:
-            entry["commit"] = self.commit
-        return entry
+            result["commit"] = self.commit
+        if self.last_checked is not None:
+            result["lastChecked"] = self.last_checked.isoformat()
+        return result
+
+    def is_cache_valid(self, ttl_hours: int | None = None) -> bool:
+        """Check if the cache is still valid based on lastChecked timestamp."""
+        if self.last_checked is None:
+            return False
+        if ttl_hours is None:
+            ttl_hours = _get_cache_ttl_hours()
+        now = datetime.now(timezone.utc)
+        last_checked = self.last_checked
+        if last_checked.tzinfo is None:
+            last_checked = last_checked.replace(tzinfo=timezone.utc)
+        return now - last_checked < timedelta(hours=ttl_hours)
+
+    def with_updated_timestamp(self) -> "SourceEntry":
+        """Return a copy with updated lastChecked timestamp."""
+        return self.model_copy(update={"last_checked": datetime.now(timezone.utc)})
 
 
-@dataclass
-class SourcesFile:
+class SourcesFile(BaseModel):
     """Container for sources.json entries."""
+
+    model_config = ConfigDict(extra="forbid")
 
     entries: dict[str, SourceEntry]
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "SourcesFile":
-        return cls(
-            entries={
-                str(name): SourceEntry.from_dict(entry) for name, entry in data.items()
-            }
-        )
+        """Parse raw JSON data into SourcesFile."""
+        entries = {}
+        for name, entry in data.items():
+            if name == "$schema":
+                continue
+            entries[name] = SourceEntry.model_validate(entry)
+        return cls(entries=entries)
 
     @classmethod
     def load(cls, path: Path) -> "SourcesFile":
+        """Load from file path."""
         if not path.exists():
             return cls(entries={})
         return cls.from_dict(json.loads(path.read_text()))
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize to JSON-compatible dict."""
         return {name: entry.to_dict() for name, entry in self.entries.items()}
 
     def save(self, path: Path) -> None:
-        path.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n")
+        """Save to file path."""
+        data = self.to_dict()
+        path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+    @classmethod
+    def json_schema(cls) -> dict[str, Any]:
+        """Generate JSON schema for sources.json file format.
+
+        Post-processes the Pydantic schema to match the actual serialization
+        format (hashes as list or dict, not wrapped in entries/mapping).
+        """
+        entry_schema = SourceEntry.model_json_schema()
+        defs = dict(entry_schema.get("$defs", {}))
+
+        # Extract SourceEntry definition from root schema (pydantic puts it there)
+        source_entry_def = {
+            k: v for k, v in entry_schema.items() if k not in ("$defs", "$schema")
+        }
+        defs["SourceEntry"] = source_entry_def
+
+        # Replace HashCollection with the actual serialization format
+        defs["HashCollection"] = {
+            "title": "Hashes",
+            "description": "Hashes as list of entries or platform-to-hash mapping",
+            "oneOf": [
+                {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/HashEntry"},
+                    "description": "List of structured hash entries",
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "pattern": "^sha256-[A-Za-z0-9+/]+=*$",
+                    },
+                    "description": "Platform to SRI hash mapping",
+                },
+            ],
+        }
+
+        return {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "Nix Sources",
+            "description": "Source package versions and hashes for Nix derivations",
+            "type": "object",
+            "additionalProperties": {
+                "$ref": "#/$defs/SourceEntry",
+            },
+            "$defs": defs,
+        }
 
 
 @dataclass
@@ -837,8 +1012,37 @@ class Updater(ABC):
         )
         return UpdateResult(entry=entry)
 
+    def _build_result_with_urls(
+        self,
+        info: VersionInfo,
+        hashes: SourceHashes,
+        urls: dict[str, str],
+        *,
+        commit: str | None = None,
+    ) -> UpdateResult:
+        """Helper for updaters that include download URLs in the result."""
+        entry = SourceEntry(
+            version=info.version,
+            hashes=HashCollection.from_value(hashes),
+            urls=urls,
+            commit=commit,
+        )
+        return UpdateResult(entry=entry)
+
     def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:
-        return current is not None and current.version == info.version
+        """Check if current entry matches latest version info.
+
+        Compares version and optionally commit hash for sources that track commits.
+        """
+        if current is None:
+            return False
+        if current.version != info.version:
+            return False
+        # For sources with commit tracking, also compare commits
+        upstream_commit = info.metadata.get("commit")
+        if upstream_commit and current.commit:
+            return current.commit == upstream_commit
+        return True
 
     def _build_result_or_none(
         self,
@@ -1087,6 +1291,63 @@ class NpmDepsHashUpdater(FlakeInputHashUpdater):
 
 
 # =============================================================================
+# Updater Factory Functions
+# =============================================================================
+
+
+def go_vendor_updater(
+    name: str,
+    *,
+    input_name: str | None = None,
+    pname: str | None = None,
+    subpackages: list[str] | None = None,
+    proxy_vendor: bool = False,
+) -> type[GoVendorHashUpdater]:
+    """Create and register a Go vendor hash updater."""
+    attrs = {
+        "name": name,
+        "input_name": input_name,
+        "pname": pname,
+        "subpackages": subpackages,
+        "proxy_vendor": proxy_vendor,
+    }
+    return type(f"{name}Updater", (GoVendorHashUpdater,), attrs)
+
+
+def cargo_vendor_updater(
+    name: str,
+    *,
+    input_name: str | None = None,
+    subdir: str | None = None,
+) -> type[CargoVendorHashUpdater]:
+    """Create and register a Cargo vendor hash updater."""
+    attrs = {"name": name, "input_name": input_name, "subdir": subdir}
+    return type(f"{name}Updater", (CargoVendorHashUpdater,), attrs)
+
+
+def npm_deps_updater(
+    name: str,
+    *,
+    input_name: str | None = None,
+) -> type[NpmDepsHashUpdater]:
+    """Create and register an npm deps hash updater."""
+    attrs = {"name": name, "input_name": input_name}
+    return type(f"{name}Updater", (NpmDepsHashUpdater,), attrs)
+
+
+def github_raw_file_updater(
+    name: str,
+    *,
+    owner: str,
+    repo: str,
+    path: str,
+) -> type[GitHubRawFileUpdater]:
+    """Create and register a GitHub raw file updater."""
+    attrs = {"name": name, "owner": owner, "repo": repo, "path": path}
+    return type(f"{name}Updater", (GitHubRawFileUpdater,), attrs)
+
+
+# =============================================================================
 # Source Updaters
 # =============================================================================
 
@@ -1123,18 +1384,18 @@ class GitHubRawFileUpdater(HashEntryUpdater):
         )
 
 
-class HomebrewZshCompletionUpdater(GitHubRawFileUpdater):
-    name = "homebrew-zsh-completion"
-    owner = "Homebrew"
-    repo = "brew"
-    path = "completions/zsh/_brew"
-
-
-class GituiKeyConfigUpdater(GitHubRawFileUpdater):
-    name = "gitui-key-config"
-    owner = "extrawurst"
-    repo = "gitui"
-    path = "vim_style_key_config.ron"
+github_raw_file_updater(
+    "homebrew-zsh-completion",
+    owner="Homebrew",
+    repo="brew",
+    path="completions/zsh/_brew",
+)
+github_raw_file_updater(
+    "gitui-key-config",
+    owner="extrawurst",
+    repo="gitui",
+    path="vim_style_key_config.ron",
+)
 
 
 class GoogleChromeUpdater(DownloadHashUpdater):
@@ -1156,6 +1417,9 @@ class GoogleChromeUpdater(DownloadHashUpdater):
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         return self.PLATFORMS[platform]
+
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
+        return self._build_result_with_urls(info, hashes, dict(self.PLATFORMS))
 
 
 class DataGripUpdater(ChecksumProvidedUpdater):
@@ -1191,6 +1455,14 @@ class DataGripUpdater(ChecksumProvidedUpdater):
             checksums[nix_platform] = hex_hash
         return checksums
 
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
+        release = info.metadata["release"]
+        urls = {
+            nix_platform: release["downloads"][jb_key]["link"]
+            for nix_platform, jb_key in self.PLATFORMS.items()
+        }
+        return self._build_result_with_urls(info, hashes, urls)
+
 
 class ChatGPTUpdater(DownloadHashUpdater):
     """Update ChatGPT desktop app to latest version using Sparkle appcast."""
@@ -1209,8 +1481,6 @@ class ChatGPTUpdater(DownloadHashUpdater):
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch version and download URL from Sparkle appcast XML."""
-        import xml.etree.ElementTree as ET
-
         # Use Sparkle user agent to avoid 403
         xml_payload = await fetch_url(
             session,
@@ -1247,13 +1517,9 @@ class ChatGPTUpdater(DownloadHashUpdater):
         return info.metadata["url"]
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
-        """Include the versioned URL in the result."""
-        entry = SourceEntry(
-            version=info.version,
-            hashes=HashCollection.from_value(hashes),
-            urls={"darwin": info.metadata["url"]},
+        return self._build_result_with_urls(
+            info, hashes, {"darwin": info.metadata["url"]}
         )
-        return UpdateResult(entry=entry)
 
 
 class ConductorUpdater(DownloadHashUpdater):
@@ -1271,8 +1537,6 @@ class ConductorUpdater(DownloadHashUpdater):
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch version from Content-Disposition header of the download."""
-        import re
-
         url = f"{self.BASE_URL}/dmg-aarch64"
         _payload, headers = await _request(
             session, url, method="HEAD", timeout=DEFAULT_TIMEOUT
@@ -1288,6 +1552,13 @@ class ConductorUpdater(DownloadHashUpdater):
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         return f"{self.BASE_URL}/{self.PLATFORMS[platform]}"
+
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
+        urls = {
+            nix_platform: f"{self.BASE_URL}/{cn_platform}"
+            for nix_platform, cn_platform in self.PLATFORMS.items()
+        }
+        return self._build_result_with_urls(info, hashes, urls)
 
 
 class VSCodeInsidersUpdater(ChecksumProvidedUpdater):
@@ -1335,33 +1606,20 @@ class VSCodeInsidersUpdater(ChecksumProvidedUpdater):
             for platform in self.PLATFORMS
         }
 
-
-class AxiomCliUpdater(GoVendorHashUpdater):
-    name = "axiom-cli"
-    subpackages = ["cmd/axiom"]
-
-
-class BeadsUpdater(GoVendorHashUpdater):
-    name = "beads"
-    subpackages = ["cmd/bd"]
-    proxy_vendor = True
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
+        urls = {
+            nix_platform: f"https://update.code.visualstudio.com/{info.version}/{api_platform}/insider"
+            for nix_platform, api_platform in self.PLATFORMS.items()
+        }
+        return self._build_result_with_urls(info, hashes, urls)
 
 
-class CodexUpdater(CargoVendorHashUpdater):
-    name = "codex"
-    subdir = "codex-rs"
-
-
-class CrushUpdater(GoVendorHashUpdater):
-    name = "crush"
-
-
-class GeminiCliUpdater(NpmDepsHashUpdater):
-    name = "gemini-cli"
-
-
-class SentryCliUpdater(CargoVendorHashUpdater):
-    name = "sentry-cli"
+go_vendor_updater("axiom-cli", subpackages=["cmd/axiom"])
+go_vendor_updater("beads", subpackages=["cmd/bd"], proxy_vendor=True)
+go_vendor_updater("crush")
+cargo_vendor_updater("codex", subdir="codex-rs")
+cargo_vendor_updater("sentry-cli")
+npm_deps_updater("gemini-cli")
 
 
 class CodeCursorUpdater(DownloadHashUpdater):
@@ -1412,18 +1670,37 @@ class CodeCursorUpdater(DownloadHashUpdater):
         return info.metadata["platform_info"][platform]["downloadUrl"]
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
-        """Include commit SHA in the result."""
-        entry = SourceEntry(
-            version=info.version,
-            commit=info.metadata["commit"],
-            hashes=HashCollection.from_value(hashes),
+        platform_info = info.metadata["platform_info"]
+        urls = {
+            nix_platform: platform_info[nix_platform]["downloadUrl"]
+            for nix_platform in self.PLATFORMS
+        }
+        return self._build_result_with_urls(
+            info, hashes, urls, commit=info.metadata["commit"]
         )
-        return UpdateResult(entry=entry)
 
 
 # =============================================================================
 # Main
 # =============================================================================
+
+
+@dataclass
+class OutputOptions:
+    """Control output format and verbosity."""
+
+    json_output: bool = False
+    quiet: bool = False
+
+    def print(self, message: str, *, file: Any = None) -> None:
+        """Print message unless in quiet or json mode."""
+        if not self.quiet and not self.json_output:
+            print(message, file=file or sys.stdout)
+
+    def print_error(self, message: str) -> None:
+        """Print error message (always shown unless json mode)."""
+        if not self.json_output:
+            print(message, file=sys.stderr)
 
 
 def load_sources() -> SourcesFile:
@@ -1508,10 +1785,12 @@ class Renderer:
         *,
         is_tty: bool,
         panel_height: int | None = None,
+        quiet: bool = False,
     ) -> None:
         self.states = states
         self.order = order
         self.is_tty = is_tty
+        self.quiet = quiet
         self.style = RenderStyle(
             bold_prefix="\x1b[1m" if is_tty else "",
             bold_suffix="\x1b[0m" if is_tty else "",
@@ -1525,6 +1804,21 @@ class Renderer:
         )
         self.last_render = 0.0
         self.needs_render = False
+
+    def log(self, source: str, message: str, *, stream: str | None = None) -> None:
+        """Log a message to stdout when not in TTY mode."""
+        if self.is_tty or self.quiet:
+            return
+        if stream:
+            print(f"[{source}][{stream}] {message}")
+        else:
+            print(f"[{source}] {message}")
+
+    def log_error(self, source: str, message: str) -> None:
+        """Log an error message to stderr (always shown unless quiet)."""
+        if self.is_tty or self.quiet:
+            return
+        print(f"[{source}] Error: {message}", file=sys.stderr)
 
     def request_render(self) -> None:
         if self.is_tty:
@@ -1594,14 +1888,16 @@ async def _consume_events(
     *,
     max_lines: int,
     is_tty: bool,
-) -> tuple[bool, int]:
+    quiet: bool = False,
+) -> tuple[bool, int, dict[str, str]]:
     states = {
         name: SourceState(status="pending", tail=deque(maxlen=max_lines))
         for name in order
     }
     updated = False
     errors = 0
-    renderer = Renderer(states, order, is_tty=is_tty)
+    update_details: dict[str, str] = {}  # name -> "updated" | "error" | "no_change"
+    renderer = Renderer(states, order, is_tty=is_tty, quiet=quiet)
 
     while True:
         event = await queue.get()
@@ -1611,60 +1907,90 @@ async def _consume_events(
         if state is None:
             continue
 
-        if event.kind == UpdateEventKind.STATUS:
-            state.status = event.message or state.status
-            if not is_tty and event.message:
-                print(f"[{event.source}] {event.message}")
-        elif event.kind == UpdateEventKind.COMMAND_START:
-            state.active_commands += 1
-            if event.message:
-                state.status = event.message
-            if state.active_commands == 1:
-                state.tail.clear()
-            if not is_tty and event.message:
-                print(f"[{event.source}] {event.message}")
-        elif event.kind == UpdateEventKind.LINE:
-            label = event.stream or "stdout"
-            message = event.message or ""
-            line_text = f"[{label}] {message}" if label else message
-            if state.active_commands > 0:
-                if not state.tail or state.tail[-1] != line_text:
-                    state.tail.append(line_text)
-            if not is_tty:
-                print(f"[{event.source}][{label}] {message}")
-        elif event.kind == UpdateEventKind.COMMAND_END:
-            state.active_commands = max(0, state.active_commands - 1)
-            if state.active_commands == 0:
-                state.tail.clear()
-            if not is_tty:
+        match event.kind:
+            case UpdateEventKind.STATUS:
+                state.status = event.message or state.status
+                if event.message:
+                    renderer.log(event.source, event.message)
+
+            case UpdateEventKind.COMMAND_START:
+                state.active_commands += 1
+                if event.message:
+                    state.status = event.message
+                    renderer.log(event.source, event.message)
+                if state.active_commands == 1:
+                    state.tail.clear()
+
+            case UpdateEventKind.LINE:
+                label = event.stream or "stdout"
+                message = event.message or ""
+                line_text = f"[{label}] {message}" if label else message
+                if state.active_commands > 0:
+                    if not state.tail or state.tail[-1] != line_text:
+                        state.tail.append(line_text)
+                renderer.log(event.source, message, stream=label)
+
+            case UpdateEventKind.COMMAND_END:
+                state.active_commands = max(0, state.active_commands - 1)
+                if state.active_commands == 0:
+                    state.tail.clear()
                 result = event.payload
                 if isinstance(result, CommandResult):
-                    print(
-                        f"[{event.source}] command finished (exit {result.returncode})"
+                    renderer.log(
+                        event.source, f"command finished (exit {result.returncode})"
                     )
-        elif event.kind == UpdateEventKind.RESULT:
-            result = event.payload
-            if result is not None:
-                sources.entries[event.source] = result.entry
-                updated = True
-                state.status = "Updated."
-            elif not state.status:
-                state.status = "No updates needed."
-        elif event.kind == UpdateEventKind.ERROR:
-            errors += 1
-            message = event.message or "Unknown error"
-            state.status = f"Error: {message}"
-            state.active_commands = 0
-            state.tail.clear()
-            if not is_tty:
-                print(f"[{event.source}] Error: {message}", file=sys.stderr)
+
+            case UpdateEventKind.RESULT:
+                result = event.payload
+                if result is not None:
+                    old_entry = sources.entries.get(event.source)
+                    old_version = old_entry.version if old_entry else None
+                    new_version = result.entry.version
+                    # Add timestamp to the new entry
+                    sources.entries[event.source] = (
+                        result.entry.with_updated_timestamp()
+                    )
+                    updated = True
+                    update_details[event.source] = "updated"
+                    if old_version and new_version and old_version != new_version:
+                        state.status = f"Updated :: {old_version} => {new_version}"
+                    else:
+                        # Fall back to showing hash change if no version
+                        old_hash = (
+                            old_entry.hashes.primary_hash() if old_entry else None
+                        )
+                        new_hash = result.entry.hashes.primary_hash()
+                        if old_hash and new_hash and old_hash != new_hash:
+                            state.status = f"Updated :: {old_hash} => {new_hash}"
+                        else:
+                            state.status = "Updated."
+                else:
+                    # No update needed, but update lastChecked timestamp
+                    old_entry = sources.entries.get(event.source)
+                    if old_entry:
+                        sources.entries[event.source] = (
+                            old_entry.with_updated_timestamp()
+                        )
+                        updated = True  # Mark as updated so we save the new timestamp
+                    update_details[event.source] = "no_change"
+                    if not state.status:
+                        state.status = "No updates needed."
+
+            case UpdateEventKind.ERROR:
+                errors += 1
+                update_details[event.source] = "error"
+                message = event.message or "Unknown error"
+                state.status = f"Error: {message}"
+                state.active_commands = 0
+                state.tail.clear()
+                renderer.log_error(event.source, message)
 
         renderer.request_render()
         renderer.render_if_due(time.monotonic())
 
     renderer.finalize()
 
-    return updated, errors
+    return updated, errors, update_details
 
 
 async def _update_source_task(
@@ -1708,26 +2034,95 @@ async def _update_source_task(
         )
 
 
+@dataclass
+class UpdateSummary:
+    """Summary of update run for JSON output."""
+
+    updated: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    no_change: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "updated": self.updated,
+            "skipped": self.skipped,
+            "errors": self.errors,
+            "noChange": self.no_change,
+            "success": len(self.errors) == 0,
+        }
+
+
 async def _run_updates(args: argparse.Namespace) -> int:
-    if args.list:
-        print("Available sources:")
-        for name in UPDATERS:
-            print(f"  {name}")
+    out = OutputOptions(json_output=args.json, quiet=args.quiet)
+
+    if args.schema:
+        print(json.dumps(SourcesFile.json_schema(), indent=2))
         return 0
 
+    if args.list:
+        if args.json:
+            print(json.dumps({"sources": list(UPDATERS.keys())}))
+        else:
+            print("Available sources:")
+            for name in UPDATERS:
+                print(f"  {name}")
+        return 0
+
+    # Validate mode: just load and validate sources.json
+    if args.validate:
+        try:
+            sources = load_sources()
+            if args.json:
+                print(json.dumps({"valid": True, "count": len(sources.entries)}))
+            else:
+                print(f"Validated {SOURCES_FILE}: {len(sources.entries)} sources OK")
+            return 0
+        except Exception as exc:
+            if args.json:
+                print(json.dumps({"valid": False, "error": str(exc)}))
+            else:
+                print(f"Validation failed: {exc}", file=sys.stderr)
+            return 1
+
     if not args.source and not args.all:
-        print("No source specified. Use --all or provide a source name.")
+        out.print_error("No source specified. Use --all or provide a source name.")
         return 1
 
     if not args.all and args.source not in UPDATERS:
-        print(f"Error: Unknown source '{args.source}'")
-        print(f"Available sources: {', '.join(UPDATERS.keys())}")
+        out.print_error(f"Error: Unknown source '{args.source}'")
+        out.print_error(f"Available sources: {', '.join(UPDATERS.keys())}")
         return 1
 
     sources = load_sources()
-    names = list(UPDATERS.keys()) if args.all else [args.source]
+    all_names = list(UPDATERS.keys()) if args.all else [args.source]
+
+    # Filter out sources with valid cache unless --force is used
+    summary = UpdateSummary()
+    names = []
+    for name in all_names:
+        current = sources.entries.get(name)
+        if not args.force and current and current.is_cache_valid():
+            summary.skipped.append(name)
+        else:
+            names.append(name)
+
+    if summary.skipped:
+        out.print(
+            f"Skipping {len(summary.skipped)} recently checked: {', '.join(summary.skipped)}"
+        )
+        out.print("Use --force to check anyway.\n")
+
+    if not names:
+        if args.json:
+            print(json.dumps(summary.to_dict()))
+        else:
+            out.print("All sources recently checked. Nothing to do.")
+        return 0
+
     max_lines = _resolve_log_tail_lines(None)
-    is_tty = _is_tty()
+    # Disable TTY rendering in quiet or JSON mode
+    is_tty = _is_tty() and not args.quiet and not args.json
 
     async with aiohttp.ClientSession() as session:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
@@ -1746,18 +2141,48 @@ async def _run_updates(args: argparse.Namespace) -> int:
             for name in names
         ]
         consumer = asyncio.create_task(
-            _consume_events(queue, names, sources, max_lines=max_lines, is_tty=is_tty)
+            _consume_events(
+                queue,
+                names,
+                sources,
+                max_lines=max_lines,
+                is_tty=is_tty,
+                quiet=args.quiet or args.json,
+            )
         )
         await asyncio.gather(*tasks)
         await queue.put(None)
-        updated, errors = await consumer
+        updated, errors, update_details = await consumer
+
+    # Populate summary from update details
+    for name, detail in update_details.items():
+        if detail == "updated":
+            summary.updated.append(name)
+        elif detail == "error":
+            summary.errors.append(name)
+        else:
+            summary.no_change.append(name)
 
     if updated:
         save_sources(sources)
-        print(f"\nUpdated {SOURCES_FILE}")
-        print("Run: nh darwin switch --no-nom .")
+
+    # JSON output mode
+    if args.json:
+        print(json.dumps(summary.to_dict()))
+        return 1 if summary.errors else 0
+
+    # Standard output
+    if updated:
+        out.print(f"\nUpdated {SOURCES_FILE}")
+        out.print("Run: nh darwin switch --no-nom .")
     else:
-        print("\nNo updates needed.")
+        out.print("\nNo updates needed.")
+
+    # With --continue-on-error, return success if any updates succeeded
+    if args.continue_on_error and updated:
+        if errors:
+            out.print(f"\nWarning: {errors} source(s) failed but continuing.")
+        return 0
 
     return 1 if errors else 0
 
@@ -1777,6 +2202,38 @@ def main() -> None:
         "--update-input",
         action="store_true",
         help="Update flake input(s) before hashing",
+    )
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Force update even if recently checked (ignores cache TTL)",
+    )
+    parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Continue updating other sources if one fails",
+    )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Validate sources.json and exit",
+    )
+    parser.add_argument(
+        "--schema",
+        action="store_true",
+        help="Output JSON schema for sources.json and exit",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON (for scripting/automation)",
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Suppress progress output, only show errors and final summary",
     )
     args = parser.parse_args()
 
