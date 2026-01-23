@@ -36,7 +36,6 @@ import json
 import os
 import re
 import select
-import shutil
 import shlex
 import time
 import sys
@@ -126,17 +125,24 @@ def _read_cursor_row() -> int | None:
 
 
 class TerminalInfo:
-    @staticmethod
-    def size() -> os.terminal_size:
-        return shutil.get_terminal_size(fallback=(120, 20))
+    _console: Any = None
+
+    @classmethod
+    def _get_console(cls) -> Any:
+        """Lazily initialize Rich Console."""
+        if cls._console is None:
+            from rich.console import Console
+
+            cls._console = Console()
+        return cls._console
 
     @classmethod
     def width(cls) -> int:
-        return cls.size().columns
+        return cls._get_console().width
 
     @classmethod
     def height(cls) -> int:
-        return cls.size().lines
+        return cls._get_console().height
 
     @classmethod
     def panel_height(cls) -> int:
@@ -153,13 +159,12 @@ class TerminalInfo:
         return max(1, height - row + 1)
 
 
-_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
-
-
 def _sanitize_log_line(line: str) -> str:
+    """Remove carriage returns and ANSI escape sequences from log line."""
+    from rich.text import Text
+
     line = line.replace("\r", "")
-    line = _ANSI_ESCAPE_RE.sub("", line)
-    return line
+    return Text.from_ansi(line).plain
 
 
 def _truncate_command(text: str, max_len: int = 80) -> str:
@@ -1637,16 +1642,39 @@ class OutputOptions:
 
     json_output: bool = False
     quiet: bool = False
+    _console: Any = field(default=None, repr=False)
+    _err_console: Any = field(default=None, repr=False)
 
-    def print(self, message: str, *, file: Any = None) -> None:
+    def __post_init__(self) -> None:
+        from rich.console import Console
+
+        self._console = Console()
+        self._err_console = Console(stderr=True)
+
+    def print(
+        self, message: str, *, style: str | None = None, file: Any = None
+    ) -> None:
         """Print message unless in quiet or json mode."""
         if not self.quiet and not self.json_output:
-            print(message, file=file or sys.stdout)
+            if file is sys.stderr:
+                self._err_console.print(message, style=style)
+            else:
+                self._console.print(message, style=style)
 
     def print_error(self, message: str) -> None:
         """Print error message (always shown unless json mode)."""
         if not self.json_output:
-            print(message, file=sys.stderr)
+            self._err_console.print(message, style="red")
+
+    def print_success(self, message: str) -> None:
+        """Print success message unless in quiet or json mode."""
+        if not self.quiet and not self.json_output:
+            self._console.print(message, style="green")
+
+    def print_warning(self, message: str) -> None:
+        """Print warning message unless in quiet or json mode."""
+        if not self.quiet and not self.json_output:
+            self._console.print(message, style="yellow")
 
 
 def load_sources() -> SourcesFile:
@@ -1985,9 +2013,12 @@ async def _run_updates(args: argparse.Namespace) -> int:
         if args.json:
             print(json.dumps({"sources": list(UPDATERS.keys())}))
         else:
-            print("Available sources:")
-            for name in UPDATERS:
-                print(f"  {name}")
+            from rich.columns import Columns
+            from rich.console import Console
+
+            console = Console()
+            console.print("[bold]Available sources:[/bold]")
+            console.print(Columns(sorted(UPDATERS.keys()), padding=(0, 2)))
         return 0
 
     # Validate mode: just load and validate sources.json
@@ -1997,13 +2028,16 @@ async def _run_updates(args: argparse.Namespace) -> int:
             if args.json:
                 print(json.dumps({"valid": True, "count": len(sources.entries)}))
             else:
-                print(f"Validated {SOURCES_FILE}: {len(sources.entries)} sources OK")
+                out.print_success(
+                    f":heavy_check_mark: Validated {SOURCES_FILE}: "
+                    f"{len(sources.entries)} sources OK"
+                )
             return 0
         except Exception as exc:
             if args.json:
                 print(json.dumps({"valid": False, "error": str(exc)}))
             else:
-                print(f"Validation failed: {exc}", file=sys.stderr)
+                out.print_error(f":x: Validation failed: {exc}")
             return 1
 
     if not args.source and not args.all:
@@ -2079,14 +2113,14 @@ async def _run_updates(args: argparse.Namespace) -> int:
 
     # Standard output
     if updated:
-        out.print(f"\nUpdated {SOURCES_FILE}")
+        out.print_success(f"\n:heavy_check_mark: Updated {SOURCES_FILE}")
     else:
-        out.print("\nNo updates needed.")
+        out.print("\nNo updates needed.", style="dim")
 
     # With --continue-on-error, return success if any updates succeeded
     if args.continue_on_error and updated:
         if errors:
-            out.print(f"\nWarning: {errors} source(s) failed but continuing.")
+            out.print_warning(f"\n:warning: {errors} source(s) failed but continuing.")
         return 0
 
     return 1 if errors else 0
