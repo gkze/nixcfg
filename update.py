@@ -9,19 +9,17 @@
 """Update source versions and hashes in sources.json.
 
 Usage:
-    ./update.py <source>                 Update a specific source
-    ./update.py <source> --update-input  Update and refresh flake input
-    ./update.py --all                    Update all sources
-    ./update.py --all --force            Force update even if recently checked
+    ./update.py <source>                   Update a specific source
+    ./update.py <source> --update-input    Update and refresh flake input
+    ./update.py --all                      Update all sources
     ./update.py --all --continue-on-error  Continue if individual sources fail
-    ./update.py --list                   List available sources
-    ./update.py --validate               Validate sources.json
-    ./update.py --schema                 Output JSON schema for sources.json
-    ./update.py --json                   Output results as JSON
-    ./update.py --quiet                  Suppress progress output
+    ./update.py --list                     List available sources
+    ./update.py --validate                 Validate sources.json
+    ./update.py --schema                   Output JSON schema for sources.json
+    ./update.py --json                     Output results as JSON
+    ./update.py --quiet                    Suppress progress output
 
 Environment Variables:
-    UPDATE_CACHE_TTL_HOURS    Cache TTL in hours (default: 6)
     UPDATE_LOG_TAIL_LINES     Number of log lines to show (default: 10)
     UPDATE_PANEL_HEIGHT       Terminal panel height override
 
@@ -48,10 +46,10 @@ import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, AsyncIterator, Iterable, Literal, Mapping
+from typing import Any, AsyncIterator, Iterable, Literal, Mapping
 
 import aiohttp
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -72,21 +70,6 @@ def get_repo_file(filename: str) -> Path:
 SOURCES_FILE = get_repo_file("sources.json")
 FLAKE_LOCK_FILE = get_repo_file("flake.lock")
 
-# Cache TTL: skip update check if lastChecked is within this window
-DEFAULT_CACHE_TTL_HOURS = 6
-
-
-def _get_cache_ttl_hours() -> int:
-    """Get cache TTL from environment or use default."""
-    env_ttl = os.environ.get("UPDATE_CACHE_TTL_HOURS")
-    if env_ttl:
-        try:
-            return max(0, int(env_ttl))
-        except ValueError:
-            pass
-    return DEFAULT_CACHE_TTL_HOURS
-
-
 # =============================================================================
 # Utilities
 # =============================================================================
@@ -98,10 +81,6 @@ DEFAULT_RENDER_INTERVAL = 0.05
 DEFAULT_USER_AGENT = "update.py"
 DEFAULT_RETRIES = 3
 DEFAULT_RETRY_BACKOFF = 1.0
-
-
-def _resolve_timeout(timeout: float | None) -> float:
-    return DEFAULT_TIMEOUT if timeout is None else timeout
 
 
 def _resolve_log_tail_lines(lines: int | None) -> int:
@@ -271,7 +250,7 @@ async def _request(
     headers = {}
     if user_agent:
         headers["User-Agent"] = user_agent
-    timeout_config = aiohttp.ClientTimeout(total=_resolve_timeout(timeout))
+    timeout_config = aiohttp.ClientTimeout(total=timeout or DEFAULT_TIMEOUT)
 
     last_error: Exception | None = None
     for attempt in range(retries):
@@ -354,10 +333,14 @@ async def stream_command(
         payload=args,
     )
 
+    # Use TERM=dumb to prevent subprocesses (especially nix) from writing
+    # fancy progress output directly to /dev/tty, which corrupts cursor tracking.
+    env = {**os.environ, "TERM": "dumb"}
     process = await asyncio.create_subprocess_exec(
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
@@ -754,10 +737,6 @@ def _validate_sri_hash(value: str) -> str:
     return value
 
 
-# Type alias for SRI hash with validation
-SriHash = Annotated[str, Field(pattern=r"^sha256-[A-Za-z0-9+/]+=*$")]
-
-
 class HashEntry(BaseModel):
     """Single hash entry for sources.json (flake-input-based sources)."""
 
@@ -838,6 +817,11 @@ class HashCollection(BaseModel):
                 return values[0]
         return None
 
+    @classmethod
+    def from_value(cls, data: "SourceHashes") -> "HashCollection":
+        """Create HashCollection from raw hashes data."""
+        return cls.model_validate(data)
+
 
 class SourceEntry(BaseModel):
     """A source package entry in sources.json."""
@@ -852,7 +836,6 @@ class SourceEntry(BaseModel):
     input: str | None = None
     urls: dict[str, str] | None = None
     commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
-    last_checked: datetime | None = Field(default=None, alias="lastChecked")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict with camelCase keys."""
@@ -865,25 +848,7 @@ class SourceEntry(BaseModel):
             result["urls"] = self.urls
         if self.commit is not None:
             result["commit"] = self.commit
-        if self.last_checked is not None:
-            result["lastChecked"] = self.last_checked.isoformat()
         return result
-
-    def is_cache_valid(self, ttl_hours: int | None = None) -> bool:
-        """Check if the cache is still valid based on lastChecked timestamp."""
-        if self.last_checked is None:
-            return False
-        if ttl_hours is None:
-            ttl_hours = _get_cache_ttl_hours()
-        now = datetime.now(timezone.utc)
-        last_checked = self.last_checked
-        if last_checked.tzinfo is None:
-            last_checked = last_checked.replace(tzinfo=timezone.utc)
-        return now - last_checked < timedelta(hours=ttl_hours)
-
-    def with_updated_timestamp(self) -> "SourceEntry":
-        """Return a copy with updated lastChecked timestamp."""
-        return self.model_copy(update={"last_checked": datetime.now(timezone.utc)})
 
 
 class SourcesFile(BaseModel):
@@ -978,13 +943,6 @@ class VersionInfo:
     ]  # Updater-specific data (URLs, checksums, release info, etc.)
 
 
-@dataclass
-class UpdateResult:
-    """Result of an update check."""
-
-    entry: SourceEntry
-
-
 class Updater(ABC):
     """Base class for source updaters. Subclasses auto-register via `name` attribute."""
 
@@ -1005,12 +963,11 @@ class Updater(ABC):
     ) -> AsyncIterator[UpdateEvent]:
         """Fetch hashes for the source."""
 
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
-        """Build UpdateResult from version info and hashes. Override to customize."""
-        entry = SourceEntry(
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
+        """Build SourceEntry from version info and hashes. Override to customize."""
+        return SourceEntry(
             version=info.version, hashes=HashCollection.from_value(hashes)
         )
-        return UpdateResult(entry=entry)
 
     def _build_result_with_urls(
         self,
@@ -1019,15 +976,14 @@ class Updater(ABC):
         urls: dict[str, str],
         *,
         commit: str | None = None,
-    ) -> UpdateResult:
+    ) -> SourceEntry:
         """Helper for updaters that include download URLs in the result."""
-        entry = SourceEntry(
+        return SourceEntry(
             version=info.version,
             hashes=HashCollection.from_value(hashes),
             urls=urls,
             commit=commit,
         )
-        return UpdateResult(entry=entry)
 
     def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:
         """Check if current entry matches latest version info.
@@ -1043,17 +999,6 @@ class Updater(ABC):
         if upstream_commit and current.commit:
             return current.commit == upstream_commit
         return True
-
-    def _build_result_or_none(
-        self,
-        current: SourceEntry | None,
-        info: VersionInfo,
-        hashes: SourceHashes,
-    ) -> UpdateResult | None:
-        result = self.build_result(info, hashes)
-        if current is not None and result.entry == current:
-            return None
-        return result
 
     async def update_stream(
         self, current: SourceEntry | None, session: aiohttp.ClientSession
@@ -1095,8 +1040,8 @@ class Updater(ABC):
         ):
             yield event
         hashes = _require_value(hashes_drain, "Missing hash output")
-        result = self._build_result_or_none(current, info, hashes)
-        if result is None:
+        result = self.build_result(info, hashes)
+        if current is not None and result == current:
             yield UpdateEvent(
                 source=self.name,
                 kind=UpdateEventKind.STATUS,
@@ -1192,11 +1137,10 @@ class HashEntryUpdater(Updater):
 
     input_name: str | None = None
 
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
-        entry = SourceEntry(
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
+        return SourceEntry(
             hashes=HashCollection.from_value(hashes), input=self.input_name
         )
-        return UpdateResult(entry=entry)
 
     async def _emit_single_hash_entry(
         self,
@@ -1418,7 +1362,7 @@ class GoogleChromeUpdater(DownloadHashUpdater):
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         return self.PLATFORMS[platform]
 
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         return self._build_result_with_urls(info, hashes, dict(self.PLATFORMS))
 
 
@@ -1455,7 +1399,7 @@ class DataGripUpdater(ChecksumProvidedUpdater):
             checksums[nix_platform] = hex_hash
         return checksums
 
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         release = info.metadata["release"]
         urls = {
             nix_platform: release["downloads"][jb_key]["link"]
@@ -1516,7 +1460,7 @@ class ChatGPTUpdater(DownloadHashUpdater):
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         return info.metadata["url"]
 
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         return self._build_result_with_urls(
             info, hashes, {"darwin": info.metadata["url"]}
         )
@@ -1553,7 +1497,7 @@ class ConductorUpdater(DownloadHashUpdater):
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         return f"{self.BASE_URL}/{self.PLATFORMS[platform]}"
 
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         urls = {
             nix_platform: f"{self.BASE_URL}/{cn_platform}"
             for nix_platform, cn_platform in self.PLATFORMS.items()
@@ -1606,7 +1550,7 @@ class VSCodeInsidersUpdater(ChecksumProvidedUpdater):
             for platform in self.PLATFORMS
         }
 
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         urls = {
             nix_platform: f"https://update.code.visualstudio.com/{info.version}/{api_platform}/insider"
             for nix_platform, api_platform in self.PLATFORMS.items()
@@ -1617,6 +1561,7 @@ class VSCodeInsidersUpdater(ChecksumProvidedUpdater):
 go_vendor_updater("axiom-cli", subpackages=["cmd/axiom"])
 go_vendor_updater("beads", subpackages=["cmd/bd"], proxy_vendor=True)
 go_vendor_updater("crush")
+go_vendor_updater("gogcli", subpackages=["cmd/gog"])
 cargo_vendor_updater("codex", subdir="codex-rs")
 cargo_vendor_updater("sentry-cli")
 npm_deps_updater("gemini-cli")
@@ -1669,7 +1614,7 @@ class CodeCursorUpdater(DownloadHashUpdater):
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         return info.metadata["platform_info"][platform]["downloadUrl"]
 
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> UpdateResult:
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         platform_info = info.metadata["platform_info"]
         urls = {
             nix_platform: platform_info[nix_platform]["downloadUrl"]
@@ -1716,12 +1661,6 @@ class SourceState:
     status: str = "pending"
     tail: deque[str] = field(default_factory=deque)
     active_commands: int = 0
-
-
-@dataclass
-class RenderState:
-    lines_rendered: int = 0
-    panel_height: int = 0
 
 
 def _is_tty() -> bool:
@@ -1797,11 +1736,8 @@ class Renderer:
             dim_prefix="\x1b[2m" if is_tty else "",
             dim_suffix="\x1b[0m" if is_tty else "",
         )
-        self.render_state = RenderState(
-            panel_height=TerminalInfo.panel_height()
-            if panel_height is None
-            else panel_height
-        )
+        self.panel_height = panel_height or TerminalInfo.panel_height()
+        self.lines_rendered = 0
         self.last_render = 0.0
         self.needs_render = False
 
@@ -1841,7 +1777,7 @@ class Renderer:
             return
         width = TerminalInfo.width()
         style = self.style
-        max_visible = self.render_state.panel_height
+        max_visible = self.panel_height
         lines: list[str] = []
         for name in self.order:
             if len(lines) >= max_visible:
@@ -1873,11 +1809,11 @@ class Renderer:
                             dim_suffix=style.dim_suffix,
                         )
                     )
-        if self.render_state.lines_rendered > 1:
-            sys.stdout.write(f"\x1b[{self.render_state.lines_rendered - 1}A")
+        if self.lines_rendered > 1:
+            sys.stdout.write(f"\x1b[{self.lines_rendered - 1}A")
         sys.stdout.write("\r\x1b[J")
         sys.stdout.write("\n".join(lines))
-        self.render_state.lines_rendered = len(lines)
+        self.lines_rendered = len(lines)
         sys.stdout.flush()
 
 
@@ -1945,11 +1881,8 @@ async def _consume_events(
                 if result is not None:
                     old_entry = sources.entries.get(event.source)
                     old_version = old_entry.version if old_entry else None
-                    new_version = result.entry.version
-                    # Add timestamp to the new entry
-                    sources.entries[event.source] = (
-                        result.entry.with_updated_timestamp()
-                    )
+                    new_version = result.version
+                    sources.entries[event.source] = result
                     updated = True
                     update_details[event.source] = "updated"
                     if old_version and new_version and old_version != new_version:
@@ -1959,19 +1892,12 @@ async def _consume_events(
                         old_hash = (
                             old_entry.hashes.primary_hash() if old_entry else None
                         )
-                        new_hash = result.entry.hashes.primary_hash()
+                        new_hash = result.hashes.primary_hash()
                         if old_hash and new_hash and old_hash != new_hash:
                             state.status = f"Updated :: {old_hash} => {new_hash}"
                         else:
                             state.status = "Updated."
                 else:
-                    # No update needed, but update lastChecked timestamp
-                    old_entry = sources.entries.get(event.source)
-                    if old_entry:
-                        sources.entries[event.source] = (
-                            old_entry.with_updated_timestamp()
-                        )
-                        updated = True  # Mark as updated so we save the new timestamp
                     update_details[event.source] = "no_change"
                     if not state.status:
                         state.status = "No updates needed."
@@ -2039,14 +1965,12 @@ class UpdateSummary:
     """Summary of update run for JSON output."""
 
     updated: list[str] = field(default_factory=list)
-    skipped: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     no_change: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "updated": self.updated,
-            "skipped": self.skipped,
             "errors": self.errors,
             "noChange": self.no_change,
             "success": len(self.errors) == 0,
@@ -2095,29 +2019,14 @@ async def _run_updates(args: argparse.Namespace) -> int:
         return 1
 
     sources = load_sources()
-    all_names = list(UPDATERS.keys()) if args.all else [args.source]
-
-    # Filter out sources with valid cache unless --force is used
+    names = list(UPDATERS.keys()) if args.all else [args.source]
     summary = UpdateSummary()
-    names = []
-    for name in all_names:
-        current = sources.entries.get(name)
-        if not args.force and current and current.is_cache_valid():
-            summary.skipped.append(name)
-        else:
-            names.append(name)
-
-    if summary.skipped:
-        out.print(
-            f"Skipping {len(summary.skipped)} recently checked: {', '.join(summary.skipped)}"
-        )
-        out.print("Use --force to check anyway.\n")
 
     if not names:
         if args.json:
             print(json.dumps(summary.to_dict()))
         else:
-            out.print("All sources recently checked. Nothing to do.")
+            out.print("No sources to update.")
         return 0
 
     max_lines = _resolve_log_tail_lines(None)
@@ -2202,12 +2111,6 @@ def main() -> None:
         "--update-input",
         action="store_true",
         help="Update flake input(s) before hashing",
-    )
-    parser.add_argument(
-        "-f",
-        "--force",
-        action="store_true",
-        help="Force update even if recently checked (ignores cache TTL)",
     )
     parser.add_argument(
         "--continue-on-error",

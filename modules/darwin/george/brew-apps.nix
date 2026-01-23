@@ -11,6 +11,7 @@
       "figma"
       "framer"
       "ghostty@tip"
+      "gitbutler"
       "google-drive"
       "keepingyouawake"
       "linear-linear"
