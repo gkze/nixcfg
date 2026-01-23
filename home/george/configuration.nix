@@ -29,63 +29,15 @@
     defaultSopsFile = ../../secrets.yaml;
     environment.PATH = lib.mkForce (lib.makeBinPath [ pkgs.coreutils ] + ":/usr/bin:/sbin");
     secrets.github_pat = { };
-    templates."zed-settings.json" = {
-      # Rendered to sops-managed location, then copied by activation script
-      # so the file is editable from Zed
-      mode = "0644";
-      content = builtins.toJSON {
-        agent = {
-          default_model = {
-            model = "claude-opus-4-5-20251101";
-            provider = "anthropic";
-          };
-          dock = "right";
-          inline_assistant_model = {
-            model = "claude-opus-4-5-20251101";
-            provider = "anthropic";
-          };
-          model_parameters = [ ];
-        };
-        buffer_font_family = "Hack Nerd Font Mono";
-        buffer_font_size = 12.0;
-        context_servers = {
-          mcp-server-github = {
-            enabled = true;
-            settings = {
-              github_personal_access_token = config.sops.placeholder.github_pat;
-            };
-          };
-        };
-        format_on_save = "on";
-        icon_theme = "Catppuccin Frappe";
-        minimap = {
-          show = "always";
-        };
-        outline_panel = {
-          dock = "right";
-        };
-        show_whitespaces = "all";
-        theme = {
-          dark = "Catppuccin Frappé";
-          light = "One Light";
-          mode = "system";
-        };
-        ui_font_size = 15.0;
-        vim_mode = true;
-        wrap_guides = [
-          80
-          100
-        ];
-      };
-    };
   };
 
   home = {
-    activation.copyZedSettings = lib.hm.dag.entryAfter [ "sops-nix" ] ''
-      # Copy sops-rendered template to zed config (editable, not symlinked)
-      ${lib.getExe' pkgs.coreutils "install"} -m 644 \
-        "${config.sops.templates."zed-settings.json".path}" \
-        "${config.xdg.configHome}/zed/settings.json"
+    activation.injectZedGithubToken = lib.hm.dag.entryAfter [ "zedSettingsActivation" "sops-nix" ] ''
+      # Inject sops-managed GitHub token into Zed settings (preserves user modifications)
+      ${lib.getExe pkgs.jq} --arg token "$(cat ${config.sops.secrets.github_pat.path})" \
+        '.context_servers."mcp-server-github".settings.github_personal_access_token = $token' \
+        "${config.xdg.configHome}/zed/settings.json" \
+        | ${lib.getExe' pkgs.moreutils "sponge"} "${config.xdg.configHome}/zed/settings.json"
     '';
     file = {
       "${config.programs.gpg.homedir}/gpg-agent.conf".text =
@@ -237,8 +189,62 @@
     };
     opencode = {
       enable = true;
-      # MCP config is managed via sops template for secret injection
-      # See sops.templates."opencode-config.json"
+      settings = {
+        theme = "catppuccin-frappe";
+        mcp = {
+          axiom = {
+            type = "remote";
+            url = "https://mcp.axiom.co/mcp";
+          };
+          chrome-devtools = {
+            type = "local";
+            command = [
+              "npx"
+              "chrome-devtools-mcp@latest"
+              "--executablePath=${config.home.homeDirectory}/Applications/Home Manager Apps/Google Chrome.app/Contents/MacOS/Google Chrome"
+            ];
+          };
+          convex = {
+            type = "local";
+            command = [
+              "npx"
+              "-y"
+              "convex@latest"
+              "mcp"
+              "start"
+            ];
+          };
+          linear = {
+            type = "remote";
+            url = "https://mcp.linear.app/mcp";
+          };
+          next-devtools = {
+            type = "local";
+            command = [
+              "npx"
+              "next-devtools-mcp@latest"
+            ];
+          };
+          notion = {
+            type = "remote";
+            url = "https://mcp.notion.com/mcp";
+            oauth = { };
+          };
+          sentry = {
+            type = "remote";
+            url = "https://mcp.sentry.dev/mcp";
+          };
+          vercel = {
+            type = "remote";
+            url = "https://mcp.vercel.com";
+          };
+        };
+        plugin = [
+          "opencode-beads"
+          "@franlol/opencode-md-table-formatter"
+        ];
+        tui.scroll_acceleration.enabled = true;
+      };
     };
     ssh = {
       enable = true;
@@ -318,6 +324,42 @@
     zed-editor = {
       enable = true;
       package = pkgs.zed-editor-nightly;
+      userSettings = {
+        agent = {
+          default_model = {
+            model = "claude-opus-4-5-20251101";
+            provider = "anthropic";
+          };
+          dock = "right";
+          inline_assistant_model = {
+            model = "claude-opus-4-5-20251101";
+            provider = "anthropic";
+          };
+          model_parameters = [ ];
+        };
+        buffer_font_family = "Hack Nerd Font Mono";
+        buffer_font_size = 12.0;
+        context_servers.mcp-server-github = {
+          enabled = true;
+          settings = { }; # Token injected by activation script
+        };
+        format_on_save = "on";
+        icon_theme = "Catppuccin Frappe";
+        minimap.show = "always";
+        outline_panel.dock = "right";
+        show_whitespaces = "all";
+        theme = {
+          dark = "Catppuccin Frappé";
+          light = "One Light";
+          mode = "system";
+        };
+        ui_font_size = 15.0;
+        vim_mode = true;
+        wrap_guides = [
+          80
+          100
+        ];
+      };
       userKeymaps = [
         {
           context = "Terminal";

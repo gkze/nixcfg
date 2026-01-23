@@ -52,7 +52,6 @@
       nix-tree
       nixfmt
       nodejs_latest
-      opencode
       opencode-desktop
       postman
       procs

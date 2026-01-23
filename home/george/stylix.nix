@@ -14,6 +14,10 @@
       gnome-text-editor.enable = pkgs.stdenv.isLinux;
       # Disabled: VS Code manages themes via extensions
       vscode.enable = false;
+      # Disabled: using built-in catppuccin-frappe theme (better diff colors, panel hierarchy)
+      opencode.enable = false;
+      # Disabled: managing zed config directly with sops secret injection
+      zed.enable = false;
       gnome.enable = pkgs.stdenv.isLinux;
       gtk.enable = pkgs.stdenv.isLinux;
     };

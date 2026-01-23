@@ -1045,7 +1045,7 @@ class Updater(ABC):
             yield UpdateEvent(
                 source=self.name,
                 kind=UpdateEventKind.STATUS,
-                message="No updates needed.",
+                message="No updates needed",
             )
             yield UpdateEvent(
                 source=self.name,
@@ -2083,7 +2083,6 @@ async def _run_updates(args: argparse.Namespace) -> int:
     # Standard output
     if updated:
         out.print(f"\nUpdated {SOURCES_FILE}")
-        out.print("Run: nh darwin switch --no-nom .")
     else:
         out.print("\nNo updates needed.")
 
