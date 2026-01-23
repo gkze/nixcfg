@@ -36,6 +36,7 @@ import json
 import os
 import re
 import select
+import signal
 import shlex
 import time
 import sys
@@ -1707,8 +1708,7 @@ def _fit_to_width(text: str, width: int) -> str:
 class Renderer:
     """Rich-based live renderer for update progress.
 
-    Uses Rich's Live display for automatic terminal resize handling and
-    clean rendering without manual ANSI escape sequences.
+    Uses Rich's Live display with SIGWINCH handling for clean resize behavior.
     """
 
     def __init__(
@@ -1732,6 +1732,7 @@ class Renderer:
         self.panel_height = panel_height or TerminalInfo.panel_height()
         self.last_render = 0.0
         self.needs_render = False
+        self._old_sigwinch: Any = None
 
         # Rich components - only initialize for TTY mode
         self._console: Any = None
@@ -1742,9 +1743,10 @@ class Renderer:
                 Text(""),
                 console=self._console,
                 refresh_per_second=10,
-                screen=True,  # Use alternate screen buffer for clean resize handling
+                transient=True,  # Clear when stopped, render in-place
             )
             self._live.start()
+            self._setup_resize_handler()
 
     def _build_display(self) -> Any:
         """Build the Rich renderable for current state."""
@@ -1801,6 +1803,23 @@ class Renderer:
             return
         print(f"[{source}] Error: {message}", file=sys.stderr)
 
+    def _setup_resize_handler(self) -> None:
+        """Install SIGWINCH handler to force refresh on terminal resize."""
+        self._old_sigwinch = signal.getsignal(signal.SIGWINCH)
+
+        def on_resize(signum: int, frame: Any) -> None:
+            # Force Rich to refresh - it will pick up new terminal size
+            if self._live:
+                self._live.refresh()
+
+        signal.signal(signal.SIGWINCH, on_resize)
+
+    def _cleanup_resize_handler(self) -> None:
+        """Restore previous SIGWINCH handler."""
+        if self._old_sigwinch is not None:
+            signal.signal(signal.SIGWINCH, self._old_sigwinch)
+            self._old_sigwinch = None
+
     def request_render(self) -> None:
         if self.is_tty:
             self.needs_render = True
@@ -1815,6 +1834,7 @@ class Renderer:
 
     def finalize(self) -> None:
         """Stop live display and print final status."""
+        self._cleanup_resize_handler()
         if self._live:
             self._live.stop()
             self._live = None
