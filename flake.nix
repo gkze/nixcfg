@@ -124,7 +124,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.34.0";
+      url = "github:charmbracelet/crush/v0.35.0";
       flake = false;
     };
     gemini-cli = {

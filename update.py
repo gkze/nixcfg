@@ -4,6 +4,7 @@
 # dependencies = [
 #   "aiohttp",
 #   "pydantic>=2.0",
+#   "rich>=13.0",
 # ]
 # ///
 """Update source versions and hashes in sources.json.
@@ -1675,48 +1676,13 @@ def _fit_to_width(text: str, width: int) -> str:
     return text[: max(0, width - 1)]
 
 
-def _format_header_line(
-    name: str,
-    status: str,
-    *,
-    width: int,
-    is_tty: bool,
-    bold_prefix: str,
-    bold_suffix: str,
-) -> str:
-    header_plain = _fit_to_width(f"{name}: {status}", width)
-    if is_tty and header_plain:
-        name_len = min(len(name), len(header_plain))
-        return (
-            f"{bold_prefix}{header_plain[:name_len]}{bold_suffix}"
-            f"{header_plain[name_len:]}"
-        )
-    return header_plain
-
-
-def _format_detail_line(
-    line: str,
-    *,
-    width: int,
-    is_tty: bool,
-    dim_prefix: str,
-    dim_suffix: str,
-) -> str:
-    entry = _fit_to_width(f"  {line}", width)
-    if is_tty:
-        return f"{dim_prefix}{entry}{dim_suffix}"
-    return entry
-
-
-@dataclass(frozen=True)
-class RenderStyle:
-    bold_prefix: str
-    bold_suffix: str
-    dim_prefix: str
-    dim_suffix: str
-
-
 class Renderer:
+    """Rich-based live renderer for update progress.
+
+    Uses Rich's Live display for automatic terminal resize handling and
+    clean rendering without manual ANSI escape sequences.
+    """
+
     def __init__(
         self,
         states: dict[str, SourceState],
@@ -1726,20 +1692,71 @@ class Renderer:
         panel_height: int | None = None,
         quiet: bool = False,
     ) -> None:
+        from rich.console import Console
+        from rich.live import Live
+        from rich.text import Text
+
         self.states = states
         self.order = order
         self.is_tty = is_tty
         self.quiet = quiet
-        self.style = RenderStyle(
-            bold_prefix="\x1b[1m" if is_tty else "",
-            bold_suffix="\x1b[0m" if is_tty else "",
-            dim_prefix="\x1b[2m" if is_tty else "",
-            dim_suffix="\x1b[0m" if is_tty else "",
-        )
+        self._initial_panel_height = panel_height
         self.panel_height = panel_height or TerminalInfo.panel_height()
-        self.lines_rendered = 0
         self.last_render = 0.0
         self.needs_render = False
+
+        # Rich components - only initialize for TTY mode
+        self._console: Any = None
+        self._live: Any = None
+        if is_tty and not quiet:
+            self._console = Console(force_terminal=True)
+            self._live = Live(
+                Text(""),
+                console=self._console,
+                refresh_per_second=10,
+                transient=True,  # Clear display when stopped
+            )
+            self._live.start()
+
+    def _build_display(self) -> Any:
+        """Build the Rich renderable for current state."""
+        from rich.console import Group
+        from rich.text import Text
+
+        if not self._console:
+            return Text("")
+
+        width = self._console.width
+        height = self._console.height
+        max_visible = min(self.panel_height, height - 1)
+
+        lines: list[Text] = []
+        for name in self.order:
+            if len(lines) >= max_visible:
+                break
+            state = self.states[name]
+            status = state.status or "pending"
+
+            # Build header line: "name: status" with name in bold
+            header = Text()
+            header.append(name, style="bold")
+            header.append(f": {status}")
+            header.truncate(width - 1)
+            lines.append(header)
+
+            if len(lines) >= max_visible:
+                break
+
+            # Add tail lines for active commands
+            if state.active_commands > 0:
+                for tail_line in state.tail:
+                    if len(lines) >= max_visible:
+                        break
+                    detail = Text(f"  {tail_line}", style="dim")
+                    detail.truncate(width - 1)
+                    lines.append(detail)
+
+        return Group(*lines)
 
     def log(self, source: str, message: str, *, stream: str | None = None) -> None:
         """Log a message to stdout when not in TTY mode."""
@@ -1769,52 +1786,32 @@ class Renderer:
             self.needs_render = False
 
     def finalize(self) -> None:
-        if self.is_tty and self.needs_render:
-            self.render()
+        """Stop live display and print final status."""
+        if self._live:
+            self._live.stop()
+            self._live = None
+        if self.is_tty and not self.quiet:
+            self._print_final_status()
+
+    def _print_final_status(self) -> None:
+        """Print final status summary after stopping live display."""
+        from rich.console import Console
+        from rich.text import Text
+
+        console = Console()
+        for name in self.order:
+            state = self.states[name]
+            status = state.status or "done"
+            line = Text()
+            line.append(name, style="bold")
+            line.append(f": {status}")
+            console.print(line)
 
     def render(self) -> None:
-        if not self.is_tty:
+        """Update the live display with current state."""
+        if not self._live:
             return
-        width = TerminalInfo.width()
-        style = self.style
-        max_visible = self.panel_height
-        lines: list[str] = []
-        for name in self.order:
-            if len(lines) >= max_visible:
-                break
-            state = self.states[name]
-            status = state.status or "pending"
-            lines.append(
-                _format_header_line(
-                    name,
-                    status,
-                    width=width,
-                    is_tty=self.is_tty,
-                    bold_prefix=style.bold_prefix,
-                    bold_suffix=style.bold_suffix,
-                )
-            )
-            if len(lines) >= max_visible:
-                break
-            if state.active_commands > 0:
-                for line in state.tail:
-                    if len(lines) >= max_visible:
-                        break
-                    lines.append(
-                        _format_detail_line(
-                            line,
-                            width=width,
-                            is_tty=self.is_tty,
-                            dim_prefix=style.dim_prefix,
-                            dim_suffix=style.dim_suffix,
-                        )
-                    )
-        if self.lines_rendered > 1:
-            sys.stdout.write(f"\x1b[{self.lines_rendered - 1}A")
-        sys.stdout.write("\r\x1b[J")
-        sys.stdout.write("\n".join(lines))
-        self.lines_rendered = len(lines)
-        sys.stdout.flush()
+        self._live.update(self._build_display())
 
 
 async def _consume_events(

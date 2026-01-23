@@ -70,7 +70,7 @@
     "hashes": [
       {
         "drvType": "buildGoModule",
-        "hash": "sha256-1YLP9j2QxRbYjw+SkP0zop74FZOw0upelEo1IhsSz+s=",
+        "hash": "sha256-WkkKPF3rE2eFsocxc9k3Q18/FbJaOFy5TrApJ5q3gsA=",
         "hashType": "vendorHash"
       }
     ],
