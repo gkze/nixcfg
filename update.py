@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import netrc
 import os
 import re
 import select
@@ -225,6 +226,37 @@ def _require_value(drain: ValueDrain, error: str) -> Any:
     return drain.value
 
 
+def _get_github_token() -> str | None:
+    """Get GitHub token from GITHUB_TOKEN env var or ~/.netrc.
+
+    Returns None if no token is available (will use unauthenticated requests).
+    """
+    # First try GITHUB_TOKEN environment variable
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        return token
+
+    # Then try ~/.netrc (check both api.github.com and github.com)
+    netrc_path = Path.home() / ".netrc"
+    if netrc_path.exists():
+        try:
+            nrc = netrc.netrc(str(netrc_path))
+            # Try api.github.com first (common for API tokens), then github.com
+            for host in ("api.github.com", "github.com"):
+                auth = nrc.authenticators(host)
+                if auth:
+                    # netrc returns (login, account, password) - token is in password
+                    return auth[2]
+        except (netrc.NetrcParseError, OSError):
+            pass
+
+    return None
+
+
+# Cache the token lookup
+_GITHUB_TOKEN: str | None = _get_github_token()
+
+
 def _check_github_rate_limit(headers: Mapping[str, str], url: str) -> None:
     remaining = headers.get("X-RateLimit-Remaining")
     if remaining is None:
@@ -254,9 +286,12 @@ async def _request(
     retries: int = DEFAULT_RETRIES,
     backoff: float = DEFAULT_RETRY_BACKOFF,
 ) -> tuple[bytes, Mapping[str, str]]:
-    headers = {}
+    headers: dict[str, str] = {}
     if user_agent:
         headers["User-Agent"] = user_agent
+    # Add GitHub API authentication if available
+    if url.startswith("https://api.github.com/") and _GITHUB_TOKEN:
+        headers["Authorization"] = f"Bearer {_GITHUB_TOKEN}"
     timeout_config = aiohttp.ClientTimeout(total=timeout or DEFAULT_TIMEOUT)
 
     last_error: Exception | None = None
