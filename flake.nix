@@ -337,6 +337,7 @@
             editorVenv = editorPySet.mkVirtualEnv "nixcfg-venv" {
               aiohttp = [ ];
               pydantic = [ ];
+              rich = [ ];
             };
           in
           pkgs.devshell.mkShell {

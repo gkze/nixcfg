@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
   "aiohttp",
   "pydantic>=2.0",
+  "rich>=13.0",
 ]
 
 [tool.uv]

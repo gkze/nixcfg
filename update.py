@@ -1742,7 +1742,7 @@ class Renderer:
                 Text(""),
                 console=self._console,
                 refresh_per_second=10,
-                transient=True,  # Clear display when stopped
+                screen=True,  # Use alternate screen buffer for clean resize handling
             )
             self._live.start()
 
