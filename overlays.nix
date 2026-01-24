@@ -281,6 +281,7 @@ in
             mkdir -p "$out/Applications"
             mkdir -p "$out/bin"
             cp -a Conductor.app "$out/Applications"
+            /usr/bin/xattr -cr "$out/Applications/Conductor.app"
             ln -s "$out/Applications/Conductor.app/Contents/MacOS/Conductor" "$out/bin/conductor"
 
             runHook postInstall
@@ -336,6 +337,7 @@ in
               mkdir -p "$out/Applications"
               mkdir -p "$out/bin"
               cp -a Sculptor.app "$out/Applications"
+              /usr/bin/xattr -cr "$out/Applications/Sculptor.app"
               ln -s "$out/Applications/Sculptor.app/Contents/MacOS/Sculptor" "$out/bin/sculptor"
 
               runHook postInstall
@@ -462,17 +464,21 @@ in
 
       sentry-cli =
         let
+          # Fetch source directly (not via flake input) so we can filter BEFORE
+          # it enters the store. Flake inputs are unconditionally added to the
+          # store, making post-hoc filtering ineffective for nix-store --optimise.
           version = getFlakeVersion "sentry-cli";
+          lock = outputs.lib.flakeLock.sentry-cli.locked;
           # Filter out iOS test fixtures with code-signed .xcarchive bundles
           # These cause nix-store --optimise to fail on macOS due to
           # code signature protections on _CodeSignature/CodeResources files
-          # Note: lib.cleanSourceWith does NOT work on flake inputs (already in store)
-          # Must use a derivation to physically copy and filter the source
-          filteredSrc = prev.runCommand "sentry-cli-src-filtered" { } ''
-            cp -r ${inputs.sentry-cli} $out
-            chmod -R u+w $out
-            find $out -name "*.xcarchive" -type d -exec rm -rf {} + 2>/dev/null || true
-          '';
+          filteredSrc = prev.fetchFromGitHub {
+            inherit (lock) owner repo rev;
+            hash = outputs.lib.sourceHash "sentry-cli" "srcHash";
+            postFetch = ''
+              find $out -name "*.xcarchive" -type d -exec rm -rf {} + 2>/dev/null || true
+            '';
+          };
         in
         prev.sentry-cli.overrideAttrs (old: {
           inherit version;

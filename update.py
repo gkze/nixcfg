@@ -38,9 +38,9 @@ import os
 import re
 import select
 import shlex
-import time
 import sys
 import termios
+import time
 import tty
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -54,7 +54,6 @@ from typing import Any, AsyncIterator, Iterable, Literal, Mapping
 
 import aiohttp
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 
 # =============================================================================
 # Configuration

@@ -163,6 +163,11 @@
         "drvType": "fetchCargoVendor",
         "hash": "sha256-PUQ55pNiLEI5qxykA/j7RsykKJRTUGOGf2JBLacFGBo=",
         "hashType": "cargoHash"
+      },
+      {
+        "drvType": "fetchFromGitHub",
+        "hash": "sha256-jBtQKAgqFGDUTrhsyMpNF0qzSJU+XKY9OcUfZf7Z5/8=",
+        "hashType": "srcHash"
       }
     ],
     "input": "sentry-cli"
