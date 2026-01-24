@@ -21,7 +21,7 @@ in
         ];
     };
     ptpythonTheme = mkOption {
-      type = types.oneOf [ "catppuccin" ];
+      type = types.enum [ "catppuccin" ];
       default = "catppuccin";
     };
   };

@@ -8,8 +8,8 @@ let
   # Get version from flake lock, stripping common prefixes
   getFlakeVersion = name: stripVersionPrefix outputs.lib.flakeLock.${name}.original.ref;
 
-  # Pre-parsed sources.json for all packages
-  sources = builtins.fromJSON (builtins.readFile ./sources.json);
+  # Use pre-parsed sources from lib (avoids duplicate parsing)
+  inherit (outputs.lib) sources;
 in
 {
   default =
@@ -415,7 +415,7 @@ in
           source = outputs.lib.sourceHashEntry "homebrew-zsh-completion" "sha256";
         in
         prev.stdenvNoCC.mkDerivation {
-          name = "brew-zsh-compmletion";
+          name = "brew-zsh-completion";
           src = builtins.fetchurl {
             inherit (source) url;
             sha256 = source.hash;
