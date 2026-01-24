@@ -37,7 +37,6 @@ import netrc
 import os
 import re
 import select
-import signal
 import shlex
 import time
 import sys
@@ -799,17 +798,17 @@ class HashEntry(BaseModel):
         return _validate_sri_hash(v)
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to JSON-compatible dict with camelCase keys."""
+        """Serialize to JSON-compatible dict with camelCase keys, sorted alphabetically."""
         result: dict[str, Any] = {
             "drvType": self.drv_type,
-            "hashType": self.hash_type,
             "hash": self.hash,
+            "hashType": self.hash_type,
         }
         if self.url is not None:
             result["url"] = self.url
         if self.urls is not None:
             result["urls"] = self.urls
-        return result
+        return dict(sorted(result.items()))
 
 
 # Type for hashes - either list of entries or platform->hash mapping
@@ -880,17 +879,17 @@ class SourceEntry(BaseModel):
     commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to JSON-compatible dict with camelCase keys."""
+        """Serialize to JSON-compatible dict with camelCase keys, sorted alphabetically."""
         result: dict[str, Any] = {"hashes": self.hashes.to_json()}
-        if self.version is not None:
-            result["version"] = self.version
+        if self.commit is not None:
+            result["commit"] = self.commit
         if self.input is not None:
             result["input"] = self.input
         if self.urls is not None:
             result["urls"] = self.urls
-        if self.commit is not None:
-            result["commit"] = self.commit
-        return result
+        if self.version is not None:
+            result["version"] = self.version
+        return dict(sorted(result.items()))
 
 
 class SourcesFile(BaseModel):
@@ -1547,6 +1546,58 @@ class ConductorUpdater(DownloadHashUpdater):
         return self._build_result_with_urls(info, hashes, urls)
 
 
+class SculptorUpdater(DownloadHashUpdater):
+    """Update Sculptor to latest version from Imbue S3 bucket.
+
+    Sculptor doesn't have a version API, so we use the Last-Modified header
+    as a pseudo-version (date format: YYYY-MM-DD).
+    """
+
+    name = "sculptor"
+
+    # S3 base URL (discovered via redirect from tryimbue.link shortlinks)
+    BASE_URL = "https://imbue-sculptor-releases.s3.us-west-2.amazonaws.com/sculptor"
+
+    # nix platform -> S3 path suffix
+    PLATFORMS = {
+        "aarch64-darwin": "Sculptor.dmg",
+        "x86_64-darwin": "Sculptor-x86_64.dmg",
+        "x86_64-linux": "AppImage/x64/Sculptor.AppImage",
+    }
+
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        """Fetch version from Last-Modified header (no version API available)."""
+        url = f"{self.BASE_URL}/Sculptor.dmg"
+        _payload, headers = await _request(
+            session, url, method="HEAD", timeout=DEFAULT_TIMEOUT
+        )
+        last_modified = headers.get("Last-Modified", "")
+
+        # Parse Last-Modified header: "Tue, 20 Jan 2026 21:11:45 GMT"
+        if not last_modified:
+            raise RuntimeError("No Last-Modified header from Sculptor download")
+
+        # Convert to date-based version: "2026-01-20"
+        try:
+            dt = datetime.strptime(last_modified, "%a, %d %b %Y %H:%M:%S %Z")
+            version = dt.strftime("%Y-%m-%d")
+        except ValueError:
+            # Fallback: use raw header if parsing fails
+            version = last_modified[:10]
+
+        return VersionInfo(version=version, metadata={})
+
+    def get_download_url(self, platform: str, info: VersionInfo) -> str:
+        return f"{self.BASE_URL}/{self.PLATFORMS[platform]}"
+
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
+        urls = {
+            nix_platform: f"{self.BASE_URL}/{path}"
+            for nix_platform, path in self.PLATFORMS.items()
+        }
+        return self._build_result_with_urls(info, hashes, urls)
+
+
 class VSCodeInsidersUpdater(ChecksumProvidedUpdater):
     """Update VS Code Insiders to latest version."""
 
@@ -1764,10 +1815,8 @@ class Renderer:
         self.is_tty = is_tty
         self.quiet = quiet
         self._initial_panel_height = panel_height
-        self.panel_height = panel_height or TerminalInfo.panel_height()
         self.last_render = 0.0
         self.needs_render = False
-        self._old_sigwinch: Any = None
 
         # Rich components - only initialize for TTY mode
         self._console: Any = None
@@ -1777,11 +1826,10 @@ class Renderer:
             self._live = Live(
                 Text(""),
                 console=self._console,
-                refresh_per_second=10,
+                auto_refresh=False,  # We control refresh timing
                 transient=True,  # Clear when stopped, render in-place
             )
             self._live.start()
-            self._setup_resize_handler()
 
     def _build_display(self) -> Any:
         """Build the Rich renderable for current state."""
@@ -1793,7 +1841,9 @@ class Renderer:
 
         width = self._console.width
         height = self._console.height
-        max_visible = min(self.panel_height, height - 1)
+        # Calculate max_visible dynamically to handle terminal resize
+        panel_height = self._initial_panel_height or max(1, height - 1)
+        max_visible = min(panel_height, height - 1)
 
         lines: list[Text] = []
         for name in self.order:
@@ -1838,23 +1888,6 @@ class Renderer:
             return
         print(f"[{source}] Error: {message}", file=sys.stderr)
 
-    def _setup_resize_handler(self) -> None:
-        """Install SIGWINCH handler to force refresh on terminal resize."""
-        self._old_sigwinch = signal.getsignal(signal.SIGWINCH)
-
-        def on_resize(signum: int, frame: Any) -> None:
-            # Force Rich to refresh - it will pick up new terminal size
-            if self._live:
-                self._live.refresh()
-
-        signal.signal(signal.SIGWINCH, on_resize)
-
-    def _cleanup_resize_handler(self) -> None:
-        """Restore previous SIGWINCH handler."""
-        if self._old_sigwinch is not None:
-            signal.signal(signal.SIGWINCH, self._old_sigwinch)
-            self._old_sigwinch = None
-
     def request_render(self) -> None:
         if self.is_tty:
             self.needs_render = True
@@ -1869,7 +1902,6 @@ class Renderer:
 
     def finalize(self) -> None:
         """Stop live display and print final status."""
-        self._cleanup_resize_handler()
         if self._live:
             self._live.stop()
             self._live = None
@@ -1894,7 +1926,7 @@ class Renderer:
         """Update the live display with current state."""
         if not self._live:
             return
-        self._live.update(self._build_display())
+        self._live.update(self._build_display(), refresh=True)
 
 
 async def _consume_events(

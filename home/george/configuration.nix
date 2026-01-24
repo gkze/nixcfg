@@ -339,6 +339,7 @@
         };
         buffer_font_family = "Hack Nerd Font Mono";
         buffer_font_size = 12.0;
+        font_family = "Hack Nerd Font Mono";
         context_servers.mcp-server-github = {
           enabled = true;
           settings = { }; # Token injected by activation script

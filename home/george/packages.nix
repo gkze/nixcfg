@@ -59,6 +59,7 @@
       rsync
       rustup
       sd
+      sculptor
       sentry-cli
       sequoia-chameleon-gnupg
       sequoia-sq
@@ -82,6 +83,7 @@
     ++ lib.lists.optionals pkgs.stdenv.isDarwin [
       appcleaner
       chatgpt
+      conductor
       container
       cyberduck
       google-chrome

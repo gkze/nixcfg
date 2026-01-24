@@ -65,12 +65,10 @@ in
                 --fish <($out/bin/${cmdName} completion fish) \
                 --zsh <($out/bin/${cmdName} completion zsh)
             '';
-            meta =
-              with prev.lib;
-              {
-                mainProgram = cmdName;
-              }
-              // meta;
+            meta = {
+              mainProgram = cmdName;
+            }
+            // meta;
           }
           // (builtins.removeAttrs args [
             "pname"
@@ -298,6 +296,83 @@ in
           };
         };
 
+      sculptor =
+        let
+          info = sources.sculptor;
+          inherit (prev.stdenv) isDarwin;
+          arch = if system == "aarch64-darwin" then "aarch64" else "x86_64";
+          meta = with prev.lib; {
+            description = "UI for running parallel coding agents in safe, isolated sandboxes";
+            homepage = "https://imbue.com/sculptor/";
+            license = licenses.unfree;
+            platforms = [
+              "aarch64-darwin"
+              "x86_64-darwin"
+              "x86_64-linux"
+            ];
+            sourceProvenance = with sourceTypes; [ binaryNativeCode ];
+            mainProgram = "sculptor";
+          };
+        in
+        if isDarwin then
+          prev.stdenvNoCC.mkDerivation {
+            pname = "sculptor";
+            inherit (info) version;
+            inherit meta;
+
+            src = prev.fetchurl {
+              name = "Sculptor_${info.version}_${arch}.dmg";
+              url = info.urls.${system};
+              hash = info.hashes.${system};
+            };
+
+            nativeBuildInputs = [ prev.undmg ];
+
+            sourceRoot = ".";
+
+            installPhase = ''
+              runHook preInstall
+
+              mkdir -p "$out/Applications"
+              mkdir -p "$out/bin"
+              cp -a Sculptor.app "$out/Applications"
+              ln -s "$out/Applications/Sculptor.app/Contents/MacOS/Sculptor" "$out/bin/sculptor"
+
+              runHook postInstall
+            '';
+          }
+        else
+          prev.appimageTools.wrapType2 {
+            pname = "sculptor";
+            inherit (info) version;
+            inherit meta;
+
+            src = prev.fetchurl {
+              name = "Sculptor_${info.version}.AppImage";
+              url = info.urls.${system};
+              hash = info.hashes.${system};
+            };
+
+            extraInstallCommands =
+              let
+                appimageContents = prev.appimageTools.extractType2 {
+                  inherit (info) version;
+                  pname = "sculptor";
+                  src = prev.fetchurl {
+                    name = "Sculptor_${info.version}.AppImage";
+                    url = info.urls.${system};
+                    hash = info.hashes.${system};
+                  };
+                };
+              in
+              ''
+                # Install desktop file and icons if available
+                if [ -d "${appimageContents}/usr/share" ]; then
+                  cp -r "${appimageContents}/usr/share" "$out/"
+                fi
+              '';
+          };
+
       crush =
         let
           version = getFlakeVersion "crush";
@@ -391,19 +466,13 @@ in
           # Filter out iOS test fixtures with code-signed .xcarchive bundles
           # These cause nix-store --optimise to fail on macOS due to
           # code signature protections on _CodeSignature/CodeResources files
-          # Note: There are xcarchives in multiple locations:
-          #   - tests/integration/_fixtures/build/archive.xcarchive
-          #   - apple-catalog-parsing/.../Resources/test.xcarchive
-          # Using lib.cleanSourceWith to filter at evaluation time avoids keeping
-          # the original source with code-signed files as a build dependency
-          filteredSrc = prev.lib.cleanSourceWith {
-            src = inputs.sentry-cli;
-            name = "sentry-cli-src-filtered";
-            filter =
-              path: _type:
-              # Check if any path component is an xcarchive directory
-              !(builtins.match ".*\\.xcarchive.*" path != null);
-          };
+          # Note: lib.cleanSourceWith does NOT work on flake inputs (already in store)
+          # Must use a derivation to physically copy and filter the source
+          filteredSrc = prev.runCommand "sentry-cli-src-filtered" { } ''
+            cp -r ${inputs.sentry-cli} $out
+            chmod -R u+w $out
+            find $out -name "*.xcarchive" -type d -exec rm -rf {} + 2>/dev/null || true
+          '';
         in
         prev.sentry-cli.overrideAttrs (old: {
           inherit version;

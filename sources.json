@@ -144,6 +144,19 @@
       }
     ]
   },
+  "sculptor": {
+    "hashes": {
+      "aarch64-darwin": "sha256-v7Jn1awquOJXRi5twbddTKSkP2gl5E9y3AeXUL7zsJA=",
+      "x86_64-darwin": "sha256-OhY5HVLKnA82QnOWwcefi2xrHc3iUuSXKBnKv0N08dM=",
+      "x86_64-linux": "sha256-Etfr088ctspZI2NXn2THlEWd8LNRDjX/OVTSnsaC0zk="
+    },
+    "urls": {
+      "aarch64-darwin": "https://imbue-sculptor-releases.s3.us-west-2.amazonaws.com/sculptor/Sculptor.dmg",
+      "x86_64-darwin": "https://imbue-sculptor-releases.s3.us-west-2.amazonaws.com/sculptor/Sculptor-x86_64.dmg",
+      "x86_64-linux": "https://imbue-sculptor-releases.s3.us-west-2.amazonaws.com/sculptor/AppImage/x64/Sculptor.AppImage"
+    },
+    "version": "2026-01-20"
+  },
   "sentry-cli": {
     "hashes": [
       {
