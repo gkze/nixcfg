@@ -52,7 +52,7 @@
         ''
           pinentry-program ${prog}
         '';
-      "${config.xdg.configHome}/home-manager/home.nix".source = ../../standalone-home.nix;
+      "${config.xdg.configHome}/home-manager/home.nix".source = ./standalone-home.nix;
       ".local/bin" = {
         source = ./bin;
         recursive = true;
