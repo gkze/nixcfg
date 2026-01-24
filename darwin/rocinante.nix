@@ -15,7 +15,7 @@ mkSystem {
   system = "aarch64-darwin";
   hostname = removeSuffix ".nix" (baseNameOf ./.);
   users = [ user ];
-  homeModules = [ ];
+  homeModules = [ { } ]; # Empty module to enable home-manager integration
   systemModules = [
     "${modulesPath}/darwin/display-management.nix"
     nix-homebrew.darwinModules.nix-homebrew
