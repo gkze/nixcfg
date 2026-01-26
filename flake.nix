@@ -313,7 +313,10 @@
                   excludes = [ "misc/zsh-plugins/go\\.plugin\\.zsh" ];
                 };
                 # Markdown
-                mdformat.enable = true;
+                mdformat = {
+                  enable = true;
+                  package = pkgs.mdformat;
+                };
                 # General
                 check-merge-conflicts.enable = true;
                 end-of-file-fixer.enable = true;

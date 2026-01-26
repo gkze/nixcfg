@@ -239,6 +239,30 @@ in
       };
 
       # ═══════════════════════════════════════════════════════════════════════════
+      # Python Package Overrides
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      # mdformat: Update to 1.0.0 for markdown-it-py 4.x compatibility
+      # nixos-unstable has markdown-it-py 4.0.0 but mdformat 0.7.22 requires <4.0.0
+      # PR #483504 merged to master but not yet in unstable
+      # TODO: Remove this override once nixos-unstable has mdformat 1.0.0
+      mdformat = prev.mdformat.override {
+        python3 = prev.python3.override {
+          packageOverrides = _: pyPrev: {
+            mdformat = pyPrev.mdformat.overridePythonAttrs (_: rec {
+              version = "1.0.0";
+              src = prev.fetchFromGitHub {
+                owner = "hukkin";
+                repo = "mdformat";
+                tag = version;
+                hash = "sha256-fo4xO4Y89qPAggEjwuf6dnTyu1JzhZVdJyUqGNpti7g=";
+              };
+            });
+          };
+        };
+      };
+
+      # ═══════════════════════════════════════════════════════════════════════════
       # Other Packages (with custom logic)
       # ═══════════════════════════════════════════════════════════════════════════
 
@@ -462,35 +486,35 @@ in
         }
       );
 
-      sentry-cli =
-        let
-          # Fetch source directly (not via flake input) so we can filter BEFORE
-          # it enters the store. Flake inputs are unconditionally added to the
-          # store, making post-hoc filtering ineffective for nix-store --optimise.
-          version = getFlakeVersion "sentry-cli";
-          lock = outputs.lib.flakeLock.sentry-cli.locked;
-          # Filter out iOS test fixtures with code-signed .xcarchive bundles
-          # These cause nix-store --optimise to fail on macOS due to
-          # code signature protections on _CodeSignature/CodeResources files
-          filteredSrc = prev.fetchFromGitHub {
-            inherit (lock) owner repo rev;
-            hash = outputs.lib.sourceHash "sentry-cli" "srcHash";
-            postFetch = ''
-              find $out -name "*.xcarchive" -type d -exec rm -rf {} + 2>/dev/null || true
-            '';
-          };
-        in
-        prev.sentry-cli.overrideAttrs (old: {
-          inherit version;
-          src = filteredSrc;
-          cargoDeps = prev.rustPlatform.fetchCargoVendor {
-            src = filteredSrc;
-            hash = outputs.lib.sourceHash "sentry-cli" "cargoHash";
-          };
-          buildInputs = old.buildInputs or [ ] ++ [ prev.curl ];
-          # Disable tests that depend on xcarchive fixtures we removed
-          doCheck = false;
-        });
+      # sentry-cli =
+      #   let
+      #     # Fetch source directly (not via flake input) so we can filter BEFORE
+      #     # it enters the store. Flake inputs are unconditionally added to the
+      #     # store, making post-hoc filtering ineffective for nix-store --optimise.
+      #     version = getFlakeVersion "sentry-cli";
+      #     lock = outputs.lib.flakeLock.sentry-cli.locked;
+      #     # Filter out iOS test fixtures with code-signed .xcarchive bundles
+      #     # These cause nix-store --optimise to fail on macOS due to
+      #     # code signature protections on _CodeSignature/CodeResources files
+      #     filteredSrc = prev.fetchFromGitHub {
+      #       inherit (lock) owner repo rev;
+      #       hash = outputs.lib.sourceHash "sentry-cli" "srcHash";
+      #       postFetch = ''
+      #         find $out -name "*.xcarchive" -type d -exec rm -rf {} + 2>/dev/null || true
+      #       '';
+      #     };
+      #   in
+      #   prev.sentry-cli.overrideAttrs (old: {
+      #     inherit version;
+      #     src = filteredSrc;
+      #     cargoDeps = prev.rustPlatform.fetchCargoVendor {
+      #       src = filteredSrc;
+      #       hash = outputs.lib.sourceHash "sentry-cli" "cargoHash";
+      #     };
+      #     buildInputs = old.buildInputs or [ ] ++ [ prev.curl ];
+      #     # Disable tests that depend on xcarchive fixtures we removed
+      #     doCheck = false;
+      #   });
 
       sublime-kdl =
         let
