@@ -104,7 +104,7 @@
       flake = false;
     };
     beads = {
-      url = "github:steveyegge/beads/v0.49.0";
+      url = "github:steveyegge/beads/v0.49.1";
       flake = false;
     };
     bufresize-nvim = {
@@ -116,7 +116,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.89.0";
+      url = "github:openai/codex/rust-v0.91.0";
       flake = false;
     };
     curator = {
@@ -128,7 +128,7 @@
       flake = false;
     };
     gemini-cli = {
-      url = "github:google-gemini/gemini-cli/v0.25.1";
+      url = "github:google-gemini/gemini-cli/v0.25.2";
       flake = false;
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
