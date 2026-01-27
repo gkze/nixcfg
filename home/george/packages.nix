@@ -27,6 +27,7 @@
       dust
       file
       gawk
+      git-bug
       git-who
       gita
       glab
@@ -58,8 +59,8 @@
       red-reddit-cli
       rsync
       rustup
-      sd
       sculptor
+      sd
       sentry-cli
       sequoia-chameleon-gnupg
       sequoia-sq

@@ -582,14 +582,20 @@ in
             '';
           };
         in
-        prev.sentry-cli.overrideAttrs {
+        prev.sentry-cli.overrideAttrs (old: {
           inherit (sources.sentry-cli) version;
           src = filteredSrc;
+          buildInputs = (old.buildInputs or [ ]) ++ [ prev.curl ];
           cargoDeps = prev.rustPlatform.fetchCargoVendor {
             src = filteredSrc;
             hash = outputs.lib.sourceHash "sentry-cli" "cargoHash";
           };
-        };
+          # postFetch strips .xcarchive bundles (macOS code-signed), which
+          # breaks this test that expects them present in the source tree.
+          checkFlags = (old.checkFlags or [ ]) ++ [
+            "--skip=commands::build::upload::tests::test_xcarchive_upload_includes_parsed_assets"
+          ];
+        });
 
       sublime-kdl =
         let
