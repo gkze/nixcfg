@@ -32,6 +32,7 @@
       git-who
       gita
       glab
+      gmailctl
       gnused
       gnutar
       gogcli

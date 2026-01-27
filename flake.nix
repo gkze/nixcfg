@@ -136,7 +136,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.35.0";
+      url = "github:charmbracelet/crush/v0.36.0";
       flake = false;
     };
     gemini-cli = {
@@ -172,6 +172,10 @@
       url = "github:nvuillam/markdown-table-formatter";
       flake = false;
     };
+    mdformat = {
+      url = "github:hukkin/mdformat/1.0.0";
+      flake = false;
+    };
     mdq = {
       url = "github:yshavit/mdq";
       flake = false;
@@ -201,7 +205,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad/v0.5.34";
+      url = "github:batrachianai/toad/v0.5.35";
       flake = false;
     };
     treewalker-nvim = {

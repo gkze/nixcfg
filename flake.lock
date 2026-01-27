@@ -254,16 +254,16 @@
     "crush": {
       "flake": false,
       "locked": {
-        "lastModified": 1769199977,
-        "narHash": "sha256-yr3965QQ5u9Yuwm/cPF2Wx/rPKP+5CnJBMjLB5ettLY=",
+        "lastModified": 1769521697,
+        "narHash": "sha256-xitCvejiVts9kkvtcVwh/zaeWIzDj0jx9xQMh2h+9Ns=",
         "owner": "charmbracelet",
         "repo": "crush",
-        "rev": "d8532064881e58b154e17c678e8b86a733d526f1",
+        "rev": "4a0af718b20d9de3e0f0f44f78649815c0279326",
         "type": "github"
       },
       "original": {
         "owner": "charmbracelet",
-        "ref": "v0.35.0",
+        "ref": "v0.36.0",
         "repo": "crush",
         "type": "github"
       }
@@ -1151,6 +1151,23 @@
         "type": "github"
       }
     },
+    "mdformat": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1760616048,
+        "narHash": "sha256-fo4xO4Y89qPAggEjwuf6dnTyu1JzhZVdJyUqGNpti7g=",
+        "owner": "hukkin",
+        "repo": "mdformat",
+        "rev": "82912cdaea4fb830f751504486a7879c70526547",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hukkin",
+        "ref": "1.0.0",
+        "repo": "mdformat",
+        "type": "github"
+      }
+    },
     "mdq": {
       "flake": false,
       "locked": {
@@ -1781,6 +1798,7 @@
         "mac-app-util": "mac-app-util",
         "macfuse": "macfuse",
         "markdown-table-formatter": "markdown-table-formatter",
+        "mdformat": "mdformat",
         "mdq": "mdq",
         "mountpoint-s3": "mountpoint-s3",
         "naersk": "naersk",
@@ -2176,16 +2194,16 @@
     "toad": {
       "flake": false,
       "locked": {
-        "lastModified": 1768585940,
-        "narHash": "sha256-f7T6JtuZO0XK6f5JhMsbA0glS1LanjW2KlPfH6g1P/0=",
+        "lastModified": 1768999124,
+        "narHash": "sha256-XYTSADrJiihDoeuyluG8rNbeFZRSUg8j1y/oDzj6O+M=",
         "owner": "batrachianai",
         "repo": "toad",
-        "rev": "7e2735806e838ef7039109fb10ba15493d7a2f1b",
+        "rev": "a1147211a33c274c5e8e0271cc25c0c1a8f00be5",
         "type": "github"
       },
       "original": {
         "owner": "batrachianai",
-        "ref": "v0.5.34",
+        "ref": "v0.5.35",
         "repo": "toad",
         "type": "github"
       }

@@ -249,14 +249,9 @@ in
       mdformat = prev.mdformat.override {
         python3 = prev.python3.override {
           packageOverrides = _: pyPrev: {
-            mdformat = pyPrev.mdformat.overridePythonAttrs (_: rec {
-              version = "1.0.0";
-              src = prev.fetchFromGitHub {
-                owner = "hukkin";
-                repo = "mdformat";
-                tag = version;
-                hash = "sha256-fo4xO4Y89qPAggEjwuf6dnTyu1JzhZVdJyUqGNpti7g=";
-              };
+            mdformat = pyPrev.mdformat.overridePythonAttrs (_: {
+              version = getFlakeVersion "mdformat-src";
+              src = inputs.mdformat;
             });
           };
         };
