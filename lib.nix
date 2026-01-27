@@ -130,8 +130,15 @@ rec {
     system:
     let
       sysTup = split "-" system;
+      k = elemAt sysTup (length sysTup - 1);
     in
-    elemAt sysTup (length sysTup - 1);
+    assert
+      builtins.elem k [
+        "darwin"
+        "linux"
+      ]
+      || throw "unsupported kernel '${k}' from system '${system}' (expected darwin or linux)";
+    k;
   homeDirBase =
     system:
     {

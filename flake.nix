@@ -212,6 +212,10 @@
       url = "github:batrachianai/toad/v0.5.35";
       flake = false;
     };
+    treesitter-textobjects = {
+      url = "github:gkze/nvim-treesitter-textobjects/feat/nix-expand-textobjects";
+      flake = false;
+    };
     treewalker-nvim = {
       url = "github:aaronik/treewalker.nvim";
       flake = false;
@@ -236,10 +240,6 @@
       url = "github:jnsahaj/lumen/v2.19.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # ghostty-shaders = {
-    #   url = "github:0xhckr/ghostty-shaders";
-    #   flake = false;
-    # };
   };
 
   outputs =
@@ -254,6 +254,29 @@
     }@inputs:
     flakelight ./. (
       { lib, ... }:
+      let
+        # ─── Lint file patterns ───────────────────────────────────────────
+        # Defined once, referenced in both devShell (git-hooks, regex)
+        # and formatter (treefmt-nix, globs).
+        lintFiles = {
+          ruff = {
+            regex = "(\\.py$|home/george/bin/git-ignore)";
+            globs = [
+              "*.py"
+              "home/george/bin/git-ignore"
+            ];
+          };
+          shell = {
+            regex = "(\\.envrc|misc/zsh-plugins/.*\\.zsh)";
+            globs = [
+              ".envrc"
+              "misc/zsh-plugins/*.zsh"
+            ];
+            excludeRegex = [ "misc/zsh-plugins/go\\.plugin\\.zsh" ];
+            excludeGlobs = [ "misc/zsh-plugins/go.plugin.zsh" ];
+          };
+        };
+      in
       {
         inherit inputs;
 
@@ -279,43 +302,11 @@
           inputs.neovim-nightly-overlay.overlays.default
           inputs.red.overlays.default
           self.overlays.default
-          (final: _: { flake-edit = inputs.flake-edit.packages.${final.system}.default; })
-          # Pin Swift to a nixpkgs rev where it builds (clang-21.1.8 broke it)
-          # Tracking: https://github.com/NixOS/nixpkgs/issues/483584
-          (
-            final: _:
-            let
-              pkgsSwift = import inputs.nixpkgs-swift { inherit (final) system; };
-            in
-            {
-              inherit (pkgsSwift) swiftPackages swift;
-            }
-          )
-          (
-            _: prev:
-            let
-              inherit (inputs.pyproject-nix.lib) scripts;
-              script = scripts.loadScript {
-                name = "update";
-                script = ./update.py;
-              };
-            in
-            {
-              update-script = prev.writeScriptBin script.name (
-                scripts.renderWithPackages {
-                  inherit script;
-                  python = prev.python313;
-                }
-              );
-            }
-          )
         ];
 
         devShell =
           pkgs:
           let
-            ruffFiles = "(\\.py$|home/george/bin/git-ignore)";
-            shFiles = "(\\.envrc|misc/zsh-plugins/.*\\.zsh)";
             pre-commit-check = git-hooks.lib.${pkgs.system}.run {
               src = ./.;
               package = pkgs.prek;
@@ -327,22 +318,22 @@
                 # Python
                 ruff = {
                   enable = true;
-                  files = ruffFiles;
+                  files = lintFiles.ruff.regex;
                 };
                 ruff-format = {
                   enable = true;
-                  files = ruffFiles;
+                  files = lintFiles.ruff.regex;
                 };
                 # Shell
                 shellcheck = {
                   enable = true;
-                  files = shFiles;
-                  excludes = [ "misc/zsh-plugins/go\\.plugin\\.zsh" ];
+                  files = lintFiles.shell.regex;
+                  excludes = lintFiles.shell.excludeRegex;
                 };
                 shfmt = {
                   enable = true;
-                  files = shFiles;
-                  excludes = [ "misc/zsh-plugins/go\\.plugin\\.zsh" ];
+                  files = lintFiles.shell.regex;
+                  excludes = lintFiles.shell.excludeRegex;
                 };
                 # Markdown
                 mdformat = {
@@ -411,14 +402,6 @@
           pkgs:
           with treefmt-nix.lib;
           let
-            ruffInclude = [
-              "*.py"
-              "home/george/bin/git-ignore"
-            ];
-            shInclude = [
-              ".envrc"
-              "misc/zsh-plugins/*.zsh"
-            ];
             inherit
               (evalModule pkgs {
                 projectRootFile = "flake.nix";
@@ -428,21 +411,21 @@
                   statix.enable = true;
                   ruff-check = {
                     enable = true;
-                    includes = ruffInclude;
+                    includes = lintFiles.ruff.globs;
                   };
                   ruff-format = {
                     enable = true;
-                    includes = ruffInclude;
+                    includes = lintFiles.ruff.globs;
                   };
                   shellcheck = {
                     enable = true;
-                    includes = shInclude;
-                    excludes = [ "misc/zsh-plugins/go.plugin.zsh" ];
+                    includes = lintFiles.shell.globs;
+                    excludes = lintFiles.shell.excludeGlobs;
                   };
                   shfmt = {
                     enable = true;
-                    includes = shInclude;
-                    excludes = [ "misc/zsh-plugins/go.plugin.zsh" ];
+                    includes = lintFiles.shell.globs;
+                    excludes = lintFiles.shell.excludeGlobs;
                   };
                 };
                 settings.formatter."markdown-table-formatter" = with pkgs; {

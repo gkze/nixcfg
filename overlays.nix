@@ -130,6 +130,49 @@ in
         };
 
       # ─────────────────────────────────────────────────────────────────────────
+      # Helper: Build a macOS .app from a .dmg with optional CLI symlink
+      # ─────────────────────────────────────────────────────────────────────────
+      mkDmgApp =
+        {
+          pname,
+          info,
+          appName ? pname,
+          meta ? { },
+        }:
+        let
+          arch = if system == "aarch64-darwin" then "aarch64" else "x86_64";
+          capitalizedAppName =
+            (prev.lib.toUpper (builtins.substring 0 1 appName)) + builtins.substring 1 (-1) appName;
+        in
+        prev.stdenvNoCC.mkDerivation {
+          inherit pname;
+          inherit (info) version;
+          inherit meta;
+
+          src = prev.fetchurl {
+            name = "${capitalizedAppName}_${info.version}_${arch}.dmg";
+            url = info.urls.${system};
+            hash = info.hashes.${system};
+          };
+
+          nativeBuildInputs = [ prev.undmg ];
+
+          sourceRoot = ".";
+
+          installPhase = ''
+            runHook preInstall
+
+            mkdir -p "$out/Applications"
+            mkdir -p "$out/bin"
+            cp -a ${capitalizedAppName}.app "$out/Applications"
+            /usr/bin/xattr -cr "$out/Applications/${capitalizedAppName}.app"
+            ln -s "$out/Applications/${capitalizedAppName}.app/Contents/MacOS/${capitalizedAppName}" "$out/bin/${pname}"
+
+            runHook postInstall
+          '';
+        };
+
+      # ─────────────────────────────────────────────────────────────────────────
       # Helper: Patch opencode packages for bun version compatibility
       # ─────────────────────────────────────────────────────────────────────────
       opencodeBunPatch = old: {
@@ -311,52 +354,23 @@ in
           BORING_BSSL_ASSUME_PATCHED = "1";
         });
 
-      conductor =
-        let
-          info = sources.conductor;
-          arch = if system == "aarch64-darwin" then "aarch64" else "x86_64";
-        in
-        prev.stdenvNoCC.mkDerivation {
-          pname = "conductor";
-          inherit (info) version;
-
-          src = prev.fetchurl {
-            name = "Conductor_${info.version}_${arch}.dmg";
-            url = info.urls.${system};
-            hash = info.hashes.${system};
-          };
-
-          nativeBuildInputs = [ prev.undmg ];
-
-          sourceRoot = ".";
-
-          installPhase = ''
-            runHook preInstall
-
-            mkdir -p "$out/Applications"
-            mkdir -p "$out/bin"
-            cp -a Conductor.app "$out/Applications"
-            /usr/bin/xattr -cr "$out/Applications/Conductor.app"
-            ln -s "$out/Applications/Conductor.app/Contents/MacOS/Conductor" "$out/bin/conductor"
-
-            runHook postInstall
-          '';
-
-          meta = with prev.lib; {
-            description = "Run a team of coding agents on your Mac";
-            homepage = "https://www.conductor.build/";
-            license = licenses.unfree;
-            platforms = platforms.darwin;
-            sourceProvenance = with sourceTypes; [ binaryNativeCode ];
-            mainProgram = "conductor";
-          };
+      conductor = mkDmgApp {
+        pname = "conductor";
+        info = sources.conductor;
+        meta = with prev.lib; {
+          description = "Run a team of coding agents on your Mac";
+          homepage = "https://www.conductor.build/";
+          license = licenses.unfree;
+          platforms = platforms.darwin;
+          sourceProvenance = with sourceTypes; [ binaryNativeCode ];
+          mainProgram = "conductor";
         };
+      };
 
       sculptor =
         let
           info = sources.sculptor;
           inherit (prev.stdenv) isDarwin;
-          arch = if system == "aarch64-darwin" then "aarch64" else "x86_64";
           meta = with prev.lib; {
             description = "UI for running parallel coding agents in safe, isolated sandboxes";
             homepage = "https://imbue.com/sculptor/";
@@ -371,55 +385,29 @@ in
           };
         in
         if isDarwin then
-          prev.stdenvNoCC.mkDerivation {
+          mkDmgApp {
             pname = "sculptor";
-            inherit (info) version;
-            inherit meta;
-
-            src = prev.fetchurl {
-              name = "Sculptor_${info.version}_${arch}.dmg";
-              url = info.urls.${system};
-              hash = info.hashes.${system};
-            };
-
-            nativeBuildInputs = [ prev.undmg ];
-
-            sourceRoot = ".";
-
-            installPhase = ''
-              runHook preInstall
-
-              mkdir -p "$out/Applications"
-              mkdir -p "$out/bin"
-              cp -a Sculptor.app "$out/Applications"
-              /usr/bin/xattr -cr "$out/Applications/Sculptor.app"
-              ln -s "$out/Applications/Sculptor.app/Contents/MacOS/Sculptor" "$out/bin/sculptor"
-
-              runHook postInstall
-            '';
+            inherit info meta;
           }
         else
-          prev.appimageTools.wrapType2 {
-            pname = "sculptor";
-            inherit (info) version;
-            inherit meta;
-
+          let
             src = prev.fetchurl {
               name = "Sculptor_${info.version}.AppImage";
               url = info.urls.${system};
               hash = info.hashes.${system};
             };
+          in
+          prev.appimageTools.wrapType2 {
+            pname = "sculptor";
+            inherit (info) version;
+            inherit meta src;
 
             extraInstallCommands =
               let
                 appimageContents = prev.appimageTools.extractType2 {
                   inherit (info) version;
+                  inherit src;
                   pname = "sculptor";
-                  src = prev.fetchurl {
-                    name = "Sculptor_${info.version}.AppImage";
-                    url = info.urls.${system};
-                    hash = info.hashes.${system};
-                  };
                 };
               in
               ''
@@ -711,6 +699,10 @@ in
               '';
           });
 
+          nvim-treesitter-textobjects = vprev.nvim-treesitter-textobjects.overrideAttrs {
+            src = inputs.treesitter-textobjects;
+          };
+
           vim-bundle-mako = prev.vimUtils.buildVimPlugin {
             pname = normalizeName outputs.lib.flakeLock.vim-bundle-mako.original.repo;
             version = inputs.vim-bundle-mako.rev;
@@ -755,5 +747,37 @@ in
 
       # Zed editor nightly from upstream flake
       zed-editor-nightly = inputs.zed.packages.${system}.default;
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # Flake Input Packages (simple re-exports)
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      flake-edit = inputs.flake-edit.packages.${system}.default;
+
+      # Pin Swift to a nixpkgs rev where it builds (clang-21.1.8 broke it)
+      # Tracking: https://github.com/NixOS/nixpkgs/issues/483584
+      inherit (import inputs.nixpkgs-swift { inherit system; })
+        swiftPackages
+        swift
+        ;
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # Update Script
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      update-script =
+        let
+          inherit (inputs.pyproject-nix.lib) scripts;
+          script = scripts.loadScript {
+            name = "update";
+            script = ./update.py;
+          };
+        in
+        prev.writeScriptBin script.name (
+          scripts.renderWithPackages {
+            inherit script;
+            python = prev.python313;
+          }
+        );
     };
 }

@@ -35,11 +35,6 @@ in
     };
     git = {
       enable = true;
-      # difftastic = {
-      #   enable = true;
-      #   enableAsDifftool = true;
-      #   options.background = "dark";
-      # };
       ignores = [ ".direnv" ];
       includes =
         let

@@ -146,7 +146,6 @@
       package = null; # installed via Homebrew on macOS
       enableZshIntegration = true;
       settings = {
-        # custom-shader = "${inputs.ghostty-shaders}/crt.glsl";
         font-family = "Hack Nerd Font Mono";
         font-size = 12;
         macos-option-as-alt = "left";

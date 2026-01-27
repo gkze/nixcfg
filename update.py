@@ -738,23 +738,6 @@ async def fetch_github_latest_commit(
     return data[0]["sha"]
 
 
-def make_hash_entry(
-    drv_type: str,
-    hash_type: str,
-    hash_value: str,
-    *,
-    url: str | None = None,
-    urls: dict[str, str] | None = None,
-) -> HashEntry:
-    return HashEntry(
-        drv_type=drv_type,
-        hash_type=hash_type,
-        hash=hash_value,
-        url=url,
-        urls=urls,
-    )
-
-
 # =============================================================================
 # Updater Base Class
 # =============================================================================
@@ -804,6 +787,25 @@ class HashEntry(BaseModel):
     @classmethod
     def validate_hash(cls, v: str) -> str:
         return _validate_sri_hash(v)
+
+    @classmethod
+    def create(
+        cls,
+        drv_type: DrvType,
+        hash_type: HashType,
+        hash_value: str,
+        *,
+        url: str | None = None,
+        urls: dict[str, str] | None = None,
+    ) -> "HashEntry":
+        """Convenience constructor with positional args."""
+        return cls(
+            drvType=drv_type,
+            hashType=hash_type,
+            hash=hash_value,
+            url=url,
+            urls=urls,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict with camelCase keys, sorted alphabetically."""
@@ -1196,8 +1198,8 @@ class HashEntryUpdater(Updater):
         events: AsyncIterator[UpdateEvent],
         *,
         error: str,
-        drv_type: str,
-        hash_type: str,
+        drv_type: DrvType,
+        hash_type: HashType,
     ) -> AsyncIterator[UpdateEvent]:
         hash_drain = ValueDrain()
         async for event in drain_value_events(events, hash_drain):
@@ -1206,7 +1208,7 @@ class HashEntryUpdater(Updater):
         yield UpdateEvent(
             source=self.name,
             kind=UpdateEventKind.VALUE,
-            payload=[make_hash_entry(drv_type, hash_type, hash_value)],
+            payload=[HashEntry.create(drv_type, hash_type, hash_value)],
         )
 
 
@@ -1214,8 +1216,8 @@ class FlakeInputHashUpdater(HashEntryUpdater):
     """Base for hashes derived from flake inputs."""
 
     input_name: str | None = None
-    drv_type: str
-    hash_type: str
+    drv_type: DrvType
+    hash_type: HashType
 
     def __init__(self):
         if self.input_name is None:
@@ -1373,7 +1375,7 @@ class GitHubRawFileUpdater(HashEntryUpdater):
         yield UpdateEvent(
             source=self.name,
             kind=UpdateEventKind.VALUE,
-            payload=[make_hash_entry("fetchurl", "sha256", hash_value, url=url)],
+            payload=[HashEntry.create("fetchurl", "sha256", hash_value, url=url)],
         )
 
 
@@ -1798,8 +1800,8 @@ class SentryCliUpdater(Updater):
             source=self.name,
             kind=UpdateEventKind.VALUE,
             payload=[
-                make_hash_entry("fetchFromGitHub", "srcHash", src_hash),
-                make_hash_entry("fetchCargoVendor", "cargoHash", cargo_hash),
+                HashEntry.create("fetchFromGitHub", "srcHash", src_hash),
+                HashEntry.create("fetchCargoVendor", "cargoHash", cargo_hash),
             ],
         )
 
@@ -2192,92 +2194,6 @@ async def _update_refs_task(
         )
 
 
-async def _run_ref_updates(
-    args: argparse.Namespace,
-    *,
-    dry_run: bool = False,
-) -> int:
-    """Run flake input ref updates."""
-    out = OutputOptions(json_output=args.json, quiet=args.quiet)
-    all_inputs = get_flake_inputs_with_refs()
-
-    if args.source:
-        # Filter to specific input
-        matching = [i for i in all_inputs if i.name == args.source]
-        if not matching:
-            out.print_error(
-                f"No flake input with version ref found for '{args.source}'"
-            )
-            available = [i.name for i in all_inputs]
-            out.print_error(f"Available inputs with refs: {', '.join(available)}")
-            return 1
-        inputs = matching
-    else:
-        inputs = all_inputs
-
-    if not inputs:
-        out.print("No flake inputs with version refs found.")
-        return 0
-
-    names = [i.name for i in inputs]
-    max_lines = _resolve_log_tail_lines(None)
-    is_tty = _is_tty() and not args.quiet and not args.json
-
-    # We re-use _consume_events but need a sources file for it.
-    # Create a dummy one since we're not updating sources.json.
-    dummy_sources = SourcesFile(entries={})
-
-    async with aiohttp.ClientSession() as session:
-        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-        flake_edit_lock = asyncio.Lock()
-        tasks = [
-            asyncio.create_task(
-                _update_refs_task(
-                    inp,
-                    session,
-                    queue,
-                    dry_run=dry_run,
-                    flake_edit_lock=flake_edit_lock,
-                )
-            )
-            for inp in inputs
-        ]
-        consumer = asyncio.create_task(
-            _consume_events(
-                queue,
-                names,
-                dummy_sources,
-                max_lines=max_lines,
-                is_tty=is_tty,
-                quiet=args.quiet or args.json,
-            )
-        )
-        await asyncio.gather(*tasks)
-        await queue.put(None)
-        _updated, errors, update_details = await consumer
-
-    summary = UpdateSummary()
-    for name, detail in update_details.items():
-        if detail == "updated":
-            summary.updated.append(name)
-        elif detail == "error":
-            summary.errors.append(name)
-        else:
-            summary.no_change.append(name)
-
-    if args.json:
-        print(json.dumps(summary.to_dict()))
-        return 1 if summary.errors else 0
-
-    verb = "Available updates" if dry_run else "Updated"
-    if summary.updated:
-        out.print_success(f"\n{verb}: {', '.join(summary.updated)}")
-    else:
-        out.print("\nNo ref updates needed.", style="dim")
-
-    return 1 if errors else 0
-
-
 # =============================================================================
 # Main
 # =============================================================================
@@ -2660,6 +2576,46 @@ class UpdateSummary:
             "success": len(self.errors) == 0,
         }
 
+    def accumulate(self, details: dict[str, str]) -> None:
+        """Accumulate phase details into this summary."""
+        for name, detail in details.items():
+            if detail == "updated":
+                self.updated.append(name)
+            elif detail == "error":
+                self.errors.append(name)
+            else:
+                self.no_change.append(name)
+
+
+async def _run_phase(
+    task_coros: list[asyncio.Task[None]],
+    names: list[str],
+    sources: SourcesFile,
+    queue: asyncio.Queue[UpdateEvent | None],
+    *,
+    quiet: bool,
+    json_output: bool,
+) -> tuple[bool, int, dict[str, str]]:
+    """Run update tasks with shared event consumption.
+
+    Returns (updated, error_count, details_dict).
+    """
+    max_lines = _resolve_log_tail_lines(None)
+    is_tty = _is_tty() and not quiet and not json_output
+    consumer = asyncio.create_task(
+        _consume_events(
+            queue,
+            names,
+            sources,
+            max_lines=max_lines,
+            is_tty=is_tty,
+            quiet=quiet or json_output,
+        )
+    )
+    await asyncio.gather(*task_coros)
+    await queue.put(None)
+    return await consumer
+
 
 async def _run_updates(args: argparse.Namespace) -> int:
     """Unified update orchestrator.
@@ -2754,8 +2710,6 @@ async def _run_updates(args: argparse.Namespace) -> int:
 
         if ref_inputs:
             ref_names = [i.name for i in ref_inputs]
-            max_lines = _resolve_log_tail_lines(None)
-            is_tty = _is_tty() and not args.quiet and not args.json
             dummy_sources = SourcesFile(entries={})
 
             async with aiohttp.ClientSession() as session:
@@ -2773,28 +2727,16 @@ async def _run_updates(args: argparse.Namespace) -> int:
                     )
                     for inp in ref_inputs
                 ]
-                consumer = asyncio.create_task(
-                    _consume_events(
-                        queue,
-                        ref_names,
-                        dummy_sources,
-                        max_lines=max_lines,
-                        is_tty=is_tty,
-                        quiet=args.quiet or args.json,
-                    )
+                _, ref_errors, ref_details = await _run_phase(
+                    tasks,
+                    ref_names,
+                    dummy_sources,
+                    queue,
+                    quiet=args.quiet,
+                    json_output=args.json,
                 )
-                await asyncio.gather(*tasks)
-                await queue.put(None)
-                _ref_updated, ref_errors, ref_details = await consumer
 
-            for name, detail in ref_details.items():
-                if detail == "updated":
-                    summary.updated.append(name)
-                elif detail == "error":
-                    summary.errors.append(name)
-                else:
-                    summary.no_change.append(name)
-
+            summary.accumulate(ref_details)
             if ref_errors:
                 had_errors = True
 
@@ -2807,8 +2749,6 @@ async def _run_updates(args: argparse.Namespace) -> int:
 
         if source_names:
             sources = load_sources()
-            max_lines = _resolve_log_tail_lines(None)
-            is_tty = _is_tty() and not args.quiet and not args.json
 
             async with aiohttp.ClientSession() as session:
                 queue2: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
@@ -2826,28 +2766,16 @@ async def _run_updates(args: argparse.Namespace) -> int:
                     )
                     for name in source_names
                 ]
-                consumer = asyncio.create_task(
-                    _consume_events(
-                        queue2,
-                        source_names,
-                        sources,
-                        max_lines=max_lines,
-                        is_tty=is_tty,
-                        quiet=args.quiet or args.json,
-                    )
+                src_updated, src_errors, src_details = await _run_phase(
+                    tasks,
+                    source_names,
+                    sources,
+                    queue2,
+                    quiet=args.quiet,
+                    json_output=args.json,
                 )
-                await asyncio.gather(*tasks)
-                await queue2.put(None)
-                src_updated, src_errors, src_details = await consumer
 
-            for name, detail in src_details.items():
-                if detail == "updated":
-                    summary.updated.append(name)
-                elif detail == "error":
-                    summary.errors.append(name)
-                else:
-                    summary.no_change.append(name)
-
+            summary.accumulate(src_details)
             if src_updated:
                 save_sources(sources)
             if src_errors:
@@ -2891,13 +2819,6 @@ def main() -> None:
     )
     parser.add_argument(
         "source", nargs="?", help="Source or flake input to update (default: all)"
-    )
-    # Backwards-compat: --all is now a no-op (default behavior)
-    parser.add_argument(
-        "-a",
-        "--all",
-        action="store_true",
-        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "-l", "--list", action="store_true", help="List available sources and inputs"
@@ -2955,18 +2876,7 @@ def main() -> None:
         action="store_true",
         help="Suppress progress output, only show errors and final summary",
     )
-    # Hidden backwards-compat aliases
-    parser.add_argument("--update-input", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--update-refs", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
-
-    # Map old flags to new semantics
-    if args.update_refs:
-        # Old --update-refs means "only do refs" → skip sources
-        args.no_sources = True
-    if args.update_input:
-        # Old --update-input explicitly requested → ensure not skipped
-        args.no_input = False
 
     raise SystemExit(asyncio.run(_run_updates(args)))
 

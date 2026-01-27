@@ -689,7 +689,6 @@ in
         with pkgs.vimPlugins;
         [
           nvim-treesitter-parsers.nickel
-          # nvim-treesitter-textsubjects # disabled: incompatible with newer nvim-treesitter API
           nvim-treesitter.queries.ecma # Required for JS/TS keyword highlighting (inherited queries)
           nvim-treesitter.queries.jsx # Required for JSX/TSX highlighting (inherited queries)
           opencode-nvim
