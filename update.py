@@ -15,17 +15,17 @@ source hashes. Use --no-* flags to skip specific phases.
 Usage:
     ./update.py                            Update everything
     ./update.py codex                      Update a specific source/input
-    ./update.py --no-refs                  Skip flake input ref updates
-    ./update.py --no-sources               Skip sources.json hash updates
-    ./update.py --no-input                 Skip flake input lock refresh
-    ./update.py --check                    Dry run: check for updates only
-    ./update.py --check codex              Check a specific source/input
-    ./update.py --continue-on-error        Continue if individual sources fail
-    ./update.py --list                     List available sources
-    ./update.py --validate                 Validate sources.json
+    ./update.py -R  | --no-refs            Skip flake input ref updates
+    ./update.py -S  | --no-sources         Skip sources.json hash updates
+    ./update.py -I  | --no-input           Skip flake input lock refresh
+    ./update.py -c  | --check              Dry run: check for updates only
+    ./update.py -c codex                   Check a specific source/input
+    ./update.py -k  | --continue-on-error  Continue if individual sources fail
+    ./update.py -l  | --list               List available sources
+    ./update.py -v  | --validate           Validate sources.json
     ./update.py --schema                   Output JSON schema for sources.json
-    ./update.py --json                     Output results as JSON
-    ./update.py --quiet                    Suppress progress output
+    ./update.py -j  | --json               Output results as JSON
+    ./update.py -q  | --quiet              Suppress progress output
 
 Environment Variables:
     UPDATE_LOG_TAIL_LINES     Number of log lines to show (default: 10)
@@ -2903,31 +2903,37 @@ def main() -> None:
         "-l", "--list", action="store_true", help="List available sources and inputs"
     )
     parser.add_argument(
+        "-R",
         "--no-refs",
         action="store_true",
         help="Skip flake input ref updates",
     )
     parser.add_argument(
+        "-S",
         "--no-sources",
         action="store_true",
         help="Skip sources.json hash updates",
     )
     parser.add_argument(
+        "-I",
         "--no-input",
         action="store_true",
         help="Skip flake input lock refresh before hashing",
     )
     parser.add_argument(
+        "-c",
         "--check",
         action="store_true",
         help="Dry run: check for updates without applying",
     )
     parser.add_argument(
+        "-k",
         "--continue-on-error",
         action="store_true",
         help="Continue updating other sources if one fails",
     )
     parser.add_argument(
+        "-v",
         "--validate",
         action="store_true",
         help="Validate sources.json and exit",
@@ -2938,6 +2944,7 @@ def main() -> None:
         help="Output JSON schema for sources.json and exit",
     )
     parser.add_argument(
+        "-j",
         "--json",
         action="store_true",
         help="Output results as JSON (for scripting/automation)",
