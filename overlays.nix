@@ -250,7 +250,7 @@ in
         python3 = prev.python3.override {
           packageOverrides = _: pyPrev: {
             mdformat = pyPrev.mdformat.overridePythonAttrs (_: {
-              version = getFlakeVersion "mdformat-src";
+              version = getFlakeVersion "mdformat";
               src = inputs.mdformat;
             });
           };

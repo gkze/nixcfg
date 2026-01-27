@@ -3,8 +3,14 @@ name: Nightly Flake Update
 
 on:
   schedule:
-    - cron: "0 11 * * *" # 3:00 AM PST / 4:00 AM PDT
+    - cron: "0 */5 * * *" # Every 5 hours (worst-case runtime ~5h)
+  push:
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: flake-update
+  cancel-in-progress: true
 
 jobs:
   update-lock:

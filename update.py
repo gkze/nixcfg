@@ -7,13 +7,20 @@
 #   "rich>=13.0",
 # ]
 # ///
-"""Update source versions and hashes in sources.json.
+"""Update source versions and hashes in sources.json and flake input refs.
+
+By default, updates everything: flake input refs, flake input locks, and
+source hashes. Use --no-* flags to skip specific phases.
 
 Usage:
-    ./update.py <source>                   Update a specific source
-    ./update.py <source> --update-input    Update and refresh flake input
-    ./update.py --all                      Update all sources
-    ./update.py --all --continue-on-error  Continue if individual sources fail
+    ./update.py                            Update everything
+    ./update.py codex                      Update a specific source/input
+    ./update.py --no-refs                  Skip flake input ref updates
+    ./update.py --no-sources               Skip sources.json hash updates
+    ./update.py --no-input                 Skip flake input lock refresh
+    ./update.py --check                    Dry run: check for updates only
+    ./update.py --check codex              Check a specific source/input
+    ./update.py --continue-on-error        Continue if individual sources fail
     ./update.py --list                     List available sources
     ./update.py --validate                 Validate sources.json
     ./update.py --schema                   Output JSON schema for sources.json
@@ -1862,6 +1869,416 @@ class CodeCursorUpdater(DownloadHashUpdater):
 
 
 # =============================================================================
+# Flake Input Ref Updates
+# =============================================================================
+
+# Patterns that indicate a branch or commit ref (not a version)
+_BRANCH_REF_PATTERNS = {
+    "master",
+    "main",
+    "nixos-unstable",
+    "nixos-stable",
+    "nixpkgs-unstable",
+}
+
+# Minimum length for a hex string to be considered a commit hash
+_MIN_COMMIT_HEX_LEN = 7
+
+
+def _is_version_ref(ref: str) -> bool:
+    """Check if a ref looks like a version tag (not a branch or commit)."""
+    if ref in _BRANCH_REF_PATTERNS:
+        return False
+    if ref.startswith("nixos-") or ref.startswith("nixpkgs-"):
+        return False
+    # Hex-only strings that look like commit hashes
+    if re.fullmatch(r"[0-9a-f]+", ref) and len(ref) >= _MIN_COMMIT_HEX_LEN:
+        return False
+    # Must contain at least one digit to look like a version
+    if not re.search(r"\d", ref):
+        return False
+    return True
+
+
+@dataclass(frozen=True)
+class FlakeInputRef:
+    """A flake input that has a version-like ref."""
+
+    name: str
+    owner: str
+    repo: str
+    ref: str
+    input_type: str  # "github", "gitlab"
+
+
+def get_flake_inputs_with_refs() -> list[FlakeInputRef]:
+    """Parse flake.lock to find inputs with version-like refs."""
+    lock = load_flake_lock()
+    root_inputs = lock.get("root", {}).get("inputs", {})
+    result = []
+
+    for input_name, node_name in sorted(root_inputs.items()):
+        if isinstance(node_name, list):
+            continue  # follows declaration
+        node = lock.get(node_name or input_name, {})
+        original = node.get("original", {})
+        ref = original.get("ref")
+        if not ref or not _is_version_ref(ref):
+            continue
+        owner = original.get("owner")
+        repo = original.get("repo")
+        input_type = original.get("type", "github")
+        if owner and repo and input_type in ("github", "gitlab"):
+            result.append(
+                FlakeInputRef(
+                    name=input_name,
+                    owner=owner,
+                    repo=repo,
+                    ref=ref,
+                    input_type=input_type,
+                )
+            )
+    return result
+
+
+def _extract_version_prefix(ref: str) -> str:
+    """Extract the prefix before the version number in a ref.
+
+    Examples:
+        "v0.14.7" -> "v"
+        "rust-v0.91.0" -> "rust-v"
+        "1.0.0" -> ""
+        "2.0.6" -> ""
+    """
+    match = re.match(r"^(.*?)\d", ref)
+    if match:
+        return match.group(1)
+    return ""
+
+
+async def fetch_github_latest_version_ref(
+    session: aiohttp.ClientSession, owner: str, repo: str, prefix: str
+) -> str | None:
+    """Fetch the latest version ref from GitHub matching the given prefix.
+
+    Strategy: try releases API first (non-draft, non-prerelease, sorted by
+    date), then fall back to the tags API if no releases exist or none match.
+
+    Returns the tag/ref name, or None if nothing matches.
+    """
+    # 1. Releases API (paginated, newest first)
+    try:
+        releases = await fetch_json(
+            session,
+            f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=20",
+            user_agent=DEFAULT_USER_AGENT,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        for release in releases:
+            if release.get("draft") or release.get("prerelease"):
+                continue
+            tag = release.get("tag_name", "")
+            if tag.startswith(prefix):
+                return tag
+    except RuntimeError:
+        pass  # No releases endpoint or API error
+
+    # 2. Tags API fallback (repos that use tags without GitHub Releases)
+    try:
+        tags = await fetch_json(
+            session,
+            f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=30",
+            user_agent=DEFAULT_USER_AGENT,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        for tag_info in tags:
+            tag = tag_info.get("name", "")
+            if tag.startswith(prefix):
+                return tag
+    except RuntimeError:
+        pass
+
+    return None
+
+
+@dataclass(frozen=True)
+class RefUpdateResult:
+    """Result of checking/updating a flake input ref."""
+
+    name: str
+    current_ref: str
+    latest_ref: str | None
+    error: str | None = None
+
+
+async def check_flake_ref_update(
+    input_ref: FlakeInputRef,
+    session: aiohttp.ClientSession,
+) -> RefUpdateResult:
+    """Check if a flake input ref has a newer version available."""
+    prefix = _extract_version_prefix(input_ref.ref)
+
+    if input_ref.input_type == "github":
+        latest = await fetch_github_latest_version_ref(
+            session, input_ref.owner, input_ref.repo, prefix
+        )
+    else:
+        return RefUpdateResult(
+            name=input_ref.name,
+            current_ref=input_ref.ref,
+            latest_ref=None,
+            error=f"Unsupported input type: {input_ref.input_type}",
+        )
+
+    if latest is None:
+        return RefUpdateResult(
+            name=input_ref.name,
+            current_ref=input_ref.ref,
+            latest_ref=None,
+            error="Could not determine latest version",
+        )
+
+    return RefUpdateResult(
+        name=input_ref.name,
+        current_ref=input_ref.ref,
+        latest_ref=latest,
+    )
+
+
+async def update_flake_ref(
+    input_ref: FlakeInputRef,
+    new_ref: str,
+    *,
+    source: str,
+) -> AsyncIterator[UpdateEvent]:
+    """Update a flake input ref using flake-edit and lock the input.
+
+    Raises RuntimeError if either flake-edit or nix flake lock fails.
+    """
+    yield UpdateEvent(
+        source=source,
+        kind=UpdateEventKind.STATUS,
+        message=f"Updating ref: {input_ref.ref} -> {new_ref}",
+    )
+
+    # Use flake-edit to change the ref in flake.nix
+    new_url = f"github:{input_ref.owner}/{input_ref.repo}/{new_ref}"
+    change_result: CommandResult | None = None
+    async for event in stream_command(
+        ["flake-edit", "change", input_ref.name, new_url],
+        source=source,
+    ):
+        if event.kind == UpdateEventKind.COMMAND_END:
+            change_result = event.payload
+        yield event
+    if change_result and change_result.returncode != 0:
+        raise RuntimeError(
+            f"flake-edit change failed (exit {change_result.returncode}): "
+            f"{change_result.stderr.strip()}"
+        )
+
+    # Lock the updated input
+    lock_result: CommandResult | None = None
+    async for event in stream_command(
+        ["nix", "flake", "lock", "--update-input", input_ref.name],
+        source=source,
+    ):
+        if event.kind == UpdateEventKind.COMMAND_END:
+            lock_result = event.payload
+        yield event
+    if lock_result and lock_result.returncode != 0:
+        raise RuntimeError(
+            f"nix flake lock failed (exit {lock_result.returncode}): "
+            f"{lock_result.stderr.strip()}"
+        )
+
+
+async def _update_refs_task(
+    input_ref: FlakeInputRef,
+    session: aiohttp.ClientSession,
+    queue: asyncio.Queue[UpdateEvent | None],
+    *,
+    dry_run: bool = False,
+    flake_edit_lock: asyncio.Lock | None = None,
+) -> None:
+    """Task to check and optionally update a single flake input ref.
+
+    The version check (API calls) runs concurrently across inputs, but the
+    actual file mutations (flake-edit change + nix flake lock) are serialized
+    via ``flake_edit_lock`` to avoid races on flake.nix / flake.lock.
+    """
+    source = input_ref.name
+    try:
+        await queue.put(
+            UpdateEvent(
+                source=source,
+                kind=UpdateEventKind.STATUS,
+                message=f"Checking {input_ref.owner}/{input_ref.repo} (current: {input_ref.ref})",
+            )
+        )
+        result = await check_flake_ref_update(input_ref, session)
+
+        if result.error:
+            await queue.put(
+                UpdateEvent(
+                    source=source,
+                    kind=UpdateEventKind.ERROR,
+                    message=result.error,
+                )
+            )
+            return
+
+        if result.latest_ref == result.current_ref:
+            await queue.put(
+                UpdateEvent(
+                    source=source,
+                    kind=UpdateEventKind.STATUS,
+                    message=f"Already at latest: {result.current_ref}",
+                )
+            )
+            await queue.put(
+                UpdateEvent(
+                    source=source,
+                    kind=UpdateEventKind.RESULT,
+                    payload=None,
+                )
+            )
+            return
+
+        if dry_run:
+            await queue.put(
+                UpdateEvent(
+                    source=source,
+                    kind=UpdateEventKind.STATUS,
+                    message=f"Update available: {result.current_ref} -> {result.latest_ref}",
+                )
+            )
+            await queue.put(
+                UpdateEvent(
+                    source=source,
+                    kind=UpdateEventKind.RESULT,
+                    payload={
+                        "current": result.current_ref,
+                        "latest": result.latest_ref,
+                    },
+                )
+            )
+            return
+
+        # Actually update the ref — serialize file mutations
+        assert result.latest_ref is not None
+        if flake_edit_lock:
+            async with flake_edit_lock:
+                async for event in update_flake_ref(
+                    input_ref, result.latest_ref, source=source
+                ):
+                    await queue.put(event)
+        else:
+            async for event in update_flake_ref(
+                input_ref, result.latest_ref, source=source
+            ):
+                await queue.put(event)
+
+        await queue.put(
+            UpdateEvent(
+                source=source,
+                kind=UpdateEventKind.RESULT,
+                payload={"current": result.current_ref, "latest": result.latest_ref},
+            )
+        )
+    except Exception as exc:
+        await queue.put(
+            UpdateEvent(source=source, kind=UpdateEventKind.ERROR, message=str(exc))
+        )
+
+
+async def _run_ref_updates(
+    args: argparse.Namespace,
+    *,
+    dry_run: bool = False,
+) -> int:
+    """Run flake input ref updates."""
+    out = OutputOptions(json_output=args.json, quiet=args.quiet)
+    all_inputs = get_flake_inputs_with_refs()
+
+    if args.source:
+        # Filter to specific input
+        matching = [i for i in all_inputs if i.name == args.source]
+        if not matching:
+            out.print_error(
+                f"No flake input with version ref found for '{args.source}'"
+            )
+            available = [i.name for i in all_inputs]
+            out.print_error(f"Available inputs with refs: {', '.join(available)}")
+            return 1
+        inputs = matching
+    else:
+        inputs = all_inputs
+
+    if not inputs:
+        out.print("No flake inputs with version refs found.")
+        return 0
+
+    names = [i.name for i in inputs]
+    max_lines = _resolve_log_tail_lines(None)
+    is_tty = _is_tty() and not args.quiet and not args.json
+
+    # We re-use _consume_events but need a sources file for it.
+    # Create a dummy one since we're not updating sources.json.
+    dummy_sources = SourcesFile(entries={})
+
+    async with aiohttp.ClientSession() as session:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        flake_edit_lock = asyncio.Lock()
+        tasks = [
+            asyncio.create_task(
+                _update_refs_task(
+                    inp,
+                    session,
+                    queue,
+                    dry_run=dry_run,
+                    flake_edit_lock=flake_edit_lock,
+                )
+            )
+            for inp in inputs
+        ]
+        consumer = asyncio.create_task(
+            _consume_events(
+                queue,
+                names,
+                dummy_sources,
+                max_lines=max_lines,
+                is_tty=is_tty,
+                quiet=args.quiet or args.json,
+            )
+        )
+        await asyncio.gather(*tasks)
+        await queue.put(None)
+        _updated, errors, update_details = await consumer
+
+    summary = UpdateSummary()
+    for name, detail in update_details.items():
+        if detail == "updated":
+            summary.updated.append(name)
+        elif detail == "error":
+            summary.errors.append(name)
+        else:
+            summary.no_change.append(name)
+
+    if args.json:
+        print(json.dumps(summary.to_dict()))
+        return 1 if summary.errors else 0
+
+    verb = "Available updates" if dry_run else "Updated"
+    if summary.updated:
+        out.print_success(f"\n{verb}: {', '.join(summary.updated)}")
+    else:
+        out.print("\nNo ref updates needed.", style="dim")
+
+    return 1 if errors else 0
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -2134,24 +2551,36 @@ async def _consume_events(
             case UpdateEventKind.RESULT:
                 result = event.payload
                 if result is not None:
-                    old_entry = sources.entries.get(event.source)
-                    old_version = old_entry.version if old_entry else None
-                    new_version = result.version
-                    sources.entries[event.source] = result
-                    updated = True
-                    update_details[event.source] = "updated"
-                    if old_version and new_version and old_version != new_version:
-                        state.status = f"Updated :: {old_version} => {new_version}"
-                    else:
-                        # Fall back to showing hash change if no version
-                        old_hash = (
-                            old_entry.hashes.primary_hash() if old_entry else None
-                        )
-                        new_hash = result.hashes.primary_hash()
-                        if old_hash and new_hash and old_hash != new_hash:
-                            state.status = f"Updated :: {old_hash} => {new_hash}"
+                    if isinstance(result, dict):
+                        # Ref update result: {"current": ..., "latest": ...}
+                        updated = True
+                        update_details[event.source] = "updated"
+                        current_ref = result.get("current", "?")
+                        latest_ref = result.get("latest", "?")
+                        state.status = f"Updated :: {current_ref} => {latest_ref}"
+                    elif isinstance(result, SourceEntry):
+                        old_entry = sources.entries.get(event.source)
+                        old_version = old_entry.version if old_entry else None
+                        new_version = result.version
+                        sources.entries[event.source] = result
+                        updated = True
+                        update_details[event.source] = "updated"
+                        if old_version and new_version and old_version != new_version:
+                            state.status = f"Updated :: {old_version} => {new_version}"
                         else:
-                            state.status = "Updated."
+                            # Fall back to showing hash change if no version
+                            old_hash = (
+                                old_entry.hashes.primary_hash() if old_entry else None
+                            )
+                            new_hash = result.hashes.primary_hash()
+                            if old_hash and new_hash and old_hash != new_hash:
+                                state.status = f"Updated :: {old_hash} => {new_hash}"
+                            else:
+                                state.status = "Updated."
+                    else:
+                        updated = True
+                        update_details[event.source] = "updated"
+                        state.status = "Updated."
                 else:
                     update_details[event.source] = "no_change"
                     if not state.status:
@@ -2233,6 +2662,14 @@ class UpdateSummary:
 
 
 async def _run_updates(args: argparse.Namespace) -> int:
+    """Unified update orchestrator.
+
+    Phase 1: Flake input ref updates (unless --no-refs)
+    Phase 2: Source hash updates (unless --no-sources)
+
+    Refs must complete before sources since source hash computation depends
+    on the locked flake input state.
+    """
     out = OutputOptions(json_output=args.json, quiet=args.quiet)
 
     if args.schema:
@@ -2241,14 +2678,24 @@ async def _run_updates(args: argparse.Namespace) -> int:
 
     if args.list:
         if args.json:
-            print(json.dumps({"sources": list(UPDATERS.keys())}))
+            sources_list = sorted(UPDATERS.keys())
+            ref_inputs = [i.name for i in get_flake_inputs_with_refs()]
+            print(
+                json.dumps({"sources": sources_list, "flakeInputsWithRefs": ref_inputs})
+            )
         else:
             from rich.columns import Columns
             from rich.console import Console
 
             console = Console()
-            console.print("[bold]Available sources:[/bold]")
+            console.print("[bold]Available sources (sources.json):[/bold]")
             console.print(Columns(sorted(UPDATERS.keys()), padding=(0, 2)))
+            console.print()
+            ref_inputs = get_flake_inputs_with_refs()
+            if ref_inputs:
+                console.print("[bold]Flake inputs with version refs:[/bold]")
+                for inp in ref_inputs:
+                    console.print(f"  {inp.name}: {inp.owner}/{inp.repo} @ {inp.ref}")
         return 0
 
     # Validate mode: just load and validate sources.json
@@ -2270,107 +2717,210 @@ async def _run_updates(args: argparse.Namespace) -> int:
                 out.print_error(f":x: Validation failed: {exc}")
             return 1
 
-    if not args.source and not args.all:
-        out.print_error("No source specified. Use --all or provide a source name.")
+    # Resolve what's known to each system
+    all_source_names = set(UPDATERS.keys())
+    all_ref_inputs = get_flake_inputs_with_refs()
+    all_ref_names = {i.name for i in all_ref_inputs}
+    all_known_names = all_source_names | all_ref_names
+
+    # Validate source name if specified
+    if args.source and args.source not in all_known_names:
+        out.print_error(f"Error: Unknown source or input '{args.source}'")
+        out.print_error(f"Available: {', '.join(sorted(all_known_names))}")
         return 1
 
-    if not args.all and args.source not in UPDATERS:
-        out.print_error(f"Error: Unknown source '{args.source}'")
-        out.print_error(f"Available sources: {', '.join(UPDATERS.keys())}")
-        return 1
+    do_refs = not args.no_refs
+    do_sources = not args.no_sources
+    do_input_refresh = not args.no_input
+    dry_run = args.check
 
-    sources = load_sources()
-    names = list(UPDATERS.keys()) if args.all else [args.source]
+    # If a specific name is given, only run phases that know about it
+    if args.source:
+        if args.source not in all_ref_names:
+            do_refs = False
+        if args.source not in all_source_names:
+            do_sources = False
+
+    # Combined summary across both phases
     summary = UpdateSummary()
+    had_errors = False
 
-    if not names:
-        if args.json:
-            print(json.dumps(summary.to_dict()))
+    # ── Phase 1: Ref updates ──────────────────────────────────────────
+    if do_refs:
+        if args.source:
+            ref_inputs = [i for i in all_ref_inputs if i.name == args.source]
         else:
-            out.print("No sources to update.")
-        return 0
+            ref_inputs = all_ref_inputs
 
-    max_lines = _resolve_log_tail_lines(None)
-    # Disable TTY rendering in quiet or JSON mode
-    is_tty = _is_tty() and not args.quiet and not args.json
+        if ref_inputs:
+            ref_names = [i.name for i in ref_inputs]
+            max_lines = _resolve_log_tail_lines(None)
+            is_tty = _is_tty() and not args.quiet and not args.json
+            dummy_sources = SourcesFile(entries={})
 
-    async with aiohttp.ClientSession() as session:
-        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-        update_input_lock = asyncio.Lock()
-        tasks = [
-            asyncio.create_task(
-                _update_source_task(
-                    name,
-                    sources,
-                    update_input=args.update_input,
-                    session=session,
-                    update_input_lock=update_input_lock,
-                    queue=queue,
+            async with aiohttp.ClientSession() as session:
+                queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+                flake_edit_lock = asyncio.Lock()
+                tasks = [
+                    asyncio.create_task(
+                        _update_refs_task(
+                            inp,
+                            session,
+                            queue,
+                            dry_run=dry_run,
+                            flake_edit_lock=flake_edit_lock,
+                        )
+                    )
+                    for inp in ref_inputs
+                ]
+                consumer = asyncio.create_task(
+                    _consume_events(
+                        queue,
+                        ref_names,
+                        dummy_sources,
+                        max_lines=max_lines,
+                        is_tty=is_tty,
+                        quiet=args.quiet or args.json,
+                    )
                 )
-            )
-            for name in names
-        ]
-        consumer = asyncio.create_task(
-            _consume_events(
-                queue,
-                names,
-                sources,
-                max_lines=max_lines,
-                is_tty=is_tty,
-                quiet=args.quiet or args.json,
-            )
-        )
-        await asyncio.gather(*tasks)
-        await queue.put(None)
-        updated, errors, update_details = await consumer
+                await asyncio.gather(*tasks)
+                await queue.put(None)
+                _ref_updated, ref_errors, ref_details = await consumer
 
-    # Populate summary from update details
-    for name, detail in update_details.items():
-        if detail == "updated":
-            summary.updated.append(name)
-        elif detail == "error":
-            summary.errors.append(name)
+            for name, detail in ref_details.items():
+                if detail == "updated":
+                    summary.updated.append(name)
+                elif detail == "error":
+                    summary.errors.append(name)
+                else:
+                    summary.no_change.append(name)
+
+            if ref_errors:
+                had_errors = True
+
+    # ── Phase 2: Source hash updates ──────────────────────────────────
+    if do_sources:
+        if args.source:
+            source_names = [args.source] if args.source in all_source_names else []
         else:
-            summary.no_change.append(name)
+            source_names = list(UPDATERS.keys())
 
-    if updated:
-        save_sources(sources)
+        if source_names:
+            sources = load_sources()
+            max_lines = _resolve_log_tail_lines(None)
+            is_tty = _is_tty() and not args.quiet and not args.json
 
-    # JSON output mode
+            async with aiohttp.ClientSession() as session:
+                queue2: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+                update_input_lock = asyncio.Lock()
+                tasks = [
+                    asyncio.create_task(
+                        _update_source_task(
+                            name,
+                            sources,
+                            update_input=do_input_refresh,
+                            session=session,
+                            update_input_lock=update_input_lock,
+                            queue=queue2,
+                        )
+                    )
+                    for name in source_names
+                ]
+                consumer = asyncio.create_task(
+                    _consume_events(
+                        queue2,
+                        source_names,
+                        sources,
+                        max_lines=max_lines,
+                        is_tty=is_tty,
+                        quiet=args.quiet or args.json,
+                    )
+                )
+                await asyncio.gather(*tasks)
+                await queue2.put(None)
+                src_updated, src_errors, src_details = await consumer
+
+            for name, detail in src_details.items():
+                if detail == "updated":
+                    summary.updated.append(name)
+                elif detail == "error":
+                    summary.errors.append(name)
+                else:
+                    summary.no_change.append(name)
+
+            if src_updated:
+                save_sources(sources)
+            if src_errors:
+                had_errors = True
+
+    # ── Combined output ───────────────────────────────────────────────
     if args.json:
         print(json.dumps(summary.to_dict()))
-        return 1 if summary.errors else 0
+        return 1 if had_errors else 0
 
-    # Standard output
-    if updated:
-        out.print_success(f"\n:heavy_check_mark: Updated {SOURCES_FILE}")
+    if dry_run:
+        if summary.updated:
+            out.print_success(f"\nAvailable updates: {', '.join(summary.updated)}")
+        else:
+            out.print("\nNo updates available.", style="dim")
     else:
-        out.print("\nNo updates needed.", style="dim")
+        if summary.updated:
+            out.print_success(
+                f"\n:heavy_check_mark: Updated: {', '.join(summary.updated)}"
+            )
+        else:
+            out.print("\nNo updates needed.", style="dim")
 
-    # With --continue-on-error, return success if any updates succeeded
-    if args.continue_on_error and updated:
-        if errors:
-            out.print_warning(f"\n:warning: {errors} source(s) failed but continuing.")
+    if summary.errors:
+        out.print_error(f"\nFailed: {', '.join(summary.errors)}")
+
+    if args.continue_on_error and summary.updated and had_errors:
+        out.print_warning(
+            f"\n:warning: {len(summary.errors)} item(s) failed but continuing."
+        )
         return 0
 
-    return 1 if errors else 0
+    return 1 if had_errors else 0
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Update source versions and hashes",
+        description="Update source versions/hashes and flake input refs",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"Available sources: {', '.join(UPDATERS.keys())}",
     )
-    parser.add_argument("source", nargs="?", help="Source to update")
-    parser.add_argument("-a", "--all", action="store_true", help="Update all sources")
     parser.add_argument(
-        "-l", "--list", action="store_true", help="List available sources"
+        "source", nargs="?", help="Source or flake input to update (default: all)"
+    )
+    # Backwards-compat: --all is now a no-op (default behavior)
+    parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--update-input",
+        "-l", "--list", action="store_true", help="List available sources and inputs"
+    )
+    parser.add_argument(
+        "--no-refs",
         action="store_true",
-        help="Update flake input(s) before hashing",
+        help="Skip flake input ref updates",
+    )
+    parser.add_argument(
+        "--no-sources",
+        action="store_true",
+        help="Skip sources.json hash updates",
+    )
+    parser.add_argument(
+        "--no-input",
+        action="store_true",
+        help="Skip flake input lock refresh before hashing",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Dry run: check for updates without applying",
     )
     parser.add_argument(
         "--continue-on-error",
@@ -2398,7 +2948,18 @@ def main() -> None:
         action="store_true",
         help="Suppress progress output, only show errors and final summary",
     )
+    # Hidden backwards-compat aliases
+    parser.add_argument("--update-input", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--update-refs", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+
+    # Map old flags to new semantics
+    if args.update_refs:
+        # Old --update-refs means "only do refs" → skip sources
+        args.no_sources = True
+    if args.update_input:
+        # Old --update-input explicitly requested → ensure not skipped
+        args.no_input = False
 
     raise SystemExit(asyncio.run(_run_updates(args)))
 
