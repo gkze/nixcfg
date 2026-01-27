@@ -435,6 +435,48 @@ in
               '';
           };
 
+      # Factory Droid: AI coding agent CLI (prebuilt binary)
+      droid =
+        let
+          info = sources.droid;
+          inherit (info) version;
+        in
+        prev.stdenvNoCC.mkDerivation {
+          pname = "droid";
+          inherit version;
+
+          src = prev.fetchurl {
+            url = info.urls.${system};
+            hash = info.hashes.${system};
+          };
+
+          dontUnpack = true;
+
+          installPhase = ''
+            runHook preInstall
+
+            mkdir -p $out/bin
+            cp $src $out/bin/droid
+            chmod +x $out/bin/droid
+
+            runHook postInstall
+          '';
+
+          meta = with prev.lib; {
+            description = "Factory's AI coding agent";
+            homepage = "https://factory.ai";
+            license = licenses.unfree;
+            platforms = [
+              "aarch64-darwin"
+              "x86_64-darwin"
+              "aarch64-linux"
+              "x86_64-linux"
+            ];
+            sourceProvenance = with sourceTypes; [ binaryNativeCode ];
+            mainProgram = "droid";
+          };
+        };
+
       crush =
         let
           version = getFlakeVersion "crush";
@@ -522,54 +564,30 @@ in
         }
       );
 
-      # sentry-cli: Use prebuilt binaries on Darwin to avoid building Swift
-      # Swift builds from source are extremely slow (hours) and often not cached
-      # Sentry provides official prebuilt binaries for macOS
+      # sentry-cli: Build from source with xcarchive test fixtures stripped.
+      # Not a flake input because the repo contains .xcarchive bundles with
+      # macOS code signatures that cause nix-store --optimise to fail
+      # ("Operation not permitted" on _CodeSignature/CodeResources hardlinks).
+      # Using fetchFromGitHub with postFetch lets us strip them before the
+      # source enters the store — flake inputs are added unconditionally.
       sentry-cli =
         let
-          info = sources.sentry-cli;
-          inherit (info) version;
-        in
-        prev.stdenvNoCC.mkDerivation {
-          pname = "sentry-cli";
-          inherit version;
-
-          src = prev.fetchurl {
-            url = info.urls.${system};
-            hash = info.hashes.${system};
+          filteredSrc = prev.fetchFromGitHub {
+            owner = "getsentry";
+            repo = "sentry-cli";
+            tag = sources.sentry-cli.version;
+            hash = outputs.lib.sourceHash "sentry-cli" "srcHash";
+            postFetch = ''
+              find $out -name '*.xcarchive' -type d -exec rm -rf {} +
+            '';
           };
-
-          dontUnpack = true;
-
-          nativeBuildInputs = [ prev.installShellFiles ];
-
-          installPhase = ''
-            runHook preInstall
-
-            mkdir -p $out/bin
-            cp $src $out/bin/sentry-cli
-            chmod +x $out/bin/sentry-cli
-
-            runHook postInstall
-          '';
-
-          # Generate shell completions
-          postInstall = ''
-            installShellCompletion --cmd sentry-cli \
-              --bash <($out/bin/sentry-cli completions bash) \
-              --fish <($out/bin/sentry-cli completions fish) \
-              --zsh <($out/bin/sentry-cli completions zsh)
-          '';
-
-          meta = with prev.lib; {
-            description = "Command line utility to work with Sentry";
-            homepage = "https://docs.sentry.io/cli/";
-            license = licenses.bsd3;
-            platforms = [
-              "aarch64-darwin"
-              "x86_64-darwin"
-            ];
-            mainProgram = "sentry-cli";
+        in
+        prev.sentry-cli.overrideAttrs {
+          inherit (sources.sentry-cli) version;
+          src = filteredSrc;
+          cargoDeps = prev.rustPlatform.fetchCargoVendor {
+            src = filteredSrc;
+            hash = outputs.lib.sourceHash "sentry-cli" "cargoHash";
           };
         };
 

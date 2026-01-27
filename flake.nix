@@ -3,6 +3,9 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Pinned nixpkgs with working Swift build (before clang-21.1.8 broke it)
+    # Tracking: https://github.com/NixOS/nixpkgs/issues/483584
+    nixpkgs-swift.url = "github:NixOS/nixpkgs/70801e06d9730c4f1704fbd3bbf5b8e11c03a2a7";
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
     nix-homebrew.url = "github:Yeradon/nix-homebrew";
     neovim-nightly-overlay = {
@@ -81,10 +84,6 @@
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
-    };
-    sentry-cli = {
-      url = "github:getsentry/sentry-cli/3.1.0";
-      flake = false;
     };
     sops-nix = {
       url = "github:Mic92/sops-nix";
@@ -273,6 +272,17 @@
           inputs.red.overlays.default
           self.overlays.default
           (final: _: { flake-edit = inputs.flake-edit.packages.${final.system}.default; })
+          # Pin Swift to a nixpkgs rev where it builds (clang-21.1.8 broke it)
+          # Tracking: https://github.com/NixOS/nixpkgs/issues/483584
+          (
+            final: _:
+            let
+              pkgsSwift = import inputs.nixpkgs-swift { inherit (final) system; };
+            in
+            {
+              inherit (pkgsSwift) swiftPackages swift;
+            }
+          )
           (
             _: prev:
             let

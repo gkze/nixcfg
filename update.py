@@ -764,10 +764,12 @@ NixPlatform = Literal[
 ]
 
 # Valid derivation types
-DrvType = Literal["buildGoModule", "fetchCargoVendor", "fetchNpmDeps", "fetchurl"]
+DrvType = Literal[
+    "buildGoModule", "fetchCargoVendor", "fetchFromGitHub", "fetchNpmDeps", "fetchurl"
+]
 
 # Valid hash types
-HashType = Literal["vendorHash", "cargoHash", "npmDepsHash", "sha256"]
+HashType = Literal["vendorHash", "cargoHash", "npmDepsHash", "sha256", "srcHash"]
 
 
 def _validate_sri_hash(value: str) -> str:
@@ -1506,6 +1508,66 @@ class ChatGPTUpdater(DownloadHashUpdater):
         )
 
 
+class DroidUpdater(ChecksumProvidedUpdater):
+    """Update Factory Droid CLI to latest version."""
+
+    name = "droid"
+
+    INSTALL_SCRIPT_URL = "https://app.factory.ai/cli"
+    BASE_URL = "https://downloads.factory.ai/factory-cli/releases"
+
+    # nix platform -> (factory_platform, factory_arch)
+    PLATFORMS = {
+        "aarch64-darwin": "arm64",
+        "x86_64-darwin": "x64",
+        "aarch64-linux": "arm64",
+        "x86_64-linux": "x64",
+    }
+
+    # Factory platform names
+    _FACTORY_OS = {
+        "aarch64-darwin": "darwin",
+        "x86_64-darwin": "darwin",
+        "aarch64-linux": "linux",
+        "x86_64-linux": "linux",
+    }
+
+    def _download_url(self, nix_platform: str, version: str) -> str:
+        factory_os = self._FACTORY_OS[nix_platform]
+        factory_arch = self.PLATFORMS[nix_platform]
+        return f"{self.BASE_URL}/{version}/{factory_os}/{factory_arch}/droid"
+
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        """Parse version from the install script."""
+        script = await fetch_url(
+            session, self.INSTALL_SCRIPT_URL, timeout=DEFAULT_TIMEOUT
+        )
+        match = re.search(r'VER="([^"]+)"', script.decode())
+        if not match:
+            raise RuntimeError(
+                "Could not parse version from Factory CLI install script"
+            )
+        return VersionInfo(version=match.group(1), metadata={})
+
+    async def fetch_checksums(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> dict[str, str]:
+        checksums = {}
+        for nix_platform in self.PLATFORMS:
+            sha_url = f"{self._download_url(nix_platform, info.version)}.sha256"
+            payload = await fetch_url(session, sha_url, timeout=DEFAULT_TIMEOUT)
+            hex_hash = payload.decode().strip()
+            checksums[nix_platform] = hex_hash
+        return checksums
+
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
+        urls = {
+            nix_platform: self._download_url(nix_platform, info.version)
+            for nix_platform in self.PLATFORMS
+        }
+        return self._build_result_with_urls(info, hashes, urls)
+
+
 class ConductorUpdater(DownloadHashUpdater):
     """Update Conductor to latest version from CrabNebula CDN."""
 
@@ -1655,8 +1717,90 @@ go_vendor_updater("beads", subpackages=["cmd/bd"], proxy_vendor=True)
 go_vendor_updater("crush")
 go_vendor_updater("gogcli", subpackages=["cmd/gog"])
 cargo_vendor_updater("codex", subdir="codex-rs")
-cargo_vendor_updater("sentry-cli")
 npm_deps_updater("gemini-cli")
+
+
+class SentryCliUpdater(Updater):
+    """Update sentry-cli to latest GitHub release.
+
+    Builds from source using fetchFromGitHub with postFetch to strip .xcarchive
+    test fixtures (macOS code-signed bundles that break nix-store --optimise).
+    """
+
+    name = "sentry-cli"
+
+    GITHUB_OWNER = "getsentry"
+    GITHUB_REPO = "sentry-cli"
+    XCARCHIVE_FILTER = "find $out -name '*.xcarchive' -type d -exec rm -rf {} +"
+
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        data = await fetch_json(
+            session,
+            f"https://api.github.com/repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/releases/latest",
+            user_agent=DEFAULT_USER_AGENT,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        return VersionInfo(version=data["tag_name"], metadata={})
+
+    def _src_nix_expr(self, version: str, hash_value: str = "pkgs.lib.fakeHash") -> str:
+        """Build nix expression for fetchFromGitHub with xcarchive filtering."""
+        return (
+            f"pkgs.fetchFromGitHub {{\n"
+            f'  owner = "{self.GITHUB_OWNER}";\n'
+            f'  repo = "{self.GITHUB_REPO}";\n'
+            f'  tag = "{version}";\n'
+            f"  hash = {hash_value};\n"
+            f'  postFetch = "{self.XCARCHIVE_FILTER}";\n'
+            f"}}"
+        )
+
+    async def fetch_hashes(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> AsyncIterator[UpdateEvent]:
+        # Step 1: Compute source hash (fetchFromGitHub with xcarchive filtering)
+        src_hash_drain = ValueDrain()
+        async for event in drain_value_events(
+            compute_fixed_output_hash(
+                self.name,
+                _build_nix_expr(self._src_nix_expr(info.version)),
+            ),
+            src_hash_drain,
+        ):
+            yield event
+        src_hash = _require_value(src_hash_drain, "Missing srcHash output")
+
+        # Step 2: Compute cargo vendor hash using the filtered source
+        cargo_hash_drain = ValueDrain()
+        src_expr = self._src_nix_expr(info.version, f'"{src_hash}"')
+        async for event in drain_value_events(
+            compute_fixed_output_hash(
+                self.name,
+                _build_nix_expr(
+                    f"pkgs.rustPlatform.fetchCargoVendor {{\n"
+                    f"  src = {src_expr};\n"
+                    f"  hash = pkgs.lib.fakeHash;\n"
+                    f"}}"
+                ),
+            ),
+            cargo_hash_drain,
+        ):
+            yield event
+        cargo_hash = _require_value(cargo_hash_drain, "Missing cargoHash output")
+
+        yield UpdateEvent(
+            source=self.name,
+            kind=UpdateEventKind.VALUE,
+            payload=[
+                make_hash_entry("fetchFromGitHub", "srcHash", src_hash),
+                make_hash_entry("fetchCargoVendor", "cargoHash", cargo_hash),
+            ],
+        )
+
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
+        return SourceEntry(
+            version=info.version,
+            hashes=HashCollection.from_value(hashes),
+        )
 
 
 class CodeCursorUpdater(DownloadHashUpdater):

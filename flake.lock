@@ -1427,6 +1427,22 @@
         "type": "github"
       }
     },
+    "nixpkgs-swift": {
+      "locked": {
+        "lastModified": 1769105483,
+        "narHash": "sha256-cC4W6KDq3942hk4zyoDWYOvb/9lvlsPZbrdlTj9hsxw=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "70801e06d9730c4f1704fbd3bbf5b8e11c03a2a7",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "70801e06d9730c4f1704fbd3bbf5b8e11c03a2a7",
+        "type": "github"
+      }
+    },
     "nixpkgs_2": {
       "locked": {
         "lastModified": 1761236834,
@@ -1775,6 +1791,7 @@
         "nix-rosetta-builder": "nix-rosetta-builder",
         "nixos-hardware": "nixos-hardware",
         "nixpkgs": "nixpkgs_4",
+        "nixpkgs-swift": "nixpkgs-swift",
         "nixvim": "nixvim",
         "opencode": "opencode",
         "pantsbuild-tap": "pantsbuild-tap",
@@ -1784,7 +1801,6 @@
         "rama-boringssl": "rama-boringssl",
         "red": "red",
         "rust-overlay": "rust-overlay_3",
-        "sentry-cli": "sentry-cli",
         "sops-nix": "sops-nix",
         "stylix": "stylix",
         "sublime-kdl": "sublime-kdl",
@@ -1896,23 +1912,6 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "type": "github"
-      }
-    },
-    "sentry-cli": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1768224854,
-        "narHash": "sha256-bjVMVaN8jc/j77k3krpLbNznQnqZTg6ZIde/Awp1DOs=",
-        "owner": "getsentry",
-        "repo": "sentry-cli",
-        "rev": "34c9ee407386de032483a46b99df6eab94ff4f4a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "getsentry",
-        "ref": "3.1.0",
-        "repo": "sentry-cli",
         "type": "github"
       }
     },

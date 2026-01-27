@@ -91,6 +91,21 @@
     },
     "version": "2025.3.4"
   },
+  "droid": {
+    "hashes": {
+      "aarch64-darwin": "sha256-lgMB3JmDnWamR4zhIIMQWhpgoPpbubPaLiyrJaVS3RE=",
+      "aarch64-linux": "sha256-r3xahVbWg3GUisraHlfVy8UBBz1+RzSypxPN0Y6XuU8=",
+      "x86_64-darwin": "sha256-InGfJN3CSKaELV23YsX5cxaIjr/0SoRBuSKXZp4XywU=",
+      "x86_64-linux": "sha256-zUjq69GU5dB/obuTC8bseOiffzBuYUBYDHqPsFP6vAU="
+    },
+    "urls": {
+      "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.55.2/darwin/arm64/droid",
+      "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.55.2/linux/arm64/droid",
+      "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.55.2/darwin/x64/droid",
+      "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.55.2/linux/x64/droid"
+    },
+    "version": "0.55.2"
+  },
   "gemini-cli": {
     "hashes": [
       {
@@ -158,14 +173,18 @@
     "version": "2026-01-20"
   },
   "sentry-cli": {
-    "hashes": {
-      "aarch64-darwin": "sha256-S0NhMOVgDURrj3YzRDUW+7qLIPpudNXblkWQcAnk6YI=",
-      "x86_64-darwin": "sha256-UM0h2OdkX9i0OtJPTpWrMi0oGOanObvRA3xzL4+WysY="
-    },
-    "urls": {
-      "aarch64-darwin": "https://github.com/getsentry/sentry-cli/releases/download/3.1.0/sentry-cli-Darwin-arm64",
-      "x86_64-darwin": "https://github.com/getsentry/sentry-cli/releases/download/3.1.0/sentry-cli-Darwin-x86_64"
-    },
+    "hashes": [
+      {
+        "drvType": "fetchFromGitHub",
+        "hash": "sha256-jBtQKAgqFGDUTrhsyMpNF0qzSJU+XKY9OcUfZf7Z5/8=",
+        "hashType": "srcHash"
+      },
+      {
+        "drvType": "fetchCargoVendor",
+        "hash": "sha256-PUQ55pNiLEI5qxykA/j7RsykKJRTUGOGf2JBLacFGBo=",
+        "hashType": "cargoHash"
+      }
+    ],
     "version": "3.1.0"
   },
   "vscode-insiders": {
