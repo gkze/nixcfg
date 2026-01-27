@@ -22,6 +22,7 @@
       dasel
       dbeaver-bin
       deno
+      droid
       dua
       duf
       dust

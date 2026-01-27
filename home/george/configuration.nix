@@ -192,10 +192,6 @@
       settings = {
         theme = "catppuccin-frappe";
         mcp = {
-          axiom = {
-            type = "remote";
-            url = "https://mcp.axiom.co/mcp";
-          };
           chrome-devtools = {
             type = "local";
             command = [
@@ -204,39 +200,12 @@
               "--executablePath=${config.home.homeDirectory}/Applications/Home Manager Apps/Google Chrome.app/Contents/MacOS/Google Chrome"
             ];
           };
-          convex = {
-            type = "local";
-            command = [
-              "npx"
-              "-y"
-              "convex@latest"
-              "mcp"
-              "start"
-            ];
-          };
-          linear = {
-            type = "remote";
-            url = "https://mcp.linear.app/mcp";
-          };
           next-devtools = {
             type = "local";
             command = [
               "npx"
               "next-devtools-mcp@latest"
             ];
-          };
-          notion = {
-            type = "remote";
-            url = "https://mcp.notion.com/mcp";
-            oauth = { };
-          };
-          sentry = {
-            type = "remote";
-            url = "https://mcp.sentry.dev/mcp";
-          };
-          vercel = {
-            type = "remote";
-            url = "https://mcp.vercel.com";
           };
         };
         plugin = [
