@@ -266,11 +266,34 @@ in
       # Other Packages (with custom logic)
       # ═══════════════════════════════════════════════════════════════════════════
 
+      # Patched BoringSSL source for rama-boring-sys (required by codex network-proxy)
+      # rama-boring-sys builds BoringSSL from source, so we provide pre-patched source
+      ramaBoringsslSource = prev.stdenvNoCC.mkDerivation {
+        pname = "rama-boringssl-source";
+        version = "79048f1-patched";
+        src = inputs.rama-boringssl;
+        phases = [
+          "unpackPhase"
+          "patchPhase"
+          "installPhase"
+        ];
+
+        # Apply patches from rama-boring repo (in boring-sys/patches/)
+        postPatch = ''
+          patch -p1 < ${inputs.rama-boring}/boring-sys/patches/rama_tls.patch
+          patch -p1 < ${inputs.rama-boring}/boring-sys/patches/rama_boring_pq.patch
+        '';
+
+        installPhase = ''
+          cp -r . $out
+        '';
+      };
+
       codex =
         let
           version = getFlakeVersion "codex";
         in
-        prev.codex.overrideAttrs {
+        prev.codex.overrideAttrs (old: {
           inherit version;
           src = inputs.codex;
           sourceRoot = "source/codex-rs";
@@ -278,7 +301,20 @@ in
             src = "${inputs.codex}/codex-rs";
             hash = outputs.lib.sourceHash "codex" "cargoHash";
           };
-        };
+
+          nativeBuildInputs =
+            (old.nativeBuildInputs or [ ])
+            ++ (with prev; [
+              cmake
+              ninja
+              go
+              perl
+            ]);
+
+          # Provide patched BoringSSL source for rama-boring-sys
+          BORING_BSSL_SOURCE_PATH = final.ramaBoringsslSource;
+          BORING_BSSL_ASSUME_PATCHED = "1";
+        });
 
       conductor =
         let
@@ -486,35 +522,56 @@ in
         }
       );
 
-      # sentry-cli =
-      #   let
-      #     # Fetch source directly (not via flake input) so we can filter BEFORE
-      #     # it enters the store. Flake inputs are unconditionally added to the
-      #     # store, making post-hoc filtering ineffective for nix-store --optimise.
-      #     version = getFlakeVersion "sentry-cli";
-      #     lock = outputs.lib.flakeLock.sentry-cli.locked;
-      #     # Filter out iOS test fixtures with code-signed .xcarchive bundles
-      #     # These cause nix-store --optimise to fail on macOS due to
-      #     # code signature protections on _CodeSignature/CodeResources files
-      #     filteredSrc = prev.fetchFromGitHub {
-      #       inherit (lock) owner repo rev;
-      #       hash = outputs.lib.sourceHash "sentry-cli" "srcHash";
-      #       postFetch = ''
-      #         find $out -name "*.xcarchive" -type d -exec rm -rf {} + 2>/dev/null || true
-      #       '';
-      #     };
-      #   in
-      #   prev.sentry-cli.overrideAttrs (old: {
-      #     inherit version;
-      #     src = filteredSrc;
-      #     cargoDeps = prev.rustPlatform.fetchCargoVendor {
-      #       src = filteredSrc;
-      #       hash = outputs.lib.sourceHash "sentry-cli" "cargoHash";
-      #     };
-      #     buildInputs = old.buildInputs or [ ] ++ [ prev.curl ];
-      #     # Disable tests that depend on xcarchive fixtures we removed
-      #     doCheck = false;
-      #   });
+      # sentry-cli: Use prebuilt binaries on Darwin to avoid building Swift
+      # Swift builds from source are extremely slow (hours) and often not cached
+      # Sentry provides official prebuilt binaries for macOS
+      sentry-cli =
+        let
+          info = sources.sentry-cli;
+          inherit (info) version;
+        in
+        prev.stdenvNoCC.mkDerivation {
+          pname = "sentry-cli";
+          inherit version;
+
+          src = prev.fetchurl {
+            url = info.urls.${system};
+            hash = info.hashes.${system};
+          };
+
+          dontUnpack = true;
+
+          nativeBuildInputs = [ prev.installShellFiles ];
+
+          installPhase = ''
+            runHook preInstall
+
+            mkdir -p $out/bin
+            cp $src $out/bin/sentry-cli
+            chmod +x $out/bin/sentry-cli
+
+            runHook postInstall
+          '';
+
+          # Generate shell completions
+          postInstall = ''
+            installShellCompletion --cmd sentry-cli \
+              --bash <($out/bin/sentry-cli completions bash) \
+              --fish <($out/bin/sentry-cli completions fish) \
+              --zsh <($out/bin/sentry-cli completions zsh)
+          '';
+
+          meta = with prev.lib; {
+            description = "Command line utility to work with Sentry";
+            homepage = "https://docs.sentry.io/cli/";
+            license = licenses.bsd3;
+            platforms = [
+              "aarch64-darwin"
+              "x86_64-darwin"
+            ];
+            mainProgram = "sentry-cli";
+          };
+        };
 
       sublime-kdl =
         let

@@ -36,6 +36,10 @@
       url = "github:nix-community/flake-firefox-nightly";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    flake-edit = {
+      url = "github:a-kenji/flake-edit";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     git-hooks = {
       url = "github:cachix/git-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -117,6 +121,15 @@
     };
     codex = {
       url = "github:openai/codex/rust-v0.91.0";
+      flake = false;
+    };
+    # rama-boring-sys dependencies (for codex network-proxy crate)
+    rama-boringssl = {
+      url = "github:plabayo/rama-boringssl/79048f1f1d8e6b7f9ca59b95c24486c8149122a4";
+      flake = false;
+    };
+    rama-boring = {
+      url = "github:plabayo/rama-boring/4b54e2b";
       flake = false;
     };
     curator = {
@@ -259,6 +272,7 @@
           inputs.neovim-nightly-overlay.overlays.default
           inputs.red.overlays.default
           self.overlays.default
+          (final: _: { flake-edit = inputs.flake-edit.packages.${final.system}.default; })
           (
             _: prev:
             let
@@ -349,6 +363,7 @@
             packages =
               with pkgs;
               [
+                flake-edit
                 home-manager
                 nh
                 nil

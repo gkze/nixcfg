@@ -49,7 +49,7 @@
     "hashes": [
       {
         "drvType": "fetchCargoVendor",
-        "hash": "sha256-gg7KPEMO2aiBcIN8TllaDQeTLyw+WLfmMrXBKV/L53M=",
+        "hash": "sha256-FIjNADpaJdhr56mBa5sBac6uHnIsoJv8wQu3FdkP7yo=",
         "hashType": "cargoHash"
       }
     ],
@@ -95,7 +95,7 @@
     "hashes": [
       {
         "drvType": "fetchNpmDeps",
-        "hash": "sha256-VEqV2flvxylrJrkfX8wCiYZ8r4tfUeJUEi3rY53h8y4=",
+        "hash": "sha256-4peAAxCws5IjWaiNwkRBiaL+n1fE+zsK0qbk1owueeY=",
         "hashType": "npmDepsHash"
       }
     ],
@@ -158,19 +158,15 @@
     "version": "2026-01-20"
   },
   "sentry-cli": {
-    "hashes": [
-      {
-        "drvType": "fetchCargoVendor",
-        "hash": "sha256-PUQ55pNiLEI5qxykA/j7RsykKJRTUGOGf2JBLacFGBo=",
-        "hashType": "cargoHash"
-      },
-      {
-        "drvType": "fetchFromGitHub",
-        "hash": "sha256-jBtQKAgqFGDUTrhsyMpNF0qzSJU+XKY9OcUfZf7Z5/8=",
-        "hashType": "srcHash"
-      }
-    ],
-    "input": "sentry-cli"
+    "hashes": {
+      "aarch64-darwin": "sha256-S0NhMOVgDURrj3YzRDUW+7qLIPpudNXblkWQcAnk6YI=",
+      "x86_64-darwin": "sha256-UM0h2OdkX9i0OtJPTpWrMi0oGOanObvRA3xzL4+WysY="
+    },
+    "urls": {
+      "aarch64-darwin": "https://github.com/getsentry/sentry-cli/releases/download/3.1.0/sentry-cli-Darwin-arm64",
+      "x86_64-darwin": "https://github.com/getsentry/sentry-cli/releases/download/3.1.0/sentry-cli-Darwin-x86_64"
+    },
+    "version": "3.1.0"
   },
   "vscode-insiders": {
     "hashes": {
