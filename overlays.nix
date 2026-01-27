@@ -507,6 +507,76 @@ in
       # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
       # See bead nixcfg-uec for technical details
 
+      linear-cli =
+        let
+          version = "1.8.1";
+          # FOD: fetch Deno dependencies + run GraphQL codegen (both need network)
+          denoDeps = prev.stdenvNoCC.mkDerivation {
+            pname = "linear-cli-deps";
+            inherit version;
+            src = inputs.linear-cli;
+            nativeBuildInputs = [
+              prev.deno
+              prev.cacert
+            ];
+            outputHashAlgo = "sha256";
+            outputHashMode = "recursive";
+            outputHash = outputs.lib.sourceHash "linear-cli" "denoDepsHash";
+            buildPhase = ''
+              export DENO_DIR=$TMPDIR/deno-cache
+              export SSL_CERT_FILE=${prev.cacert}/etc/ssl/certs/ca-bundle.crt
+              export HOME=$TMPDIR
+
+              # Run codegen (generates src/__codegen__/graphql.ts via npm:@graphql-codegen/cli)
+              deno task codegen
+
+              # Cache all modules so deno compile works offline
+              deno cache src/main.ts
+            '';
+            installPhase = ''
+              mkdir -p $out
+              cp -r $TMPDIR/deno-cache $out/deno-cache
+              cp -r src/__codegen__ $out/codegen
+            '';
+          };
+        in
+        prev.stdenvNoCC.mkDerivation {
+          pname = "linear-cli";
+          inherit version;
+          src = inputs.linear-cli;
+          nativeBuildInputs = [
+            prev.deno
+            prev.installShellFiles
+          ];
+          buildPhase = ''
+            export DENO_DIR=$(mktemp -d)
+            cp -r ${denoDeps}/deno-cache/* $DENO_DIR/
+            chmod -R u+w $DENO_DIR
+            export HOME=$TMPDIR
+
+            # Copy generated codegen files into source tree
+            mkdir -p src/__codegen__
+            cp -r ${denoDeps}/codegen/* src/__codegen__/
+
+            deno compile -A --output linear src/main.ts
+          '';
+          installPhase = ''
+            mkdir -p $out/bin
+            cp linear $out/bin/
+
+            installShellCompletion --cmd linear \
+              --bash <($out/bin/linear completions bash) \
+              --fish <($out/bin/linear completions fish) \
+              --zsh <($out/bin/linear completions zsh)
+          '';
+          meta = with prev.lib; {
+            description = "Linear issue tracker CLI";
+            homepage = "https://github.com/schpet/linear-cli";
+            license = licenses.isc;
+            mainProgram = "linear";
+          };
+        };
+
       homebrew-zsh-completion =
         let
           source = outputs.lib.sourceHashEntry "homebrew-zsh-completion" "sha256";

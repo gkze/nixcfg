@@ -49,7 +49,7 @@
     "hashes": [
       {
         "drvType": "fetchCargoVendor",
-        "hash": "sha256-FIjNADpaJdhr56mBa5sBac6uHnIsoJv8wQu3FdkP7yo=",
+        "hash": "sha256-fuT8vPb9/7fZam129nR6y+r+3j46WBhlf73Htkcjpzc=",
         "hashType": "cargoHash"
       }
     ],
@@ -125,6 +125,16 @@
         "url": "https://raw.githubusercontent.com/extrawurst/gitui/8876c1d0f616d55a0c0957683781fd32af815ae3/vim_style_key_config.ron"
       }
     ]
+  },
+  "linear-cli": {
+    "hashes": [
+      {
+        "drvType": "denoDeps",
+        "hash": "sha256-GfG/2rt120UQjuyit0I+5oP0rMu+zNwsZsHFH483gXg=",
+        "hashType": "denoDepsHash"
+      }
+    ],
+    "input": "linear-cli"
   },
   "gogcli": {
     "hashes": [

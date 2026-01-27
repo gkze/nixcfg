@@ -119,7 +119,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.91.0";
+      url = "github:openai/codex/rust-v0.92.0";
       flake = false;
     };
     # rama-boring-sys dependencies (for codex network-proxy crate)
@@ -160,6 +160,10 @@
       url = "github:homebrew/homebrew-core";
       flake = false;
     };
+    linear-cli = {
+      url = "github:schpet/linear-cli/v1.8.1";
+      flake = false;
+    };
     kdl-vim = {
       url = "github:imsnif/kdl.vim";
       flake = false;
@@ -193,7 +197,7 @@
       flake = false;
     };
     sublime-kdl = {
-      url = "github:eugenesvk/sublime-kdl/2.0.6";
+      url = "github:eugenesvk/sublime-kdl/2.0.5";
       flake = false;
     };
     tclint = {

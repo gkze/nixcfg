@@ -45,6 +45,7 @@
       jnv
       jo
       killport
+      linear-cli
       lumen
       mdq
       moreutils

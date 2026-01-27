@@ -238,8 +238,10 @@ in
                 ruff_fix.command = ruffCmd;
                 ruff_format.command = ruffCmd;
                 ruff_organize_imports.command = ruffCmd;
+                jsonnetfmt.command = lib.getExe pkgs.jsonnet;
               };
             formatters_by_ft = {
+              jsonnet = [ "jsonnetfmt" ];
               html = [ "biome" ];
               javascript = [ "biome" ];
               javascriptreact = [ "biome" ];
@@ -315,6 +317,7 @@ in
             #   enable = true;
             #   package = pkgs.jinja-lsp;
             # };
+            jsonnet_ls.enable = true;
             jsonls = {
               enable = true;
               # Use Biome formatter instead to avoid LSP conflicts
