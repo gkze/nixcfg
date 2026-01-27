@@ -279,4 +279,28 @@ rec {
         }
       ];
     };
+
+  # Common base for all Darwin hosts — captures shared boilerplate so each
+  # host file only declares its differences.  hostname is injected by
+  # flakelight-darwin from the attrset key (i.e. the filename).
+  mkDarwinHost =
+    {
+      user ? "george",
+      extraHomeModules ? [ ],
+      extraSystemModules ? [ ],
+    }:
+    mkSystem {
+      system = "aarch64-darwin";
+      users = [ user ];
+      homeModules = extraHomeModules;
+      systemModules = [
+        "${modulesPath}/darwin/display-management.nix"
+        inputs.nix-homebrew.darwinModules.nix-homebrew
+        "${modulesPath}/darwin/homebrew.nix"
+        { nix-homebrew = { inherit user; }; }
+        "${modulesPath}/darwin/${user}/shell.nix"
+        "${modulesPath}/darwin/${user}/brew-apps.nix"
+      ]
+      ++ extraSystemModules;
+    };
 }

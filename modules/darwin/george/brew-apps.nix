@@ -1,5 +1,6 @@
 {
   homebrew = {
+    brews = [ "mole" ];
     casks = [
       "airfoil"
       "antigravity"
