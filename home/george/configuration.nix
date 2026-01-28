@@ -188,31 +188,32 @@
     };
     opencode = {
       enable = true;
-      settings = {
-        theme = "catppuccin-frappe";
-        mcp = {
-          chrome-devtools = {
-            type = "local";
-            command = [
-              "npx"
-              "chrome-devtools-mcp@latest"
-              "--executablePath=${config.home.homeDirectory}/Applications/Home Manager Apps/Google Chrome.app/Contents/MacOS/Google Chrome"
-            ];
-          };
-          next-devtools = {
-            type = "local";
-            command = [
-              "npx"
-              "next-devtools-mcp@latest"
-            ];
-          };
-        };
-        plugin = [
-          "opencode-beads"
-          "@franlol/opencode-md-table-formatter"
-        ];
-        tui.scroll_acceleration.enabled = true;
-      };
+      # TODO: figure out work/personal split & mutability
+      # settings = {
+      #   theme = "catppuccin-frappe";
+      #   mcp = {
+      #     chrome-devtools = {
+      #       type = "local";
+      #       command = [
+      #         "npx"
+      #         "chrome-devtools-mcp@latest"
+      #         "--executablePath=${config.home.homeDirectory}/Applications/Home Manager Apps/Google Chrome.app/Contents/MacOS/Google Chrome"
+      #       ];
+      #     };
+      #     next-devtools = {
+      #       type = "local";
+      #       command = [
+      #         "npx"
+      #         "next-devtools-mcp@latest"
+      #       ];
+      #     };
+      #   };
+      #   plugin = [
+      #     "opencode-beads"
+      #     "@franlol/opencode-md-table-formatter"
+      #   ];
+      #   tui.scroll_acceleration.enabled = true;
+      # };
     };
     ssh = {
       enable = true;

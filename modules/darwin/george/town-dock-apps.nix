@@ -8,6 +8,7 @@
       { app = "/Applications/1Password.app"; }
       { app = "/Applications/Twilight.app"; }
       { app = "/Applications/Ghostty.app"; }
+      { app = "/Users/${primaryUser}/Applications/Home Manager Apps/OpenCode Dev.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Zed Nightly.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Cursor.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Visual Studio Code - Insiders.app"; }
