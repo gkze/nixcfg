@@ -3,7 +3,7 @@
     "hashes": [
       {
         "drvType": "buildGoModule",
-        "hash": "sha256-ULiXQxJl8hqWUY04cyjXWUefPoC5DoeZ2kcQEcefbWQ=",
+        "hash": "sha256-tDl2pmHPNXxpUdFLCBM33SQX/SsNtn7XqrZkZsy8k6o=",
         "hashType": "vendorHash"
       }
     ],
@@ -21,29 +21,29 @@
   },
   "chatgpt": {
     "hashes": {
-      "aarch64-darwin": "sha256-xs4AZSbj9wuxkGhw2JyFvaPt6W9ZkL+ab0FmjYvTR8Y=",
-      "x86_64-darwin": "sha256-xs4AZSbj9wuxkGhw2JyFvaPt6W9ZkL+ab0FmjYvTR8Y="
+      "aarch64-darwin": "sha256-ngcNGDwuQ6WuM5EiozOOk/6SjWVzuCRlvcbG7eP/Ghw=",
+      "x86_64-darwin": "sha256-ngcNGDwuQ6WuM5EiozOOk/6SjWVzuCRlvcbG7eP/Ghw="
     },
     "urls": {
-      "darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.006_1768086529.dmg"
+      "darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.013_1768606532.dmg"
     },
-    "version": "1.2026.006"
+    "version": "1.2026.013"
   },
   "code-cursor": {
-    "commit": "dc8361355d709f306d5159635a677a571b277bcc",
+    "commit": "618c607a249dd7fd2ffc662c6531143833bebd44",
     "hashes": {
-      "aarch64-darwin": "sha256-nCch/JXO1lzj0ibAa8e0OPlnBTOrIk/fvq9CO46Ev8w=",
-      "aarch64-linux": "sha256-tk7TzkLy8oHtXp0UcMwhDXa9B2f2lanWYmPbF7OKfZ0=",
-      "x86_64-darwin": "sha256-uacRpz0HFRfmaNekSB5qLXpnhiQRvAw03W+9QfPl6ZY=",
-      "x86_64-linux": "sha256-OOjANfVHMlRN1uWq2jNmK/RqI4Q5NTlN/19Nl2jWiKI="
+      "aarch64-darwin": "sha256-JvkumedZhRyqZdjOVhqjMRShtGPCafVCGOewFooEGpc=",
+      "aarch64-linux": "sha256-5QVw5iN17yeU8TFMZrCW/AswgNl4bUONeuhBdretiWk=",
+      "x86_64-darwin": "sha256-hNpy1wfaxo2W/8Itbam1tt5tLqo2BjsnYZyl5NQn23g=",
+      "x86_64-linux": "sha256-qB6HEJZdn8+MdudNd/kVooArUGg1jBaeArlvOKCpFao="
     },
     "urls": {
-      "aarch64-darwin": "https://downloads.cursor.com/production/dc8361355d709f306d5159635a677a571b277bcc/darwin/arm64/Cursor-darwin-arm64.dmg",
-      "aarch64-linux": "https://downloads.cursor.com/production/dc8361355d709f306d5159635a677a571b277bcc/linux/arm64/Cursor-2.4.21-aarch64.AppImage",
-      "x86_64-darwin": "https://downloads.cursor.com/production/dc8361355d709f306d5159635a677a571b277bcc/darwin/x64/Cursor-darwin-x64.dmg",
-      "x86_64-linux": "https://downloads.cursor.com/production/dc8361355d709f306d5159635a677a571b277bcc/linux/x64/Cursor-2.4.21-x86_64.AppImage"
+      "aarch64-darwin": "https://downloads.cursor.com/production/618c607a249dd7fd2ffc662c6531143833bebd44/darwin/arm64/Cursor-darwin-arm64.dmg",
+      "aarch64-linux": "https://downloads.cursor.com/production/618c607a249dd7fd2ffc662c6531143833bebd44/linux/arm64/Cursor-2.4.22-aarch64.AppImage",
+      "x86_64-darwin": "https://downloads.cursor.com/production/618c607a249dd7fd2ffc662c6531143833bebd44/darwin/x64/Cursor-darwin-x64.dmg",
+      "x86_64-linux": "https://downloads.cursor.com/production/618c607a249dd7fd2ffc662c6531143833bebd44/linux/x64/Cursor-2.4.22-x86_64.AppImage"
     },
-    "version": "2.4.21"
+    "version": "2.4.22"
   },
   "codex": {
     "hashes": [
@@ -57,14 +57,14 @@
   },
   "conductor": {
     "hashes": {
-      "aarch64-darwin": "sha256-6ys0zs/zxmqceI3BrVz1NuuLB53WEaseezO9+Zjtf0A=",
-      "x86_64-darwin": "sha256-gpVtD//okNbLEcHa0V+tcoNyiy60chePvhQ3DvoxuEg="
+      "aarch64-darwin": "sha256-zxPZMTCYcKmurFIGJ9RlEwqA/mU/J2laETpOWGv8viI=",
+      "x86_64-darwin": "sha256-rYsheo3TO0cW+ptC95IqQW72woLmCE8pw/WWL+X313A="
     },
     "urls": {
       "aarch64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-aarch64",
       "x86_64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-x86_64"
     },
-    "version": "0.32.2"
+    "version": "0.33.1"
   },
   "crush": {
     "hashes": [
@@ -93,24 +93,24 @@
   },
   "droid": {
     "hashes": {
-      "aarch64-darwin": "sha256-lgMB3JmDnWamR4zhIIMQWhpgoPpbubPaLiyrJaVS3RE=",
-      "aarch64-linux": "sha256-r3xahVbWg3GUisraHlfVy8UBBz1+RzSypxPN0Y6XuU8=",
-      "x86_64-darwin": "sha256-InGfJN3CSKaELV23YsX5cxaIjr/0SoRBuSKXZp4XywU=",
-      "x86_64-linux": "sha256-zUjq69GU5dB/obuTC8bseOiffzBuYUBYDHqPsFP6vAU="
+      "aarch64-darwin": "sha256-YGKaR6tR7s7nDwZFLIkbHNO6zGAC0yweY/YfqY43AxQ=",
+      "aarch64-linux": "sha256-TzoDXknosRJz9M85pAp3RXV46E1u1CN3FEW7wcvxYwE=",
+      "x86_64-darwin": "sha256-mOluX3fgZFLJ9oEHsakMjVF6WyKfTWdqnIaD+IL8QqM=",
+      "x86_64-linux": "sha256-972I+Fl/UjBo5FQv01/whZejBxbEAxR43WAMpXdXkb0="
     },
     "urls": {
-      "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.55.2/darwin/arm64/droid",
-      "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.55.2/linux/arm64/droid",
-      "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.55.2/darwin/x64/droid",
-      "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.55.2/linux/x64/droid"
+      "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.56.3/darwin/arm64/droid",
+      "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.56.3/linux/arm64/droid",
+      "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.56.3/darwin/x64/droid",
+      "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.56.3/linux/x64/droid"
     },
-    "version": "0.55.2"
+    "version": "0.56.3"
   },
   "gemini-cli": {
     "hashes": [
       {
         "drvType": "fetchNpmDeps",
-        "hash": "sha256-4peAAxCws5IjWaiNwkRBiaL+n1fE+zsK0qbk1owueeY=",
+        "hash": "sha256-nfmIt+wUelhz3KiW4/pp/dGE71f2jsPbxwpBRT8gtYc=",
         "hashType": "npmDepsHash"
       }
     ],
@@ -126,16 +126,6 @@
       }
     ]
   },
-  "linear-cli": {
-    "hashes": [
-      {
-        "drvType": "denoDeps",
-        "hash": "sha256-GfG/2rt120UQjuyit0I+5oP0rMu+zNwsZsHFH483gXg=",
-        "hashType": "denoDepsHash"
-      }
-    ],
-    "input": "linear-cli"
-  },
   "gogcli": {
     "hashes": [
       {
@@ -148,16 +138,16 @@
   },
   "google-chrome": {
     "hashes": {
-      "aarch64-darwin": "sha256-gogtUrrA8MUlIpp9NCdco2XDbo/Zf/HGAE37nUTrLYg=",
-      "x86_64-darwin": "sha256-gogtUrrA8MUlIpp9NCdco2XDbo/Zf/HGAE37nUTrLYg=",
-      "x86_64-linux": "sha256-tPM+bbT3AreOPZdeHfO2ktBXvFGicH1+oz/a2R+MbEE="
+      "aarch64-darwin": "sha256-+1bfrMyoEnKTYUOpx19c20AAY/cOTN118wW9syu2IAE=",
+      "x86_64-darwin": "sha256-+1bfrMyoEnKTYUOpx19c20AAY/cOTN118wW9syu2IAE=",
+      "x86_64-linux": "sha256-O3fFCcSghHor8UaqvUCn/GDqKD+8SCrXT6FEnWh9QUc="
     },
     "urls": {
       "aarch64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
       "x86_64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
       "x86_64-linux": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
     },
-    "version": "144.0.7559.97"
+    "version": "144.0.7559.98"
   },
   "homebrew-zsh-completion": {
     "hashes": [
@@ -168,6 +158,16 @@
         "url": "https://raw.githubusercontent.com/Homebrew/brew/84dd40dc2ff554852eeb50c18dd0dc33cb1723b5/completions/zsh/_brew"
       }
     ]
+  },
+  "linear-cli": {
+    "hashes": [
+      {
+        "drvType": "denoDeps",
+        "hash": "sha256-RNC26GlahVtx/GMv/6T31cT4hfXav4Mizo4I5xfvBzI=",
+        "hashType": "denoDepsHash"
+      }
+    ],
+    "input": "linear-cli"
   },
   "sculptor": {
     "hashes": {

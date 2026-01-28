@@ -1,5 +1,5 @@
 ---
-name: Nightly Flake Update
+name: Periodic Flake Update
 
 on:
   schedule:
@@ -22,10 +22,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/determinate-nix-action@v3
       - run: nix flake update
+      - name: Update sources.json
+        run: nix run .#update
       - uses: actions/upload-artifact@v4
         with:
           name: flake-lock
-          path: flake.lock
+          path: |
+            flake.lock
+            sources.json
 
   darwin:
     needs: update-lock
@@ -72,6 +76,7 @@ jobs:
       - run: brew install --cask macfuse && brew install 1password-cli
       - run: nix build .#darwinConfigurations.${{ matrix.host }}.system
 
+  # Placeholder for future NixOS configuration builds
   linux:
     needs: update-lock
     runs-on: ubuntu-24.04
@@ -100,21 +105,31 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/determinate-nix-action@v3
       - uses: actions/download-artifact@v4
         with:
           name: flake-lock
           path: .
-      - name: Generate flake lock diff
+      - name: Generate update diff
         id: diff
         run: |
           git show HEAD:flake.lock > /tmp/old-flake.lock
-          diff_body=$(python3 .github/scripts/flake_lock_diff.py /tmp/old-flake.lock flake.lock)
+          flake_diff=$(python3 .github/scripts/flake_lock_diff.py /tmp/old-flake.lock flake.lock)
+
+          # Generate sources.json diff if it changed
+          sources_diff=""
+          if ! git diff --quiet HEAD -- sources.json 2>/dev/null; then
+            sources_diff=$(git diff HEAD -- sources.json | head -100)
+          fi
 
           # Handle multiline output for GitHub Actions
           {
             echo 'body<<EOF'
-            echo "$diff_body"
+            echo "$flake_diff"
+            if [ -n "$sources_diff" ]; then
+              echo ""
+              echo "Sources.json changes:"
+              echo "$sources_diff"
+            fi
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
       - uses: peter-evans/create-pull-request@v7
@@ -122,10 +137,10 @@ jobs:
           sign-commits: true
           branch: update_flake_lock_action
           delete-branch: true
-          title: "flake.lock: Update"
-          commit-message: "flake.lock: Update"
+          title: "nix: Update flake.lock and sources"
+          commit-message: "nix: Update flake.lock and sources"
           body: |
-            Automated changes by the Nightly Flake Update workflow.
+            Automated changes by the Periodic Flake Update workflow.
 
             ```
             ${{ steps.diff.outputs.body }}

@@ -706,6 +706,89 @@ async def compute_npm_deps_hash(
         yield event
 
 
+async def compute_deno_deps_hash(
+    source: str, input_name: str
+) -> AsyncIterator[UpdateEvent]:
+    """Compute Deno deps hash by building the flake with a fakeHash.
+
+    Deno caches are inherently non-deterministic (timestamps, network variance).
+    Instead of replicating the derivation, we temporarily set the hash to fakeHash
+    in sources.json, build the flake, and extract the correct hash from the error.
+
+    This ensures the hash matches exactly what the flake build produces.
+    """
+    # Temporarily update sources.json with fakeHash to trigger hash mismatch
+    sources = SourcesFile.load(SOURCES_FILE)
+    original_entry = sources.entries.get(source)
+
+    # Create temporary entry with fakeHash
+    fake_hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    temp_entry = SourceEntry(
+        hashes=HashCollection.from_value(
+            [HashEntry.create("denoDeps", "denoDepsHash", fake_hash)]
+        ),
+        input=input_name,
+    )
+    sources.entries[source] = temp_entry
+    sources.save(SOURCES_FILE)
+
+    try:
+        # Build the actual flake package through legacyPackages
+        # Use quoted attribute name since nix attrs can have hyphens
+        nix_attr = f'"{source}"'  # Quote the attribute name for nix
+        result_drain = ValueDrain()
+        async for event in drain_value_events(
+            run_command(
+                [
+                    "nix",
+                    "build",
+                    "-L",
+                    "--no-link",
+                    "--impure",
+                    "--expr",
+                    f"""
+                      let
+                        flake = builtins.getFlake "git+file://{get_repo_file(".")}?dirty=1";
+                        pkgs = import ({flake_fetch_expr(get_flake_input_node(get_root_input_name("nixpkgs")))}) {{
+                          system = builtins.currentSystem;
+                          overlays = [ flake.overlays.default ];
+                        }};
+                      in pkgs.{nix_attr}
+                    """,
+                ],
+                source=source,
+                error="nix build did not return output",
+            ),
+            result_drain,
+        ):
+            yield event
+        result = _require_value(result_drain, "nix build did not return output")
+
+        if result.returncode == 0:
+            raise RuntimeError(
+                "Expected nix build to fail with hash mismatch, but it succeeded"
+            )
+
+        hash_value = _extract_nix_hash(result.stderr + result.stdout)
+        if not hash_value.startswith("sha256-"):
+            # Convert to SRI if needed
+            sri_drain = ValueDrain()
+            async for event in drain_value_events(
+                convert_nix_hash_to_sri(source, hash_value), sri_drain
+            ):
+                yield event
+            hash_value = _require_value(sri_drain, "Hash conversion failed")
+
+        yield UpdateEvent(source=source, kind=UpdateEventKind.VALUE, payload=hash_value)
+    finally:
+        # Restore original sources.json
+        if original_entry is not None:
+            sources.entries[source] = original_entry
+        else:
+            del sources.entries[source]
+        sources.save(SOURCES_FILE)
+
+
 def github_raw_url(owner: str, repo: str, rev: str, path: str) -> str:
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{rev}/{path}"
 
@@ -755,11 +838,18 @@ NixPlatform = Literal[
 
 # Valid derivation types
 DrvType = Literal[
-    "buildGoModule", "fetchCargoVendor", "fetchFromGitHub", "fetchNpmDeps", "fetchurl"
+    "buildGoModule",
+    "denoDeps",
+    "fetchCargoVendor",
+    "fetchFromGitHub",
+    "fetchNpmDeps",
+    "fetchurl",
 ]
 
 # Valid hash types
-HashType = Literal["vendorHash", "cargoHash", "npmDepsHash", "sha256", "srcHash"]
+HashType = Literal[
+    "cargoHash", "denoDepsHash", "npmDepsHash", "sha256", "srcHash", "vendorHash"
+]
 
 
 def _validate_sri_hash(value: str) -> str:
@@ -1285,6 +1375,16 @@ class NpmDepsHashUpdater(FlakeInputHashUpdater):
         return compute_npm_deps_hash(self.name, self._input)
 
 
+class DenoDepsHashUpdater(FlakeInputHashUpdater):
+    """Update Deno dependencies hash for FOD derivations like linear-cli."""
+
+    drv_type = "denoDeps"
+    hash_type = "denoDepsHash"
+
+    def _compute_hash(self, info: VersionInfo) -> AsyncIterator[UpdateEvent]:
+        return compute_deno_deps_hash(self.name, self._input)
+
+
 # =============================================================================
 # Updater Factory Functions
 # =============================================================================
@@ -1328,6 +1428,16 @@ def npm_deps_updater(
     """Create and register an npm deps hash updater."""
     attrs = {"name": name, "input_name": input_name}
     return type(f"{name}Updater", (NpmDepsHashUpdater,), attrs)
+
+
+def deno_deps_updater(
+    name: str,
+    *,
+    input_name: str | None = None,
+) -> type[DenoDepsHashUpdater]:
+    """Create and register a Deno deps hash updater."""
+    attrs = {"name": name, "input_name": input_name}
+    return type(f"{name}Updater", (DenoDepsHashUpdater,), attrs)
 
 
 def github_raw_file_updater(
@@ -1727,6 +1837,7 @@ go_vendor_updater("crush")
 go_vendor_updater("gogcli", subpackages=["cmd/gog"])
 cargo_vendor_updater("codex", subdir="codex-rs")
 npm_deps_updater("gemini-cli")
+deno_deps_updater("linear-cli")
 
 
 class SentryCliUpdater(Updater):

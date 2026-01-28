@@ -71,6 +71,8 @@
       MANPAGER = "sh -c 'col -bx | bat -plman'";
       MANROFFOPT = "-c";
       NIX_PAGER = "bat -p";
+      # OpenCode context: defaults to personal, use opencode-work/opencode-personal to switch
+      OPENCODE_CONFIG = "${config.xdg.configHome}/opencode/personal.json";
       PAGER = "bat -p";
     };
     shellAliases =
@@ -188,32 +190,41 @@
     };
     opencode = {
       enable = true;
-      # TODO: figure out work/personal split & mutability
-      # settings = {
-      #   theme = "catppuccin-frappe";
-      #   mcp = {
-      #     chrome-devtools = {
-      #       type = "local";
-      #       command = [
-      #         "npx"
-      #         "chrome-devtools-mcp@latest"
-      #         "--executablePath=${config.home.homeDirectory}/Applications/Home Manager Apps/Google Chrome.app/Contents/MacOS/Google Chrome"
-      #       ];
-      #     };
-      #     next-devtools = {
-      #       type = "local";
-      #       command = [
-      #         "npx"
-      #         "next-devtools-mcp@latest"
-      #       ];
-      #     };
-      #   };
-      #   plugin = [
-      #     "opencode-beads"
-      #     "@franlol/opencode-md-table-formatter"
-      #   ];
-      #   tui.scroll_acceleration.enabled = true;
-      # };
+      # Base config: shared settings for both work and personal contexts
+      # Work/personal MCP servers go in mutable overlay files:
+      #   ~/.config/opencode/work.json
+      #   ~/.config/opencode/personal.json
+      # Context is selected via OPENCODE_CONFIG env var (see zsh config)
+      settings = {
+        theme = "catppuccin-frappe";
+        plugin = [
+          "opencode-beads"
+          "@franlol/opencode-md-table-formatter"
+        ];
+        tui.scroll_acceleration.enabled = true;
+        # Base MCP servers (work-specific ones go in ~/.config/opencode/work.json)
+        mcp = {
+          axiom = {
+            type = "remote";
+            url = "https://mcp.axiom.co/mcp";
+          };
+          chrome-devtools = {
+            type = "local";
+            command = [
+              "npx"
+              "chrome-devtools-mcp@latest"
+              "--executablePath=${config.home.homeDirectory}/Applications/Home Manager Apps/Google Chrome.app/Contents/MacOS/Google Chrome"
+            ];
+          };
+          next-devtools = {
+            type = "local";
+            command = [
+              "npx"
+              "next-devtools-mcp@latest"
+            ];
+          };
+        };
+      };
     };
     ssh = {
       enable = true;
@@ -361,7 +372,7 @@
     element-desktop.enable = true;
     eza.enable = true;
     fd.enable = true;
-    gemini-cli.enable = true;
+    # gemini-cli.enable = true; # TODO: temporarily disabled - patch needs update
     home-manager.enable = true;
     jq.enable = true;
     jujutsu.enable = true;

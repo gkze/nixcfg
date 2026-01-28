@@ -103,7 +103,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
-      url = "github:axiomhq/cli/v0.14.7";
+      url = "github:axiomhq/cli/v0.14.8";
       flake = false;
     };
     beads = {
@@ -140,7 +140,7 @@
       flake = false;
     };
     gemini-cli = {
-      url = "github:google-gemini/gemini-cli/v0.25.2";
+      url = "github:google-gemini/gemini-cli/v0.26.0";
       flake = false;
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
