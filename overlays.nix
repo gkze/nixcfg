@@ -772,12 +772,21 @@ in
             name = "update";
             script = ./update.py;
           };
+          unwrapped = prev.writeScriptBin script.name (
+            scripts.renderWithPackages {
+              inherit script;
+              python = prev.python313;
+            }
+          );
         in
-        prev.writeScriptBin script.name (
-          scripts.renderWithPackages {
-            inherit script;
-            python = prev.python313;
-          }
-        );
+        prev.symlinkJoin {
+          name = "update-script";
+          paths = [ unwrapped ];
+          nativeBuildInputs = [ prev.makeWrapper ];
+          postBuild = ''
+            wrapProgram $out/bin/update \
+              --prefix PATH : ${prev.lib.makeBinPath [ final.flake-edit ]}
+          '';
+        };
     };
 }
