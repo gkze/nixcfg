@@ -706,80 +706,113 @@ async def compute_npm_deps_hash(
         yield event
 
 
+async def _compute_deno_deps_hash_for_platform(
+    source: str, input_name: str, platform: str
+) -> AsyncIterator[UpdateEvent]:
+    """Compute Deno deps hash for a specific platform."""
+    nix_attr = f'"{source}"'  # Quote the attribute name for nix
+    result_drain = ValueDrain()
+    async for event in drain_value_events(
+        run_command(
+            [
+                "nix",
+                "build",
+                "-L",
+                "--no-link",
+                "--impure",
+                "--expr",
+                f"""
+                  let
+                    flake = builtins.getFlake "git+file://{get_repo_file(".")}?dirty=1";
+                    pkgs = import ({flake_fetch_expr(get_flake_input_node(get_root_input_name("nixpkgs")))}) {{
+                      system = "{platform}";
+                      overlays = [ flake.overlays.default ];
+                    }};
+                  in pkgs.{nix_attr}
+                """,
+            ],
+            source=f"{source}:{platform}",
+            error="nix build did not return output",
+        ),
+        result_drain,
+    ):
+        yield event
+    result = _require_value(result_drain, "nix build did not return output")
+
+    if result.returncode == 0:
+        raise RuntimeError(
+            f"Expected nix build to fail with hash mismatch for {platform}, but it succeeded"
+        )
+
+    hash_value = _extract_nix_hash(result.stderr + result.stdout)
+    if not hash_value.startswith("sha256-"):
+        # Convert to SRI if needed
+        sri_drain = ValueDrain()
+        async for event in drain_value_events(
+            convert_nix_hash_to_sri(source, hash_value), sri_drain
+        ):
+            yield event
+        hash_value = _require_value(sri_drain, "Hash conversion failed")
+
+    yield UpdateEvent(
+        source=source, kind=UpdateEventKind.VALUE, payload=(platform, hash_value)
+    )
+
+
+# Platforms to compute Deno deps hashes for (darwin-only for now)
+DENO_DEPS_PLATFORMS = ["aarch64-darwin", "x86_64-darwin"]
+
+
 async def compute_deno_deps_hash(
     source: str, input_name: str
 ) -> AsyncIterator[UpdateEvent]:
-    """Compute Deno deps hash by building the flake with a fakeHash.
+    """Compute Deno deps hash for all supported platforms.
 
-    Deno caches are inherently non-deterministic (timestamps, network variance).
-    Instead of replicating the derivation, we temporarily set the hash to fakeHash
-    in sources.json, build the flake, and extract the correct hash from the error.
+    Deno caches can include platform-specific dependencies (e.g., lefthook binaries),
+    so we compute hashes for each supported platform separately.
 
-    This ensures the hash matches exactly what the flake build produces.
+    We temporarily set fakeHash entries in sources.json, build the flake for each
+    platform, and extract the correct hashes from the errors.
     """
-    # Temporarily update sources.json with fakeHash to trigger hash mismatch
+    # Temporarily update sources.json with fakeHash entries for all platforms
     sources = SourcesFile.load(SOURCES_FILE)
     original_entry = sources.entries.get(source)
 
-    # Create temporary entry with fakeHash
+    # Create temporary entry with fakeHash for all platforms
     fake_hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    fake_entries = [
+        HashEntry.create("denoDeps", "denoDepsHash", fake_hash, platform=platform)
+        for platform in DENO_DEPS_PLATFORMS
+    ]
     temp_entry = SourceEntry(
-        hashes=HashCollection.from_value(
-            [HashEntry.create("denoDeps", "denoDepsHash", fake_hash)]
-        ),
+        hashes=HashCollection.from_value(fake_entries),
         input=input_name,
     )
     sources.entries[source] = temp_entry
     sources.save(SOURCES_FILE)
 
     try:
-        # Build the actual flake package through legacyPackages
-        # Use quoted attribute name since nix attrs can have hyphens
-        nix_attr = f'"{source}"'  # Quote the attribute name for nix
-        result_drain = ValueDrain()
-        async for event in drain_value_events(
-            run_command(
-                [
-                    "nix",
-                    "build",
-                    "-L",
-                    "--no-link",
-                    "--impure",
-                    "--expr",
-                    f"""
-                      let
-                        flake = builtins.getFlake "git+file://{get_repo_file(".")}?dirty=1";
-                        pkgs = import ({flake_fetch_expr(get_flake_input_node(get_root_input_name("nixpkgs")))}) {{
-                          system = builtins.currentSystem;
-                          overlays = [ flake.overlays.default ];
-                        }};
-                      in pkgs.{nix_attr}
-                    """,
-                ],
+        # Compute hash for each platform
+        platform_hashes: dict[str, str] = {}
+        for platform in DENO_DEPS_PLATFORMS:
+            yield UpdateEvent(
                 source=source,
-                error="nix build did not return output",
-            ),
-            result_drain,
-        ):
-            yield event
-        result = _require_value(result_drain, "nix build did not return output")
-
-        if result.returncode == 0:
-            raise RuntimeError(
-                "Expected nix build to fail with hash mismatch, but it succeeded"
+                kind=UpdateEventKind.STATUS,
+                message=f"Computing hash for {platform}...",
             )
-
-        hash_value = _extract_nix_hash(result.stderr + result.stdout)
-        if not hash_value.startswith("sha256-"):
-            # Convert to SRI if needed
-            sri_drain = ValueDrain()
-            async for event in drain_value_events(
-                convert_nix_hash_to_sri(source, hash_value), sri_drain
+            async for event in _compute_deno_deps_hash_for_platform(
+                source, input_name, platform
             ):
-                yield event
-            hash_value = _require_value(sri_drain, "Hash conversion failed")
+                if event.kind == UpdateEventKind.VALUE and event.payload is not None:
+                    plat, hash_val = event.payload
+                    platform_hashes[plat] = hash_val
+                else:
+                    yield event
 
-        yield UpdateEvent(source=source, kind=UpdateEventKind.VALUE, payload=hash_value)
+        # Return all platform hashes as a dict
+        yield UpdateEvent(
+            source=source, kind=UpdateEventKind.VALUE, payload=platform_hashes
+        )
     finally:
         # Restore original sources.json
         if original_entry is not None:
@@ -870,6 +903,7 @@ class HashEntry(BaseModel):
     drv_type: DrvType = Field(alias="drvType")
     hash_type: HashType = Field(alias="hashType")
     hash: str
+    platform: str | None = None  # Optional platform for platform-specific hashes
     url: str | None = None
     urls: dict[str, str] | None = None
 
@@ -885,6 +919,7 @@ class HashEntry(BaseModel):
         hash_type: HashType,
         hash_value: str,
         *,
+        platform: str | None = None,
         url: str | None = None,
         urls: dict[str, str] | None = None,
     ) -> "HashEntry":
@@ -893,6 +928,7 @@ class HashEntry(BaseModel):
             drvType=drv_type,
             hashType=hash_type,
             hash=hash_value,
+            platform=platform,
             url=url,
             urls=urls,
         )
@@ -904,6 +940,8 @@ class HashEntry(BaseModel):
             "hash": self.hash,
             "hashType": self.hash_type,
         }
+        if self.platform is not None:
+            result["platform"] = self.platform
         if self.url is not None:
             result["url"] = self.url
         if self.urls is not None:
@@ -1376,13 +1414,43 @@ class NpmDepsHashUpdater(FlakeInputHashUpdater):
 
 
 class DenoDepsHashUpdater(FlakeInputHashUpdater):
-    """Update Deno dependencies hash for FOD derivations like linear-cli."""
+    """Update Deno dependencies hash for FOD derivations like linear-cli.
+
+    Computes platform-specific hashes since Deno deps can include platform-specific
+    binaries (e.g., lefthook).
+    """
 
     drv_type = "denoDeps"
     hash_type = "denoDepsHash"
 
     def _compute_hash(self, info: VersionInfo) -> AsyncIterator[UpdateEvent]:
         return compute_deno_deps_hash(self.name, self._input)
+
+    async def fetch_hashes(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> AsyncIterator[UpdateEvent]:
+        """Override to handle multi-platform hash results."""
+        hash_drain = ValueDrain()
+        async for event in drain_value_events(self._compute_hash(info), hash_drain):
+            yield event
+
+        # compute_deno_deps_hash returns {platform: hash} dict
+        platform_hashes = _require_value(hash_drain, f"Missing {self.hash_type} output")
+        if not isinstance(platform_hashes, dict):
+            raise TypeError(
+                f"Expected dict of platform hashes, got {type(platform_hashes)}"
+            )
+
+        # Create HashEntry for each platform
+        entries = [
+            HashEntry.create(self.drv_type, self.hash_type, hash_val, platform=platform)
+            for platform, hash_val in sorted(platform_hashes.items())
+        ]
+        yield UpdateEvent(
+            source=self.name,
+            kind=UpdateEventKind.VALUE,
+            payload=entries,
+        )
 
 
 # =============================================================================

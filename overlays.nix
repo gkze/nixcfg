@@ -499,6 +499,7 @@ in
         let
           version = "1.8.1";
           # FOD: fetch Deno dependencies + run GraphQL codegen (both need network)
+          # Uses platform-specific hash since deps include platform-specific binaries (lefthook)
           denoDeps = prev.stdenvNoCC.mkDerivation {
             pname = "linear-cli-deps";
             inherit version;
@@ -509,7 +510,7 @@ in
             ];
             outputHashAlgo = "sha256";
             outputHashMode = "recursive";
-            outputHash = outputs.lib.sourceHash "linear-cli" "denoDepsHash";
+            outputHash = outputs.lib.sourceHashForPlatform "linear-cli" "denoDepsHash" system;
             buildPhase = ''
               export DENO_DIR=$TMPDIR/deno-cache
               export SSL_CERT_FILE=${prev.cacert}/etc/ssl/certs/ca-bundle.crt

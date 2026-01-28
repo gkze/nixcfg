@@ -32,16 +32,37 @@ rec {
   sourceEntry =
     name: if hasAttr name sources then sources.${name} else throw "sources.json missing entry: ${name}";
 
+  # Find hash entry matching hashType and optionally platform
   sourceHashEntry =
     name: hashType:
     let
       entry = sourceEntry name;
       hashes = entry.hashes or [ ];
-      match = findFirst (hash: hash.hashType == hashType) null hashes;
+      match = findFirst (hash: hash.hashType == hashType && !(hash ? platform)) null hashes;
     in
     if match == null then throw "sources.json missing ${hashType} for ${name}" else match;
 
+  # Find hash entry matching hashType and specific platform
+  sourceHashEntryForPlatform =
+    name: hashType: platform:
+    let
+      entry = sourceEntry name;
+      hashes = entry.hashes or [ ];
+      match = findFirst (
+        hash: hash.hashType == hashType && (hash.platform or null) == platform
+      ) null hashes;
+    in
+    if match == null then
+      throw "sources.json missing ${hashType} for ${name} on ${platform}"
+    else
+      match;
+
   sourceHash = name: hashType: (sourceHashEntry name hashType).hash;
+
+  # Get hash for a specific platform
+  sourceHashForPlatform =
+    name: hashType: platform:
+    (sourceHashEntryForPlatform name hashType platform).hash;
   sourceUrl =
     name: hashType:
     let
