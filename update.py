@@ -2,9 +2,10 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#   "aiohttp",
-#   "pydantic>=2.0",
-#   "rich>=13.0",
+#   "aiohttp>=3.13.3",
+#   "filelock>=3.20.3",
+#   "pydantic>=2.12.5",
+#   "rich>=14.3.1",
 # ]
 # ///
 """Update source versions and hashes in sources.json and flake input refs.
@@ -39,12 +40,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import functools
 import json
 import netrc
 import os
 import re
 import select
 import shlex
+import shutil
 import sys
 import termios
 import time
@@ -60,6 +63,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Iterable, Literal, Mapping
 
 import aiohttp
+from filelock import FileLock
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # =============================================================================
@@ -83,11 +87,22 @@ FLAKE_LOCK_FILE = get_repo_file("flake.lock")
 
 
 DEFAULT_TIMEOUT = 30
+DEFAULT_SUBPROCESS_TIMEOUT = 600  # 10 minutes for nix builds
 DEFAULT_LOG_TAIL_LINES = 10
 DEFAULT_RENDER_INTERVAL = 0.05
 DEFAULT_USER_AGENT = "update.py"
 DEFAULT_RETRIES = 3
 DEFAULT_RETRY_BACKOFF = 1.0
+FAKE_HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+SRI_PREFIX = "sha256-"
+REQUIRED_TOOLS = ["nix", "nix-prefetch-url"]
+OPTIONAL_TOOLS = ["flake-edit"]  # Only needed for ref updates
+
+
+def _check_required_tools() -> list[str]:
+    """Check that required external tools are available. Returns list of missing tools."""
+    missing = [tool for tool in REQUIRED_TOOLS if shutil.which(tool) is None]
+    return missing
 
 
 def _resolve_log_tail_lines(lines: int | None) -> int:
@@ -209,15 +224,33 @@ class UpdateEvent:
     stream: str | None = None
     payload: Any | None = None
 
+    @classmethod
+    def status(cls, source: str, message: str) -> "UpdateEvent":
+        return cls(source=source, kind=UpdateEventKind.STATUS, message=message)
+
+    @classmethod
+    def error(cls, source: str, message: str) -> "UpdateEvent":
+        return cls(source=source, kind=UpdateEventKind.ERROR, message=message)
+
+    @classmethod
+    def result(cls, source: str, payload: Any = None) -> "UpdateEvent":
+        return cls(source=source, kind=UpdateEventKind.RESULT, payload=payload)
+
+    @classmethod
+    def value(cls, source: str, payload: Any) -> "UpdateEvent":
+        return cls(source=source, kind=UpdateEventKind.VALUE, payload=payload)
+
+
+# Type alias for async event streams
+EventStream = AsyncIterator[UpdateEvent]
+
 
 @dataclass
 class ValueDrain:
     value: Any | None = None
 
 
-async def drain_value_events(
-    events: AsyncIterator[UpdateEvent], drain: ValueDrain
-) -> AsyncIterator[UpdateEvent]:
+async def drain_value_events(events: EventStream, drain: ValueDrain) -> EventStream:
     async for event in events:
         if event.kind == UpdateEventKind.VALUE:
             drain.value = event.payload
@@ -231,35 +264,23 @@ def _require_value(drain: ValueDrain, error: str) -> Any:
     return drain.value
 
 
+@functools.cache
 def _get_github_token() -> str | None:
-    """Get GitHub token from GITHUB_TOKEN env var or ~/.netrc.
-
-    Returns None if no token is available (will use unauthenticated requests).
-    """
-    # First try GITHUB_TOKEN environment variable
+    """Get GitHub token from GITHUB_TOKEN env var or ~/.netrc (cached)."""
     token = os.environ.get("GITHUB_TOKEN")
     if token:
         return token
-
-    # Then try ~/.netrc (check both api.github.com and github.com)
     netrc_path = Path.home() / ".netrc"
     if netrc_path.exists():
         try:
-            nrc = netrc.netrc(str(netrc_path))
-            # Try api.github.com first (common for API tokens), then github.com
+            netrc_data = netrc.netrc(str(netrc_path))
             for host in ("api.github.com", "github.com"):
-                auth = nrc.authenticators(host)
+                auth = netrc_data.authenticators(host)
                 if auth:
-                    # netrc returns (login, account, password) - token is in password
-                    return auth[2]
+                    return auth[2]  # password field contains token
         except (netrc.NetrcParseError, OSError):
             pass
-
     return None
-
-
-# Cache the token lookup
-_GITHUB_TOKEN: str | None = _get_github_token()
 
 
 def _check_github_rate_limit(headers: Mapping[str, str], url: str) -> None:
@@ -295,8 +316,9 @@ async def _request(
     if user_agent:
         headers["User-Agent"] = user_agent
     # Add GitHub API authentication if available
-    if url.startswith("https://api.github.com/") and _GITHUB_TOKEN:
-        headers["Authorization"] = f"Bearer {_GITHUB_TOKEN}"
+    github_token = _get_github_token()
+    if url.startswith("https://api.github.com/") and github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
     timeout_config = aiohttp.ClientTimeout(total=timeout or DEFAULT_TIMEOUT)
 
     last_error: Exception | None = None
@@ -371,7 +393,8 @@ async def stream_command(
     args: list[str],
     *,
     source: str,
-) -> AsyncIterator[UpdateEvent]:
+    timeout: float = DEFAULT_SUBPROCESS_TIMEOUT,
+) -> EventStream:
     command_text = _truncate_command(shlex.join(args))
     yield UpdateEvent(
         source=source,
@@ -392,6 +415,7 @@ async def stream_command(
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
     queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
+    deadline = asyncio.get_event_loop().time() + timeout
 
     async def pump(
         stream: asyncio.StreamReader | None, label: str, store: list[str]
@@ -413,23 +437,31 @@ async def stream_command(
         asyncio.create_task(pump(process.stderr, "stderr", stderr_chunks)),
     ]
 
-    done_streams = 0
-    while done_streams < len(tasks):
-        label, text = await queue.get()
-        if text is None:
-            done_streams += 1
-            continue
-        sanitized = _sanitize_log_line(text.rstrip("\n"))
-        if sanitized:
-            yield UpdateEvent(
-                source=source,
-                kind=UpdateEventKind.LINE,
-                message=sanitized,
-                stream=label,
-            )
+    try:
+        done_streams = 0
+        while done_streams < len(tasks):
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError(f"Command timed out after {timeout}s")
+            label, text = await asyncio.wait_for(queue.get(), timeout=remaining)
+            if text is None:
+                done_streams += 1
+                continue
+            sanitized = _sanitize_log_line(text.rstrip("\n"))
+            if sanitized:
+                yield UpdateEvent(
+                    source=source,
+                    kind=UpdateEventKind.LINE,
+                    message=sanitized,
+                    stream=label,
+                )
+        await asyncio.gather(*tasks)
+        returncode = await process.wait()
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise RuntimeError(f"Command timed out after {timeout}s: {shlex.join(args)}")
 
-    await asyncio.gather(*tasks)
-    returncode = await process.wait()
     result = CommandResult(
         args=args,
         returncode=returncode,
@@ -439,21 +471,17 @@ async def stream_command(
     yield UpdateEvent(source=source, kind=UpdateEventKind.COMMAND_END, payload=result)
 
 
-async def run_command(
-    args: list[str], *, source: str, error: str
-) -> AsyncIterator[UpdateEvent]:
+async def run_command(args: list[str], *, source: str, error: str) -> EventStream:
     result_drain = ValueDrain()
     async for event in stream_command(args, source=source):
         if event.kind == UpdateEventKind.COMMAND_END:
             result_drain.value = event.payload
         yield event
     result = _require_value(result_drain, error)
-    yield UpdateEvent(source=source, kind=UpdateEventKind.VALUE, payload=result)
+    yield UpdateEvent.value(source, result)
 
 
-async def convert_nix_hash_to_sri(
-    source: str, hash_value: str
-) -> AsyncIterator[UpdateEvent]:
+async def convert_nix_hash_to_sri(source: str, hash_value: str) -> EventStream:
     """Convert any nix hash format (base32, hex) to SRI format."""
     result_drain = ValueDrain()
     async for event in drain_value_events(
@@ -475,14 +503,10 @@ async def convert_nix_hash_to_sri(
     ):
         yield event
     result = _require_value(result_drain, "nix hash convert did not return output")
-    yield UpdateEvent(
-        source=source,
-        kind=UpdateEventKind.VALUE,
-        payload=result.stdout.strip(),
-    )
+    yield UpdateEvent.value(source, result.stdout.strip())
 
 
-async def compute_sri_hash(source: str, url: str) -> AsyncIterator[UpdateEvent]:
+async def compute_sri_hash(source: str, url: str) -> EventStream:
     """Compute SRI hash for a URL using nix-prefetch-url."""
     result_drain = ValueDrain()
     async for event in drain_value_events(
@@ -500,9 +524,7 @@ async def compute_sri_hash(source: str, url: str) -> AsyncIterator[UpdateEvent]:
         yield event
 
 
-async def compute_url_hashes(
-    source: str, urls: Iterable[str]
-) -> AsyncIterator[UpdateEvent]:
+async def compute_url_hashes(source: str, urls: Iterable[str]) -> EventStream:
     hashes: dict[str, str] = {}
     for url in dict.fromkeys(urls):
         sri_drain = ValueDrain()
@@ -510,14 +532,24 @@ async def compute_url_hashes(
             yield event
         sri_value = _require_value(sri_drain, "Missing hash output")
         hashes[url] = sri_value
-    yield UpdateEvent(source=source, kind=UpdateEventKind.VALUE, payload=hashes)
+    yield UpdateEvent.value(source, hashes)
 
 
 def load_flake_lock() -> dict:
-    """Load flake.lock nodes."""
+    """Load flake.lock nodes. Validates expected structure."""
     if not FLAKE_LOCK_FILE.exists():
         raise FileNotFoundError(f"flake.lock not found at {FLAKE_LOCK_FILE}")
-    return json.loads(FLAKE_LOCK_FILE.read_text())["nodes"]
+    data = json.loads(FLAKE_LOCK_FILE.read_text())
+    if "nodes" not in data:
+        raise ValueError(
+            f"Invalid flake.lock: missing 'nodes' key in {FLAKE_LOCK_FILE}"
+        )
+    nodes = data["nodes"]
+    if "root" not in nodes:
+        raise ValueError(
+            f"Invalid flake.lock: missing 'root' node in {FLAKE_LOCK_FILE}"
+        )
+    return nodes
 
 
 def get_flake_input_node(input_name: str) -> dict:
@@ -568,9 +600,7 @@ def nixpkgs_expr() -> str:
     return f"import ({flake_fetch_expr(node)}) {{ system = builtins.currentSystem; }}"
 
 
-async def update_flake_input(
-    input_name: str, *, source: str
-) -> AsyncIterator[UpdateEvent]:
+async def update_flake_input(input_name: str, *, source: str) -> EventStream:
     """Update a flake input in flake.lock."""
     async for event in stream_command(
         ["nix", "flake", "lock", "--update-input", input_name],
@@ -592,9 +622,7 @@ def _extract_nix_hash(output: str) -> str:
     raise RuntimeError(f"Could not find hash in nix output:\n{output.strip()}")
 
 
-async def compute_fixed_output_hash(
-    source: str, expr: str
-) -> AsyncIterator[UpdateEvent]:
+async def compute_fixed_output_hash(source: str, expr: str) -> EventStream:
     """Compute hash by running a nix expression with lib.fakeHash."""
     result_drain = ValueDrain()
     async for event in drain_value_events(
@@ -621,8 +649,8 @@ async def compute_fixed_output_hash(
             "Expected nix build to fail with hash mismatch, but it succeeded"
         )
     hash_value = _extract_nix_hash(result.stderr + result.stdout)
-    if hash_value.startswith("sha256-"):
-        yield UpdateEvent(source=source, kind=UpdateEventKind.VALUE, payload=hash_value)
+    if hash_value.startswith(SRI_PREFIX):
+        yield UpdateEvent.value(source, hash_value)
         return
     async for event in convert_nix_hash_to_sri(source, hash_value):
         yield event
@@ -638,9 +666,7 @@ def _build_nix_expr(body: str) -> str:
     """
 
 
-async def _compute_nixpkgs_hash(
-    source: str, expr_body: str
-) -> AsyncIterator[UpdateEvent]:
+async def _compute_nixpkgs_hash(source: str, expr_body: str) -> EventStream:
     """Compute hash for a nixpkgs expression that uses lib.fakeHash."""
     expr = _build_nix_expr(expr_body)
     async for event in compute_fixed_output_hash(source, expr):
@@ -655,10 +681,10 @@ async def compute_go_vendor_hash(
     version: str,
     subpackages: list[str] | None = None,
     proxy_vendor: bool = False,
-) -> AsyncIterator[UpdateEvent]:
+) -> EventStream:
     subpackages_expr = ""
     if subpackages:
-        quoted = " ".join(f'"{sp}"' for sp in subpackages)
+        quoted = " ".join(f'"{subpkg}"' for subpkg in subpackages)
         subpackages_expr = f"subPackages = [ {quoted} ];"
     proxy_expr = "proxyVendor = true;" if proxy_vendor else ""
     src_expr = flake_fetch_expr(get_flake_input_node(input_name))
@@ -678,7 +704,7 @@ async def compute_go_vendor_hash(
 
 async def compute_cargo_vendor_hash(
     source: str, input_name: str, *, subdir: str | None = None
-) -> AsyncIterator[UpdateEvent]:
+) -> EventStream:
     src_expr = flake_fetch_expr(get_flake_input_node(input_name))
     if subdir:
         src_expr = f'"${{{src_expr}}}/{subdir}"'
@@ -692,9 +718,7 @@ async def compute_cargo_vendor_hash(
         yield event
 
 
-async def compute_npm_deps_hash(
-    source: str, input_name: str
-) -> AsyncIterator[UpdateEvent]:
+async def compute_npm_deps_hash(source: str, input_name: str) -> EventStream:
     src_expr = flake_fetch_expr(get_flake_input_node(input_name))
     async for event in _compute_nixpkgs_hash(
         source,
@@ -708,7 +732,7 @@ async def compute_npm_deps_hash(
 
 async def _compute_deno_deps_hash_for_platform(
     source: str, input_name: str, platform: str
-) -> AsyncIterator[UpdateEvent]:
+) -> EventStream:
     """Compute Deno deps hash for a specific platform."""
     nix_attr = f'"{source}"'  # Quote the attribute name for nix
     result_drain = ValueDrain()
@@ -745,7 +769,7 @@ async def _compute_deno_deps_hash_for_platform(
         )
 
     hash_value = _extract_nix_hash(result.stderr + result.stdout)
-    if not hash_value.startswith("sha256-"):
+    if not hash_value.startswith(SRI_PREFIX):
         # Convert to SRI if needed
         sri_drain = ValueDrain()
         async for event in drain_value_events(
@@ -754,103 +778,102 @@ async def _compute_deno_deps_hash_for_platform(
             yield event
         hash_value = _require_value(sri_drain, "Hash conversion failed")
 
-    yield UpdateEvent(
-        source=source, kind=UpdateEventKind.VALUE, payload=(platform, hash_value)
-    )
+    yield UpdateEvent.value(source, (platform, hash_value))
 
 
 # Platforms to compute Deno deps hashes for (darwin-only for now)
 DENO_DEPS_PLATFORMS = ["aarch64-darwin", "x86_64-darwin"]
 
 
-async def compute_deno_deps_hash(
-    source: str, input_name: str
-) -> AsyncIterator[UpdateEvent]:
+async def compute_deno_deps_hash(source: str, input_name: str) -> EventStream:
     """Compute Deno deps hash for all supported platforms.
 
     Deno caches can include platform-specific dependencies (e.g., lefthook binaries),
     so we compute hashes for each supported platform separately.
 
     We temporarily set fakeHash entries in sources.json, build the flake for each
-    platform, and extract the correct hashes from the errors.
+    platform, and extract the correct hashes from the errors. Uses file locking to
+    prevent concurrent modifications.
     """
-    # Temporarily update sources.json with fakeHash entries for all platforms
-    sources = SourcesFile.load(SOURCES_FILE)
-    original_entry = sources.entries.get(source)
+    lock_path = SOURCES_FILE.with_suffix(".json.lock")
+    with FileLock(lock_path):
+        sources = SourcesFile.load(SOURCES_FILE)
+        original_entry = sources.entries.get(source)
 
-    # Create temporary entry with fakeHash for all platforms
-    fake_hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-    fake_entries = [
-        HashEntry.create("denoDeps", "denoDepsHash", fake_hash, platform=platform)
-        for platform in DENO_DEPS_PLATFORMS
-    ]
-    temp_entry = SourceEntry(
-        hashes=HashCollection.from_value(fake_entries),
-        input=input_name,
-    )
-    sources.entries[source] = temp_entry
-    sources.save(SOURCES_FILE)
-
-    try:
-        # Compute hash for each platform
-        platform_hashes: dict[str, str] = {}
-        for platform in DENO_DEPS_PLATFORMS:
-            yield UpdateEvent(
-                source=source,
-                kind=UpdateEventKind.STATUS,
-                message=f"Computing hash for {platform}...",
-            )
-            async for event in _compute_deno_deps_hash_for_platform(
-                source, input_name, platform
-            ):
-                if event.kind == UpdateEventKind.VALUE and event.payload is not None:
-                    plat, hash_val = event.payload
-                    platform_hashes[plat] = hash_val
-                else:
-                    yield event
-
-        # Return all platform hashes as a dict
-        yield UpdateEvent(
-            source=source, kind=UpdateEventKind.VALUE, payload=platform_hashes
+        fake_entries = [
+            HashEntry.create("denoDeps", "denoDepsHash", FAKE_HASH, platform=platform)
+            for platform in DENO_DEPS_PLATFORMS
+        ]
+        temp_entry = SourceEntry(
+            hashes=HashCollection.from_value(fake_entries),
+            input=input_name,
         )
-    finally:
-        # Restore original sources.json
-        if original_entry is not None:
-            sources.entries[source] = original_entry
-        else:
-            del sources.entries[source]
+        sources.entries[source] = temp_entry
         sources.save(SOURCES_FILE)
+
+        try:
+            platform_hashes: dict[str, str] = {}
+            for platform in DENO_DEPS_PLATFORMS:
+                yield UpdateEvent.status(source, f"Computing hash for {platform}...")
+                async for event in _compute_deno_deps_hash_for_platform(
+                    source, input_name, platform
+                ):
+                    if (
+                        event.kind == UpdateEventKind.VALUE
+                        and event.payload is not None
+                    ):
+                        plat, hash_val = event.payload
+                        platform_hashes[plat] = hash_val
+                    else:
+                        yield event
+
+            yield UpdateEvent.value(source, platform_hashes)
+        finally:
+            if original_entry is not None:
+                sources.entries[source] = original_entry
+            else:
+                del sources.entries[source]
+            sources.save(SOURCES_FILE)
 
 
 def github_raw_url(owner: str, repo: str, rev: str, path: str) -> str:
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{rev}/{path}"
 
 
+def github_api_url(path: str) -> str:
+    """Build GitHub API URL from path (e.g., 'repos/owner/repo')."""
+    return f"https://api.github.com/{path}"
+
+
+async def fetch_github_api(
+    session: aiohttp.ClientSession, path: str, **params: str
+) -> dict:
+    """Fetch from GitHub API with standard options."""
+    url = github_api_url(path)
+    if params:
+        url = f"{url}?{'&'.join(f'{k}={v}' for k, v in params.items())}"
+    return await fetch_json(
+        session, url, user_agent=DEFAULT_USER_AGENT, timeout=DEFAULT_TIMEOUT
+    )
+
+
 async def fetch_github_default_branch(
     session: aiohttp.ClientSession, owner: str, repo: str
 ) -> str:
-    data = await fetch_json(
-        session,
-        f"https://api.github.com/repos/{owner}/{repo}",
-        user_agent=DEFAULT_USER_AGENT,
-        timeout=DEFAULT_TIMEOUT,
-    )
+    data = await fetch_github_api(session, f"repos/{owner}/{repo}")
     return data["default_branch"]
 
 
 async def fetch_github_latest_commit(
-    session: aiohttp.ClientSession, owner: str, repo: str, path: str, branch: str
+    session: aiohttp.ClientSession, owner: str, repo: str, file_path: str, branch: str
 ) -> str:
-    encoded_path = urllib.parse.quote(path)
-    url = (
-        f"https://api.github.com/repos/{owner}/{repo}/commits"
-        f"?path={encoded_path}&sha={branch}&per_page=1"
-    )
+    url = github_api_url(f"repos/{owner}/{repo}/commits")
+    url = f"{url}?path={urllib.parse.quote(file_path)}&sha={branch}&per_page=1"
     data = await fetch_json(
         session, url, user_agent=DEFAULT_USER_AGENT, timeout=DEFAULT_TIMEOUT
     )
     if not data:
-        raise RuntimeError(f"No commits found for {owner}/{repo}:{path}")
+        raise RuntimeError(f"No commits found for {owner}/{repo}:{file_path}")
     return data[0]["sha"]
 
 
@@ -868,6 +891,16 @@ _SRI_HASH_PATTERN = re.compile(r"^sha256-[A-Za-z0-9+/]+=*$")
 NixPlatform = Literal[
     "aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux", "darwin"
 ]
+ALL_PLATFORMS = ("aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux")
+DARWIN_PLATFORMS = ("aarch64-darwin", "x86_64-darwin")
+
+# Common platform API mappings (nix platform -> API platform)
+VSCODE_PLATFORMS = {
+    "aarch64-darwin": "darwin-arm64",
+    "aarch64-linux": "linux-arm64",
+    "x86_64-darwin": "darwin",
+    "x86_64-linux": "linux-x64",
+}
 
 # Valid derivation types
 DrvType = Literal[
@@ -935,18 +968,22 @@ class HashEntry(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict with camelCase keys, sorted alphabetically."""
-        result: dict[str, Any] = {
-            "drvType": self.drv_type,
-            "hash": self.hash,
-            "hashType": self.hash_type,
-        }
-        if self.platform is not None:
-            result["platform"] = self.platform
-        if self.url is not None:
-            result["url"] = self.url
-        if self.urls is not None:
-            result["urls"] = self.urls
-        return dict(sorted(result.items()))
+        return dict(
+            sorted(
+                {
+                    k: v
+                    for k, v in {
+                        "drvType": self.drv_type,
+                        "hash": self.hash,
+                        "hashType": self.hash_type,
+                        "platform": self.platform,
+                        "url": self.url,
+                        "urls": self.urls,
+                    }.items()
+                    if v is not None
+                }.items()
+            )
+        )
 
 
 # Type for hashes - either list of entries or platform->hash mapping
@@ -1018,16 +1055,21 @@ class SourceEntry(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict with camelCase keys, sorted alphabetically."""
-        result: dict[str, Any] = {"hashes": self.hashes.to_json()}
-        if self.commit is not None:
-            result["commit"] = self.commit
-        if self.input is not None:
-            result["input"] = self.input
-        if self.urls is not None:
-            result["urls"] = self.urls
-        if self.version is not None:
-            result["version"] = self.version
-        return dict(sorted(result.items()))
+        return dict(
+            sorted(
+                {
+                    k: v
+                    for k, v in {
+                        "hashes": self.hashes.to_json(),
+                        "commit": self.commit,
+                        "input": self.input,
+                        "urls": self.urls,
+                        "version": self.version,
+                    }.items()
+                    if v is not None
+                }.items()
+            )
+        )
 
 
 class SourcesFile(BaseModel):
@@ -1122,6 +1164,16 @@ class VersionInfo:
     ]  # Updater-specific data (URLs, checksums, release info, etc.)
 
 
+def _verify_platform_versions(versions: dict[str, str], source_name: str) -> str:
+    """Verify all platform versions match and return the common version."""
+    unique = set(versions.values())
+    if len(unique) != 1:
+        raise RuntimeError(
+            f"{source_name} version mismatch across platforms: {versions}"
+        )
+    return unique.pop()
+
+
 class Updater(ABC):
     """Base class for source updaters. Subclasses auto-register via `name` attribute."""
 
@@ -1139,7 +1191,7 @@ class Updater(ABC):
     @abstractmethod
     def fetch_hashes(
         self, info: VersionInfo, session: aiohttp.ClientSession
-    ) -> AsyncIterator[UpdateEvent]:
+    ) -> EventStream:
         """Fetch hashes for the source."""
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
@@ -1181,38 +1233,18 @@ class Updater(ABC):
 
     async def update_stream(
         self, current: SourceEntry | None, session: aiohttp.ClientSession
-    ) -> AsyncIterator[UpdateEvent]:
+    ) -> EventStream:
         """Check for updates. Yields UpdateEvent stream and final result."""
-        yield UpdateEvent(
-            source=self.name,
-            kind=UpdateEventKind.STATUS,
-            message=f"Fetching latest {self.name} version...",
-        )
+        yield UpdateEvent.status(self.name, f"Fetching latest {self.name} version...")
         info = await self.fetch_latest(session)
 
-        yield UpdateEvent(
-            source=self.name,
-            kind=UpdateEventKind.STATUS,
-            message=f"Latest version: {info.version}",
-        )
+        yield UpdateEvent.status(self.name, f"Latest version: {info.version}")
         if self._is_latest(current, info):
-            yield UpdateEvent(
-                source=self.name,
-                kind=UpdateEventKind.STATUS,
-                message="Already at latest version",
-            )
-            yield UpdateEvent(
-                source=self.name,
-                kind=UpdateEventKind.RESULT,
-                payload=None,
-            )
+            yield UpdateEvent.status(self.name, "Already at latest version")
+            yield UpdateEvent.result(self.name)
             return
 
-        yield UpdateEvent(
-            source=self.name,
-            kind=UpdateEventKind.STATUS,
-            message="Fetching hashes for all platforms...",
-        )
+        yield UpdateEvent.status(self.name, "Fetching hashes for all platforms...")
         hashes_drain = ValueDrain()
         async for event in drain_value_events(
             self.fetch_hashes(info, session), hashes_drain
@@ -1221,22 +1253,10 @@ class Updater(ABC):
         hashes = _require_value(hashes_drain, "Missing hash output")
         result = self.build_result(info, hashes)
         if current is not None and result == current:
-            yield UpdateEvent(
-                source=self.name,
-                kind=UpdateEventKind.STATUS,
-                message="No updates needed",
-            )
-            yield UpdateEvent(
-                source=self.name,
-                kind=UpdateEventKind.RESULT,
-                payload=None,
-            )
+            yield UpdateEvent.status(self.name, "No updates needed")
+            yield UpdateEvent.result(self.name)
             return
-        yield UpdateEvent(
-            source=self.name,
-            kind=UpdateEventKind.RESULT,
-            payload=result,
-        )
+        yield UpdateEvent.result(self.name, result)
 
 
 # =============================================================================
@@ -1257,7 +1277,7 @@ class ChecksumProvidedUpdater(Updater):
 
     async def fetch_hashes(
         self, info: VersionInfo, session: aiohttp.ClientSession
-    ) -> AsyncIterator[UpdateEvent]:
+    ) -> EventStream:
         """Convert API checksums to SRI format."""
         hashes: dict[str, str] = {}
         checksums = await self.fetch_checksums(info, session)
@@ -1269,25 +1289,29 @@ class ChecksumProvidedUpdater(Updater):
                 yield event
             sri_value = _require_value(sri_drain, "Missing checksum conversion output")
             hashes[platform] = sri_value
-        yield UpdateEvent(
-            source=self.name,
-            kind=UpdateEventKind.VALUE,
-            payload=hashes,
-        )
+        yield UpdateEvent.value(self.name, hashes)
 
 
 class DownloadHashUpdater(Updater):
     """Base for sources requiring download to compute hash, with URL deduplication."""
 
     PLATFORMS: dict[str, str]  # nix_platform -> download_url or template
+    BASE_URL: str = ""  # Optional base URL for simple {BASE_URL}/{PLATFORMS[p]} pattern
 
-    @abstractmethod
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
-        """Return download URL for a platform."""
+        """Return download URL for a platform. Override for custom URL building."""
+        if self.BASE_URL:
+            return f"{self.BASE_URL}/{self.PLATFORMS[platform]}"
+        return self.PLATFORMS[platform]
+
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
+        """Build result with platform URLs. Override for custom result building."""
+        urls = {p: self.get_download_url(p, info) for p in self.PLATFORMS}
+        return self._build_result_with_urls(info, hashes, urls)
 
     async def fetch_hashes(
         self, info: VersionInfo, session: aiohttp.ClientSession
-    ) -> AsyncIterator[UpdateEvent]:
+    ) -> EventStream:
         """Compute hashes by downloading, deduplicating identical URLs."""
         platform_urls = {
             platform: self.get_download_url(platform, info)
@@ -1304,11 +1328,7 @@ class DownloadHashUpdater(Updater):
             platform: hashes_by_url[platform_urls[platform]]
             for platform in self.PLATFORMS
         }
-        yield UpdateEvent(
-            source=self.name,
-            kind=UpdateEventKind.VALUE,
-            payload=hashes,
-        )
+        yield UpdateEvent.value(self.name, hashes)
 
 
 class HashEntryUpdater(Updater):
@@ -1323,20 +1343,18 @@ class HashEntryUpdater(Updater):
 
     async def _emit_single_hash_entry(
         self,
-        events: AsyncIterator[UpdateEvent],
+        events: EventStream,
         *,
         error: str,
         drv_type: DrvType,
         hash_type: HashType,
-    ) -> AsyncIterator[UpdateEvent]:
+    ) -> EventStream:
         hash_drain = ValueDrain()
         async for event in drain_value_events(events, hash_drain):
             yield event
         hash_value = _require_value(hash_drain, error)
-        yield UpdateEvent(
-            source=self.name,
-            kind=UpdateEventKind.VALUE,
-            payload=[HashEntry.create(drv_type, hash_type, hash_value)],
+        yield UpdateEvent.value(
+            self.name, [HashEntry.create(drv_type, hash_type, hash_value)]
         )
 
 
@@ -1363,12 +1381,12 @@ class FlakeInputHashUpdater(HashEntryUpdater):
         return VersionInfo(version=version, metadata={"node": node})
 
     @abstractmethod
-    def _compute_hash(self, info: VersionInfo) -> AsyncIterator[UpdateEvent]:
+    def _compute_hash(self, info: VersionInfo) -> EventStream:
         """Return async iterator that yields hash computation events."""
 
     async def fetch_hashes(
         self, info: VersionInfo, session: aiohttp.ClientSession
-    ) -> AsyncIterator[UpdateEvent]:
+    ) -> EventStream:
         async for event in self._emit_single_hash_entry(
             self._compute_hash(info),
             error=f"Missing {self.hash_type} output",
@@ -1385,7 +1403,7 @@ class GoVendorHashUpdater(FlakeInputHashUpdater):
     subpackages: list[str] | None = None
     proxy_vendor: bool = False
 
-    def _compute_hash(self, info: VersionInfo) -> AsyncIterator[UpdateEvent]:
+    def _compute_hash(self, info: VersionInfo) -> EventStream:
         return compute_go_vendor_hash(
             self.name,
             self._input,
@@ -1401,7 +1419,7 @@ class CargoVendorHashUpdater(FlakeInputHashUpdater):
     hash_type = "cargoHash"
     subdir: str | None = None
 
-    def _compute_hash(self, info: VersionInfo) -> AsyncIterator[UpdateEvent]:
+    def _compute_hash(self, info: VersionInfo) -> EventStream:
         return compute_cargo_vendor_hash(self.name, self._input, subdir=self.subdir)
 
 
@@ -1409,7 +1427,7 @@ class NpmDepsHashUpdater(FlakeInputHashUpdater):
     drv_type = "fetchNpmDeps"
     hash_type = "npmDepsHash"
 
-    def _compute_hash(self, info: VersionInfo) -> AsyncIterator[UpdateEvent]:
+    def _compute_hash(self, info: VersionInfo) -> EventStream:
         return compute_npm_deps_hash(self.name, self._input)
 
 
@@ -1423,12 +1441,12 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
     drv_type = "denoDeps"
     hash_type = "denoDepsHash"
 
-    def _compute_hash(self, info: VersionInfo) -> AsyncIterator[UpdateEvent]:
+    def _compute_hash(self, info: VersionInfo) -> EventStream:
         return compute_deno_deps_hash(self.name, self._input)
 
     async def fetch_hashes(
         self, info: VersionInfo, session: aiohttp.ClientSession
-    ) -> AsyncIterator[UpdateEvent]:
+    ) -> EventStream:
         """Override to handle multi-platform hash results."""
         hash_drain = ValueDrain()
         async for event in drain_value_events(self._compute_hash(info), hash_drain):
@@ -1446,11 +1464,7 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
             HashEntry.create(self.drv_type, self.hash_type, hash_val, platform=platform)
             for platform, hash_val in sorted(platform_hashes.items())
         ]
-        yield UpdateEvent(
-            source=self.name,
-            kind=UpdateEventKind.VALUE,
-            payload=entries,
-        )
+        yield UpdateEvent.value(self.name, entries)
 
 
 # =============================================================================
@@ -1541,7 +1555,7 @@ class GitHubRawFileUpdater(HashEntryUpdater):
 
     async def fetch_hashes(
         self, info: VersionInfo, session: aiohttp.ClientSession
-    ) -> AsyncIterator[UpdateEvent]:
+    ) -> EventStream:
         url = github_raw_url(self.owner, self.repo, info.metadata["rev"], self.path)
         hashes_drain = ValueDrain()
         async for event in drain_value_events(
@@ -1550,10 +1564,8 @@ class GitHubRawFileUpdater(HashEntryUpdater):
             yield event
         hashes_by_url = _require_value(hashes_drain, "Missing hash output")
         hash_value = hashes_by_url[url]
-        yield UpdateEvent(
-            source=self.name,
-            kind=UpdateEventKind.VALUE,
-            payload=[HashEntry.create("fetchurl", "sha256", hash_value, url=url)],
+        yield UpdateEvent.value(
+            self.name, [HashEntry.create("fetchurl", "sha256", hash_value, url=url)]
         )
 
 
@@ -1575,8 +1587,6 @@ class GoogleChromeUpdater(DownloadHashUpdater):
     """Update Google Chrome to latest stable version."""
 
     name = "google-chrome"
-
-    # nix platform -> download url
     PLATFORMS = {
         "aarch64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
         "x86_64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
@@ -1584,15 +1594,11 @@ class GoogleChromeUpdater(DownloadHashUpdater):
     }
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        url = "https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Mac&num=1"
-        data = await fetch_json(session, url)
+        data = await fetch_json(
+            session,
+            "https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Mac&num=1",
+        )
         return VersionInfo(version=data[0]["version"], metadata={})
-
-    def get_download_url(self, platform: str, info: VersionInfo) -> str:
-        return self.PLATFORMS[platform]
-
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
-        return self._build_result_with_urls(info, hashes, dict(self.PLATFORMS))
 
 
 class DataGripUpdater(ChecksumProvidedUpdater):
@@ -1620,8 +1626,8 @@ class DataGripUpdater(ChecksumProvidedUpdater):
     ) -> dict[str, str]:
         release = info.metadata["release"]
         checksums = {}
-        for nix_platform, jb_key in self.PLATFORMS.items():
-            checksum_url = release["downloads"][jb_key]["checksumLink"]
+        for nix_platform, jetbrains_key in self.PLATFORMS.items():
+            checksum_url = release["downloads"][jetbrains_key]["checksumLink"]
             # Format: "hexhash *filename"
             payload = await fetch_url(session, checksum_url, timeout=DEFAULT_TIMEOUT)
             hex_hash = payload.decode().split()[0]
@@ -1631,8 +1637,8 @@ class DataGripUpdater(ChecksumProvidedUpdater):
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         release = info.metadata["release"]
         urls = {
-            nix_platform: release["downloads"][jb_key]["link"]
-            for nix_platform, jb_key in self.PLATFORMS.items()
+            nix_platform: release["downloads"][jetbrains_key]["link"]
+            for nix_platform, jetbrains_key in self.PLATFORMS.items()
         }
         return self._build_result_with_urls(info, hashes, urls)
 
@@ -1703,26 +1709,18 @@ class DroidUpdater(ChecksumProvidedUpdater):
     INSTALL_SCRIPT_URL = "https://app.factory.ai/cli"
     BASE_URL = "https://downloads.factory.ai/factory-cli/releases"
 
-    # nix platform -> (factory_platform, factory_arch)
-    PLATFORMS = {
-        "aarch64-darwin": "arm64",
-        "x86_64-darwin": "x64",
-        "aarch64-linux": "arm64",
-        "x86_64-linux": "x64",
+    # nix platform -> (os, arch)
+    _PLATFORM_INFO: dict[str, tuple[str, str]] = {
+        "aarch64-darwin": ("darwin", "arm64"),
+        "x86_64-darwin": ("darwin", "x64"),
+        "aarch64-linux": ("linux", "arm64"),
+        "x86_64-linux": ("linux", "x64"),
     }
-
-    # Factory platform names
-    _FACTORY_OS = {
-        "aarch64-darwin": "darwin",
-        "x86_64-darwin": "darwin",
-        "aarch64-linux": "linux",
-        "x86_64-linux": "linux",
-    }
+    PLATFORMS = {p: "" for p in _PLATFORM_INFO}  # Satisfy base class
 
     def _download_url(self, nix_platform: str, version: str) -> str:
-        factory_os = self._FACTORY_OS[nix_platform]
-        factory_arch = self.PLATFORMS[nix_platform]
-        return f"{self.BASE_URL}/{version}/{factory_os}/{factory_arch}/droid"
+        os_name, arch = self._PLATFORM_INFO[nix_platform]
+        return f"{self.BASE_URL}/{version}/{os_name}/{arch}/droid"
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Parse version from the install script."""
@@ -1740,7 +1738,7 @@ class DroidUpdater(ChecksumProvidedUpdater):
         self, info: VersionInfo, session: aiohttp.ClientSession
     ) -> dict[str, str]:
         checksums = {}
-        for nix_platform in self.PLATFORMS:
+        for nix_platform in self._PLATFORM_INFO:
             sha_url = f"{self._download_url(nix_platform, info.version)}.sha256"
             payload = await fetch_url(session, sha_url, timeout=DEFAULT_TIMEOUT)
             hex_hash = payload.decode().strip()
@@ -1748,10 +1746,7 @@ class DroidUpdater(ChecksumProvidedUpdater):
         return checksums
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
-        urls = {
-            nix_platform: self._download_url(nix_platform, info.version)
-            for nix_platform in self.PLATFORMS
-        }
+        urls = {p: self._download_url(p, info.version) for p in self._PLATFORM_INFO}
         return self._build_result_with_urls(info, hashes, urls)
 
 
@@ -1759,54 +1754,27 @@ class ConductorUpdater(DownloadHashUpdater):
     """Update Conductor to latest version from CrabNebula CDN."""
 
     name = "conductor"
-
-    # nix platform -> CrabNebula platform
-    PLATFORMS = {
-        "aarch64-darwin": "dmg-aarch64",
-        "x86_64-darwin": "dmg-x86_64",
-    }
-
     BASE_URL = "https://cdn.crabnebula.app/download/melty/conductor/latest/platform"
+    PLATFORMS = {"aarch64-darwin": "dmg-aarch64", "x86_64-darwin": "dmg-x86_64"}
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Fetch version from Content-Disposition header of the download."""
         url = f"{self.BASE_URL}/dmg-aarch64"
         _payload, headers = await _request(
             session, url, method="HEAD", timeout=DEFAULT_TIMEOUT
         )
-        disposition = headers.get("Content-Disposition", "")
-
-        # Parse version from filename like "Conductor_0.31.1_aarch64.dmg"
-        match = re.search(r"Conductor_([0-9.]+)_", disposition)
+        match = re.search(
+            r"Conductor_([0-9.]+)_", headers.get("Content-Disposition", "")
+        )
         if not match:
-            raise RuntimeError(f"Could not parse version from: {disposition}")
-
+            raise RuntimeError("Could not parse version from Content-Disposition")
         return VersionInfo(version=match.group(1), metadata={})
-
-    def get_download_url(self, platform: str, info: VersionInfo) -> str:
-        return f"{self.BASE_URL}/{self.PLATFORMS[platform]}"
-
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
-        urls = {
-            nix_platform: f"{self.BASE_URL}/{cn_platform}"
-            for nix_platform, cn_platform in self.PLATFORMS.items()
-        }
-        return self._build_result_with_urls(info, hashes, urls)
 
 
 class SculptorUpdater(DownloadHashUpdater):
-    """Update Sculptor to latest version from Imbue S3 bucket.
-
-    Sculptor doesn't have a version API, so we use the Last-Modified header
-    as a pseudo-version (date format: YYYY-MM-DD).
-    """
+    """Update Sculptor (uses Last-Modified header as version since no API exists)."""
 
     name = "sculptor"
-
-    # S3 base URL (discovered via redirect from tryimbue.link shortlinks)
     BASE_URL = "https://imbue-sculptor-releases.s3.us-west-2.amazonaws.com/sculptor"
-
-    # nix platform -> S3 path suffix
     PLATFORMS = {
         "aarch64-darwin": "Sculptor.dmg",
         "x86_64-darwin": "Sculptor-x86_64.dmg",
@@ -1814,89 +1782,73 @@ class SculptorUpdater(DownloadHashUpdater):
     }
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Fetch version from Last-Modified header (no version API available)."""
         url = f"{self.BASE_URL}/Sculptor.dmg"
         _payload, headers = await _request(
             session, url, method="HEAD", timeout=DEFAULT_TIMEOUT
         )
         last_modified = headers.get("Last-Modified", "")
-
-        # Parse Last-Modified header: "Tue, 20 Jan 2026 21:11:45 GMT"
         if not last_modified:
             raise RuntimeError("No Last-Modified header from Sculptor download")
-
-        # Convert to date-based version: "2026-01-20"
         try:
             dt = datetime.strptime(last_modified, "%a, %d %b %Y %H:%M:%S %Z")
             version = dt.strftime("%Y-%m-%d")
         except ValueError:
-            # Fallback: use raw header if parsing fails
             version = last_modified[:10]
-
         return VersionInfo(version=version, metadata={})
 
-    def get_download_url(self, platform: str, info: VersionInfo) -> str:
-        return f"{self.BASE_URL}/{self.PLATFORMS[platform]}"
 
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
-        urls = {
-            nix_platform: f"{self.BASE_URL}/{path}"
-            for nix_platform, path in self.PLATFORMS.items()
-        }
-        return self._build_result_with_urls(info, hashes, urls)
+class PlatformAPIUpdater(ChecksumProvidedUpdater):
+    """Base for updaters that fetch per-platform info from an API."""
 
+    VERSION_KEY: str = "version"  # Key for version in API response
+    CHECKSUM_KEY: str | None = None  # Key for checksum in API response (if provided)
 
-class VSCodeInsidersUpdater(ChecksumProvidedUpdater):
-    """Update VS Code Insiders to latest version."""
+    def _api_url(self, api_platform: str) -> str:
+        """Return API URL for a platform. Override in subclass."""
+        raise NotImplementedError
 
-    name = "vscode-insiders"
-
-    # nix platform -> vscode api platform
-    PLATFORMS = {
-        "aarch64-darwin": "darwin-arm64",
-        "aarch64-linux": "linux-arm64",
-        "x86_64-darwin": "darwin",
-        "x86_64-linux": "linux-x64",
-    }
-
-    async def _fetch_platform_info(
-        self, session: aiohttp.ClientSession, api_platform: str
-    ) -> dict:
-        url = f"https://update.code.visualstudio.com/api/update/{api_platform}/insider/latest"
-        return await fetch_json(session, url)
+    def _download_url(self, api_platform: str, info: VersionInfo) -> str:
+        """Return download URL for a platform. Override in subclass."""
+        raise NotImplementedError
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        # Fetch info for all platforms upfront to avoid repeated API calls
-        platform_info = {}
-        for nix_platform, api_platform in self.PLATFORMS.items():
-            platform_info[nix_platform] = await self._fetch_platform_info(
-                session, api_platform
-            )
-
-        versions = {
-            platform: info["productVersion"] for platform, info in platform_info.items()
+        platform_info = {
+            nix_plat: await fetch_json(session, self._api_url(api_plat))
+            for nix_plat, api_plat in self.PLATFORMS.items()
         }
-        unique_versions = set(versions.values())
-        if len(unique_versions) != 1:
-            raise RuntimeError(f"VS Code Insiders version mismatch: {versions}")
-        version = unique_versions.pop()
+        versions = {p: info[self.VERSION_KEY] for p, info in platform_info.items()}
+        version = _verify_platform_versions(versions, self.name)
         return VersionInfo(version=version, metadata={"platform_info": platform_info})
 
     async def fetch_checksums(
         self, info: VersionInfo, session: aiohttp.ClientSession
     ) -> dict[str, str]:
+        if not self.CHECKSUM_KEY:
+            raise NotImplementedError("No CHECKSUM_KEY defined")
         platform_info = info.metadata["platform_info"]
-        return {
-            platform: platform_info[platform]["sha256hash"]
-            for platform in self.PLATFORMS
-        }
+        return {p: platform_info[p][self.CHECKSUM_KEY] for p in self.PLATFORMS}
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         urls = {
-            nix_platform: f"https://update.code.visualstudio.com/{info.version}/{api_platform}/insider"
-            for nix_platform, api_platform in self.PLATFORMS.items()
+            nix_plat: self._download_url(api_plat, info)
+            for nix_plat, api_plat in self.PLATFORMS.items()
         }
         return self._build_result_with_urls(info, hashes, urls)
+
+
+class VSCodeInsidersUpdater(PlatformAPIUpdater):
+    """Update VS Code Insiders to latest version."""
+
+    name = "vscode-insiders"
+    PLATFORMS = VSCODE_PLATFORMS
+    VERSION_KEY = "productVersion"
+    CHECKSUM_KEY = "sha256hash"
+
+    def _api_url(self, api_platform: str) -> str:
+        return f"https://update.code.visualstudio.com/api/update/{api_platform}/insider/latest"
+
+    def _download_url(self, api_platform: str, info: VersionInfo) -> str:
+        return f"https://update.code.visualstudio.com/{info.version}/{api_platform}/insider"
 
 
 go_vendor_updater("axiom-cli", subpackages=["cmd/axiom"])
@@ -1922,11 +1874,8 @@ class SentryCliUpdater(Updater):
     XCARCHIVE_FILTER = "find $out -name '*.xcarchive' -type d -exec rm -rf {} +"
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        data = await fetch_json(
-            session,
-            f"https://api.github.com/repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/releases/latest",
-            user_agent=DEFAULT_USER_AGENT,
-            timeout=DEFAULT_TIMEOUT,
+        data = await fetch_github_api(
+            session, f"repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/releases/latest"
         )
         return VersionInfo(version=data["tag_name"], metadata={})
 
@@ -1944,7 +1893,7 @@ class SentryCliUpdater(Updater):
 
     async def fetch_hashes(
         self, info: VersionInfo, session: aiohttp.ClientSession
-    ) -> AsyncIterator[UpdateEvent]:
+    ) -> EventStream:
         # Step 1: Compute source hash (fetchFromGitHub with xcarchive filtering)
         src_hash_drain = ValueDrain()
         async for event in drain_value_events(
@@ -1975,10 +1924,9 @@ class SentryCliUpdater(Updater):
             yield event
         cargo_hash = _require_value(cargo_hash_drain, "Missing cargoHash output")
 
-        yield UpdateEvent(
-            source=self.name,
-            kind=UpdateEventKind.VALUE,
-            payload=[
+        yield UpdateEvent.value(
+            self.name,
+            [
                 HashEntry.create("fetchFromGitHub", "srcHash", src_hash),
                 HashEntry.create("fetchCargoVendor", "cargoHash", cargo_hash),
             ],
@@ -1995,10 +1943,7 @@ class CodeCursorUpdater(DownloadHashUpdater):
     """Update Cursor editor to latest stable version."""
 
     name = "code-cursor"
-
     API_BASE = "https://www.cursor.com/api/download"
-
-    # nix platform -> Cursor API platform
     PLATFORMS = {
         "aarch64-darwin": "darwin-arm64",
         "x86_64-darwin": "darwin-x64",
@@ -2006,30 +1951,17 @@ class CodeCursorUpdater(DownloadHashUpdater):
         "x86_64-linux": "linux-x64",
     }
 
-    async def _fetch_platform_info(
-        self, session: aiohttp.ClientSession, api_platform: str
-    ) -> dict:
-        url = f"{self.API_BASE}?platform={api_platform}&releaseTrack=stable"
-        return await fetch_json(session, url)
-
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        # Fetch info for all platforms - they share version but have different URLs
-        platform_info = {}
-        for nix_platform, api_platform in self.PLATFORMS.items():
-            platform_info[nix_platform] = await self._fetch_platform_info(
-                session, api_platform
+        platform_info = {
+            nix_plat: await fetch_json(
+                session, f"{self.API_BASE}?platform={api_plat}&releaseTrack=stable"
             )
-
-        # Verify all platforms have the same version and commit
-        versions = {info["version"] for info in platform_info.values()}
-        commits = {info["commitSha"] for info in platform_info.values()}
-        if len(versions) != 1:
-            raise RuntimeError(f"Cursor version mismatch across platforms: {versions}")
-        if len(commits) != 1:
-            raise RuntimeError(f"Cursor commit mismatch across platforms: {commits}")
-
-        version = versions.pop()
-        commit = commits.pop()
+            for nix_plat, api_plat in self.PLATFORMS.items()
+        }
+        versions = {p: info["version"] for p, info in platform_info.items()}
+        commits = {p: info["commitSha"] for p, info in platform_info.items()}
+        version = _verify_platform_versions(versions, "Cursor")
+        commit = _verify_platform_versions(commits, "Cursor commit")
         return VersionInfo(
             version=version,
             metadata={"commit": commit, "platform_info": platform_info},
@@ -2039,11 +1971,7 @@ class CodeCursorUpdater(DownloadHashUpdater):
         return info.metadata["platform_info"][platform]["downloadUrl"]
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
-        platform_info = info.metadata["platform_info"]
-        urls = {
-            nix_platform: platform_info[nix_platform]["downloadUrl"]
-            for nix_platform in self.PLATFORMS
-        }
+        urls = {p: self.get_download_url(p, info) for p in self.PLATFORMS}
         return self._build_result_with_urls(
             info, hashes, urls, commit=info.metadata["commit"]
         )
@@ -2144,16 +2072,11 @@ async def fetch_github_latest_version_ref(
 
     Strategy: try releases API first (non-draft, non-prerelease, sorted by
     date), then fall back to the tags API if no releases exist or none match.
-
-    Returns the tag/ref name, or None if nothing matches.
     """
     # 1. Releases API (paginated, newest first)
     try:
-        releases = await fetch_json(
-            session,
-            f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=20",
-            user_agent=DEFAULT_USER_AGENT,
-            timeout=DEFAULT_TIMEOUT,
+        releases = await fetch_github_api(
+            session, f"repos/{owner}/{repo}/releases", per_page="20"
         )
         for release in releases:
             if release.get("draft") or release.get("prerelease"):
@@ -2166,15 +2089,11 @@ async def fetch_github_latest_version_ref(
 
     # 2. Tags API fallback (repos that use tags without GitHub Releases)
     try:
-        tags = await fetch_json(
-            session,
-            f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=30",
-            user_agent=DEFAULT_USER_AGENT,
-            timeout=DEFAULT_TIMEOUT,
+        tags = await fetch_github_api(
+            session, f"repos/{owner}/{repo}/tags", per_page="30"
         )
         for tag_info in tags:
-            tag = tag_info.get("name", "")
-            if tag.startswith(prefix):
+            if (tag := tag_info.get("name", "")).startswith(prefix):
                 return tag
     except RuntimeError:
         pass
@@ -2231,16 +2150,12 @@ async def update_flake_ref(
     new_ref: str,
     *,
     source: str,
-) -> AsyncIterator[UpdateEvent]:
+) -> EventStream:
     """Update a flake input ref using flake-edit and lock the input.
 
     Raises RuntimeError if either flake-edit or nix flake lock fails.
     """
-    yield UpdateEvent(
-        source=source,
-        kind=UpdateEventKind.STATUS,
-        message=f"Updating ref: {input_ref.ref} -> {new_ref}",
-    )
+    yield UpdateEvent.status(source, f"Updating ref: {input_ref.ref} -> {new_ref}")
 
     # Use flake-edit to change the ref in flake.nix
     new_url = f"github:{input_ref.owner}/{input_ref.repo}/{new_ref}"
@@ -2289,88 +2204,55 @@ async def _update_refs_task(
     via ``flake_edit_lock`` to avoid races on flake.nix / flake.lock.
     """
     source = input_ref.name
+    put = queue.put  # Local reference for brevity
     try:
-        await queue.put(
-            UpdateEvent(
-                source=source,
-                kind=UpdateEventKind.STATUS,
-                message=f"Checking {input_ref.owner}/{input_ref.repo} (current: {input_ref.ref})",
+        await put(
+            UpdateEvent.status(
+                source,
+                f"Checking {input_ref.owner}/{input_ref.repo} (current: {input_ref.ref})",
             )
         )
         result = await check_flake_ref_update(input_ref, session)
 
         if result.error:
-            await queue.put(
-                UpdateEvent(
-                    source=source,
-                    kind=UpdateEventKind.ERROR,
-                    message=result.error,
-                )
-            )
+            await put(UpdateEvent.error(source, result.error))
             return
 
         if result.latest_ref == result.current_ref:
-            await queue.put(
-                UpdateEvent(
-                    source=source,
-                    kind=UpdateEventKind.STATUS,
-                    message=f"Already at latest: {result.current_ref}",
-                )
+            await put(
+                UpdateEvent.status(source, f"Already at latest: {result.current_ref}")
             )
-            await queue.put(
-                UpdateEvent(
-                    source=source,
-                    kind=UpdateEventKind.RESULT,
-                    payload=None,
-                )
-            )
+            await put(UpdateEvent.result(source))
             return
 
+        update_payload = {"current": result.current_ref, "latest": result.latest_ref}
         if dry_run:
-            await queue.put(
-                UpdateEvent(
-                    source=source,
-                    kind=UpdateEventKind.STATUS,
-                    message=f"Update available: {result.current_ref} -> {result.latest_ref}",
+            await put(
+                UpdateEvent.status(
+                    source,
+                    f"Update available: {result.current_ref} -> {result.latest_ref}",
                 )
             )
-            await queue.put(
-                UpdateEvent(
-                    source=source,
-                    kind=UpdateEventKind.RESULT,
-                    payload={
-                        "current": result.current_ref,
-                        "latest": result.latest_ref,
-                    },
-                )
-            )
+            await put(UpdateEvent.result(source, update_payload))
             return
 
         # Actually update the ref — serialize file mutations
-        assert result.latest_ref is not None
+        latest_ref = result.latest_ref
+        assert latest_ref is not None
+
+        async def do_update() -> None:
+            async for event in update_flake_ref(input_ref, latest_ref, source=source):
+                await put(event)
+
         if flake_edit_lock:
             async with flake_edit_lock:
-                async for event in update_flake_ref(
-                    input_ref, result.latest_ref, source=source
-                ):
-                    await queue.put(event)
+                await do_update()
         else:
-            async for event in update_flake_ref(
-                input_ref, result.latest_ref, source=source
-            ):
-                await queue.put(event)
+            await do_update()
 
-        await queue.put(
-            UpdateEvent(
-                source=source,
-                kind=UpdateEventKind.RESULT,
-                payload={"current": result.current_ref, "latest": result.latest_ref},
-            )
-        )
+        await put(UpdateEvent.result(source, update_payload))
     except Exception as exc:
-        await queue.put(
-            UpdateEvent(source=source, kind=UpdateEventKind.ERROR, message=str(exc))
-        )
+        await put(UpdateEvent.error(source, str(exc)))
 
 
 # =============================================================================
@@ -2394,29 +2276,17 @@ class OutputOptions:
         self._err_console = Console(stderr=True)
 
     def print(
-        self, message: str, *, style: str | None = None, file: Any = None
+        self, message: str, *, style: str | None = None, stderr: bool = False
     ) -> None:
         """Print message unless in quiet or json mode."""
         if not self.quiet and not self.json_output:
-            if file is sys.stderr:
-                self._err_console.print(message, style=style)
-            else:
-                self._console.print(message, style=style)
+            console = self._err_console if stderr else self._console
+            console.print(message, style=style)
 
     def print_error(self, message: str) -> None:
         """Print error message (always shown unless json mode)."""
         if not self.json_output:
             self._err_console.print(message, style="red")
-
-    def print_success(self, message: str) -> None:
-        """Print success message unless in quiet or json mode."""
-        if not self.quiet and not self.json_output:
-            self._console.print(message, style="green")
-
-    def print_warning(self, message: str) -> None:
-        """Print warning message unless in quiet or json mode."""
-        if not self.quiet and not self.json_output:
-            self._console.print(message, style="yellow")
 
 
 def load_sources() -> SourcesFile:
@@ -2710,33 +2580,22 @@ async def _update_source_task(
     current = sources.entries.get(name)
     updater = UPDATERS[name]()
     input_name = getattr(updater, "input_name", None)
+    put = queue.put
 
     try:
-        await queue.put(
-            UpdateEvent(
-                source=name,
-                kind=UpdateEventKind.STATUS,
-                message="Starting update",
-            )
-        )
+        await put(UpdateEvent.status(name, "Starting update"))
         if update_input and input_name:
-            await queue.put(
-                UpdateEvent(
-                    source=name,
-                    kind=UpdateEventKind.STATUS,
-                    message=f"Updating flake input '{input_name}'...",
-                )
+            await put(
+                UpdateEvent.status(name, f"Updating flake input '{input_name}'...")
             )
             async with update_input_lock:
                 async for event in update_flake_input(input_name, source=name):
-                    await queue.put(event)
+                    await put(event)
 
         async for event in updater.update_stream(current, session):
-            await queue.put(event)
+            await put(event)
     except Exception as exc:
-        await queue.put(
-            UpdateEvent(source=name, kind=UpdateEventKind.ERROR, message=str(exc))
-        )
+        await put(UpdateEvent.error(name, str(exc)))
 
 
 @dataclass
@@ -2840,9 +2699,10 @@ async def _run_updates(args: argparse.Namespace) -> int:
             if args.json:
                 print(json.dumps({"valid": True, "count": len(sources.entries)}))
             else:
-                out.print_success(
+                out.print(
                     f":heavy_check_mark: Validated {SOURCES_FILE}: "
-                    f"{len(sources.entries)} sources OK"
+                    f"{len(sources.entries)} sources OK",
+                    style="green",
                 )
             return 0
         except Exception as exc:
@@ -2967,13 +2827,16 @@ async def _run_updates(args: argparse.Namespace) -> int:
 
     if dry_run:
         if summary.updated:
-            out.print_success(f"\nAvailable updates: {', '.join(summary.updated)}")
+            out.print(
+                f"\nAvailable updates: {', '.join(summary.updated)}", style="green"
+            )
         else:
             out.print("\nNo updates available.", style="dim")
     else:
         if summary.updated:
-            out.print_success(
-                f"\n:heavy_check_mark: Updated: {', '.join(summary.updated)}"
+            out.print(
+                f"\n:heavy_check_mark: Updated: {', '.join(summary.updated)}",
+                style="green",
             )
         else:
             out.print("\nNo updates needed.", style="dim")
@@ -2982,8 +2845,9 @@ async def _run_updates(args: argparse.Namespace) -> int:
         out.print_error(f"\nFailed: {', '.join(summary.errors)}")
 
     if args.continue_on_error and summary.updated and had_errors:
-        out.print_warning(
-            f"\n:warning: {len(summary.errors)} item(s) failed but continuing."
+        out.print(
+            f"\n:warning: {len(summary.errors)} item(s) failed but continuing.",
+            style="yellow",
         )
         return 0
 
@@ -3056,6 +2920,13 @@ def main() -> None:
         help="Suppress progress output, only show errors and final summary",
     )
     args = parser.parse_args()
+
+    # Check for required tools before running
+    missing = _check_required_tools()
+    if missing:
+        sys.stderr.write(f"Error: Required tools not found: {', '.join(missing)}\n")
+        sys.stderr.write("Please install them and ensure they are in your PATH.\n")
+        raise SystemExit(1)
 
     raise SystemExit(asyncio.run(_run_updates(args)))
 

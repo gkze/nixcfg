@@ -57,14 +57,14 @@
   },
   "conductor": {
     "hashes": {
-      "aarch64-darwin": "sha256-zxPZMTCYcKmurFIGJ9RlEwqA/mU/J2laETpOWGv8viI=",
-      "x86_64-darwin": "sha256-rYsheo3TO0cW+ptC95IqQW72woLmCE8pw/WWL+X313A="
+      "aarch64-darwin": "sha256-T7lL65w5BkyoPi0KQ77J6uU/2adMmg3EobgHCxLDtok=",
+      "x86_64-darwin": "sha256-0020uJoVQwRUHfJVNOrmS+OAYkfiS57kDH5b2IgeXSQ="
     },
     "urls": {
       "aarch64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-aarch64",
       "x86_64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-x86_64"
     },
-    "version": "0.33.1"
+    "version": "0.33.2"
   },
   "crush": {
     "hashes": [
@@ -147,7 +147,7 @@
       "x86_64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
       "x86_64-linux": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
     },
-    "version": "144.0.7559.98"
+    "version": "145.0.7632.26"
   },
   "homebrew-zsh-completion": {
     "hashes": [
@@ -163,13 +163,13 @@
     "hashes": [
       {
         "drvType": "denoDeps",
-        "hash": "sha256-LJKsc3/Cx3Drc7nQBUk5Jvnz2nOIPlkj40Wh+Of0vrs=",
+        "hash": "sha256-bko4wqkUhf1iKCMYfH1WKlYSCQqRulfysasfoTtNRGc=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-darwin"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-hXinXlvWhc3qSc0RBPahQPTsJI6UkV1Eg7KhviRKyMY=",
+        "hash": "sha256-JuySSDsk79OEwqg04eSmth688Hlvp0knSx28/D7hAMM=",
         "hashType": "denoDepsHash",
         "platform": "x86_64-darwin"
       }

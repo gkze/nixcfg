@@ -132,7 +132,7 @@
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.1.7";
+      url = "github:gkze/curator/v0.1.8";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
@@ -360,11 +360,7 @@
                     (editorWorkspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
                   ]
                 );
-            editorVenv = editorPySet.mkVirtualEnv "nixcfg-venv" {
-              aiohttp = [ ];
-              pydantic = [ ];
-              rich = [ ];
-            };
+            editorVenv = editorPySet.mkVirtualEnv "nixcfg-venv" editorWorkspace.deps.default;
           in
           pkgs.devshell.mkShell {
             name = "nixcfg";

@@ -71,8 +71,6 @@
       MANPAGER = "sh -c 'col -bx | bat -plman'";
       MANROFFOPT = "-c";
       NIX_PAGER = "bat -p";
-      # OpenCode context: defaults to personal, use opencode-work/opencode-personal to switch
-      OPENCODE_CONFIG = "${config.xdg.configHome}/opencode/personal.json";
       PAGER = "bat -p";
     };
     shellAliases =
