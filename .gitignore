@@ -20,3 +20,4 @@ result
 # Python
 __pycache__
 .venv
+sources.json.lock

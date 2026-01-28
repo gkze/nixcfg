@@ -163,15 +163,27 @@
     "hashes": [
       {
         "drvType": "denoDeps",
-        "hash": "sha256-bko4wqkUhf1iKCMYfH1WKlYSCQqRulfysasfoTtNRGc=",
+        "hash": "sha256-CMS+odIFHMFjzszZ1H5bgiDyX4OH4d2Q4w5Q4eFuH4o=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-darwin"
+      },
+      {
+        "drvType": "denoDeps",
+        "hash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "hashType": "denoDepsHash",
+        "platform": "aarch64-linux"
       },
       {
         "drvType": "denoDeps",
         "hash": "sha256-JuySSDsk79OEwqg04eSmth688Hlvp0knSx28/D7hAMM=",
         "hashType": "denoDepsHash",
         "platform": "x86_64-darwin"
+      },
+      {
+        "drvType": "denoDeps",
+        "hash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "hashType": "denoDepsHash",
+        "platform": "x86_64-linux"
       }
     ],
     "input": "linear-cli"

@@ -99,6 +99,20 @@ REQUIRED_TOOLS = ["nix", "nix-prefetch-url"]
 OPTIONAL_TOOLS = ["flake-edit"]  # Only needed for ref updates
 
 
+@functools.cache
+def get_current_nix_platform() -> str:
+    """Get current Nix platform (e.g., 'aarch64-darwin', 'x86_64-linux')."""
+    import platform
+
+    machine = platform.machine()
+    system = platform.system().lower()
+
+    arch_map = {"arm64": "aarch64", "x86_64": "x86_64", "amd64": "x86_64"}
+    arch = arch_map.get(machine, machine)
+
+    return f"{arch}-{system}"
+
+
 def _check_required_tools() -> list[str]:
     """Check that required external tools are available. Returns list of missing tools."""
     missing = [tool for tool in REQUIRED_TOOLS if shutil.which(tool) is None]
@@ -781,51 +795,76 @@ async def _compute_deno_deps_hash_for_platform(
     yield UpdateEvent.value(source, (platform, hash_value))
 
 
-# Platforms to compute Deno deps hashes for (darwin-only for now)
-DENO_DEPS_PLATFORMS = ["aarch64-darwin", "x86_64-darwin"]
+# Platforms to compute Deno deps hashes for
+DENO_DEPS_PLATFORMS = [
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
+]
 
 
 async def compute_deno_deps_hash(source: str, input_name: str) -> EventStream:
-    """Compute Deno deps hash for all supported platforms.
+    """Compute Deno deps hash for the current platform.
 
     Deno caches can include platform-specific dependencies (e.g., lefthook binaries),
-    so we compute hashes for each supported platform separately.
+    so we compute hashes for each supported platform separately. Since Deno derivations
+    can only be built natively (not cross-compiled), we only compute the hash for the
+    current platform and preserve existing hashes for other platforms.
 
-    We temporarily set fakeHash entries in sources.json, build the flake for each
-    platform, and extract the correct hashes from the errors. Uses file locking to
-    prevent concurrent modifications.
+    We temporarily set fakeHash for the current platform in sources.json, build the
+    flake, and extract the correct hash from the error. Uses file locking to prevent
+    concurrent modifications.
     """
+    current_platform = get_current_nix_platform()
+    if current_platform not in DENO_DEPS_PLATFORMS:
+        raise RuntimeError(
+            f"Current platform {current_platform} not in supported platforms: "
+            f"{DENO_DEPS_PLATFORMS}"
+        )
+
     lock_path = SOURCES_FILE.with_suffix(".json.lock")
     with FileLock(lock_path):
         sources = SourcesFile.load(SOURCES_FILE)
         original_entry = sources.entries.get(source)
 
-        fake_entries = [
-            HashEntry.create("denoDeps", "denoDepsHash", FAKE_HASH, platform=platform)
+        # Preserve existing hashes for other platforms, set fake hash for current
+        existing_hashes: dict[str, str] = {}
+        if original_entry and original_entry.hashes.entries:
+            for entry in original_entry.hashes.entries:
+                if entry.platform and entry.platform != current_platform:
+                    existing_hashes[entry.platform] = entry.hash
+
+        # Build temp entries: fake hash for current platform, preserved for others
+        temp_entries = [
+            HashEntry.create(
+                "denoDeps",
+                "denoDepsHash",
+                existing_hashes.get(platform, FAKE_HASH),
+                platform=platform,
+            )
             for platform in DENO_DEPS_PLATFORMS
         ]
         temp_entry = SourceEntry(
-            hashes=HashCollection.from_value(fake_entries),
+            hashes=HashCollection.from_value(temp_entries),
             input=input_name,
         )
         sources.entries[source] = temp_entry
         sources.save(SOURCES_FILE)
 
         try:
-            platform_hashes: dict[str, str] = {}
-            for platform in DENO_DEPS_PLATFORMS:
-                yield UpdateEvent.status(source, f"Computing hash for {platform}...")
-                async for event in _compute_deno_deps_hash_for_platform(
-                    source, input_name, platform
-                ):
-                    if (
-                        event.kind == UpdateEventKind.VALUE
-                        and event.payload is not None
-                    ):
-                        plat, hash_val = event.payload
-                        platform_hashes[plat] = hash_val
-                    else:
-                        yield event
+            platform_hashes: dict[str, str] = dict(existing_hashes)
+            yield UpdateEvent.status(
+                source, f"Computing hash for {current_platform}..."
+            )
+            async for event in _compute_deno_deps_hash_for_platform(
+                source, input_name, current_platform
+            ):
+                if event.kind == UpdateEventKind.VALUE and event.payload is not None:
+                    plat, hash_val = event.payload
+                    platform_hashes[plat] = hash_val
+                else:
+                    yield event
 
             yield UpdateEvent.value(source, platform_hashes)
         finally:
