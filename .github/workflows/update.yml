@@ -71,6 +71,8 @@ jobs:
           name: flake-lock
           path: .
       - run: brew install --cask macfuse && brew install 1password-cli
+      - name: Pre-fetch flake inputs
+        run: nix flake archive --json > /dev/null
       - name: Build shared Darwin closure
         run: |
           python3 .github/scripts/build_shared_closure.py \
@@ -120,6 +122,8 @@ jobs:
           name: flake-lock
           path: .
       - run: brew install --cask macfuse && brew install 1password-cli
+      - name: Pre-fetch flake inputs
+        run: nix flake archive --json > /dev/null
       - run: nix build .#darwinConfigurations.${{ matrix.host }}.system
 
   # Placeholder for future NixOS configuration builds
