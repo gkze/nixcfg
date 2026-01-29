@@ -18,6 +18,7 @@
     ./git.nix
     ./go.nix
     ./nixvim.nix
+    ./opencode.nix
     ./packages.nix
     ./python.nix
     ./stylix.nix
@@ -185,44 +186,6 @@
     man = {
       enable = true;
       generateCaches = true;
-    };
-    opencode = {
-      enable = true;
-      # Base config: shared settings for both work and personal contexts
-      # Work/personal MCP servers go in mutable overlay files:
-      #   ~/.config/opencode/work.json
-      #   ~/.config/opencode/personal.json
-      # Context is selected via OPENCODE_CONFIG env var (see zsh config)
-      settings = {
-        theme = "catppuccin-frappe";
-        plugin = [
-          "opencode-beads"
-          "@franlol/opencode-md-table-formatter"
-        ];
-        tui.scroll_acceleration.enabled = true;
-        # Base MCP servers (work-specific ones go in ~/.config/opencode/work.json)
-        mcp = {
-          axiom = {
-            type = "remote";
-            url = "https://mcp.axiom.co/mcp";
-          };
-          chrome-devtools = {
-            type = "local";
-            command = [
-              "npx"
-              "chrome-devtools-mcp@latest"
-              "--executablePath=${config.home.homeDirectory}/Applications/Home Manager Apps/Google Chrome.app/Contents/MacOS/Google Chrome"
-            ];
-          };
-          next-devtools = {
-            type = "local";
-            command = [
-              "npx"
-              "next-devtools-mcp@latest"
-            ];
-          };
-        };
-      };
     };
     ssh = {
       enable = true;

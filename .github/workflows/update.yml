@@ -48,12 +48,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/determinate-nix-action@v3
+      - uses: astral-sh/setup-uv@v7
       - uses: actions/download-artifact@v4
         with:
           name: flake-lock
           path: .
       - name: Compute hashes for ${{ matrix.platform }}
-        run: nix run .#update -- --native-only
+        # Run update.py directly with uv to avoid flake evaluation
+        # (which fails when sources.json has stale hashes)
+        run: uv run update.py --native-only
       - uses: actions/upload-artifact@v4
         with:
           name: sources-${{ matrix.platform }}

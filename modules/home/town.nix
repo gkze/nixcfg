@@ -1,44 +1,63 @@
-{ pkgs, ... }:
+{ config, pkgs, ... }:
 {
   home.packages = with pkgs; [
     _1password-cli
     google-cloud-sdk
   ];
+  xdg.configFile."opencode/work.json".text = builtins.toJSON {
+    "$schema" = "https://opencode.ai/config.json";
+    mcp = {
+      convex = {
+        type = "local";
+        command = [
+          "bunx"
+          "--bun"
+          "convex@latest"
+          "mcp"
+          "start"
+        ];
+      };
+      linear = {
+        type = "remote";
+        url = "https://mcp.linear.app/mcp";
+      };
+      notion = {
+        type = "remote";
+        url = "https://mcp.notion.com/mcp";
+        oauth = { };
+      };
+      sentry = {
+        type = "remote";
+        url = "https://mcp.sentry.dev/mcp";
+      };
+      slack =
+        let
+          slack-mcp-wrapper = pkgs.writeShellScript "slack-mcp" ''
+            export SLACK_MCP_XOXP_TOKEN="$(security find-generic-password -s "slack-mcp-token" -a "$USER" -w)"
+            export SLACK_MCP_ADD_MESSAGE_TOOL=true
+            exec ${pkgs.lib.getExe' pkgs.bun "bunx"} --bun slack-mcp-server@latest --transport stdio
+          '';
+        in
+        {
+          type = "local";
+          command = [ "${slack-mcp-wrapper}" ];
+        };
+      vanta = {
+        type = "local";
+        command = [
+          "bunx"
+          "--bun"
+          "@vantasdk/vanta-mcp-server"
+        ];
+        environment.VANTA_ENV_FILE = "${config.home.homeDirectory}/.config/vanta-credentials.env";
+      };
+      vercel = {
+        type = "remote";
+        url = "https://mcp.vercel.com";
+      };
+    };
+  };
   programs = {
-    # TODO: figure out
-    # opencode.settings.mcp = {
-    #   axiom = {
-    #     type = "remote";
-    #     url = "https://mcp.axiom.co/mcp";
-    #   };
-    #   convex = {
-    #     type = "local";
-    #     command = [
-    #       "npx"
-    #       "-y"
-    #       "convex@latest"
-    #       "mcp"
-    #       "start"
-    #     ];
-    #   };
-    #   linear = {
-    #     type = "remote";
-    #     url = "https://mcp.linear.app/mcp";
-    #   };
-    #   notion = {
-    #     type = "remote";
-    #     url = "https://mcp.notion.com/mcp";
-    #     oauth = { };
-    #   };
-    #   sentry = {
-    #     type = "remote";
-    #     url = "https://mcp.sentry.dev/mcp";
-    #   };
-    #   vercel = {
-    #     type = "remote";
-    #     url = "https://mcp.vercel.com";
-    #   };
-    # };
     topgrade.settings.misc.disable = [
       # "bun"
       "gcloud"
