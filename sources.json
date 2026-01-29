@@ -21,7 +21,8 @@
   },
   "chatgpt": {
     "hashes": {
-      "aarch64-darwin": "sha256-ngcNGDwuQ6WuM5EiozOOk/6SjWVzuCRlvcbG7eP/Ghw="
+      "aarch64-darwin": "sha256-ngcNGDwuQ6WuM5EiozOOk/6SjWVzuCRlvcbG7eP/Ghw=",
+      "x86_64-darwin": "sha256-2vEO9dJi9D2EU3Awq/JJGGafh6EZFnFayNIlkhpQBTk="
     },
     "urls": {
       "darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.013_1768606532.dmg"
@@ -33,11 +34,13 @@
     "hashes": {
       "aarch64-darwin": "sha256-JvkumedZhRyqZdjOVhqjMRShtGPCafVCGOewFooEGpc=",
       "aarch64-linux": "sha256-5QVw5iN17yeU8TFMZrCW/AswgNl4bUONeuhBdretiWk=",
+      "x86_64-darwin": "sha256-Jl6t4oHC6nqOGDKUvvfViPgKJzpG2vpvht4JMBLHzVk=",
       "x86_64-linux": "sha256-qB6HEJZdn8+MdudNd/kVooArUGg1jBaeArlvOKCpFao="
     },
     "urls": {
       "aarch64-darwin": "https://downloads.cursor.com/production/618c607a249dd7fd2ffc662c6531143833bebd44/darwin/arm64/Cursor-darwin-arm64.dmg",
       "aarch64-linux": "https://downloads.cursor.com/production/618c607a249dd7fd2ffc662c6531143833bebd44/linux/arm64/Cursor-2.4.22-aarch64.AppImage",
+      "x86_64-darwin": "https://downloads.cursor.com/production/cf8353edc265f5e46b798bfb276861d0bf3bf129/darwin/x64/Cursor-darwin-x64.dmg",
       "x86_64-linux": "https://downloads.cursor.com/production/618c607a249dd7fd2ffc662c6531143833bebd44/linux/x64/Cursor-2.4.22-x86_64.AppImage"
     },
     "version": "2.4.22"
@@ -88,11 +91,13 @@
     "hashes": {
       "aarch64-darwin": "sha256-9QHoXBY5J9235AH0WXRCcP1mBpyrCdbCrVY4Epu0KWg=",
       "aarch64-linux": "sha256-WkuWvGESRmvbi2ON2rB16RWRBGKVL/RhVr/yEU1BaHI=",
+      "x86_64-darwin": "sha256-ZTDNQGXyVfX5oBFf7X5OIxskOEy20je025Wgux0fj/k=",
       "x86_64-linux": "sha256-wkhbE8UuSvyGxvgbWMGhw2EEzC2KFfNvakoYYzhWJsw="
     },
     "urls": {
       "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.56.4/darwin/arm64/droid",
       "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.56.4/linux/arm64/droid",
+      "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.0/darwin/x64/droid",
       "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.56.4/linux/x64/droid"
     },
     "version": "0.56.4"
