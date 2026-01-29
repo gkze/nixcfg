@@ -158,15 +158,15 @@
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "hash": "sha256-ebso7UoPwbH7XgnQBWoy0lI9I0ovGoQ6KlBUd2e8Ves=",
         "hashType": "denoDepsHash",
-        "platform": "aarch64-linux"
+        "platform": "x86_64-linux"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "hash": "sha256-iUeWCXNMbQ4rSl1vMpBFGfu/jnziBcMnLi3hQ2ijKSA=",
         "hashType": "denoDepsHash",
-        "platform": "x86_64-linux"
+        "platform": "aarch64-linux"
       }
     ],
     "input": "linear-cli"
