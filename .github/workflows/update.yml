@@ -53,6 +53,8 @@ jobs:
         with:
           name: flake-lock
           path: .
+      - name: Install flake-edit
+        run: nix profile install nixpkgs#flake-edit
       - name: Compute hashes for ${{ matrix.platform }}
         # Run update.py directly with uv to avoid flake evaluation
         # (which fails when sources.json has stale hashes)
