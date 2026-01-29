@@ -21,13 +21,32 @@ import sys
 from pathlib import Path
 
 
+# Timeout for nix commands (5 minutes should be plenty for evaluation)
+NIX_COMMAND_TIMEOUT = 300
+
+# Maximum derivations per batch to avoid ARG_MAX limits
+MAX_DERIVATIONS_PER_BATCH = 500
+
+
 def get_derivations_to_build(flake_ref: str) -> set[str]:
     """Get the set of derivations that need to be built for a flake reference."""
-    result = subprocess.run(
-        ["nix", "build", flake_ref, "--dry-run"],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["nix", "build", flake_ref, "--dry-run"],
+            capture_output=True,
+            text=True,
+            timeout=NIX_COMMAND_TIMEOUT,
+            check=False,  # dry-run "fails" with build info, which is expected
+        )
+    except subprocess.TimeoutExpired:
+        print(f"Error: Timed out evaluating {flake_ref}", file=sys.stderr)
+        sys.exit(1)
+
+    # Check for actual errors (not just dry-run output)
+    if result.returncode != 0 and "will be built:" not in result.stderr:
+        print(f"Error evaluating {flake_ref}: {result.stderr}", file=sys.stderr)
+        sys.exit(1)
+
     # Derivations are listed in stderr
     output = result.stderr
 
@@ -54,38 +73,55 @@ def get_output_paths(derivations: set[str]) -> list[str]:
     if not derivations:
         return []
 
-    # Use nix derivation show to get output paths
-    result = subprocess.run(
-        ["nix", "derivation", "show", *derivations],
-        capture_output=True,
-        text=True,
-    )
+    outputs = []
+    derivation_list = list(derivations)
 
-    if result.returncode != 0:
-        print(
-            f"Warning: Failed to get derivation info: {result.stderr}", file=sys.stderr
-        )
-        return []
+    # Process in batches to avoid ARG_MAX limits
+    for i in range(0, len(derivation_list), MAX_DERIVATIONS_PER_BATCH):
+        batch = derivation_list[i : i + MAX_DERIVATIONS_PER_BATCH]
 
-    try:
-        drv_info = json.loads(result.stdout)
-        outputs = []
-        # Handle new nix derivation show format with "derivations" key
-        derivations_data = drv_info.get("derivations", drv_info)
-        for drv_name, info in derivations_data.items():
-            if not isinstance(info, dict):
-                continue
-            for output_name, output_info in info.get("outputs", {}).items():
-                if "path" in output_info:
-                    path = output_info["path"]
-                    # Handle both full paths and hash-name format
-                    if not path.startswith("/nix/store/"):
-                        path = f"/nix/store/{path}"
-                    outputs.append(path)
-        return outputs
-    except json.JSONDecodeError as e:
-        print(f"Warning: Failed to parse derivation info: {e}", file=sys.stderr)
-        return []
+        try:
+            result = subprocess.run(
+                ["nix", "derivation", "show", *batch],
+                capture_output=True,
+                text=True,
+                timeout=NIX_COMMAND_TIMEOUT,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            print(
+                f"Warning: Timed out getting derivation info for batch {i // MAX_DERIVATIONS_PER_BATCH + 1}",
+                file=sys.stderr,
+            )
+            continue
+
+        if result.returncode != 0:
+            print(
+                f"Warning: Failed to get derivation info: {result.stderr}",
+                file=sys.stderr,
+            )
+            continue
+
+        try:
+            drv_info = json.loads(result.stdout)
+            # Handle new nix derivation show format with "derivations" key
+            derivations_data = drv_info.get("derivations", drv_info)
+            for drv_name, info in derivations_data.items():
+                if not isinstance(info, dict):
+                    continue
+                for output_name, output_info in info.get("outputs", {}).items():
+                    if "path" in output_info:
+                        path = output_info["path"]
+                        # Handle both full paths and hash-name format
+                        # Nix store paths follow: /nix/store/<hash>-<name>
+                        if not path.startswith("/nix/store/"):
+                            path = f"/nix/store/{path}"
+                        outputs.append(path)
+        except json.JSONDecodeError as e:
+            print(f"Warning: Failed to parse derivation info: {e}", file=sys.stderr)
+            continue
+
+    return outputs
 
 
 def build_derivations(derivations: set[str], dry_run: bool = False) -> bool:
@@ -103,14 +139,33 @@ def build_derivations(derivations: set[str], dry_run: bool = False) -> bool:
 
     print(f"Building {len(outputs)} store paths from {len(derivations)} derivations...")
 
-    cmd = ["nix", "build", "--no-link", *outputs]
-
     if dry_run:
-        print(f"Would run: {' '.join(cmd[:5])}... ({len(outputs)} paths)")
+        print(f"Would run: nix build --no-link ... ({len(outputs)} paths)")
         return True
 
-    result = subprocess.run(cmd)
-    return result.returncode == 0
+    # Build in batches to avoid ARG_MAX limits
+    success = True
+    for i in range(0, len(outputs), MAX_DERIVATIONS_PER_BATCH):
+        batch = outputs[i : i + MAX_DERIVATIONS_PER_BATCH]
+        batch_num = i // MAX_DERIVATIONS_PER_BATCH + 1
+        total_batches = (
+            len(outputs) + MAX_DERIVATIONS_PER_BATCH - 1
+        ) // MAX_DERIVATIONS_PER_BATCH
+
+        if total_batches > 1:
+            print(
+                f"  Building batch {batch_num}/{total_batches} ({len(batch)} paths)..."
+            )
+
+        cmd = ["nix", "build", "--no-link", *batch]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print(f"Error building batch {batch_num}: {result.stderr}", file=sys.stderr)
+            success = False
+            # Continue with other batches to build as much as possible
+
+    return success
 
 
 def main():
