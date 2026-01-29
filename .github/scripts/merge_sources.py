@@ -15,22 +15,31 @@ from pathlib import Path
 
 
 def merge_hash_entries(entries_list: list[list[dict]]) -> list[dict]:
-    """Merge hash entries from multiple sources, keyed by platform."""
-    # For entries with platform, merge by platform
-    # For entries without platform, take from first source that has them
-    by_platform: dict[str | None, dict] = {}
+    """Merge hash entries from multiple sources, keyed by (hashType, platform).
+
+    Each entry in the hashes array can have different identifying fields:
+    - hashType: e.g., "srcHash", "cargoHash", "vendorHash"
+    - platform: e.g., "aarch64-darwin", "x86_64-linux" (optional)
+    - drvType: e.g., "fetchFromGitHub", "fetchCargoVendor" (optional)
+
+    We key by (hashType, platform) to preserve all unique hash entries.
+    """
+    # Key by (hashType, platform) tuple to preserve all unique entries
+    by_key: dict[tuple[str | None, str | None], dict] = {}
 
     for entries in entries_list:
         for entry in entries:
+            hash_type = entry.get("hashType")
             platform = entry.get("platform")
+            key = (hash_type, platform)
             # Skip FAKE_HASH entries
             if entry.get("hash", "").startswith("sha256-AAAAAAA"):
                 continue
-            # Take first valid hash for each platform
-            if platform not in by_platform:
-                by_platform[platform] = entry
+            # Take first valid hash for each (hashType, platform) combination
+            if key not in by_key:
+                by_key[key] = entry
 
-    return list(by_platform.values())
+    return list(by_key.values())
 
 
 def merge_hash_dicts(dicts_list: list[dict]) -> dict:

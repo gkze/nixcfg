@@ -55,6 +55,10 @@
         type = "remote";
         url = "https://mcp.vercel.com";
       };
+      clerk = {
+        type = "remote";
+        url = "https://mcp.clerk.com/mcp";
+      };
     };
   };
   programs = {
