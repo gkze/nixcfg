@@ -18,6 +18,8 @@ import argparse
 import json
 import subprocess
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 
@@ -27,9 +29,39 @@ NIX_COMMAND_TIMEOUT = 300
 # Maximum derivations per batch to avoid ARG_MAX limits
 MAX_DERIVATIONS_PER_BATCH = 500
 
+# Global verbose flag (set by main)
+VERBOSE = False
+
+
+def log(message: str, verbose_only: bool = False) -> None:
+    """Print a timestamped log message."""
+    if verbose_only and not VERBOSE:
+        return
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] {message}", flush=True)
+
+
+def log_progress(current: int, total: int, message: str) -> None:
+    """Print a progress message."""
+    percent = (current / total * 100) if total > 0 else 0
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] [{current}/{total} {percent:.0f}%] {message}", flush=True)
+
+
+def format_duration(seconds: float) -> str:
+    """Format a duration in seconds to a human-readable string."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    return f"{minutes}m {secs}s"
+
 
 def get_derivations_to_build(flake_ref: str) -> set[str]:
     """Get the set of derivations that need to be built for a flake reference."""
+    log(f"Evaluating {flake_ref}...", verbose_only=True)
+    start_time = time.time()
+
     try:
         result = subprocess.run(
             ["nix", "build", flake_ref, "--dry-run"],
@@ -39,13 +71,17 @@ def get_derivations_to_build(flake_ref: str) -> set[str]:
             check=False,  # dry-run "fails" with build info, which is expected
         )
     except subprocess.TimeoutExpired:
-        print(f"Error: Timed out evaluating {flake_ref}", file=sys.stderr)
+        log(f"ERROR: Timed out evaluating {flake_ref} after {NIX_COMMAND_TIMEOUT}s")
         sys.exit(1)
+
+    elapsed = time.time() - start_time
 
     # Check for actual errors (not just dry-run output)
     if result.returncode != 0 and "will be built:" not in result.stderr:
-        print(f"Error evaluating {flake_ref}: {result.stderr}", file=sys.stderr)
+        log(f"ERROR: Failed to evaluate {flake_ref}: {result.stderr}")
         sys.exit(1)
+
+    log(f"Evaluation completed in {format_duration(elapsed)}", verbose_only=True)
 
     # Derivations are listed in stderr
     output = result.stderr
@@ -75,10 +111,21 @@ def get_output_paths(derivations: set[str]) -> list[str]:
 
     outputs = []
     derivation_list = list(derivations)
+    total_batches = (
+        len(derivation_list) + MAX_DERIVATIONS_PER_BATCH - 1
+    ) // MAX_DERIVATIONS_PER_BATCH
+
+    log(f"Resolving output paths for {len(derivations)} derivations...")
 
     # Process in batches to avoid ARG_MAX limits
     for i in range(0, len(derivation_list), MAX_DERIVATIONS_PER_BATCH):
         batch = derivation_list[i : i + MAX_DERIVATIONS_PER_BATCH]
+        batch_num = i // MAX_DERIVATIONS_PER_BATCH + 1
+
+        if total_batches > 1:
+            log_progress(
+                batch_num, total_batches, f"Resolving batch ({len(batch)} derivations)"
+            )
 
         try:
             result = subprocess.run(
@@ -89,17 +136,11 @@ def get_output_paths(derivations: set[str]) -> list[str]:
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            print(
-                f"Warning: Timed out getting derivation info for batch {i // MAX_DERIVATIONS_PER_BATCH + 1}",
-                file=sys.stderr,
-            )
+            log(f"WARNING: Timed out getting derivation info for batch {batch_num}")
             continue
 
         if result.returncode != 0:
-            print(
-                f"Warning: Failed to get derivation info: {result.stderr}",
-                file=sys.stderr,
-            )
+            log(f"WARNING: Failed to get derivation info: {result.stderr[:200]}")
             continue
 
         try:
@@ -118,52 +159,86 @@ def get_output_paths(derivations: set[str]) -> list[str]:
                             path = f"/nix/store/{path}"
                         outputs.append(path)
         except json.JSONDecodeError as e:
-            print(f"Warning: Failed to parse derivation info: {e}", file=sys.stderr)
+            log(f"WARNING: Failed to parse derivation info: {e}")
             continue
 
+    log(f"Resolved {len(outputs)} output paths")
     return outputs
 
 
 def build_derivations(derivations: set[str], dry_run: bool = False) -> bool:
-    """Build the specified derivations."""
+    """Build the specified derivations.
+
+    Builds derivations directly using their .drv paths with nix-store --realise.
+    This ensures Nix can build from source if paths aren't in any cache,
+    unlike `nix build <output-path>` which only checks substituters.
+    """
     if not derivations:
-        print("No derivations to build.")
+        log("No derivations to build.")
         return True
 
-    # Get the output paths for the derivations
-    outputs = get_output_paths(derivations)
-
-    if not outputs:
-        print("No output paths found for derivations.", file=sys.stderr)
-        return False
-
-    print(f"Building {len(outputs)} store paths from {len(derivations)} derivations...")
+    derivation_list = list(derivations)
+    log(f"Building {len(derivation_list)} derivations...")
 
     if dry_run:
-        print(f"Would run: nix build --no-link ... ({len(outputs)} paths)")
+        log(
+            f"DRY RUN: Would run: nix-store --realise ... ({len(derivation_list)} derivations)"
+        )
         return True
 
     # Build in batches to avoid ARG_MAX limits
     success = True
-    for i in range(0, len(outputs), MAX_DERIVATIONS_PER_BATCH):
-        batch = outputs[i : i + MAX_DERIVATIONS_PER_BATCH]
+    total_batches = (
+        len(derivation_list) + MAX_DERIVATIONS_PER_BATCH - 1
+    ) // MAX_DERIVATIONS_PER_BATCH
+    overall_start = time.time()
+
+    for i in range(0, len(derivation_list), MAX_DERIVATIONS_PER_BATCH):
+        batch = derivation_list[i : i + MAX_DERIVATIONS_PER_BATCH]
         batch_num = i // MAX_DERIVATIONS_PER_BATCH + 1
-        total_batches = (
-            len(outputs) + MAX_DERIVATIONS_PER_BATCH - 1
-        ) // MAX_DERIVATIONS_PER_BATCH
 
         if total_batches > 1:
-            print(
-                f"  Building batch {batch_num}/{total_batches} ({len(batch)} paths)..."
+            log_progress(
+                batch_num, total_batches, f"Building batch ({len(batch)} derivations)"
             )
+        else:
+            log(f"Building {len(batch)} derivations...")
 
-        cmd = ["nix", "build", "--no-link", *batch]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        batch_start = time.time()
+        # Use nix-store --realise to build derivations directly
+        # This allows building from source when paths aren't cached
+        cmd = ["nix-store", "--realise", *batch]
 
-        if result.returncode != 0:
-            print(f"Error building batch {batch_num}: {result.stderr}", file=sys.stderr)
+        # Stream output in real-time instead of capturing
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,  # Line buffered
+        )
+
+        # Stream output lines as they come
+        if process.stdout:
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    print(f"  {line}", flush=True)
+
+        process.wait()
+        batch_elapsed = time.time() - batch_start
+
+        if process.returncode != 0:
+            log(
+                f"ERROR: Build failed for batch {batch_num} (exit code {process.returncode})"
+            )
             success = False
             # Continue with other batches to build as much as possible
+        else:
+            log(f"Batch {batch_num} completed in {format_duration(batch_elapsed)}")
+
+    overall_elapsed = time.time() - overall_start
+    log(f"Total build time: {format_duration(overall_elapsed)}")
 
     return success
 
@@ -197,21 +272,26 @@ def main():
 
     args = parser.parse_args()
 
+    # Set verbose mode
+    global VERBOSE
+    VERBOSE = args.verbose
+
     if len(args.targets) < 2:
-        print("Need at least 2 targets to find shared derivations.", file=sys.stderr)
+        log("ERROR: Need at least 2 targets to find shared derivations.")
         sys.exit(1)
 
-    print(f"Analyzing {len(args.targets)} targets...")
+    log(f"Analyzing {len(args.targets)} targets for shared derivations...")
 
     # Get derivations to build for each target
     target_derivations: dict[str, set[str]] = {}
-    for target in args.targets:
-        print(f"  Checking {target}...")
+    for idx, target in enumerate(args.targets, 1):
+        log_progress(idx, len(args.targets), f"Evaluating {target}")
         derivations = get_derivations_to_build(target)
         target_derivations[target] = derivations
-        print(f"    {len(derivations)} derivations need building")
+        log(f"  → {len(derivations)} derivations need building")
 
     # Find derivations shared by at least min_shared targets
+    log("Analyzing derivation overlap...")
     all_derivations: set[str] = set()
     for drvs in target_derivations.values():
         all_derivations.update(drvs)
@@ -222,37 +302,40 @@ def main():
         if count >= args.min_shared:
             shared_derivations.add(drv)
 
-    print(
-        f"\nFound {len(shared_derivations)} shared derivations (out of {len(all_derivations)} total)"
+    log(
+        f"Found {len(shared_derivations)} shared derivations (out of {len(all_derivations)} total)"
     )
 
     if args.verbose and shared_derivations:
-        print("\nShared derivations:")
+        log("Shared derivations:")
         for drv in sorted(shared_derivations):
             # Extract package name from derivation path
             name = Path(drv).name.replace(".drv", "")
             # Remove hash prefix
             if "-" in name:
                 name = name.split("-", 1)[1]
-            print(f"  - {name}")
+            print(f"    - {name}", flush=True)
 
     # Calculate unique derivations per target
+    log("Per-target breakdown:")
     for target, drvs in target_derivations.items():
         unique = drvs - shared_derivations
-        print(f"  {target}: {len(unique)} unique derivations")
+        print(f"    {target}: {len(unique)} unique derivations", flush=True)
 
     if not shared_derivations:
-        print("\nNo shared derivations to build.")
+        log(
+            "No shared derivations to build - all targets are independent or already cached."
+        )
         return
 
-    print(f"\nBuilding {len(shared_derivations)} shared derivations...")
+    log(f"Starting build of {len(shared_derivations)} shared derivations...")
     success = build_derivations(shared_derivations, dry_run=args.dry_run)
 
     if success:
-        print("\n✓ Shared closure built successfully!")
-        print("  Subsequent builds of individual targets will hit the cache.")
+        log("✓ Shared closure built successfully!")
+        log("  Subsequent builds of individual targets will hit the cache.")
     else:
-        print("\n✗ Failed to build shared closure", file=sys.stderr)
+        log("✗ Failed to build shared closure")
         sys.exit(1)
 
 
