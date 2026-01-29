@@ -31,8 +31,54 @@ jobs:
             flake.lock
             sources.json
 
-  darwin:
+  # Build shared derivations first to populate cache
+  darwin-shared:
     needs: update-lock
+    runs-on: macos-15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Free disk space
+        run: |
+          echo "=== Before cleanup ==="
+          df -h /
+
+          # Keep only the latest Xcode, remove all others - saves ~60-80 GB
+          latest_xcode=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          for xcode in /Applications/Xcode*.app; do
+            [[ "$xcode" != "$latest_xcode" ]] && sudo rm -rf "$xcode"
+          done
+
+          # Remove all simulators - saves ~20-30 GB
+          sudo rm -rf ~/Library/Developer/CoreSimulator
+          xcrun simctl delete all 2>/dev/null || true
+
+          # Remove Android SDK, .NET, and cached tools - saves ~30-40 GB
+          sudo rm -rf ~/Library/Android/sdk /usr/local/share/dotnet ~/hostedtoolcache
+
+          echo "=== After cleanup ==="
+          df -h /
+
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - uses: cachix/cachix-action@v15
+        with:
+          name: gkze
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: flake-lock
+          path: .
+      - run: brew install --cask macfuse && brew install 1password-cli
+      - name: Build shared Darwin closure
+        run: |
+          python3 .github/scripts/build_shared_closure.py \
+            .#darwinConfigurations.argus.system \
+            .#darwinConfigurations.rocinante.system
+
+  darwin:
+    needs: [update-lock, darwin-shared]
     runs-on: macos-15
     strategy:
       fail-fast: false
@@ -97,7 +143,7 @@ jobs:
       - run: nix run .#update -- --list
 
   create-pr:
-    needs: [update-lock, darwin, linux]
+    needs: [update-lock, darwin-shared, darwin, linux]
     if: ${{ needs.darwin.result == 'success' && needs.linux.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
