@@ -3,7 +3,7 @@ name: Periodic Flake Update
 
 on:
   schedule:
-    - cron: "0 */5 * * *" # Every 5 hours (worst-case runtime ~5h)
+    - cron: "0 */6 * * *" # Every 6 hours
   push:
     branches: [main]
   workflow_dispatch:
@@ -67,8 +67,6 @@ jobs:
           path: ~/.cache/nix
           key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
           restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
-      - name: Install flake-edit
-        run: nix profile install nixpkgs#flake-edit
       - name: Compute hashes for ${{ matrix.platform }}
         # Run update.py directly with uv to avoid flake evaluation
         # (which fails when sources.json has stale hashes)
@@ -251,7 +249,11 @@ jobs:
   # Phase 7: Create PR with updates
   create-pr:
     needs: [merge-hashes, darwin-shared, darwin, linux]
-    if: ${{ needs.darwin.result == 'success' && needs.linux.result == 'success' }}
+    if: >-
+      needs.merge-hashes.result == 'success' &&
+      needs.darwin-shared.result == 'success' &&
+      needs.darwin.result == 'success' &&
+      needs.linux.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -294,6 +296,8 @@ jobs:
           commit-message: "nix: Update flake.lock and sources"
           body: |
             Automated changes by the Periodic Flake Update workflow.
+
+            **Workflow run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
             ```
             ${{ steps.diff.outputs.body }}

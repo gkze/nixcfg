@@ -93,6 +93,11 @@ DEFAULT_RENDER_INTERVAL = 0.05
 DEFAULT_USER_AGENT = "update.py"
 DEFAULT_RETRIES = 3
 DEFAULT_RETRY_BACKOFF = 1.0
+# Placeholder hash used when a real hash cannot be computed (e.g., non-native platforms).
+# In --native-only mode, updaters preserve FAKE_HASH for platforms that can't be built
+# locally. The CI pipeline runs on multiple platforms and merges results, so each
+# platform computes its native hashes while preserving placeholders for others.
+# See merge_sources.py for the merge logic that combines platform-specific results.
 FAKE_HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 SRI_PREFIX = "sha256-"
 REQUIRED_TOOLS = ["nix", "nix-prefetch-url"]
@@ -1644,7 +1649,6 @@ class GoogleChromeUpdater(DownloadHashUpdater):
     name = "google-chrome"
     PLATFORMS = {
         "aarch64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
-        "x86_64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
         "x86_64-linux": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb",
     }
 
@@ -1666,7 +1670,6 @@ class DataGripUpdater(ChecksumProvidedUpdater):
     # nix platform -> JetBrains download key
     PLATFORMS = {
         "aarch64-darwin": "macM1",
-        "x86_64-darwin": "mac",
         "aarch64-linux": "linuxARM64",
         "x86_64-linux": "linux",
     }
