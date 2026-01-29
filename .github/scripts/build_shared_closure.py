@@ -23,8 +23,8 @@ from datetime import datetime
 from pathlib import Path
 
 
-# Timeout for nix commands (5 minutes should be plenty for evaluation)
-NIX_COMMAND_TIMEOUT = 300
+# Timeout for nix commands (10 minutes - large configs can take 5+ minutes to evaluate)
+NIX_COMMAND_TIMEOUT = 600
 
 # Maximum derivations per batch to avoid ARG_MAX limits
 MAX_DERIVATIONS_PER_BATCH = 500
