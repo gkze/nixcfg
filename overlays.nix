@@ -598,37 +598,25 @@ in
 
       opencode = inputs.opencode.packages.${system}.opencode.overrideAttrs opencodeBunPatch;
 
-      opencode-desktop =
-        let
-          # PR #10292: Add missing TUI themes to desktop app
-          # https://github.com/anomalyco/opencode/pull/10292
-          # Includes Catppuccin Frappe and other themes missing from Desktop
-          desktopThemesPatch = prev.fetchpatch {
-            url = "https://github.com/anomalyco/opencode/pull/10292.patch";
-            hash = "sha256-XAZ86gVJhYnFPoPfOiN0GWB46rWNco3guhQVFOlloIk=";
-          };
-        in
-        inputs.opencode.packages.${system}.desktop.overrideAttrs (
-          old:
-          (opencodeBunPatch old)
-          // {
-            # Use dev config instead of prod (gets dev icon + "OpenCode Dev" name)
-            tauriBuildFlags = [ "--no-sign" ];
+      opencode-desktop = inputs.opencode.packages.${system}.desktop.overrideAttrs (
+        old:
+        (opencodeBunPatch old)
+        // {
+          # Use dev config instead of prod (gets dev icon + "OpenCode Dev" name)
+          tauriBuildFlags = [ "--no-sign" ];
 
-            patches = (old.patches or [ ]) ++ [ desktopThemesPatch ];
+          # Override preBuild to use our patched opencode instead of upstream's
+          preBuild = ''
+            cp -a ${old.node_modules}/{node_modules,packages} .
+            chmod -R u+w node_modules packages
+            patchShebangs node_modules
+            patchShebangs packages/desktop/node_modules
 
-            # Override preBuild to use our patched opencode instead of upstream's
-            preBuild = ''
-              cp -a ${old.node_modules}/{node_modules,packages} .
-              chmod -R u+w node_modules packages
-              patchShebangs node_modules
-              patchShebangs packages/desktop/node_modules
-
-              mkdir -p packages/desktop/src-tauri/sidecars
-              cp ${final.opencode}/bin/opencode packages/desktop/src-tauri/sidecars/opencode-cli-${prev.stdenv.hostPlatform.rust.rustcTarget}
-            '';
-          }
-        );
+            mkdir -p packages/desktop/src-tauri/sidecars
+            cp ${final.opencode}/bin/opencode packages/desktop/src-tauri/sidecars/opencode-cli-${prev.stdenv.hostPlatform.rust.rustcTarget}
+          '';
+        }
+      );
 
       # sentry-cli: Build from source with xcarchive test fixtures stripped.
       # Not a flake input because the repo contains .xcarchive bundles with
