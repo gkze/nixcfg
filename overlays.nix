@@ -377,7 +377,6 @@ in
             license = licenses.unfree;
             platforms = [
               "aarch64-darwin"
-              "x86_64-darwin"
               "x86_64-linux"
             ];
             sourceProvenance = with sourceTypes; [ binaryNativeCode ];
@@ -451,7 +450,6 @@ in
             license = licenses.unfree;
             platforms = [
               "aarch64-darwin"
-              "x86_64-darwin"
               "aarch64-linux"
               "x86_64-linux"
             ];
@@ -731,7 +729,6 @@ in
             {
               aarch64-darwin = "darwin-arm64";
               aarch64-linux = "linux-arm64";
-              x86_64-darwin = "darwin";
               x86_64-linux = "linux-x64";
             }
             .${system};

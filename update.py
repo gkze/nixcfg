@@ -795,26 +795,33 @@ async def _compute_deno_deps_hash_for_platform(
     yield UpdateEvent.value(source, (platform, hash_value))
 
 
-# Platforms to compute Deno deps hashes for
+# Platforms to compute Deno deps hashes for (matches flake's systems list)
 DENO_DEPS_PLATFORMS = [
     "aarch64-darwin",
     "aarch64-linux",
-    "x86_64-darwin",
     "x86_64-linux",
 ]
 
+# Module-level flag set by --native-only CLI arg
+# When True, only compute hashes for current platform (for CI without remote builders)
+_NATIVE_ONLY = False
+
 
 async def compute_deno_deps_hash(source: str, input_name: str) -> EventStream:
-    """Compute Deno deps hash for the current platform.
+    """Compute Deno deps hash for supported platforms.
 
     Deno caches can include platform-specific dependencies (e.g., lefthook binaries),
-    so we compute hashes for each supported platform separately. Since Deno derivations
-    can only be built natively (not cross-compiled), we only compute the hash for the
-    current platform and preserve existing hashes for other platforms.
+    so we compute hashes for each supported platform separately. For non-native
+    platforms, Nix will automatically use configured remote builders (e.g.,
+    nix-rosetta-builder on macOS provides aarch64-linux and x86_64-linux builders).
 
-    We temporarily set fakeHash for the current platform in sources.json, build the
-    flake, and extract the correct hash from the error. Uses file locking to prevent
-    concurrent modifications.
+    When _NATIVE_ONLY is True (--native-only flag), only computes hash for the
+    current platform and preserves existing hashes for other platforms. This is
+    useful in CI where remote builders aren't available.
+
+    We compute hashes one platform at a time: set fakeHash for that platform,
+    build the flake, extract the correct hash from the error, then move to next.
+    Uses file locking to prevent concurrent modifications.
     """
     current_platform = get_current_nix_platform()
     if current_platform not in DENO_DEPS_PLATFORMS:
@@ -828,45 +835,57 @@ async def compute_deno_deps_hash(source: str, input_name: str) -> EventStream:
         sources = SourcesFile.load(SOURCES_FILE)
         original_entry = sources.entries.get(source)
 
-        # Preserve existing hashes for other platforms, set fake hash for current
+        # Preserve existing hashes for platforms we won't compute
         existing_hashes: dict[str, str] = {}
         if original_entry and original_entry.hashes.entries:
             for entry in original_entry.hashes.entries:
-                if entry.platform and entry.platform != current_platform:
+                if entry.platform:
                     existing_hashes[entry.platform] = entry.hash
 
-        # Build temp entries: fake hash for current platform, preserved for others
-        temp_entries = [
-            HashEntry.create(
-                "denoDeps",
-                "denoDepsHash",
-                existing_hashes.get(platform, FAKE_HASH),
-                platform=platform,
-            )
-            for platform in DENO_DEPS_PLATFORMS
-        ]
-        temp_entry = SourceEntry(
-            hashes=HashCollection.from_value(temp_entries),
-            input=input_name,
+        # Determine which platforms to compute
+        platforms_to_compute = (
+            [current_platform] if _NATIVE_ONLY else DENO_DEPS_PLATFORMS
         )
-        sources.entries[source] = temp_entry
-        sources.save(SOURCES_FILE)
 
         try:
-            platform_hashes: dict[str, str] = dict(existing_hashes)
-            yield UpdateEvent.status(
-                source, f"Computing hash for {current_platform}..."
-            )
-            async for event in _compute_deno_deps_hash_for_platform(
-                source, input_name, current_platform
-            ):
-                if event.kind == UpdateEventKind.VALUE and event.payload is not None:
-                    plat, hash_val = event.payload
-                    platform_hashes[plat] = hash_val
-                else:
-                    yield event
+            platform_hashes: dict[str, str] = {}
 
-            yield UpdateEvent.value(source, platform_hashes)
+            # Compute hash for each platform sequentially
+            for platform in platforms_to_compute:
+                yield UpdateEvent.status(source, f"Computing hash for {platform}...")
+
+                # Set fake hash for platform being computed, use existing/computed for others
+                temp_entries = [
+                    HashEntry.create(
+                        "denoDeps",
+                        "denoDepsHash",
+                        (platform_hashes.get(p) or existing_hashes.get(p, FAKE_HASH)),
+                        platform=p,
+                    )
+                    for p in DENO_DEPS_PLATFORMS
+                ]
+                temp_entry = SourceEntry(
+                    hashes=HashCollection.from_value(temp_entries),
+                    input=input_name,
+                )
+                sources.entries[source] = temp_entry
+                sources.save(SOURCES_FILE)
+
+                async for event in _compute_deno_deps_hash_for_platform(
+                    source, input_name, platform
+                ):
+                    if (
+                        event.kind == UpdateEventKind.VALUE
+                        and event.payload is not None
+                    ):
+                        plat, hash_val = event.payload
+                        platform_hashes[plat] = hash_val
+                    else:
+                        yield event
+
+            # Merge computed hashes with preserved existing hashes
+            final_hashes = {**existing_hashes, **platform_hashes}
+            yield UpdateEvent.value(source, final_hashes)
         finally:
             if original_entry is not None:
                 sources.entries[source] = original_entry
@@ -926,18 +945,15 @@ UPDATERS: dict[str, type["Updater"]] = {}
 # SRI hash pattern for validation
 _SRI_HASH_PATTERN = re.compile(r"^sha256-[A-Za-z0-9+/]+=*$")
 
-# Valid Nix platforms
-NixPlatform = Literal[
-    "aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux", "darwin"
-]
-ALL_PLATFORMS = ("aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux")
-DARWIN_PLATFORMS = ("aarch64-darwin", "x86_64-darwin")
+# Valid Nix platforms (matches flake's systems list - no x86_64-darwin)
+NixPlatform = Literal["aarch64-darwin", "aarch64-linux", "x86_64-linux", "darwin"]
+ALL_PLATFORMS = ("aarch64-darwin", "aarch64-linux", "x86_64-linux")
+DARWIN_PLATFORMS = ("aarch64-darwin",)
 
 # Common platform API mappings (nix platform -> API platform)
 VSCODE_PLATFORMS = {
     "aarch64-darwin": "darwin-arm64",
     "aarch64-linux": "linux-arm64",
-    "x86_64-darwin": "darwin",
     "x86_64-linux": "linux-x64",
 }
 
@@ -2703,6 +2719,9 @@ async def _run_updates(args: argparse.Namespace) -> int:
     Refs must complete before sources since source hash computation depends
     on the locked flake input state.
     """
+    global _NATIVE_ONLY
+    _NATIVE_ONLY = args.native_only
+
     out = OutputOptions(json_output=args.json, quiet=args.quiet)
 
     if args.schema:
@@ -2957,6 +2976,12 @@ def main() -> None:
         "--quiet",
         action="store_true",
         help="Suppress progress output, only show errors and final summary",
+    )
+    parser.add_argument(
+        "-n",
+        "--native-only",
+        action="store_true",
+        help="Only compute platform-specific hashes for current platform (for CI)",
     )
     args = parser.parse_args()
 

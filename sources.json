@@ -21,8 +21,7 @@
   },
   "chatgpt": {
     "hashes": {
-      "aarch64-darwin": "sha256-ngcNGDwuQ6WuM5EiozOOk/6SjWVzuCRlvcbG7eP/Ghw=",
-      "x86_64-darwin": "sha256-ngcNGDwuQ6WuM5EiozOOk/6SjWVzuCRlvcbG7eP/Ghw="
+      "aarch64-darwin": "sha256-ngcNGDwuQ6WuM5EiozOOk/6SjWVzuCRlvcbG7eP/Ghw="
     },
     "urls": {
       "darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.013_1768606532.dmg"
@@ -34,13 +33,11 @@
     "hashes": {
       "aarch64-darwin": "sha256-JvkumedZhRyqZdjOVhqjMRShtGPCafVCGOewFooEGpc=",
       "aarch64-linux": "sha256-5QVw5iN17yeU8TFMZrCW/AswgNl4bUONeuhBdretiWk=",
-      "x86_64-darwin": "sha256-hNpy1wfaxo2W/8Itbam1tt5tLqo2BjsnYZyl5NQn23g=",
       "x86_64-linux": "sha256-qB6HEJZdn8+MdudNd/kVooArUGg1jBaeArlvOKCpFao="
     },
     "urls": {
       "aarch64-darwin": "https://downloads.cursor.com/production/618c607a249dd7fd2ffc662c6531143833bebd44/darwin/arm64/Cursor-darwin-arm64.dmg",
       "aarch64-linux": "https://downloads.cursor.com/production/618c607a249dd7fd2ffc662c6531143833bebd44/linux/arm64/Cursor-2.4.22-aarch64.AppImage",
-      "x86_64-darwin": "https://downloads.cursor.com/production/618c607a249dd7fd2ffc662c6531143833bebd44/darwin/x64/Cursor-darwin-x64.dmg",
       "x86_64-linux": "https://downloads.cursor.com/production/618c607a249dd7fd2ffc662c6531143833bebd44/linux/x64/Cursor-2.4.22-x86_64.AppImage"
     },
     "version": "2.4.22"
@@ -57,12 +54,10 @@
   },
   "conductor": {
     "hashes": {
-      "aarch64-darwin": "sha256-T7lL65w5BkyoPi0KQ77J6uU/2adMmg3EobgHCxLDtok=",
-      "x86_64-darwin": "sha256-0020uJoVQwRUHfJVNOrmS+OAYkfiS57kDH5b2IgeXSQ="
+      "aarch64-darwin": "sha256-T7lL65w5BkyoPi0KQ77J6uU/2adMmg3EobgHCxLDtok="
     },
     "urls": {
-      "aarch64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-aarch64",
-      "x86_64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-x86_64"
+      "aarch64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-aarch64"
     },
     "version": "0.33.2"
   },
@@ -80,13 +75,11 @@
     "hashes": {
       "aarch64-darwin": "sha256-OmfIeVJ69HWBdsfI9sXnWUgDIWbp9EbdOsDXdL3/taM=",
       "aarch64-linux": "sha256-FRZP/2a7yBL7NdikAoc2StRLsgjI+qADtHPfkQFdwxI=",
-      "x86_64-darwin": "sha256-E3i7bxnOeHP38LGY+Dw0rlpKn4ps4iyHY23L+qzCIjc=",
       "x86_64-linux": "sha256-8sR4C+a1FsngYTRnjgHKzZpmGQY2ury2Ynp3zQ3U9nk="
     },
     "urls": {
       "aarch64-darwin": "https://download.jetbrains.com/datagrip/datagrip-2025.3.4-aarch64.dmg",
       "aarch64-linux": "https://download.jetbrains.com/datagrip/datagrip-2025.3.4-aarch64.tar.gz",
-      "x86_64-darwin": "https://download.jetbrains.com/datagrip/datagrip-2025.3.4.dmg",
       "x86_64-linux": "https://download.jetbrains.com/datagrip/datagrip-2025.3.4.tar.gz"
     },
     "version": "2025.3.4"
@@ -95,13 +88,11 @@
     "hashes": {
       "aarch64-darwin": "sha256-9QHoXBY5J9235AH0WXRCcP1mBpyrCdbCrVY4Epu0KWg=",
       "aarch64-linux": "sha256-WkuWvGESRmvbi2ON2rB16RWRBGKVL/RhVr/yEU1BaHI=",
-      "x86_64-darwin": "sha256-yBONBuEFQEaA/s57YpA55cOYefc4Sn1Z4yOgJRaq9lk=",
       "x86_64-linux": "sha256-wkhbE8UuSvyGxvgbWMGhw2EEzC2KFfNvakoYYzhWJsw="
     },
     "urls": {
       "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.56.4/darwin/arm64/droid",
       "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.56.4/linux/arm64/droid",
-      "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.56.4/darwin/x64/droid",
       "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.56.4/linux/x64/droid"
     },
     "version": "0.56.4"
@@ -139,12 +130,10 @@
   "google-chrome": {
     "hashes": {
       "aarch64-darwin": "sha256-+1bfrMyoEnKTYUOpx19c20AAY/cOTN118wW9syu2IAE=",
-      "x86_64-darwin": "sha256-+1bfrMyoEnKTYUOpx19c20AAY/cOTN118wW9syu2IAE=",
       "x86_64-linux": "sha256-O3fFCcSghHor8UaqvUCn/GDqKD+8SCrXT6FEnWh9QUc="
     },
     "urls": {
       "aarch64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
-      "x86_64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
       "x86_64-linux": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
     },
     "version": "145.0.7632.26"
@@ -175,12 +164,6 @@
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-JuySSDsk79OEwqg04eSmth688Hlvp0knSx28/D7hAMM=",
-        "hashType": "denoDepsHash",
-        "platform": "x86_64-darwin"
-      },
-      {
-        "drvType": "denoDeps",
         "hash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "hashType": "denoDepsHash",
         "platform": "x86_64-linux"
@@ -191,12 +174,10 @@
   "sculptor": {
     "hashes": {
       "aarch64-darwin": "sha256-v7Jn1awquOJXRi5twbddTKSkP2gl5E9y3AeXUL7zsJA=",
-      "x86_64-darwin": "sha256-OhY5HVLKnA82QnOWwcefi2xrHc3iUuSXKBnKv0N08dM=",
       "x86_64-linux": "sha256-Etfr088ctspZI2NXn2THlEWd8LNRDjX/OVTSnsaC0zk="
     },
     "urls": {
       "aarch64-darwin": "https://imbue-sculptor-releases.s3.us-west-2.amazonaws.com/sculptor/Sculptor.dmg",
-      "x86_64-darwin": "https://imbue-sculptor-releases.s3.us-west-2.amazonaws.com/sculptor/Sculptor-x86_64.dmg",
       "x86_64-linux": "https://imbue-sculptor-releases.s3.us-west-2.amazonaws.com/sculptor/AppImage/x64/Sculptor.AppImage"
     },
     "version": "2026-01-20"
@@ -220,13 +201,11 @@
     "hashes": {
       "aarch64-darwin": "sha256-cO74uzRcg+aX7UWefC18tgfIsVjtb7LrY+DZY5DoyPc=",
       "aarch64-linux": "sha256-7rpSWtB0Rb3WX1hTtpSxF75ZuhLGXRGR6mLT9PXvuP8=",
-      "x86_64-darwin": "sha256-85CJeliO0oVyH6+tZIXBsWNM1JfKGZAOuK+q+niwhwA=",
       "x86_64-linux": "sha256-/3fg1SVwXi6TtJ9nAINXQHkTLxQwR6TKhp8CP/sCo+A="
     },
     "urls": {
       "aarch64-darwin": "https://update.code.visualstudio.com/1.109.0-insider/darwin-arm64/insider",
       "aarch64-linux": "https://update.code.visualstudio.com/1.109.0-insider/linux-arm64/insider",
-      "x86_64-darwin": "https://update.code.visualstudio.com/1.109.0-insider/darwin/insider",
       "x86_64-linux": "https://update.code.visualstudio.com/1.109.0-insider/linux-x64/insider"
     },
     "version": "1.109.0-insider"
