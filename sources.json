@@ -163,7 +163,7 @@
     "hashes": [
       {
         "drvType": "denoDeps",
-        "hash": "sha256-CMS+odIFHMFjzszZ1H5bgiDyX4OH4d2Q4w5Q4eFuH4o=",
+        "hash": "sha256-vbNp9CGGqa+GJnT6l7rb2UYr6pt96UQ9burrW9Uvdec=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-darwin"
       },
