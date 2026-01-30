@@ -136,7 +136,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.36.0";
+      url = "github:charmbracelet/crush/v0.37.0";
       flake = false;
     };
     gemini-cli = {
@@ -161,7 +161,7 @@
       flake = false;
     };
     linear-cli = {
-      url = "github:schpet/linear-cli/v1.8.1";
+      url = "github:schpet/linear-cli/v1.9.1";
       flake = false;
     };
     kdl-vim = {
@@ -237,7 +237,7 @@
       flake = false;
     };
     lumen = {
-      url = "github:jnsahaj/lumen/v2.19.0";
+      url = "github:jnsahaj/lumen/v2.20.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };

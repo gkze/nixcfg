@@ -328,10 +328,11 @@ rec {
         { nix-homebrew = { inherit user; }; }
         "${modulesPath}/darwin/${user}/shell.nix"
         "${modulesPath}/darwin/${user}/brew-apps.nix"
-        # TODO: Enable nix-rosetta-builder once bootstrapped. It provides
-        # aarch64-linux and x86_64-linux builders on Apple Silicon, but requires
-        # an existing Linux builder to build its VM image first.
-        # inputs.nix-rosetta-builder.darwinModules.default
+        # Linux builder for cross-platform Nix builds on Apple Silicon.
+        # nix-rosetta-builder provides aarch64-linux and x86_64-linux builders
+        # via Rosetta 2. Requires initial bootstrap with nix.linux-builder.
+        inputs.nix-rosetta-builder.darwinModules.default
+        { nix-rosetta-builder.onDemand = true; }
       ]
       ++ extraSystemModules;
     };

@@ -854,6 +854,7 @@ async def compute_deno_deps_hash(source: str, input_name: str) -> EventStream:
 
         try:
             platform_hashes: dict[str, str] = {}
+            failed_platforms: list[str] = []
 
             # Compute hash for each platform sequentially
             for platform in platforms_to_compute:
@@ -864,7 +865,14 @@ async def compute_deno_deps_hash(source: str, input_name: str) -> EventStream:
                     HashEntry.create(
                         "denoDeps",
                         "denoDepsHash",
-                        (platform_hashes.get(p) or existing_hashes.get(p, FAKE_HASH)),
+                        (
+                            FAKE_HASH
+                            if p == platform
+                            else (
+                                platform_hashes.get(p)
+                                or existing_hashes.get(p, FAKE_HASH)
+                            )
+                        ),
                         platform=p,
                     )
                     for p in DENO_DEPS_PLATFORMS
@@ -876,17 +884,44 @@ async def compute_deno_deps_hash(source: str, input_name: str) -> EventStream:
                 sources.entries[source] = temp_entry
                 sources.save(SOURCES_FILE)
 
-                async for event in _compute_deno_deps_hash_for_platform(
-                    source, input_name, platform
-                ):
-                    if (
-                        event.kind == UpdateEventKind.VALUE
-                        and event.payload is not None
+                try:
+                    async for event in _compute_deno_deps_hash_for_platform(
+                        source, input_name, platform
                     ):
-                        plat, hash_val = event.payload
-                        platform_hashes[plat] = hash_val
+                        if (
+                            event.kind == UpdateEventKind.VALUE
+                            and event.payload is not None
+                        ):
+                            plat, hash_val = event.payload
+                            platform_hashes[plat] = hash_val
+                        else:
+                            yield event
+                except RuntimeError:
+                    # Non-native platform build failed - preserve existing hash if available
+                    if platform != current_platform:
+                        failed_platforms.append(platform)
+                        if platform in existing_hashes:
+                            yield UpdateEvent.status(
+                                source,
+                                f"Build failed for {platform}, preserving existing hash",
+                            )
+                            platform_hashes[platform] = existing_hashes[platform]
+                        else:
+                            yield UpdateEvent.status(
+                                source,
+                                f"Build failed for {platform}, no existing hash to preserve",
+                            )
                     else:
-                        yield event
+                        # Native platform failed - this is a real error
+                        raise
+
+            # Warn if any platforms failed
+            if failed_platforms:
+                yield UpdateEvent.status(
+                    source,
+                    f"Warning: {len(failed_platforms)} platform(s) failed, "
+                    f"preserved existing hashes: {', '.join(failed_platforms)}",
+                )
 
             # Merge computed hashes with preserved existing hashes
             final_hashes = {**existing_hashes, **platform_hashes}

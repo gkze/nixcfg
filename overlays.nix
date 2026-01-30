@@ -594,7 +594,16 @@ in
         };
       });
 
-      opencode = inputs.opencode.packages.${system}.opencode.overrideAttrs opencodeBunPatch;
+      opencode = inputs.opencode.packages.${system}.opencode.overrideAttrs (
+        old:
+        (opencodeBunPatch old)
+        // {
+          # Override node_modules hash - upstream may lag behind actual npm registry state
+          node_modules = old.node_modules.overrideAttrs {
+            outputHash = "sha256-yvrNFmYeMYviyCVSahuLFXmyoIMT136WoJ0MEbk+AD8=";
+          };
+        }
+      );
 
       opencode-desktop = inputs.opencode.packages.${system}.desktop.overrideAttrs (
         old:
