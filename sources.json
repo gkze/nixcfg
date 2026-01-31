@@ -91,18 +91,18 @@
   },
   "droid": {
     "hashes": {
-      "aarch64-darwin": "sha256-oUOB1iMK5HdkFoEv0LDDWn05Xj10tjsTDJKzAWr2klc=",
-      "aarch64-linux": "sha256-FvA2fTzofLb9WdpPWlA/3G0YYVykYik7ZK7BrRGGwlE=",
-      "x86_64-darwin": "sha256-Hwtq8guOxprWMh+rv4r1Ujv+r4ZvvVmfz6DIB07kDGA=",
-      "x86_64-linux": "sha256-Rw/juJo0maFakAR4dB8yNuAnuCiISQSclPajEgayMMU="
+      "aarch64-darwin": "sha256-Gmnp4J8dawZz63MwNktedJoQruwsoBh4fX5M89eSq3I=",
+      "aarch64-linux": "sha256-atqqznu82Pe2lf03A3rXQDy7fjHgeJ7lrzmg+qB6AAI=",
+      "x86_64-darwin": "sha256-16onXjf1MxsfjWOEVhw/eQZABWnoAxbQLN+zM4yrED4=",
+      "x86_64-linux": "sha256-xBqnvfPXYsepVMKM6WLUKzta92VwRiH/tbi7gWGxEVY="
     },
     "urls": {
-      "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.1/darwin/arm64/droid",
-      "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.57.1/linux/arm64/droid",
-      "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.1/darwin/x64/droid",
-      "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.57.1/linux/x64/droid"
+      "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.2/darwin/arm64/droid",
+      "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.57.2/linux/arm64/droid",
+      "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.2/darwin/x64/droid",
+      "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.57.2/linux/x64/droid"
     },
-    "version": "0.57.1"
+    "version": "0.57.2"
   },
   "gemini-cli": {
     "hashes": [
@@ -159,19 +159,19 @@
     "hashes": [
       {
         "drvType": "denoDeps",
-        "hash": "sha256-7Wth4sosMb385D+aUkh8NF9D2o2tpB+UfbiLUo+b6hk=",
+        "hash": "sha256-jQPkP7DcM9rr8YJhXAKkc6BrHPLIoAQwmkVDr60uy8I=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-darwin"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-2at3SrD8XxlD8fCsFxO6M0Uhyp8tyLZzjlhjnwgUHvc=",
+        "hash": "sha256-pIuxuLkT8SjxTMmx+uc3afl/Oz0jvgv9c01KP3m0txM=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-linux"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-M1UcWVTwKjvDpBFIe9jL8DT2TP6CK1alIINpoFkx1nQ=",
+        "hash": "sha256-nIpX1EBZndc2XgWV+ukof5JlmC5Rgo3DWiRvqgjK2Tw=",
         "hashType": "denoDepsHash",
         "platform": "x86_64-linux"
       }
