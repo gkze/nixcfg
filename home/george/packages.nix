@@ -78,6 +78,7 @@
       trdsql
       tree
       viddy
+      worktrunk
       xan
       xq-xml
       xz

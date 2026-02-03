@@ -939,6 +939,9 @@ in
           };
         };
 
+      # Worktrunk: Git worktree management CLI (from upstream flake)
+      worktrunk = inputs.worktrunk.packages.${system}.default;
+
       # Zed editor nightly from upstream flake
       zed-editor-nightly = inputs.zed.packages.${system}.default;
 

@@ -73,6 +73,10 @@
       url = "github:ipetkov/crane";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    lumen = {
+      url = "github:jnsahaj/lumen/v2.20.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     opencode = {
       url = "github:anomalyco/opencode";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -112,6 +116,10 @@
     uv2nix = {
       url = "github:pyproject-nix/uv2nix";
       inputs.pyproject-nix.follows = "pyproject-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    worktrunk = {
+      url = "github:max-sixty/worktrunk/v0.22.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -247,10 +255,6 @@
     zsh-completions = {
       url = "github:zsh-users/zsh-completions";
       flake = false;
-    };
-    lumen = {
-      url = "github:jnsahaj/lumen/v2.20.0";
-      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 

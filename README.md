@@ -36,10 +36,10 @@ nh (os|darwin) switch -a . # os for NixOS, darwin for macOS
 
 | Feature :arrow_down: / OS :arrow_right: | macOS | NixOS | Debian | Any Linux distribution |
 | --------------------------------------- | ----- | ----- | ------ | ---------------------- |
-| Automatic setup                         | :x:   | :x:   | :x:    | :x:                    |
-| Automatic backups                       | :x:   | :x:   | :x:    | :x:                    |
-| Storage encryption                      | :x:   | :x:   | :x:    | :x:                    |
-| Secret management                       | :x:   | :x:   | :x:    | :x:                    |
+| Automatic setup | :x: | :x: | :x: | :x: |
+| Automatic backups | :x: | :x: | :x: | :x: |
+| Storage encryption | :x: | :x: | :x: | :x: |
+| Secret management | :x: | :x: | :x: | :x: |
 
 ## License
 

@@ -159,19 +159,19 @@
     "hashes": [
       {
         "drvType": "denoDeps",
-        "hash": "sha256-D6foZF+vwBuJ9kbQthZvu1f3Z93hBevcIsf/an+AEyU=",
+        "hash": "sha256-rykjikP4zdLWWrOz6fvKQD3HrrIEZ91USvUjWz7ovCM=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-darwin"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-yFRR2lA8DBfHoX7/TDlg36doXEpo4hP1tGmpCL9fLlM=",
+        "hash": "sha256-Y+yfqwyAiG7UyVRM9Tb14bV37/R4JKdpEtc2YegOZxc=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-linux"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-marxrTq+2dtexkny0V/ImcJiAVKr2KvtC5d152KRpOw=",
+        "hash": "sha256-sa8XQTvWulhcG7/EB0yrm18DOydwvi8RiOGNSaVIw1s=",
         "hashType": "denoDepsHash",
         "platform": "x86_64-linux"
       }
