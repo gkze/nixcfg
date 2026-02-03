@@ -333,7 +333,7 @@
     element-desktop.enable = true;
     eza.enable = true;
     fd.enable = true;
-    # gemini-cli.enable = true; # TODO: temporarily disabled - patch needs update
+    gemini-cli.enable = true;
     home-manager.enable = true;
     jq.enable = true;
     jujutsu.enable = true;

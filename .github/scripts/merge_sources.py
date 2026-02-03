@@ -15,27 +15,29 @@ from pathlib import Path
 
 
 def merge_hash_entries(entries_list: list[list[dict]]) -> list[dict]:
-    """Merge hash entries from multiple sources, keyed by (hashType, platform).
+    """Merge hash entries from multiple sources, keyed by (hashType, platform, drvType).
 
     Each entry in the hashes array can have different identifying fields:
     - hashType: e.g., "srcHash", "cargoHash", "vendorHash"
     - platform: e.g., "aarch64-darwin", "x86_64-linux" (optional)
     - drvType: e.g., "fetchFromGitHub", "fetchCargoVendor" (optional)
 
-    We key by (hashType, platform) to preserve all unique hash entries.
+    We key by (hashType, platform, drvType) to preserve all unique hash entries.
     """
-    # Key by (hashType, platform) tuple to preserve all unique entries
-    by_key: dict[tuple[str | None, str | None], dict] = {}
+    # Key by (hashType, platform, drvType) tuple to preserve all unique entries
+    by_key: dict[tuple[str | None, str | None, str | None], dict] = {}
 
     for entries in entries_list:
         for entry in entries:
             hash_type = entry.get("hashType")
             platform = entry.get("platform")
-            key = (hash_type, platform)
+            drv_type = entry.get("drvType")
+            key = (hash_type, platform, drv_type)
             # Skip FAKE_HASH entries
-            if entry.get("hash", "").startswith("sha256-AAAAAAA"):
+            hash_val = entry.get("hash")
+            if isinstance(hash_val, str) and hash_val.startswith("sha256-AAAAAAA"):
                 continue
-            # Take first valid hash for each (hashType, platform) combination
+            # Take first valid hash for each (hashType, platform, drvType) combination
             if key not in by_key:
                 by_key[key] = entry
 
@@ -48,7 +50,7 @@ def merge_hash_dicts(dicts_list: list[dict]) -> dict:
     for d in dicts_list:
         for platform, hash_val in d.items():
             # Skip FAKE_HASH
-            if hash_val.startswith("sha256-AAAAAAA"):
+            if isinstance(hash_val, str) and hash_val.startswith("sha256-AAAAAAA"):
                 continue
             if platform not in merged:
                 merged[platform] = hash_val
@@ -118,7 +120,7 @@ def main():
         if not path.exists():
             print(f"Warning: {filepath} not found, skipping", file=sys.stderr)
             continue
-        with open(path) as f:
+        with path.open(encoding="utf-8") as f:
             sources_list.append(json.load(f))
 
     if not sources_list:
@@ -127,7 +129,7 @@ def main():
 
     merged = merge_sources(sources_list)
 
-    with open(args.output, "w") as f:
+    with open(args.output, "w", encoding="utf-8") as f:
         json.dump(merged, f, indent=2, sort_keys=True)
         f.write("\n")
 

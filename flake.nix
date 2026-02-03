@@ -61,6 +61,18 @@
       url = "github:nix-community/nixvim";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    bun2nix = {
+      url = "github:nix-community/bun2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    crate2nix = {
+      url = "github:nix-community/crate2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     opencode = {
       url = "github:anomalyco/opencode";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -107,7 +119,7 @@
       flake = false;
     };
     beads = {
-      url = "github:steveyegge/beads/v0.49.1";
+      url = "github:steveyegge/beads/v0.49.3";
       flake = false;
     };
     bufresize-nvim = {
@@ -119,7 +131,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.92.0";
+      url = "github:openai/codex/rust-v0.94.0";
       flake = false;
     };
     # rama-boring-sys dependencies (for codex network-proxy crate)
@@ -136,7 +148,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.37.0";
+      url = "github:charmbracelet/crush/v0.38.1";
       flake = false;
     };
     gemini-cli = {
@@ -209,7 +221,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad/v0.5.35";
+      url = "github:batrachianai/toad/v0.5.38";
       flake = false;
     };
     treesitter-textobjects = {
@@ -298,10 +310,13 @@
 
         withOverlays = [
           devshell.overlays.default
+          inputs.bun2nix.overlays.default
           inputs.curator.overlays.default
           inputs.lumen.overlays.default
+          self.overlays.neovimLuaCompat # Must be before neovim-nightly-overlay
           inputs.neovim-nightly-overlay.overlays.default
           inputs.red.overlays.default
+          inputs.rust-overlay.overlays.default
           self.overlays.default
         ];
 

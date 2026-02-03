@@ -30,7 +30,7 @@ Usage:
 
 Environment Variables:
     UPDATE_LOG_TAIL_LINES     Number of log lines to show (default: 10)
-    UPDATE_PANEL_HEIGHT       Terminal panel height override
+    UPDATE_LOG_FULL           Show full, scrollable output (default: 0)
 
 Sources are defined with custom update logic for fetching latest versions
 and computing hashes from upstream release channels.
@@ -44,23 +44,23 @@ import functools
 import json
 import netrc
 import os
+import random
 import re
-import select
 import shlex
 import shutil
 import sys
-import termios
+import tempfile
 import time
-import tty
 import urllib.parse
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, AsyncIterator, Iterable, Literal, Mapping
+from typing import Any, AsyncIterator, Callable, Iterable, Literal, Mapping
 
 import aiohttp
 from filelock import FileLock
@@ -81,27 +81,61 @@ def get_repo_file(filename: str) -> Path:
 SOURCES_FILE = get_repo_file("sources.json")
 FLAKE_LOCK_FILE = get_repo_file("flake.lock")
 
+
+@dataclass(frozen=True)
+class UpdateConfig:
+    default_timeout: int = 30
+    default_subprocess_timeout: int = 600  # 10 minutes for nix builds
+    default_log_tail_lines: int = 10
+    default_render_interval: float = 0.05
+    default_user_agent: str = "update.py"
+    default_retries: int = 3
+    default_retry_backoff: float = 1.0
+    retry_jitter_ratio: float = 0.2
+    fake_hash: str = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    deno_deps_platforms: tuple[str, ...] = (
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-linux",
+    )
+
+
+DEFAULT_CONFIG = UpdateConfig()
+
 # =============================================================================
-# Utilities
+# Core utilities
 # =============================================================================
 
 
-DEFAULT_TIMEOUT = 30
-DEFAULT_SUBPROCESS_TIMEOUT = 600  # 10 minutes for nix builds
-DEFAULT_LOG_TAIL_LINES = 10
-DEFAULT_RENDER_INTERVAL = 0.05
-DEFAULT_USER_AGENT = "update.py"
-DEFAULT_RETRIES = 3
-DEFAULT_RETRY_BACKOFF = 1.0
+DEFAULT_TIMEOUT = DEFAULT_CONFIG.default_timeout
+DEFAULT_SUBPROCESS_TIMEOUT = DEFAULT_CONFIG.default_subprocess_timeout
+DEFAULT_LOG_TAIL_LINES = DEFAULT_CONFIG.default_log_tail_lines
+DEFAULT_RENDER_INTERVAL = DEFAULT_CONFIG.default_render_interval
+DEFAULT_USER_AGENT = DEFAULT_CONFIG.default_user_agent
+DEFAULT_RETRIES = DEFAULT_CONFIG.default_retries
+DEFAULT_RETRY_BACKOFF = DEFAULT_CONFIG.default_retry_backoff
 # Placeholder hash used when a real hash cannot be computed (e.g., non-native platforms).
 # In --native-only mode, updaters preserve FAKE_HASH for platforms that can't be built
 # locally. The CI pipeline runs on multiple platforms and merges results, so each
 # platform computes its native hashes while preserving placeholders for others.
 # See merge_sources.py for the merge logic that combines platform-specific results.
-FAKE_HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+FAKE_HASH = DEFAULT_CONFIG.fake_hash
+# Platforms to compute Deno deps hashes for (matches flake's systems list)
+DENO_DEPS_PLATFORMS = DEFAULT_CONFIG.deno_deps_platforms
 SRI_PREFIX = "sha256-"
+GO_LATEST_EXPR = "if pkgs ? go_1_26 then pkgs.go_1_26 else if pkgs ? go_1_25 then pkgs.go_1_25 else pkgs.go"
+# Core tools needed for most operations
 REQUIRED_TOOLS = ["nix", "nix-prefetch-url"]
-OPTIONAL_TOOLS = ["flake-edit"]  # Only needed for ref updates
+# flake-edit only needed for ref updates
+FIXED_OUTPUT_NOISE = (
+    "error: hash mismatch in fixed-output derivation",
+    "specified:",
+    "got:",
+    "error: Cannot build",
+    "Reason:",
+    "Output paths:",
+    "error: Build failed due to failed dependency",
+)
 
 
 @functools.cache
@@ -118,86 +152,32 @@ def get_current_nix_platform() -> str:
     return f"{arch}-{system}"
 
 
-def _check_required_tools() -> list[str]:
+def _check_required_tools(*, include_flake_edit: bool = False) -> list[str]:
     """Check that required external tools are available. Returns list of missing tools."""
-    missing = [tool for tool in REQUIRED_TOOLS if shutil.which(tool) is None]
+    tools = list(REQUIRED_TOOLS)
+    if include_flake_edit:
+        tools.append("flake-edit")
+    missing = [tool for tool in tools if shutil.which(tool) is None]
     return missing
 
 
 def _resolve_log_tail_lines(lines: int | None) -> int:
     if lines is not None:
         return max(1, lines)
+    configured = os.environ.get("UPDATE_LOG_TAIL_LINES")
+    if configured is None:
+        return DEFAULT_LOG_TAIL_LINES
     try:
-        configured = int(
-            os.environ.get("UPDATE_LOG_TAIL_LINES", DEFAULT_LOG_TAIL_LINES)
-        )
+        return max(1, int(configured))
     except ValueError:
-        configured = DEFAULT_LOG_TAIL_LINES
-    return max(1, configured)
+        return DEFAULT_LOG_TAIL_LINES
 
 
-def _read_cursor_row() -> int | None:
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        return None
-    fd = sys.stdin.fileno()
-    try:
-        original = termios.tcgetattr(fd)
-    except termios.error:
-        return None
-    try:
-        tty.setcbreak(fd)
-        sys.stdout.write("\x1b[6n")
-        sys.stdout.flush()
-        response = ""
-        start = time.monotonic()
-        while time.monotonic() - start < 0.05:
-            ready, _, _ = select.select([fd], [], [], 0.05)
-            if not ready:
-                continue
-            response += os.read(fd, 32).decode(errors="ignore")
-            if "R" in response:
-                break
-        match = re.search(r"\x1b\[(\d+);(\d+)R", response)
-        if match:
-            return int(match.group(1))
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, original)
-    return None
-
-
-class TerminalInfo:
-    _console: Any = None
-
-    @classmethod
-    def _get_console(cls) -> Any:
-        """Lazily initialize Rich Console."""
-        if cls._console is None:
-            from rich.console import Console
-
-            cls._console = Console()
-        return cls._console
-
-    @classmethod
-    def width(cls) -> int:
-        return cls._get_console().width
-
-    @classmethod
-    def height(cls) -> int:
-        return cls._get_console().height
-
-    @classmethod
-    def panel_height(cls) -> int:
-        override = os.environ.get("UPDATE_PANEL_HEIGHT")
-        if override:
-            try:
-                return max(1, int(override))
-            except ValueError:
-                pass
-        height = cls.height()
-        row = _read_cursor_row()
-        if row is None:
-            return max(1, height - 1)
-        return max(1, height - row + 1)
+def _resolve_full_output() -> bool:
+    configured = os.environ.get("UPDATE_LOG_FULL")
+    if not configured:
+        return False
+    return configured.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _sanitize_log_line(line: str) -> str:
@@ -217,12 +197,21 @@ def _truncate_command(text: str, max_len: int = 80) -> str:
     return f"{trimmed}{suffix}"
 
 
-@dataclass(frozen=True)
-class CommandResult:
-    args: list[str]
-    returncode: int
-    stdout: str
-    stderr: str
+def _is_terminal_status(message: str) -> bool:
+    return message.startswith(
+        (
+            "Up to date",
+            "Updated",
+            "Update available",
+            "Already at latest",
+            "No updates needed",
+        )
+    )
+
+
+# =============================================================================
+# Event stream
+# =============================================================================
 
 
 class UpdateEventKind(StrEnum):
@@ -283,712 +272,13 @@ def _require_value(drain: ValueDrain, error: str) -> Any:
     return drain.value
 
 
-@functools.cache
-def _get_github_token() -> str | None:
-    """Get GitHub token from GITHUB_TOKEN env var or ~/.netrc (cached)."""
-    token = os.environ.get("GITHUB_TOKEN")
-    if token:
-        return token
-    netrc_path = Path.home() / ".netrc"
-    if netrc_path.exists():
-        try:
-            netrc_data = netrc.netrc(str(netrc_path))
-            for host in ("api.github.com", "github.com"):
-                auth = netrc_data.authenticators(host)
-                if auth:
-                    return auth[2]  # password field contains token
-        except (netrc.NetrcParseError, OSError):
-            pass
-    return None
-
-
-def _check_github_rate_limit(headers: Mapping[str, str], url: str) -> None:
-    remaining = headers.get("X-RateLimit-Remaining")
-    if remaining is None:
-        return
-    try:
-        remaining_value = int(remaining)
-    except ValueError:
-        return
-    if remaining_value > 0:
-        return
-    reset = headers.get("X-RateLimit-Reset")
-    reset_time = "unknown"
-    if reset and reset.isdigit():
-        reset_time = datetime.fromtimestamp(int(reset), tz=timezone.utc).isoformat()
-    raise RuntimeError(
-        f"GitHub API rate limit exceeded for {url}. Resets at {reset_time}."
-    )
-
-
-async def _request(
-    session: aiohttp.ClientSession,
-    url: str,
-    *,
-    user_agent: str | None = None,
-    timeout: float | None = None,
-    method: str = "GET",
-    retries: int = DEFAULT_RETRIES,
-    backoff: float = DEFAULT_RETRY_BACKOFF,
-) -> tuple[bytes, Mapping[str, str]]:
-    headers: dict[str, str] = {}
-    if user_agent:
-        headers["User-Agent"] = user_agent
-    # Add GitHub API authentication if available
-    github_token = _get_github_token()
-    if url.startswith("https://api.github.com/") and github_token:
-        headers["Authorization"] = f"Bearer {github_token}"
-    timeout_config = aiohttp.ClientTimeout(total=timeout or DEFAULT_TIMEOUT)
-
-    last_error: Exception | None = None
-    for attempt in range(retries):
-        try:
-            async with session.request(
-                method,
-                url,
-                headers=headers,
-                timeout=timeout_config,
-                allow_redirects=True,
-            ) as response:
-                payload = await response.read()
-                if response.status >= 400:
-                    error_body = payload.decode(errors="ignore").strip()
-                    detail = f"HTTP {response.status} {response.reason}"
-                    if error_body:
-                        detail = f"{detail}\n{error_body}"
-                    # Don't retry client errors (4xx), only server errors (5xx)
-                    if response.status < 500:
-                        raise RuntimeError(f"Request to {url} failed: {detail}")
-                    last_error = RuntimeError(f"Request to {url} failed: {detail}")
-                else:
-                    return payload, response.headers
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            last_error = e
-
-        # Exponential backoff before retry
-        if attempt < retries - 1:
-            await asyncio.sleep(backoff * (2**attempt))
-
-    raise RuntimeError(
-        f"Request to {url} failed after {retries} attempts: {last_error}"
-    )
-
-
-async def fetch_url(
-    session: aiohttp.ClientSession,
-    url: str,
-    *,
-    user_agent: str | None = None,
-    timeout: float | None = None,
-) -> bytes:
-    payload, _headers = await _request(
-        session, url, user_agent=user_agent, timeout=timeout
-    )
-    return payload
-
-
-async def fetch_json(
-    session: aiohttp.ClientSession,
-    url: str,
-    *,
-    user_agent: str | None = None,
-    timeout: float | None = None,
-) -> dict:
-    """Fetch and parse JSON from a URL."""
-    if url.startswith("https://api.github.com/"):
-        payload, headers = await _request(
-            session, url, user_agent=user_agent, timeout=timeout
-        )
-        _check_github_rate_limit(headers, url)
-    else:
-        payload = await fetch_url(session, url, user_agent=user_agent, timeout=timeout)
-    try:
-        return json.loads(payload.decode())
-    except json.JSONDecodeError as err:
-        raise RuntimeError(f"Invalid JSON response from {url}: {err}") from err
-
-
-async def stream_command(
-    args: list[str],
-    *,
-    source: str,
-    timeout: float = DEFAULT_SUBPROCESS_TIMEOUT,
-) -> EventStream:
-    command_text = _truncate_command(shlex.join(args))
-    yield UpdateEvent(
-        source=source,
-        kind=UpdateEventKind.COMMAND_START,
-        message=command_text,
-        payload=args,
-    )
-
-    # Use TERM=dumb to prevent subprocesses (especially nix) from writing
-    # fancy progress output directly to /dev/tty, which corrupts cursor tracking.
-    env = {**os.environ, "TERM": "dumb"}
-    process = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-    )
-    stdout_chunks: list[str] = []
-    stderr_chunks: list[str] = []
-    queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
-    deadline = asyncio.get_event_loop().time() + timeout
-
-    async def pump(
-        stream: asyncio.StreamReader | None, label: str, store: list[str]
-    ) -> None:
-        if stream is None:
-            await queue.put((label, None))
-            return
-        while True:
-            line = await stream.readline()
-            if not line:
-                break
-            text = line.decode(errors="replace")
-            store.append(text)
-            await queue.put((label, text))
-        await queue.put((label, None))
-
-    tasks = [
-        asyncio.create_task(pump(process.stdout, "stdout", stdout_chunks)),
-        asyncio.create_task(pump(process.stderr, "stderr", stderr_chunks)),
-    ]
-
-    try:
-        done_streams = 0
-        while done_streams < len(tasks):
-            remaining = deadline - asyncio.get_event_loop().time()
-            if remaining <= 0:
-                raise asyncio.TimeoutError(f"Command timed out after {timeout}s")
-            label, text = await asyncio.wait_for(queue.get(), timeout=remaining)
-            if text is None:
-                done_streams += 1
-                continue
-            sanitized = _sanitize_log_line(text.rstrip("\n"))
-            if sanitized:
-                yield UpdateEvent(
-                    source=source,
-                    kind=UpdateEventKind.LINE,
-                    message=sanitized,
-                    stream=label,
-                )
-        await asyncio.gather(*tasks)
-        returncode = await process.wait()
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
-        raise RuntimeError(f"Command timed out after {timeout}s: {shlex.join(args)}")
-
-    result = CommandResult(
-        args=args,
-        returncode=returncode,
-        stdout="".join(stdout_chunks),
-        stderr="".join(stderr_chunks),
-    )
-    yield UpdateEvent(source=source, kind=UpdateEventKind.COMMAND_END, payload=result)
-
-
-async def run_command(args: list[str], *, source: str, error: str) -> EventStream:
-    result_drain = ValueDrain()
-    async for event in stream_command(args, source=source):
-        if event.kind == UpdateEventKind.COMMAND_END:
-            result_drain.value = event.payload
-        yield event
-    result = _require_value(result_drain, error)
-    yield UpdateEvent.value(source, result)
-
-
-async def convert_nix_hash_to_sri(source: str, hash_value: str) -> EventStream:
-    """Convert any nix hash format (base32, hex) to SRI format."""
-    result_drain = ValueDrain()
-    async for event in drain_value_events(
-        run_command(
-            [
-                "nix",
-                "hash",
-                "convert",
-                "--hash-algo",
-                "sha256",
-                "--to",
-                "sri",
-                hash_value,
-            ],
-            source=source,
-            error="nix hash convert did not return output",
-        ),
-        result_drain,
-    ):
-        yield event
-    result = _require_value(result_drain, "nix hash convert did not return output")
-    yield UpdateEvent.value(source, result.stdout.strip())
-
-
-async def compute_sri_hash(source: str, url: str) -> EventStream:
-    """Compute SRI hash for a URL using nix-prefetch-url."""
-    result_drain = ValueDrain()
-    async for event in drain_value_events(
-        run_command(
-            ["nix-prefetch-url", "--type", "sha256", url],
-            source=source,
-            error="nix-prefetch-url did not return output",
-        ),
-        result_drain,
-    ):
-        yield event
-    result = _require_value(result_drain, "nix-prefetch-url did not return output")
-    base32_hash = result.stdout.strip().split("\n")[-1]
-    async for event in convert_nix_hash_to_sri(source, base32_hash):
-        yield event
-
-
-async def compute_url_hashes(source: str, urls: Iterable[str]) -> EventStream:
-    hashes: dict[str, str] = {}
-    for url in dict.fromkeys(urls):
-        sri_drain = ValueDrain()
-        async for event in drain_value_events(compute_sri_hash(source, url), sri_drain):
-            yield event
-        sri_value = _require_value(sri_drain, "Missing hash output")
-        hashes[url] = sri_value
-    yield UpdateEvent.value(source, hashes)
-
-
-def load_flake_lock() -> dict:
-    """Load flake.lock nodes. Validates expected structure."""
-    if not FLAKE_LOCK_FILE.exists():
-        raise FileNotFoundError(f"flake.lock not found at {FLAKE_LOCK_FILE}")
-    data = json.loads(FLAKE_LOCK_FILE.read_text())
-    if "nodes" not in data:
-        raise ValueError(
-            f"Invalid flake.lock: missing 'nodes' key in {FLAKE_LOCK_FILE}"
-        )
-    nodes = data["nodes"]
-    if "root" not in nodes:
-        raise ValueError(
-            f"Invalid flake.lock: missing 'root' node in {FLAKE_LOCK_FILE}"
-        )
-    return nodes
-
-
-def get_flake_input_node(input_name: str) -> dict:
-    """Return flake.lock node for an input."""
-    lock = load_flake_lock()
-    if input_name not in lock:
-        raise KeyError(f"flake input '{input_name}' not found in flake.lock")
-    return lock[input_name]
-
-
-def get_root_input_name(input_name: str) -> str:
-    """Return the node name for a root input."""
-    lock = load_flake_lock()
-    root_inputs = lock.get("root", {}).get("inputs", {})
-    return root_inputs.get(input_name, input_name)
-
-
-def get_flake_input_version(node: dict) -> str:
-    """Best-effort version string for a flake input."""
-    original = node.get("original", {})
-    return (
-        original.get("ref")
-        or original.get("rev")
-        or node.get("locked", {}).get("rev")
-        or "unknown"
-    )
-
-
-def flake_fetch_expr(node: dict) -> str:
-    """Build a nix expression to fetch a flake input."""
-    locked = node.get("locked", {})
-    if locked.get("type") not in {"github", "gitlab"}:
-        raise ValueError(f"Unsupported flake input type: {locked.get('type')}")
-    return (
-        "builtins.fetchTree { "
-        f'type = "{locked["type"]}"; '
-        f'owner = "{locked["owner"]}"; '
-        f'repo = "{locked["repo"]}"; '
-        f'rev = "{locked["rev"]}"; '
-        f'narHash = "{locked["narHash"]}"; '
-        "}"
-    )
-
-
-def nixpkgs_expr() -> str:
-    node_name = get_root_input_name("nixpkgs")
-    node = get_flake_input_node(node_name)
-    return f"import ({flake_fetch_expr(node)}) {{ system = builtins.currentSystem; }}"
-
-
-async def update_flake_input(input_name: str, *, source: str) -> EventStream:
-    """Update a flake input in flake.lock."""
-    async for event in stream_command(
-        ["nix", "flake", "lock", "--update-input", input_name],
-        source=source,
-    ):
-        yield event
-
-
-def _extract_nix_hash(output: str) -> str:
-    sri_match = re.search(r"got:\s*(sha256-[0-9A-Za-z+/=]+)", output)
-    if sri_match:
-        return sri_match.group(1)
-    fallback_match = re.search(
-        r"got:\s*(sha256:[0-9a-fA-F]{64}|[0-9a-fA-F]{64}|[0-9a-z]{52})",
-        output,
-    )
-    if fallback_match:
-        return fallback_match.group(1)
-    raise RuntimeError(f"Could not find hash in nix output:\n{output.strip()}")
-
-
-async def compute_fixed_output_hash(source: str, expr: str) -> EventStream:
-    """Compute hash by running a nix expression with lib.fakeHash."""
-    result_drain = ValueDrain()
-    async for event in drain_value_events(
-        run_command(
-            [
-                "nix",
-                "build",
-                "-L",
-                "--verbose",
-                "--no-link",
-                "--impure",
-                "--expr",
-                expr,
-            ],
-            source=source,
-            error="nix build did not return output",
-        ),
-        result_drain,
-    ):
-        yield event
-    result = _require_value(result_drain, "nix build did not return output")
-    if result.returncode == 0:
-        raise RuntimeError(
-            "Expected nix build to fail with hash mismatch, but it succeeded"
-        )
-    hash_value = _extract_nix_hash(result.stderr + result.stdout)
-    if hash_value.startswith(SRI_PREFIX):
-        yield UpdateEvent.value(source, hash_value)
-        return
-    async for event in convert_nix_hash_to_sri(source, hash_value):
-        yield event
-
-
-def _build_nix_expr(body: str) -> str:
-    """Build a nix expression with nixpkgs prelude."""
-    return f"""
-      let
-        pkgs = {nixpkgs_expr()};
-      in
-        {body}
-    """
-
-
-async def _compute_nixpkgs_hash(source: str, expr_body: str) -> EventStream:
-    """Compute hash for a nixpkgs expression that uses lib.fakeHash."""
-    expr = _build_nix_expr(expr_body)
-    async for event in compute_fixed_output_hash(source, expr):
-        yield event
-
-
-async def compute_go_vendor_hash(
-    source: str,
-    input_name: str,
-    *,
-    pname: str,
-    version: str,
-    subpackages: list[str] | None = None,
-    proxy_vendor: bool = False,
-) -> EventStream:
-    subpackages_expr = ""
-    if subpackages:
-        quoted = " ".join(f'"{subpkg}"' for subpkg in subpackages)
-        subpackages_expr = f"subPackages = [ {quoted} ];"
-    proxy_expr = "proxyVendor = true;" if proxy_vendor else ""
-    src_expr = flake_fetch_expr(get_flake_input_node(input_name))
-    async for event in _compute_nixpkgs_hash(
-        source,
-        f"""pkgs.buildGoModule {{
-        pname = "{pname}";
-        version = "{version}";
-        src = {src_expr};
-        {subpackages_expr}
-        {proxy_expr}
-        vendorHash = pkgs.lib.fakeHash;
-      }}""",
-    ):
-        yield event
-
-
-async def compute_cargo_vendor_hash(
-    source: str, input_name: str, *, subdir: str | None = None
-) -> EventStream:
-    src_expr = flake_fetch_expr(get_flake_input_node(input_name))
-    if subdir:
-        src_expr = f'"${{{src_expr}}}/{subdir}"'
-    async for event in _compute_nixpkgs_hash(
-        source,
-        f"""pkgs.rustPlatform.fetchCargoVendor {{
-        src = {src_expr};
-        hash = pkgs.lib.fakeHash;
-      }}""",
-    ):
-        yield event
-
-
-async def compute_npm_deps_hash(source: str, input_name: str) -> EventStream:
-    src_expr = flake_fetch_expr(get_flake_input_node(input_name))
-    async for event in _compute_nixpkgs_hash(
-        source,
-        f"""pkgs.fetchNpmDeps {{
-        src = {src_expr};
-        hash = pkgs.lib.fakeHash;
-      }}""",
-    ):
-        yield event
-
-
-async def _compute_deno_deps_hash_for_platform(
-    source: str, input_name: str, platform: str
-) -> EventStream:
-    """Compute Deno deps hash for a specific platform."""
-    nix_attr = f'"{source}"'  # Quote the attribute name for nix
-    result_drain = ValueDrain()
-    async for event in drain_value_events(
-        run_command(
-            [
-                "nix",
-                "build",
-                "-L",
-                "--no-link",
-                "--impure",
-                "--expr",
-                f"""
-                  let
-                    flake = builtins.getFlake "git+file://{get_repo_file(".")}?dirty=1";
-                    pkgs = import ({flake_fetch_expr(get_flake_input_node(get_root_input_name("nixpkgs")))}) {{
-                      system = "{platform}";
-                      overlays = [ flake.overlays.default ];
-                    }};
-                  in pkgs.{nix_attr}
-                """,
-            ],
-            source=f"{source}:{platform}",
-            error="nix build did not return output",
-        ),
-        result_drain,
-    ):
-        yield event
-    result = _require_value(result_drain, "nix build did not return output")
-
-    if result.returncode == 0:
-        raise RuntimeError(
-            f"Expected nix build to fail with hash mismatch for {platform}, but it succeeded"
-        )
-
-    hash_value = _extract_nix_hash(result.stderr + result.stdout)
-    if not hash_value.startswith(SRI_PREFIX):
-        # Convert to SRI if needed
-        sri_drain = ValueDrain()
-        async for event in drain_value_events(
-            convert_nix_hash_to_sri(source, hash_value), sri_drain
-        ):
-            yield event
-        hash_value = _require_value(sri_drain, "Hash conversion failed")
-
-    yield UpdateEvent.value(source, (platform, hash_value))
-
-
-# Platforms to compute Deno deps hashes for (matches flake's systems list)
-DENO_DEPS_PLATFORMS = [
-    "aarch64-darwin",
-    "aarch64-linux",
-    "x86_64-linux",
-]
-
-# Module-level flag set by --native-only CLI arg
-# When True, only compute hashes for current platform (for CI without remote builders)
-_NATIVE_ONLY = False
-
-
-async def compute_deno_deps_hash(source: str, input_name: str) -> EventStream:
-    """Compute Deno deps hash for supported platforms.
-
-    Deno caches can include platform-specific dependencies (e.g., lefthook binaries),
-    so we compute hashes for each supported platform separately. For non-native
-    platforms, Nix will automatically use configured remote builders (e.g.,
-    nix-rosetta-builder on macOS provides aarch64-linux and x86_64-linux builders).
-
-    When _NATIVE_ONLY is True (--native-only flag), only computes hash for the
-    current platform and preserves existing hashes for other platforms. This is
-    useful in CI where remote builders aren't available.
-
-    We compute hashes one platform at a time: set fakeHash for that platform,
-    build the flake, extract the correct hash from the error, then move to next.
-    Uses file locking to prevent concurrent modifications.
-    """
-    current_platform = get_current_nix_platform()
-    if current_platform not in DENO_DEPS_PLATFORMS:
-        raise RuntimeError(
-            f"Current platform {current_platform} not in supported platforms: "
-            f"{DENO_DEPS_PLATFORMS}"
-        )
-
-    lock_path = SOURCES_FILE.with_suffix(".json.lock")
-    with FileLock(lock_path):
-        sources = SourcesFile.load(SOURCES_FILE)
-        original_entry = sources.entries.get(source)
-
-        # Preserve existing hashes for platforms we won't compute
-        existing_hashes: dict[str, str] = {}
-        if original_entry and original_entry.hashes.entries:
-            for entry in original_entry.hashes.entries:
-                if entry.platform:
-                    existing_hashes[entry.platform] = entry.hash
-
-        # Determine which platforms to compute
-        platforms_to_compute = (
-            [current_platform] if _NATIVE_ONLY else DENO_DEPS_PLATFORMS
-        )
-
-        try:
-            platform_hashes: dict[str, str] = {}
-            failed_platforms: list[str] = []
-
-            # Compute hash for each platform sequentially
-            for platform in platforms_to_compute:
-                yield UpdateEvent.status(source, f"Computing hash for {platform}...")
-
-                # Set fake hash for platform being computed, use existing/computed for others
-                temp_entries = [
-                    HashEntry.create(
-                        "denoDeps",
-                        "denoDepsHash",
-                        (
-                            FAKE_HASH
-                            if p == platform
-                            else (
-                                platform_hashes.get(p)
-                                or existing_hashes.get(p, FAKE_HASH)
-                            )
-                        ),
-                        platform=p,
-                    )
-                    for p in DENO_DEPS_PLATFORMS
-                ]
-                temp_entry = SourceEntry(
-                    hashes=HashCollection.from_value(temp_entries),
-                    input=input_name,
-                )
-                sources.entries[source] = temp_entry
-                sources.save(SOURCES_FILE)
-
-                try:
-                    async for event in _compute_deno_deps_hash_for_platform(
-                        source, input_name, platform
-                    ):
-                        if (
-                            event.kind == UpdateEventKind.VALUE
-                            and event.payload is not None
-                        ):
-                            plat, hash_val = event.payload
-                            platform_hashes[plat] = hash_val
-                        else:
-                            yield event
-                except RuntimeError:
-                    # Non-native platform build failed - preserve existing hash if available
-                    if platform != current_platform:
-                        failed_platforms.append(platform)
-                        if platform in existing_hashes:
-                            yield UpdateEvent.status(
-                                source,
-                                f"Build failed for {platform}, preserving existing hash",
-                            )
-                            platform_hashes[platform] = existing_hashes[platform]
-                        else:
-                            yield UpdateEvent.status(
-                                source,
-                                f"Build failed for {platform}, no existing hash to preserve",
-                            )
-                    else:
-                        # Native platform failed - this is a real error
-                        raise
-
-            # Warn if any platforms failed
-            if failed_platforms:
-                yield UpdateEvent.status(
-                    source,
-                    f"Warning: {len(failed_platforms)} platform(s) failed, "
-                    f"preserved existing hashes: {', '.join(failed_platforms)}",
-                )
-
-            # Merge computed hashes with preserved existing hashes
-            final_hashes = {**existing_hashes, **platform_hashes}
-            yield UpdateEvent.value(source, final_hashes)
-        finally:
-            if original_entry is not None:
-                sources.entries[source] = original_entry
-            else:
-                del sources.entries[source]
-            sources.save(SOURCES_FILE)
-
-
-def github_raw_url(owner: str, repo: str, rev: str, path: str) -> str:
-    return f"https://raw.githubusercontent.com/{owner}/{repo}/{rev}/{path}"
-
-
-def github_api_url(path: str) -> str:
-    """Build GitHub API URL from path (e.g., 'repos/owner/repo')."""
-    return f"https://api.github.com/{path}"
-
-
-async def fetch_github_api(
-    session: aiohttp.ClientSession, path: str, **params: str
-) -> dict:
-    """Fetch from GitHub API with standard options."""
-    url = github_api_url(path)
-    if params:
-        url = f"{url}?{'&'.join(f'{k}={v}' for k, v in params.items())}"
-    return await fetch_json(
-        session, url, user_agent=DEFAULT_USER_AGENT, timeout=DEFAULT_TIMEOUT
-    )
-
-
-async def fetch_github_default_branch(
-    session: aiohttp.ClientSession, owner: str, repo: str
-) -> str:
-    data = await fetch_github_api(session, f"repos/{owner}/{repo}")
-    return data["default_branch"]
-
-
-async def fetch_github_latest_commit(
-    session: aiohttp.ClientSession, owner: str, repo: str, file_path: str, branch: str
-) -> str:
-    url = github_api_url(f"repos/{owner}/{repo}/commits")
-    url = f"{url}?path={urllib.parse.quote(file_path)}&sha={branch}&per_page=1"
-    data = await fetch_json(
-        session, url, user_agent=DEFAULT_USER_AGENT, timeout=DEFAULT_TIMEOUT
-    )
-    if not data:
-        raise RuntimeError(f"No commits found for {owner}/{repo}:{file_path}")
-    return data[0]["sha"]
-
-
 # =============================================================================
-# Updater Base Class
+# Data models
 # =============================================================================
 
-# Registry populated automatically via __init_subclass__
-UPDATERS: dict[str, type["Updater"]] = {}
 
 # SRI hash pattern for validation
 _SRI_HASH_PATTERN = re.compile(r"^sha256-[A-Za-z0-9+/]+=*$")
-
-# Valid Nix platforms (matches flake's systems list - no x86_64-darwin)
-NixPlatform = Literal["aarch64-darwin", "aarch64-linux", "x86_64-linux", "darwin"]
-ALL_PLATFORMS = ("aarch64-darwin", "aarch64-linux", "x86_64-linux")
-DARWIN_PLATFORMS = ("aarch64-darwin",)
 
 # Common platform API mappings (nix platform -> API platform)
 VSCODE_PLATFORMS = {
@@ -1000,16 +290,27 @@ VSCODE_PLATFORMS = {
 # Valid derivation types
 DrvType = Literal[
     "buildGoModule",
+    "bunBuild",  # For bun-based node_modules (e.g., opencode)
     "denoDeps",
     "fetchCargoVendor",
     "fetchFromGitHub",
     "fetchNpmDeps",
     "fetchurl",
+    "importCargoLock",  # For Cargo.lock with git dependencies
 ]
 
 # Valid hash types
 HashType = Literal[
-    "cargoHash", "denoDepsHash", "npmDepsHash", "sha256", "srcHash", "vendorHash"
+    "cargoHash",
+    "denoDepsHash",
+    "nodeModulesHash",  # For node_modules built via bun/custom builders
+    "npmDepsHash",
+    "sha256",
+    "srcHash",
+    "spectaOutputHash",  # For specta git dependency hash
+    "tauriOutputHash",  # For tauri git dependency hash
+    "tauriSpectaOutputHash",  # For tauri-specta git dependency hash
+    "vendorHash",
 ]
 
 
@@ -1034,6 +335,9 @@ class HashEntry(BaseModel):
     platform: str | None = None  # Optional platform for platform-specific hashes
     url: str | None = None
     urls: dict[str, str] | None = None
+    git_dep: str | None = Field(
+        default=None, alias="gitDep"
+    )  # Git dependency name (for importCargoLock)
 
     @field_validator("hash")
     @classmethod
@@ -1047,6 +351,7 @@ class HashEntry(BaseModel):
         hash_type: HashType,
         hash_value: str,
         *,
+        git_dep: str | None = None,
         platform: str | None = None,
         url: str | None = None,
         urls: dict[str, str] | None = None,
@@ -1054,6 +359,7 @@ class HashEntry(BaseModel):
         """Convenience constructor with positional args."""
         return cls(
             drvType=drv_type,
+            gitDep=git_dep,
             hashType=hash_type,
             hash=hash_value,
             platform=platform,
@@ -1069,6 +375,7 @@ class HashEntry(BaseModel):
                     k: v
                     for k, v in {
                         "drvType": self.drv_type,
+                        "gitDep": self.git_dep,
                         "hash": self.hash,
                         "hashType": self.hash_type,
                         "platform": self.platform,
@@ -1198,7 +505,29 @@ class SourcesFile(BaseModel):
     def save(self, path: Path) -> None:
         """Save to file path."""
         data = self.to_dict()
-        path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+        payload = json.dumps(data, indent=2, sort_keys=True) + "\n"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        mode = path.stat().st_mode & 0o777 if path.exists() else None
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as tmp_file:
+                tmp_file.write(payload)
+                tmp_file.flush()
+                os.fsync(tmp_file.fileno())
+                tmp_path = Path(tmp_file.name)
+                if mode is not None:
+                    os.fchmod(tmp_file.fileno(), mode)
+            tmp_path.replace(path)
+        finally:
+            if tmp_path is not None and tmp_path.exists():
+                tmp_path.unlink()
 
     @classmethod
     def json_schema(cls) -> dict[str, Any]:
@@ -1259,6 +588,13 @@ class VersionInfo:
     ]  # Updater-specific data (URLs, checksums, release info, etc.)
 
 
+@dataclass(frozen=True)
+class CargoLockGitDep:
+    git_dep: str
+    hash_type: HashType
+    match_name: str
+
+
 def _verify_platform_versions(versions: dict[str, str], source_name: str) -> str:
     """Verify all platform versions match and return the common version."""
     unique = set(versions.values())
@@ -1267,6 +603,1030 @@ def _verify_platform_versions(versions: dict[str, str], source_name: str) -> str
             f"{source_name} version mismatch across platforms: {versions}"
         )
     return unique.pop()
+
+
+# =============================================================================
+# Network + subprocess utilities
+# =============================================================================
+
+
+@functools.cache
+def _get_github_token() -> str | None:
+    """Get GitHub token from GITHUB_TOKEN env var or ~/.netrc (cached)."""
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        return token
+    netrc_path = Path.home() / ".netrc"
+    if netrc_path.exists():
+        try:
+            netrc_data = netrc.netrc(str(netrc_path))
+            for host in ("api.github.com", "github.com"):
+                auth = netrc_data.authenticators(host)
+                if auth:
+                    return auth[2]  # password field contains token
+        except (netrc.NetrcParseError, OSError):
+            pass
+    return None
+
+
+def _check_github_rate_limit(headers: Mapping[str, str], url: str) -> None:
+    remaining = headers.get("X-RateLimit-Remaining")
+    if remaining is None:
+        return
+    try:
+        remaining_value = int(remaining)
+    except ValueError:
+        return
+    if remaining_value > 0:
+        return
+    reset = headers.get("X-RateLimit-Reset")
+    reset_time = "unknown"
+    if reset and reset.isdigit():
+        reset_time = datetime.fromtimestamp(int(reset), tz=timezone.utc).isoformat()
+    raise RuntimeError(
+        f"GitHub API rate limit exceeded for {url}. Resets at {reset_time}."
+    )
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return max(0.0, float(value))
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    delay = (parsed - datetime.now(timezone.utc)).total_seconds()
+    return max(0.0, delay)
+
+
+def _apply_retry_jitter(delay: float, *, jitter_ratio: float) -> float:
+    if jitter_ratio <= 0:
+        return delay
+    jitter_ratio = min(jitter_ratio, 1.0)
+    low = max(0.0, 1.0 - jitter_ratio)
+    high = 1.0 + jitter_ratio
+    return max(0.0, delay * random.uniform(low, high))
+
+
+def _build_request_headers(url: str, user_agent: str | None) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    if user_agent:
+        headers["User-Agent"] = user_agent
+    github_token = _get_github_token()
+    if url.startswith("https://api.github.com/") and github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
+    return headers
+
+
+def _format_http_error(response: aiohttp.ClientResponse, payload: bytes) -> str:
+    error_body = payload.decode(errors="ignore").strip()
+    detail = f"HTTP {response.status} {response.reason}"
+    if error_body:
+        detail = f"{detail}\n{error_body}"
+    return detail
+
+
+async def _request(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    user_agent: str | None = None,
+    timeout: float | None = None,
+    method: str = "GET",
+    retries: int | None = None,
+    backoff: float | None = None,
+    config: UpdateConfig = DEFAULT_CONFIG,
+) -> tuple[bytes, Mapping[str, str]]:
+    if retries is None:
+        retries = config.default_retries
+    if backoff is None:
+        backoff = config.default_retry_backoff
+    headers = _build_request_headers(url, user_agent)
+    timeout_config = aiohttp.ClientTimeout(total=timeout or config.default_timeout)
+
+    last_error: Exception | None = None
+    for attempt in range(retries):
+        retry_after_delay: float | None = None
+        try:
+            async with session.request(
+                method,
+                url,
+                headers=headers,
+                timeout=timeout_config,
+                allow_redirects=True,
+            ) as response:
+                payload = await response.read()
+                if response.status < 400:
+                    return payload, response.headers
+                detail = _format_http_error(response, payload)
+                error = RuntimeError(f"Request to {url} failed: {detail}")
+                if response.status == 429:
+                    last_error = error
+                    retry_after_delay = _parse_retry_after(
+                        response.headers.get("Retry-After")
+                    )
+                # Don't retry client errors (4xx), only server errors (5xx)
+                elif response.status < 500:
+                    raise error
+                else:
+                    last_error = error
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            last_error = e
+
+        # Exponential backoff before retry
+        if attempt < retries - 1:
+            delay = retry_after_delay
+            if delay is None:
+                delay = backoff * (2**attempt)
+                delay = _apply_retry_jitter(
+                    delay, jitter_ratio=config.retry_jitter_ratio
+                )
+            await asyncio.sleep(delay)
+
+    raise RuntimeError(
+        f"Request to {url} failed after {retries} attempts: {last_error}"
+    )
+
+
+async def fetch_url(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    user_agent: str | None = None,
+    timeout: float | None = None,
+) -> bytes:
+    payload, _ = await _request(session, url, user_agent=user_agent, timeout=timeout)
+    return payload
+
+
+async def fetch_json(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    user_agent: str | None = None,
+    timeout: float | None = None,
+) -> dict:
+    """Fetch and parse JSON from a URL."""
+    if url.startswith("https://api.github.com/"):
+        payload, headers = await _request(
+            session, url, user_agent=user_agent, timeout=timeout
+        )
+        _check_github_rate_limit(headers, url)
+    else:
+        payload = await fetch_url(session, url, user_agent=user_agent, timeout=timeout)
+    try:
+        return json.loads(payload.decode())
+    except json.JSONDecodeError as err:
+        raise RuntimeError(f"Invalid JSON response from {url}: {err}") from err
+
+
+# =============================================================================
+# Subprocess execution
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    args: list[str]
+    returncode: int
+    stdout: str
+    stderr: str
+    allow_failure: bool = False
+
+
+async def stream_command(
+    args: list[str],
+    *,
+    source: str,
+    timeout: float = DEFAULT_SUBPROCESS_TIMEOUT,
+    env: Mapping[str, str] | None = None,
+    allow_failure: bool = False,
+    suppress_patterns: tuple[str, ...] | None = None,
+) -> EventStream:
+    command_text = _truncate_command(shlex.join(args))
+    yield UpdateEvent(
+        source=source,
+        kind=UpdateEventKind.COMMAND_START,
+        message=command_text,
+        payload=args,
+    )
+
+    # Use TERM=dumb to prevent subprocesses (especially nix) from writing
+    # fancy progress output directly to /dev/tty, which corrupts cursor tracking.
+    base_env = {**os.environ, "TERM": "dumb"}
+    if env:
+        base_env.update(env)
+    process = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=base_env,
+    )
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+
+    async def pump(
+        stream: asyncio.StreamReader | None, label: str, store: list[str]
+    ) -> None:
+        if stream is None:
+            await queue.put((label, None))
+            return
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode(errors="replace")
+            store.append(text)
+            await queue.put((label, text))
+        await queue.put((label, None))
+
+    tasks = [
+        asyncio.create_task(pump(process.stdout, "stdout", stdout_chunks)),
+        asyncio.create_task(pump(process.stderr, "stderr", stderr_chunks)),
+    ]
+
+    try:
+        done_streams = 0
+        while done_streams < len(tasks):
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError(f"Command timed out after {timeout}s")
+            label, text = await asyncio.wait_for(queue.get(), timeout=remaining)
+            if text is None:
+                done_streams += 1
+                continue
+            sanitized = _sanitize_log_line(text.rstrip("\n"))
+            if sanitized:
+                if suppress_patterns and any(
+                    pattern in sanitized for pattern in suppress_patterns
+                ):
+                    continue
+                yield UpdateEvent(
+                    source=source,
+                    kind=UpdateEventKind.LINE,
+                    message=sanitized,
+                    stream=label,
+                )
+        await asyncio.gather(*tasks)
+        returncode = await process.wait()
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise RuntimeError(f"Command timed out after {timeout}s: {shlex.join(args)}")
+
+    result = CommandResult(
+        args=args,
+        returncode=returncode,
+        stdout="".join(stdout_chunks),
+        stderr="".join(stderr_chunks),
+        allow_failure=allow_failure,
+    )
+    yield UpdateEvent(source=source, kind=UpdateEventKind.COMMAND_END, payload=result)
+
+
+async def run_command(
+    args: list[str],
+    *,
+    source: str,
+    error: str,
+    env: Mapping[str, str] | None = None,
+    allow_failure: bool = False,
+    suppress_patterns: tuple[str, ...] | None = None,
+) -> EventStream:
+    result_drain = ValueDrain()
+    async for event in stream_command(
+        args,
+        source=source,
+        env=env,
+        allow_failure=allow_failure,
+        suppress_patterns=suppress_patterns,
+    ):
+        if event.kind == UpdateEventKind.COMMAND_END:
+            result_drain.value = event.payload
+        yield event
+    result = _require_value(result_drain, error)
+    yield UpdateEvent.value(source, result)
+
+
+async def run_nix_build(
+    source: str,
+    expr: str,
+    *,
+    allow_failure: bool = False,
+    suppress_patterns: tuple[str, ...] | None = None,
+    env: Mapping[str, str] | None = None,
+    verbose: bool = False,
+) -> EventStream:
+    args = ["nix", "build", "-L"]
+    if verbose:
+        args.append("--verbose")
+    args.extend(["--no-link", "--impure", "--expr", expr])
+    async for event in run_command(
+        args,
+        source=source,
+        error="nix build did not return output",
+        env=env,
+        allow_failure=allow_failure,
+        suppress_patterns=suppress_patterns,
+    ):
+        yield event
+
+
+# =============================================================================
+# Hash computation (downloaded artifacts)
+# =============================================================================
+
+
+async def convert_nix_hash_to_sri(source: str, hash_value: str) -> EventStream:
+    """Convert any nix hash format (base32, hex) to SRI format."""
+    result_drain = ValueDrain()
+    async for event in drain_value_events(
+        run_command(
+            [
+                "nix",
+                "hash",
+                "convert",
+                "--hash-algo",
+                "sha256",
+                "--to",
+                "sri",
+                hash_value,
+            ],
+            source=source,
+            error="nix hash convert did not return output",
+        ),
+        result_drain,
+    ):
+        yield event
+    result = _require_value(result_drain, "nix hash convert did not return output")
+    yield UpdateEvent.value(source, result.stdout.strip())
+
+
+async def compute_sri_hash(source: str, url: str) -> EventStream:
+    """Compute SRI hash for a URL using nix-prefetch-url."""
+    result_drain = ValueDrain()
+    async for event in drain_value_events(
+        run_command(
+            ["nix-prefetch-url", "--type", "sha256", url],
+            source=source,
+            error="nix-prefetch-url did not return output",
+        ),
+        result_drain,
+    ):
+        yield event
+    result = _require_value(result_drain, "nix-prefetch-url did not return output")
+    base32_hash = result.stdout.strip().split("\n")[-1]
+    async for event in convert_nix_hash_to_sri(source, base32_hash):
+        yield event
+
+
+async def compute_url_hashes(source: str, urls: Iterable[str]) -> EventStream:
+    hashes: dict[str, str] = {}
+    for url in dict.fromkeys(urls):
+        sri_drain = ValueDrain()
+        async for event in drain_value_events(compute_sri_hash(source, url), sri_drain):
+            yield event
+        sri_value = _require_value(sri_drain, "Missing hash output")
+        hashes[url] = sri_value
+    yield UpdateEvent.value(source, hashes)
+
+
+# =============================================================================
+# Flake + nix helpers
+# =============================================================================
+
+
+def load_flake_lock() -> dict:
+    """Load flake.lock nodes. Validates expected structure."""
+    if not FLAKE_LOCK_FILE.exists():
+        raise FileNotFoundError(f"flake.lock not found at {FLAKE_LOCK_FILE}")
+    data = json.loads(FLAKE_LOCK_FILE.read_text())
+    if "nodes" not in data:
+        raise ValueError(
+            f"Invalid flake.lock: missing 'nodes' key in {FLAKE_LOCK_FILE}"
+        )
+    nodes = data["nodes"]
+    if "root" not in nodes:
+        raise ValueError(
+            f"Invalid flake.lock: missing 'root' node in {FLAKE_LOCK_FILE}"
+        )
+    return nodes
+
+
+def get_flake_input_node(input_name: str) -> dict:
+    """Return flake.lock node for an input."""
+    lock = load_flake_lock()
+    if input_name not in lock:
+        raise KeyError(f"flake input '{input_name}' not found in flake.lock")
+    return lock[input_name]
+
+
+def get_root_input_name(input_name: str) -> str:
+    """Return the node name for a root input."""
+    lock = load_flake_lock()
+    root_inputs = lock.get("root", {}).get("inputs", {})
+    return root_inputs.get(input_name, input_name)
+
+
+def get_flake_input_version(node: dict) -> str:
+    """Best-effort version string for a flake input."""
+    original = node.get("original", {})
+    return (
+        original.get("ref")
+        or original.get("rev")
+        or node.get("locked", {}).get("rev")
+        or "unknown"
+    )
+
+
+def flake_fetch_expr(node: dict) -> str:
+    """Build a nix expression to fetch a flake input."""
+    locked = node.get("locked", {})
+    if locked.get("type") not in {"github", "gitlab"}:
+        raise ValueError(f"Unsupported flake input type: {locked.get('type')}")
+
+    return "\n".join(
+        [
+            "builtins.fetchTree { ",
+            f'type = "{locked["type"]}"; ',
+            f'owner = "{locked["owner"]}"; ',
+            f'repo = "{locked["repo"]}"; ',
+            f'rev = "{locked["rev"]}"; ',
+            f'narHash = "{locked["narHash"]}"; ',
+            " }",
+        ]
+    )
+
+
+def nixpkgs_expr() -> str:
+    node_name = get_root_input_name("nixpkgs")
+    node = get_flake_input_node(node_name)
+    return f"import ({flake_fetch_expr(node)}) {{ system = builtins.currentSystem; }}"
+
+
+async def update_flake_input(input_name: str, *, source: str) -> EventStream:
+    """Update a flake input in flake.lock."""
+    async for event in stream_command(
+        ["nix", "flake", "lock", "--update-input", input_name],
+        source=source,
+    ):
+        yield event
+
+
+# =============================================================================
+# Hash computation (nix builds)
+# =============================================================================
+
+
+def _extract_nix_hash(output: str) -> str:
+    sri_match = re.search(r"got:\s*(sha256-[0-9A-Za-z+/=]+)", output)
+    if sri_match:
+        return sri_match.group(1)
+    fallback_match = re.search(
+        r"got:\s*(sha256:[0-9a-fA-F]{64}|[0-9a-fA-F]{64}|[0-9a-z]{52})",
+        output,
+    )
+    if fallback_match:
+        return fallback_match.group(1)
+    raise RuntimeError(
+        "Could not find hash in nix output. Output tail:\n"
+        f"{_tail_output_excerpt(output, max_lines=DEFAULT_LOG_TAIL_LINES)}"
+    )
+
+
+def _tail_output_excerpt(output: str, *, max_lines: int) -> str:
+    output = output.strip()
+    if not output:
+        return "<no output>"
+    lines = output.splitlines()
+    if len(lines) <= max_lines:
+        return output
+    tail = "\n".join(lines[-max_lines:])
+    return f"... (last {max_lines} of {len(lines)} lines)\n{tail}"
+
+
+def _compact_nix_expr(expr: str) -> str:
+    return " ".join(line.strip() for line in expr.splitlines() if line.strip())
+
+
+def _render_output_hashes(output_hashes: Mapping[str, str], *, fake_hash: str) -> str:
+    lines = ["{"]
+    for name in sorted(output_hashes):
+        value = output_hashes[name]
+        rendered = "pkgs.lib.fakeHash" if value == fake_hash else f'"{value}"'
+        lines.append(f'  "{name}" = {rendered};')
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _extract_git_dep_from_output(
+    output: str, git_deps: Iterable[CargoLockGitDep]
+) -> CargoLockGitDep:
+    match = re.search(r"hash mismatch in fixed-output derivation '([^']+)'", output)
+    search_text = output
+    if match:
+        search_text = match.group(1).rsplit("/", 1)[-1]
+    matches = [dep for dep in git_deps if dep.match_name in search_text]
+    if not matches:
+        raise RuntimeError(
+            "Could not identify git dependency from nix output. Output tail:\n"
+            f"{_tail_output_excerpt(output, max_lines=DEFAULT_LOG_TAIL_LINES)}"
+        )
+    return max(matches, key=lambda dep: len(dep.match_name))
+
+
+def _build_import_cargo_lock_expr(
+    *,
+    input_name: str,
+    package_attr: str,
+    lockfile_path: str,
+    output_hashes_expr: str,
+) -> str:
+    repo_path = get_repo_file(".")
+    return _compact_nix_expr(
+        f"""
+        let
+          pkgs = {nixpkgs_expr()};
+          flake = builtins.getFlake "git+file://{repo_path}?dirty=1";
+          upstream = flake.inputs.{input_name}.packages.${{builtins.currentSystem}}.{package_attr};
+        in pkgs.rustPlatform.importCargoLock {{
+          lockFile = "${{upstream.src}}/{lockfile_path}";
+          outputHashes = {output_hashes_expr};
+        }}
+        """
+    )
+
+
+async def _emit_sri_hash_from_build_result(
+    source: str, result: CommandResult
+) -> EventStream:
+    hash_value = _extract_nix_hash(result.stderr + result.stdout)
+    if hash_value.startswith(SRI_PREFIX):
+        yield UpdateEvent.value(source, hash_value)
+        return
+    async for event in convert_nix_hash_to_sri(source, hash_value):
+        yield event
+
+
+async def compute_fixed_output_hash(source: str, expr: str) -> EventStream:
+    """Compute hash by running a nix expression with lib.fakeHash."""
+    expr = _compact_nix_expr(expr)
+    result_drain = ValueDrain()
+    async for event in drain_value_events(
+        run_nix_build(
+            source,
+            expr,
+            allow_failure=True,
+            suppress_patterns=FIXED_OUTPUT_NOISE,
+            verbose=True,
+        ),
+        result_drain,
+    ):
+        yield event
+    result = _require_value(result_drain, "nix build did not return output")
+    if result.returncode == 0:
+        raise RuntimeError(
+            "Expected nix build to fail with hash mismatch, but it succeeded"
+        )
+    async for event in _emit_sri_hash_from_build_result(source, result):
+        yield event
+
+
+def _build_nix_expr(body: str) -> str:
+    """Build a nix expression with nixpkgs prelude."""
+    return _compact_nix_expr(f"let pkgs = {nixpkgs_expr()}; in {body}")
+
+
+async def _compute_nixpkgs_hash(source: str, expr_body: str) -> EventStream:
+    """Compute hash for a nixpkgs expression that uses lib.fakeHash."""
+    expr = _build_nix_expr(expr_body)
+    async for event in compute_fixed_output_hash(source, expr):
+        yield event
+
+
+def _build_deno_deps_expr(source: str, platform: str) -> str:
+    nix_attr = f'"{source}"'
+    nixpkgs_node = get_flake_input_node(get_root_input_name("nixpkgs"))
+    expr = (
+        'let flake = builtins.getFlake "git+file://'
+        f'{get_repo_file(".")}?dirty=1"; '
+        "pkgs = import ("
+        f"{flake_fetch_expr(nixpkgs_node)}"
+        f') {{ system = "{platform}"; overlays = [ flake.overlays.default ]; }}; '
+        f"in pkgs.{nix_attr}"
+    )
+    return _compact_nix_expr(expr)
+
+
+def _build_deno_hash_entries(
+    *,
+    platforms: Iterable[str],
+    active_platform: str,
+    existing_hashes: Mapping[str, str],
+    computed_hashes: Mapping[str, str],
+    fake_hash: str,
+) -> list[HashEntry]:
+    entries: list[HashEntry] = []
+    for platform in platforms:
+        if platform == active_platform:
+            hash_value = fake_hash
+        else:
+            hash_value = computed_hashes.get(platform) or existing_hashes.get(
+                platform, fake_hash
+            )
+        entries.append(
+            HashEntry.create(
+                "denoDeps",
+                "denoDepsHash",
+                hash_value,
+                platform=platform,
+            )
+        )
+    return entries
+
+
+def _build_deno_temp_sources(
+    *,
+    sources: SourcesFile,
+    source: str,
+    input_name: str,
+    original_entry: SourceEntry | None,
+    entries: list[HashEntry],
+) -> SourcesFile:
+    hash_collection = HashCollection.from_value(entries)
+    if original_entry is not None:
+        temp_entry = original_entry.model_copy(
+            update={"hashes": hash_collection, "input": input_name}
+        )
+    else:
+        temp_entry = SourceEntry(hashes=hash_collection, input=input_name)
+    temp_entries = dict(sources.entries)
+    temp_entries[source] = temp_entry
+    return SourcesFile(entries=temp_entries)
+
+
+async def compute_go_vendor_hash(
+    source: str,
+    input_name: str,
+    *,
+    pname: str,
+    version: str,
+    subpackages: list[str] | None = None,
+    proxy_vendor: bool = False,
+    go_package_expr: str | None = None,
+) -> EventStream:
+    subpackages_expr = ""
+    if subpackages:
+        quoted = " ".join(f'"{subpkg}"' for subpkg in subpackages)
+        subpackages_expr = f"subPackages = [ {quoted} ];"
+    proxy_expr = "proxyVendor = true;" if proxy_vendor else ""
+    src_expr = flake_fetch_expr(get_flake_input_node(input_name))
+    build_go_module = "pkgs.buildGoModule"
+    if go_package_expr:
+        build_go_module = f"(pkgs.buildGoModule.override {{ go = {go_package_expr}; }})"
+    async for event in _compute_nixpkgs_hash(
+        source,
+        f"""{build_go_module} {{
+        pname = "{pname}";
+        version = "{version}";
+        src = {src_expr};
+        {subpackages_expr}
+        {proxy_expr}
+        vendorHash = pkgs.lib.fakeHash;
+      }}""",
+    ):
+        yield event
+
+
+async def compute_cargo_vendor_hash(
+    source: str, input_name: str, *, subdir: str | None = None
+) -> EventStream:
+    src_expr = flake_fetch_expr(get_flake_input_node(input_name))
+    if subdir:
+        src_expr = f'"${{{src_expr}}}/{subdir}"'
+    async for event in _compute_nixpkgs_hash(
+        source,
+        f"""pkgs.rustPlatform.fetchCargoVendor {{
+        src = {src_expr};
+        hash = pkgs.lib.fakeHash;
+      }}""",
+    ):
+        yield event
+
+
+async def compute_npm_deps_hash(source: str, input_name: str) -> EventStream:
+    src_expr = flake_fetch_expr(get_flake_input_node(input_name))
+    async for event in _compute_nixpkgs_hash(
+        source,
+        f"""pkgs.fetchNpmDeps {{
+        src = {src_expr};
+        hash = pkgs.lib.fakeHash;
+      }}""",
+    ):
+        yield event
+
+
+async def compute_bun_node_modules_hash(source: str, input_name: str) -> EventStream:
+    """Compute hash for bun-based node_modules from a flake input package.
+
+    This is used for packages like opencode that use bun to build node_modules.
+    The hash is computed by building the upstream package's node_modules derivation
+    with a fake hash and extracting the correct hash from the error.
+    """
+    repo_path = get_repo_file(".")
+    expr = _compact_nix_expr(f"""
+        let
+          pkgs = {nixpkgs_expr()};
+          flake = builtins.getFlake "git+file://{repo_path}?dirty=1";
+          upstream = flake.inputs.{input_name}.packages.${{builtins.currentSystem}}.{source};
+        in upstream.node_modules.overrideAttrs {{ outputHash = pkgs.lib.fakeHash; }}
+    """)
+    async for event in compute_fixed_output_hash(source, expr):
+        yield event
+
+
+async def compute_import_cargo_lock_output_hashes(
+    source: str,
+    input_name: str,
+    *,
+    package_attr: str,
+    lockfile_path: str,
+    git_deps: list[CargoLockGitDep],
+    config: UpdateConfig = DEFAULT_CONFIG,
+) -> EventStream:
+    hashes: dict[str, str] = {}
+    remaining = {dep.git_dep for dep in git_deps}
+
+    while remaining:
+        output_hashes = {
+            dep.git_dep: hashes.get(dep.git_dep, config.fake_hash) for dep in git_deps
+        }
+        output_hashes_expr = _render_output_hashes(
+            output_hashes, fake_hash=config.fake_hash
+        )
+        expr = _build_import_cargo_lock_expr(
+            input_name=input_name,
+            package_attr=package_attr,
+            lockfile_path=lockfile_path,
+            output_hashes_expr=output_hashes_expr,
+        )
+        result_drain = ValueDrain()
+        async for event in drain_value_events(
+            run_nix_build(
+                source,
+                expr,
+                allow_failure=True,
+                suppress_patterns=FIXED_OUTPUT_NOISE,
+                verbose=True,
+            ),
+            result_drain,
+        ):
+            yield event
+        result = _require_value(result_drain, "nix build did not return output")
+        if result.returncode == 0:
+            raise RuntimeError(
+                "Expected nix build to fail with hash mismatch, but it succeeded"
+            )
+        output = result.stderr + result.stdout
+        hash_value = _extract_nix_hash(output)
+        dep = _extract_git_dep_from_output(output, git_deps)
+        if dep.git_dep in hashes:
+            raise RuntimeError(
+                f"Hash for {dep.git_dep} already computed; output:\n{_tail_output_excerpt(output, max_lines=DEFAULT_LOG_TAIL_LINES)}"
+            )
+        hashes[dep.git_dep] = hash_value
+        remaining.discard(dep.git_dep)
+
+    yield UpdateEvent.value(source, hashes)
+
+
+async def _compute_deno_deps_hash_for_platform(
+    source: str,
+    input_name: str,
+    platform: str,
+    *,
+    sources_path: Path | None = None,
+) -> EventStream:
+    """Compute Deno deps hash for a specific platform."""
+    expr = _build_deno_deps_expr(source, platform)
+    result_drain = ValueDrain()
+    command_env = None
+    if sources_path is not None:
+        command_env = {"SOURCES_JSON": str(sources_path)}
+    async for event in drain_value_events(
+        run_nix_build(
+            f"{source}:{platform}",
+            expr,
+            env=command_env,
+        ),
+        result_drain,
+    ):
+        yield event
+    result = _require_value(result_drain, "nix build did not return output")
+
+    if result.returncode == 0:
+        raise RuntimeError(
+            f"Expected nix build to fail with hash mismatch for {platform}, but it succeeded"
+        )
+    hash_drain = ValueDrain()
+    async for event in drain_value_events(
+        _emit_sri_hash_from_build_result(source, result), hash_drain
+    ):
+        yield event
+    hash_value = _require_value(hash_drain, "Hash conversion failed")
+    yield UpdateEvent.value(source, (platform, hash_value))
+
+
+async def compute_deno_deps_hash(
+    source: str,
+    input_name: str,
+    *,
+    native_only: bool = False,
+    sources_path: Path | None = None,
+    config: UpdateConfig = DEFAULT_CONFIG,
+) -> EventStream:
+    """Compute Deno deps hash for supported platforms.
+
+    Deno caches can include platform-specific dependencies (e.g., lefthook binaries),
+    so we compute hashes for each supported platform separately. For non-native
+    platforms, Nix will automatically use configured remote builders (e.g.,
+    nix-rosetta-builder on macOS provides aarch64-linux and x86_64-linux builders).
+
+    When native_only is True (--native-only flag), only computes hash for the
+    current platform and preserves existing hashes for other platforms. This is
+    useful in CI where remote builders aren't available.
+
+    We compute hashes one platform at a time: set fakeHash for that platform,
+    build the flake, extract the correct hash from the error, then move to next.
+    Uses file locking to prevent concurrent modifications.
+    """
+    current_platform = get_current_nix_platform()
+    platforms = config.deno_deps_platforms
+    if current_platform not in platforms:
+        raise RuntimeError(
+            f"Current platform {current_platform} not in supported platforms: "
+            f"{platforms}"
+        )
+
+    if sources_path is None:
+        sources_path = SOURCES_FILE
+    lock_path = sources_path.with_suffix(".json.lock")
+    with FileLock(lock_path):
+        sources = SourcesFile.load(sources_path)
+        original_entry = sources.entries.get(source)
+
+        # Preserve existing hashes for platforms we won't compute
+        existing_hashes: dict[str, str] = {}
+        if original_entry:
+            if original_entry.hashes.entries:
+                existing_hashes = {
+                    entry.platform: entry.hash
+                    for entry in original_entry.hashes.entries
+                    if entry.platform
+                }
+            elif original_entry.hashes.mapping:
+                existing_hashes = dict(original_entry.hashes.mapping)
+
+        # Determine which platforms to compute
+        platforms_to_compute = (current_platform,) if native_only else platforms
+
+        platform_hashes: dict[str, str] = {}
+        failed_platforms: list[str] = []
+        with tempfile.TemporaryDirectory(prefix="sources-json-") as temp_dir:
+            temp_sources_path = Path(temp_dir) / "sources.json"
+
+            # Compute hash for each platform sequentially
+            for platform in platforms_to_compute:
+                yield UpdateEvent.status(source, f"Computing hash for {platform}...")
+
+                temp_entries = _build_deno_hash_entries(
+                    platforms=platforms,
+                    active_platform=platform,
+                    existing_hashes=existing_hashes,
+                    computed_hashes=platform_hashes,
+                    fake_hash=config.fake_hash,
+                )
+                temp_sources = _build_deno_temp_sources(
+                    sources=sources,
+                    source=source,
+                    input_name=input_name,
+                    original_entry=original_entry,
+                    entries=temp_entries,
+                )
+                temp_sources.save(temp_sources_path)
+
+                try:
+                    async for event in _compute_deno_deps_hash_for_platform(
+                        source,
+                        input_name,
+                        platform,
+                        sources_path=temp_sources_path,
+                    ):
+                        if (
+                            event.kind == UpdateEventKind.VALUE
+                            and event.payload is not None
+                        ):
+                            plat, hash_val = event.payload
+                            platform_hashes[plat] = hash_val
+                        else:
+                            yield event
+                except RuntimeError:
+                    # Non-native platform build failed - preserve existing hash if available
+                    if platform != current_platform:
+                        failed_platforms.append(platform)
+                        if platform in existing_hashes:
+                            yield UpdateEvent.status(
+                                source,
+                                f"Build failed for {platform}, preserving existing hash",
+                            )
+                            platform_hashes[platform] = existing_hashes[platform]
+                        else:
+                            yield UpdateEvent.status(
+                                source,
+                                f"Build failed for {platform}, no existing hash to preserve",
+                            )
+                    else:
+                        # Native platform failed - this is a real error
+                        raise
+
+        # Warn if any platforms failed
+        if failed_platforms:
+            yield UpdateEvent.status(
+                source,
+                f"Warning: {len(failed_platforms)} platform(s) failed, "
+                f"preserved existing hashes: {', '.join(failed_platforms)}",
+            )
+
+        # Merge computed hashes with preserved existing hashes
+        final_hashes = {**existing_hashes, **platform_hashes}
+        yield UpdateEvent.value(source, final_hashes)
+
+
+# =============================================================================
+# GitHub helpers
+# =============================================================================
+
+
+def github_raw_url(owner: str, repo: str, rev: str, path: str) -> str:
+    return f"https://raw.githubusercontent.com/{owner}/{repo}/{rev}/{path}"
+
+
+def github_api_url(path: str) -> str:
+    """Build GitHub API URL from path (e.g., 'repos/owner/repo')."""
+    return f"https://api.github.com/{path}"
+
+
+async def fetch_github_api(
+    session: aiohttp.ClientSession, api_path: str, **params: str
+) -> dict:
+    """Fetch from GitHub API with standard options."""
+    url = github_api_url(api_path)
+    if params:
+        url = f"{url}?{'&'.join(f'{k}={v}' for k, v in params.items())}"
+    return await fetch_json(
+        session, url, user_agent=DEFAULT_USER_AGENT, timeout=DEFAULT_TIMEOUT
+    )
+
+
+async def fetch_github_default_branch(
+    session: aiohttp.ClientSession, owner: str, repo: str
+) -> str:
+    data = await fetch_github_api(session, f"repos/{owner}/{repo}")
+    return data["default_branch"]
+
+
+async def fetch_github_latest_commit(
+    session: aiohttp.ClientSession, owner: str, repo: str, file_path: str, branch: str
+) -> str:
+    data = await fetch_github_api(
+        session,
+        f"repos/{owner}/{repo}/commits",
+        path=urllib.parse.quote(file_path),
+        sha=branch,
+        per_page="1",
+    )
+    if not data:
+        raise RuntimeError(f"No commits found for {owner}/{repo}:{file_path}")
+    return data[0]["sha"]
+
+
+# =============================================================================
+# Updater framework
+# =============================================================================
+
+# Registry populated automatically via __init_subclass__
+UPDATERS: dict[str, type["Updater"]] = {}
 
 
 class Updater(ABC):
@@ -1335,7 +1695,7 @@ class Updater(ABC):
 
         yield UpdateEvent.status(self.name, f"Latest version: {info.version}")
         if self._is_latest(current, info):
-            yield UpdateEvent.status(self.name, "Already at latest version")
+            yield UpdateEvent.status(self.name, f"Up to date (version: {info.version})")
             yield UpdateEvent.result(self.name)
             return
 
@@ -1348,7 +1708,7 @@ class Updater(ABC):
         hashes = _require_value(hashes_drain, "Missing hash output")
         result = self.build_result(info, hashes)
         if current is not None and result == current:
-            yield UpdateEvent.status(self.name, "No updates needed")
+            yield UpdateEvent.status(self.name, "Up to date")
             yield UpdateEvent.result(self.name)
             return
         yield UpdateEvent.result(self.name, result)
@@ -1399,19 +1759,22 @@ class DownloadHashUpdater(Updater):
             return f"{self.BASE_URL}/{self.PLATFORMS[platform]}"
         return self.PLATFORMS[platform]
 
+    def _platform_urls(self, info: VersionInfo) -> dict[str, str]:
+        return {
+            platform: self.get_download_url(platform, info)
+            for platform in self.PLATFORMS
+        }
+
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build result with platform URLs. Override for custom result building."""
-        urls = {p: self.get_download_url(p, info) for p in self.PLATFORMS}
+        urls = self._platform_urls(info)
         return self._build_result_with_urls(info, hashes, urls)
 
     async def fetch_hashes(
         self, info: VersionInfo, session: aiohttp.ClientSession
     ) -> EventStream:
         """Compute hashes by downloading, deduplicating identical URLs."""
-        platform_urls = {
-            platform: self.get_download_url(platform, info)
-            for platform in self.PLATFORMS
-        }
+        platform_urls = self._platform_urls(info)
         hashes_drain = ValueDrain()
         async for event in drain_value_events(
             compute_url_hashes(self.name, platform_urls.values()), hashes_drain
@@ -1497,6 +1860,7 @@ class GoVendorHashUpdater(FlakeInputHashUpdater):
     pname: str | None = None
     subpackages: list[str] | None = None
     proxy_vendor: bool = False
+    go_package_expr: str | None = None
 
     def _compute_hash(self, info: VersionInfo) -> EventStream:
         return compute_go_vendor_hash(
@@ -1506,6 +1870,7 @@ class GoVendorHashUpdater(FlakeInputHashUpdater):
             version=info.version,
             subpackages=self.subpackages,
             proxy_vendor=self.proxy_vendor,
+            go_package_expr=self.go_package_expr,
         )
 
 
@@ -1526,6 +1891,20 @@ class NpmDepsHashUpdater(FlakeInputHashUpdater):
         return compute_npm_deps_hash(self.name, self._input)
 
 
+class BunNodeModulesHashUpdater(FlakeInputHashUpdater):
+    """Update bun-based node_modules hash for packages like opencode.
+
+    Computes the hash by building the upstream flake input's package node_modules
+    derivation with a fake hash and extracting the correct hash from the error.
+    """
+
+    drv_type = "bunBuild"
+    hash_type = "nodeModulesHash"
+
+    def _compute_hash(self, info: VersionInfo) -> EventStream:
+        return compute_bun_node_modules_hash(self.name, self._input)
+
+
 class DenoDepsHashUpdater(FlakeInputHashUpdater):
     """Update Deno dependencies hash for FOD derivations like linear-cli.
 
@@ -1535,9 +1914,12 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
 
     drv_type = "denoDeps"
     hash_type = "denoDepsHash"
+    native_only: bool = False
 
     def _compute_hash(self, info: VersionInfo) -> EventStream:
-        return compute_deno_deps_hash(self.name, self._input)
+        return compute_deno_deps_hash(
+            self.name, self._input, native_only=self.native_only
+        )
 
     async def fetch_hashes(
         self, info: VersionInfo, session: aiohttp.ClientSession
@@ -1574,6 +1956,7 @@ def go_vendor_updater(
     pname: str | None = None,
     subpackages: list[str] | None = None,
     proxy_vendor: bool = False,
+    go_package_expr: str | None = None,
 ) -> type[GoVendorHashUpdater]:
     """Create and register a Go vendor hash updater."""
     attrs = {
@@ -1582,6 +1965,7 @@ def go_vendor_updater(
         "pname": pname,
         "subpackages": subpackages,
         "proxy_vendor": proxy_vendor,
+        "go_package_expr": go_package_expr,
     }
     return type(f"{name}Updater", (GoVendorHashUpdater,), attrs)
 
@@ -1607,6 +1991,16 @@ def npm_deps_updater(
     return type(f"{name}Updater", (NpmDepsHashUpdater,), attrs)
 
 
+def bun_node_modules_updater(
+    name: str,
+    *,
+    input_name: str | None = None,
+) -> type[BunNodeModulesHashUpdater]:
+    """Create and register a bun node_modules hash updater."""
+    attrs = {"name": name, "input_name": input_name}
+    return type(f"{name}Updater", (BunNodeModulesHashUpdater,), attrs)
+
+
 def deno_deps_updater(
     name: str,
     *,
@@ -1630,7 +2024,7 @@ def github_raw_file_updater(
 
 
 # =============================================================================
-# Source Updaters
+# Handlers
 # =============================================================================
 
 
@@ -1944,13 +2338,76 @@ class VSCodeInsidersUpdater(PlatformAPIUpdater):
         return f"https://update.code.visualstudio.com/{info.version}/{api_platform}/insider"
 
 
+class OpencodeDesktopCargoLockUpdater(HashEntryUpdater):
+    """Update importCargoLock output hashes for opencode-desktop."""
+
+    name = "opencode-desktop"
+    input_name = "opencode"
+    package_attr = "desktop"
+    lockfile_path = "packages/desktop/src-tauri/Cargo.lock"
+    git_deps = [
+        CargoLockGitDep("specta-2.0.0-rc.22", "spectaOutputHash", "specta"),
+        CargoLockGitDep("tauri-2.9.5", "tauriOutputHash", "tauri"),
+        CargoLockGitDep(
+            "tauri-specta-2.0.0-rc.21", "tauriSpectaOutputHash", "tauri-specta"
+        ),
+    ]
+
+    @property
+    def _input(self) -> str:
+        assert self.input_name is not None
+        return self.input_name
+
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        node = get_flake_input_node(self._input)
+        version = get_flake_input_version(node)
+        return VersionInfo(version=version, metadata={"node": node})
+
+    async def fetch_hashes(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> EventStream:
+        hash_drain = ValueDrain()
+        async for event in drain_value_events(
+            compute_import_cargo_lock_output_hashes(
+                self.name,
+                self._input,
+                package_attr=self.package_attr,
+                lockfile_path=self.lockfile_path,
+                git_deps=self.git_deps,
+            ),
+            hash_drain,
+        ):
+            yield event
+        hashes = _require_value(hash_drain, "Missing importCargoLock output hashes")
+        entries = []
+        for dep in self.git_deps:
+            hash_value = hashes.get(dep.git_dep)
+            if not hash_value:
+                raise RuntimeError(f"Missing hash for {dep.git_dep}")
+            entries.append(
+                HashEntry.create(
+                    "importCargoLock",
+                    dep.hash_type,
+                    hash_value,
+                    git_dep=dep.git_dep,
+                )
+            )
+        yield UpdateEvent.value(self.name, entries)
+
+
 go_vendor_updater("axiom-cli", subpackages=["cmd/axiom"])
-go_vendor_updater("beads", subpackages=["cmd/bd"], proxy_vendor=True)
+go_vendor_updater(
+    "beads",
+    subpackages=["cmd/bd"],
+    proxy_vendor=True,
+    go_package_expr=GO_LATEST_EXPR,
+)
 go_vendor_updater("crush")
 go_vendor_updater("gogcli", subpackages=["cmd/gog"])
 cargo_vendor_updater("codex", subdir="codex-rs")
 npm_deps_updater("gemini-cli")
 deno_deps_updater("linear-cli")
+bun_node_modules_updater("opencode")
 
 
 class SentryCliUpdater(Updater):
@@ -2313,7 +2770,7 @@ async def _update_refs_task(
 
         if result.latest_ref == result.current_ref:
             await put(
-                UpdateEvent.status(source, f"Already at latest: {result.current_ref}")
+                UpdateEvent.status(source, f"Up to date (ref: {result.current_ref})")
             )
             await put(UpdateEvent.result(source))
             return
@@ -2349,7 +2806,7 @@ async def _update_refs_task(
 
 
 # =============================================================================
-# Main
+# Rendering
 # =============================================================================
 
 
@@ -2382,19 +2839,77 @@ class OutputOptions:
             self._err_console.print(message, style="red")
 
 
-def load_sources() -> SourcesFile:
-    return SourcesFile.load(SOURCES_FILE)
+class OperationKind(StrEnum):
+    CHECK_VERSION = "check_version"
+    UPDATE_REF = "update_ref"
+    REFRESH_LOCK = "refresh_lock"
+    COMPUTE_HASH = "compute_hash"
 
 
-def save_sources(sources: SourcesFile) -> None:
-    sources.save(SOURCES_FILE)
+_ORIGIN_FLAKE_ONLY = "(flake.nix)"
+_ORIGIN_SOURCES_ONLY = "(sources.json)"
+_ORIGIN_BOTH = "(flake.nix + sources.json)"
+
+_OPERATION_LABELS: dict[OperationKind, str] = {
+    OperationKind.CHECK_VERSION: "Checking version",
+    OperationKind.UPDATE_REF: "Updating ref",
+    OperationKind.REFRESH_LOCK: "Refreshing lock",
+    OperationKind.COMPUTE_HASH: "Computing hash",
+}
 
 
 @dataclass
-class SourceState:
+class OperationState:
+    kind: OperationKind
+    label: str
     status: str = "pending"
+    message: str | None = None
     tail: deque[str] = field(default_factory=deque)
+    detail_lines: list[str] = field(default_factory=list)
     active_commands: int = 0
+    spinner: Any | None = field(default=None, repr=False)
+
+    def visible(self) -> bool:
+        return (
+            self.status != "pending"
+            or self.message is not None
+            or bool(self.detail_lines)
+            or self.active_commands > 0
+        )
+
+
+@dataclass(frozen=True)
+class ItemMeta:
+    name: str
+    origin: str
+    op_order: tuple[OperationKind, ...]
+
+
+@dataclass
+class ItemState:
+    name: str
+    origin: str
+    op_order: tuple[OperationKind, ...]
+    operations: dict[OperationKind, OperationState]
+    last_operation: OperationKind | None = None
+    active_command_op: OperationKind | None = None
+
+    @classmethod
+    def from_meta(cls, meta: ItemMeta, *, max_lines: int) -> "ItemState":
+        operations = {
+            kind: OperationState(
+                kind=kind,
+                label=_OPERATION_LABELS[kind],
+                tail=deque(maxlen=max_lines),
+            )
+            for kind in meta.op_order
+        }
+        return cls(
+            name=meta.name,
+            origin=meta.origin,
+            op_order=meta.op_order,
+            operations=operations,
+        )
 
 
 def _is_tty() -> bool:
@@ -2402,11 +2917,199 @@ def _is_tty() -> bool:
     return sys.stdout.isatty() and term.lower() not in {"", "dumb"}
 
 
-def _fit_to_width(text: str, width: int) -> str:
-    if width <= 0:
-        return text
-    # Reserve the last column to avoid line wrapping on some terminals.
-    return text[: max(0, width - 1)]
+_STATUS_UPDATE_AVAILABLE = re.compile(r"Update available: (.+) -> (.+)")
+_STATUS_UP_TO_DATE_VERSION = re.compile(r"Up to date \(version: (.+)\)")
+_STATUS_UP_TO_DATE_REF = re.compile(r"Up to date \(ref: (.+)\)")
+_STATUS_LATEST_VERSION = re.compile(r"Latest version: (.+)")
+_STATUS_CHECKING = re.compile(r"Checking .*\(current: (.+)\)")
+_STATUS_UPDATE_REF = re.compile(r"Updating ref: (.+) -> (.+)")
+_STATUS_UPDATE_INPUT = re.compile(r"Updating flake input '([^']+)'\.*")
+_STATUS_COMPUTING_HASH = re.compile(r"Computing hash for (.+)\.")
+
+_OP_STATUS_PRIORITY = {
+    "pending": 0,
+    "running": 1,
+    "no_change": 2,
+    "success": 3,
+    "error": 4,
+}
+
+
+def _operation_for_status(message: str) -> OperationKind | None:
+    lowered = message.lower()
+    if lowered.startswith(
+        (
+            "checking ",
+            "fetching latest",
+            "latest version",
+            "update available",
+            "up to date (version",
+            "up to date (ref",
+        )
+    ):
+        return OperationKind.CHECK_VERSION
+    if lowered.startswith("updating ref"):
+        return OperationKind.UPDATE_REF
+    if lowered.startswith("updating flake input"):
+        return OperationKind.REFRESH_LOCK
+    if (
+        lowered.startswith(
+            (
+                "fetching hashes",
+                "computing hash",
+                "build failed",
+                "warning:",
+            )
+        )
+        or message == "Up to date"
+    ):
+        return OperationKind.COMPUTE_HASH
+    return None
+
+
+def _operation_for_command(args: list[str] | None) -> OperationKind:
+    if not args:
+        return OperationKind.COMPUTE_HASH
+    if args[0] == "flake-edit":
+        return OperationKind.UPDATE_REF
+    if args[:3] == ["nix", "flake", "lock"] and "--update-input" in args:
+        return OperationKind.REFRESH_LOCK
+    return OperationKind.COMPUTE_HASH
+
+
+def _set_operation_status(
+    operation: OperationState,
+    status: str,
+    *,
+    message: str | None = None,
+    clear_message: bool = False,
+) -> None:
+    if _OP_STATUS_PRIORITY[status] < _OP_STATUS_PRIORITY[operation.status]:
+        return
+    operation.status = status
+    if status != "running":
+        operation.spinner = None
+    if clear_message:
+        operation.message = None
+    elif message is not None:
+        operation.message = message
+
+
+def _apply_status(item: ItemState, message: str) -> None:
+    kind = _operation_for_status(message)
+    if kind is None:
+        return
+    operation = item.operations.get(kind)
+    if operation is None:
+        return
+    item.last_operation = kind
+
+    if kind == OperationKind.CHECK_VERSION:
+        if match := _STATUS_UPDATE_AVAILABLE.match(message):
+            _set_operation_status(
+                operation,
+                "success",
+                message=f"{match.group(1)} → {match.group(2)}",
+            )
+            return
+        if match := _STATUS_UP_TO_DATE_VERSION.match(message):
+            _set_operation_status(
+                operation,
+                "no_change",
+                message=f"{match.group(1)} (up to date)",
+            )
+            return
+        if match := _STATUS_UP_TO_DATE_REF.match(message):
+            _set_operation_status(
+                operation,
+                "no_change",
+                message=f"{match.group(1)} (up to date)",
+            )
+            return
+        if match := _STATUS_LATEST_VERSION.match(message):
+            _set_operation_status(operation, "running", message=match.group(1))
+            return
+        if match := _STATUS_CHECKING.match(message):
+            _set_operation_status(
+                operation,
+                "running",
+                message=f"current {match.group(1)}",
+            )
+            return
+        _set_operation_status(operation, "running")
+        return
+
+    if kind == OperationKind.UPDATE_REF:
+        if match := _STATUS_UPDATE_REF.match(message):
+            _set_operation_status(
+                operation,
+                "running",
+                message=f"{match.group(1)} → {match.group(2)}",
+            )
+            return
+        _set_operation_status(operation, "running")
+        return
+
+    if kind == OperationKind.REFRESH_LOCK:
+        if match := _STATUS_UPDATE_INPUT.match(message):
+            _set_operation_status(operation, "running", message=match.group(1))
+            return
+        _set_operation_status(operation, "running")
+        return
+
+    if kind == OperationKind.COMPUTE_HASH:
+        if message == "Up to date":
+            _set_operation_status(operation, "no_change", clear_message=True)
+            return
+        if message.startswith("Fetching hashes"):
+            _set_operation_status(operation, "running", message="all platforms")
+            return
+        if match := _STATUS_COMPUTING_HASH.match(message):
+            _set_operation_status(operation, "running", message=match.group(1))
+            return
+        _set_operation_status(operation, "running", message=message)
+
+
+def _hash_label_map(entry: SourceEntry | None) -> dict[str, str]:
+    if entry is None:
+        return {}
+    hashes = entry.hashes
+    if hashes.mapping:
+        return dict(hashes.mapping)
+    mapping: dict[str, str] = {}
+    if hashes.entries:
+        for idx, item in enumerate(hashes.entries, start=1):
+            if item.git_dep:
+                key = f"{item.hash_type}:{item.git_dep}"
+            elif item.platform:
+                key = item.platform
+            else:
+                key = item.hash_type
+            if key in mapping:
+                key = f"{key}#{idx}"
+            mapping[key] = item.hash
+    return mapping
+
+
+def _hash_diff_lines(
+    old_entry: SourceEntry | None, new_entry: SourceEntry | None
+) -> list[str]:
+    old_map = _hash_label_map(old_entry)
+    new_map = _hash_label_map(new_entry)
+    labels = sorted(set(old_map) | set(new_map))
+    lines: list[str] = []
+    for label in labels:
+        old_hash = old_map.get(label)
+        new_hash = new_map.get(label)
+        if old_hash == new_hash:
+            continue
+        if old_hash is None:
+            lines.append(f"{label} :: <none> → {new_hash}")
+        elif new_hash is None:
+            lines.append(f"{label} :: {old_hash} → <removed>")
+        else:
+            lines.append(f"{label} :: {old_hash} → {new_hash}")
+    return lines
 
 
 class Renderer:
@@ -2417,10 +3120,11 @@ class Renderer:
 
     def __init__(
         self,
-        states: dict[str, SourceState],
+        items: dict[str, ItemState],
         order: list[str],
         *,
         is_tty: bool,
+        full_output: bool = False,
         panel_height: int | None = None,
         quiet: bool = False,
     ) -> None:
@@ -2428,9 +3132,10 @@ class Renderer:
         from rich.live import Live
         from rich.text import Text
 
-        self.states = states
+        self.items = items
         self.order = order
         self.is_tty = is_tty
+        self.full_output = full_output
         self.quiet = quiet
         self._initial_panel_height = panel_height
         self.last_render = 0.0
@@ -2449,10 +3154,56 @@ class Renderer:
             )
             self._live.start()
 
-    def _build_display(self) -> Any:
+    def _format_operation_text(self, operation: OperationState) -> str:
+        text = f"{operation.label}..."
+        message = operation.message
+        if operation.status == "success" and not message:
+            message = "done"
+        elif operation.status == "no_change" and not message:
+            message = "no change"
+        elif operation.status == "error" and not message:
+            message = "failed"
+        if message:
+            return f"{text} {message}"
+        return text
+
+    def _render_operation(self, operation: OperationState) -> Any:
+        from rich.spinner import Spinner
+        from rich.text import Text
+
+        text = self._format_operation_text(operation)
+        if operation.status == "running":
+            if operation.spinner is None:
+                operation.spinner = Spinner("dots", text, style="cyan")
+            else:
+                operation.spinner.text = text
+            return operation.spinner
+
+        operation.spinner = None
+
+        symbol = "•"
+        style = None
+        if operation.status == "success":
+            symbol = "✓"
+            style = "green"
+        elif operation.status == "no_change":
+            symbol = "•"
+            style = "yellow"
+        elif operation.status == "error":
+            symbol = "✗"
+            style = "red"
+
+        line = Text()
+        line.append(symbol, style=style)
+        line.append(" ")
+        line.append(text, style=style)
+        return line
+
+    def _build_display(self, *, full_output: bool | None = None) -> Any:
         """Build the Rich renderable for current state."""
         from rich.console import Group
         from rich.text import Text
+        from rich.tree import Tree
 
         if not self._console:
             return Text("")
@@ -2462,32 +3213,47 @@ class Renderer:
         # Calculate max_visible dynamically to handle terminal resize
         panel_height = self._initial_panel_height or max(1, height - 1)
         max_visible = min(panel_height, height - 1)
+        if full_output is None:
+            full_output = self.full_output
 
-        lines: list[Text] = []
+        trees: list[Any] = []
         for name in self.order:
-            if len(lines) >= max_visible:
-                break
-            state = self.states[name]
-            status = state.status or "pending"
-
-            # Build header line: "name: status" with name in bold
+            item = self.items[name]
             header = Text()
             header.append(name, style="bold")
-            header.append(f": {status}")
-            header.truncate(width - 1)
-            lines.append(header)
+            header.append(" ")
+            header.append(item.origin, style="dim")
+            tree = Tree(header, guide_style="dim")
 
-            if len(lines) >= max_visible:
-                break
+            operations = [
+                item.operations[kind]
+                for kind in item.op_order
+                if item.operations[kind].visible()
+            ]
+            for operation in operations:
+                op_node = tree.add(self._render_operation(operation))
+                for detail in operation.detail_lines:
+                    op_node.add(Text(detail))
+                if operation.active_commands > 0:
+                    for tail_line in operation.tail:
+                        op_node.add(Text(f"> {tail_line}", style="dim"))
 
-            # Add tail lines for active commands
-            if state.active_commands > 0:
-                for tail_line in state.tail:
-                    if len(lines) >= max_visible:
-                        break
-                    detail = Text(f"  {tail_line}", style="dim")
-                    detail.truncate(width - 1)
-                    lines.append(detail)
+            trees.append(tree)
+
+        renderable: Any = Group(*trees) if trees else Text("")
+        if full_output:
+            return renderable
+
+        options = self._console.options.update(width=width, height=max_visible)
+        rendered_lines = self._console.render_lines(renderable, options=options)
+        lines: list[Text] = []
+        for line in rendered_lines[:max_visible]:
+            text = Text()
+            for segment in line:
+                if segment.text:
+                    text.append(segment.text, style=segment.style)
+            text.truncate(width - 1)
+            lines.append(text)
 
         return Group(*lines)
 
@@ -2529,16 +3295,9 @@ class Renderer:
     def _print_final_status(self) -> None:
         """Print final status summary after stopping live display."""
         from rich.console import Console
-        from rich.text import Text
 
         console = Console()
-        for name in self.order:
-            state = self.states[name]
-            status = state.status or "done"
-            line = Text()
-            line.append(name, style="bold")
-            line.append(f": {status}")
-            console.print(line)
+        console.print(self._build_display(full_output=True))
 
     def render(self) -> None:
         """Update the live display with current state."""
@@ -2547,110 +3306,200 @@ class Renderer:
         self._live.update(self._build_display(), refresh=True)
 
 
+# =============================================================================
+# Orchestration + CLI
+# =============================================================================
+
+
 async def _consume_events(
     queue: asyncio.Queue[UpdateEvent | None],
     order: list[str],
     sources: SourcesFile,
     *,
+    item_meta: dict[str, ItemMeta],
     max_lines: int,
     is_tty: bool,
     quiet: bool = False,
 ) -> tuple[bool, int, dict[str, str]]:
-    states = {
-        name: SourceState(status="pending", tail=deque(maxlen=max_lines))
+    items = {
+        name: ItemState.from_meta(item_meta[name], max_lines=max_lines)
         for name in order
+        if name in item_meta
     }
     updated = False
     errors = 0
     update_details: dict[str, str] = {}  # name -> "updated" | "error" | "no_change"
-    renderer = Renderer(states, order, is_tty=is_tty, quiet=quiet)
+    detail_priority = {"no_change": 0, "updated": 1, "error": 2}
+
+    def set_detail(name: str, status: str) -> None:
+        nonlocal updated
+        current = update_details.get(name)
+        if current is None or detail_priority[status] > detail_priority[current]:
+            update_details[name] = status
+        if status == "updated":
+            updated = True
+
+    renderer = Renderer(
+        items,
+        order,
+        is_tty=is_tty,
+        full_output=_resolve_full_output(),
+        quiet=quiet,
+    )
 
     while True:
         event = await queue.get()
         if event is None:
             break
-        state = states.get(event.source)
-        if state is None:
+        item = items.get(event.source)
+        if item is None:
             continue
 
         match event.kind:
             case UpdateEventKind.STATUS:
-                state.status = event.message or state.status
                 if event.message:
-                    renderer.log(event.source, event.message)
+                    _apply_status(item, event.message)
+                    if _is_terminal_status(event.message):
+                        renderer.log(event.source, event.message)
 
             case UpdateEventKind.COMMAND_START:
-                state.active_commands += 1
-                if event.message:
-                    state.status = event.message
-                    renderer.log(event.source, event.message)
-                if state.active_commands == 1:
-                    state.tail.clear()
+                args = event.payload if isinstance(event.payload, list) else None
+                op_kind = _operation_for_command(args)
+                operation = item.operations.get(op_kind)
+                if operation:
+                    item.last_operation = op_kind
+                    item.active_command_op = op_kind
+                    operation.status = "running"
+                    operation.active_commands += 1
+                    if operation.active_commands == 1:
+                        operation.tail.clear()
 
             case UpdateEventKind.LINE:
                 label = event.stream or "stdout"
                 message = event.message or ""
                 line_text = f"[{label}] {message}" if label else message
-                if state.active_commands > 0:
-                    if not state.tail or state.tail[-1] != line_text:
-                        state.tail.append(line_text)
-                renderer.log(event.source, message, stream=label)
+                op_kind = item.active_command_op or item.last_operation
+                if op_kind is None:
+                    op_kind = OperationKind.COMPUTE_HASH
+                operation = item.operations.get(op_kind)
+                if operation and operation.active_commands > 0:
+                    if not operation.tail or operation.tail[-1] != line_text:
+                        operation.tail.append(line_text)
 
             case UpdateEventKind.COMMAND_END:
-                state.active_commands = max(0, state.active_commands - 1)
-                if state.active_commands == 0:
-                    state.tail.clear()
                 result = event.payload
                 if isinstance(result, CommandResult):
-                    renderer.log(
-                        event.source, f"command finished (exit {result.returncode})"
-                    )
+                    op_kind = _operation_for_command(result.args)
+                    operation = item.operations.get(op_kind)
+                    if operation:
+                        operation.active_commands = max(
+                            0, operation.active_commands - 1
+                        )
+                        if operation.active_commands == 0:
+                            operation.tail.clear()
+                            if item.active_command_op == op_kind:
+                                item.active_command_op = None
+                        if result.returncode != 0 and not result.allow_failure:
+                            operation.status = "error"
+                        elif (
+                            op_kind
+                            in (
+                                OperationKind.UPDATE_REF,
+                                OperationKind.REFRESH_LOCK,
+                            )
+                            and operation.status != "error"
+                        ):
+                            operation.status = "success"
 
             case UpdateEventKind.RESULT:
                 result = event.payload
                 if result is not None:
                     if isinstance(result, dict):
                         # Ref update result: {"current": ..., "latest": ...}
-                        updated = True
-                        update_details[event.source] = "updated"
+                        set_detail(event.source, "updated")
                         current_ref = result.get("current", "?")
                         latest_ref = result.get("latest", "?")
-                        state.status = f"Updated :: {current_ref} => {latest_ref}"
+                        check_op = item.operations.get(OperationKind.CHECK_VERSION)
+                        if check_op:
+                            check_op.status = "success"
+                            check_op.message = f"{current_ref} → {latest_ref}"
+                            item.last_operation = OperationKind.CHECK_VERSION
+                        for op_kind in (
+                            OperationKind.UPDATE_REF,
+                            OperationKind.REFRESH_LOCK,
+                        ):
+                            op = item.operations.get(op_kind)
+                            if op and op.status == "running":
+                                op.status = "success"
+                        renderer.log(
+                            event.source,
+                            f"Updated: {current_ref} -> {latest_ref}",
+                        )
                     elif isinstance(result, SourceEntry):
                         old_entry = sources.entries.get(event.source)
                         old_version = old_entry.version if old_entry else None
                         new_version = result.version
                         sources.entries[event.source] = result
-                        updated = True
-                        update_details[event.source] = "updated"
+                        set_detail(event.source, "updated")
+
+                        check_op = item.operations.get(OperationKind.CHECK_VERSION)
+                        if check_op:
+                            if (
+                                old_version
+                                and new_version
+                                and old_version != new_version
+                            ):
+                                check_op.status = "success"
+                                check_op.message = f"{old_version} → {new_version}"
+                            elif new_version:
+                                check_op.status = "success"
+                                if check_op.message is None:
+                                    check_op.message = new_version
+
+                        hash_op = item.operations.get(OperationKind.COMPUTE_HASH)
+                        if hash_op:
+                            hash_op.status = "success"
+                            hash_op.detail_lines = _hash_diff_lines(old_entry, result)
+                            hash_op.message = None
                         if old_version and new_version and old_version != new_version:
-                            state.status = f"Updated :: {old_version} => {new_version}"
+                            renderer.log(
+                                event.source,
+                                f"Updated: {old_version} -> {new_version}",
+                            )
                         else:
-                            # Fall back to showing hash change if no version
                             old_hash = (
                                 old_entry.hashes.primary_hash() if old_entry else None
                             )
                             new_hash = result.hashes.primary_hash()
                             if old_hash and new_hash and old_hash != new_hash:
-                                state.status = f"Updated :: {old_hash} => {new_hash}"
+                                renderer.log(
+                                    event.source,
+                                    f"Updated: hash {old_hash} -> {new_hash}",
+                                )
                             else:
-                                state.status = "Updated."
+                                renderer.log(event.source, "Updated")
                     else:
-                        updated = True
-                        update_details[event.source] = "updated"
-                        state.status = "Updated."
+                        set_detail(event.source, "updated")
                 else:
-                    update_details[event.source] = "no_change"
-                    if not state.status:
-                        state.status = "No updates needed."
+                    set_detail(event.source, "no_change")
+                    check_op = item.operations.get(OperationKind.CHECK_VERSION)
+                    if check_op and check_op.status == "pending":
+                        check_op.status = "no_change"
 
             case UpdateEventKind.ERROR:
                 errors += 1
-                update_details[event.source] = "error"
+                set_detail(event.source, "error")
                 message = event.message or "Unknown error"
-                state.status = f"Error: {message}"
-                state.active_commands = 0
-                state.tail.clear()
+                error_op: OperationState | None = None
+                if item.active_command_op:
+                    error_op = item.operations.get(item.active_command_op)
+                if error_op is None and item.last_operation:
+                    error_op = item.operations.get(item.last_operation)
+                if error_op:
+                    error_op.status = "error"
+                    error_op.message = message
+                    error_op.active_commands = 0
+                    error_op.tail.clear()
                 renderer.log_error(event.source, message)
 
         renderer.request_render()
@@ -2666,12 +3515,15 @@ async def _update_source_task(
     sources: SourcesFile,
     *,
     update_input: bool,
+    native_only: bool,
     session: aiohttp.ClientSession,
     update_input_lock: asyncio.Lock,
     queue: asyncio.Queue[UpdateEvent | None],
 ) -> None:
     current = sources.entries.get(name)
     updater = UPDATERS[name]()
+    if isinstance(updater, DenoDepsHashUpdater):
+        updater.native_only = native_only
     input_name = getattr(updater, "input_name", None)
     put = queue.put
 
@@ -2691,6 +3543,9 @@ async def _update_source_task(
         await put(UpdateEvent.error(name, str(exc)))
 
 
+_SUMMARY_STATUS_PRIORITY = {"no_change": 0, "updated": 1, "error": 2}
+
+
 @dataclass
 class UpdateSummary:
     """Summary of update run for JSON output."""
@@ -2698,6 +3553,31 @@ class UpdateSummary:
     updated: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     no_change: list[str] = field(default_factory=list)
+    _status_by_name: dict[str, str] = field(default_factory=dict, repr=False)
+    _order: list[str] = field(default_factory=list, repr=False)
+
+    def _set_status(self, name: str, status: str) -> None:
+        normalized = status if status in _SUMMARY_STATUS_PRIORITY else "no_change"
+        if name not in self._status_by_name:
+            self._order.append(name)
+            self._status_by_name[name] = normalized
+            return
+        current = self._status_by_name[name]
+        if _SUMMARY_STATUS_PRIORITY[normalized] > _SUMMARY_STATUS_PRIORITY[current]:
+            self._status_by_name[name] = normalized
+
+    def _rebuild_lists(self) -> None:
+        self.updated = []
+        self.errors = []
+        self.no_change = []
+        for name in self._order:
+            status = self._status_by_name[name]
+            if status == "updated":
+                self.updated.append(name)
+            elif status == "error":
+                self.errors.append(name)
+            else:
+                self.no_change.append(name)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2710,12 +3590,8 @@ class UpdateSummary:
     def accumulate(self, details: dict[str, str]) -> None:
         """Accumulate phase details into this summary."""
         for name, detail in details.items():
-            if detail == "updated":
-                self.updated.append(name)
-            elif detail == "error":
-                self.errors.append(name)
-            else:
-                self.no_change.append(name)
+            self._set_status(name, detail)
+        self._rebuild_lists()
 
 
 async def _run_phase(
@@ -2726,6 +3602,7 @@ async def _run_phase(
     *,
     quiet: bool,
     json_output: bool,
+    item_meta: dict[str, ItemMeta] | None = None,
 ) -> tuple[bool, int, dict[str, str]]:
     """Run update tasks with shared event consumption.
 
@@ -2733,11 +3610,24 @@ async def _run_phase(
     """
     max_lines = _resolve_log_tail_lines(None)
     is_tty = _is_tty() and not quiet and not json_output
+    if item_meta is None:
+        item_meta = {
+            name: ItemMeta(
+                name=name,
+                origin=_ORIGIN_SOURCES_ONLY,
+                op_order=(
+                    OperationKind.CHECK_VERSION,
+                    OperationKind.COMPUTE_HASH,
+                ),
+            )
+            for name in names
+        }
     consumer = asyncio.create_task(
         _consume_events(
             queue,
             names,
             sources,
+            item_meta=item_meta,
             max_lines=max_lines,
             is_tty=is_tty,
             quiet=quiet or json_output,
@@ -2748,175 +3638,161 @@ async def _run_phase(
     return await consumer
 
 
-async def _run_updates(args: argparse.Namespace) -> int:
-    """Unified update orchestrator.
+@dataclass(frozen=True)
+class ResolvedTargets:
+    all_source_names: set[str]
+    all_ref_inputs: list[FlakeInputRef]
+    all_ref_names: set[str]
+    all_known_names: set[str]
+    do_refs: bool
+    do_sources: bool
+    do_input_refresh: bool
+    dry_run: bool
+    native_only: bool
+    ref_inputs: list[FlakeInputRef]
+    source_names: list[str]
 
-    Phase 1: Flake input ref updates (unless --no-refs)
-    Phase 2: Source hash updates (unless --no-sources)
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "ResolvedTargets":
+        all_source_names = set(UPDATERS.keys())
+        all_ref_inputs = get_flake_inputs_with_refs()
+        all_ref_names = {i.name for i in all_ref_inputs}
+        all_known_names = all_source_names | all_ref_names
 
-    Refs must complete before sources since source hash computation depends
-    on the locked flake input state.
-    """
-    global _NATIVE_ONLY
-    _NATIVE_ONLY = args.native_only
+        do_refs = not args.no_refs
+        do_sources = not args.no_sources
+        if args.source:
+            if args.source not in all_ref_names:
+                do_refs = False
+            if args.source not in all_source_names:
+                do_sources = False
 
-    out = OutputOptions(json_output=args.json, quiet=args.quiet)
+        ref_inputs = (
+            [i for i in all_ref_inputs if i.name == args.source]
+            if args.source
+            else all_ref_inputs
+        )
+        source_names = (
+            [args.source]
+            if args.source in all_source_names
+            else []
+            if args.source
+            else list(UPDATERS.keys())
+        )
+        if not do_refs:
+            ref_inputs = []
+        if not do_sources:
+            source_names = []
 
-    if args.schema:
-        print(json.dumps(SourcesFile.json_schema(), indent=2))
-        return 0
+        return cls(
+            all_source_names=all_source_names,
+            all_ref_inputs=all_ref_inputs,
+            all_ref_names=all_ref_names,
+            all_known_names=all_known_names,
+            do_refs=do_refs,
+            do_sources=do_sources,
+            do_input_refresh=not args.no_input,
+            dry_run=args.check,
+            native_only=args.native_only,
+            ref_inputs=ref_inputs,
+            source_names=source_names,
+        )
 
-    if args.list:
-        if args.json:
-            sources_list = sorted(UPDATERS.keys())
-            ref_inputs = [i.name for i in get_flake_inputs_with_refs()]
-            print(
-                json.dumps({"sources": sources_list, "flakeInputsWithRefs": ref_inputs})
+
+def _build_item_meta(
+    resolved: ResolvedTargets, sources: SourcesFile | None
+) -> tuple[dict[str, ItemMeta], list[str]]:
+    flake_names = (
+        {inp.name for inp in resolved.ref_inputs} if resolved.do_refs else set()
+    )
+    source_names = set(resolved.source_names) if resolved.do_sources else set()
+    sources_with_input: set[str] = set()
+    if sources is not None:
+        sources_with_input = {
+            name for name, entry in sources.entries.items() if entry.input
+        }
+    sources_with_input &= source_names
+
+    both = flake_names & sources_with_input
+    flake_only = flake_names - both
+    sources_only = source_names - both
+
+    item_meta: dict[str, ItemMeta] = {}
+    for name in both:
+        item_meta[name] = ItemMeta(
+            name=name,
+            origin=_ORIGIN_BOTH,
+            op_order=(
+                OperationKind.CHECK_VERSION,
+                OperationKind.UPDATE_REF,
+                OperationKind.REFRESH_LOCK,
+                OperationKind.COMPUTE_HASH,
+            ),
+        )
+    for name in flake_only:
+        item_meta[name] = ItemMeta(
+            name=name,
+            origin=_ORIGIN_FLAKE_ONLY,
+            op_order=(
+                OperationKind.CHECK_VERSION,
+                OperationKind.UPDATE_REF,
+                OperationKind.REFRESH_LOCK,
+            ),
+        )
+    for name in sources_only:
+        if name in sources_with_input:
+            op_order = (
+                OperationKind.CHECK_VERSION,
+                OperationKind.REFRESH_LOCK,
+                OperationKind.COMPUTE_HASH,
             )
         else:
-            from rich.columns import Columns
-            from rich.console import Console
+            op_order = (
+                OperationKind.CHECK_VERSION,
+                OperationKind.COMPUTE_HASH,
+            )
+        item_meta[name] = ItemMeta(
+            name=name,
+            origin=_ORIGIN_SOURCES_ONLY,
+            op_order=op_order,
+        )
 
-            console = Console()
-            console.print("[bold]Available sources (sources.json):[/bold]")
-            console.print(Columns(sorted(UPDATERS.keys()), padding=(0, 2)))
-            console.print()
-            ref_inputs = get_flake_inputs_with_refs()
-            if ref_inputs:
-                console.print("[bold]Flake inputs with version refs:[/bold]")
-                for inp in ref_inputs:
-                    console.print(f"  {inp.name}: {inp.owner}/{inp.repo} @ {inp.ref}")
-        return 0
+    order = sorted(item_meta, key=lambda name: f"{item_meta[name].origin} {name}")
+    return item_meta, order
 
-    # Validate mode: just load and validate sources.json
-    if args.validate:
-        try:
-            sources = load_sources()
-            if args.json:
-                print(json.dumps({"valid": True, "count": len(sources.entries)}))
-            else:
-                out.print(
-                    f":heavy_check_mark: Validated {SOURCES_FILE}: "
-                    f"{len(sources.entries)} sources OK",
-                    style="green",
-                )
-            return 0
-        except Exception as exc:
-            if args.json:
-                print(json.dumps({"valid": False, "error": str(exc)}))
-            else:
-                out.print_error(f":x: Validation failed: {exc}")
-            return 1
 
-    # Resolve what's known to each system
-    all_source_names = set(UPDATERS.keys())
-    all_ref_inputs = get_flake_inputs_with_refs()
-    all_ref_names = {i.name for i in all_ref_inputs}
-    all_known_names = all_source_names | all_ref_names
+async def _run_phase_tasks(
+    names: list[str],
+    sources: SourcesFile,
+    *,
+    quiet: bool,
+    json_output: bool,
+    build_tasks: Callable[
+        [aiohttp.ClientSession, asyncio.Queue[UpdateEvent | None]],
+        list[asyncio.Task[None]],
+    ],
+) -> tuple[bool, int, dict[str, str]]:
+    async with aiohttp.ClientSession() as session:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        tasks = build_tasks(session, queue)
+        return await _run_phase(
+            tasks,
+            names,
+            sources,
+            queue,
+            quiet=quiet,
+            json_output=json_output,
+        )
 
-    # Validate source name if specified
-    if args.source and args.source not in all_known_names:
-        out.print_error(f"Error: Unknown source or input '{args.source}'")
-        out.print_error(f"Available: {', '.join(sorted(all_known_names))}")
-        return 1
 
-    do_refs = not args.no_refs
-    do_sources = not args.no_sources
-    do_input_refresh = not args.no_input
-    dry_run = args.check
-
-    # If a specific name is given, only run phases that know about it
-    if args.source:
-        if args.source not in all_ref_names:
-            do_refs = False
-        if args.source not in all_source_names:
-            do_sources = False
-
-    # Combined summary across both phases
-    summary = UpdateSummary()
-    had_errors = False
-
-    # ── Phase 1: Ref updates ──────────────────────────────────────────
-    if do_refs:
-        if args.source:
-            ref_inputs = [i for i in all_ref_inputs if i.name == args.source]
-        else:
-            ref_inputs = all_ref_inputs
-
-        if ref_inputs:
-            ref_names = [i.name for i in ref_inputs]
-            dummy_sources = SourcesFile(entries={})
-
-            async with aiohttp.ClientSession() as session:
-                queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-                flake_edit_lock = asyncio.Lock()
-                tasks = [
-                    asyncio.create_task(
-                        _update_refs_task(
-                            inp,
-                            session,
-                            queue,
-                            dry_run=dry_run,
-                            flake_edit_lock=flake_edit_lock,
-                        )
-                    )
-                    for inp in ref_inputs
-                ]
-                _, ref_errors, ref_details = await _run_phase(
-                    tasks,
-                    ref_names,
-                    dummy_sources,
-                    queue,
-                    quiet=args.quiet,
-                    json_output=args.json,
-                )
-
-            summary.accumulate(ref_details)
-            if ref_errors:
-                had_errors = True
-
-    # ── Phase 2: Source hash updates ──────────────────────────────────
-    if do_sources:
-        if args.source:
-            source_names = [args.source] if args.source in all_source_names else []
-        else:
-            source_names = list(UPDATERS.keys())
-
-        if source_names:
-            sources = load_sources()
-
-            async with aiohttp.ClientSession() as session:
-                queue2: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-                update_input_lock = asyncio.Lock()
-                tasks = [
-                    asyncio.create_task(
-                        _update_source_task(
-                            name,
-                            sources,
-                            update_input=do_input_refresh,
-                            session=session,
-                            update_input_lock=update_input_lock,
-                            queue=queue2,
-                        )
-                    )
-                    for name in source_names
-                ]
-                src_updated, src_errors, src_details = await _run_phase(
-                    tasks,
-                    source_names,
-                    sources,
-                    queue2,
-                    quiet=args.quiet,
-                    json_output=args.json,
-                )
-
-            summary.accumulate(src_details)
-            if src_updated:
-                save_sources(sources)
-            if src_errors:
-                had_errors = True
-
-    # ── Combined output ───────────────────────────────────────────────
+def _emit_summary(
+    args: argparse.Namespace,
+    summary: UpdateSummary,
+    *,
+    had_errors: bool,
+    out: OutputOptions,
+    dry_run: bool,
+) -> int:
     if args.json:
         print(json.dumps(summary.to_dict()))
         return 1 if had_errors else 0
@@ -2948,6 +3824,175 @@ async def _run_updates(args: argparse.Namespace) -> int:
         return 0
 
     return 1 if had_errors else 0
+
+
+async def _run_updates(args: argparse.Namespace) -> int:
+    """Unified update orchestrator.
+
+    Phase 1: Flake input ref updates (unless --no-refs)
+    Phase 2: Source hash updates (unless --no-sources)
+
+    Refs must complete before sources since source hash computation depends
+    on the locked flake input state.
+    """
+    out = OutputOptions(json_output=args.json, quiet=args.quiet)
+
+    if args.schema:
+        print(json.dumps(SourcesFile.json_schema(), indent=2))
+        return 0
+
+    if args.list:
+        if args.json:
+            sources_list = sorted(UPDATERS.keys())
+            ref_inputs = [i.name for i in get_flake_inputs_with_refs()]
+            print(
+                json.dumps({"sources": sources_list, "flakeInputsWithRefs": ref_inputs})
+            )
+            return 0
+
+        from rich.columns import Columns
+        from rich.console import Console
+
+        console = Console()
+        console.print("[bold]Available sources (sources.json):[/bold]")
+        console.print(Columns(sorted(UPDATERS.keys()), padding=(0, 2)))
+        console.print()
+        ref_inputs = get_flake_inputs_with_refs()
+        if ref_inputs:
+            console.print("[bold]Flake inputs with version refs:[/bold]")
+            for inp in ref_inputs:
+                console.print(f"  {inp.name}: {inp.owner}/{inp.repo} @ {inp.ref}")
+        return 0
+
+    # Validate mode: just load and validate sources.json
+    if args.validate:
+        try:
+            sources = SourcesFile.load(SOURCES_FILE)
+            if args.json:
+                print(json.dumps({"valid": True, "count": len(sources.entries)}))
+            else:
+                out.print(
+                    f":heavy_check_mark: Validated {SOURCES_FILE}: "
+                    f"{len(sources.entries)} sources OK",
+                    style="green",
+                )
+            return 0
+        except Exception as exc:
+            if args.json:
+                print(json.dumps({"valid": False, "error": str(exc)}))
+            else:
+                out.print_error(f":x: Validation failed: {exc}")
+            return 1
+
+    resolved = ResolvedTargets.from_args(args)
+    show_phase_headers = (
+        not args.json
+        and not args.quiet
+        and not _is_tty()
+        and resolved.do_refs
+        and resolved.do_sources
+        and resolved.ref_inputs
+        and resolved.source_names
+    )
+
+    # Validate source name if specified
+    if args.source and args.source not in resolved.all_known_names:
+        out.print_error(f"Error: Unknown source or input '{args.source}'")
+        out.print_error(f"Available: {', '.join(sorted(resolved.all_known_names))}")
+        return 1
+
+    # Combined summary across both phases
+    summary = UpdateSummary()
+    had_errors = False
+
+    if not resolved.ref_inputs and not resolved.source_names:
+        return _emit_summary(
+            args, summary, had_errors=False, out=out, dry_run=resolved.dry_run
+        )
+
+    sources = (
+        SourcesFile.load(SOURCES_FILE)
+        if resolved.do_sources and resolved.source_names
+        else SourcesFile(entries={})
+    )
+    item_meta, order = _build_item_meta(
+        resolved, sources if resolved.do_sources else None
+    )
+
+    if not order:
+        return _emit_summary(
+            args, summary, had_errors=False, out=out, dry_run=resolved.dry_run
+        )
+
+    queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+    max_lines = _resolve_log_tail_lines(None)
+    is_tty = _is_tty() and not args.quiet and not args.json
+    consumer = asyncio.create_task(
+        _consume_events(
+            queue,
+            order,
+            sources,
+            item_meta=item_meta,
+            max_lines=max_lines,
+            is_tty=is_tty,
+            quiet=args.quiet or args.json,
+        )
+    )
+
+    # ── Phase 1: Ref updates ──────────────────────────────────────────
+    if resolved.do_refs and resolved.ref_inputs:
+        if show_phase_headers:
+            out.print("\nPhase 1: flake input refs", style="dim")
+        async with aiohttp.ClientSession() as session:
+            flake_edit_lock = asyncio.Lock()
+            tasks = [
+                asyncio.create_task(
+                    _update_refs_task(
+                        inp,
+                        session,
+                        queue,
+                        dry_run=resolved.dry_run,
+                        flake_edit_lock=flake_edit_lock,
+                    )
+                )
+                for inp in resolved.ref_inputs
+            ]
+            await asyncio.gather(*tasks)
+
+    # ── Phase 2: Source hash updates ──────────────────────────────────
+    if resolved.do_sources and resolved.source_names:
+        if show_phase_headers:
+            out.print("\nPhase 2: sources.json updates", style="dim")
+        async with aiohttp.ClientSession() as session:
+            update_input_lock = asyncio.Lock()
+            tasks = [
+                asyncio.create_task(
+                    _update_source_task(
+                        name,
+                        sources,
+                        update_input=resolved.do_input_refresh,
+                        native_only=resolved.native_only,
+                        session=session,
+                        update_input_lock=update_input_lock,
+                        queue=queue,
+                    )
+                )
+                for name in resolved.source_names
+            ]
+            await asyncio.gather(*tasks)
+
+    await queue.put(None)
+    _, error_count, details = await consumer
+    summary.accumulate(details)
+    had_errors = error_count > 0
+
+    if resolved.do_sources and resolved.source_names:
+        if any(details.get(name) == "updated" for name in resolved.source_names):
+            sources.save(SOURCES_FILE)
+
+    return _emit_summary(
+        args, summary, had_errors=had_errors, out=out, dry_run=resolved.dry_run
+    )
 
 
 def main() -> None:
@@ -3023,8 +4068,20 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Early exit modes that don't need tool checks
+    if args.list or args.schema or args.validate:
+        raise SystemExit(asyncio.run(_run_updates(args)))
+
     # Check for required tools before running
-    missing = _check_required_tools()
+    # flake-edit only needed if we're updating refs (not --no-refs)
+    # If a specific source is given, check if it's a ref input
+    needs_flake_edit = not args.no_refs
+    if needs_flake_edit and args.source:
+        # Only need flake-edit if the source is a ref input
+        ref_names = {i.name for i in get_flake_inputs_with_refs()}
+        needs_flake_edit = args.source in ref_names
+
+    missing = _check_required_tools(include_flake_edit=needs_flake_edit)
     if missing:
         sys.stderr.write(f"Error: Required tools not found: {', '.join(missing)}\n")
         sys.stderr.write("Please install them and ensure they are in your PATH.\n")

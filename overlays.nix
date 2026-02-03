@@ -12,6 +12,36 @@ let
   inherit (outputs.lib) sources;
 in
 {
+  # Compatibility overlay: nixpkgs renamed neovim's `lua` arg to `lua5_1`
+  # This must be applied BEFORE neovim-nightly-overlay to intercept the old arg
+  # Tracking: https://github.com/nix-community/neovim-nightly-overlay/pull/1166
+  # TODO: Remove once neovim-nightly-overlay merges the fix
+  neovimLuaCompat = _: prev: {
+    neovim-unwrapped =
+      let
+        original = prev.neovim-unwrapped;
+        # Wrapper that translates lua -> lua5_1 before calling the real override
+        compatOverride =
+          args:
+          let
+            fixedArgs =
+              if args ? lua then (builtins.removeAttrs args [ "lua" ]) // { lua5_1 = args.lua; } else args;
+          in
+          original.override fixedArgs;
+      in
+      # Replace the override function while preserving everything else
+      original
+      // {
+        override = compatOverride;
+        overrideAttrs =
+          f:
+          (original.overrideAttrs f)
+          // {
+            override = compatOverride;
+          };
+      };
+  };
+
   default =
     final: prev:
     let
@@ -44,14 +74,17 @@ in
           cmdName ? pname,
           version ? null,
           meta ? { },
+          go ? prev.go, # Allow overriding Go version
           ...
         }@args:
         let
           flakeRef = outputs.lib.flakeLock.${pname};
           finalVersion =
             if version != null then version else stripVersionPrefix (flakeRef.original.ref or "");
+          buildGoModule =
+            if go == prev.go then prev.buildGoModule else prev.buildGoModule.override { inherit go; };
         in
-        prev.buildGoModule (
+        buildGoModule (
           {
             inherit pname subPackages;
             version = finalVersion;
@@ -77,6 +110,7 @@ in
             "cmdName"
             "version"
             "meta"
+            "go"
           ])
         );
 
@@ -219,6 +253,10 @@ in
         cmdName = "bd";
         version = "0.0.0"; # beads doesn't have version tags
         proxyVendor = true;
+        # beads requires Go >= 1.25.6, nixpkgs default is 1.25.5
+        go = prev.go_1_26;
+        # go-icu-regex (transitive dep via dolt) requires ICU headers
+        buildInputs = [ prev.icu ];
       };
 
       gogcli = mkGoCliPackage {
@@ -281,6 +319,45 @@ in
         datagrip = mkSourceOverride "datagrip" prev.jetbrains.datagrip;
       };
 
+      # Pin element-desktop to 1.12.8 - version 1.12.9 requires Xcode 26 actool
+      # which isn't available in nixpkgs yet (nixpkgs#485589)
+      # TODO: Remove this override once nixpkgs PR #486275 is merged
+      element-desktop = prev.element-desktop.overrideAttrs (_: {
+        version = "1.12.8";
+        src = prev.fetchFromGitHub {
+          owner = "element-hq";
+          repo = "element-desktop";
+          rev = "v1.12.8";
+          hash = "sha256-J+ITqHLxbmhhjFnyfBlHFzxrPeIvsCv+iaxa8DiWorM=";
+        };
+        offlineCache = prev.fetchYarnDeps {
+          yarnLock =
+            prev.fetchFromGitHub {
+              owner = "element-hq";
+              repo = "element-desktop";
+              rev = "v1.12.8";
+              hash = "sha256-J+ITqHLxbmhhjFnyfBlHFzxrPeIvsCv+iaxa8DiWorM=";
+            }
+            + "/yarn.lock";
+          hash = "sha256-coa2AMNGLDtqcrQJDc/DDkcaWBCLa76VTKJLGlr7dpQ=";
+        };
+      });
+
+      # nushell: Skip sandbox-incompatible test on Darwin
+      # path_is_a_list_in_repl fails with "I/O error: Operation not permitted" in Nix sandbox
+      # The test spawns nushell in REPL mode which hits Darwin sandbox I/O restrictions
+      # TODO: Remove once upstream fixes the test or nixpkgs adds this skip
+      nushell = prev.nushell.overrideAttrs (old: {
+        checkPhase =
+          let
+            extraSkip = "--skip=shell::environment::env::path_is_a_list_in_repl";
+          in
+          prev.lib.replaceStrings
+            [ "--skip=repl::test_config_path::test_default_config_path" ]
+            [ "${extraSkip} --skip=repl::test_config_path::test_default_config_path" ]
+            old.checkPhase;
+      });
+
       # ═══════════════════════════════════════════════════════════════════════════
       # Python Package Overrides
       # ═══════════════════════════════════════════════════════════════════════════
@@ -330,29 +407,75 @@ in
       codex =
         let
           version = getFlakeVersion "codex";
-        in
-        prev.codex.overrideAttrs (old: {
-          inherit version;
-          src = inputs.codex;
-          sourceRoot = "source/codex-rs";
-          cargoDeps = prev.rustPlatform.fetchCargoVendor {
-            src = "${inputs.codex}/codex-rs";
-            hash = outputs.lib.sourceHash "codex" "cargoHash";
-          };
+          craneLib = inputs.crane.mkLib prev;
+          src = "${inputs.codex}/codex-rs";
+          commonArgs = {
+            inherit src version;
+            pname = "codex";
+            strictDeps = true;
+            cargoLock = "${inputs.codex}/codex-rs/Cargo.lock";
+            # Use --offline instead of --locked to avoid checksum mismatch errors
+            # for git dependencies (runfiles from rules_rust)
+            cargoExtraArgs = "--offline";
 
-          nativeBuildInputs =
-            (old.nativeBuildInputs or [ ])
-            ++ (with prev; [
+            nativeBuildInputs = with prev; [
+              clang
               cmake
+              gitMinimal
+              installShellFiles
+              makeBinaryWrapper
+              pkg-config
               ninja
               go
               perl
-            ]);
+            ];
 
-          # Provide patched BoringSSL source for rama-boring-sys
-          BORING_BSSL_SOURCE_PATH = final.ramaBoringsslSource;
-          BORING_BSSL_ASSUME_PATCHED = "1";
-        });
+            buildInputs =
+              with prev;
+              [
+                libclang
+                openssl
+              ]
+              ++ lib.optionals stdenv.hostPlatform.isDarwin [ apple-sdk_15 ];
+
+            LIBCLANG_PATH = "${prev.lib.getLib prev.libclang}/lib";
+            BORING_BSSL_SOURCE_PATH = final.ramaBoringsslSource;
+            BORING_BSSL_ASSUME_PATCHED = "1";
+
+            NIX_CFLAGS_COMPILE = toString (
+              prev.lib.optionals prev.stdenv.cc.isClang [
+                "-Wno-error=character-conversion"
+              ]
+            );
+          };
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+        in
+        craneLib.buildPackage (
+          commonArgs
+          // {
+            inherit cargoArtifacts;
+            doCheck = false;
+
+            postInstall = ''
+              installShellCompletion --cmd codex \
+                --bash <($out/bin/codex completion bash) \
+                --fish <($out/bin/codex completion fish) \
+                --zsh <($out/bin/codex completion zsh)
+            '';
+
+            postFixup = ''
+              wrapProgram $out/bin/codex --prefix PATH : ${prev.lib.makeBinPath [ prev.ripgrep ]}
+            '';
+
+            meta = with prev.lib; {
+              description = "Lightweight coding agent that runs in your terminal";
+              homepage = "https://github.com/openai/codex";
+              license = licenses.asl20;
+              mainProgram = "codex";
+              platforms = platforms.unix;
+            };
+          }
+        );
 
       conductor = mkDmgApp {
         pname = "conductor";
@@ -484,6 +607,34 @@ in
             npmDeps
             prev.nodejs_22.python
           ];
+          # Replace postPatch entirely for v0.26.0+ (upstream patterns changed)
+          postPatch =
+            let
+              jq = "${prev.jq}/bin/jq";
+              rmNodePty = "del(.optionalDependencies.\"node-pty\")";
+              rg = prev.lib.getExe prev.ripgrep;
+              schema = "packages/cli/src/config/settingsSchema.ts";
+              # Sed pattern to change default: true -> false within a block
+              disableDefault = "s/default: true/default: false/";
+            in
+            ''
+              # Remove node-pty dependency from package.json
+              ${jq} '${rmNodePty}' package.json > package.json.tmp
+              mv package.json.tmp package.json
+
+              # Remove node-pty dependency from packages/core/package.json
+              ${jq} '${rmNodePty}' packages/core/package.json > tmp.json
+              mv tmp.json packages/core/package.json
+
+              # Fix ripgrep path for SearchText
+              substituteInPlace packages/core/src/tools/ripGrep.ts \
+                --replace-fail "await ensureRgPath();" "'${rg}';"
+
+              # Disable auto-update defaults in settingsSchema.ts (v0.26.0+)
+              sed -i '/enableAutoUpdate: {/,/}/ ${disableDefault}' ${schema}
+              sed -i '/enableAutoUpdateNotification: {/,/}/ ${disableDefault}' \
+                ${schema}
+            '';
           # Remove files that reference python to keep it out of the closure
           postInstall = (oldAttrs.postInstall or "") + ''
             rm -rf $out/share/gemini-cli/node_modules/keytar/build
@@ -600,30 +751,66 @@ in
         // {
           # Override node_modules hash - upstream may lag behind actual npm registry state
           node_modules = old.node_modules.overrideAttrs {
-            outputHash = "sha256-yvrNFmYeMYviyCVSahuLFXmyoIMT136WoJ0MEbk+AD8=";
+            outputHash = outputs.lib.sourceHash "opencode" "nodeModulesHash";
           };
         }
       );
 
-      opencode-desktop = inputs.opencode.packages.${system}.desktop.overrideAttrs (
-        old:
-        (opencodeBunPatch old)
-        // {
-          # Use dev config instead of prod (gets dev icon + "OpenCode Dev" name)
-          tauriBuildFlags = [ "--no-sign" ];
+      opencode-desktop =
+        let
+          # Get Cargo.lock git dependency hashes from sources.json
+          spectaEntry = outputs.lib.sourceHashEntry "opencode-desktop" "spectaOutputHash";
+          tauriEntry = outputs.lib.sourceHashEntry "opencode-desktop" "tauriOutputHash";
+          tauriSpectaEntry = outputs.lib.sourceHashEntry "opencode-desktop" "tauriSpectaOutputHash";
+          upstreamDesktop = inputs.opencode.packages.${system}.desktop;
+        in
+        prev.rustPlatform.buildRustPackage (
+          (opencodeBunPatch { })
+          // {
+            inherit (upstreamDesktop)
+              pname
+              version
+              src
+              node_modules
+              patches
+              cargoRoot
+              buildAndTestSubdir
+              nativeBuildInputs
+              buildInputs
+              strictDeps
+              meta
+              ;
 
-          # Override preBuild to use our patched opencode instead of upstream's
-          preBuild = ''
-            cp -a ${old.node_modules}/{node_modules,packages} .
-            chmod -R u+w node_modules packages
-            patchShebangs node_modules
-            patchShebangs packages/desktop/node_modules
+            # Add output hashes for Cargo.lock git dependencies
+            cargoLock = {
+              lockFile = "${upstreamDesktop.src}/packages/desktop/src-tauri/Cargo.lock";
+              outputHashes = {
+                ${spectaEntry.gitDep} = spectaEntry.hash;
+                ${tauriEntry.gitDep} = tauriEntry.hash;
+                ${tauriSpectaEntry.gitDep} = tauriSpectaEntry.hash;
+              };
+            };
 
-            mkdir -p packages/desktop/src-tauri/sidecars
-            cp ${final.opencode}/bin/opencode packages/desktop/src-tauri/sidecars/opencode-cli-${prev.stdenv.hostPlatform.rust.rustcTarget}
-          '';
-        }
-      );
+            # Use dev config instead of prod (gets dev icon + "OpenCode Dev" name)
+            tauriBuildFlags = [ "--no-sign" ];
+
+            # Override preBuild to use our patched opencode instead of upstream's
+            preBuild = ''
+              cp -a ${upstreamDesktop.node_modules}/{node_modules,packages} .
+              chmod -R u+w node_modules packages
+              patchShebangs node_modules
+              patchShebangs packages/desktop/node_modules
+
+              mkdir -p packages/desktop/src-tauri/sidecars
+              cp ${final.opencode}/bin/opencode packages/desktop/src-tauri/sidecars/opencode-cli-${prev.stdenv.hostPlatform.rust.rustcTarget}
+            '';
+
+            postFixup = prev.lib.optionalString prev.stdenv.hostPlatform.isLinux ''
+              mv $out/bin/OpenCode $out/bin/opencode-desktop
+              sed -i 's|^Exec=OpenCode$|Exec=opencode-desktop|' $out/share/applications/OpenCode.desktop
+            '';
+          }
+        );
 
       # sentry-cli: Build from source with xcarchive test fixtures stripped.
       # Not a flake input because the repo contains .xcarchive bundles with

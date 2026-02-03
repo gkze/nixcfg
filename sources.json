@@ -13,7 +13,7 @@
     "hashes": [
       {
         "drvType": "buildGoModule",
-        "hash": "sha256-mdb+4OpdQXGQ96cMpc2JC7L5V1b3Y0gRbRZT9tmMfno=",
+        "hash": "sha256-66xL90lHCDWEOHbA5GnBYmmo/JO37GEcigjwVOAQhnY=",
         "hashType": "vendorHash"
       }
     ],
@@ -49,7 +49,7 @@
     "hashes": [
       {
         "drvType": "fetchCargoVendor",
-        "hash": "sha256-fuT8vPb9/7fZam129nR6y+r+3j46WBhlf73Htkcjpzc=",
+        "hash": "sha256-s0UCvkdecOYLAs8XBdZEv8krUibYsaeKWAVJBH5lvs4=",
         "hashType": "cargoHash"
       }
     ],
@@ -57,20 +57,20 @@
   },
   "conductor": {
     "hashes": {
-      "aarch64-darwin": "sha256-XlD0qW3RbaZI3pbVi/pLhbyY4KHQAmVoL/cf6CBmwSE=",
-      "x86_64-darwin": "sha256-EFnEmcyAD6YQETbBXoVGCP7WV2HFf6QBsAacwnrE2Es="
+      "aarch64-darwin": "sha256-gmDe127jMjQ5256wOj4tE2lB4txo6LDbSRVIi7jMhjA=",
+      "x86_64-darwin": "sha256-f/LG6Hz3eshiLyRXQxg/PV85l9SUbxqZwqlg9ip2RmI="
     },
     "urls": {
       "aarch64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-aarch64",
       "x86_64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-x86_64"
     },
-    "version": "0.33.3"
+    "version": "0.33.4"
   },
   "crush": {
     "hashes": [
       {
         "drvType": "buildGoModule",
-        "hash": "sha256-hhBjQ1Wm4ZY1KX09CgpNusse3osT8b3VSsIIj6KFjFA=",
+        "hash": "sha256-uo9VelhRjtWiaYI88+eTk9PxAUE18Tu2pNq4qQqoTwk=",
         "hashType": "vendorHash"
       }
     ],
@@ -159,24 +159,57 @@
     "hashes": [
       {
         "drvType": "denoDeps",
-        "hash": "sha256-jQPkP7DcM9rr8YJhXAKkc6BrHPLIoAQwmkVDr60uy8I=",
+        "hash": "sha256-D6foZF+vwBuJ9kbQthZvu1f3Z93hBevcIsf/an+AEyU=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-darwin"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-pIuxuLkT8SjxTMmx+uc3afl/Oz0jvgv9c01KP3m0txM=",
+        "hash": "sha256-yFRR2lA8DBfHoX7/TDlg36doXEpo4hP1tGmpCL9fLlM=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-linux"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-nIpX1EBZndc2XgWV+ukof5JlmC5Rgo3DWiRvqgjK2Tw=",
+        "hash": "sha256-marxrTq+2dtexkny0V/ImcJiAVKr2KvtC5d152KRpOw=",
         "hashType": "denoDepsHash",
         "platform": "x86_64-linux"
       }
     ],
     "input": "linear-cli"
+  },
+  "opencode": {
+    "hashes": [
+      {
+        "drvType": "bunBuild",
+        "hash": "sha256-Q3FKm7+4Jr3PL+TnQngrTtv/xdek2st5HmgeoEOHUis=",
+        "hashType": "nodeModulesHash"
+      }
+    ],
+    "input": "opencode"
+  },
+  "opencode-desktop": {
+    "hashes": [
+      {
+        "drvType": "importCargoLock",
+        "gitDep": "specta-2.0.0-rc.22",
+        "hash": "sha256-J+rDfV5Wx82VNbpLRh3g/4LerjKQodgMq7A9S9WGhXU=",
+        "hashType": "spectaOutputHash"
+      },
+      {
+        "drvType": "importCargoLock",
+        "gitDep": "tauri-2.9.5",
+        "hash": "sha256-dv5E/+A49ZBvnUQUkCGGJ21iHrVvrhHKNcpUctivJ8M=",
+        "hashType": "tauriOutputHash"
+      },
+      {
+        "drvType": "importCargoLock",
+        "gitDep": "tauri-specta-2.0.0-rc.21",
+        "hash": "sha256-n2VJ+B1nVrh6zQoZyfMoctqP+Csh7eVHRXwUQuiQjaQ=",
+        "hashType": "tauriSpectaOutputHash"
+      }
+    ],
+    "input": "opencode"
   },
   "sculptor": {
     "hashes": {

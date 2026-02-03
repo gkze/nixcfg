@@ -10,6 +10,7 @@ let
   inherit (builtins)
     elemAt
     fromJSON
+    getEnv
     hasAttr
     length
     listToAttrs
@@ -27,7 +28,15 @@ in
 rec {
   inherit modulesPath;
   flakeLock = (fromJSON (readFile ./flake.lock)).nodes;
-  sources = fromJSON (readFile ./sources.json);
+  sourcesPath =
+    let
+      envPath = getEnv "SOURCES_JSON";
+    in
+    if envPath != "" then
+      if pathExists envPath then envPath else throw "SOURCES_JSON does not exist: ${envPath}"
+    else
+      ./sources.json;
+  sources = fromJSON (readFile sourcesPath);
 
   sourceEntry =
     name: if hasAttr name sources then sources.${name} else throw "sources.json missing entry: ${name}";
