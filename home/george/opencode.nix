@@ -16,19 +16,19 @@
       tui.scroll_acceleration.enabled = true;
       # Base MCP servers shared across all machines
       mcp = {
-        aws-knowledge = {
-          type = "remote";
-          url = "https://knowledge-mcp.global.api.aws";
-        };
-        aws-mcp = {
-          type = "local";
-          command = [
-            "uvx"
-            "mcp-proxy-for-aws@latest"
-            "https://aws-mcp.us-east-1.api.aws/mcp"
-          ];
-          environment.AWS_PROFILE = "default";
-        };
+        # aws-knowledge = {
+        #   type = "remote";
+        #   url = "https://knowledge-mcp.global.api.aws";
+        # };
+        # aws-mcp = {
+        #   type = "local";
+        #   command = [
+        #     "uvx"
+        #     "mcp-proxy-for-aws@latest"
+        #     "https://aws-mcp.us-east-1.api.aws/mcp"
+        #   ];
+        #   environment.AWS_PROFILE = "default";
+        # };
         axiom = {
           type = "remote";
           url = "https://mcp.axiom.co/mcp";

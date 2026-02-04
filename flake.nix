@@ -6,7 +6,6 @@
     # Pinned nixpkgs with working Swift build (before clang-21.1.8 broke it)
     # Tracking: https://github.com/NixOS/nixpkgs/issues/483584
     nixpkgs-swift.url = "github:NixOS/nixpkgs/70801e06d9730c4f1704fbd3bbf5b8e11c03a2a7";
-    nixos-hardware.url = "github:NixOS/nixos-hardware/master";
     nix-homebrew.url = "github:Yeradon/nix-homebrew";
     neovim-nightly-overlay = {
       url = "github:nix-community/neovim-nightly-overlay";
@@ -35,10 +34,6 @@
       url = "github:numtide/devshell";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    firefox = {
-      url = "github:nix-community/flake-firefox-nightly";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     flake-edit = {
       url = "github:a-kenji/flake-edit";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -65,18 +60,7 @@
       url = "github:nix-community/bun2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    crate2nix = {
-      url = "github:nix-community/crate2nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    crane = {
-      url = "github:ipetkov/crane";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    lumen = {
-      url = "github:jnsahaj/lumen/v2.20.0";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    crane.url = "github:ipetkov/crane";
     opencode = {
       url = "github:anomalyco/opencode";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -118,6 +102,10 @@
       inputs.pyproject-nix.follows = "pyproject-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    lumen = {
+      url = "github:jnsahaj/lumen/v2.20.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     worktrunk = {
       url = "github:max-sixty/worktrunk/v0.22.0";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -128,10 +116,6 @@
     };
     beads = {
       url = "github:steveyegge/beads/v0.49.3";
-      flake = false;
-    };
-    bufresize-nvim = {
-      url = "github:kwkarlwang/bufresize.nvim";
       flake = false;
     };
     catppuccin-bat = {
@@ -152,15 +136,15 @@
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.2.0";
+      url = "github:gkze/curator/v0.2.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.38.1";
+      url = "github:charmbracelet/crush/v0.39.0";
       flake = false;
     };
     gemini-cli = {
-      url = "github:google-gemini/gemini-cli/v0.26.0";
+      url = "github:google-gemini/gemini-cli/v0.27.0";
       flake = false;
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
@@ -184,16 +168,8 @@
       url = "github:schpet/linear-cli/v1.9.1";
       flake = false;
     };
-    kdl-vim = {
-      url = "github:imsnif/kdl.vim";
-      flake = false;
-    };
     macfuse = {
       url = "github:macfuse/library";
-      flake = false;
-    };
-    markdown-table-formatter = {
-      url = "github:nvuillam/markdown-table-formatter";
       flake = false;
     };
     mdformat = {
@@ -208,20 +184,12 @@
       url = "github:awslabs/mountpoint-s3";
       flake = false;
     };
-    naersk = {
-      url = "github:nix-community/naersk";
-      flake = false;
-    };
     pantsbuild-tap = {
       url = "github:pantsbuild/homebrew-tap";
       flake = false;
     };
     sublime-kdl = {
       url = "github:eugenesvk/sublime-kdl/2.0.5";
-      flake = false;
-    };
-    tclint = {
-      url = "github:nmoroze/tclint";
       flake = false;
     };
     nix-manipulator = {
@@ -247,14 +215,6 @@
     zed = {
       url = "github:zed-industries/zed";
       inputs.nixpkgs.follows = "nixpkgs";
-    };
-    zsh-system-clipboard = {
-      url = "github:kutsan/zsh-system-clipboard";
-      flake = false;
-    };
-    zsh-completions = {
-      url = "github:zsh-users/zsh-completions";
-      flake = false;
     };
   };
 
@@ -444,15 +404,13 @@
                     excludes = lintFiles.shell.excludeGlobs;
                   };
                 };
-                settings.formatter."markdown-table-formatter" = with pkgs; {
-                  command = "${
-                    python3.withPackages (
-                      ps: with ps; [
-                        mdformat
-                        mdformat-tables
-                      ]
-                    )
-                  }/bin/mdformat";
+                settings.formatter."markdown-table-formatter" = {
+                  command = lib.getExe' (pkgs.python3.withPackages (
+                    ps: with ps; [
+                      mdformat
+                      mdformat-tables
+                    ]
+                  )) "mdformat";
                   includes = [ "*.md" ];
                 };
               })

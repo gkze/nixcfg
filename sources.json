@@ -57,14 +57,14 @@
   },
   "conductor": {
     "hashes": {
-      "aarch64-darwin": "sha256-gmDe127jMjQ5256wOj4tE2lB4txo6LDbSRVIi7jMhjA=",
-      "x86_64-darwin": "sha256-f/LG6Hz3eshiLyRXQxg/PV85l9SUbxqZwqlg9ip2RmI="
+      "aarch64-darwin": "sha256-BK83bV4RvwjSkrFY3FQsFjo6U3RfEbPRByYsefCBwu4=",
+      "x86_64-darwin": "sha256-RWlPdXe6/oVXz8NTzSumj/pB0LHaJUaUsKY1B5ipmJQ="
     },
     "urls": {
       "aarch64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-aarch64",
       "x86_64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-x86_64"
     },
-    "version": "0.33.4"
+    "version": "0.33.5"
   },
   "crush": {
     "hashes": [
@@ -108,7 +108,7 @@
     "hashes": [
       {
         "drvType": "fetchNpmDeps",
-        "hash": "sha256-nfmIt+wUelhz3KiW4/pp/dGE71f2jsPbxwpBRT8gtYc=",
+        "hash": "sha256-0bS3yl5EG2KyfBrw8SO1BfKwxb1f2LVsudeaQTb5/DQ=",
         "hashType": "npmDepsHash"
       }
     ],
@@ -136,14 +136,14 @@
   },
   "google-chrome": {
     "hashes": {
-      "aarch64-darwin": "sha256-+1bfrMyoEnKTYUOpx19c20AAY/cOTN118wW9syu2IAE=",
-      "x86_64-linux": "sha256-O3fFCcSghHor8UaqvUCn/GDqKD+8SCrXT6FEnWh9QUc="
+      "aarch64-darwin": "sha256-P1TxSLJRp8hmnHWPk3dLR4frHTWS9JOS+kAVxVEyaWA=",
+      "x86_64-linux": "sha256-5VuJaixlw9o+oD1bp6S3o2kR8KcolomSFyWpMZQydwM="
     },
     "urls": {
       "aarch64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
       "x86_64-linux": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
     },
-    "version": "145.0.7632.26"
+    "version": "144.0.7559.133"
   },
   "homebrew-zsh-completion": {
     "hashes": [
@@ -159,19 +159,19 @@
     "hashes": [
       {
         "drvType": "denoDeps",
-        "hash": "sha256-rykjikP4zdLWWrOz6fvKQD3HrrIEZ91USvUjWz7ovCM=",
+        "hash": "sha256-l5umdbF1gHNrbZpOM4QAatR36YHYoAdvwIQ7Th213D8=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-darwin"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-Y+yfqwyAiG7UyVRM9Tb14bV37/R4JKdpEtc2YegOZxc=",
+        "hash": "sha256-QfjjKhO1u4gBLFPlCYPi/bcPZ39tMmQt8M73i50JLpc=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-linux"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-sa8XQTvWulhcG7/EB0yrm18DOydwvi8RiOGNSaVIw1s=",
+        "hash": "sha256-tsuDS8A23kcYjM6+K/4c6VUIDN/R0yJRVFWYfptO7HU=",
         "hashType": "denoDepsHash",
         "platform": "x86_64-linux"
       }
@@ -182,7 +182,7 @@
     "hashes": [
       {
         "drvType": "bunBuild",
-        "hash": "sha256-Q3FKm7+4Jr3PL+TnQngrTtv/xdek2st5HmgeoEOHUis=",
+        "hash": "sha256-C650/LVIoeymKnRw9lVO3f5ve9xYZPrO0vOM5pqY2nE=",
         "hashType": "nodeModulesHash"
       }
     ],

@@ -688,6 +688,8 @@ in
       extraPlugins =
         with pkgs.vimPlugins;
         [
+          bufresize-nvim
+          nvim-treesitter-parsers.kdl
           nvim-treesitter-parsers.nickel
           nvim-treesitter.queries.ecma # Required for JS/TS keyword highlighting (inherited queries)
           nvim-treesitter.queries.jsx # Required for JSX/TSX highlighting (inherited queries)
@@ -703,6 +705,7 @@ in
         let
           helpers = config.lib.nixvim;
           extraPluginsConfig = {
+            bufresize = { };
             nvim-surround = { };
             overseer = { };
             # nvim-treesitter-textsubjects disabled: incompatible with newer nvim-treesitter API

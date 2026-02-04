@@ -319,6 +319,10 @@ in
         datagrip = mkSourceOverride "datagrip" prev.jetbrains.datagrip;
       };
 
+      # ═══════════════════════════════════════════════════════════════════════════
+      # Temporary Overrides (remove when upstream fixes land)
+      # ═══════════════════════════════════════════════════════════════════════════
+
       # Pin element-desktop to 1.12.8 - version 1.12.9 requires Xcode 26 actool
       # which isn't available in nixpkgs yet (nixpkgs#485589)
       # TODO: Remove this override once nixpkgs PR #486275 is merged
@@ -358,10 +362,6 @@ in
             old.checkPhase;
       });
 
-      # ═══════════════════════════════════════════════════════════════════════════
-      # Python Package Overrides
-      # ═══════════════════════════════════════════════════════════════════════════
-
       # mdformat: Update to 1.0.0 for markdown-it-py 4.x compatibility
       # nixos-unstable has markdown-it-py 4.0.0 but mdformat 0.7.22 requires <4.0.0
       # PR #483504 merged to master but not yet in unstable
@@ -376,6 +376,13 @@ in
           };
         };
       };
+
+      # Pin Swift to a nixpkgs rev where it builds (clang-21.1.8 broke it)
+      # Tracking: https://github.com/NixOS/nixpkgs/issues/483584
+      inherit (import inputs.nixpkgs-swift { inherit system; })
+        swiftPackages
+        swift
+        ;
 
       # ═══════════════════════════════════════════════════════════════════════════
       # Other Packages (with custom logic)
@@ -950,13 +957,6 @@ in
       # ═══════════════════════════════════════════════════════════════════════════
 
       flake-edit = inputs.flake-edit.packages.${system}.default;
-
-      # Pin Swift to a nixpkgs rev where it builds (clang-21.1.8 broke it)
-      # Tracking: https://github.com/NixOS/nixpkgs/issues/483584
-      inherit (import inputs.nixpkgs-swift { inherit system; })
-        swiftPackages
-        swift
-        ;
 
       # ═══════════════════════════════════════════════════════════════════════════
       # Update Script

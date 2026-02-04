@@ -1,6 +1,5 @@
 {
   config,
-  inputs,
   lib,
   pkgs,
   slib,
@@ -66,7 +65,7 @@
       }
       {
         name = "zsh-system-clipboard";
-        src = inputs.zsh-system-clipboard;
+        src = "${pkgs.zsh-system-clipboard}/share/zsh/zsh-system-clipboard";
       }
       {
         name = "zsh-vi-mode-backward-kill-word";
