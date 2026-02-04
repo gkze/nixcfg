@@ -159,25 +159,26 @@
     "hashes": [
       {
         "drvType": "denoDeps",
-        "hash": "sha256-l5umdbF1gHNrbZpOM4QAatR36YHYoAdvwIQ7Th213D8=",
+        "hash": "sha256-XBlNbcpN4TVGxrSlDwYFCbHFp8+/A4AoJBgSAH/MT9s=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-darwin"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-QfjjKhO1u4gBLFPlCYPi/bcPZ39tMmQt8M73i50JLpc=",
+        "hash": "sha256-Cce7Gu8VotvtIPm8BtFkCmCCqas4WL+ddmU5cmrxAoU=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-linux"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-tsuDS8A23kcYjM6+K/4c6VUIDN/R0yJRVFWYfptO7HU=",
+        "hash": "sha256-G9624n56n707+8dBoCs/rE2NzvkJlmtgoix7G/4KuE8=",
         "hashType": "denoDepsHash",
         "platform": "x86_64-linux"
       }
     ],
     "input": "linear-cli"
   },
+
   "opencode": {
     "hashes": [
       {

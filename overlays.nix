@@ -953,6 +953,185 @@ in
       zed-editor-nightly = inputs.zed.packages.${system}.default;
 
       # ═══════════════════════════════════════════════════════════════════════════
+      # OpenChamber Packages
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      # Shared bun dependencies for OpenChamber packages
+      # The bun.nix file needs to be in the openchamber source tree context
+      # so workspace paths resolve correctly
+      openchamberBunDeps =
+        let
+          bun2nix = inputs.bun2nix.packages.${system}.default;
+          # Create a merged source with our generated bun.nix
+          srcWithBunNix = prev.runCommand "openchamber-src-with-bun-nix" { } ''
+            cp -r ${inputs.openchamber} $out
+            chmod -R u+w $out
+            cp ${./packages/openchamber/bun.nix} $out/bun.nix
+          '';
+        in
+        bun2nix.fetchBunDeps {
+          bunNix = "${srcWithBunNix}/bun.nix";
+        };
+
+      # OpenChamber Web: Web server interface for OpenCode AI agent
+      # Built from source using bun2nix for dependency management
+      openchamber-web =
+        let
+          version = builtins.replaceStrings [ "v" ] [ "" ] (
+            outputs.lib.flakeLock.openchamber.original.ref or "1.6.3"
+          );
+          src = inputs.openchamber;
+          bun2nix = inputs.bun2nix.packages.${system}.default;
+        in
+        prev.stdenv.mkDerivation {
+          pname = "openchamber-web";
+          inherit version src;
+
+          nativeBuildInputs = with prev; [
+            bun
+            bun2nix.hook
+            nodejs_22
+            makeWrapper
+          ];
+
+          bunDeps = final.openchamberBunDeps;
+
+          buildPhase = ''
+            runHook preBuild
+
+            # Build the UI package first (workspace dependency)
+            cd packages/ui
+            bun run build
+            cd ../..
+
+            # Build the web package (vite build)
+            cd packages/web
+            bun run build
+            cd ../..
+
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+
+            mkdir -p $out/lib/openchamber-web $out/bin
+
+            # Copy built assets and server files
+            cp -r packages/web/dist $out/lib/openchamber-web/
+            cp -r packages/web/server $out/lib/openchamber-web/
+            cp -r packages/web/bin $out/lib/openchamber-web/
+            cp packages/web/package.json $out/lib/openchamber-web/
+
+            # Copy runtime node_modules
+            cp -r node_modules $out/lib/openchamber-web/
+
+            # Create wrapper script
+            makeWrapper ${prev.nodejs_22}/bin/node $out/bin/openchamber \
+              --add-flags "$out/lib/openchamber-web/bin/cli.js"
+
+            runHook postInstall
+          '';
+
+          meta = with prev.lib; {
+            description = "Web interface for OpenCode AI agent";
+            homepage = "https://github.com/btriapitsyn/openchamber";
+            license = licenses.mit;
+            mainProgram = "openchamber";
+          };
+        };
+
+      # OpenChamber Desktop: Native macOS Tauri app for OpenCode AI agent
+      # Built from source using rustPlatform + bun2nix for frontend
+      openchamber-desktop =
+        let
+          version = builtins.replaceStrings [ "v" ] [ "" ] (
+            outputs.lib.flakeLock.openchamber.original.ref or "1.6.3"
+          );
+          src = inputs.openchamber;
+          bun2nix = inputs.bun2nix.packages.${system}.default;
+        in
+        prev.rustPlatform.buildRustPackage {
+          pname = "openchamber-desktop";
+          inherit version src;
+
+          cargoRoot = "packages/desktop/src-tauri";
+          buildAndTestSubdir = "packages/desktop/src-tauri";
+
+          cargoLock = {
+            lockFile = "${src}/packages/desktop/src-tauri/Cargo.lock";
+            # Add git dependency hashes if needed (check Cargo.lock for git deps)
+          };
+
+          nativeBuildInputs = with prev; [
+            bun
+            bun2nix.hook
+            cargo-tauri
+            makeWrapper
+            pkg-config
+          ];
+
+          bunDeps = final.openchamberBunDeps;
+
+          buildInputs =
+            with prev;
+            [ openssl ]
+            ++ lib.optionals stdenv.hostPlatform.isDarwin [
+              apple-sdk_15
+            ];
+
+          doCheck = false;
+
+          # Build frontend before Tauri build
+          preBuild = ''
+            # Build the UI package first (workspace dependency)
+            cd packages/ui
+            bun run build
+            cd ../..
+
+            # Build the desktop frontend
+            cd packages/desktop
+            bun run build
+            cd ../..
+          '';
+
+          # Override default cargo build to use cargo-tauri
+          buildPhase = ''
+            runHook preBuild
+
+            cd packages/desktop/src-tauri
+            cargo tauri build --bundles app --no-sign
+
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+
+            mkdir -p $out/Applications $out/bin
+
+            # Build phase changes directory, go back to root
+            cd $NIX_BUILD_TOP/source
+
+            # Copy the built .app bundle
+            cp -r packages/desktop/src-tauri/target/release/bundle/macos/OpenChamber.app $out/Applications/
+
+            # Create CLI symlink
+            ln -s "$out/Applications/OpenChamber.app/Contents/MacOS/openchamber-desktop" "$out/bin/openchamber-desktop"
+
+            runHook postInstall
+          '';
+
+          meta = with prev.lib; {
+            description = "Desktop interface for OpenCode AI agent";
+            homepage = "https://github.com/btriapitsyn/openchamber";
+            license = licenses.mit;
+            platforms = platforms.darwin;
+            mainProgram = "openchamber-desktop";
+          };
+        };
+
+      # ═══════════════════════════════════════════════════════════════════════════
       # Flake Input Packages (simple re-exports)
       # ═══════════════════════════════════════════════════════════════════════════
 

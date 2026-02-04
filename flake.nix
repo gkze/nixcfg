@@ -61,6 +61,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crane.url = "github:ipetkov/crane";
+    openchamber = {
+      url = "github:btriapitsyn/openchamber/v1.6.3";
+      flake = false;
+    };
     opencode = {
       url = "github:anomalyco/opencode";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -136,7 +140,7 @@
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.2.1";
+      url = "github:gkze/curator/v0.2.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {

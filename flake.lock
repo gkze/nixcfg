@@ -320,16 +320,16 @@
         "treefmt-nix": "treefmt-nix_2"
       },
       "locked": {
-        "lastModified": 1770080534,
-        "narHash": "sha256-k3EdzgHNryD1jAd8xLnUiAoqGPj+mdBj3EO+Xpqijx8=",
+        "lastModified": 1770167821,
+        "narHash": "sha256-YskglUb4bDH2xJcoBMhanAVUGDVlDs7o8MIA6HL8PE4=",
         "owner": "gkze",
         "repo": "curator",
-        "rev": "c82b93bc4448f975a6c4b2854f30182b785bd788",
+        "rev": "209d60c356de542a87fdac6ccfa3222b74b7574f",
         "type": "github"
       },
       "original": {
         "owner": "gkze",
-        "ref": "v0.2.1",
+        "ref": "v0.2.2",
         "repo": "curator",
         "type": "github"
       }
@@ -1541,6 +1541,23 @@
         "type": "github"
       }
     },
+    "openchamber": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1770051899,
+        "narHash": "sha256-FvqOtliUczRqMwdt5q5bUBLjbn7WH3uKvmRHNo/BDcs=",
+        "owner": "btriapitsyn",
+        "repo": "openchamber",
+        "rev": "0ff67e488c82e7096a4b6139da60bf6dfbf442d2",
+        "type": "github"
+      },
+      "original": {
+        "owner": "btriapitsyn",
+        "ref": "v1.6.3",
+        "repo": "openchamber",
+        "type": "github"
+      }
+    },
     "opencode": {
       "inputs": {
         "nixpkgs": [
@@ -1794,6 +1811,7 @@
         "nixpkgs": "nixpkgs_4",
         "nixpkgs-swift": "nixpkgs-swift",
         "nixvim": "nixvim",
+        "openchamber": "openchamber",
         "opencode": "opencode",
         "pantsbuild-tap": "pantsbuild-tap",
         "pyproject-build-systems": "pyproject-build-systems",

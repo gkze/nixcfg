@@ -30,6 +30,7 @@
     defaultSopsFile = ../../secrets.yaml;
     environment.PATH = lib.mkForce (lib.makeBinPath [ pkgs.coreutils ] + ":/usr/bin:/sbin");
     secrets.github_pat = { };
+    secrets.opencode_server_password = { };
   };
 
   home = {
