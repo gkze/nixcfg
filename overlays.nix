@@ -1066,6 +1066,7 @@ in
             bun
             bun2nix.hook
             cargo-tauri
+            cargo-tauri.hook
             makeWrapper
             pkg-config
           ];
@@ -1081,7 +1082,15 @@ in
 
           doCheck = false;
 
-          # Build frontend before Tauri build
+          # Use cargo-tauri.hook for build and install
+          # It handles standard tauri build flags and bundle locations
+          buildPhase = "tauriBuildHook";
+          installPhase = "tauriInstallHook";
+
+          # Configure tauri hook
+          tauriBuildFlags = [ "--no-sign" ];
+
+          # Build frontend before Tauri build (tauriBuildHook calls runHook preBuild)
           preBuild = ''
             # Build the UI package first (workspace dependency)
             cd packages/ui
@@ -1094,31 +1103,9 @@ in
             cd ../..
           '';
 
-          # Override default cargo build to use cargo-tauri
-          buildPhase = ''
-            runHook preBuild
-
-            cd packages/desktop/src-tauri
-            cargo tauri build --bundles app --no-sign
-
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-
-            mkdir -p $out/Applications $out/bin
-
-            # Build phase changes directory, go back to root
-            cd $NIX_BUILD_TOP/source
-
-            # Copy the built .app bundle
-            cp -r packages/desktop/src-tauri/target/release/bundle/macos/OpenChamber.app $out/Applications/
-
-            # Create CLI symlink
+          postInstall = ''
+            # Create CLI symlink (not handled by tauriInstallHook)
             ln -s "$out/Applications/OpenChamber.app/Contents/MacOS/openchamber-desktop" "$out/bin/openchamber-desktop"
-
-            runHook postInstall
           '';
 
           meta = with prev.lib; {
