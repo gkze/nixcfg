@@ -956,36 +956,38 @@ in
       # OpenChamber Packages
       # ═══════════════════════════════════════════════════════════════════════════
 
-      # Shared bun dependencies for OpenChamber packages
+      openchamberVersion = builtins.replaceStrings [ "v" ] [ "" ] (
+        outputs.lib.flakeLock.openchamber.original.ref or "1.6.3"
+      );
+
+      # Shared source with generated bun.nix
       # The bun.nix file needs to be in the openchamber source tree context
-      # so workspace paths resolve correctly
+      # so workspace paths resolve correctly for bun2nix
+      openchamberSource = prev.runCommand "openchamber-src" { } ''
+        cp -r ${inputs.openchamber} $out
+        chmod -R u+w $out
+        cp ${./packages/openchamber/bun.nix} $out/bun.nix
+      '';
+
+      # Shared bun dependencies for OpenChamber packages
       openchamberBunDeps =
         let
           bun2nix = inputs.bun2nix.packages.${system}.default;
-          # Create a merged source with our generated bun.nix
-          srcWithBunNix = prev.runCommand "openchamber-src-with-bun-nix" { } ''
-            cp -r ${inputs.openchamber} $out
-            chmod -R u+w $out
-            cp ${./packages/openchamber/bun.nix} $out/bun.nix
-          '';
         in
         bun2nix.fetchBunDeps {
-          bunNix = "${srcWithBunNix}/bun.nix";
+          bunNix = "${final.openchamberSource}/bun.nix";
         };
 
       # OpenChamber Web: Web server interface for OpenCode AI agent
       # Built from source using bun2nix for dependency management
       openchamber-web =
         let
-          version = builtins.replaceStrings [ "v" ] [ "" ] (
-            outputs.lib.flakeLock.openchamber.original.ref or "1.6.3"
-          );
-          src = inputs.openchamber;
           bun2nix = inputs.bun2nix.packages.${system}.default;
         in
         prev.stdenv.mkDerivation {
           pname = "openchamber-web";
-          inherit version src;
+          version = final.openchamberVersion;
+          src = final.openchamberSource;
 
           nativeBuildInputs = with prev; [
             bun
@@ -1045,21 +1047,18 @@ in
       # Built from source using rustPlatform + bun2nix for frontend
       openchamber-desktop =
         let
-          version = builtins.replaceStrings [ "v" ] [ "" ] (
-            outputs.lib.flakeLock.openchamber.original.ref or "1.6.3"
-          );
-          src = inputs.openchamber;
           bun2nix = inputs.bun2nix.packages.${system}.default;
         in
         prev.rustPlatform.buildRustPackage {
           pname = "openchamber-desktop";
-          inherit version src;
+          version = final.openchamberVersion;
+          src = final.openchamberSource;
 
           cargoRoot = "packages/desktop/src-tauri";
           buildAndTestSubdir = "packages/desktop/src-tauri";
 
           cargoLock = {
-            lockFile = "${src}/packages/desktop/src-tauri/Cargo.lock";
+            lockFile = "${final.openchamberSource}/packages/desktop/src-tauri/Cargo.lock";
             # Add git dependency hashes if needed (check Cargo.lock for git deps)
           };
 

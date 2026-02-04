@@ -62,7 +62,7 @@ FLAKE_LOCK_FILE = get_repo_file("flake.lock")
 @dataclass(frozen=True)
 class UpdateConfig:
     default_timeout: int = 30
-    default_subprocess_timeout: int = 600  # 10 minutes for nix builds
+    default_subprocess_timeout: int = 1200  # 20 minutes for nix builds
     default_log_tail_lines: int = 10
     default_render_interval: float = 0.05
     default_user_agent: str = "update.py"
