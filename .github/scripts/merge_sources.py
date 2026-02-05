@@ -37,9 +37,8 @@ def merge_hash_entries(entries_list: list[list[dict]]) -> list[dict]:
             hash_val = entry.get("hash")
             if isinstance(hash_val, str) and hash_val.startswith("sha256-AAAAAAA"):
                 continue
-            # Take first valid hash for each (hashType, platform, drvType) combination
-            if key not in by_key:
-                by_key[key] = entry
+            # Last wins - computed hashes (processed later) override base hashes
+            by_key[key] = entry
 
     return list(by_key.values())
 
@@ -52,8 +51,8 @@ def merge_hash_dicts(dicts_list: list[dict]) -> dict:
             # Skip FAKE_HASH
             if isinstance(hash_val, str) and hash_val.startswith("sha256-AAAAAAA"):
                 continue
-            if platform not in merged:
-                merged[platform] = hash_val
+            # Last wins - computed hashes override base hashes
+            merged[platform] = hash_val
     return merged
 
 
