@@ -345,7 +345,6 @@
               with pkgs;
               [
                 flake-edit
-                home-manager
                 nh
                 nil
                 nix-init
