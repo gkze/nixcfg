@@ -188,7 +188,7 @@
       },
       {
         "drvType": "bunBuild",
-        "hash": "sha256-9XlAYCNdBhw8NmfJoYNjvQYhSn02rFhWvbJtlOnnCjc=",
+        "hash": "sha256-jtMqFH7uYzgI1ICASAePJOj1QeaQfEWuoME7gyrvinA=",
         "hashType": "nodeModulesHash",
         "platform": "x86_64-linux"
       },
