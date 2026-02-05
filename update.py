@@ -1061,17 +1061,28 @@ def _render_output_hashes(output_hashes: Mapping[str, str], *, fake_hash: str) -
 def _extract_git_dep_from_output(
     output: str, git_deps: Iterable[CargoLockGitDep]
 ) -> CargoLockGitDep:
+    git_deps = list(git_deps)
     match = re.search(r"hash mismatch in fixed-output derivation '([^']+)'", output)
-    search_text = output
-    if match:
-        search_text = match.group(1).rsplit("/", 1)[-1]
-    matches = [dep for dep in git_deps if dep.match_name in search_text]
-    if not matches:
+    if not match:
         raise RuntimeError(
-            "Could not identify git dependency from nix output. Output tail:\n"
+            "No hash mismatch found in nix output (build may have failed for a "
+            "non-hash reason). Output tail:\n"
             f"{_tail_output_excerpt(output, max_lines=get_config().default_log_tail_lines)}"
         )
-    return max(matches, key=lambda dep: len(dep.match_name))
+    drv_name = match.group(1).rsplit("/", 1)[-1]
+    # Try matching the full git_dep name first (e.g., "specta-2.0.0-rc.22") to
+    # avoid ambiguity with short match_name (e.g., "specta" matching "specta-typescript")
+    matches = [dep for dep in git_deps if dep.git_dep in drv_name]
+    if not matches:
+        # Fall back to match_name on the derivation name only (not the full output)
+        matches = [dep for dep in git_deps if dep.match_name in drv_name]
+    if not matches:
+        raise RuntimeError(
+            f"Could not identify git dependency from derivation '{drv_name}'. "
+            f"Output tail:\n"
+            f"{_tail_output_excerpt(output, max_lines=get_config().default_log_tail_lines)}"
+        )
+    return max(matches, key=lambda dep: len(dep.git_dep))
 
 
 def _build_import_cargo_lock_expr(
@@ -1343,8 +1354,18 @@ async def compute_import_cargo_lock_output_hashes(
             yield event
         result = _require_value(result_drain, "nix build did not return output")
         output = result.stderr + result.stdout
-        hash_value = _extract_nix_hash(output)
-        dep = _extract_git_dep_from_output(output, git_deps)
+        try:
+            hash_value = _extract_nix_hash(output)
+            dep = _extract_git_dep_from_output(output, git_deps)
+        except RuntimeError:
+            # Build failed for a non-hash-mismatch reason (e.g., compilation error).
+            # Re-raise with context about what we were trying to do.
+            raise RuntimeError(
+                f"Build failed while computing outputHashes for {source} "
+                f"(resolved {len(hashes)}/{len(git_deps)} deps so far: "
+                f"{', '.join(hashes)}). Output tail:\n"
+                f"{_tail_output_excerpt(output, max_lines=get_config().default_log_tail_lines)}"
+            )
         if dep.git_dep in hashes:
             raise RuntimeError(
                 f"Hash for {dep.git_dep} already computed; output:\n{_tail_output_excerpt(output, max_lines=get_config().default_log_tail_lines)}"
