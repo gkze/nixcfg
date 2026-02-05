@@ -1061,6 +1061,9 @@ def _render_output_hashes(output_hashes: Mapping[str, str], *, fake_hash: str) -
 def _extract_git_dep_from_output(
     output: str, git_deps: Iterable[CargoLockGitDep]
 ) -> CargoLockGitDep:
+    """Match the failing derivation name (e.g. ``specta-106425e``) to a git dep
+    via prefix matching on ``match_name``, disambiguating e.g. ``specta`` from
+    ``tauri-specta``."""
     git_deps = list(git_deps)
     match = re.search(r"hash mismatch in fixed-output derivation '([^']+)'", output)
     if not match:
@@ -1070,19 +1073,20 @@ def _extract_git_dep_from_output(
             f"{_tail_output_excerpt(output, max_lines=get_config().default_log_tail_lines)}"
         )
     drv_name = match.group(1).rsplit("/", 1)[-1]
-    # Try matching the full git_dep name first (e.g., "specta-2.0.0-rc.22") to
-    # avoid ambiguity with short match_name (e.g., "specta" matching "specta-typescript")
-    matches = [dep for dep in git_deps if dep.git_dep in drv_name]
-    if not matches:
-        # Fall back to match_name on the derivation name only (not the full output)
-        matches = [dep for dep in git_deps if dep.match_name in drv_name]
+    matches = [
+        dep
+        for dep in git_deps
+        if drv_name == dep.match_name or drv_name.startswith(dep.match_name + "-")
+    ]
     if not matches:
         raise RuntimeError(
             f"Could not identify git dependency from derivation '{drv_name}'. "
+            f"Known deps: {[dep.match_name for dep in git_deps]}. "
             f"Output tail:\n"
             f"{_tail_output_excerpt(output, max_lines=get_config().default_log_tail_lines)}"
         )
-    return max(matches, key=lambda dep: len(dep.git_dep))
+    # Longest match_name wins (most specific prefix).
+    return max(matches, key=lambda dep: len(dep.match_name))
 
 
 def _build_import_cargo_lock_expr(
@@ -1356,8 +1360,9 @@ async def compute_import_cargo_lock_output_hashes(
         output = result.stderr + result.stdout
         try:
             hash_value = _extract_nix_hash(output)
-            dep = _extract_git_dep_from_output(output, git_deps)
-        except RuntimeError:
+            unresolved = [dep for dep in git_deps if dep.git_dep in remaining]
+            dep = _extract_git_dep_from_output(output, unresolved)
+        except RuntimeError as exc:
             # Build failed for a non-hash-mismatch reason (e.g., compilation error).
             # Re-raise with context about what we were trying to do.
             raise RuntimeError(
@@ -1365,7 +1370,7 @@ async def compute_import_cargo_lock_output_hashes(
                 f"(resolved {len(hashes)}/{len(git_deps)} deps so far: "
                 f"{', '.join(hashes)}). Output tail:\n"
                 f"{_tail_output_excerpt(output, max_lines=get_config().default_log_tail_lines)}"
-            )
+            ) from exc
         if dep.git_dep in hashes:
             raise RuntimeError(
                 f"Hash for {dep.git_dep} already computed; output:\n{_tail_output_excerpt(output, max_lines=get_config().default_log_tail_lines)}"
