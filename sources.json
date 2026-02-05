@@ -185,6 +185,18 @@
         "hash": "sha256-NDB6+NVZ4+9+Yds/cjEGQAn9Tl/LRuEjEH6wV5dTdVg=",
         "hashType": "nodeModulesHash",
         "platform": "aarch64-darwin"
+      },
+      {
+        "drvType": "bunBuild",
+        "hash": "sha256-9XlAYCNdBhw8NmfJoYNjvQYhSn02rFhWvbJtlOnnCjc=",
+        "hashType": "nodeModulesHash",
+        "platform": "x86_64-linux"
+      },
+      {
+        "drvType": "bunBuild",
+        "hash": "sha256-Mdz3gAy8auN7mhMHRaWyH/exHGO9eYDyUMQKqscg6Xc=",
+        "hashType": "nodeModulesHash",
+        "platform": "aarch64-linux"
       }
     ],
     "input": "opencode"
