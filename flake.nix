@@ -127,16 +127,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.94.0";
-      flake = false;
-    };
-    # rama-boring-sys dependencies (for codex network-proxy crate)
-    rama-boringssl = {
-      url = "github:plabayo/rama-boringssl/79048f1f1d8e6b7f9ca59b95c24486c8149122a4";
-      flake = false;
-    };
-    rama-boring = {
-      url = "github:plabayo/rama-boring/4b54e2b";
+      url = "github:openai/codex/rust-v0.96.0";
       flake = false;
     };
     curator = {
@@ -144,7 +135,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.39.0";
+      url = "github:charmbracelet/crush/v0.39.1";
       flake = false;
     };
     gemini-cli = {
@@ -271,6 +262,7 @@
         ];
 
         nixpkgs.config.allowUnfree = true;
+        nixpkgs.config.permittedInsecurePackages = [ "google-chrome-145.0.7632.46" ];
 
         imports = [ flakelight-darwin.flakelightModules.default ];
 

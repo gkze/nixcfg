@@ -55,6 +55,7 @@
     config = {
       allowUnfree = true;
       # Per-package insecure overrides should be used instead of global allowInsecure
+      # Note: permittedInsecurePackages is set in flake.nix at the flakelight level
     };
   };
 

@@ -173,7 +173,7 @@
       homedir = "${config.xdg.dataHome}/gnupg";
       settings = {
         auto-key-retrieve = true;
-        default-key = userMeta.gpg.keys.personal;
+        default-key = userMeta.gpg.keys.primary;
       };
     };
     helix = {

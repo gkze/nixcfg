@@ -100,12 +100,14 @@ in
         init.defaultBranch = "main";
         rebase.pull = true;
         url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
-        # exclamation auto selects signing subkey
-        user.signingkey = "${userMeta.gpg.keys.personal}!";
+        # GPG will auto-select the signing subkey from the primary key
+        user.signingkey = userMeta.gpg.keys.primary;
       };
       signing = {
         format = lib.mkForce "openpgp";
-        signer = lib.getExe pkgs.sequoia-chameleon-gnupg;
+        # TODO: switch back to sequoia-chameleon-gnupg once secret key access is fixed
+        # See: https://gitlab.com/sequoia-pgp/sequoia-chameleon-gnupg/-/issues/156
+        signer = lib.getExe' pkgs.gnupg "gpg";
       };
     };
   };

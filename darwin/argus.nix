@@ -8,15 +8,15 @@ with inputs;
 mkDarwinHost {
   extraHomeModules = [
     "${modulesPath}/home/town.nix"
-    (
-      { config, ... }:
-      {
-        home.sessionVariables.OPENCODE_CONFIG = "${config.xdg.configHome}/opencode/work.json";
-      }
-    )
   ];
   extraSystemModules = [
     "${modulesPath}/darwin/town.nix"
     "${modulesPath}/darwin/george/town-dock-apps.nix"
+    (
+      { primaryUser, ... }:
+      {
+        launchd.user.envVariables.OPENCODE_CONFIG = "/Users/${primaryUser}/.config/opencode/work.json";
+      }
+    )
   ];
 }

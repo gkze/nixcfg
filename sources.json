@@ -21,13 +21,13 @@
   },
   "chatgpt": {
     "hashes": {
-      "aarch64-darwin": "sha256-2vEO9dJi9D2EU3Awq/JJGGafh6EZFnFayNIlkhpQBTk=",
-      "x86_64-darwin": "sha256-2vEO9dJi9D2EU3Awq/JJGGafh6EZFnFayNIlkhpQBTk="
+      "aarch64-darwin": "sha256-yjP9YLkikSLdUsnvrvzYoHsTSsh2GKPyoETaHDFF+mY=",
+      "x86_64-darwin": "sha256-yjP9YLkikSLdUsnvrvzYoHsTSsh2GKPyoETaHDFF+mY="
     },
     "urls": {
-      "darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.014_1769698892.dmg"
+      "darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.027_1769832365.dmg"
     },
-    "version": "1.2026.014"
+    "version": "1.2026.027"
   },
   "code-cursor": {
     "commit": "cf8353edc265f5e46b798bfb276861d0bf3bf129",
@@ -49,7 +49,7 @@
     "hashes": [
       {
         "drvType": "fetchCargoVendor",
-        "hash": "sha256-s0UCvkdecOYLAs8XBdZEv8krUibYsaeKWAVJBH5lvs4=",
+        "hash": "sha256-vVLMPrZ23n/u6fJQcw6GR4GiyzmMgHvpHFhZZL2CRW4=",
         "hashType": "cargoHash"
       }
     ],
@@ -91,18 +91,18 @@
   },
   "droid": {
     "hashes": {
-      "aarch64-darwin": "sha256-Gmnp4J8dawZz63MwNktedJoQruwsoBh4fX5M89eSq3I=",
-      "aarch64-linux": "sha256-atqqznu82Pe2lf03A3rXQDy7fjHgeJ7lrzmg+qB6AAI=",
-      "x86_64-darwin": "sha256-16onXjf1MxsfjWOEVhw/eQZABWnoAxbQLN+zM4yrED4=",
-      "x86_64-linux": "sha256-xBqnvfPXYsepVMKM6WLUKzta92VwRiH/tbi7gWGxEVY="
+      "aarch64-darwin": "sha256-1aXzVzKoAPOSd1y2YwKXhpNMxSan7dGGp7D1cFiai5M=",
+      "aarch64-linux": "sha256-GnuGR0ogEF8EdJz+Gk63vLMhr9Yp5zqlJ9GPPBJQMr0=",
+      "x86_64-darwin": "sha256-VR9zWNXHLkk23vD6etZ4/aTvVJTQAIXRWwqrIsQ0uIs=",
+      "x86_64-linux": "sha256-/N33Az919tsiBhvthXbAYhHULZD8luaQPvUEhvGeNWs="
     },
     "urls": {
-      "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.2/darwin/arm64/droid",
-      "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.57.2/linux/arm64/droid",
-      "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.2/darwin/x64/droid",
-      "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.57.2/linux/x64/droid"
+      "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.3/darwin/arm64/droid",
+      "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.57.3/linux/arm64/droid",
+      "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.3/darwin/x64/droid",
+      "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.57.3/linux/x64/droid"
     },
-    "version": "0.57.2"
+    "version": "0.57.3"
   },
   "gemini-cli": {
     "hashes": [
@@ -143,7 +143,7 @@
       "aarch64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
       "x86_64-linux": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
     },
-    "version": "144.0.7559.133"
+    "version": "145.0.7632.46"
   },
   "homebrew-zsh-completion": {
     "hashes": [
@@ -159,32 +159,32 @@
     "hashes": [
       {
         "drvType": "denoDeps",
-        "hash": "sha256-XBlNbcpN4TVGxrSlDwYFCbHFp8+/A4AoJBgSAH/MT9s=",
+        "hash": "sha256-6vv5IcEi8xSrDVaj2kNBiJ/RCBxqV48FXIVX6TBjh7I=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-darwin"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-Cce7Gu8VotvtIPm8BtFkCmCCqas4WL+ddmU5cmrxAoU=",
+        "hash": "sha256-Q5AVbWkSfZegIVk6Qyw66xUl5sHM7bSoplFMGLlHY2M=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-linux"
       },
       {
         "drvType": "denoDeps",
-        "hash": "sha256-G9624n56n707+8dBoCs/rE2NzvkJlmtgoix7G/4KuE8=",
+        "hash": "sha256-ElBs47rTj0bx80ag+ebUHOVpcr8JVBIaahCzMyPt91k=",
         "hashType": "denoDepsHash",
         "platform": "x86_64-linux"
       }
     ],
     "input": "linear-cli"
   },
-
   "opencode": {
     "hashes": [
       {
         "drvType": "bunBuild",
-        "hash": "sha256-C650/LVIoeymKnRw9lVO3f5ve9xYZPrO0vOM5pqY2nE=",
-        "hashType": "nodeModulesHash"
+        "hash": "sha256-NDB6+NVZ4+9+Yds/cjEGQAn9Tl/LRuEjEH6wV5dTdVg=",
+        "hashType": "nodeModulesHash",
+        "platform": "aarch64-darwin"
       }
     ],
     "input": "opencode"
@@ -240,15 +240,15 @@
   },
   "vscode-insiders": {
     "hashes": {
-      "aarch64-darwin": "sha256-cO74uzRcg+aX7UWefC18tgfIsVjtb7LrY+DZY5DoyPc=",
-      "aarch64-linux": "sha256-7rpSWtB0Rb3WX1hTtpSxF75ZuhLGXRGR6mLT9PXvuP8=",
-      "x86_64-linux": "sha256-/3fg1SVwXi6TtJ9nAINXQHkTLxQwR6TKhp8CP/sCo+A="
+      "aarch64-darwin": "sha256-zO6Bfnw0reGs1xUHRpFj641aREIIQZJepcBMQqFkPBs=",
+      "aarch64-linux": "sha256-iJ8A3OibaP+QO9qHhVlORYxO2OjNo48ZCweIVP61NJQ=",
+      "x86_64-linux": "sha256-HjMMDTWEFJTBxpUrl3uoqCSj50Etdp2sGNfSCjhcUrY="
     },
     "urls": {
-      "aarch64-darwin": "https://update.code.visualstudio.com/1.109.0-insider/darwin-arm64/insider",
-      "aarch64-linux": "https://update.code.visualstudio.com/1.109.0-insider/linux-arm64/insider",
-      "x86_64-linux": "https://update.code.visualstudio.com/1.109.0-insider/linux-x64/insider"
+      "aarch64-darwin": "https://update.code.visualstudio.com/1.110.0-insider/darwin-arm64/insider",
+      "aarch64-linux": "https://update.code.visualstudio.com/1.110.0-insider/linux-arm64/insider",
+      "x86_64-linux": "https://update.code.visualstudio.com/1.110.0-insider/linux-x64/insider"
     },
-    "version": "1.109.0-insider"
+    "version": "1.110.0-insider"
   }
 }

@@ -7,18 +7,20 @@ with outputs.lib;
 with inputs;
 mkDarwinHost {
   extraHomeModules = [
-    (
-      { config, ... }:
-      {
-        home.sessionVariables.OPENCODE_CONFIG = "${config.xdg.configHome}/opencode/personal.json";
-        xdg.configFile."opencode/personal.json".text = builtins.toJSON {
-          "$schema" = "https://opencode.ai/config.json";
-          mcp = { };
-        };
-      }
-    )
+    (_: {
+      xdg.configFile."opencode/personal.json".text = builtins.toJSON {
+        "$schema" = "https://opencode.ai/config.json";
+        mcp = { };
+      };
+    })
   ];
   extraSystemModules = [
     "${modulesPath}/darwin/george/dock-apps.nix"
+    (
+      { primaryUser, ... }:
+      {
+        launchd.user.envVariables.OPENCODE_CONFIG = "/Users/${primaryUser}/.config/opencode/personal.json";
+      }
+    )
   ];
 }

@@ -1811,6 +1811,23 @@ class BunNodeModulesHashUpdater(FlakeInputHashUpdater):
     def _compute_hash(self, info: VersionInfo) -> EventStream:
         return compute_bun_node_modules_hash(self.name, self._input)
 
+    async def fetch_hashes(
+        self, info: VersionInfo, session: aiohttp.ClientSession
+    ) -> EventStream:
+        """Compute hash for current platform only, emit platform-specific entry."""
+        hash_drain = ValueDrain[str]()
+        async for event in drain_value_events(self._compute_hash(info), hash_drain):
+            yield event
+
+        hash_value = _require_value(hash_drain, f"Missing {self.hash_type} output")
+        platform = get_current_nix_platform()
+        entries = [
+            HashEntry.create(
+                self.drv_type, self.hash_type, hash_value, platform=platform
+            )
+        ]
+        yield UpdateEvent.value(self.name, entries)
+
 
 class DenoDepsHashUpdater(FlakeInputHashUpdater):
     drv_type = "denoDeps"
@@ -3254,7 +3271,7 @@ class Renderer:
         width = self._console.width
         height = self._console.height
         panel_height = self._initial_panel_height or max(1, height - 1)
-        max_visible = min(panel_height, height - 1)
+        max_visible = min(panel_height, max(1, height - 1))
         if full_output is None:
             full_output = self.full_output
 
@@ -3286,15 +3303,16 @@ class Renderer:
         if full_output:
             return renderable
 
-        options = self._console.options.update(width=width, height=max_visible)
+        options = self._console.options.update(width=width)
         rendered_lines = self._console.render_lines(renderable, options=options)
         lines: list[Text] = []
+        truncate_width = max(1, width - 1)
         for line in rendered_lines[:max_visible]:
             text = Text()
             for segment in line:
                 if segment.text:
                     text.append(segment.text, style=segment.style)
-            text.truncate(width - 1)
+            text.truncate(truncate_width)
             lines.append(text)
 
         return Group(*lines)
@@ -3386,175 +3404,184 @@ async def _consume_events(
         quiet=quiet,
     )
 
-    while True:
-        event = await queue.get()
-        if event is None:
-            break
-        item = items.get(event.source)
-        if item is None:
-            continue
+    try:
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            item = items.get(event.source)
+            if item is None:
+                continue
 
-        match event.kind:
-            case UpdateEventKind.STATUS:
-                if event.message:
-                    _apply_status(item, event.message)
-                    if _is_terminal_status(event.message):
-                        renderer.log(event.source, event.message)
+            match event.kind:
+                case UpdateEventKind.STATUS:
+                    if event.message:
+                        _apply_status(item, event.message)
+                        if _is_terminal_status(event.message):
+                            renderer.log(event.source, event.message)
 
-            case UpdateEventKind.COMMAND_START:
-                args: CommandArgs | None = None
-                if isinstance(event.payload, list) and all(
-                    isinstance(item, str) for item in event.payload
-                ):
-                    args = cast(CommandArgs, event.payload)
-                op_kind = _operation_for_command(args)
-                operation = item.operations.get(op_kind)
-                if operation:
-                    item.last_operation = op_kind
-                    item.active_command_op = op_kind
-                    operation.status = "running"
-                    operation.active_commands += 1
-                    if operation.active_commands == 1:
-                        operation.tail.clear()
-                        operation.detail_lines.clear()
-
-            case UpdateEventKind.LINE:
-                label = event.stream or "stdout"
-                message = event.message or ""
-                line_text = f"[{label}] {message}" if label else message
-                op_kind = item.active_command_op or item.last_operation
-                if op_kind is None:
-                    op_kind = OperationKind.COMPUTE_HASH
-                operation = item.operations.get(op_kind)
-                if operation and operation.active_commands > 0:
-                    if not operation.tail or operation.tail[-1] != line_text:
-                        operation.tail.append(line_text)
-
-            case UpdateEventKind.COMMAND_END:
-                result = event.payload
-                if isinstance(result, CommandResult):
-                    op_kind = _operation_for_command(result.args)
+                case UpdateEventKind.COMMAND_START:
+                    args: CommandArgs | None = None
+                    if isinstance(event.payload, list) and all(
+                        isinstance(item, str) for item in event.payload
+                    ):
+                        args = cast(CommandArgs, event.payload)
+                    op_kind = _operation_for_command(args)
                     operation = item.operations.get(op_kind)
                     if operation:
-                        operation.active_commands = max(
-                            0, operation.active_commands - 1
-                        )
-                        if operation.active_commands == 0:
+                        item.last_operation = op_kind
+                        item.active_command_op = op_kind
+                        operation.status = "running"
+                        operation.active_commands += 1
+                        if operation.active_commands == 1:
                             operation.tail.clear()
-                            if item.active_command_op == op_kind:
-                                item.active_command_op = None
-                        if result.returncode != 0 and not result.allow_failure:
-                            operation.status = "error"
-                            if _is_nix_build_command(result.args):
-                                if result.tail_lines:
-                                    operation.detail_lines = [
-                                        f"Output tail (last {NIX_BUILD_FAILURE_TAIL_LINES} lines):",
-                                        *result.tail_lines,
-                                    ]
-                        elif (
-                            op_kind
-                            in (
+                            operation.detail_lines.clear()
+
+                case UpdateEventKind.LINE:
+                    label = event.stream or "stdout"
+                    message = event.message or ""
+                    line_text = f"[{label}] {message}" if label else message
+                    op_kind = item.active_command_op or item.last_operation
+                    if op_kind is None:
+                        op_kind = OperationKind.COMPUTE_HASH
+                    operation = item.operations.get(op_kind)
+                    if operation and operation.active_commands > 0:
+                        if not operation.tail or operation.tail[-1] != line_text:
+                            operation.tail.append(line_text)
+
+                case UpdateEventKind.COMMAND_END:
+                    result = event.payload
+                    if isinstance(result, CommandResult):
+                        op_kind = _operation_for_command(result.args)
+                        operation = item.operations.get(op_kind)
+                        if operation:
+                            operation.active_commands = max(
+                                0, operation.active_commands - 1
+                            )
+                            if operation.active_commands == 0:
+                                operation.tail.clear()
+                                if item.active_command_op == op_kind:
+                                    item.active_command_op = None
+                            if result.returncode != 0 and not result.allow_failure:
+                                operation.status = "error"
+                                if _is_nix_build_command(result.args):
+                                    if result.tail_lines:
+                                        operation.detail_lines = [
+                                            f"Output tail (last {NIX_BUILD_FAILURE_TAIL_LINES} lines):",
+                                            *result.tail_lines,
+                                        ]
+                            elif (
+                                op_kind
+                                in (
+                                    OperationKind.UPDATE_REF,
+                                    OperationKind.REFRESH_LOCK,
+                                )
+                                and operation.status != "error"
+                            ):
+                                operation.status = "success"
+
+                case UpdateEventKind.RESULT:
+                    result = event.payload
+                    if result is not None:
+                        if isinstance(result, dict):
+                            set_detail(event.source, "updated")
+                            current_ref = result.get("current", "?")
+                            latest_ref = result.get("latest", "?")
+                            check_op = item.operations.get(OperationKind.CHECK_VERSION)
+                            if check_op:
+                                check_op.status = "success"
+                                check_op.message = f"{current_ref} → {latest_ref}"
+                                item.last_operation = OperationKind.CHECK_VERSION
+                            for op_kind in (
                                 OperationKind.UPDATE_REF,
                                 OperationKind.REFRESH_LOCK,
+                            ):
+                                op = item.operations.get(op_kind)
+                                if op and op.status == "running":
+                                    op.status = "success"
+                            renderer.log(
+                                event.source,
+                                f"Updated: {current_ref} -> {latest_ref}",
                             )
-                            and operation.status != "error"
-                        ):
-                            operation.status = "success"
+                        elif isinstance(result, SourceEntry):
+                            old_entry = sources.entries.get(event.source)
+                            old_version = old_entry.version if old_entry else None
+                            new_version = result.version
+                            sources.entries[event.source] = result
+                            set_detail(event.source, "updated")
 
-            case UpdateEventKind.RESULT:
-                result = event.payload
-                if result is not None:
-                    if isinstance(result, dict):
-                        set_detail(event.source, "updated")
-                        current_ref = result.get("current", "?")
-                        latest_ref = result.get("latest", "?")
-                        check_op = item.operations.get(OperationKind.CHECK_VERSION)
-                        if check_op:
-                            check_op.status = "success"
-                            check_op.message = f"{current_ref} → {latest_ref}"
-                            item.last_operation = OperationKind.CHECK_VERSION
-                        for op_kind in (
-                            OperationKind.UPDATE_REF,
-                            OperationKind.REFRESH_LOCK,
-                        ):
-                            op = item.operations.get(op_kind)
-                            if op and op.status == "running":
-                                op.status = "success"
-                        renderer.log(
-                            event.source,
-                            f"Updated: {current_ref} -> {latest_ref}",
-                        )
-                    elif isinstance(result, SourceEntry):
-                        old_entry = sources.entries.get(event.source)
-                        old_version = old_entry.version if old_entry else None
-                        new_version = result.version
-                        sources.entries[event.source] = result
-                        set_detail(event.source, "updated")
+                            check_op = item.operations.get(OperationKind.CHECK_VERSION)
+                            if check_op:
+                                if (
+                                    old_version
+                                    and new_version
+                                    and old_version != new_version
+                                ):
+                                    check_op.status = "success"
+                                    check_op.message = f"{old_version} → {new_version}"
+                                elif new_version:
+                                    check_op.status = "success"
+                                    if check_op.message is None:
+                                        check_op.message = new_version
 
-                        check_op = item.operations.get(OperationKind.CHECK_VERSION)
-                        if check_op:
+                            hash_op = item.operations.get(OperationKind.COMPUTE_HASH)
+                            if hash_op:
+                                hash_op.status = "success"
+                                hash_op.detail_lines = _hash_diff_lines(
+                                    old_entry, result
+                                )
+                                hash_op.message = None
                             if (
                                 old_version
                                 and new_version
                                 and old_version != new_version
                             ):
-                                check_op.status = "success"
-                                check_op.message = f"{old_version} → {new_version}"
-                            elif new_version:
-                                check_op.status = "success"
-                                if check_op.message is None:
-                                    check_op.message = new_version
-
-                        hash_op = item.operations.get(OperationKind.COMPUTE_HASH)
-                        if hash_op:
-                            hash_op.status = "success"
-                            hash_op.detail_lines = _hash_diff_lines(old_entry, result)
-                            hash_op.message = None
-                        if old_version and new_version and old_version != new_version:
-                            renderer.log(
-                                event.source,
-                                f"Updated: {old_version} -> {new_version}",
-                            )
-                        else:
-                            old_hash = (
-                                old_entry.hashes.primary_hash() if old_entry else None
-                            )
-                            new_hash = result.hashes.primary_hash()
-                            if old_hash and new_hash and old_hash != new_hash:
                                 renderer.log(
                                     event.source,
-                                    f"Updated: hash {old_hash} -> {new_hash}",
+                                    f"Updated: {old_version} -> {new_version}",
                                 )
                             else:
-                                renderer.log(event.source, "Updated")
+                                old_hash = (
+                                    old_entry.hashes.primary_hash()
+                                    if old_entry
+                                    else None
+                                )
+                                new_hash = result.hashes.primary_hash()
+                                if old_hash and new_hash and old_hash != new_hash:
+                                    renderer.log(
+                                        event.source,
+                                        f"Updated: hash {old_hash} -> {new_hash}",
+                                    )
+                                else:
+                                    renderer.log(event.source, "Updated")
+                        else:
+                            set_detail(event.source, "updated")
                     else:
-                        set_detail(event.source, "updated")
-                else:
-                    set_detail(event.source, "no_change")
-                    check_op = item.operations.get(OperationKind.CHECK_VERSION)
-                    if check_op and check_op.status == "pending":
-                        check_op.status = "no_change"
+                        set_detail(event.source, "no_change")
+                        check_op = item.operations.get(OperationKind.CHECK_VERSION)
+                        if check_op and check_op.status == "pending":
+                            check_op.status = "no_change"
 
-            case UpdateEventKind.ERROR:
-                errors += 1
-                set_detail(event.source, "error")
-                message = event.message or "Unknown error"
-                error_op: OperationState | None = None
-                if item.active_command_op:
-                    error_op = item.operations.get(item.active_command_op)
-                if error_op is None and item.last_operation:
-                    error_op = item.operations.get(item.last_operation)
-                if error_op:
-                    error_op.status = "error"
-                    error_op.message = message
-                    error_op.active_commands = 0
-                    error_op.tail.clear()
-                renderer.log_error(event.source, message)
+                case UpdateEventKind.ERROR:
+                    errors += 1
+                    set_detail(event.source, "error")
+                    message = event.message or "Unknown error"
+                    error_op: OperationState | None = None
+                    if item.active_command_op:
+                        error_op = item.operations.get(item.active_command_op)
+                    if error_op is None and item.last_operation:
+                        error_op = item.operations.get(item.last_operation)
+                    if error_op:
+                        error_op.status = "error"
+                        error_op.message = message
+                        error_op.active_commands = 0
+                        error_op.tail.clear()
+                    renderer.log_error(event.source, message)
 
-        renderer.request_render()
-        renderer.render_if_due(time.monotonic())
-
-    renderer.finalize()
+            renderer.request_render()
+            renderer.render_if_due(time.monotonic())
+    finally:
+        renderer.finalize()
 
     return updated, errors, update_details
 

@@ -388,29 +388,6 @@ in
       # Other Packages (with custom logic)
       # ═══════════════════════════════════════════════════════════════════════════
 
-      # Patched BoringSSL source for rama-boring-sys (required by codex network-proxy)
-      # rama-boring-sys builds BoringSSL from source, so we provide pre-patched source
-      ramaBoringsslSource = prev.stdenvNoCC.mkDerivation {
-        pname = "rama-boringssl-source";
-        version = "79048f1-patched";
-        src = inputs.rama-boringssl;
-        phases = [
-          "unpackPhase"
-          "patchPhase"
-          "installPhase"
-        ];
-
-        # Apply patches from rama-boring repo (in boring-sys/patches/)
-        postPatch = ''
-          patch -p1 < ${inputs.rama-boring}/boring-sys/patches/rama_tls.patch
-          patch -p1 < ${inputs.rama-boring}/boring-sys/patches/rama_boring_pq.patch
-        '';
-
-        installPhase = ''
-          cp -r . $out
-        '';
-      };
-
       codex =
         let
           version = getFlakeVersion "codex";
@@ -446,9 +423,6 @@ in
               ++ lib.optionals stdenv.hostPlatform.isDarwin [ apple-sdk_15 ];
 
             LIBCLANG_PATH = "${prev.lib.getLib prev.libclang}/lib";
-            BORING_BSSL_SOURCE_PATH = final.ramaBoringsslSource;
-            BORING_BSSL_ASSUME_PATCHED = "1";
-
             NIX_CFLAGS_COMPILE = toString (
               prev.lib.optionals prev.stdenv.cc.isClang [
                 "-Wno-error=character-conversion"
@@ -757,8 +731,9 @@ in
         (opencodeBunPatch old)
         // {
           # Override node_modules hash - upstream may lag behind actual npm registry state
+          # Hash is platform-specific since bun resolution can differ across platforms
           node_modules = old.node_modules.overrideAttrs {
-            outputHash = outputs.lib.sourceHash "opencode" "nodeModulesHash";
+            outputHash = outputs.lib.sourceHashForPlatform "opencode" "nodeModulesHash" system;
           };
         }
       );
@@ -956,6 +931,7 @@ in
       # OpenChamber Packages
       # ═══════════════════════════════════════════════════════════════════════════
 
+      # Version extracted from flake input ref
       openchamberVersion = builtins.replaceStrings [ "v" ] [ "" ] (
         outputs.lib.flakeLock.openchamber.original.ref or "1.6.3"
       );
@@ -988,6 +964,8 @@ in
           pname = "openchamber-web";
           version = final.openchamberVersion;
           src = final.openchamberSource;
+
+          strictDeps = true;
 
           nativeBuildInputs = with prev; [
             bun
@@ -1025,7 +1003,7 @@ in
             cp -r packages/web/bin $out/lib/openchamber-web/
             cp packages/web/package.json $out/lib/openchamber-web/
 
-            # Copy runtime node_modules
+            # Copy runtime node_modules (needed for server runtime)
             cp -r node_modules $out/lib/openchamber-web/
 
             # Create wrapper script
@@ -1043,54 +1021,65 @@ in
           };
         };
 
-      # OpenChamber Desktop: Native macOS Tauri app for OpenCode AI agent
+      # OpenChamber Desktop: Native Tauri app for OpenCode AI agent
       # Built from source using rustPlatform + bun2nix for frontend
+      # Supports both macOS (Darwin) and Linux
       openchamber-desktop =
         let
           bun2nix = inputs.bun2nix.packages.${system}.default;
         in
-        prev.rustPlatform.buildRustPackage {
+        prev.rustPlatform.buildRustPackage (finalAttrs: {
           pname = "openchamber-desktop";
           version = final.openchamberVersion;
           src = final.openchamberSource;
 
+          strictDeps = true;
+
           cargoRoot = "packages/desktop/src-tauri";
-          buildAndTestSubdir = "packages/desktop/src-tauri";
+          buildAndTestSubdir = finalAttrs.cargoRoot;
 
           cargoLock = {
             lockFile = "${final.openchamberSource}/packages/desktop/src-tauri/Cargo.lock";
-            # Add git dependency hashes if needed (check Cargo.lock for git deps)
+            # Add outputHashes here if Cargo.lock has git dependencies
           };
 
-          nativeBuildInputs = with prev; [
-            bun
-            bun2nix.hook
-            cargo-tauri
-            cargo-tauri.hook
-            makeWrapper
-            pkg-config
-          ];
-
+          # bun2nix hook sets up node_modules from bunDeps
           bunDeps = final.openchamberBunDeps;
+          # Disable automatic bun build/install phases - we use vite via preBuild
+          # and cargo-tauri.hook handles the actual build and install
+          dontUseBunBuild = true;
+          dontUseBunInstall = true;
+
+          nativeBuildInputs =
+            with prev;
+            [
+              bun
+              bun2nix.hook
+              cargo-tauri.hook # Automatically sets buildPhase and installPhase
+              pkg-config
+            ]
+            ++ lib.optionals stdenv.hostPlatform.isLinux [
+              wrapGAppsHook4
+            ];
 
           buildInputs =
             with prev;
             [ openssl ]
             ++ lib.optionals stdenv.hostPlatform.isDarwin [
               apple-sdk_15
+            ]
+            ++ lib.optionals stdenv.hostPlatform.isLinux [
+              glib-networking
+              webkitgtk_4_1
+              libayatana-appindicator
             ];
 
           doCheck = false;
 
-          # Use cargo-tauri.hook for build and install
-          # It handles standard tauri build flags and bundle locations
-          buildPhase = "tauriBuildHook";
-          installPhase = "tauriInstallHook";
-
-          # Configure tauri hook
+          # Configure tauri hook - skip code signing for Nix builds
           tauriBuildFlags = [ "--no-sign" ];
 
-          # Build frontend before Tauri build (tauriBuildHook calls runHook preBuild)
+          # Build frontend before Tauri build (cargo-tauri.hook runs preBuild)
           preBuild = ''
             # Build the UI package first (workspace dependency)
             cd packages/ui
@@ -1103,19 +1092,43 @@ in
             cd ../..
           '';
 
-          postInstall = ''
-            # Create CLI symlink (not handled by tauriInstallHook)
-            ln -s "$out/Applications/OpenChamber.app/Contents/MacOS/openchamber-desktop" "$out/bin/openchamber-desktop"
+          # Patch libappindicator path for Linux system tray support
+          postPatch = prev.lib.optionalString prev.stdenv.hostPlatform.isLinux ''
+            substituteInPlace $cargoDepsCopy/libappindicator-sys-*/src/lib.rs \
+              --replace-fail "libayatana-appindicator3.so.1" \
+              "${prev.libayatana-appindicator}/lib/libayatana-appindicator3.so.1"
+          '';
+
+          # Create CLI symlink for easy terminal access
+          postInstall = prev.lib.optionalString prev.stdenv.hostPlatform.isDarwin ''
+            mkdir -p $out/bin
+            for app in "$out/Applications"/*.app; do
+              if [ -d "$app/Contents/MacOS" ]; then
+                for bin in "$app/Contents/MacOS"/*; do
+                  if [ -x "$bin" ] && [ -f "$bin" ]; then
+                    ln -sf "$bin" "$out/bin/openchamber-desktop"
+                    break 2
+                  fi
+                done
+              fi
+            done
+          '';
+
+          # Linux WebKit workaround for NVIDIA GPUs
+          preFixup = prev.lib.optionalString prev.stdenv.hostPlatform.isLinux ''
+            gappsWrapperArgs+=(
+              --set-default WEBKIT_DISABLE_DMABUF_RENDERER "1"
+            )
           '';
 
           meta = with prev.lib; {
             description = "Desktop interface for OpenCode AI agent";
             homepage = "https://github.com/btriapitsyn/openchamber";
             license = licenses.mit;
-            platforms = platforms.darwin;
+            platforms = platforms.darwin ++ platforms.linux;
             mainProgram = "openchamber-desktop";
           };
-        };
+        });
 
       # ═══════════════════════════════════════════════════════════════════════════
       # Flake Input Packages (simple re-exports)
