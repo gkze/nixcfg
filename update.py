@@ -1016,15 +1016,17 @@ async def update_flake_input(input_name: str, *, source: str) -> EventStream:
 
 
 def _extract_nix_hash(output: str) -> str:
-    sri_match = re.search(r"got:\s*(sha256-[0-9A-Za-z+/=]+)", output)
-    if sri_match:
-        return sri_match.group(1)
-    fallback_match = re.search(
+    # Use findall and take the LAST match - when there are nested derivation failures,
+    # the last hash mismatch is typically the one we're actually trying to compute
+    sri_matches = re.findall(r"got:\s*(sha256-[0-9A-Za-z+/=]+)", output)
+    if sri_matches:
+        return sri_matches[-1]
+    fallback_matches = re.findall(
         r"got:\s*(sha256:[0-9a-fA-F]{64}|[0-9a-fA-F]{64}|[0-9a-z]{52})",
         output,
     )
-    if fallback_match:
-        return fallback_match.group(1)
+    if fallback_matches:
+        return fallback_matches[-1]
     raise RuntimeError(
         "Could not find hash in nix output. Output tail:\n"
         f"{_tail_output_excerpt(output, max_lines=get_config().default_log_tail_lines)}"
