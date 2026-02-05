@@ -15,6 +15,7 @@ In CI, this is used as a preliminary step:
 """
 
 import argparse
+import select
 import subprocess
 import time
 from datetime import datetime
@@ -24,8 +25,8 @@ from pathlib import Path
 # Timeout for nix commands (10 minutes - large configs can take 5+ minutes to evaluate)
 NIX_COMMAND_TIMEOUT = 600
 
-# Timeout for nix-store builds (60 minutes)
-NIX_BUILD_TIMEOUT = 3600
+# Timeout for nix-store builds (2 hours - Zed can take up to 1 hour to build from source)
+NIX_BUILD_TIMEOUT = 7200
 
 # Maximum derivations per batch to avoid ARG_MAX limits
 MAX_DERIVATIONS_PER_BATCH = 500
@@ -148,37 +149,72 @@ def build_derivations(
             logger.log(f"Building {len(batch)} derivations...")
 
         batch_start = time.time()
+        last_progress_time = batch_start
+        progress_interval = 60  # Log progress every 60 seconds during long builds
+
         # Use nix-store --realise to build derivations directly
         # This allows building from source when paths aren't cached
         cmd = ["nix-store", "--realise", *batch]
 
         try:
-            result = subprocess.run(
+            # Stream output in real-time for better CI visibility
+            process = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                timeout=NIX_BUILD_TIMEOUT,
-                check=False,
+                bufsize=1,  # Line buffered
             )
+
+            while True:
+                # Check if process has output ready (with 1 second timeout)
+                if process.stdout:
+                    # Use select for non-blocking read on Unix
+                    ready, _, _ = select.select([process.stdout], [], [], 1.0)
+                    if ready:
+                        line = process.stdout.readline()
+                        if line:
+                            print(f"  {line.rstrip()}", flush=True)
+                            last_progress_time = time.time()
+
+                # Check if process finished
+                if process.poll() is not None:
+                    # Read any remaining output
+                    if process.stdout:
+                        for line in process.stdout:
+                            print(f"  {line.rstrip()}", flush=True)
+                    break
+
+                # Log periodic progress for long-running builds
+                current_time = time.time()
+                elapsed = current_time - batch_start
+                if current_time - last_progress_time >= progress_interval:
+                    logger.log(
+                        f"Still building... ({format_duration(elapsed)} elapsed, "
+                        f"timeout at {format_duration(NIX_BUILD_TIMEOUT)})"
+                    )
+                    last_progress_time = current_time
+
+                # Check for timeout
+                if elapsed > NIX_BUILD_TIMEOUT:
+                    process.kill()
+                    process.wait()
+                    raise subprocess.TimeoutExpired(cmd, NIX_BUILD_TIMEOUT)
+
+            returncode = process.returncode
+
         except subprocess.TimeoutExpired:
             logger.log(
-                f"ERROR: Build timed out for batch {batch_num} after {NIX_BUILD_TIMEOUT}s"
+                f"ERROR: Build timed out for batch {batch_num} after {format_duration(NIX_BUILD_TIMEOUT)}"
             )
             success = False
             continue
 
-        combined_output = "\n".join([result.stdout, result.stderr]).strip()
-        if combined_output:
-            for line in combined_output.splitlines():
-                line = line.rstrip()
-                if line:
-                    print(f"  {line}", flush=True)
-
         batch_elapsed = time.time() - batch_start
 
-        if result.returncode != 0:
+        if returncode != 0:
             logger.log(
-                f"ERROR: Build failed for batch {batch_num} (exit code {result.returncode})"
+                f"ERROR: Build failed for batch {batch_num} (exit code {returncode})"
             )
             success = False
             # Continue with other batches to build as much as possible
@@ -223,6 +259,11 @@ def main() -> int:
     args = parser.parse_args()
 
     logger = Logger(args.verbose)
+
+    logger.log(
+        f"Build configuration: eval timeout={format_duration(NIX_COMMAND_TIMEOUT)}, "
+        f"build timeout={format_duration(NIX_BUILD_TIMEOUT)}"
+    )
 
     if len(args.targets) < 2:
         logger.log("ERROR: Need at least 2 targets to find shared derivations.")
