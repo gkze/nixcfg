@@ -62,7 +62,7 @@
     };
     crane.url = "github:ipetkov/crane";
     openchamber = {
-      url = "github:btriapitsyn/openchamber/v1.6.3";
+      url = "github:btriapitsyn/openchamber/v1.6.4";
       flake = false;
     };
     opencode = {
@@ -127,7 +127,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.96.0";
+      url = "github:openai/codex/rust-v0.97.0";
       flake = false;
     };
     curator = {

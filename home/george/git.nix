@@ -100,8 +100,8 @@ in
         init.defaultBranch = "main";
         rebase.pull = true;
         url."ssh://gitlab.gnome.org".insteadOf = "https://gitlab.gnome.org";
-        # GPG will auto-select the signing subkey from the primary key
-        user.signingkey = userMeta.gpg.keys.primary;
+        # Use signing subkey explicitly for git signatures
+        user.signingkey = userMeta.gpg.keys.signing;
       };
       signing = {
         format = lib.mkForce "openpgp";

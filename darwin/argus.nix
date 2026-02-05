@@ -15,7 +15,15 @@ mkDarwinHost {
     (
       { primaryUser, ... }:
       {
-        launchd.user.envVariables.OPENCODE_CONFIG = "/Users/${primaryUser}/.config/opencode/work.json";
+        launchd.user.agents.set-opencode-env = {
+          script = ''
+            launchctl setenv OPENCODE_CONFIG "/Users/${primaryUser}/.config/opencode/work.json"
+          '';
+          serviceConfig = {
+            Label = "com.george.set-opencode-env";
+            RunAtLoad = true;
+          };
+        };
       }
     )
   ];
