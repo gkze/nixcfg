@@ -74,7 +74,7 @@ jobs:
         # (which fails when sources.json has stale hashes)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: uv run update.py --native-only
+        run: uv run update.py --native-only --continue-on-error
       - uses: actions/upload-artifact@v4
         with:
           name: sources-${{ matrix.platform }}
