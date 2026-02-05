@@ -119,7 +119,7 @@
       flake = false;
     };
     beads = {
-      url = "github:steveyegge/beads/v0.49.3";
+      url = "github:steveyegge/beads/v0.49.4";
       flake = false;
     };
     catppuccin-bat = {
