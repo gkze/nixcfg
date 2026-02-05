@@ -41,6 +41,20 @@
         "${config.xdg.configHome}/zed/settings.json" \
         | ${lib.getExe' pkgs.moreutils "sponge"} "${config.xdg.configHome}/zed/settings.json"
     '';
+    # Standalone home-manager wrapper - allows `home-manager switch` without --flake
+    # Written as a real file (not symlink) so home-manager can find it
+    activation.standaloneHomeManagerFlake = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      mkdir -p "${config.xdg.configHome}/home-manager"
+      cat > "${config.xdg.configHome}/home-manager/flake.nix" << 'EOF'
+      {
+        description = "Standalone home-manager wrapper";
+        inputs.nixcfg.url = "git+file:///Users/george/.config/nixcfg";
+        outputs = { nixcfg, ... }: {
+          homeConfigurations.george = nixcfg.homeConfigurations.george;
+        };
+      }
+      EOF
+    '';
     file = {
       "${config.programs.gpg.homedir}/gpg-agent.conf".text =
         let
@@ -54,7 +68,7 @@
         ''
           pinentry-program ${prog}
         '';
-      "${config.xdg.configHome}/home-manager/home.nix".source = ./standalone-home.nix;
+
       ".local/bin" = {
         source = ./bin;
         recursive = true;
