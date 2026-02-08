@@ -88,6 +88,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
       - uses: actions/download-artifact@v4
         with:
           name: flake-lock
@@ -106,7 +107,7 @@ jobs:
           path: sources-aarch64-linux
       - name: Merge sources.json files
         run: |
-          python3 -m tools.merge_sources \
+          uv run python -m tools.merge_sources \
             sources.json \
             sources-aarch64-darwin/sources.json \
             sources-x86_64-linux/sources.json \
@@ -145,12 +146,13 @@ jobs:
           key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock')
             }}
           restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
+      - uses: astral-sh/setup-uv@v7
       - run: brew install --cask macfuse && brew install 1password-cli
       - name: Pre-fetch flake inputs
         run: nix flake archive --json > /dev/null
       - name: Build shared Darwin closure
         run: |
-          python3 -m tools.build_shared_closure \
+          uv run python -m tools.build_shared_closure \
             .#darwinConfigurations.argus.system \
             .#darwinConfigurations.rocinante.system
 
@@ -237,6 +239,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
       - uses: actions/download-artifact@v4
         with:
           name: merged-sources
@@ -245,7 +248,7 @@ jobs:
         id: diff
         run: |
           git show HEAD:flake.lock > /tmp/old-flake.lock
-          flake_diff=$(python3 -m tools.flake_lock_diff /tmp/old-flake.lock flake.lock)
+          flake_diff=$(uv run python -m tools.flake_lock_diff /tmp/old-flake.lock flake.lock)
 
           # Generate sources.json diff if it changed
           sources_diff=""
