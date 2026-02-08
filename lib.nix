@@ -21,6 +21,8 @@ let
   inherit (lib.lists) findFirst optionals;
   inherit (lib.attrsets) optionalAttrs;
 
+  isCI = getEnv "CI" != "";
+
   maybePath = p: if pathExists p then p else null;
   userMetaPath = u: maybePath "${src}/home/${u}/meta.nix";
   modulesPath = "${src}/modules";
@@ -361,6 +363,10 @@ rec {
         # Linux builder for cross-platform Nix builds on Apple Silicon.
         # nix-rosetta-builder provides aarch64-linux and x86_64-linux builders
         # via Rosetta 2. Requires initial bootstrap with nix.linux-builder.
+        # Skipped in CI — the builder VM image requires aarch64-linux to build
+        # and GitHub Actions macOS runners lack a Linux builder.
+      ]
+      ++ optionals (!isCI) [
         inputs.nix-rosetta-builder.darwinModules.default
         { nix-rosetta-builder.onDemand = true; }
       ]
