@@ -57,8 +57,8 @@
       nix-tree
       nixfmt
       nodejs_latest
-      openchamber-desktop
-      openchamber-web
+      # openchamber-desktop
+      # openchamber-web
       opencode-desktop
       postman
       procs

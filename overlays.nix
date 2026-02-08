@@ -46,7 +46,6 @@ in
     final: prev:
     let
       inherit (prev.stdenv.hostPlatform) system;
-
       # ─────────────────────────────────────────────────────────────────────────
       # Helper: Override a package with version/src from sources.json
       # ─────────────────────────────────────────────────────────────────────────
@@ -121,7 +120,7 @@ in
         {
           name,
           src,
-          pythonVersion ? prev.python313,
+          pythonVersion ? prev.python314,
           mainProgram,
           packageName ? name,
           venvName ? name,
@@ -206,28 +205,6 @@ in
           '';
         };
 
-      # ─────────────────────────────────────────────────────────────────────────
-      # Helper: Patch opencode packages for bun version compatibility
-      # ─────────────────────────────────────────────────────────────────────────
-      opencodeBunPatch = old: {
-        nativeBuildInputs =
-          (old.nativeBuildInputs or [ ])
-          ++ (with prev; [
-            findutils
-            jq
-            moreutils
-            bun
-          ]);
-        postPatch = ''
-          # Update all package.json files with packageManager field to use current bun version
-          bunVersion=$(bun -v | tr -d '\n')
-          find . -name 'package.json' -exec sh -c '
-            if jq -e ".packageManager" "$1" >/dev/null 2>&1; then
-              jq --arg bunVersion "'"$bunVersion"'" ".packageManager = \"bun@\(\$bunVersion)\"" "$1" | sponge "$1"
-            fi
-          ' _ {} \;
-        '';
-      };
     in
     {
       # ═══════════════════════════════════════════════════════════════════════════
@@ -625,43 +602,42 @@ in
       # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
       # See bead nixcfg-uec for technical details
 
+      linear-cli-deno-deps = prev.stdenvNoCC.mkDerivation {
+        pname = "linear-cli-deps";
+        version = getFlakeVersion "linear-cli";
+        src = inputs.linear-cli;
+        nativeBuildInputs = [
+          prev.deno
+          prev.cacert
+        ];
+        outputHashAlgo = "sha256";
+        outputHashMode = "recursive";
+        outputHash = outputs.lib.sourceHashForPlatform "linear-cli" "denoDepsHash" system;
+        buildPhase = ''
+          export DENO_DIR=$TMPDIR/deno-cache
+          export SSL_CERT_FILE=${prev.cacert}/etc/ssl/certs/ca-bundle.crt
+          export HOME=$TMPDIR
+
+          # Run codegen (generates src/__codegen__/graphql.ts via npm:@graphql-codegen/cli)
+          deno task codegen
+
+          # Cache all modules so deno compile works offline
+          deno cache src/main.ts
+        '';
+        installPhase = ''
+          mkdir -p $out
+          cp -r $TMPDIR/deno-cache $out/deno-cache
+          cp -r src/__codegen__ $out/codegen
+        '';
+      };
+
       linear-cli =
         let
-          version = "1.8.1";
-          # FOD: fetch Deno dependencies + run GraphQL codegen (both need network)
-          # Uses platform-specific hash since deps include platform-specific binaries (lefthook)
-          denoDeps = prev.stdenvNoCC.mkDerivation {
-            pname = "linear-cli-deps";
-            inherit version;
-            src = inputs.linear-cli;
-            nativeBuildInputs = [
-              prev.deno
-              prev.cacert
-            ];
-            outputHashAlgo = "sha256";
-            outputHashMode = "recursive";
-            outputHash = outputs.lib.sourceHashForPlatform "linear-cli" "denoDepsHash" system;
-            buildPhase = ''
-              export DENO_DIR=$TMPDIR/deno-cache
-              export SSL_CERT_FILE=${prev.cacert}/etc/ssl/certs/ca-bundle.crt
-              export HOME=$TMPDIR
-
-              # Run codegen (generates src/__codegen__/graphql.ts via npm:@graphql-codegen/cli)
-              deno task codegen
-
-              # Cache all modules so deno compile works offline
-              deno cache src/main.ts
-            '';
-            installPhase = ''
-              mkdir -p $out
-              cp -r $TMPDIR/deno-cache $out/deno-cache
-              cp -r src/__codegen__ $out/codegen
-            '';
-          };
+          denoDeps = final.linear-cli-deno-deps;
         in
         prev.stdenvNoCC.mkDerivation {
           pname = "linear-cli";
-          inherit version;
+          version = getFlakeVersion "linear-cli";
           src = inputs.linear-cli;
           nativeBuildInputs = [
             prev.deno
@@ -726,17 +702,29 @@ in
         };
       });
 
-      opencode = inputs.opencode.packages.${system}.opencode.overrideAttrs (
-        old:
-        (opencodeBunPatch old)
-        // {
-          # Override node_modules hash - upstream may lag behind actual npm registry state
-          # Hash is platform-specific since bun resolution can differ across platforms
-          node_modules = old.node_modules.overrideAttrs {
-            outputHash = outputs.lib.sourceHashForPlatform "opencode" "nodeModulesHash" system;
-          };
-        }
-      );
+      opencode = inputs.opencode.packages.${system}.opencode.overrideAttrs (old: {
+        # @opentui/core is hoisted to root node_modules/ but the build script
+        # resolves it from packages/opencode/node_modules/. Symlink it so
+        # fs.realpathSync can find parser.worker.js at build time.
+        preBuild = ''
+          if [ -d node_modules/@opentui ] && [ ! -d packages/opencode/node_modules/@opentui ]; then
+            chmod u+w packages/opencode/node_modules
+            mkdir -p packages/opencode/node_modules/@opentui
+            for pkg in node_modules/@opentui/*; do
+              ln -s "../../../../$pkg" "packages/opencode/node_modules/@opentui/$(basename "$pkg")"
+            done
+          fi
+        '';
+        node_modules = old.node_modules.overrideAttrs (nodeOld: {
+          outputHash = outputs.lib.sourceHashForPlatform "opencode" "nodeModulesHash" system;
+          # bun 1.3.8+ no longer creates .bun/node_modules/, making the
+          # upstream canonicalize/normalize scripts fail. Guard them so they
+          # only run when .bun/node_modules actually exists.
+          buildPhase =
+            builtins.replaceStrings [ "bun --bun" ] [ "[ -d node_modules/.bun/node_modules ] && bun --bun" ]
+              (nodeOld.buildPhase or "");
+        });
+      });
 
       opencode-desktop =
         let
@@ -746,53 +734,54 @@ in
           tauriSpectaEntry = outputs.lib.sourceHashEntry "opencode-desktop" "tauriSpectaOutputHash";
           upstreamDesktop = inputs.opencode.packages.${system}.desktop;
         in
-        prev.rustPlatform.buildRustPackage (
-          (opencodeBunPatch { })
-          // {
-            inherit (upstreamDesktop)
-              pname
-              version
-              src
-              node_modules
-              patches
-              cargoRoot
-              buildAndTestSubdir
-              nativeBuildInputs
-              buildInputs
-              strictDeps
-              meta
-              ;
+        prev.rustPlatform.buildRustPackage {
+          inherit (upstreamDesktop)
+            pname
+            version
+            src
+            patches
+            cargoRoot
+            buildAndTestSubdir
+            nativeBuildInputs
+            buildInputs
+            strictDeps
+            meta
+            ;
 
-            # Add output hashes for Cargo.lock git dependencies
-            cargoLock = {
-              lockFile = "${upstreamDesktop.src}/packages/desktop/src-tauri/Cargo.lock";
-              outputHashes = {
-                ${spectaEntry.gitDep} = spectaEntry.hash;
-                ${tauriEntry.gitDep} = tauriEntry.hash;
-                ${tauriSpectaEntry.gitDep} = tauriSpectaEntry.hash;
-              };
+          # Reuse the CLI's node_modules which has the correct hash override
+          # from sources.json, rather than inheriting upstream's potentially
+          # stale fixed-output hash.
+          inherit (final.opencode) node_modules;
+
+          # Add output hashes for Cargo.lock git dependencies
+          cargoLock = {
+            lockFile = "${upstreamDesktop.src}/packages/desktop/src-tauri/Cargo.lock";
+            outputHashes = {
+              ${spectaEntry.gitDep} = spectaEntry.hash;
+              ${tauriEntry.gitDep} = tauriEntry.hash;
+              ${tauriSpectaEntry.gitDep} = tauriSpectaEntry.hash;
             };
+          };
 
-            # Use dev config instead of prod (gets dev icon + "OpenCode Dev" name)
-            tauriBuildFlags = [ "--no-sign" ];
+          # Use dev config instead of prod (gets dev icon + "OpenCode Dev" name)
+          tauriBuildFlags = [ "--no-sign" ];
 
-            # Override preBuild to use our patched opencode instead of upstream's
-            preBuild = ''
-              cp -a ${upstreamDesktop.node_modules}/{node_modules,packages} .
-              chmod -R u+w node_modules packages
-              patchShebangs node_modules
-              patchShebangs packages/desktop/node_modules
+          # Override preBuild to use our patched opencode instead of upstream's
+          preBuild = ''
+            cp -a ${final.opencode.node_modules}/{node_modules,packages} .
+            chmod -R u+w node_modules packages
+            patchShebangs node_modules
+            patchShebangs packages/desktop/node_modules
 
-              mkdir -p packages/desktop/src-tauri/sidecars
-              cp ${final.opencode}/bin/opencode packages/desktop/src-tauri/sidecars/opencode-cli-${prev.stdenv.hostPlatform.rust.rustcTarget}
-            '';
+            mkdir -p packages/desktop/src-tauri/sidecars
+            cp ${final.opencode}/bin/opencode packages/desktop/src-tauri/sidecars/opencode-cli-${prev.stdenv.hostPlatform.rust.rustcTarget}
+          '';
 
-            postFixup = prev.lib.optionalString prev.stdenv.hostPlatform.isLinux ''
-              mv $out/bin/OpenCode $out/bin/opencode-desktop
-              sed -i 's|^Exec=OpenCode$|Exec=opencode-desktop|' $out/share/applications/OpenCode.desktop
-            '';
-          }
-        );
+          postFixup = prev.lib.optionalString prev.stdenv.hostPlatform.isLinux ''
+            mv $out/bin/OpenCode $out/bin/opencode-desktop
+            sed -i 's|^Exec=OpenCode$|Exec=opencode-desktop|' $out/share/applications/OpenCode.desktop
+          '';
+        };
 
       # sentry-cli: Build from source with xcarchive test fixtures stripped.
       # Not a flake input because the repo contains .xcarchive bundles with
@@ -928,207 +917,206 @@ in
       zed-editor-nightly = inputs.zed.packages.${system}.default;
 
       # ═══════════════════════════════════════════════════════════════════════════
-      # OpenChamber Packages
+      # OpenChamber Packages (commented out)
       # ═══════════════════════════════════════════════════════════════════════════
 
-      # Version extracted from flake input ref
-      openchamberVersion = builtins.replaceStrings [ "v" ] [ "" ] (
-        outputs.lib.flakeLock.openchamber.original.ref or "1.6.3"
-      );
-
-      # Shared source with generated bun.nix
-      # The bun.nix file needs to be in the openchamber source tree context
-      # so workspace paths resolve correctly for bun2nix
-      openchamberSource = prev.runCommand "openchamber-src" { } ''
-        cp -r ${inputs.openchamber} $out
-        chmod -R u+w $out
-        cp ${./packages/openchamber/bun.nix} $out/bun.nix
-      '';
-
-      # Shared bun dependencies for OpenChamber packages
-      openchamberBunDeps =
-        let
-          bun2nix = inputs.bun2nix.packages.${system}.default;
-        in
-        bun2nix.fetchBunDeps {
-          bunNix = "${final.openchamberSource}/bun.nix";
-        };
-
-      # OpenChamber Web: Web server interface for OpenCode AI agent
-      # Built from source using bun2nix for dependency management
-      openchamber-web =
-        let
-          bun2nix = inputs.bun2nix.packages.${system}.default;
-        in
-        prev.stdenv.mkDerivation {
-          pname = "openchamber-web";
-          version = final.openchamberVersion;
-          src = final.openchamberSource;
-
-          strictDeps = true;
-
-          nativeBuildInputs = with prev; [
-            bun
-            bun2nix.hook
-            nodejs_22
-            makeWrapper
-          ];
-
-          bunDeps = final.openchamberBunDeps;
-
-          buildPhase = ''
-            runHook preBuild
-
-            # Build the UI package first (workspace dependency)
-            cd packages/ui
-            bun run build
-            cd ../..
-
-            # Build the web package (vite build)
-            cd packages/web
-            bun run build
-            cd ../..
-
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-
-            mkdir -p $out/lib/openchamber-web $out/bin
-
-            # Copy built assets and server files
-            cp -r packages/web/dist $out/lib/openchamber-web/
-            cp -r packages/web/server $out/lib/openchamber-web/
-            cp -r packages/web/bin $out/lib/openchamber-web/
-            cp packages/web/package.json $out/lib/openchamber-web/
-
-            # Copy runtime node_modules (needed for server runtime)
-            cp -r node_modules $out/lib/openchamber-web/
-
-            # Create wrapper script
-            makeWrapper ${prev.nodejs_22}/bin/node $out/bin/openchamber \
-              --add-flags "$out/lib/openchamber-web/bin/cli.js"
-
-            runHook postInstall
-          '';
-
-          meta = with prev.lib; {
-            description = "Web interface for OpenCode AI agent";
-            homepage = "https://github.com/btriapitsyn/openchamber";
-            license = licenses.mit;
-            mainProgram = "openchamber";
-          };
-        };
-
-      # OpenChamber Desktop: Native Tauri app for OpenCode AI agent
-      # Built from source using rustPlatform + bun2nix for frontend
-      # Supports both macOS (Darwin) and Linux
-      openchamber-desktop =
-        let
-          bun2nix = inputs.bun2nix.packages.${system}.default;
-        in
-        prev.rustPlatform.buildRustPackage (finalAttrs: {
-          pname = "openchamber-desktop";
-          version = final.openchamberVersion;
-          src = final.openchamberSource;
-
-          strictDeps = true;
-
-          cargoRoot = "packages/desktop/src-tauri";
-          buildAndTestSubdir = finalAttrs.cargoRoot;
-
-          cargoLock = {
-            lockFile = "${final.openchamberSource}/packages/desktop/src-tauri/Cargo.lock";
-            # Add outputHashes here if Cargo.lock has git dependencies
-          };
-
-          # bun2nix hook sets up node_modules from bunDeps
-          bunDeps = final.openchamberBunDeps;
-          # Disable automatic bun build/install phases - we use vite via preBuild
-          # and cargo-tauri.hook handles the actual build and install
-          dontUseBunBuild = true;
-          dontUseBunInstall = true;
-
-          nativeBuildInputs =
-            with prev;
-            [
-              bun
-              bun2nix.hook
-              cargo-tauri.hook # Automatically sets buildPhase and installPhase
-              pkg-config
-            ]
-            ++ lib.optionals stdenv.hostPlatform.isLinux [
-              wrapGAppsHook4
-            ];
-
-          buildInputs =
-            with prev;
-            [ openssl ]
-            ++ lib.optionals stdenv.hostPlatform.isDarwin [
-              apple-sdk_15
-            ]
-            ++ lib.optionals stdenv.hostPlatform.isLinux [
-              glib-networking
-              webkitgtk_4_1
-              libayatana-appindicator
-            ];
-
-          doCheck = false;
-
-          # Configure tauri hook - skip code signing for Nix builds
-          tauriBuildFlags = [ "--no-sign" ];
-
-          # Build frontend before Tauri build (cargo-tauri.hook runs preBuild)
-          preBuild = ''
-            # Build the UI package first (workspace dependency)
-            cd packages/ui
-            bun run build
-            cd ../..
-
-            # Build the desktop frontend
-            cd packages/desktop
-            bun run build
-            cd ../..
-          '';
-
-          # Patch libappindicator path for Linux system tray support
-          postPatch = prev.lib.optionalString prev.stdenv.hostPlatform.isLinux ''
-            substituteInPlace $cargoDepsCopy/libappindicator-sys-*/src/lib.rs \
-              --replace-fail "libayatana-appindicator3.so.1" \
-              "${prev.libayatana-appindicator}/lib/libayatana-appindicator3.so.1"
-          '';
-
-          # Create CLI symlink for easy terminal access
-          postInstall = prev.lib.optionalString prev.stdenv.hostPlatform.isDarwin ''
-            mkdir -p $out/bin
-            for app in "$out/Applications"/*.app; do
-              if [ -d "$app/Contents/MacOS" ]; then
-                for bin in "$app/Contents/MacOS"/*; do
-                  if [ -x "$bin" ] && [ -f "$bin" ]; then
-                    ln -sf "$bin" "$out/bin/openchamber-desktop"
-                    break 2
-                  fi
-                done
-              fi
-            done
-          '';
-
-          # Linux WebKit workaround for NVIDIA GPUs
-          preFixup = prev.lib.optionalString prev.stdenv.hostPlatform.isLinux ''
-            gappsWrapperArgs+=(
-              --set-default WEBKIT_DISABLE_DMABUF_RENDERER "1"
-            )
-          '';
-
-          meta = with prev.lib; {
-            description = "Desktop interface for OpenCode AI agent";
-            homepage = "https://github.com/btriapitsyn/openchamber";
-            license = licenses.mit;
-            platforms = platforms.darwin ++ platforms.linux;
-            mainProgram = "openchamber-desktop";
-          };
-        });
+      # # Version extracted from flake input ref
+      # openchamberVersion = getFlakeVersion "openchamber";
+      #
+      # # Shared source with generated bun.nix
+      # # The bun.nix file needs to be in the openchamber source tree context
+      # # so workspace paths resolve correctly for bun2nix
+      # openchamberSource = prev.runCommand "openchamber-src" { } ''
+      #   cp -r ${inputs.openchamber} $out
+      #   chmod -R u+w $out
+      #   cp ${./packages/openchamber/bun.nix} $out/bun.nix
+      # '';
+      #
+      # # Shared bun dependencies for OpenChamber packages
+      # openchamberBunDeps =
+      #   let
+      #     bun2nix = inputs.bun2nix.packages.${system}.default;
+      #   in
+      #   bun2nix.fetchBunDeps {
+      #     bunNix = "${final.openchamberSource}/bun.nix";
+      #   };
+      #
+      # openchamberUiBuildPhase = ''
+      #   # Build the UI package first (workspace dependency)
+      #   cd packages/ui
+      #   bun run build
+      #   cd ../..
+      # '';
+      #
+      # # OpenChamber Web: Web server interface for OpenCode AI agent
+      # # Built from source using bun2nix for dependency management
+      # openchamber-web =
+      #   let
+      #     bun2nix = inputs.bun2nix.packages.${system}.default;
+      #   in
+      #   prev.stdenv.mkDerivation {
+      #     pname = "openchamber-web";
+      #     version = final.openchamberVersion;
+      #     src = final.openchamberSource;
+      #
+      #     strictDeps = true;
+      #
+      #     nativeBuildInputs = with prev; [
+      #       bun
+      #       bun2nix.hook
+      #       nodejs_22
+      #       makeWrapper
+      #     ];
+      #
+      #     bunDeps = final.openchamberBunDeps;
+      #
+      #     buildPhase = ''
+      #       runHook preBuild
+      #
+      #       ${final.openchamberUiBuildPhase}
+      #
+      #       # Build the web package (vite build)
+      #       cd packages/web
+      #       bun run build
+      #       cd ../..
+      #
+      #       runHook postBuild
+      #     '';
+      #
+      #     installPhase = ''
+      #       runHook preInstall
+      #
+      #       mkdir -p $out/lib/openchamber-web $out/bin
+      #
+      #       # Copy built assets and server files
+      #       cp -r packages/web/dist $out/lib/openchamber-web/
+      #       cp -r packages/web/server $out/lib/openchamber-web/
+      #       cp -r packages/web/bin $out/lib/openchamber-web/
+      #       cp packages/web/package.json $out/lib/openchamber-web/
+      #
+      #       # Copy runtime node_modules (needed for server runtime)
+      #       cp -r node_modules $out/lib/openchamber-web/
+      #
+      #       # Create wrapper script
+      #       makeWrapper ${prev.nodejs_22}/bin/node $out/bin/openchamber \
+      #         --add-flags "$out/lib/openchamber-web/bin/cli.js"
+      #
+      #       runHook postInstall
+      #     '';
+      #
+      #     meta = with prev.lib; {
+      #       description = "Web interface for OpenCode AI agent";
+      #       homepage = "https://github.com/btriapitsyn/openchamber";
+      #       license = licenses.mit;
+      #       mainProgram = "openchamber";
+      #     };
+      #   };
+      #
+      # # OpenChamber Desktop: Native Tauri app for OpenCode AI agent
+      # # Built from source using rustPlatform + bun2nix for frontend
+      # # Supports both macOS (Darwin) and Linux
+      # openchamber-desktop =
+      #   let
+      #     bun2nix = inputs.bun2nix.packages.${system}.default;
+      #   in
+      #   prev.rustPlatform.buildRustPackage (finalAttrs: {
+      #     pname = "openchamber-desktop";
+      #     version = final.openchamberVersion;
+      #     src = final.openchamberSource;
+      #
+      #     strictDeps = true;
+      #
+      #     cargoRoot = "packages/desktop/src-tauri";
+      #     buildAndTestSubdir = finalAttrs.cargoRoot;
+      #
+      #     cargoLock = {
+      #       lockFile = "${final.openchamberSource}/packages/desktop/src-tauri/Cargo.lock";
+      #       # Add outputHashes here if Cargo.lock has git dependencies
+      #     };
+      #
+      #     # bun2nix hook sets up node_modules from bunDeps
+      #     bunDeps = final.openchamberBunDeps;
+      #     # Disable automatic bun build/install phases - we use vite via preBuild
+      #     # and cargo-tauri.hook handles the actual build and install
+      #     dontUseBunBuild = true;
+      #     dontUseBunInstall = true;
+      #
+      #     nativeBuildInputs =
+      #       with prev;
+      #       [
+      #         bun
+      #         bun2nix.hook
+      #         cargo-tauri.hook # Automatically sets buildPhase and installPhase
+      #         pkg-config
+      #       ]
+      #       ++ lib.optionals stdenv.hostPlatform.isLinux [
+      #         wrapGAppsHook4
+      #       ];
+      #
+      #     buildInputs =
+      #       with prev;
+      #       [ openssl ]
+      #       ++ lib.optionals stdenv.hostPlatform.isDarwin [
+      #         apple-sdk_15
+      #       ]
+      #       ++ lib.optionals stdenv.hostPlatform.isLinux [
+      #         glib-networking
+      #         webkitgtk_4_1
+      #         libayatana-appindicator
+      #       ];
+      #
+      #     doCheck = false;
+      #
+      #     # Configure tauri hook - skip code signing for Nix builds
+      #     tauriBuildFlags = [ "--no-sign" ];
+      #
+      #     # Build frontend before Tauri build (cargo-tauri.hook runs preBuild)
+      #     preBuild = ''
+      #       ${final.openchamberUiBuildPhase}
+      #
+      #       # Build the desktop frontend
+      #       cd packages/desktop
+      #       bun run build
+      #       cd ../..
+      #     '';
+      #
+      #     # Patch libappindicator path for Linux system tray support
+      #     postPatch = prev.lib.optionalString prev.stdenv.hostPlatform.isLinux ''
+      #       substituteInPlace $cargoDepsCopy/libappindicator-sys-*/src/lib.rs \
+      #         --replace-fail "libayatana-appindicator3.so.1" \
+      #         "${prev.libayatana-appindicator}/lib/libayatana-appindicator3.so.1"
+      #     '';
+      #
+      #     # Create CLI symlink for easy terminal access
+      #     postInstall = prev.lib.optionalString prev.stdenv.hostPlatform.isDarwin ''
+      #       mkdir -p $out/bin
+      #       for app in "$out/Applications"/*.app; do
+      #         if [ -d "$app/Contents/MacOS" ]; then
+      #           for bin in "$app/Contents/MacOS"/*; do
+      #             if [ -x "$bin" ] && [ -f "$bin" ]; then
+      #               ln -sf "$bin" "$out/bin/openchamber-desktop"
+      #               break 2
+      #             fi
+      #           done
+      #         fi
+      #       done
+      #     '';
+      #
+      #     # Linux WebKit workaround for NVIDIA GPUs
+      #     preFixup = prev.lib.optionalString prev.stdenv.hostPlatform.isLinux ''
+      #       gappsWrapperArgs+=(
+      #         --set-default WEBKIT_DISABLE_DMABUF_RENDERER "1"
+      #       )
+      #     '';
+      #
+      #     meta = with prev.lib; {
+      #       description = "Desktop interface for OpenCode AI agent";
+      #       homepage = "https://github.com/btriapitsyn/openchamber";
+      #       license = licenses.mit;
+      #       platforms = platforms.darwin ++ platforms.linux;
+      #       mainProgram = "openchamber-desktop";
+      #     };
+      #   });
 
       # ═══════════════════════════════════════════════════════════════════════════
       # Flake Input Packages (simple re-exports)
@@ -1150,7 +1138,7 @@ in
           unwrapped = prev.writeScriptBin script.name (
             scripts.renderWithPackages {
               inherit script;
-              python = prev.python313;
+              python = prev.python314;
             }
           );
         in
@@ -1160,8 +1148,15 @@ in
           nativeBuildInputs = [ prev.makeWrapper ];
           postBuild = ''
             wrapProgram $out/bin/update \
-              --prefix PATH : ${prev.lib.makeBinPath [ final.flake-edit ]}
+              --prefix PATH : ${
+                prev.lib.makeBinPath [
+                  final.flake-edit
+                  prev.nix-prefetch-git
+                ]
+              } \
+              --prefix PYTHONPATH : ${./.}
           '';
         };
+
     };
 }

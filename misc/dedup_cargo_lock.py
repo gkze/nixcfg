@@ -15,8 +15,6 @@ Usage: python3 dedup_cargo_lock.py <path-to-Cargo.lock>
        python3 dedup_cargo_lock.py --dry-run <path-to-Cargo.lock>
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import logging
@@ -33,7 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 # Type aliases for clarity
-PackageKey = tuple[str, str]  # (name, version)
+type PackageKey = tuple[str, str]  # (name, version)
 
 logger = logging.getLogger(__name__)
 
@@ -329,7 +327,7 @@ def strip_git_commit_hash(source: str) -> str:
     This returns the shortened form for building replacement maps.
     """
     if "#" in source:
-        return source.split("#")[0]
+        return source.split("#", maxsplit=1)[0]
     return source
 
 
@@ -503,7 +501,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         packages, lock_version = parse_cargo_lock(content)
     except tomllib.TOMLDecodeError as e:
-        logger.error("Error parsing Cargo.lock: %s", e)
+        logger.exception("Error parsing Cargo.lock: %s", e)
         return ExitCode.ERROR
 
     logger.info("  Found %d packages", len(packages))
@@ -528,7 +526,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if total_changes > 0:
         if not args.dry_run:
             new_content = format_cargo_lock(sorted_packages, lock_version)
-            output_path = args.output if args.output else cargo_lock
+            output_path = args.output or cargo_lock
             output_path.write_text(new_content)
 
         action = "Would make" if args.dry_run else "Made"

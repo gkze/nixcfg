@@ -2,7 +2,6 @@
   "axiom-cli": {
     "hashes": [
       {
-        "drvType": "buildGoModule",
         "hash": "sha256-tDl2pmHPNXxpUdFLCBM33SQX/SsNtn7XqrZkZsy8k6o=",
         "hashType": "vendorHash"
       }
@@ -12,7 +11,6 @@
   "beads": {
     "hashes": [
       {
-        "drvType": "buildGoModule",
         "hash": "sha256-/KvQZtWGcNt2N3VxqRAmBVHs9bEj7zBlvdHZEZ7IXFk=",
         "hashType": "vendorHash"
       }
@@ -45,32 +43,21 @@
     },
     "version": "2.4.28"
   },
-  "codex": {
-    "hashes": [
-      {
-        "drvType": "fetchCargoVendor",
-        "hash": "sha256-DTLC+s9OfWXkjK2Ab5RKPxRB5SfWNqDLA38jvcraZvg=",
-        "hashType": "cargoHash"
-      }
-    ],
-    "input": "codex"
-  },
   "conductor": {
     "hashes": {
-      "aarch64-darwin": "sha256-BK83bV4RvwjSkrFY3FQsFjo6U3RfEbPRByYsefCBwu4=",
-      "x86_64-darwin": "sha256-RWlPdXe6/oVXz8NTzSumj/pB0LHaJUaUsKY1B5ipmJQ="
+      "aarch64-darwin": "sha256-n67gm9jP1+gaCKqf9G3+a0FF7UfmEJzpLj6yMoSA9sQ=",
+      "x86_64-darwin": "sha256-OQznp8VhrOFvDSmbBKPX49mR8r58j2N6sEqZjg2O9X0="
     },
     "urls": {
       "aarch64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-aarch64",
       "x86_64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-x86_64"
     },
-    "version": "0.33.5"
+    "version": "0.34.1"
   },
   "crush": {
     "hashes": [
       {
-        "drvType": "buildGoModule",
-        "hash": "sha256-uo9VelhRjtWiaYI88+eTk9PxAUE18Tu2pNq4qQqoTwk=",
+        "hash": "sha256-Y7QterJ5Mmjg/kMqFGbeSvd+3UwG8uGFTrdIBET5yRI=",
         "hashType": "vendorHash"
       }
     ],
@@ -78,37 +65,36 @@
   },
   "datagrip": {
     "hashes": {
-      "aarch64-darwin": "sha256-OmfIeVJ69HWBdsfI9sXnWUgDIWbp9EbdOsDXdL3/taM=",
-      "aarch64-linux": "sha256-FRZP/2a7yBL7NdikAoc2StRLsgjI+qADtHPfkQFdwxI=",
-      "x86_64-linux": "sha256-8sR4C+a1FsngYTRnjgHKzZpmGQY2ury2Ynp3zQ3U9nk="
+      "aarch64-darwin": "sha256-lE0b8s37mBHJ7e0iHfKSW/9vpE95d/+wpjIgkcGDcr8=",
+      "aarch64-linux": "sha256-75OME+CICrLNkUT0tFqzUe/qAGtCGNKC6kAGeTuSK6w=",
+      "x86_64-linux": "sha256-s9Zw7SUhmAzjhTf52nEerXNaP0l7kO/6J35xFtKf6TQ="
     },
     "urls": {
-      "aarch64-darwin": "https://download.jetbrains.com/datagrip/datagrip-2025.3.4-aarch64.dmg",
-      "aarch64-linux": "https://download.jetbrains.com/datagrip/datagrip-2025.3.4-aarch64.tar.gz",
-      "x86_64-linux": "https://download.jetbrains.com/datagrip/datagrip-2025.3.4.tar.gz"
+      "aarch64-darwin": "https://download.jetbrains.com/datagrip/datagrip-2025.3.5-aarch64.dmg",
+      "aarch64-linux": "https://download.jetbrains.com/datagrip/datagrip-2025.3.5-aarch64.tar.gz",
+      "x86_64-linux": "https://download.jetbrains.com/datagrip/datagrip-2025.3.5.tar.gz"
     },
-    "version": "2025.3.4"
+    "version": "2025.3.5"
   },
   "droid": {
     "hashes": {
-      "aarch64-darwin": "sha256-LNgmrUjgc/CmncW/0YCvxBRWBmcBJn8U4gFOB6YUG3Y=",
-      "aarch64-linux": "sha256-Z1VgpimTpgDNmSMwTK56Eg+Fq7vYeJjgHcyhiMI4cpw=",
-      "x86_64-darwin": "sha256-m4TYwTGf6h+UzrCQcqRAaUxLfX3ty4zpXd2yy4XEz28=",
-      "x86_64-linux": "sha256-UYFjltoo0IOQQqOiNo0uzKLMvzonREHPgNLSwT3XhCU="
+      "aarch64-darwin": "sha256-P0+vEQG09Fm5sGDsHPFudv641HECSjVhc+RwNldc0Tw=",
+      "aarch64-linux": "sha256-Z+PFQ1s4PKN2v7s0VBOs9G2osZsJj7KJT+8iuNbjwVY=",
+      "x86_64-darwin": "sha256-Dn/4JZANeaZTAopEABhDIniHhyprZJbzzUKHpO4bKaY=",
+      "x86_64-linux": "sha256-b8u781UIpi5f63K49OBjlACvXLY9Z2Vn6WLpvTfaLgQ="
     },
     "urls": {
-      "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.4/darwin/arm64/droid",
-      "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.57.4/linux/arm64/droid",
-      "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.4/darwin/x64/droid",
-      "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.57.4/linux/x64/droid"
+      "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.9/darwin/arm64/droid",
+      "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.57.9/linux/arm64/droid",
+      "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.57.9/darwin/x64/droid",
+      "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.57.9/linux/x64/droid"
     },
-    "version": "0.57.4"
+    "version": "0.57.9"
   },
   "gemini-cli": {
     "hashes": [
       {
-        "drvType": "fetchNpmDeps",
-        "hash": "sha256-0bS3yl5EG2KyfBrw8SO1BfKwxb1f2LVsudeaQTb5/DQ=",
+        "hash": "sha256-euy7QwuoJI+07KMUMcRAmmH/zyYgF9wFiLSF4OwQivo=",
         "hashType": "npmDepsHash"
       }
     ],
@@ -117,7 +103,6 @@
   "gitui-key-config": {
     "hashes": [
       {
-        "drvType": "fetchurl",
         "hash": "sha256-uYL9CSCOlTdW3E87I7GsgvDEwOPHoz1LIxo8DARDX1Y=",
         "hashType": "sha256",
         "url": "https://raw.githubusercontent.com/extrawurst/gitui/8876c1d0f616d55a0c0957683781fd32af815ae3/vim_style_key_config.ron"
@@ -127,7 +112,6 @@
   "gogcli": {
     "hashes": [
       {
-        "drvType": "buildGoModule",
         "hash": "sha256-nig3GI7eM1XRtIoAh1qH+9PxPPGynl01dCZ2ppyhmzU=",
         "hashType": "vendorHash"
       }
@@ -148,7 +132,6 @@
   "homebrew-zsh-completion": {
     "hashes": [
       {
-        "drvType": "fetchurl",
         "hash": "sha256-6ZsViDo5DMh7VGIN+bqpXuegV1gpu34ZKitVRYnjnf0=",
         "hashType": "sha256",
         "url": "https://raw.githubusercontent.com/Homebrew/brew/84dd40dc2ff554852eeb50c18dd0dc33cb1723b5/completions/zsh/_brew"
@@ -158,20 +141,17 @@
   "linear-cli": {
     "hashes": [
       {
-        "drvType": "denoDeps",
-        "hash": "sha256-yDQEh8AoLQHNwl1dCINr3blLdLs134jrkjIRgdbdo6U=",
+        "hash": "sha256-Sxo+a6F95XYjOIUOi/9+8s20NNu+iIc02BFWEAqxLoU=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-darwin"
       },
       {
-        "drvType": "denoDeps",
-        "hash": "sha256-MQmiV3Ut2uKrJYOLDJJzvzH12eegcCpVDMJgixQJGnM=",
+        "hash": "sha256-SCiI3IDscxVXKNuSky2eDOke76+hj34lPEsG6oKjar8=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-linux"
       },
       {
-        "drvType": "denoDeps",
-        "hash": "sha256-8ITwdZUoNI8JcyrLNax/oC9/39Q+R7U0xDnzkL4naI4=",
+        "hash": "sha256-GyTAaKcPlzTlKbh40EBR//DeREZI7YJTy0IcopSXpBs=",
         "hashType": "denoDepsHash",
         "platform": "x86_64-linux"
       }
@@ -181,42 +161,27 @@
   "opencode": {
     "hashes": [
       {
-        "drvType": "bunBuild",
-        "hash": "sha256-A71PII7Ue0uqsH970GPi0XfRKInpSFFom8jD3Q0wrgQ=",
+        "hash": "sha256-PhSE23OzNlyfNFP5LffA3AtyN+hsyCeGInmDBBRjr0g=",
         "hashType": "nodeModulesHash",
         "platform": "aarch64-darwin"
-      },
-      {
-        "drvType": "bunBuild",
-        "hash": "sha256-jtMqFH7uYzgI1ICASAePJOj1QeaQfEWuoME7gyrvinA=",
-        "hashType": "nodeModulesHash",
-        "platform": "x86_64-linux"
-      },
-      {
-        "drvType": "bunBuild",
-        "hash": "sha256-Mdz3gAy8auN7mhMHRaWyH/exHGO9eYDyUMQKqscg6Xc=",
-        "hashType": "nodeModulesHash",
-        "platform": "aarch64-linux"
       }
     ],
     "input": "opencode"
   },
   "opencode-desktop": {
+    "commit": "19b1222cd85060f7b0999b99586e93f84821b94b",
     "hashes": [
       {
-        "drvType": "importCargoLock",
         "gitDep": "specta-2.0.0-rc.22",
-        "hash": "sha256-J+rDfV5Wx82VNbpLRh3g/4LerjKQodgMq7A9S9WGhXU=",
+        "hash": "sha256-YsyOAnXELLKzhNlJ35dHA6KGbs0wTAX/nlQoW8wWyJQ=",
         "hashType": "spectaOutputHash"
       },
       {
-        "drvType": "importCargoLock",
         "gitDep": "tauri-2.9.5",
         "hash": "sha256-dv5E/+A49ZBvnUQUkCGGJ21iHrVvrhHKNcpUctivJ8M=",
         "hashType": "tauriOutputHash"
       },
       {
-        "drvType": "importCargoLock",
         "gitDep": "tauri-specta-2.0.0-rc.21",
         "hash": "sha256-n2VJ+B1nVrh6zQoZyfMoctqP+Csh7eVHRXwUQuiQjaQ=",
         "hashType": "tauriSpectaOutputHash"
@@ -238,12 +203,10 @@
   "sentry-cli": {
     "hashes": [
       {
-        "drvType": "fetchFromGitHub",
         "hash": "sha256-jBtQKAgqFGDUTrhsyMpNF0qzSJU+XKY9OcUfZf7Z5/8=",
         "hashType": "srcHash"
       },
       {
-        "drvType": "fetchCargoVendor",
         "hash": "sha256-PUQ55pNiLEI5qxykA/j7RsykKJRTUGOGf2JBLacFGBo=",
         "hashType": "cargoHash"
       }

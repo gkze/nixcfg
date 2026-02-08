@@ -2,13 +2,109 @@
 name = "nixcfg"
 version = "0.0.0"
 description = "Editor tooling dependencies"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
   "aiohttp>=3.13.3",
   "filelock>=3.20.3",
   "pydantic>=2.12.5",
   "rich>=14.3.1",
 ]
+
+[project.optional-dependencies]
+codegen = [
+  "datamodel-code-generator[http]>=0.53.0",
+  "referencing>=0.36.2",
+  "pyyaml>=6.0.2",
+]
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  # Formatter conflicts
+  "COM812",   # trailing-comma
+  "ISC001",   # single-line-implicit-string-concatenation
+
+  # Documentation — config repo, not a library
+  "D",        # pydocstyle
+
+  # Type annotations — ty handles type checking
+  "ANN",      # flake8-annotations
+
+  # Style preferences
+  "ERA",      # eradicate — false positives on documentation
+  "T20",      # flake8-print — intentional CLI output
+  "FIX",      # fixme comments
+  "TD",       # flake8-todos
+
+  # Nix JSON protocol uses camelCase field names (not our choice)
+  "N815",     # mixed-case-variable-in-class-scope
+
+  # Async timeout parameters are idiomatic for nix subprocess wrappers
+  "ASYNC109", # async-function-with-timeout
+
+  # Updater subclasses intentionally ignore base-class args
+  "ARG002",   # unused-method-argument
+
+  # Lazy imports of rich inside methods keep startup fast
+  "PLC0415",  # import-outside-top-level
+
+  # Strictness knobs that create more noise than value
+  "PLR0913",  # too-many-arguments — nix commands have many options
+  "PLR0912",  # too-many-branches
+  "PLR0911",  # too-many-return-statements
+  "PLR0915",  # too-many-statements
+  "C901",     # complex-structure — some parsers are inherently complex
+  "PLR2004",  # magic-value-comparison
+  "FBT001",   # boolean-type-hint-positional-argument
+
+  # Exception message style — inline messages are more readable here
+  "TRY003",   # raise-long-message
+  "EM101",    # string-literal-in-exception
+  "EM102",    # f-string-in-exception
+
+  # Pydantic models need mutable class defaults (Field(default_factory=...))
+  "RUF012",   # mutable-class-default
+
+  # Subprocess/URL audits — all URLs are hardcoded and trusted
+  "S310",     # suspicious-url-open-usage
+  "S603",     # subprocess-without-shell-equals-true
+  "S607",     # start-process-with-partial-path
+
+  # Broad exception catches are intentional in updater orchestration
+  "BLE001",   # blind-except
+
+  # Collapsible-if — often more readable as nested for complex conditions
+  "SIM102",   # collapsible-if
+
+  # Try/except style — raise in try and re-raise patterns are clear here
+  "TRY301",   # raise-within-try
+  "TRY203",   # useless-try-except
+  "TRY300",   # try-consider-else
+  "TRY401",   # verbose-log-message
+]
+
+[tool.ruff.lint.per-file-ignores]
+"libnix/models/_generated.py" = ["ALL"]
+"libnix/schemas/_codegen.py" = ["E501"]  # long header string
+"libnix/schemas/_fetch.py" = []
+"libnix/tests/*" = ["S101"]  # assert in tests is fine
+"misc/*" = ["INP001", "EXE001"]  # standalone scripts
+"tools/*" = ["INP001"]
+".github/scripts/*" = ["INP001", "EXE001"]
+"home/*" = ["INP001", "ALL"]  # dotfile config
+# assert for narrowing subprocess handles is standard asyncio
+"libnix/commands/base.py" = ["S101", "A002"]  # assert + hash shadows builtin
+# assert for narrowing Optional properties
+"update.py" = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["libnix", "update"]
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 100  # allow up to 100, flag above
 
 [tool.uv]
 package = false
@@ -17,27 +113,55 @@ package = false
 py-modules = []
 packages = []
 
-[tool.mypy]
-python_version = "3.11"
-strict = true
-warn_return_any = true
-warn_unused_ignores = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_configs = true
-show_error_codes = true
-# Pydantic plugin for better type inference
-plugins = ["pydantic.mypy"]
+[tool.ty]
 
-[[tool.mypy.overrides]]
-module = ["aiohttp.*"]
-ignore_missing_imports = true
+[tool.ty.environment]
+python-version = "3.14"
 
-[tool.pydantic-mypy]
-init_forbid_extra = true
-init_typed = true
-warn_required_dynamic_aliases = true
+[tool.ty.rules]
+# Maximum strictness: promote everything to error
+all = "error"
+
+[tool.ty.terminal]
+error-on-warning = true
+
+[tool.ty.analysis]
+# Optional/external deps that may not be installed
+allowed-unresolved-imports = [
+  "aiohttp.**",
+  "catppuccin.**",
+  "prompt_toolkit.**",
+  "ptpython.**",
+  "pytest",
+  "referencing",
+  "referencing.**",
+  "yaml",
+  "datamodel_code_generator",
+  "datamodel_code_generator.**",
+]
+
+# Auto-generated code and codegen tools — relax rules
+[[tool.ty.overrides]]
+include = ["libnix/models/_generated/**"]
+
+[tool.ty.overrides.rules]
+# Generated code: relax checks that are noisy on auto-generated output
+possibly-unresolved-reference = "warn"
+empty-body = "warn"
+
+[[tool.ty.overrides]]
+include = ["libnix/schemas/_codegen/**", "libnix/schemas/_fetch/**"]
+
+[tool.ty.overrides.rules]
+# Codegen tools use dynamic patterns
+possibly-unresolved-reference = "warn"
+
+[[tool.ty.overrides]]
+include = ["home/**"]
+
+[tool.ty.overrides.rules]
+# Dotfile config — not project code
+unresolved-import = "warn"
+
+[tool.pytest.ini_options]
+testpaths = ["libnix/tests"]
