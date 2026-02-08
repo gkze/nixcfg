@@ -61,10 +61,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crane.url = "github:ipetkov/crane";
-    openchamber = {
-      url = "github:btriapitsyn/openchamber/v1.6.4";
-      flake = false;
-    };
+    # openchamber = {
+    #   url = "github:btriapitsyn/openchamber/v1.6.5";
+    #   flake = false;
+    # };
     opencode = {
       url = "github:anomalyco/opencode";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -111,7 +111,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.22.0";
+      url = "github:max-sixty/worktrunk/v0.23.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -119,7 +119,7 @@
       flake = false;
     };
     beads = {
-      url = "github:steveyegge/beads/v0.49.4";
+      url = "github:steveyegge/beads/v0.49.6";
       flake = false;
     };
     catppuccin-bat = {
@@ -127,19 +127,19 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.97.0";
+      url = "github:openai/codex/rust-v0.98.0";
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.2.2";
+      url = "github:gkze/curator/v0.2.4";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.39.1";
+      url = "github:charmbracelet/crush/v0.39.3";
       flake = false;
     };
     gemini-cli = {
-      url = "github:google-gemini/gemini-cli/v0.27.0";
+      url = "github:google-gemini/gemini-cli/v0.27.3";
       flake = false;
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
@@ -316,6 +316,8 @@
                   enable = true;
                   package = pkgs.mdformat;
                 };
+                # YAML
+                yamlfmt.enable = true;
                 # General
                 check-merge-conflicts.enable = true;
                 end-of-file-fixer.enable = true;
@@ -325,7 +327,7 @@
             editorWorkspace = inputs.uv2nix.lib.workspace.loadWorkspace {
               workspaceRoot = ./.;
             };
-            editorPython = pkgs.python313;
+            editorPython = pkgs.python314;
             editorPySet =
               (pkgs.callPackage inputs.pyproject-nix.build.packages {
                 python = editorPython;
@@ -353,6 +355,7 @@
                 nurl
                 prek
                 sops
+                yamlfmt
               ]
               ++ lib.optional pkgs.stdenv.isLinux dconf2nix
               ++ pre-commit-check.enabledPackages
@@ -398,6 +401,7 @@
                     includes = lintFiles.shell.globs;
                     excludes = lintFiles.shell.excludeGlobs;
                   };
+                  yamlfmt.enable = true;
                 };
                 settings.formatter."markdown-table-formatter" = {
                   command = lib.getExe' (pkgs.python3.withPackages (

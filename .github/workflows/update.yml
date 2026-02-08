@@ -3,9 +3,10 @@ name: Periodic Flake Update
 
 on:
   schedule:
-    - cron: "0 */6 * * *" # Every 6 hours
+    - cron: "0 */6 * * *"  # Every 6 hours
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
@@ -65,7 +66,8 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/nix
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock')
+            }}
           restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
       - name: Install flake-edit
         run: nix profile install nixpkgs#flake-edit
@@ -104,7 +106,7 @@ jobs:
           path: sources-aarch64-linux
       - name: Merge sources.json files
         run: |
-          python3 .github/scripts/merge_sources.py \
+          python3 -m tools.merge_sources \
             sources.json \
             sources-aarch64-darwin/sources.json \
             sources-x86_64-linux/sources.json \
@@ -140,25 +142,30 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/nix
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock')
+            }}
           restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
       - run: brew install --cask macfuse && brew install 1password-cli
       - name: Pre-fetch flake inputs
         run: nix flake archive --json > /dev/null
       - name: Build shared Darwin closure
         run: |
-          python3 .github/scripts/build_shared_closure.py \
+          python3 -m tools.build_shared_closure \
             .#darwinConfigurations.argus.system \
             .#darwinConfigurations.rocinante.system
 
   # Phase 5: Build Darwin configurations
   darwin:
-    needs: [merge-hashes, darwin-shared]
+    needs:
+      - merge-hashes
+      - darwin-shared
     runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
-        host: [argus, rocinante]
+        host:
+          - argus
+          - rocinante
     permissions:
       contents: read
       id-token: write
@@ -178,7 +185,8 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/nix
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock')
+            }}
           restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
       - run: brew install --cask macfuse && brew install 1password-cli
       - name: Pre-fetch flake inputs
@@ -206,13 +214,18 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/nix
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock')
+            }}
           restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
       - run: nix run .#update -- --list
 
   # Phase 7: Create PR with updates
   create-pr:
-    needs: [merge-hashes, darwin-shared, darwin, linux]
+    needs:
+      - merge-hashes
+      - darwin-shared
+      - darwin
+      - linux
     if: >-
       needs.merge-hashes.result == 'success' &&
       needs.darwin-shared.result == 'success' &&
@@ -232,7 +245,7 @@ jobs:
         id: diff
         run: |
           git show HEAD:flake.lock > /tmp/old-flake.lock
-          flake_diff=$(python3 .github/scripts/flake_lock_diff.py /tmp/old-flake.lock flake.lock)
+          flake_diff=$(python3 -m tools.flake_lock_diff /tmp/old-flake.lock flake.lock)
 
           # Generate sources.json diff if it changed
           sources_diff=""
@@ -258,7 +271,7 @@ jobs:
           delete-branch: true
           title: "nix: Update flake.lock and sources"
           commit-message: "nix: Update flake.lock and sources"
-          body: |
+          body: |-
             Automated changes by the Periodic Flake Update workflow.
 
             **Workflow run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

@@ -38,33 +38,54 @@ rec {
       ./sources.json;
   sources = fromJSON (readFile sourcesPath);
 
+  # When FAKE_HASHES=1, all sourceHash* functions return lib.fakeHash instead
+  # of reading from sources.json.  This lets the update script evaluate the
+  # overlay derivations with placeholder hashes to trigger hash-mismatch errors
+  # from which the correct hashes are extracted — without duplicating any
+  # derivation logic.
+  fakeHashMode = getEnv "FAKE_HASHES" == "1";
+
   sourceEntry =
     name: if hasAttr name sources then sources.${name} else throw "sources.json missing entry: ${name}";
 
   # Find hash entry matching hashType and optionally platform
   sourceHashEntry =
     name: hashType:
-    let
-      entry = sourceEntry name;
-      hashes = entry.hashes or [ ];
-      match = findFirst (hash: hash.hashType == hashType && !(hash ? platform)) null hashes;
-    in
-    if match == null then throw "sources.json missing ${hashType} for ${name}" else match;
+    if fakeHashMode then
+      {
+        hash = lib.fakeHash;
+        inherit hashType;
+        gitDep = "fake-dep";
+      }
+    else
+      let
+        entry = sourceEntry name;
+        hashes = entry.hashes or [ ];
+        match = findFirst (hash: hash.hashType == hashType && !(hash ? platform)) null hashes;
+      in
+      if match == null then throw "sources.json missing ${hashType} for ${name}" else match;
 
   # Find hash entry matching hashType and specific platform
   sourceHashEntryForPlatform =
     name: hashType: platform:
-    let
-      entry = sourceEntry name;
-      hashes = entry.hashes or [ ];
-      match = findFirst (
-        hash: hash.hashType == hashType && (hash.platform or null) == platform
-      ) null hashes;
-    in
-    if match == null then
-      throw "sources.json missing ${hashType} for ${name} on ${platform}"
+    if fakeHashMode then
+      {
+        hash = lib.fakeHash;
+        inherit hashType;
+        inherit platform;
+      }
     else
-      match;
+      let
+        entry = sourceEntry name;
+        hashes = entry.hashes or [ ];
+        match = findFirst (
+          hash: hash.hashType == hashType && (hash.platform or null) == platform
+        ) null hashes;
+      in
+      if match == null then
+        throw "sources.json missing ${hashType} for ${name} on ${platform}"
+      else
+        match;
 
   sourceHash = name: hashType: (sourceHashEntry name hashType).hash;
 

@@ -41,19 +41,22 @@
         "${config.xdg.configHome}/zed/settings.json" \
         | ${lib.getExe' pkgs.moreutils "sponge"} "${config.xdg.configHome}/zed/settings.json"
     '';
-    # Standalone home-manager wrapper - allows `home-manager switch` without --flake
-    # Written as a real file (not symlink) so home-manager can find it
-    activation.standaloneHomeManagerFlake = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      mkdir -p "${config.xdg.configHome}/home-manager"
-      cat > "${config.xdg.configHome}/home-manager/flake.nix" << 'EOF'
-      {
-        description = "Standalone home-manager wrapper";
-        inputs.nixcfg.url = "git+file:///Users/george/.config/nixcfg";
-        outputs = { nixcfg, ... }: {
-          homeConfigurations.george = nixcfg.homeConfigurations.george;
-        };
-      }
-      EOF
+    # Symlink ~/.config/home-manager -> nixcfg so `home-manager switch` uses the main flake
+    # This avoids a separate lockfile that drifts when topgrade runs home-manager updates
+    activation.standaloneHomeManagerSymlink = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      HM_DIR="${config.xdg.configHome}/home-manager"
+      NIXCFG_DIR="${config.xdg.configHome}/nixcfg"
+
+      # Only update if not already correctly symlinked
+      if [ -L "$HM_DIR" ] && [ "$(readlink "$HM_DIR")" = "$NIXCFG_DIR" ]; then
+        run --silence echo "home-manager symlink already correct"
+      else
+        # Remove existing directory/files
+        if [ -e "$HM_DIR" ]; then
+          run rm -rf "$HM_DIR"
+        fi
+        run ln -s "$NIXCFG_DIR" "$HM_DIR"
+      fi
     '';
     file = {
       "${config.programs.gpg.homedir}/gpg-agent.conf".text =

@@ -1,7 +1,4 @@
-{
-  config,
-  ...
-}:
+{ config, ... }:
 {
   programs.opencode = {
     enable = true;
@@ -13,8 +10,9 @@
     settings = {
       theme = "catppuccin-frappe";
       plugin = [
-        "opencode-beads"
         "@franlol/opencode-md-table-formatter"
+        "@mohak34/opencode-notifier@latest"
+        "opencode-beads"
       ];
       tui.scroll_acceleration.enabled = true;
       # Base MCP servers shared across all machines

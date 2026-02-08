@@ -341,7 +341,7 @@ in
               enable = true;
               settings = { };
             };
-            pyright.enable = true;
+            ty.enable = true;
             ruff.enable = true;
             rust_analyzer = {
               enable = true;

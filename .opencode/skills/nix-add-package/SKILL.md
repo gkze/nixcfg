@@ -60,7 +60,7 @@ my-package = inputs.my-package.packages.${system}.default;
 - [ ] Add flake input with `inputs.nixpkgs.follows = "nixpkgs"`
 - [ ] Either add overlay to `withOverlays` OR add assignment in `overlays.nix`
 - [ ] Run `nix flake lock --update-input my-package` to populate lock
-- [ ] No `sources.json` or `update.py` changes needed
+- [ ] No `sources.json` or `update` changes needed
 
 ______________________________________________________________________
 
@@ -257,11 +257,11 @@ Only needed for Go (`vendorHash`), Cargo (`cargoHash`), npm (`npmDepsHash`), or 
 }
 ```
 
-To compute the actual hash, temporarily use `lib.fakeHash` and build to get the expected hash from the error output, or run `./update.py my-tool`.
+To compute the actual hash, temporarily use `lib.fakeHash` and build to get the expected hash from the error output, or run `uv run update.py my-tool`.
 
-#### `update.py` - Register updater (if sources.json entry exists)
+#### `update/updaters/builtin.py` - Register updater (if sources.json entry exists)
 
-Use the appropriate factory function at the bottom of the updater registrations section (around line 1834):
+Use the appropriate factory function near the bottom of the updater registrations section:
 
 ```python
 # Go:
@@ -286,7 +286,7 @@ deno_deps_updater("my-tool")
 - [ ] Add flake input with `flake = false;` (and version tag if applicable)
 - [ ] Add derivation in `overlays.nix` using appropriate helper
 - [ ] If Go/Cargo/npm/Deno: add hash entry in `sources.json`
-- [ ] If Go/Cargo/npm/Deno: register updater in `update.py`
+- [ ] If Go/Cargo/npm/Deno: register updater in `update/updaters/builtin.py`
 - [ ] Run `nix flake lock --update-input my-tool`
 - [ ] Build to verify: `nix build .#my-tool` or `nh darwin switch --no-nom .`
 
@@ -409,7 +409,7 @@ my-config =
   };
 ```
 
-#### `update.py` - Add Updater class
+#### `update/updaters/builtin.py` - Add Updater class
 
 Choose the base class that fits:
 
@@ -483,8 +483,8 @@ github_raw_file_updater(
 
 - [ ] Add entry in `sources.json` with version, urls, and hashes
 - [ ] Add derivation in `overlays.nix`
-- [ ] Add Updater class or factory call in `update.py`
-- [ ] Verify: `./update.py --validate` and `./update.py my-app`
+- [ ] Add Updater class or factory call in `update/updaters/builtin.py`
+- [ ] Verify: `uv run update.py --validate` and `uv run update.py my-app`
 - [ ] Build to verify: `nix build .#my-app` or `nh darwin switch --no-nom .`
 
 ______________________________________________________________________
@@ -515,7 +515,7 @@ ______________________________________________________________________
 | `normalizeName s` | Replace `.` and `_` with `-` |
 | `stripVersionPrefix s` | Remove `v` / `rust-v` prefixes |
 
-## Updater factory functions in update.py
+## Updater factory functions in update/updaters
 
 | Factory | Registers | Hash type |
 |---|---|---|
