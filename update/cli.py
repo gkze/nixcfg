@@ -173,7 +173,11 @@ class ResolvedTargets:
         all_ref_names = {i.name for i in all_ref_inputs}
         all_known_names = all_source_names | all_ref_names
 
-        do_refs = not args.no_refs
+        # --native-only implies --no-refs: in CI, refs are managed by the
+        # pipeline (nix flake update + create-pr).  If compute-hashes workers
+        # update refs locally the changes are not propagated to the merged
+        # artifact, causing flake.lock / sources.json version desync.
+        do_refs = not args.no_refs and not args.native_only
         do_sources = not args.no_sources
         if args.source:
             if args.source not in all_ref_names:
@@ -688,14 +692,15 @@ def main() -> None:
         "-n",
         "--native-only",
         action="store_true",
-        help="Only compute platform-specific hashes for current platform (for CI)",
+        help="Only compute platform-specific hashes for current platform"
+        " (for CI). Implies --no-refs.",
     )
     args = parser.parse_args()
 
     if args.list or args.schema or args.validate:
         raise SystemExit(asyncio.run(_run_updates(args)))
 
-    needs_flake_edit = not args.no_refs
+    needs_flake_edit = not args.no_refs and not args.native_only
     if needs_flake_edit and args.source:
         ref_names = {i.name for i in get_flake_inputs_with_refs()}
         needs_flake_edit = args.source in ref_names

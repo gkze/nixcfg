@@ -28,20 +28,20 @@
     "version": "1.2026.027"
   },
   "code-cursor": {
-    "commit": "f3f5cec40024283013878b50c4f9be4002e0b587",
+    "commit": "3578107fdf149b00059ddad37048220e4168100f",
     "hashes": {
-      "aarch64-darwin": "sha256-mtHir14v4Uz2xs0sANY5xQMUVvjoDJZj/t/w7u7PJY0=",
-      "aarch64-linux": "sha256-ihEMvK3wJsf9bkFs/5FlqBM+UQfhUgmT+SHsG+npjdo=",
-      "x86_64-darwin": "sha256-9AW93v24w1JLTghL5VuYsyF1cIjkN6FjUQEjFqB9ETc=",
-      "x86_64-linux": "sha256-Vkat7mTge3yDDzWAfwuapuwsUCPBrl41THA1WEAvTyY="
+      "aarch64-darwin": "sha256-xXzWWDfU00IDx3vqnB0A4mItSyvfRqasUhqOAj8U5aE=",
+      "aarch64-linux": "sha256-b66KmFN92HZRyZnlFVMxCCgX0bWBktfKojtnXF7c+Qg=",
+      "x86_64-darwin": "sha256-JQq73IqSAlkedhCuxr+uIpWPEAslnMPxciDDQYHWU6o=",
+      "x86_64-linux": "sha256-4cEa5SsbE2QFfmcndnVI5QQIS9DPjFQ6u/iQO9P8SEk="
     },
     "urls": {
-      "aarch64-darwin": "https://downloads.cursor.com/production/f3f5cec40024283013878b50c4f9be4002e0b587/darwin/arm64/Cursor-darwin-arm64.dmg",
-      "aarch64-linux": "https://downloads.cursor.com/production/f3f5cec40024283013878b50c4f9be4002e0b587/linux/arm64/Cursor-2.4.28-aarch64.AppImage",
-      "x86_64-darwin": "https://downloads.cursor.com/production/f3f5cec40024283013878b50c4f9be4002e0b587/darwin/x64/Cursor-darwin-x64.dmg",
-      "x86_64-linux": "https://downloads.cursor.com/production/f3f5cec40024283013878b50c4f9be4002e0b587/linux/x64/Cursor-2.4.28-x86_64.AppImage"
+      "aarch64-darwin": "https://downloads.cursor.com/production/3578107fdf149b00059ddad37048220e4168100f/darwin/arm64/Cursor-darwin-arm64.dmg",
+      "aarch64-linux": "https://downloads.cursor.com/production/3578107fdf149b00059ddad37048220e4168100f/linux/arm64/Cursor-2.4.31-aarch64.AppImage",
+      "x86_64-darwin": "https://downloads.cursor.com/production/3578107fdf149b00059ddad37048220e4168100f/darwin/x64/Cursor-darwin-x64.dmg",
+      "x86_64-linux": "https://downloads.cursor.com/production/3578107fdf149b00059ddad37048220e4168100f/linux/x64/Cursor-2.4.31-x86_64.AppImage"
     },
-    "version": "2.4.28"
+    "version": "2.4.31"
   },
   "conductor": {
     "hashes": {
@@ -57,7 +57,7 @@
   "crush": {
     "hashes": [
       {
-        "hash": "sha256-Y7QterJ5Mmjg/kMqFGbeSvd+3UwG8uGFTrdIBET5yRI=",
+        "hash": "sha256-2rEerdtwNAhQbdqabyyetw30DSpbmIxoiU2YPTWbEcg=",
         "hashType": "vendorHash"
       }
     ],
@@ -141,17 +141,17 @@
   "linear-cli": {
     "hashes": [
       {
-        "hash": "sha256-Sxo+a6F95XYjOIUOi/9+8s20NNu+iIc02BFWEAqxLoU=",
+        "hash": "sha256-QP4dIIIpsAljpln6MPfmcjAYgB6j5S2ek4WQm5k2DIE=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-darwin"
       },
       {
-        "hash": "sha256-8Z4FsJPW3uxPIrcSKZOWcmxDAvhl9HRnNoUQxd33QxM=",
+        "hash": "sha256-L/i6ScLlEwOeVJ/7gVqwQ05qJb4TfHPYaCWvdVMpo3A=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-linux"
       },
       {
-        "hash": "sha256-GyTAaKcPlzTlKbh40EBR//DeREZI7YJTy0IcopSXpBs=",
+        "hash": "sha256-NpuCBRY76MWkTwtbiaTxutj2PYiPwo1wH4CTuxzzZKg=",
         "hashType": "denoDepsHash",
         "platform": "x86_64-linux"
       }
@@ -161,25 +161,15 @@
   "opencode": {
     "hashes": [
       {
-        "hash": "sha256-xJQuw3+QHYnlClDrafQKPQyR+aqyAEofvYYjCowHDps=",
+        "hash": "sha256-JnkqDwuC7lNsjafV+jOGfvs8K1xC8rk5CTOW+spjiCA=",
         "hashType": "nodeModulesHash",
         "platform": "aarch64-darwin"
-      },
-      {
-        "hash": "sha256-1IpZnnN6+acCcV0AgO4OVdvgf4TFBFId5dms5W5ecA0=",
-        "hashType": "nodeModulesHash",
-        "platform": "x86_64-linux"
-      },
-      {
-        "hash": "sha256-TKmPhXokOav46ucP9AFwHGgKmB9CdGCcUtwqUtLlzG4=",
-        "hashType": "nodeModulesHash",
-        "platform": "aarch64-linux"
       }
     ],
     "input": "opencode"
   },
   "opencode-desktop": {
-    "commit": "de0f4ef80b6178daa5528489738d35c4ee477432",
+    "commit": "110f6804fbabaa7004c053170c0952715b725cad",
     "hashes": [
       {
         "gitDep": "specta-2.0.0-rc.22",
@@ -213,15 +203,15 @@
   "sentry-cli": {
     "hashes": [
       {
-        "hash": "sha256-jBtQKAgqFGDUTrhsyMpNF0qzSJU+XKY9OcUfZf7Z5/8=",
+        "hash": "sha256-+aDf2xnPzUPuset2pRpaSHLhF2EXeqI75sQBnzWQ9Oc=",
         "hashType": "srcHash"
       },
       {
-        "hash": "sha256-PUQ55pNiLEI5qxykA/j7RsykKJRTUGOGf2JBLacFGBo=",
+        "hash": "sha256-LJx6BUmGf6T1GbjBpnMaKGvZdeHANJoXfUwtIItQDA8=",
         "hashType": "cargoHash"
       }
     ],
-    "version": "3.1.0"
+    "version": "3.2.0"
   },
   "vscode-insiders": {
     "hashes": {
