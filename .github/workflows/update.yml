@@ -253,7 +253,8 @@ jobs:
           # Generate sources.json diff if it changed
           sources_diff=""
           if ! git diff --quiet HEAD -- sources.json 2>/dev/null; then
-            sources_diff=$(git diff HEAD -- sources.json | head -100)
+            git show HEAD:sources.json > /tmp/old-sources.json
+            sources_diff=$(uv run python -m tools.sources_json_diff /tmp/old-sources.json sources.json)
           fi
 
           # Handle multiline output for GitHub Actions
@@ -262,7 +263,6 @@ jobs:
             echo "$flake_diff"
             if [ -n "$sources_diff" ]; then
               echo ""
-              echo "Sources.json changes:"
               echo "$sources_diff"
             fi
             echo 'EOF'
