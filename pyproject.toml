@@ -165,3 +165,9 @@ unresolved-import = "warn"
 
 [tool.pytest.ini_options]
 testpaths = ["libnix/tests"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.1",
+    "ruff>=0.15.0",
+]

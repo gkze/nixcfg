@@ -193,7 +193,7 @@ jobs:
       - run: brew install --cask macfuse && brew install 1password-cli
       - name: Pre-fetch flake inputs
         run: nix flake archive --json > /dev/null
-      - run: nix build .#darwinConfigurations.${{ matrix.host }}.system
+      - run: nix build --impure .#darwinConfigurations.${{ matrix.host }}.system
 
   # Phase 6: Placeholder for future NixOS configuration builds
   linux:
