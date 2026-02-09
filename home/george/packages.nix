@@ -85,9 +85,9 @@
       xq-xml
       xz
       yq-go
+      # Note: sculptor was removed due to AppImage tooling issues (see overlays.nix)
     ]
     ++ lib.lists.optionals pkgs.stdenv.isLinux [
-      # sculptor - temporarily removed (see overlays.nix)
       wl-clipboard
     ]
     ++ lib.lists.optionals pkgs.stdenv.isDarwin [

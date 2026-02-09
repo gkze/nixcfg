@@ -451,7 +451,6 @@ in
       # sculptor: Temporarily removed due to AppImage tooling requiring Linux
       # VM builders even during Darwin evaluation. Will be re-added once we have
       # a proper solution for platform-specific overlays.
-      # GitHub issue: https://github.com/gkze/nixcfg/issues/XXX
 
       # Factory Droid: AI coding agent CLI (prebuilt binary)
       droid =
