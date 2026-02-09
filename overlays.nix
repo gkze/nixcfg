@@ -448,55 +448,10 @@ in
         };
       };
 
-      sculptor =
-        let
-          info = sources.sculptor;
-          inherit (prev.stdenv) isDarwin;
-          meta = with prev.lib; {
-            description = "UI for running parallel coding agents in safe, isolated sandboxes";
-            homepage = "https://imbue.com/sculptor/";
-            license = licenses.unfree;
-            platforms = [
-              "aarch64-darwin"
-              "x86_64-linux"
-            ];
-            sourceProvenance = with sourceTypes; [ binaryNativeCode ];
-            mainProgram = "sculptor";
-          };
-        in
-        if isDarwin then
-          mkDmgApp {
-            pname = "sculptor";
-            inherit info meta;
-          }
-        else
-          let
-            src = prev.fetchurl {
-              name = "Sculptor_${info.version}.AppImage";
-              url = info.urls.${system};
-              hash = info.hashes.${system};
-            };
-          in
-          prev.appimageTools.wrapType2 {
-            pname = "sculptor";
-            inherit (info) version;
-            inherit meta src;
-
-            extraInstallCommands =
-              let
-                appimageContents = prev.appimageTools.extractType2 {
-                  inherit (info) version;
-                  inherit src;
-                  pname = "sculptor";
-                };
-              in
-              ''
-                # Install desktop file and icons if available
-                if [ -d "${appimageContents}/usr/share" ]; then
-                  cp -r "${appimageContents}/usr/share" "$out/"
-                fi
-              '';
-          };
+      # sculptor: Temporarily removed due to AppImage tooling requiring Linux
+      # VM builders even during Darwin evaluation. Will be re-added once we have
+      # a proper solution for platform-specific overlays.
+      # GitHub issue: https://github.com/gkze/nixcfg/issues/XXX
 
       # Factory Droid: AI coding agent CLI (prebuilt binary)
       droid =

@@ -65,7 +65,6 @@
       red-reddit-cli
       rsync
       rustup
-      sculptor
       sd
       sentry-cli
       sequoia-chameleon-gnupg
@@ -87,7 +86,10 @@
       xz
       yq-go
     ]
-    ++ lib.lists.optionals pkgs.stdenv.isLinux [ wl-clipboard ]
+    ++ lib.lists.optionals pkgs.stdenv.isLinux [
+      # sculptor - temporarily removed (see overlays.nix)
+      wl-clipboard
+    ]
     ++ lib.lists.optionals pkgs.stdenv.isDarwin [
       appcleaner
       chatgpt
