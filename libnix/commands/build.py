@@ -105,6 +105,7 @@ async def nix_build(
 async def nix_build_dry_run(
     installable: str,
     *,
+    impure: bool = True,
     timeout: float = 300.0,
 ) -> set[str]:
     """Run ``nix build --dry-run`` and return derivations that would be built.
@@ -113,6 +114,9 @@ async def nix_build_dry_run(
     ----------
     installable:
         A flake reference or store path to dry-run build.
+    impure:
+        Pass ``--impure`` to allow access to environment variables and mutable
+        paths. Defaults to ``True`` since CI detection relies on ``getEnv``.
     timeout:
         Maximum wall-clock seconds before the process is killed.
 
@@ -127,6 +131,8 @@ async def nix_build_dry_run(
         The dry-run failed.
     """
     args = ["nix", "build", installable, "--dry-run"]
+    if impure:
+        args.append("--impure")
     result = await run_nix(args, check=True, timeout=timeout)
 
     combined = result.stdout + result.stderr
