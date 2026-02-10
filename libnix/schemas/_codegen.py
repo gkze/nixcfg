@@ -10,16 +10,13 @@ Usage:
 
 from __future__ import annotations
 
+import importlib
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Protocol, cast
 
-import referencing
-import referencing.jsonschema
 import yaml
-from datamodel_code_generator import DataModelType, generate
-from datamodel_code_generator.config import GenerateConfig
 
 SCHEMAS_DIR = Path(__file__).resolve().parent
 MODELS_DIR = SCHEMAS_DIR.parent / "models"
@@ -40,29 +37,49 @@ TOP_LEVEL_SCHEMAS = [
     "store-object-info-v2",
 ]
 
+type JsonScalar = str | int | float | bool | None
+type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
+type JsonObject = dict[str, JsonValue]
 
-def _load_yaml(name: str) -> dict[str, Any]:
+
+class _ResolvedResourceLike(Protocol):
+    contents: object
+
+
+class _ResolverLike(Protocol):
+    def lookup(self, uri: str) -> _ResolvedResourceLike: ...
+
+
+class _RegistryLike(Protocol):
+    def resolver(self) -> _ResolverLike: ...
+
+
+def _load_yaml(name: str) -> JsonObject:
     """Load a YAML schema file by base name (without .yaml extension)."""
     path = SCHEMAS_DIR / f"{name}.yaml"
     with path.open() as f:
         return yaml.safe_load(f)
 
 
-def _build_registry() -> referencing.Registry[dict[str, Any]]:
+def _build_registry() -> object:
     """Build a referencing.Registry containing all vendored schemas.
 
     Each schema is registered under its relative filename (e.g.,
     ``./hash-v1.yaml``) and its ``$id`` URI if present, so that both
     cross-file ``$ref`` styles resolve correctly.
     """
-    resources: list[tuple[str, referencing.Resource[dict[str, Any]]]] = []
+    referencing = importlib.import_module("referencing")
+    referencing_jsonschema = importlib.import_module("referencing.jsonschema")
+
+    resources: list[tuple[str, object]] = []
 
     for yaml_file in sorted(SCHEMAS_DIR.glob("*.yaml")):
         schema = _load_yaml(yaml_file.stem)
         # Create a resource from the schema using JSON Schema Draft 4
         # (which the Nix schemas declare via "$schema")
         resource = referencing.Resource.from_contents(
-            schema, default_specification=referencing.jsonschema.DRAFT4
+            schema,
+            default_specification=referencing_jsonschema.DRAFT4,
         )
 
         # Register under the relative path used in $ref values
@@ -73,52 +90,57 @@ def _build_registry() -> referencing.Registry[dict[str, Any]]:
         resources.append((yaml_file.name, resource))
 
         # Also register under the $id if present
-        schema_id = schema.get("$id", "")
-        if schema_id:
+        schema_id = schema.get("$id")
+        if isinstance(schema_id, str) and schema_id:
             resources.append((schema_id, resource))
 
     return referencing.Registry().with_resources(resources)
 
 
-def _resolve_refs(
-    schema: dict[str, Any], registry: referencing.Registry[dict[str, Any]]
-) -> dict[str, Any]:
+def _walk_pointer(doc: object, fragment: str) -> object:
+    """Walk a JSON pointer fragment (e.g., /$defs/foo) into a document."""
+    parts = [p for p in fragment.split("/") if p]
+    current = doc
+    for part in parts:
+        if isinstance(current, dict):
+            current_dict = cast("dict[str, object]", current)
+            current = current_dict[part]
+            continue
+        msg = f"Cannot walk pointer /{'/'.join(parts)}: hit non-dict at {part!r}"
+        raise TypeError(msg)
+    return current
+
+
+def _resolve_refs(schema: JsonObject, registry: object) -> JsonObject:
     """Recursively resolve all $ref pointers in a schema to produce a self-contained dict.
 
     Uses the registry for cross-file references and JSON pointer
     fragment resolution for intra-file references.
     """
-
     # Cache for loaded cross-file schemas (by URI part)
-    file_cache: dict[str, dict[str, Any]] = {}
+    file_cache: dict[str, JsonObject] = {}
 
-    def _load_remote(uri_part: str) -> dict[str, Any]:
+    if not hasattr(registry, "resolver"):
+        msg = "Invalid schema registry instance"
+        raise TypeError(msg)
+    typed_registry = cast("_RegistryLike", registry)
+
+    def _load_remote(uri_part: str) -> JsonObject:
         """Load a cross-file schema by its URI part, with caching."""
         if uri_part not in file_cache:
-            resolved_resource = registry.resolver().lookup(uri_part)
+            resolved_resource = typed_registry.resolver().lookup(uri_part)
             contents = resolved_resource.contents
-            file_cache[uri_part] = (
-                dict(contents) if isinstance(contents, dict) else contents
-            )
+            if not isinstance(contents, dict):
+                msg = f"Referenced schema {uri_part!r} is not an object"
+                raise TypeError(msg)
+            file_cache[uri_part] = cast("JsonObject", contents)
         return file_cache[uri_part]
 
-    def _walk_pointer(doc: Any, fragment: str) -> Any:
-        """Walk a JSON pointer fragment (e.g., /$defs/foo) into a document."""
-        parts = [p for p in fragment.split("/") if p]
-        current = doc
-        for part in parts:
-            if isinstance(current, dict):
-                current = current[part]
-            else:
-                msg = (
-                    f"Cannot walk pointer /{'/'.join(parts)}: hit non-dict at {part!r}"
-                )
-                raise TypeError(msg)
-        return current
-
     def _resolve(
-        obj: Any, seen: set[str] | None = None, root: dict[str, Any] | None = None
-    ) -> Any:
+        obj: object,
+        seen: set[str] | None = None,
+        root: JsonObject | None = None,
+    ) -> object:
         if seen is None:
             seen = set()
         if root is None:
@@ -130,8 +152,14 @@ def _resolve_refs(
         if not isinstance(obj, dict):
             return obj
 
-        if "$ref" in obj:
-            ref = obj["$ref"]
+        obj_dict = cast("dict[str, object]", obj)
+
+        if "$ref" in obj_dict:
+            ref_obj = obj_dict["$ref"]
+            if not isinstance(ref_obj, str):
+                msg = "$ref value must be a string"
+                raise TypeError(msg)
+            ref = ref_obj
 
             # Prevent infinite recursion on circular refs
             if ref in seen:
@@ -167,30 +195,35 @@ def _resolve_refs(
                 resolved = dict(resolved)
 
             # Merge any sibling keys (e.g., title, description alongside $ref)
-            extra = {k: v for k, v in obj.items() if k != "$ref"}
+            extra = {k: v for k, v in obj_dict.items() if k != "$ref"}
             if extra and isinstance(resolved, dict):
                 resolved = {**resolved, **extra}
 
             return _resolve(resolved, seen, new_root)
 
         # Recurse into all dict values
-        return {k: _resolve(v, seen, root) for k, v in obj.items()}
+        return {k: _resolve(v, seen, root) for k, v in obj_dict.items()}
 
-    return _resolve(schema)
+    resolved_root = _resolve(schema)
+    if not isinstance(resolved_root, dict):
+        msg = "Resolved schema root must be an object"
+        raise TypeError(msg)
+    return cast("JsonObject", resolved_root)
 
 
-def _fixup_schema(obj: Any) -> Any:
+def _fixup_schema(obj: object) -> object:
     """Fix schema patterns that datamodel-code-generator can't handle.
 
     - Replace {"const": null} with {"type": "null"} (codegen crashes on null literals)
     - Replace {"const": <value>} combined with a type with just the type + enum
+    - Drop schema descriptions to keep generated models lint-friendly
     """
     if isinstance(obj, list):
         return [_fixup_schema(item) for item in obj]
     if not isinstance(obj, dict):
         return obj
 
-    result = {k: _fixup_schema(v) for k, v in obj.items()}
+    result = {k: _fixup_schema(v) for k, v in obj.items() if k != "description"}
 
     # Fix null const
     if result.get("const") is None and "const" in result:
@@ -200,25 +233,37 @@ def _fixup_schema(obj: Any) -> Any:
     return result
 
 
-def _generate_models(name: str, resolved_schema: dict[str, Any]) -> str:
+def _generate_models(name: str, resolved_schema: JsonObject) -> str:
     """Generate Pydantic v2 model code from a fully-resolved JSON schema."""
-    resolved_schema = _fixup_schema(resolved_schema)
+    datamodel_code_generator = importlib.import_module("datamodel_code_generator")
+    datamodel_code_generator_config = importlib.import_module(
+        "datamodel_code_generator.config",
+    )
+
+    fixed_schema = _fixup_schema(resolved_schema)
+    if not isinstance(fixed_schema, dict):
+        msg = f"Fixed schema for {name} is not an object"
+        raise TypeError(msg)
+    resolved_schema = cast("JsonObject", fixed_schema)
     schema_json = json.dumps(resolved_schema, indent=2)
 
-    config = GenerateConfig(
+    config = datamodel_code_generator_config.GenerateConfig(
         input_file_type="jsonschema",
         input_filename=f"{name}.yaml",
-        output_model_type=DataModelType.PydanticV2BaseModel,
+        output_model_type=datamodel_code_generator.DataModelType.PydanticV2BaseModel,
         use_annotated=True,
         use_standard_collections=True,
         use_union_operator=True,
         target_python_version="3.14",
         field_constraints=True,
+        snake_case_field=True,
+        use_field_description=False,
+        use_schema_description=False,
         capitalise_enum_members=True,
         use_one_literal_as_default=True,
         use_default_kwarg=True,
     )
-    result = generate(schema_json, config=config)
+    result = datamodel_code_generator.generate(schema_json, config=config)
     if result is None:
         msg = f"codegen returned None for {name}"
         raise RuntimeError(msg)
@@ -253,18 +298,15 @@ def _collect_imports(code: str) -> tuple[set[str], str]:
 
 
 def main() -> None:
-    print("Building schema registry...")
     registry = _build_registry()
 
     all_imports: set[str] = set()
     all_bodies: list[str] = []
 
     for name in TOP_LEVEL_SCHEMAS:
-        print(f"  resolving {name}...")
         schema = _load_yaml(name)
         resolved = _resolve_refs(schema, registry)
 
-        print(f"  generating models for {name}...")
         code = _generate_models(name, resolved)
         code = _strip_generated_headers(code)
 
@@ -273,17 +315,21 @@ def main() -> None:
         all_bodies.append(f"\n# === {name} ===\n{body}")
 
     # Compose final output
-    header = '"""Auto-generated Pydantic models from Nix JSON schemas.\n\nDO NOT EDIT MANUALLY. Regenerate with:\n    python -m libnix.schemas._codegen\n"""\n\nfrom __future__ import annotations\n'
+    header = (
+        '"""Auto-generated Pydantic models from Nix JSON schemas.\n\n'
+        "DO NOT EDIT MANUALLY. Regenerate with:\n"
+        "    python -m libnix.schemas._codegen\n"
+        '"""\n\n'
+        "from __future__ import annotations\n"
+    )
 
-    # Deduplicate imports: merge "from X import A" and "from X import A, B"
-    # by collecting all names per module
+    # Deduplicate imports by collecting imported names per module.
     from_imports: dict[str, set[str]] = {}
     bare_imports: set[str] = set()
     for imp in all_imports - {"from __future__ import annotations"}:
         if imp.startswith("from "):
-            # "from X import A, B, C"
             parts = imp.split(" import ", 1)
-            module = parts[0]  # "from X"
+            module = parts[0]
             names = {n.strip() for n in parts[1].split(",")}
             from_imports.setdefault(module, set()).update(names)
         else:
@@ -325,8 +371,6 @@ def main() -> None:
     final_code = re.sub(r"\n{4,}", "\n\n\n", final_code)
 
     OUTPUT_FILE.write_text(final_code)
-    print(f"\nWrote {OUTPUT_FILE}")
-    print(f"  {len(TOP_LEVEL_SCHEMAS)} schemas processed")
 
 
 if __name__ == "__main__":
