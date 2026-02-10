@@ -146,7 +146,7 @@
         "platform": "aarch64-darwin"
       },
       {
-        "hash": "sha256-L/i6ScLlEwOeVJ/7gVqwQ05qJb4TfHPYaCWvdVMpo3A=",
+        "hash": "sha256-FdA4ZZwpatFF69mfZmEvOEk4h6iM9rV8cPKfEjdMfjE=",
         "hashType": "denoDepsHash",
         "platform": "aarch64-linux"
       },
@@ -164,12 +164,22 @@
         "hash": "sha256-JnkqDwuC7lNsjafV+jOGfvs8K1xC8rk5CTOW+spjiCA=",
         "hashType": "nodeModulesHash",
         "platform": "aarch64-darwin"
+      },
+      {
+        "hash": "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
+        "hashType": "nodeModulesHash",
+        "platform": "x86_64-linux"
+      },
+      {
+        "hash": "sha256-DJUI4pMZ7wQTnyOiuDHALmZz7FZtrTbzRzCuNOShmWE=",
+        "hashType": "nodeModulesHash",
+        "platform": "aarch64-linux"
       }
     ],
     "input": "opencode"
   },
   "opencode-desktop": {
-    "commit": "110f6804fbabaa7004c053170c0952715b725cad",
+    "commit": "705200e199183cd802e2f4387b7a4ffc54793d5f",
     "hashes": [
       {
         "gitDep": "specta-2.0.0-rc.22",
