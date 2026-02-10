@@ -10,6 +10,7 @@ raw otherwise — use :attr:`is_sri` to check and :meth:`to_sri` to convert).
 from __future__ import annotations
 
 import asyncio
+import importlib
 import os
 import re
 import shlex
@@ -45,7 +46,7 @@ _RE_FALLBACK_GOT = re.compile(
     + r":[0-9a-fA-F]+"  # algo:hex (e.g., sha256:abc123...)
     + r"|[0-9a-fA-F]{40,128}"  # bare hex (40=sha1, 64=sha256, 128=sha512)
     + r"|[0-9a-df-np-sv-z]{32,103}"  # Nix32 encoding
-    + r")"
+    + r")",
 )
 _RE_FALLBACK_SPECIFIED = re.compile(
     r"specified:\s*("
@@ -53,7 +54,7 @@ _RE_FALLBACK_SPECIFIED = re.compile(
     + r":[0-9a-fA-F]+"
     + r"|[0-9a-fA-F]{40,128}"
     + r"|[0-9a-df-np-sv-z]{32,103}"
-    + r")"
+    + r")",
 )
 
 # --- Derivation path extraction ---
@@ -62,8 +63,15 @@ _RE_FALLBACK_SPECIFIED = re.compile(
 _RE_DRV_PATH = re.compile(
     r"(?:hash mismatch in fixed-output derivation|"
     r"(?:ca )?hash mismatch importing path)"
-    r"\s+'([^']+)'"
+    r"\s+'([^']+)'",
 )
+
+_STDERR_TAIL_LINES = 20
+
+
+def _raise_timeout() -> None:
+    """Raise ``TimeoutError`` for timeout control-flow paths."""
+    raise TimeoutError
 
 
 @dataclass(frozen=True)
@@ -80,11 +88,13 @@ class NixCommandError(Exception):
     """A Nix command exited with a non-zero return code."""
 
     def __init__(self, result: CommandResult, message: str | None = None) -> None:
+        """Create a command error from a failed subprocess result."""
         self.result = result
         self.message = message or f"command failed with exit code {result.returncode}"
         super().__init__(self.message)
 
     def __str__(self) -> str:
+        """Render a readable error message with command context."""
         cmd = shlex.join(self.result.args)
         parts = [
             f"NixCommandError: {self.message}",
@@ -95,9 +105,9 @@ class NixCommandError(Exception):
         if stderr_tail:
             # Show at most the last 20 lines to keep output readable.
             lines = stderr_tail.splitlines()
-            if len(lines) > 20:
-                lines = lines[-20:]
-                parts.append("  stderr (last 20 lines):")
+            if len(lines) > _STDERR_TAIL_LINES:
+                lines = lines[-_STDERR_TAIL_LINES:]
+                parts.append(f"  stderr (last {_STDERR_TAIL_LINES} lines):")
             else:
                 parts.append("  stderr:")
             parts.extend(f"    {line}" for line in lines)
@@ -120,14 +130,15 @@ class HashMismatchError(NixCommandError):
         self,
         result: CommandResult,
         *,
-        hash: str,
+        got_hash: str,
         specified: str | None = None,
         drv_path: str | None = None,
     ) -> None:
-        self.hash = hash
+        """Create an error with parsed hash-mismatch details."""
+        self.hash = got_hash
         self.specified = specified
         self.drv_path = drv_path
-        msg = f"hash mismatch — got {hash}"
+        msg = f"hash mismatch — got {got_hash}"
         if drv_path:
             msg += f" (derivation: {drv_path})"
         super().__init__(result, msg)
@@ -149,18 +160,19 @@ class HashMismatchError(NixCommandError):
             Algorithm hint passed to ``nix hash convert`` when the captured
             hash has no embedded algorithm prefix (bare hex / Nix32).
             Ignored when the hash is already SRI or prefixed (``algo:hex``).
+
         """
         if self.is_sri:
             return self.hash
 
-        # Import here to avoid circular dependency (hash imports base).
-        from .hash import nix_hash_convert
-
-        return await nix_hash_convert(self.hash, hash_algo=hash_algo)
+        hash_module = importlib.import_module("libnix.commands.hash")
+        return await hash_module.nix_hash_convert(self.hash, hash_algo=hash_algo)
 
     @classmethod
     def from_output(
-        cls, output: str, result: CommandResult
+        cls,
+        output: str,
+        result: CommandResult,
     ) -> HashMismatchError | None:
         """Try to parse a hash mismatch from Nix command output.
 
@@ -184,6 +196,7 @@ class HashMismatchError(NixCommandError):
         - ``derivation-check.cc``:  FOD hash mismatch (SRI format)
         - ``local-store.cc``:       NAR import hash mismatch (Nix32 or hex)
         - ``local-store.cc``:       CA hash mismatch importing path (Nix32 or hex)
+
         """
         # Primary: SRI-encoded hash (e.g. sha256-ABC...=, sha512-XYZ...=)
         sri_matches = _RE_SRI_GOT.findall(output)
@@ -213,14 +226,16 @@ class HashMismatchError(NixCommandError):
 
         return cls(
             result,
-            hash=got_hash,
+            got_hash=got_hash,
             specified=specified,
             drv_path=drv_path,
         )
 
     @classmethod
     def from_stderr(
-        cls, stderr: str, result: CommandResult
+        cls,
+        stderr: str,
+        result: CommandResult,
     ) -> HashMismatchError | None:
         """Alias for :meth:`from_output` (backward-compatible name)."""
         return cls.from_output(stderr, result)
@@ -240,12 +255,16 @@ def _merge_env(env: Mapping[str, str] | None) -> dict[str, str]:
 
 @dataclass(frozen=True)
 class ProcessLine:
+    """A single decoded line emitted by a subprocess stream."""
+
     stream: str
     text: str
 
 
 @dataclass(frozen=True)
 class ProcessDone:
+    """Terminal event containing the completed subprocess result."""
+
     result: CommandResult
 
 
@@ -255,9 +274,10 @@ type ProcessEvent = ProcessLine | ProcessDone
 async def stream_process(
     args: list[str],
     *,
-    timeout: float = 1200.0,
+    timeout: float = 1200.0,  # noqa: ASYNC109
     env: Mapping[str, str] | None = None,
 ) -> AsyncIterator[ProcessEvent]:
+    """Yield line events from both stdout and stderr until process completion."""
     merged_env = _merge_env(env)
 
     proc = await asyncio.create_subprocess_exec(
@@ -274,7 +294,9 @@ async def stream_process(
     deadline = loop.time() + timeout
 
     async def pump(
-        stream: asyncio.StreamReader | None, label: str, store: list[str]
+        stream: asyncio.StreamReader | None,
+        label: str,
+        store: list[str],
     ) -> None:
         if stream is None:
             await queue.put((label, None))
@@ -298,7 +320,7 @@ async def stream_process(
         while done_streams < len(tasks):
             remaining = deadline - loop.time()
             if remaining <= 0:
-                raise TimeoutError
+                _raise_timeout()
             label, text = await asyncio.wait_for(queue.get(), timeout=remaining)
             if text is None:
                 done_streams += 1
@@ -326,7 +348,7 @@ async def stream_process(
 async def run_nix(
     args: list[str],
     *,
-    timeout: float = 1200.0,
+    timeout: float = 1200.0,  # noqa: ASYNC109
     check: bool = True,
     capture: bool = True,
     env: Mapping[str, str] | None = None,
@@ -349,6 +371,7 @@ async def run_nix(
         inherited from the parent process (useful for interactive output).
     env:
         Extra environment variables merged on top of :data:`os.environ`.
+
     """
     merged_env = _merge_env(env)
 
@@ -368,7 +391,8 @@ async def run_nix(
 
     try:
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
+            proc.communicate(),
+            timeout=timeout,
         )
     except TimeoutError:
         proc.kill()
@@ -395,10 +419,10 @@ async def run_nix(
     return result
 
 
-async def stream_nix(
+async def stream_nix(  # noqa: C901
     args: list[str],
     *,
-    timeout: float = 1200.0,
+    timeout: float = 1200.0,  # noqa: ASYNC109
     env: Mapping[str, str] | None = None,
 ) -> AsyncIterator[str]:
     """Yield stdout lines from a Nix command as they arrive.
@@ -414,6 +438,7 @@ async def stream_nix(
         Maximum wall-clock seconds before the process is killed.
     env:
         Extra environment variables merged on top of :data:`os.environ`.
+
     """
     merged_env = _merge_env(env)
 
@@ -428,10 +453,15 @@ async def stream_nix(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
 
+    if proc.stderr is None or proc.stdout is None:
+        msg = "Subprocess was not created with piped stdout/stderr"
+        raise RuntimeError(msg)
+    stderr_stream = proc.stderr
+    stdout_stream = proc.stdout
+
     async def _drain_stderr() -> None:
-        assert proc.stderr is not None
         while True:
-            chunk = await proc.stderr.read(8192)
+            chunk = await stderr_stream.read(8192)
             if not chunk:
                 break
             stderr_chunks.append(chunk)
@@ -439,18 +469,15 @@ async def stream_nix(
     stderr_task = asyncio.create_task(_drain_stderr())
 
     try:
-        assert proc.stdout is not None
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
-                raise TimeoutError
+                _raise_timeout()
 
-            try:
-                line_bytes = await asyncio.wait_for(
-                    proc.stdout.readline(), timeout=remaining
-                )
-            except TimeoutError:
-                raise  # re-raise so the outer handler fires
+            line_bytes = await asyncio.wait_for(
+                stdout_stream.readline(),
+                timeout=remaining,
+            )
 
             if not line_bytes:
                 break

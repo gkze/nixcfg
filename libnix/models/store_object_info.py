@@ -25,7 +25,7 @@ class StoreObjectInfo(BaseModel):
     served or stored.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     version: Literal[2] = 2
     """Format version guard (always ``2``)."""
@@ -39,12 +39,14 @@ class StoreObjectInfo(BaseModel):
     )
     """Store path base name, or ``None`` when used as a map value."""
 
-    narHash: str = Field(
+    nar_hash: str = Field(
+        alias="narHash",
         description="SRI hash of the store object serialized as a Nix Archive (NAR).",
     )
     """SRI hash of the NAR serialization."""
 
-    narSize: int = Field(
+    nar_size: int = Field(
+        alias="narSize",
         ge=0,
         description="Size in bytes of the NAR serialization.",
     )
@@ -65,7 +67,8 @@ class StoreObjectInfo(BaseModel):
     )
     """Content address (``{method, hash}``), or ``None`` if input-addressed."""
 
-    storeDir: str = Field(
+    store_dir: str = Field(
+        alias="storeDir",
         default="/nix/store",
         description="The store directory this object belongs to.",
     )
@@ -87,7 +90,8 @@ class ImpureStoreObjectInfo(StoreObjectInfo):
     )
     """Derivation store path, or ``None`` if unknown."""
 
-    registrationTime: int | None = Field(
+    registration_time: int | None = Field(
+        alias="registrationTime",
         default=None,
         description="Unix timestamp of when this object was registered in the store.",
     )
@@ -108,7 +112,8 @@ class ImpureStoreObjectInfo(StoreObjectInfo):
     )
     """Signatures for input-addressed trust verification."""
 
-    closureSize: int | None = Field(
+    closure_size: int | None = Field(
+        alias="closureSize",
         default=None,
         ge=0,
         description="Total NAR size of this object and its entire closure.",
@@ -136,18 +141,21 @@ class NarInfo(ImpureStoreObjectInfo):
     )
     """Compression algorithm used for the download archive."""
 
-    downloadHash: str = Field(
+    download_hash: str = Field(
+        alias="downloadHash",
         description="SRI hash of the compressed archive itself.",
     )
     """SRI hash of the compressed download."""
 
-    downloadSize: int = Field(
+    download_size: int = Field(
+        alias="downloadSize",
         ge=0,
         description="Size in bytes of the compressed archive.",
     )
     """Size of the compressed download in bytes."""
 
-    closureDownloadSize: int | None = Field(
+    closure_download_size: int | None = Field(
+        alias="closureDownloadSize",
         default=None,
         ge=0,
         description=(

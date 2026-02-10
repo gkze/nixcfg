@@ -1,8 +1,12 @@
+"""Flake input ref discovery and version-tag update helpers."""
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
+
+from packaging.version import InvalidVersion, Version
 
 if TYPE_CHECKING:
     import asyncio
@@ -10,14 +14,14 @@ if TYPE_CHECKING:
 
     import aiohttp
 
-from libnix.update.events import (
+from update.config import UpdateConfig, _resolve_active_config
+from update.events import (
     CommandResult,
     EventStream,
     RefUpdatePayload,
     UpdateEvent,
     UpdateEventKind,
 )
-from update.config import UpdateConfig, _resolve_active_config
 from update.flake import load_flake_lock
 from update.net import fetch_github_api
 from update.process import _run_queue_task, stream_command
@@ -45,6 +49,8 @@ def _is_version_ref(ref: str) -> bool:
 
 @dataclass(frozen=True)
 class FlakeInputRef:
+    """A flake root input pinned to a version-like ref."""
+
     name: str
     owner: str
     repo: str
@@ -53,6 +59,7 @@ class FlakeInputRef:
 
 
 def get_flake_inputs_with_refs() -> list[FlakeInputRef]:
+    """Return root flake inputs whose refs look like version tags."""
     model = load_flake_lock()
     root = model.root_node
     if not root.inputs:
@@ -79,7 +86,7 @@ def get_flake_inputs_with_refs() -> list[FlakeInputRef]:
                     repo=repo,
                     ref=ref,
                     input_type=input_type,
-                )
+                ),
             )
     return result
 
@@ -107,15 +114,41 @@ def _tag_matches_prefix(tag: str, prefix: str) -> bool:
     return bool(re.match(r"\d", tag))
 
 
+def _parse_tag_version(tag: str, prefix: str) -> Version | None:
+    if not _tag_matches_prefix(tag, prefix):
+        return None
+    suffix = tag[len(prefix) :] if prefix else tag
+    suffix = suffix.lstrip("-_.")
+    if suffix.lower().startswith("v"):
+        suffix = suffix[1:]
+    try:
+        parsed = Version(suffix)
+    except InvalidVersion:
+        return None
+    if parsed.is_prerelease:
+        return None
+    return parsed
+
+
 def _select_tag(tags: Iterable[str], prefix: str) -> str | None:
-    for tag in tags:
-        if _tag_matches_prefix(tag, prefix):
-            return tag
-    return None
+    matches = [tag for tag in tags if _tag_matches_prefix(tag, prefix)]
+    if not matches:
+        return None
+
+    parsed_versions = [
+        (tag, parsed)
+        for tag in matches
+        if (parsed := _parse_tag_version(tag, prefix)) is not None
+    ]
+    if parsed_versions:
+        return max(parsed_versions, key=lambda item: item[1])[0]
+
+    return matches[0]
 
 
 def _select_tag_from_releases(
-    releases: Iterable[dict[str, str]], prefix: str
+    releases: Iterable[dict[str, str]],
+    prefix: str,
 ) -> str | None:
     return _select_tag(
         (
@@ -131,6 +164,45 @@ def _select_tag_from_tags(tags: Iterable[dict[str, str]], prefix: str) -> str | 
     return _select_tag((tag.get("name", "") for tag in tags), prefix)
 
 
+async def _fetch_first_matching_tag(
+    session: aiohttp.ClientSession,
+    owner: str,
+    repo: str,
+    prefix: str,
+    *,
+    config: UpdateConfig,
+) -> str | None:
+    candidates = (
+        (
+            f"repos/{owner}/{repo}/releases",
+            "20",
+            _select_tag_from_releases,
+        ),
+        (
+            f"repos/{owner}/{repo}/tags",
+            "30",
+            _select_tag_from_tags,
+        ),
+    )
+    for path, per_page, selector in candidates:
+        try:
+            payload = cast(
+                "list[dict[str, str]]",
+                await fetch_github_api(
+                    session,
+                    path,
+                    per_page=per_page,
+                    config=config,
+                ),
+            )
+        except RuntimeError:
+            continue
+        tag = selector(payload, prefix)
+        if tag:
+            return tag
+    return None
+
+
 async def fetch_github_latest_version_ref(
     session: aiohttp.ClientSession,
     owner: str,
@@ -140,45 +212,24 @@ async def fetch_github_latest_version_ref(
     config: UpdateConfig | None = None,
 ) -> str | None:
     config = _resolve_active_config(config)
-    prefixes = _build_version_prefixes(prefix)
-    for candidate_prefix in prefixes:
-        try:
-            releases = cast(
-                "list[dict[str, str]]",
-                await fetch_github_api(
-                    session,
-                    f"repos/{owner}/{repo}/releases",
-                    per_page="20",
-                    config=config,
-                ),
-            )
-            tag = _select_tag_from_releases(releases, candidate_prefix)
-            if tag:
-                return tag
-        except RuntimeError:
-            pass
-
-        try:
-            tags = cast(
-                "list[dict[str, str]]",
-                await fetch_github_api(
-                    session,
-                    f"repos/{owner}/{repo}/tags",
-                    per_page="30",
-                    config=config,
-                ),
-            )
-            tag = _select_tag_from_tags(tags, candidate_prefix)
-            if tag:
-                return tag
-        except RuntimeError:
-            pass
+    for candidate_prefix in _build_version_prefixes(prefix):
+        tag = await _fetch_first_matching_tag(
+            session,
+            owner,
+            repo,
+            candidate_prefix,
+            config=config,
+        )
+        if tag:
+            return tag
 
     return None
 
 
 @dataclass(frozen=True)
 class RefUpdateResult:
+    """Result of checking whether a flake input ref has a newer tag."""
+
     name: str
     current_ref: str
     latest_ref: str | None
@@ -191,12 +242,17 @@ async def check_flake_ref_update(
     *,
     config: UpdateConfig | None = None,
 ) -> RefUpdateResult:
+    """Check a flake input ref against the latest matching upstream tag."""
     config = _resolve_active_config(config)
     prefix = _extract_version_prefix(input_ref.ref)
 
     if input_ref.input_type == "github":
         latest = await fetch_github_latest_version_ref(
-            session, input_ref.owner, input_ref.repo, prefix, config=config
+            session,
+            input_ref.owner,
+            input_ref.repo,
+            prefix,
+            config=config,
         )
     else:
         return RefUpdateResult(
@@ -242,7 +298,8 @@ async def update_flake_ref(
         source=source,
     ):
         if event.kind == UpdateEventKind.COMMAND_END and isinstance(
-            event.payload, CommandResult
+            event.payload,
+            CommandResult,
         ):
             change_result = event.payload
         yield event
@@ -259,7 +316,8 @@ async def update_flake_ref(
         source=source,
     ):
         if event.kind == UpdateEventKind.COMMAND_END and isinstance(
-            event.payload, CommandResult
+            event.payload,
+            CommandResult,
         ):
             lock_result = event.payload
         yield event
@@ -271,7 +329,7 @@ async def update_flake_ref(
         raise RuntimeError(msg)
 
 
-async def _update_refs_task(
+async def _update_refs_task(  # noqa: PLR0913
     input_ref: FlakeInputRef,
     session: aiohttp.ClientSession,
     queue: asyncio.Queue[UpdateEvent | None],
@@ -289,10 +347,12 @@ async def _update_refs_task(
             UpdateEvent.status(
                 source,
                 f"Checking {input_ref.owner}/{input_ref.repo} (current: {input_ref.ref})",
-            )
+            ),
         )
         result = await check_flake_ref_update(
-            input_ref, session, config=resolved_config
+            input_ref,
+            session,
+            config=resolved_config,
         )
 
         if result.error:
@@ -301,7 +361,7 @@ async def _update_refs_task(
 
         if result.latest_ref == result.current_ref:
             await put(
-                UpdateEvent.status(source, f"Up to date (ref: {result.current_ref})")
+                UpdateEvent.status(source, f"Up to date (ref: {result.current_ref})"),
             )
             await put(UpdateEvent.result(source))
             return
@@ -315,7 +375,7 @@ async def _update_refs_task(
                 UpdateEvent.status(
                     source,
                     f"Update available: {result.current_ref} -> {result.latest_ref}",
-                )
+                ),
             )
             await put(UpdateEvent.result(source, update_payload))
             return

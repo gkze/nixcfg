@@ -1,8 +1,11 @@
+"""flake.lock lookup helpers and flake input update streaming."""
+
 import functools
 import shlex
 
+from libnix.commands.flake import nix_flake_lock_update
 from libnix.models.flake_lock import FlakeLock, FlakeLockNode
-from libnix.update.events import (
+from update.events import (
     CommandResult,
     EventStream,
     UpdateEvent,
@@ -70,13 +73,14 @@ def flake_fetch_expr(node: FlakeLockNode) -> str:
             f'owner = "{locked.owner}"; ',
             f'repo = "{locked.repo}"; ',
             f'rev = "{locked.rev}"; ',
-            f'narHash = "{locked.narHash}"; ',
+            f'narHash = "{locked.nar_hash}"; ',
             " }",
-        ]
+        ],
     )
 
 
 def nixpkgs_expr() -> str:
+    """Build a nixpkgs import expression from the pinned flake input."""
     node_name = get_root_input_name("nixpkgs")
     node = get_flake_input_node(node_name)
     return f"import ({flake_fetch_expr(node)}) {{ system = builtins.currentSystem; }}"
@@ -84,8 +88,6 @@ def nixpkgs_expr() -> str:
 
 async def update_flake_input(input_name: str, *, source: str) -> EventStream:
     """Update a single flake input via :func:`libnix.commands.flake.nix_flake_lock_update`."""
-    from libnix.commands.flake import nix_flake_lock_update
-
     args = ["nix", "flake", "lock", "--update-input", input_name]
     yield UpdateEvent(
         source=source,

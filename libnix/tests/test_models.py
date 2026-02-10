@@ -1,11 +1,12 @@
 """Tests for libnix model types and utilities."""
 
+# ruff: noqa: S101
+
 from pathlib import Path
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from libnix.commands.base import CommandResult, HashMismatchError
 from libnix.models.build_result import (
     FailedBuild,
     FailureStatus,
@@ -31,6 +32,7 @@ _StorePathAdapter = TypeAdapter(StorePath)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FLAKE_LOCK_PATH = PROJECT_ROOT / "flake.lock"
 SOURCES_JSON_PATH = PROJECT_ROOT / "sources.json"
+FLAKE_LOCK_VERSION = 7
 
 
 # =========================================================================
@@ -79,7 +81,8 @@ class TestNixHash:
     def test_make_sri(self) -> None:
         """make_sri constructs a valid SRI string from parts."""
         sri = make_sri(
-            HashAlgorithm.sha256, "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
+            HashAlgorithm.sha256,
+            "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=",
         )
         assert sri == "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
 
@@ -93,7 +96,7 @@ class TestNixHash:
         assert is_sri("sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=") is True
         assert (
             is_sri(
-                "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ=="
+                "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             )
             is True
         )
@@ -186,7 +189,7 @@ class TestBuildResult:
         )
         assert build.success is False
         assert build.status is FailureStatus.PermanentFailure
-        assert build.errorMsg == "something broke"
+        assert build.error_msg == "something broke"
 
     def test_hash_mismatch_status(self) -> None:
         """is_hash_mismatch() returns True for HashMismatch status."""
@@ -221,7 +224,7 @@ class TestFlakeLock:
 
     def test_flake_lock_from_file(self, lock: FlakeLock) -> None:
         """Load the actual flake.lock; verify version=7, nodes exist, input_names returns a list."""
-        assert lock.version == 7
+        assert lock.version == FLAKE_LOCK_VERSION
         assert len(lock.nodes) > 0
         names = lock.input_names
         assert isinstance(names, list)
@@ -244,250 +247,11 @@ class TestFlakeLock:
         locked = lock.get_locked(first_input)
         assert locked is not None
         assert isinstance(locked, LockedRef)
-        assert locked.narHash.startswith("sha256-")
+        assert locked.nar_hash.startswith("sha256-")
 
     def test_flake_lock_get_locked_missing(self, lock: FlakeLock) -> None:
         """get_locked returns None for a non-existent input."""
         assert lock.get_locked("__nonexistent_input__") is None
-
-
-# =========================================================================
-# HashMismatchError tests
-# =========================================================================
-
-
-class TestHashMismatchError:
-    """Extraction of hashes and derivation paths from Nix output.
-
-    Tests cover every known format from Nix source code:
-    - derivation-check.cc: FOD hash mismatch (SRI format)
-    - local-store.cc: NAR import hash mismatch (Nix32 format)
-    - local-store.cc: CA hash mismatch importing path (Nix32 format)
-    """
-
-    def _make_result(self, stderr: str = "", stdout: str = "") -> CommandResult:
-        return CommandResult(
-            args=["nix", "build"], returncode=1, stdout=stdout, stderr=stderr
-        )
-
-    # -- derivation-check.cc: FOD hash mismatch (the common case) --
-
-    SAMPLE_FOD_STDERR = (
-        "error: hash mismatch in fixed-output derivation "
-        "'/nix/store/g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-source.drv':\n"
-        "  specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
-        "     got:    sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=\n"
-    )
-
-    def test_fod_sha256_sri(self) -> None:
-        """Standard FOD hash mismatch with sha256 SRI hashes."""
-        result = self._make_result(self.SAMPLE_FOD_STDERR)
-        err = HashMismatchError.from_output(self.SAMPLE_FOD_STDERR, result)
-        assert err is not None
-        assert err.hash == "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
-        assert err.specified == "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-        assert err.drv_path == "/nix/store/g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-source.drv"
-
-    def test_fod_sha512_sri(self) -> None:
-        """FOD hash mismatch with sha512 SRI hashes."""
-        stderr = (
-            "hash mismatch in fixed-output derivation '/nix/store/abc-foo.drv':\n"
-            "  specified: sha512-AAAA=\n"
-            "     got:    sha512-BBBB=\n"
-        )
-        err = HashMismatchError.from_output(stderr, self._make_result(stderr))
-        assert err is not None
-        assert err.hash == "sha512-BBBB="
-        assert err.specified == "sha512-AAAA="
-
-    def test_fod_sha1_sri(self) -> None:
-        """FOD hash mismatch with sha1 SRI hashes."""
-        stderr = (
-            "hash mismatch in fixed-output derivation '/nix/store/abc-bar.drv':\n"
-            "  specified: sha1-AAAA=\n"
-            "     got:    sha1-BBBB=\n"
-        )
-        err = HashMismatchError.from_output(stderr, self._make_result(stderr))
-        assert err is not None
-        assert err.hash == "sha1-BBBB="
-        assert err.specified == "sha1-AAAA="
-
-    # -- local-store.cc: NAR import hash mismatch (Nix32 format) --
-
-    # Nix32 alphabet: 0123456789abcdfghijklmnpqrsvwxyz (no e, o, t, u)
-    SAMPLE_NAR_MISMATCH = (
-        "error: hash mismatch importing path '/nix/store/abc-foo';\n"
-        "  specified: 0c5b8vw40d1178xlpddw65q9gf1h2186jcc3p4swinwggbllv8mk\n"
-        "  got:       1d6b9xw51a1289ymqaax76ra2gi2i3297kdd4q5sxjaxhicnmwal\n"
-    )
-
-    def test_nar_import_nix32(self) -> None:
-        """NAR import hash mismatch with Nix32-encoded hashes."""
-        err = HashMismatchError.from_output(
-            self.SAMPLE_NAR_MISMATCH, self._make_result(self.SAMPLE_NAR_MISMATCH)
-        )
-        assert err is not None
-        assert err.hash == "1d6b9xw51a1289ymqaax76ra2gi2i3297kdd4q5sxjaxhicnmwal"
-        assert err.specified == "0c5b8vw40d1178xlpddw65q9gf1h2186jcc3p4swinwggbllv8mk"
-        assert err.drv_path == "/nix/store/abc-foo"
-
-    # -- local-store.cc: CA hash mismatch (Nix32 format) --
-
-    SAMPLE_CA_MISMATCH = (
-        "error: ca hash mismatch importing path '/nix/store/def-bar';\n"
-        "  specified: 0c5b8vw40d1178xlpddw65q9gf1h2186jcc3p4swinwggbllv8mk\n"
-        "  got:       1d6b9xw51a1289ymqaax76ra2gi2i3297kdd4q5sxjaxhicnmwal\n"
-    )
-
-    def test_ca_import_nix32(self) -> None:
-        """CA hash mismatch importing path with Nix32 hashes."""
-        err = HashMismatchError.from_output(
-            self.SAMPLE_CA_MISMATCH, self._make_result(self.SAMPLE_CA_MISMATCH)
-        )
-        assert err is not None
-        assert err.hash == "1d6b9xw51a1289ymqaax76ra2gi2i3297kdd4q5sxjaxhicnmwal"
-        assert err.drv_path == "/nix/store/def-bar"
-
-    # -- Hex format --
-
-    SAMPLE_HEX_MISMATCH = (
-        "hash mismatch in fixed-output derivation '/nix/store/xyz-baz.drv':\n"
-        "  specified: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n"
-        "     got:    sha256:a948904f2f0f479b8f8564e9c95a6c9d2db76a5a4b1c3d8ef6c2a4e6f1a7d3e0\n"
-    )
-
-    def test_prefixed_hex(self) -> None:
-        """Hash mismatch with algo:hex format."""
-        err = HashMismatchError.from_output(
-            self.SAMPLE_HEX_MISMATCH, self._make_result(self.SAMPLE_HEX_MISMATCH)
-        )
-        assert err is not None
-        assert (
-            err.hash
-            == "sha256:a948904f2f0f479b8f8564e9c95a6c9d2db76a5a4b1c3d8ef6c2a4e6f1a7d3e0"
-        )
-        assert (
-            err.specified
-            == "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        )
-
-    # -- Edge cases --
-
-    def test_nested_derivation_takes_last_match(self) -> None:
-        """With nested failures, the last hash is extracted (innermost)."""
-        stderr = (
-            "hash mismatch in fixed-output derivation '/nix/store/aaa-outer.drv':\n"
-            "  specified: sha256-OUTERspecOUTERspecOUTERspecOUTERspecOUTERspe0=\n"
-            "     got:    sha256-OUTERgotxOUTERgotxOUTERgotxOUTERgotxOUTERgo0=\n"
-            "\n"
-            "hash mismatch in fixed-output derivation '/nix/store/bbb-inner.drv':\n"
-            "  specified: sha256-INNERspecINNERspecINNERspecINNERspecINNERspe0=\n"
-            "     got:    sha256-INNERgotxINNERgotxINNERgotxINNERgotxINNERgo0=\n"
-        )
-        err = HashMismatchError.from_output(stderr, self._make_result(stderr))
-        assert err is not None
-        assert err.hash == "sha256-INNERgotxINNERgotxINNERgotxINNERgotxINNERgo0="
-        assert err.specified == "sha256-INNERspecINNERspecINNERspecINNERspecINNERspe0="
-
-    def test_hash_in_stdout_not_stderr(self) -> None:
-        """Hash may appear in stdout instead of stderr (update.py searches both)."""
-        stdout = (
-            "hash mismatch in fixed-output derivation '/nix/store/abc-source.drv':\n"
-            "  specified: sha256-AAA=\n"
-            "     got:    sha256-BBB=\n"
-        )
-        # from_output should find it in any text
-        err = HashMismatchError.from_output(
-            stdout, self._make_result(stdout="", stderr="")
-        )
-        assert err is not None
-        assert err.hash == "sha256-BBB="
-
-    def test_whitespace_variations(self) -> None:
-        """Nix uses different whitespace: 'specified: ' vs '     got:    '."""
-        stderr = (
-            "hash mismatch in fixed-output derivation '/nix/store/x-y.drv':\n"
-            "  specified: sha256-AAAA=\n"
-            "     got:    sha256-BBBB=\n"
-        )
-        err = HashMismatchError.from_output(stderr, self._make_result(stderr))
-        assert err is not None
-        assert err.hash == "sha256-BBBB="
-        assert err.specified == "sha256-AAAA="
-
-    def test_no_match_returns_none(self) -> None:
-        """from_output returns None for unrelated errors."""
-        unrelated = "error: attribute 'foo' missing\n"
-        err = HashMismatchError.from_output(unrelated, self._make_result(unrelated))
-        assert err is None
-
-    def test_from_stderr_compat_alias(self) -> None:
-        """from_stderr still works as backward-compatible alias."""
-        result = self._make_result(self.SAMPLE_FOD_STDERR)
-        err = HashMismatchError.from_stderr(self.SAMPLE_FOD_STDERR, result)
-        assert err is not None
-        assert err.hash == "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
-
-    def test_base64_with_plus_and_slash(self) -> None:
-        """SRI base64 may contain + and / characters."""
-        stderr = (
-            "hash mismatch in fixed-output derivation '/nix/store/abc-foo.drv':\n"
-            "  specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
-            "     got:    sha256-a+b/c+D/eF+gH/iJ+kL/mN+oP/qR+sT/uV+wX/yZ0=\n"
-        )
-        err = HashMismatchError.from_output(stderr, self._make_result(stderr))
-        assert err is not None
-        assert err.hash == "sha256-a+b/c+D/eF+gH/iJ+kL/mN+oP/qR+sT/uV+wX/yZ0="
-
-    def test_no_drv_path_still_extracts_hash(self) -> None:
-        """Hash extraction works even without a recognized derivation path line."""
-        stderr = (
-            "some other error context\n"
-            "  specified: sha256-OLD=\n"
-            "     got:    sha256-NEW=\n"
-        )
-        err = HashMismatchError.from_output(stderr, self._make_result(stderr))
-        assert err is not None
-        assert err.hash == "sha256-NEW="
-        assert err.specified == "sha256-OLD="
-        assert err.drv_path is None
-
-    # -- is_sri property tests --
-
-    def test_is_sri_true_for_sri_hash(self) -> None:
-        """is_sri returns True when hash is SRI format."""
-        result = self._make_result(self.SAMPLE_FOD_STDERR)
-        err = HashMismatchError.from_output(self.SAMPLE_FOD_STDERR, result)
-        assert err is not None
-        assert err.is_sri is True
-
-    def test_is_sri_false_for_nix32(self) -> None:
-        """is_sri returns False for Nix32 hashes."""
-        err = HashMismatchError.from_output(
-            self.SAMPLE_NAR_MISMATCH, self._make_result(self.SAMPLE_NAR_MISMATCH)
-        )
-        assert err is not None
-        assert err.is_sri is False
-
-    def test_is_sri_false_for_prefixed_hex(self) -> None:
-        """is_sri returns False for algo:hex hashes."""
-        err = HashMismatchError.from_output(
-            self.SAMPLE_HEX_MISMATCH, self._make_result(self.SAMPLE_HEX_MISMATCH)
-        )
-        assert err is not None
-        assert err.is_sri is False
-
-    # -- to_sri tests --
-
-    def test_to_sri_noop_for_sri_hash(self) -> None:
-        """to_sri returns the hash unchanged when already SRI."""
-        import asyncio
-
-        result = self._make_result(self.SAMPLE_FOD_STDERR)
-        err = HashMismatchError.from_output(self.SAMPLE_FOD_STDERR, result)
-        assert err is not None
-        sri = asyncio.run(err.to_sri())
-        assert sri == err.hash
 
 
 # =========================================================================

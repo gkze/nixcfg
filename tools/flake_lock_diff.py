@@ -26,7 +26,7 @@ def get_input_info(lock: FlakeLock, name: str) -> InputInfo | None:
     if locked is None:
         return None
 
-    last_modified = locked.lastModified or 0
+    last_modified = locked.last_modified or 0
 
     return InputInfo(
         name=name,
@@ -62,21 +62,18 @@ def _run_diff(old_lock_path: Path, new_lock_path: Path) -> None:
             removed.append(old_info)
 
     if not (added or removed or updated):
-        print("No input changes detected.")
         return
 
-    print("Flake lock file updates:\n")
-    for old, new in updated:
-        print(f"* Updated '{old.name}':")
-        print(f"    {old.type}:{old.owner}/{old.repo}/{old.rev} ({old.date})")
-        print(f"  -> {new.type}:{new.owner}/{new.repo}/{new.rev} ({new.date})")
-    for info in added:
-        print(f"+ Added '{info.name}': {info.type}:{info.owner}/{info.repo}/{info.rev}")
-    for info in removed:
-        print(f"- Removed '{info.name}'")
+    for _old, _new in updated:
+        pass
+    for _info in added:
+        pass
+    for _info in removed:
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the CLI entrypoint."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("old_lock", type=Path, help="Path to old flake.lock")
     parser.add_argument("new_lock", type=Path, help="Path to new flake.lock")

@@ -18,7 +18,41 @@ _BUILD_RESULT_LIST = TypeAdapter(list[BuildResult])
 _RE_DRV_PATH = re.compile(r"(/nix/store/[a-z0-9]{32}-[^\s]+\.drv)\b")
 
 
-async def nix_build(
+def _build_command_args(  # noqa: PLR0913
+    *,
+    expr: str | None,
+    installable: str | None,
+    impure: bool,
+    no_link: bool,
+    json_output: bool,
+    extra_args: list[str] | None,
+) -> list[str]:
+    if (expr is None and installable is None) or (
+        expr is not None and installable is not None
+    ):
+        msg = "Provide exactly one of expr or installable"
+        raise ValueError(msg)
+
+    args: list[str] = ["nix", "build"]
+    if json_output:
+        args.append("--json")
+    if impure:
+        args.append("--impure")
+    if no_link:
+        args.append("--no-link")
+
+    if expr is not None:
+        args.extend(["--expr", expr])
+    elif installable is not None:
+        args.append(installable)
+
+    if extra_args:
+        args.extend(extra_args)
+
+    return args
+
+
+async def nix_build(  # noqa: PLR0913
     expr: str | None = None,
     installable: str | None = None,
     *,
@@ -26,7 +60,7 @@ async def nix_build(
     no_link: bool = True,
     json_output: bool = True,
     extra_args: list[str] | None = None,
-    timeout: float = 1200.0,
+    timeout: float = 1200.0,  # noqa: ASYNC109
 ) -> list[BuildResult]:
     """Run ``nix build`` and return parsed build results.
 
@@ -61,31 +95,16 @@ async def nix_build(
         A fixed-output derivation reported a hash mismatch.
     NixCommandError
         The build failed for any other reason.
+
     """
-    if (expr is None and installable is None) or (
-        expr is not None and installable is not None
-    ):
-        msg = "Provide exactly one of expr or installable"
-        raise ValueError(msg)
-    args: list[str] = ["nix", "build"]
-
-    if json_output:
-        args.append("--json")
-    if impure:
-        args.append("--impure")
-    if no_link:
-        args.append("--no-link")
-
-    if expr is not None:
-        args.extend(["--expr", expr])
-    else:
-        if installable is None:
-            msg = "installable is required when expr is None"
-            raise ValueError(msg)
-        args.append(installable)
-
-    if extra_args:
-        args.extend(extra_args)
+    args = _build_command_args(
+        expr=expr,
+        installable=installable,
+        impure=impure,
+        no_link=no_link,
+        json_output=json_output,
+        extra_args=extra_args,
+    )
 
     result = await run_nix(args, check=False, timeout=timeout)
 
@@ -106,7 +125,7 @@ async def nix_build_dry_run(
     installable: str,
     *,
     impure: bool = True,
-    timeout: float = 300.0,
+    timeout: float = 300.0,  # noqa: ASYNC109
 ) -> set[str]:
     """Run ``nix build --dry-run`` and return derivations that would be built.
 
@@ -129,6 +148,7 @@ async def nix_build_dry_run(
     ------
     NixCommandError
         The dry-run failed.
+
     """
     args = ["nix", "build", installable, "--dry-run"]
     if impure:

@@ -1,3 +1,5 @@
+"""Nix-based hash computation helpers for updater implementations."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,27 +8,27 @@ import platform
 import re
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import aiohttp
 from filelock import FileLock
 
+from libnix.commands.base import CommandResult as LibnixResult
 from libnix.commands.base import HashMismatchError
 from libnix.models.hash import is_sri
 from libnix.models.sources import HashCollection, HashEntry, SourceEntry, SourcesFile
-from libnix.update.events import (
+from update.config import UpdateConfig, _resolve_active_config
+from update.constants import FIXED_OUTPUT_NOISE
+from update.events import (
+    CapturedValue,
     CommandResult,
     EventStream,
     GatheredValues,
     UpdateEvent,
     UpdateEventKind,
-    ValueDrain,
-    _require_value,
-    drain_value_events,
+    capture_stream_value,
     gather_event_streams,
 )
-from update.config import UpdateConfig, _resolve_active_config
-from update.constants import FIXED_OUTPUT_NOISE
 from update.flake import get_flake_input_node, nixpkgs_expr
 from update.net import fetch_url
 from update.paths import SOURCES_FILE, get_repo_file
@@ -39,6 +41,7 @@ if TYPE_CHECKING:
 
 
 def get_current_nix_platform() -> str:
+    """Return the current machine as a Nix platform string."""
     machine = platform.machine()
     system = platform.system().lower()
 
@@ -61,8 +64,6 @@ def _extract_nix_hash(output: str, *, config: UpdateConfig | None = None) -> str
     Delegates to :class:`libnix.commands.base.HashMismatchError` for the
     actual regex matching (single source of truth for all hash formats).
     """
-    from libnix.commands.base import CommandResult as LibnixResult
-
     dummy = LibnixResult(args=[], returncode=1, stdout="", stderr=output)
     err = HashMismatchError.from_output(output, dummy)
     if err is not None:
@@ -102,7 +103,10 @@ def _compact_nix_expr(expr: str) -> str:
 
 
 async def _emit_sri_hash_from_build_result(
-    source: str, result: CommandResult, *, config: UpdateConfig | None = None
+    source: str,
+    result: CommandResult,
+    *,
+    config: UpdateConfig | None = None,
 ) -> EventStream:
     hash_value = _extract_nix_hash(result.stderr + result.stdout, config=config)
     if is_sri(hash_value):
@@ -112,7 +116,7 @@ async def _emit_sri_hash_from_build_result(
         yield event
 
 
-async def _run_fixed_output_build(
+async def _run_fixed_output_build(  # noqa: PLR0913
     source: str,
     expr: str,
     *,
@@ -123,8 +127,8 @@ async def _run_fixed_output_build(
     success_error: str,
     config: UpdateConfig | None = None,
 ) -> EventStream:
-    result_drain = ValueDrain[CommandResult]()
-    async for event in drain_value_events(
+    result: CommandResult | None = None
+    async for item in capture_stream_value(
         run_nix_build(
             source,
             expr,
@@ -134,10 +138,15 @@ async def _run_fixed_output_build(
             verbose=verbose,
             config=config,
         ),
-        result_drain,
+        error="nix build did not return output",
     ):
-        yield event
-    result = _require_value(result_drain, "nix build did not return output")
+        if isinstance(item, CapturedValue):
+            result = cast("CommandResult", item.captured)
+        else:
+            yield item
+    if result is None:
+        msg = "nix build did not return output"
+        raise RuntimeError(msg)
     if result.returncode == 0:
         raise RuntimeError(success_error)
     yield UpdateEvent.value(source, result)
@@ -172,12 +181,13 @@ async def compute_fixed_output_hash(
     env: Mapping[str, str] | None = None,
     config: UpdateConfig | None = None,
 ) -> EventStream:
+    """Compute an SRI hash by extracting nix fixed-output mismatch output."""
     config = _resolve_active_config(config)
     expr = _compact_nix_expr(expr)
     semaphore = _get_nix_build_semaphore(config)
     async with semaphore:
-        result_drain = ValueDrain[CommandResult]()
-        async for event in drain_value_events(
+        result: CommandResult | None = None
+        async for item in capture_stream_value(
             _run_fixed_output_build(
                 source,
                 expr,
@@ -188,12 +198,19 @@ async def compute_fixed_output_hash(
                 env=env,
                 config=config,
             ),
-            result_drain,
+            error="nix build did not return output",
         ):
-            yield event
-        result = _require_value(result_drain, "nix build did not return output")
+            if isinstance(item, CapturedValue):
+                result = cast("CommandResult", item.captured)
+            else:
+                yield item
+        if result is None:
+            msg = "nix build did not return output"
+            raise RuntimeError(msg)
         async for event in _emit_sri_hash_from_build_result(
-            source, result, config=config
+            source,
+            result,
+            config=config,
         ):
             yield event
 
@@ -215,7 +232,7 @@ def _build_overlay_expr(source: str, *, system: str | None = None) -> str:
         f"pkgs = import flake.inputs.nixpkgs {{ system = {system_arg}; "
         f"config = {{ allowUnfree = true; allowInsecurePredicate = _: true; }}; "
         f"overlays = [ flake.overlays.default ]; }}; "
-        f'in pkgs."{source}"'
+        f'in pkgs."{source}"',
     )
 
 
@@ -267,14 +284,15 @@ def _build_deno_hash_entries(
             hash_value = fake_hash
         else:
             hash_value = computed_hashes.get(platform_name) or existing_hashes.get(
-                platform_name, fake_hash
+                platform_name,
+                fake_hash,
             )
         entries.append(
             HashEntry.create(
                 "denoDepsHash",
                 hash_value,
                 platform=platform_name,
-            )
+            ),
         )
     return entries
 
@@ -290,7 +308,7 @@ def _build_deno_temp_sources(
     hash_collection = HashCollection.from_value(entries)
     if original_entry is not None:
         temp_entry = original_entry.model_copy(
-            update={"hashes": hash_collection, "input": input_name}
+            update={"hashes": hash_collection, "input": input_name},
         )
     else:
         temp_entry = SourceEntry(hashes=hash_collection, input=input_name)
@@ -304,7 +322,7 @@ async def compute_go_vendor_hash(
     _input_name: str = "",
     *,
     config: UpdateConfig | None = None,
-    **_kwargs: Any,
+    **_kwargs: object,
 ) -> EventStream:
     """Compute Go vendor hash via overlay with ``FAKE_HASHES=1``."""
     async for event in compute_overlay_hash(source, config=config):
@@ -316,7 +334,7 @@ async def compute_cargo_vendor_hash(
     _input_name: str = "",
     *,
     config: UpdateConfig | None = None,
-    **_kwargs: Any,
+    **_kwargs: object,
 ) -> EventStream:
     """Compute Cargo vendor hash via overlay with ``FAKE_HASHES=1``."""
     async for event in compute_overlay_hash(source, config=config):
@@ -342,17 +360,19 @@ async def compute_bun_node_modules_hash(
 ) -> EventStream:
     """Compute bun node_modules hash via overlay with ``FAKE_HASHES=1``."""
     async for event in compute_overlay_hash(
-        source, system=get_current_nix_platform(), config=config
+        source,
+        system=get_current_nix_platform(),
+        config=config,
     ):
         yield event
 
 
 _CARGO_LOCK_GIT_SOURCE_RE = re.compile(
-    r'^source = "git\+(?P<url>[^?#]+)\?[^#]*#(?P<commit>[0-9a-f]+)"$'
+    r'^source = "git\+(?P<url>[^?#]+)\?[^#]*#(?P<commit>[0-9a-f]+)"$',
 )
 
 
-def _parse_cargo_lock_git_sources(
+def _parse_cargo_lock_git_sources(  # noqa: C901
     lockfile_content: str,
     git_deps: list[CargoLockGitDep],
 ) -> dict[str, tuple[str, str]]:
@@ -364,6 +384,18 @@ def _parse_cargo_lock_git_sources(
     """
     result: dict[str, tuple[str, str]] = {}
     unmatched = {dep.git_dep: dep for dep in git_deps}
+
+    def _select_dep(dep_key: str, crate_name: str) -> CargoLockGitDep | None:
+        direct = unmatched.get(dep_key)
+        if direct is not None:
+            return direct
+        prefix_matches = [
+            dep for dep in unmatched.values() if crate_name.startswith(dep.match_name)
+        ]
+        if len(prefix_matches) == 1:
+            return prefix_matches[0]
+        return None
+
     current_name: str | None = None
     current_version: str | None = None
 
@@ -382,9 +414,10 @@ def _parse_cargo_lock_git_sources(
             dep_key = (
                 f"{current_name}-{current_version}" if current_version else current_name
             )
-            if dep_key in unmatched:
-                result[dep_key] = (url, commit)
-                del unmatched[dep_key]
+            selected = _select_dep(dep_key, current_name)
+            if selected is not None:
+                result[selected.git_dep] = (url, commit)
+                del unmatched[selected.git_dep]
 
     if unmatched:
         msg = f"Could not find git sources in Cargo.lock for: {list(unmatched)}"
@@ -403,15 +436,23 @@ async def _prefetch_git_hash(
     config = _resolve_active_config(config)
     expr = f'(builtins.fetchGit {{ url = "{url}"; rev = "{rev}"; allRefs = true; }}).narHash'
     args = ["nix", "eval", "--json", "--expr", expr]
-    result_drain = ValueDrain[CommandResult]()
-    async for event in drain_value_events(
+    result: CommandResult | None = None
+    async for item in capture_stream_value(
         run_command(
-            args, source=source, error="builtins.fetchGit failed", config=config
+            args,
+            source=source,
+            error="builtins.fetchGit failed",
+            config=config,
         ),
-        result_drain,
+        error="builtins.fetchGit did not return output",
     ):
-        yield event
-    result = _require_value(result_drain, "builtins.fetchGit did not return output")
+        if isinstance(item, CapturedValue):
+            result = cast("CommandResult", item.captured)
+        else:
+            yield item
+    if result is None:
+        msg = "builtins.fetchGit did not return output"
+        raise RuntimeError(msg)
     if result.returncode != 0:
         msg = f"builtins.fetchGit failed:\n{result.stderr}"
         raise RuntimeError(msg)
@@ -426,7 +467,6 @@ async def compute_import_cargo_lock_output_hashes(
     source: str,
     input_name: str,
     *,
-    package_attr: str,  # noqa: ARG001 — reserved for future use
     lockfile_path: str,
     git_deps: list[CargoLockGitDep],
     config: UpdateConfig | None = None,
@@ -459,7 +499,7 @@ async def compute_import_cargo_lock_output_hashes(
         payload = await fetch_url(
             session,
             lockfile_url,
-            timeout=config.default_timeout,
+            request_timeout=config.default_timeout,
             config=config,
             user_agent=config.default_user_agent,
         )
@@ -469,7 +509,9 @@ async def compute_import_cargo_lock_output_hashes(
 
     streams = {
         dep.git_dep: _prefetch_git_hash(
-            source, *git_sources[dep.git_dep], config=config
+            source,
+            *git_sources[dep.git_dep],
+            config=config,
         )
         for dep in git_deps
     }
@@ -489,11 +531,11 @@ async def _compute_deno_deps_hash_for_platform(
     config: UpdateConfig | None = None,
 ) -> EventStream:
     expr = _build_deno_deps_expr(source, platform)
-    result_drain = ValueDrain[CommandResult]()
+    result: CommandResult | None = None
     command_env = None
     if sources_path is not None:
         command_env = {"SOURCES_JSON": str(sources_path)}
-    async for event in drain_value_events(
+    async for item in capture_stream_value(
         _run_fixed_output_build(
             f"{source}:{platform}",
             expr,
@@ -503,34 +545,46 @@ async def _compute_deno_deps_hash_for_platform(
             ),
             config=config,
         ),
-        result_drain,
+        error="nix build did not return output",
     ):
-        yield event
-    result = _require_value(result_drain, "nix build did not return output")
-    hash_drain = ValueDrain[str]()
-    async for event in drain_value_events(
-        _emit_sri_hash_from_build_result(source, result, config=config), hash_drain
+        if isinstance(item, CapturedValue):
+            result = cast("CommandResult", item.captured)
+        else:
+            yield item
+    if result is None:
+        msg = "nix build did not return output"
+        raise RuntimeError(msg)
+    hash_value: str | None = None
+    async for item in capture_stream_value(
+        _emit_sri_hash_from_build_result(source, result, config=config),
+        error="Hash conversion failed",
     ):
-        yield event
-    hash_value = _require_value(hash_drain, "Hash conversion failed")
+        if isinstance(item, CapturedValue):
+            hash_value = cast("str", item.captured)
+        else:
+            yield item
+    if hash_value is None:
+        msg = "Hash conversion failed"
+        raise RuntimeError(msg)
     yield UpdateEvent.value(source, (platform, hash_value))
 
 
 def _try_platform_hash_event(event: UpdateEvent) -> tuple[str, str] | None:
+    expected_tuple_items = 2
     if event.kind != UpdateEventKind.VALUE:
         return None
     payload = event.payload
     if (
         isinstance(payload, tuple)
-        and len(payload) == 2
+        and len(payload) == expected_tuple_items
         and isinstance(payload[0], str)
         and isinstance(payload[1], str)
     ):
-        return payload
+        return cast("tuple[str, str]", payload)
     return None
 
 
-async def compute_deno_deps_hash(
+async def compute_deno_deps_hash(  # noqa: C901, PLR0912
     source: str,
     input_name: str,
     *,
@@ -538,6 +592,7 @@ async def compute_deno_deps_hash(
     sources_path: Path | None = None,
     config: UpdateConfig | None = None,
 ) -> EventStream:
+    """Compute Deno dependency hashes across configured platforms."""
     config = _resolve_active_config(config)
     current_platform = get_current_nix_platform()
     platforms = config.deno_deps_platforms
@@ -575,7 +630,8 @@ async def compute_deno_deps_hash(
 
             for platform_name in platforms_to_compute:
                 yield UpdateEvent.status(
-                    source, f"Computing hash for {platform_name}..."
+                    source,
+                    f"Computing hash for {platform_name}...",
                 )
 
                 temp_entries = _build_deno_hash_entries(

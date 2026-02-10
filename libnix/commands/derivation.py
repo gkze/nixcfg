@@ -1,24 +1,21 @@
 """Typed wrapper for `nix derivation show`."""
 
-import json
-
 from libnix.models.derivation import Derivation
 
-from .base import run_nix
+from ._json import as_model_mapping, run_nix_json
 
 
 async def nix_derivation_show(
     installable: str,
     *,
-    timeout: float = 60.0,
+    timeout: float = 60.0,  # noqa: ASYNC109
 ) -> dict[str, Derivation]:
     """Show derivation information (always JSON output).
 
     Returns a dict mapping derivation store paths to Derivation models.
     """
-    result = await run_nix(
+    raw = await run_nix_json(
         ["nix", "derivation", "show", installable],
         timeout=timeout,
     )
-    raw = json.loads(result.stdout)
-    return {path: Derivation.model_validate(drv) for path, drv in raw.items()}
+    return as_model_mapping(raw, Derivation)

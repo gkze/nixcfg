@@ -8,7 +8,7 @@ single ``DerivationOutput`` model with optional fields.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DerivationOutput(BaseModel):
@@ -32,7 +32,7 @@ class DerivationOutput(BaseModel):
     method: str | None = None
     """Content-addressing method (``flat``, ``nar``, ``text``, ``git``)."""
 
-    hashAlgo: str | None = None
+    hash_algo: str | None = Field(default=None, alias="hashAlgo")
     """Hash algorithm for floating CA or impure outputs."""
 
     hash: str | None = None
@@ -51,10 +51,10 @@ class DerivationInputs(BaseModel):
     names (or a richer ``Drvs`` object with ``dynamicOutputs``).
     """
 
-    srcs: list[str] = []
+    srcs: list[str] = Field(default_factory=list)
     """Input source store paths (non-derivation dependencies)."""
 
-    drvs: dict[str, list[str] | dict[str, Any]] = {}
+    drvs: dict[str, list[str] | dict[str, Any]] = Field(default_factory=dict)
     """Input derivation paths mapped to requested output names.
 
     Values are typically ``list[str]`` (output names), but may be a dict
@@ -72,7 +72,7 @@ class Derivation(BaseModel):
     schema revisions.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     name: str
     """Derivation name, used when computing output store paths."""
@@ -92,13 +92,16 @@ class Derivation(BaseModel):
     builder: str
     """Absolute path to the builder executable."""
 
-    args: list[str] = []
+    args: list[str] = Field(default_factory=list)
     """Command-line arguments passed to the builder."""
 
-    env: dict[str, str] = {}
+    env: dict[str, str] = Field(default_factory=dict)
     """Environment variables passed to the builder."""
 
-    structuredAttrs: dict[str, Any] | None = None
+    structured_attrs: dict[str, Any] | None = Field(
+        default=None,
+        alias="structuredAttrs",
+    )
     """Structured attributes, if the derivation uses them."""
 
     # -- helpers -------------------------------------------------------------

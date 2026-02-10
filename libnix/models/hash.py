@@ -56,6 +56,7 @@ def parse_sri(sri: str) -> tuple[HashAlgorithm, str]:
 
     Raises:
         ValueError: If *sri* does not match the expected SRI pattern.
+
     """
     if not _SRI_RE.match(sri):
         msg = f"invalid SRI hash: {sri!r} (expected pattern {_SRI_PATTERN})"
@@ -87,6 +88,7 @@ def make_sri(algorithm: HashAlgorithm, digest_b64: str) -> NixHash:
 
     Raises:
         ValueError: If the resulting string does not match the expected SRI pattern.
+
     """
     sri = f"{algorithm}-{digest_b64}"
     if not _SRI_RE.match(sri):

@@ -8,7 +8,7 @@ async def nix_hash_convert(
     *,
     hash_algo: str = "sha256",
     to: str = "sri",
-    timeout: float = 30.0,
+    timeout: float = 30.0,  # noqa: ASYNC109
 ) -> str:
     """Convert a hash to the specified representation (SRI by default)."""
     result = await run_nix(
@@ -22,7 +22,7 @@ async def nix_prefetch_url(
     url: str,
     *,
     hash_type: str = "sha256",
-    timeout: float = 300.0,
+    timeout: float = 300.0,  # noqa: ASYNC109
 ) -> str:
     """Download a URL and return its SRI hash."""
     result = await run_nix(

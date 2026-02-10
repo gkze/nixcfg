@@ -9,7 +9,7 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -55,6 +55,8 @@ HashType = Literal[
 
 
 class HashEntry(BaseModel):
+    """A single structured hash entry in ``sources.json``."""
+
     model_config = ConfigDict(
         populate_by_name=True,
         extra="forbid",
@@ -66,16 +68,18 @@ class HashEntry(BaseModel):
     url: str | None = None
     urls: dict[str, str] | None = None
     git_dep: str | None = Field(
-        default=None, alias="gitDep"
+        default=None,
+        alias="gitDep",
     )  # Git dependency name (for importCargoLock)
 
     @field_validator("hash")
     @classmethod
     def validate_hash(cls, v: str) -> str:
+        """Validate hash values are sha256 SRI strings."""
         return _validate_sri_hash(v)
 
     @classmethod
-    def create(
+    def create(  # noqa: PLR0913
         cls,
         hash_type: HashType,
         hash_value: str,
@@ -85,16 +89,20 @@ class HashEntry(BaseModel):
         url: str | None = None,
         urls: dict[str, str] | None = None,
     ) -> HashEntry:
-        return cls(
-            gitDep=git_dep,
-            hashType=hash_type,
-            hash=hash_value,
-            platform=platform,
-            url=url,
-            urls=urls,
+        """Build a validated hash entry from plain values."""
+        return cls.model_validate(
+            {
+                "gitDep": git_dep,
+                "hashType": hash_type,
+                "hash": hash_value,
+                "platform": platform,
+                "url": url,
+                "urls": urls,
+            },
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """Return this entry as a stable, JSON-serializable mapping."""
         return dict(
             sorted(
                 {
@@ -108,8 +116,8 @@ class HashEntry(BaseModel):
                         "urls": self.urls,
                     }.items()
                     if v is not None
-                }.items()
-            )
+                }.items(),
+            ),
         )
 
 
@@ -127,6 +135,8 @@ type SourceHashes = HashMapping | HashEntries
 
 
 class HashCollection(BaseModel):
+    """Either a list of hash entries or a platform-to-hash mapping."""
+
     model_config = ConfigDict(extra="forbid")
 
     entries: HashEntries | None = None
@@ -134,13 +144,18 @@ class HashCollection(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def parse_input(cls, data: Any) -> dict[str, Any]:
+    def parse_input(cls, data: object) -> dict[str, object]:
+        """Normalize list/dict input into the model's internal shape."""
         if isinstance(data, dict):
+            data_dict = cast("dict[str, object]", data)
             if "entries" in data or "mapping" in data:
-                return data
-            for hash_value in data.values():
+                return data_dict
+            for hash_value in data_dict.values():
+                if not isinstance(hash_value, str):
+                    msg = "Hash mapping values must be strings"
+                    raise TypeError(msg)
                 _validate_sri_hash(hash_value)
-            return {"mapping": data}
+            return {"mapping": cast("HashMapping", data_dict)}
         if isinstance(data, list):
             return {"entries": data}
         if isinstance(data, HashCollection):
@@ -149,6 +164,7 @@ class HashCollection(BaseModel):
         raise ValueError(msg)
 
     def to_json(self) -> dict[str, Any] | list[dict[str, Any]]:
+        """Return hashes in their canonical JSON representation."""
         if self.entries is not None:
             return [entry.to_dict() for entry in self.entries]
         if self.mapping is not None:
@@ -156,6 +172,7 @@ class HashCollection(BaseModel):
         return {}
 
     def primary_hash(self) -> str | None:
+        """Return the single effective hash when one can be inferred."""
         if self.entries and len(self.entries) == 1:
             return self.entries[0].hash
         if self.mapping:
@@ -166,6 +183,7 @@ class HashCollection(BaseModel):
 
     @classmethod
     def from_value(cls, data: SourceHashes) -> HashCollection:
+        """Create a collection from either accepted hash representation."""
         return cls.model_validate(data)
 
     FAKE_HASH_PREFIX: ClassVar[str] = os.environ.get(
@@ -226,6 +244,8 @@ class HashCollection(BaseModel):
 
 
 class SourceEntry(BaseModel):
+    """A package source entry containing hashes and source metadata."""
+
     model_config = ConfigDict(
         populate_by_name=True,
         extra="forbid",
@@ -238,6 +258,7 @@ class SourceEntry(BaseModel):
     commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
 
     def to_dict(self) -> dict[str, Any]:
+        """Return this source entry as a stable, JSON-serializable mapping."""
         return dict(
             sorted(
                 {
@@ -250,8 +271,8 @@ class SourceEntry(BaseModel):
                         "version": self.version,
                     }.items()
                     if v is not None
-                }.items()
-            )
+                }.items(),
+            ),
         )
 
     def merge(self, other: SourceEntry) -> SourceEntry:
@@ -275,12 +296,15 @@ class SourceEntry(BaseModel):
 
 
 class SourcesFile(BaseModel):
+    """In-memory representation of the top-level ``sources.json`` file."""
+
     model_config = ConfigDict(extra="forbid")
 
     entries: dict[str, SourceEntry]
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SourcesFile:
+        """Parse raw ``sources.json`` data into typed source entries."""
         entries = {}
         for name, entry in data.items():
             if name == "$schema":
@@ -290,11 +314,13 @@ class SourcesFile(BaseModel):
 
     @classmethod
     def load(cls, path: Path) -> SourcesFile:
+        """Load ``sources.json`` from *path*, returning an empty file if missing."""
         if not path.exists():
             return cls(entries={})
         return cls.from_dict(json.loads(path.read_text()))
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize all entries to plain Python objects."""
         return {name: entry.to_dict() for name, entry in self.entries.items()}
 
     def merge(self, other: SourcesFile) -> SourcesFile:
@@ -308,6 +334,7 @@ class SourcesFile(BaseModel):
         return SourcesFile(entries=merged)
 
     def save(self, path: Path) -> None:
+        """Atomically write the file contents to *path*."""
         data = self.to_dict()
         payload = json.dumps(data, indent=2, sort_keys=True) + "\n"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -335,6 +362,7 @@ class SourcesFile(BaseModel):
 
     @classmethod
     def json_schema(cls) -> dict[str, Any]:
+        """Return the JSON schema for the top-level ``sources.json`` object."""
         entry_schema = SourceEntry.model_json_schema()
         defs = dict(entry_schema.get("$defs", {}))
 

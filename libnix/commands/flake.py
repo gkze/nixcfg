@@ -1,33 +1,33 @@
 """High-level async wrappers for ``nix flake`` subcommands."""
 
-import json
-from typing import Any
+from typing import Any, cast
 
+from ._json import run_nix_json
 from .base import run_nix
 
 
 async def nix_flake_metadata(
     flake_ref: str = ".",
     *,
-    timeout: float = 60.0,
+    timeout: float = 60.0,  # noqa: ASYNC109
 ) -> dict[str, Any]:
     """Return parsed JSON metadata for a flake.
 
     Runs ``nix flake metadata --json <flake_ref>`` and returns the
     deserialised dictionary containing locked refs, revision info, etc.
     """
-    result = await run_nix(
+    raw = await run_nix_json(
         ["nix", "flake", "metadata", "--json", flake_ref],
         timeout=timeout,
     )
-    return json.loads(result.stdout)
+    return cast("dict[str, Any]", raw)
 
 
 async def nix_flake_lock_update(
     input_name: str,
     *,
     flake_ref: str = ".",
-    timeout: float = 300.0,
+    timeout: float = 300.0,  # noqa: ASYNC109
 ) -> None:
     """Update a single flake input in the lock file.
 
@@ -44,15 +44,15 @@ async def nix_flake_lock_update(
 async def nix_flake_show(
     flake_ref: str = ".",
     *,
-    timeout: float = 60.0,
+    timeout: float = 60.0,  # noqa: ASYNC109
 ) -> dict[str, Any]:
     """Return the parsed JSON output tree of a flake.
 
     Runs ``nix flake show --json <flake_ref>`` and returns the
     deserialised dictionary describing all outputs.
     """
-    result = await run_nix(
+    raw = await run_nix_json(
         ["nix", "flake", "show", "--json", flake_ref],
         timeout=timeout,
     )
-    return json.loads(result.stdout)
+    return cast("dict[str, Any]", raw)

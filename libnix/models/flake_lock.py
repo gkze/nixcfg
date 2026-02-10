@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # Source reference models
@@ -21,18 +21,18 @@ class LockedRef(BaseModel):
     fields Nix may add for less common source types.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     type: str
     """Source type: ``github``, ``gitlab``, ``git``, ``path``, ``tarball``, etc."""
 
-    narHash: str
+    nar_hash: str = Field(alias="narHash")
     """SRI content hash of the fetched source (e.g. ``sha256-...``)."""
 
     rev: str | None = None
     """Git revision (full SHA-1 hex digest)."""
 
-    lastModified: int | None = None
+    last_modified: int | None = Field(default=None, alias="lastModified")
     """Unix timestamp of the locked commit or file."""
 
     owner: str | None = None
@@ -50,7 +50,7 @@ class LockedRef(BaseModel):
     path: str | None = None
     """Filesystem path (path type)."""
 
-    revCount: int | None = None
+    rev_count: int | None = Field(default=None, alias="revCount")
     """Number of ancestor commits (set by some fetchers)."""
 
 
@@ -172,39 +172,39 @@ class FlakeLock(BaseModel):
         Returns ``None`` when the input or its target node has no ``locked``
         field.
         """
+        node_name = self._resolve_target_node_name(input_name)
+        if node_name is None:
+            return None
+        final = self.nodes.get(node_name)
+        if final is None:
+            return None
+        return final.locked
+
+    def _resolve_target_node_name(self, input_name: str) -> str | None:
         inputs = self.root_node.inputs
         if inputs is None or input_name not in inputs:
             return None
 
         target = inputs[input_name]
-
         if isinstance(target, str):
-            node = self.nodes.get(target)
-            return node.locked if node else None
+            return target
 
-        # Follow a path like ["nixvim", "nixpkgs"] through the graph.
         node_name: str | None = None
         for i, segment in enumerate(target):
             if i == 0:
-                # First segment is a node name in the top-level nodes dict.
                 node_name = segment
-            else:
-                # Subsequent segments walk through the node's inputs.
-                node = self.nodes.get(node_name)  # type: ignore[arg-type]
-                if node is None or node.inputs is None:
-                    return None
-                ref = node.inputs.get(segment)
-                if ref is None:
-                    return None
-                # The intermediate value can itself be a string or a list;
-                # for simplicity we only support the common string case here.
-                if isinstance(ref, str):
-                    node_name = ref
-                else:
-                    # Nested list indirection — unlikely but bail gracefully.
-                    return None
+                continue
 
-        if node_name is None:
-            return None
-        final = self.nodes.get(node_name)
-        return final.locked if final else None
+            if node_name is None:
+                return None
+
+            node = self.nodes.get(node_name)
+            if node is None or node.inputs is None:
+                return None
+
+            ref = node.inputs.get(segment)
+            if not isinstance(ref, str):
+                return None
+            node_name = ref
+
+        return node_name
