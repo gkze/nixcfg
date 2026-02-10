@@ -250,24 +250,41 @@ jobs:
           git show HEAD:flake.lock > /tmp/old-flake.lock
           flake_diff=$(uv run python -m tools.flake_lock_diff /tmp/old-flake.lock flake.lock)
 
-          # Generate sources.json diff if it changed
-          sources_diff=""
-          if ! git diff --quiet HEAD -- sources.json 2>/dev/null; then
-            git show HEAD:sources.json > /tmp/old-sources.json
-            sources_diff=$(uv run python -m tools.sources_json_diff /tmp/old-sources.json sources.json)
-          fi
-
           # Handle multiline output for GitHub Actions
           {
             echo 'body<<EOF'
             echo "$flake_diff"
-            if [ -n "$sources_diff" ]; then
-              echo ""
-              echo "$sources_diff"
-            fi
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
+      - name: Generate sources.json Graphtage diff
+        id: sources_diff
+        run: |
+          if git diff --quiet HEAD -- sources.json 2>/dev/null; then
+            {
+              echo "has_sources_diff=false"
+              echo "comment_file="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git show HEAD:sources.json > /tmp/old-sources.json
+          uv run --with graphtage python -m tools.sources_json_diff /tmp/old-sources.json sources.json > /tmp/sources-diff.txt
+
+          {
+            echo "### sources.json Diff (Graphtage)"
+            echo ""
+            echo '```diff'
+            cat /tmp/sources-diff.txt
+            echo '```'
+          } > /tmp/sources-diff-comment.md
+
+          {
+            echo "has_sources_diff=true"
+            echo "comment_file=/tmp/sources-diff-comment.md"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: peter-evans/create-pull-request@v7
+        id: cpr
         with:
           sign-commits: true
           branch: update_flake_lock_action
@@ -288,3 +305,15 @@ jobs:
             GitHub Actions will not run workflows on pull requests which are opened by a GitHub Action.
 
             **To run GitHub Actions workflows on this PR, close and re-open this pull request.**
+
+      - name: Post sources.json Graphtage comment
+        if: >-
+          steps.cpr.outputs.pull-request-number != '' &&
+          steps.sources_diff.outputs.has_sources_diff == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |-
+          gh pr comment "${{ steps.cpr.outputs.pull-request-number }}" \
+            --edit-last \
+            --create-if-none \
+            --body-file "${{ steps.sources_diff.outputs.comment_file }}"
