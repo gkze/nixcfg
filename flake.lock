@@ -292,16 +292,16 @@
     "crush": {
       "flake": false,
       "locked": {
-        "lastModified": 1770648035,
-        "narHash": "sha256-3XbzwdW5KHGoEhIQAE8kbd3bQSz9GmgEwywOMnA5IF8=",
+        "lastModified": 1770669726,
+        "narHash": "sha256-CfYBAGuny+v7wvJBDCeZVxG+M9LE+eBaq5REjJA2yyw=",
         "owner": "charmbracelet",
         "repo": "crush",
-        "rev": "ae9f3f2d8466a88679ab1958623cb8462f95972c",
+        "rev": "4de4c06bc014a2118fd7f97a2bbd48fd1e4d6461",
         "type": "github"
       },
       "original": {
         "owner": "charmbracelet",
-        "ref": "v0.40.0",
+        "ref": "v0.41.0",
         "repo": "crush",
         "type": "github"
       }

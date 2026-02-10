@@ -1,0 +1,63 @@
+---
+Work:
+  AI / LLM:
+    Anthropic: platform.claude.com
+    ElevenLabs: elevenlabs.io
+    Exa: exa.ai
+    OpenAI: platform.openai.com
+    OpenRouter: openrouter.ai
+
+  AI Tooling:
+    Browserbase: browserbase.com
+    E2B: e2b.dev
+
+  Auth:
+    Clerk: dashboard.clerk.com
+
+  CRM & Marketing:
+    HubSpot: hubspot.com
+    NewsData: newsdata.io
+
+  Data & Backend:
+    Convex: dashboard.convex.dev
+    Supabase: supabase.com
+
+  Finance & HR:
+    Ramp: app.ramp.com
+    Rippling: app.rippling.com
+
+  Email:
+    Resend: resend.com
+    SendGrid: sendgrid.com
+
+  Infrastructure:
+    AWS: signin.aws.amazon.com
+    Fly.io: fly.io
+    Google Cloud: console.cloud.google.com
+    Hatchet: cloud.onhatchet.run
+    Meter: dashboard.meter.com
+    Render: dashboard.render.com
+    Vercel: vercel.com
+
+  News:
+    DevHunt: devhunt.org
+    Hacker News: news.ycombinator.com
+    Lobsters: lobste.rs
+    Product Hunt: producthunt.com
+    Reddit: reddit.com
+    Terminal Trove: terminaltrove.com
+    X: "//x.com"
+
+  Observability & Analytics:
+    Axiom: app.axiom.co
+    Datadog: us5.datadoghq.com
+    LangSmith: smith.langchain.com
+    PostHog: posthog.com
+    Sentry: sentry.io
+    Statsig: console.statsig.com
+
+  Productivity:
+    Dropbox: dropbox.com
+    Linear: linear.app
+    Notion: notion.so
+    Slack: app.slack.com

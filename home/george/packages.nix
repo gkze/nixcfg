@@ -39,7 +39,6 @@
       gping
       graphviz
       grex
-      # home-manager - installed via programs.home-manager.enable
       hoppscotch
       httpie
       jetbrains.datagrip

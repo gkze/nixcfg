@@ -109,6 +109,8 @@
       };
   };
 
+  xdg.configFile."zen-folders.yaml".source = ./zen-folders.yaml;
+
   languages = {
     go.enable = true;
     python.enable = true;
@@ -246,7 +248,7 @@
         misc.disable = [
           # "brew_cask"
           "brew_formula"
-          "cursor"
+          # "cursor"
         ];
         git.repos = [ (slib.srcDirBase system) ];
         misc = {
@@ -284,6 +286,14 @@
       enable = true;
       package = pkgs.zed-editor-nightly;
       userSettings = {
+        agent_servers = {
+          qwen-code.type = "registry";
+          mistral-vibe.type = "registry";
+          factory-droid.type = "registry";
+          github-copilot.type = "registry";
+          auggie.type = "registry";
+          opencode.type = "registry";
+        };
         agent = {
           default_model = {
             model = "claude-opus-4-5-20251101";
@@ -299,12 +309,19 @@
         buffer_font_family = "Hack Nerd Font Mono";
         buffer_font_size = 12.0;
         font_family = "Hack Nerd Font Mono";
-        context_servers.mcp-server-github = {
-          enabled = true;
-          settings = { }; # Token injected by activation script
+        context_servers = {
+          browser-tools-context-server = {
+            enabled = true;
+            remote = false;
+            settings = { };
+          };
+          mcp-server-github = {
+            enabled = true;
+            settings = { }; # Token injected by activation script
+          };
         };
         format_on_save = "on";
-        icon_theme = "Catppuccin Frappe";
+        icon_theme = "Catppuccin Frappé";
         minimap.show = "always";
         outline_panel.dock = "right";
         show_whitespaces = "all";
@@ -313,6 +330,7 @@
           light = "One Light";
           mode = "system";
         };
+        ui_font_family = "Cantarell";
         ui_font_size = 15.0;
         vim_mode = true;
         wrap_guides = [
@@ -358,7 +376,10 @@
     less.enable = true;
     mergiraf.enable = true;
     neovide.enable = true;
-    nh.enable = true;
+    nh = {
+      enable = true;
+      flake = "/Users/george/.config/nixcfg";
+    };
     nix-index.enable = true;
     nushell.enable = true;
     ripgrep.enable = true;

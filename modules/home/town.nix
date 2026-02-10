@@ -1,5 +1,13 @@
 { config, pkgs, ... }:
 let
+  # Render MCP wrapper that reads API key from macOS Keychain and calls remote server
+  render-mcp-wrapper = pkgs.writeShellScript "render-mcp" ''
+    TOKEN="$(security find-internet-password -s "mcp.render.com" -a "$USER" -r "htps" -w)"
+    exec ${pkgs.lib.getExe' pkgs.bun "bunx"} --bun mcp-remote@latest \
+      "https://mcp.render.com/mcp" \
+      --header "Authorization: Bearer $TOKEN"
+  '';
+
   # GitHub MCP wrapper that reads PAT from sops secret and calls remote server
   github-mcp-wrapper = pkgs.writeShellScript "github-mcp" ''
     TOKEN="$(cat ${config.sops.secrets.github_pat.path})"
@@ -68,6 +76,11 @@ in
       clerk = {
         type = "remote";
         url = "https://mcp.clerk.com/mcp";
+      };
+      # Render MCP (remote via mcp-remote proxy) - uses API key from macOS Keychain
+      render = {
+        type = "local";
+        command = [ "${render-mcp-wrapper}" ];
       };
       # GitHub MCP (remote via mcp-remote proxy) - uses PAT from sops secret
       # Toolsets: repos, pull_requests, actions
