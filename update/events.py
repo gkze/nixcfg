@@ -1,3 +1,5 @@
+"""Event models and stream helpers for updater workflows."""
+
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
@@ -12,6 +14,8 @@ def _is_nix_build_command(args: list[str] | None) -> bool:
 
 
 class UpdateEventKind(StrEnum):
+    """Kinds of events emitted by update tasks."""
+
     STATUS = "status"
     COMMAND_START = "command_start"
     LINE = "line"
@@ -22,6 +26,8 @@ class UpdateEventKind(StrEnum):
 
 
 class RefUpdatePayload(TypedDict):
+    """Payload emitted when a flake ref moves from current to latest."""
+
     current: str
     latest: str
 
@@ -32,6 +38,8 @@ type PlatformHash = tuple[str, str]
 
 @dataclass(frozen=True)
 class CommandResult:
+    """Result payload for a completed subprocess command."""
+
     args: list[str]
     returncode: int
     stdout: str
@@ -53,6 +61,8 @@ type UpdateEventPayload = (
 
 @dataclass(frozen=True)
 class UpdateEvent:
+    """Single event emitted during update processing."""
+
     source: str
     kind: UpdateEventKind
     message: str | None = None
@@ -61,20 +71,26 @@ class UpdateEvent:
 
     @classmethod
     def status(cls, source: str, message: str) -> UpdateEvent:
+        """Create a status event."""
         return cls(source=source, kind=UpdateEventKind.STATUS, message=message)
 
     @classmethod
     def error(cls, source: str, message: str) -> UpdateEvent:
+        """Create an error event."""
         return cls(source=source, kind=UpdateEventKind.ERROR, message=message)
 
     @classmethod
     def result(
-        cls, source: str, payload: UpdateEventPayload | None = None
+        cls,
+        source: str,
+        payload: UpdateEventPayload | None = None,
     ) -> UpdateEvent:
+        """Create a result event."""
         return cls(source=source, kind=UpdateEventKind.RESULT, payload=payload)
 
     @classmethod
     def value(cls, source: str, payload: UpdateEventPayload) -> UpdateEvent:
+        """Create a value event."""
         return cls(source=source, kind=UpdateEventKind.VALUE, payload=payload)
 
 
@@ -83,12 +99,16 @@ type EventStream = AsyncIterator[UpdateEvent]
 
 @dataclass
 class ValueDrain[T]:
+    """Mutable holder used to capture VALUE payloads from streams."""
+
     value: T | None = None
 
 
 async def drain_value_events[T](
-    events: EventStream, drain: ValueDrain[T]
+    events: EventStream,
+    drain: ValueDrain[T],
 ) -> EventStream:
+    """Yield non-VALUE events while storing VALUE payloads in ``drain``."""
     async for event in events:
         if event.kind == UpdateEventKind.VALUE:
             drain.value = cast("T", event.payload)
@@ -100,6 +120,29 @@ def _require_value[T](drain: ValueDrain[T], error: str) -> T:
     if drain.value is None:
         raise RuntimeError(error)
     return drain.value
+
+
+@dataclass(frozen=True)
+class CapturedValue[T]:
+    """Wrapper for a required value captured from an ``EventStream``."""
+
+    captured: T
+
+
+async def capture_stream_value[T](
+    events: EventStream,
+    *,
+    error: str,
+) -> AsyncGenerator[UpdateEvent | CapturedValue[T]]:
+    """Yield non-VALUE events, then emit one :class:`CapturedValue`.
+
+    This wraps the common ``ValueDrain`` + ``drain_value_events`` +
+    ``_require_value`` sequence while preserving streaming behavior.
+    """
+    drain = ValueDrain[T]()
+    async for event in drain_value_events(events, drain):
+        yield event
+    yield CapturedValue(_require_value(drain, error))
 
 
 @dataclass(frozen=True)
@@ -137,8 +180,11 @@ async def gather_event_streams[K, V](
                 await queue.put(event)
 
     async def _wait(tasks: list[asyncio.Task[None]]) -> None:
-        await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         await queue.put(None)  # sentinel
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
 
     tasks = [asyncio.create_task(_run(k, s)) for k, s in streams.items()]
     waiter = asyncio.create_task(_wait(tasks))
@@ -149,5 +195,5 @@ async def gather_event_streams[K, V](
             break
         yield event
 
-    await waiter  # propagate any exceptions
+    await waiter
     yield GatheredValues(results)

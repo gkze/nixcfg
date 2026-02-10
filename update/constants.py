@@ -1,3 +1,5 @@
+"""Shared constants for update workflows."""
+
 REQUIRED_TOOLS = ["nix"]
 ALL_TOOLS = ["nix", "nix-prefetch-url"]
 

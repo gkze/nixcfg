@@ -52,7 +52,7 @@ class SuccessfulBuild(BaseModel):
     Corresponds to the ``success: true`` variant of ``BuildResult``.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     success: Literal[True] = Field(
         default=True,
@@ -61,31 +61,37 @@ class SuccessfulBuild(BaseModel):
     status: SuccessStatus = Field(
         description="Status code indicating how the build succeeded.",
     )
-    builtOutputs: dict[str, Any] = Field(
+    built_outputs: dict[str, Any] = Field(
+        alias="builtOutputs",
         default_factory=dict,
         description="Mapping from output names to their build trace entries.",
     )
-    timesBuilt: int | None = Field(
+    times_built: int | None = Field(
+        alias="timesBuilt",
         default=None,
         ge=0,
         description="How many times this build was performed.",
     )
-    startTime: int | None = Field(
+    start_time: int | None = Field(
+        alias="startTime",
         default=None,
         ge=0,
         description="Start time of the build as a Unix timestamp.",
     )
-    stopTime: int | None = Field(
+    stop_time: int | None = Field(
+        alias="stopTime",
         default=None,
         ge=0,
         description="Stop time of the build as a Unix timestamp.",
     )
-    cpuUser: int | None = Field(
+    cpu_user: int | None = Field(
+        alias="cpuUser",
         default=None,
         ge=0,
         description="User CPU time the build took, in microseconds.",
     )
-    cpuSystem: int | None = Field(
+    cpu_system: int | None = Field(
+        alias="cpuSystem",
         default=None,
         ge=0,
         description="System CPU time the build took, in microseconds.",
@@ -99,7 +105,7 @@ class FailedBuild(BaseModel):
     Corresponds to the ``success: false`` variant of ``BuildResult``.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     success: Literal[False] = Field(
         default=False,
@@ -108,37 +114,44 @@ class FailedBuild(BaseModel):
     status: FailureStatus = Field(
         description="Status code indicating why the build failed.",
     )
-    errorMsg: str = Field(
+    error_msg: str = Field(
+        alias="errorMsg",
         description="Information about the error.",
     )
-    isNonDeterministic: bool | None = Field(
+    is_non_deterministic: bool | None = Field(
+        alias="isNonDeterministic",
         default=None,
         description=(
             "If timesBuilt > 1, whether some builds did not produce the same "
             "result. Note that False does not prove determinism."
         ),
     )
-    timesBuilt: int | None = Field(
+    times_built: int | None = Field(
+        alias="timesBuilt",
         default=None,
         ge=0,
         description="How many times this build was performed.",
     )
-    startTime: int | None = Field(
+    start_time: int | None = Field(
+        alias="startTime",
         default=None,
         ge=0,
         description="Start time of the build as a Unix timestamp.",
     )
-    stopTime: int | None = Field(
+    stop_time: int | None = Field(
+        alias="stopTime",
         default=None,
         ge=0,
         description="Stop time of the build as a Unix timestamp.",
     )
-    cpuUser: int | None = Field(
+    cpu_user: int | None = Field(
+        alias="cpuUser",
         default=None,
         ge=0,
         description="User CPU time the build took, in microseconds.",
     )
-    cpuSystem: int | None = Field(
+    cpu_system: int | None = Field(
+        alias="cpuSystem",
         default=None,
         ge=0,
         description="System CPU time the build took, in microseconds.",

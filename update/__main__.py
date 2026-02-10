@@ -8,6 +8,8 @@
 # ]
 # ///
 
+"""Run the update package as a module."""
+
 from update.cli import main
 
 if __name__ == "__main__":

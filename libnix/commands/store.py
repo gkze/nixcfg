@@ -14,7 +14,7 @@ async def nix_store_realise(
     on_line: Callable[[str], None] | None = None,
     capture: bool = True,
     check: bool = True,
-    timeout: float = 3600.0,
+    timeout: float = 3600.0,  # noqa: ASYNC109
 ) -> CommandResult:
     """Build derivations in the store.
 
@@ -37,6 +37,7 @@ async def nix_store_realise(
         (``stream_nix`` always raises on failure).
     timeout:
         Maximum wall-clock seconds before the process is killed.
+
     """
     cmd = ["nix-store", "--realise", *drv_paths]
 
@@ -52,7 +53,7 @@ async def nix_store_realise(
 async def nix_store_query_references(
     path: str,
     *,
-    timeout: float = 30.0,
+    timeout: float = 30.0,  # noqa: ASYNC109
 ) -> list[str]:
     """Return the immediate references of a store path.
 
@@ -62,6 +63,7 @@ async def nix_store_query_references(
         A Nix store path (e.g. ``/nix/store/...-foo``).
     timeout:
         Maximum wall-clock seconds before the process is killed.
+
     """
     result = await run_nix(
         ["nix-store", "--query", "--references", path],

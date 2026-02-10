@@ -25,15 +25,21 @@ BUILD_TIMEOUT = 21600.0
 # Maximum derivations per batch to avoid ARG_MAX limits
 MAX_BATCH_SIZE = 500
 
+SECONDS_PER_MINUTE = 60
+SECONDS_PER_HOUR = 3600
+
 
 def _format_duration(seconds: float) -> str:
     """Format seconds as a human-readable duration."""
-    if seconds < 60:
+    if seconds < SECONDS_PER_MINUTE:
         return f"{seconds:.1f}s"
-    if seconds < 3600:
-        return f"{int(seconds // 60)}m {int(seconds % 60)}s"
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
+    if seconds < SECONDS_PER_HOUR:
+        return (
+            f"{int(seconds // SECONDS_PER_MINUTE)}m "
+            f"{int(seconds % SECONDS_PER_MINUTE)}s"
+        )
+    hours = int(seconds // SECONDS_PER_HOUR)
+    minutes = int((seconds % SECONDS_PER_HOUR) // SECONDS_PER_MINUTE)
     return f"{hours}h {minutes}m"
 
 
@@ -94,7 +100,9 @@ async def _build_derivations(derivations: set[str], *, dry_run: bool = False) ->
         except NixCommandError:
             # run_nix raises on timeout regardless of check=
             log.exception(
-                "%sBuild timed out after %s", tag, _format_duration(BUILD_TIMEOUT)
+                "%sBuild timed out after %s",
+                tag,
+                _format_duration(BUILD_TIMEOUT),
             )
             success = False
             continue
@@ -107,7 +115,8 @@ async def _build_derivations(derivations: set[str], *, dry_run: bool = False) ->
             log.info("%sCompleted in %s", tag, elapsed and _format_duration(elapsed))
 
     log.info(
-        "Build completed in %s", _format_duration(time.monotonic() - overall_start)
+        "Build completed in %s",
+        _format_duration(time.monotonic() - overall_start),
     )
     return success
 
@@ -119,10 +128,13 @@ async def _async_main(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    """Run the CLI entrypoint."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("flake_refs", nargs="+", help="Flake references to build")
     parser.add_argument(
-        "--dry-run", action="store_true", help="Show what would be built"
+        "--dry-run",
+        action="store_true",
+        help="Show what would be built",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()

@@ -1,17 +1,24 @@
+"""Subprocess execution and hash conversion helpers for updates."""
+
 from __future__ import annotations
 
+import asyncio
 import shlex
 from collections import deque
 from typing import TYPE_CHECKING, cast
 
+from rich.text import Text
+
 if TYPE_CHECKING:
-    import asyncio
     from collections.abc import Awaitable, Callable, Iterable, Mapping
 
 from libnix.commands.base import ProcessDone, ProcessLine, stream_process
 from libnix.commands.hash import nix_hash_convert as libnix_hash_convert
 from libnix.commands.hash import nix_prefetch_url as libnix_prefetch_url
-from libnix.update.events import (
+from update.config import UpdateConfig, _resolve_active_config
+from update.constants import NIX_BUILD_FAILURE_TAIL_LINES
+from update.errors import format_exception
+from update.events import (
     CommandResult,
     EventStream,
     GatheredValues,
@@ -22,9 +29,6 @@ from libnix.update.events import (
     _require_value,
     gather_event_streams,
 )
-from update.config import UpdateConfig, _resolve_active_config
-from update.constants import NIX_BUILD_FAILURE_TAIL_LINES
-from update.errors import format_exception
 
 
 async def _run_queue_task(
@@ -33,15 +37,17 @@ async def _run_queue_task(
     queue: asyncio.Queue[UpdateEvent | None],
     task: Callable[[], Awaitable[None]],
 ) -> None:
+    """Run ``task`` and translate failures into queued error events."""
     try:
         await task()
-    except Exception as exc:
+    except asyncio.CancelledError:
+        await queue.put(UpdateEvent.error(source, "Operation cancelled"))
+    except (RuntimeError, ValueError, TypeError, OSError, KeyError) as exc:
         await queue.put(UpdateEvent.error(source, format_exception(exc)))
 
 
 def _sanitize_log_line(line: str) -> str:
-    from rich.text import Text
-
+    """Strip control characters and ANSI styling from a process line."""
     line = line.replace("\r", "")
     return Text.from_ansi(line).plain
 
@@ -55,19 +61,46 @@ def _truncate_command(text: str, max_len: int = 80) -> str:
     return f"{trimmed}{suffix}"
 
 
-async def stream_command(
+def _resolve_timeout_alias(
+    *,
+    command_timeout: float | None,
+    kwargs: dict[str, object],
+) -> float | None:
+    timeout_alias = kwargs.pop("timeout", None)
+    if timeout_alias is not None:
+        if command_timeout is not None:
+            msg = "Pass only one of 'command_timeout' or legacy 'timeout'"
+            raise TypeError(msg)
+        if not isinstance(timeout_alias, int | float):
+            msg = "timeout must be a number"
+            raise TypeError(msg)
+        command_timeout = float(timeout_alias)
+    if kwargs:
+        unknown = ", ".join(sorted(kwargs))
+        msg = f"Unexpected keyword argument(s): {unknown}"
+        raise TypeError(msg)
+    return command_timeout
+
+
+async def stream_command(  # noqa: PLR0913
     args: list[str],
     *,
     source: str,
-    timeout: float | None = None,
+    command_timeout: float | None = None,
     env: Mapping[str, str] | None = None,
     allow_failure: bool = False,
     suppress_patterns: tuple[str, ...] | None = None,
     config: UpdateConfig | None = None,
+    **kwargs: object,
 ) -> EventStream:
+    """Stream subprocess lifecycle events and output lines."""
+    command_timeout = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
     config = _resolve_active_config(config)
-    if timeout is None:
-        timeout = config.default_subprocess_timeout
+    if command_timeout is None:
+        command_timeout = config.default_subprocess_timeout
     command_text = _truncate_command(shlex.join(args))
     yield UpdateEvent(
         source=source,
@@ -81,7 +114,7 @@ async def stream_command(
         tail_lines = deque(maxlen=NIX_BUILD_FAILURE_TAIL_LINES)
     result: ProcessDone | None = None
     try:
-        async for event in stream_process(args, timeout=timeout, env=env):
+        async for event in stream_process(args, timeout=command_timeout, env=env):
             if isinstance(event, ProcessLine):
                 label = event.stream
                 text = event.text
@@ -103,7 +136,7 @@ async def stream_command(
             else:
                 result = event
     except TimeoutError:
-        msg = f"Command timed out after {timeout}s: {shlex.join(args)}"
+        msg = f"Command timed out after {command_timeout}s: {shlex.join(args)}"
         raise RuntimeError(msg) from None
 
     if result is None:
@@ -121,7 +154,7 @@ async def stream_command(
     yield UpdateEvent(source=source, kind=UpdateEventKind.COMMAND_END, payload=payload)
 
 
-async def run_command(
+async def run_command(  # noqa: PLR0913
     args: list[str],
     *,
     source: str,
@@ -131,6 +164,7 @@ async def run_command(
     suppress_patterns: tuple[str, ...] | None = None,
     config: UpdateConfig | None = None,
 ) -> EventStream:
+    """Run a command and emit both command events and final VALUE result."""
     result_drain = ValueDrain[CommandResult]()
     async for event in stream_command(
         args,
@@ -141,7 +175,8 @@ async def run_command(
         config=config,
     ):
         if event.kind == UpdateEventKind.COMMAND_END and isinstance(
-            event.payload, CommandResult
+            event.payload,
+            CommandResult,
         ):
             result_drain.value = event.payload
         yield event
@@ -149,7 +184,7 @@ async def run_command(
     yield UpdateEvent.value(source, result)
 
 
-async def run_nix_build(
+async def run_nix_build(  # noqa: PLR0913
     source: str,
     expr: str,
     *,
@@ -159,6 +194,7 @@ async def run_nix_build(
     verbose: bool = False,
     config: UpdateConfig | None = None,
 ) -> EventStream:
+    """Run ``nix build`` and stream command events."""
     args = ["nix", "build", "-L"]
     if verbose:
         args.append("--verbose")
@@ -227,6 +263,7 @@ async def compute_sri_hash(source: str, url: str) -> EventStream:
 
 
 async def compute_url_hashes(source: str, urls: Iterable[str]) -> EventStream:
+    """Compute SRI hashes for URLs and emit a final URL-to-hash mapping."""
     streams = {url: compute_sri_hash(source, url) for url in dict.fromkeys(urls)}
     async for item in gather_event_streams(streams):
         if isinstance(item, GatheredValues):

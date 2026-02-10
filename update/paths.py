@@ -1,3 +1,5 @@
+"""Repository path helpers used by update modules."""
+
 import os
 from pathlib import Path
 
@@ -19,6 +21,7 @@ def _resolve_repo_root() -> Path:
 
 
 def get_repo_file(filename: str) -> Path:
+    """Return a path under the detected repository root."""
     return _resolve_repo_root() / filename
 
 

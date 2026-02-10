@@ -14,11 +14,12 @@ Usage:
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import sys
-import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 REPO = "NixOS/nix"
 SCHEMA_PATH = "doc/manual/source/protocols/json/schema"
@@ -27,15 +28,12 @@ RAW_BASE = f"https://raw.githubusercontent.com/{REPO}"
 
 SCHEMAS_DIR = Path(__file__).resolve().parent
 VERSION_FILE = SCHEMAS_DIR / "_version.txt"
+_HTTP_BAD_REQUEST = 400
 
 
 def _github_get(url: str) -> bytes:
     """Make an authenticated or anonymous GET request to GitHub."""
-    req = urllib.request.Request(
-        url, headers={"Accept": "application/vnd.github.v3+json"}
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return resp.read()
+    return _https_get(url, headers={"Accept": "application/vnd.github.v3+json"})
 
 
 def _get_default_branch_head() -> tuple[str, str]:
@@ -63,12 +61,36 @@ def _list_schema_files(commit_sha: str) -> list[dict[str, str]]:
 
 def _download_schema(url: str) -> bytes:
     """Download a single schema file."""
-    req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return resp.read()
+    return _https_get(url)
+
+
+def _https_get(url: str, headers: dict[str, str] | None = None) -> bytes:
+    """Fetch a URL over HTTPS only and return response bytes."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        msg = f"Only absolute HTTPS URLs are allowed, got: {url!r}"
+        raise ValueError(msg)
+
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+
+    conn = http.client.HTTPSConnection(parsed.netloc, timeout=30)
+    try:
+        conn.request("GET", path, headers=headers or {})
+        response = conn.getresponse()
+        body = response.read()
+    finally:
+        conn.close()
+
+    if response.status >= _HTTP_BAD_REQUEST:
+        msg = f"HTTP {response.status} fetching {url}"
+        raise RuntimeError(msg)
+    return body
 
 
 def _sha256(data: bytes) -> str:
+    """Return hex SHA-256 digest of ``data``."""
     return hashlib.sha256(data).hexdigest()
 
 
@@ -106,33 +128,24 @@ def _parse_version() -> dict[str, str]:
 
 def fetch() -> None:
     """Fetch schemas from the latest commit on the default branch."""
-    print(f"Fetching default branch HEAD for {REPO}...")
     commit_sha, branch = _get_default_branch_head()
-    print(f"  branch: {branch}")
-    print(f"  commit: {commit_sha}")
 
-    print(f"Listing schema files at {SCHEMA_PATH}...")
     files = _list_schema_files(commit_sha)
-    print(f"  found {len(files)} YAML schemas")
 
     for f in files:
-        print(f"  downloading {f['name']}...")
         content = _download_schema(f["download_url"])
         (SCHEMAS_DIR / f["name"]).write_bytes(content)
 
     _write_version(commit_sha, branch, files)
-    print(f"Done. Wrote {len(files)} schemas + _version.txt")
 
 
 def check() -> bool:
     """Verify vendored schemas match the pinned commit. Returns True if OK."""
     version = _parse_version()
     if "commit" not in version:
-        print("ERROR: _version.txt missing or has no commit field", file=sys.stderr)
         return False
 
     commit_sha = version["commit"]
-    print(f"Checking vendored schemas against commit {commit_sha}...")
 
     files = _list_schema_files(commit_sha)
     ok = True
@@ -141,29 +154,26 @@ def check() -> bool:
     for f in files:
         local_path = SCHEMAS_DIR / f["name"]
         if not local_path.exists():
-            print(f"  MISSING: {f['name']}", file=sys.stderr)
             ok = False
             continue
 
         remote_content = _download_schema(f["download_url"])
         local_content = local_path.read_bytes()
         if remote_content != local_content:
-            print(f"  MISMATCH: {f['name']}", file=sys.stderr)
             ok = False
         else:
-            print(f"  OK: {f['name']}")
+            pass
 
     # Check for stale local files not in remote
     remote_names = {f["name"] for f in files}
     for local_file in SCHEMAS_DIR.glob("*.yaml"):
         if local_file.name not in remote_names:
-            print(f"  STALE: {local_file.name} (not in remote)", file=sys.stderr)
             ok = False
 
     if ok:
-        print("All schemas match pinned commit.")
+        pass
     else:
-        print("Schema check FAILED.", file=sys.stderr)
+        pass
 
     return ok
 

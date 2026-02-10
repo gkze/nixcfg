@@ -1,3 +1,5 @@
+"""TTY and non-TTY rendering for update progress events."""
+
 import re
 import time
 from collections import deque
@@ -5,9 +7,14 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from libnix.models.sources import SourceEntry, SourcesFile
+from rich.console import Console, Group, RenderableType
+from rich.live import Live
+from rich.spinner import Spinner
+from rich.text import Text
+from rich.tree import Tree
 
-from .events import (
+from libnix.models.sources import SourceEntry, SourcesFile
+from update.events import (
     CommandArgs,
     CommandResult,
     UpdateEvent,
@@ -29,11 +36,13 @@ def _is_terminal_status(message: str) -> bool:
             "Update available",
             "Already at latest",
             "No updates needed",
-        )
+        ),
     )
 
 
 class OperationKind(StrEnum):
+    """High-level operation phases shown in the renderer."""
+
     CHECK_VERSION = "check_version"
     UPDATE_REF = "update_ref"
     REFRESH_LOCK = "refresh_lock"
@@ -53,6 +62,8 @@ _OPERATION_LABELS: dict[OperationKind, str] = {
 
 @dataclass
 class OperationState:
+    """Mutable renderer state for a single operation phase."""
+
     kind: OperationKind
     label: str
     status: OperationStatus = "pending"
@@ -63,6 +74,7 @@ class OperationState:
     spinner: Any | None = field(default=None, repr=False)
 
     def visible(self) -> bool:
+        """Return ``True`` when this operation should be rendered."""
         return (
             self.status != "pending"
             or self.message is not None
@@ -73,6 +85,8 @@ class OperationState:
 
 @dataclass(frozen=True)
 class ItemMeta:
+    """Static metadata for one source item in the UI."""
+
     name: str
     origin: str
     op_order: tuple[OperationKind, ...]
@@ -80,6 +94,8 @@ class ItemMeta:
 
 @dataclass
 class ItemState:
+    """Runtime rendering state for one source item."""
+
     name: str
     origin: str
     op_order: tuple[OperationKind, ...]
@@ -89,6 +105,7 @@ class ItemState:
 
     @classmethod
     def from_meta(cls, meta: ItemMeta, *, max_lines: int) -> ItemState:
+        """Create initial item state from static metadata."""
         operations = {
             kind: OperationState(
                 kind=kind,
@@ -139,7 +156,7 @@ def _operation_for_status(message: str) -> OperationKind | None:
             "update available",
             "up to date (version",
             "up to date (ref",
-        )
+        ),
     ):
         return OperationKind.CHECK_VERSION
     if lowered.startswith("updating ref"):
@@ -153,7 +170,7 @@ def _operation_for_status(message: str) -> OperationKind | None:
                 "computing hash",
                 "build failed",
                 "warning:",
-            )
+            ),
         )
         or message == "Up to date"
     ):
@@ -192,7 +209,14 @@ def _set_operation_status(
 def _apply_status_rules(
     operation: OperationState,
     message: str,
-    rules,
+    rules: list[
+        tuple[
+            Any,
+            str,
+            Any | None,
+            bool,
+        ]
+    ],
     *,
     default_status: OperationStatus = "running",
     default_message: str | None = None,
@@ -203,7 +227,7 @@ def _apply_status_rules(
             formatted = formatter(match) if formatter else None
             _set_operation_status(
                 operation,
-                status,
+                cast("OperationStatus", status),
                 message=formatted,
                 clear_message=clear_message,
             )
@@ -263,7 +287,7 @@ def _apply_status(item: ItemState, message: str) -> None:
                 "running",
                 lambda m: f"{m.group(1)} → {m.group(2)}",
                 False,
-            )
+            ),
         ]
         _apply_status_rules(operation, message, rules, default_status="running")
         return
@@ -275,7 +299,7 @@ def _apply_status(item: ItemState, message: str) -> None:
                 "running",
                 lambda m: m.group(1),
                 False,
-            )
+            ),
         ]
         _apply_status_rules(operation, message, rules, default_status="running")
         return
@@ -302,7 +326,11 @@ def _apply_status(item: ItemState, message: str) -> None:
             ),
         ]
         _apply_status_rules(
-            operation, message, rules, default_status="running", default_message=message
+            operation,
+            message,
+            rules,
+            default_status="running",
+            default_message=message,
         )
 
 
@@ -328,7 +356,8 @@ def _hash_label_map(entry: SourceEntry | None) -> dict[str, str]:
 
 
 def _hash_diff_lines(
-    old_entry: SourceEntry | None, new_entry: SourceEntry | None
+    old_entry: SourceEntry | None,
+    new_entry: SourceEntry | None,
 ) -> list[str]:
     old_map = _hash_label_map(old_entry)
     new_map = _hash_label_map(new_entry)
@@ -349,7 +378,9 @@ def _hash_diff_lines(
 
 
 class Renderer:
-    def __init__(
+    """Render update progress to TTY and collect non-TTY details."""
+
+    def __init__(  # noqa: PLR0913
         self,
         items: dict[str, ItemState],
         order: list[str],
@@ -361,10 +392,7 @@ class Renderer:
         render_interval: float,
         quiet: bool = False,
     ) -> None:
-        from rich.console import Console
-        from rich.live import Live
-        from rich.text import Text
-
+        """Initialize renderer state and optional live TTY panel."""
         self.items = items
         self.order = order
         self.is_tty = is_tty
@@ -401,9 +429,7 @@ class Renderer:
             return f"{text} {message}"
         return text
 
-    def _render_operation(self, operation: OperationState) -> Any:
-        from rich.spinner import Spinner
-        from rich.text import Text
+    def _render_operation(self, operation: OperationState) -> RenderableType:
 
         text = self._format_operation_text(operation)
         if operation.status == "running":
@@ -433,10 +459,7 @@ class Renderer:
         line.append(text, style=style)
         return line
 
-    def _build_display(self, *, full_output: bool | None = None) -> Any:
-        from rich.console import Group
-        from rich.text import Text
-        from rich.tree import Tree
+    def _build_display(self, *, full_output: bool | None = None) -> RenderableType:  # noqa: C901
 
         if not self._console:
             return Text("")
@@ -489,40 +512,42 @@ class Renderer:
 
         return Group(*lines)
 
-    def log_line(self, source: str, message: str) -> None:
+    def log_line(self, _source: str, _message: str) -> None:
         """Print a build log line in verbose non-TTY mode."""
         if not self.is_tty and self.verbose and not self.quiet:
-            print(f"[{source}] {message}", flush=True)
+            pass
+
+    def _append_detail_line(self, source: str, message: str) -> bool:
+        item = self.items.get(source)
+        if item is None or item.last_operation is None:
+            return False
+        operation = item.operations.get(cast("OperationKind", item.last_operation))
+        if operation is None:
+            return False
+        operation.detail_lines.append(message)
+        return True
 
     def log(self, source: str, message: str) -> None:
+        """Record an informational message for a source item."""
         if self.is_tty:
-            item = self.items.get(source)
-            if item and item.last_operation is not None:
-                operation = item.operations.get(
-                    cast("OperationKind", item.last_operation)
-                )
-                if operation:
-                    operation.detail_lines.append(message)
+            self._append_detail_line(source, message)
         elif not self.quiet:
-            print(f"[{source}] {message}", flush=True)
+            pass
 
     def log_error(self, source: str, message: str) -> None:
+        """Record an error message for a source item."""
         if self.is_tty:
-            item = self.items.get(source)
-            if item and item.last_operation is not None:
-                operation = item.operations.get(
-                    cast("OperationKind", item.last_operation)
-                )
-                if operation:
-                    operation.detail_lines.append(message)
+            self._append_detail_line(source, message)
         elif not self.quiet:
-            print(f"[{source}] Error: {message}", flush=True)
+            pass
 
     def request_render(self) -> None:
+        """Mark the live panel as needing refresh."""
         if self.is_tty:
             self.needs_render = True
 
     def render_if_due(self, now: float) -> None:
+        """Render when the configured interval has elapsed."""
         if not self.is_tty or not self.needs_render:
             return
         if now - self.last_render >= self.render_interval:
@@ -531,6 +556,7 @@ class Renderer:
             self.needs_render = False
 
     def finalize(self) -> None:
+        """Stop live rendering and print final status when enabled."""
         if self._live:
             self._live.stop()
             self._live = None
@@ -538,18 +564,18 @@ class Renderer:
             self._print_final_status()
 
     def _print_final_status(self) -> None:
-        from rich.console import Console
-
+        """Render the final full output snapshot to stdout."""
         console = Console()
         console.print(self._build_display(full_output=True))
 
     def render(self) -> None:
+        """Force one live panel render."""
         if not self._live:
             return
         self._live.update(self._build_display(), refresh=True)
 
 
-async def consume_events(
+async def consume_events(  # noqa: C901, PLR0912, PLR0913, PLR0915
     queue: asyncio.Queue[UpdateEvent | None],
     order: list[str],
     sources: SourcesFile,
@@ -563,6 +589,7 @@ async def consume_events(
     build_failure_tail_lines: int,
     quiet: bool = False,
 ) -> tuple[bool, int, dict[str, SummaryStatus], dict[str, SourceEntry]]:
+    """Consume queued update events and return aggregate UI/update state."""
     items = {
         name: ItemState.from_meta(item_meta[name], max_lines=max_lines)
         for name in order
@@ -637,9 +664,12 @@ async def consume_events(
                     if op_kind is None:
                         op_kind = OperationKind.COMPUTE_HASH
                     operation = item.operations.get(op_kind)
-                    if operation and operation.active_commands > 0:
-                        if not operation.tail or operation.tail[-1] != line_text:
-                            operation.tail.append(line_text)
+                    if (
+                        operation
+                        and operation.active_commands > 0
+                        and (not operation.tail or operation.tail[-1] != line_text)
+                    ):
+                        operation.tail.append(line_text)
                     renderer.log_line(event.source, message)
 
                 case UpdateEventKind.COMMAND_END:
@@ -649,7 +679,8 @@ async def consume_events(
                         operation = item.operations.get(op_kind)
                         if operation:
                             operation.active_commands = max(
-                                0, operation.active_commands - 1
+                                0,
+                                operation.active_commands - 1,
                             )
                             if operation.active_commands == 0:
                                 operation.tail.clear()
@@ -657,12 +688,14 @@ async def consume_events(
                                     item.active_command_op = None
                             if result.returncode != 0 and not result.allow_failure:
                                 operation.status = "error"
-                                if _is_nix_build_command(result.args):
-                                    if result.tail_lines:
-                                        operation.detail_lines = [
-                                            f"Output tail (last {build_failure_tail_lines} lines):",
-                                            *result.tail_lines,
-                                        ]
+                                if (
+                                    _is_nix_build_command(result.args)
+                                    and result.tail_lines
+                                ):
+                                    operation.detail_lines = [
+                                        f"Output tail (last {build_failure_tail_lines} lines):",
+                                        *result.tail_lines,
+                                    ]
                             elif (
                                 op_kind
                                 in (
@@ -677,9 +710,17 @@ async def consume_events(
                     result = event.payload
                     if result is not None:
                         if isinstance(result, dict):
+                            result_map = cast("dict[str, object]", result)
+                            current_payload = result_map.get("current")
+                            latest_payload = result_map.get("latest")
+                            if not isinstance(current_payload, str) or not isinstance(
+                                latest_payload,
+                                str,
+                            ):
+                                continue
                             set_detail(event.source, "updated")
-                            current_ref = result.get("current", "?")
-                            latest_ref = result.get("latest", "?")
+                            current_ref = current_payload
+                            latest_ref = latest_payload
                             check_op = item.operations.get(OperationKind.CHECK_VERSION)
                             if check_op:
                                 check_op.status = "success"
@@ -721,7 +762,8 @@ async def consume_events(
                             if hash_op:
                                 hash_op.status = "success"
                                 hash_op.detail_lines = _hash_diff_lines(
-                                    old_entry, result
+                                    old_entry,
+                                    result,
                                 )
                                 hash_op.message = None
                             if (

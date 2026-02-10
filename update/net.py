@@ -1,21 +1,24 @@
+"""HTTP helpers for update data sources and GitHub APIs."""
+
 import asyncio
 import json
 import netrc
 import os
-import random
 import urllib.parse
 from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, cast
 
 import aiohttp
+from aiohttp_retry import ExponentialRetry, RetryClient
 
 from update.config import UpdateConfig, _resolve_active_config
 
 type JSONDict = dict[str, Any]
 type JSONList = list[Any]
 type JSONValue = JSONDict | JSONList | str | int | float | bool | None
+
+HTTP_BAD_REQUEST = 400
 
 
 def _get_github_token() -> str | None:
@@ -53,31 +56,6 @@ def _check_github_rate_limit(headers: dict[str, str], url: str) -> None:
     raise RuntimeError(msg)
 
 
-def _parse_retry_after(value: str | None) -> float | None:
-    if not value:
-        return None
-    value = value.strip()
-    if value.isdigit():
-        return max(0.0, float(value))
-    try:
-        parsed = parsedate_to_datetime(value)
-    except TypeError, ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    delay = (parsed - datetime.now(UTC)).total_seconds()
-    return max(0.0, delay)
-
-
-def _apply_retry_jitter(delay: float, *, jitter_ratio: float) -> float:
-    if jitter_ratio <= 0:
-        return delay
-    jitter_ratio = min(jitter_ratio, 1.0)
-    low = max(0.0, 1.0 - jitter_ratio)
-    high = 1.0 + jitter_ratio
-    return max(0.0, delay * random.uniform(low, high))  # noqa: S311 — jitter, not crypto
-
-
 def _build_request_headers(url: str, user_agent: str | None) -> dict[str, str]:
     headers: dict[str, str] = {}
     if user_agent:
@@ -96,64 +74,80 @@ def _format_http_error(response: aiohttp.ClientResponse, payload: bytes) -> str:
     return detail
 
 
-async def _request(
+def _resolve_timeout_alias(
+    *,
+    request_timeout: float | None,
+    kwargs: dict[str, object],
+) -> float | None:
+    timeout_alias = kwargs.pop("timeout", None)
+    if timeout_alias is not None:
+        if request_timeout is not None:
+            msg = "Pass only one of 'request_timeout' or legacy 'timeout'"
+            raise TypeError(msg)
+        if not isinstance(timeout_alias, int | float):
+            msg = "timeout must be a number"
+            raise TypeError(msg)
+        request_timeout = float(timeout_alias)
+    if kwargs:
+        unknown = ", ".join(sorted(kwargs))
+        msg = f"Unexpected keyword argument(s): {unknown}"
+        raise TypeError(msg)
+    return request_timeout
+
+
+async def _request(  # noqa: PLR0913
     session: aiohttp.ClientSession,
     url: str,
     *,
     user_agent: str | None = None,
-    timeout: float | None = None,
+    request_timeout: float | None = None,
     method: str = "GET",
     retries: int | None = None,
     backoff: float | None = None,
     config: UpdateConfig | None = None,
+    **kwargs: object,
 ) -> tuple[bytes, dict[str, str]]:
+    request_timeout = _resolve_timeout_alias(
+        request_timeout=request_timeout,
+        kwargs=kwargs,
+    )
     config = _resolve_active_config(config)
     if retries is None:
         retries = config.default_retries
     if backoff is None:
         backoff = config.default_retry_backoff
     headers = _build_request_headers(url, user_agent)
-    timeout_config = aiohttp.ClientTimeout(total=timeout or config.default_timeout)
+    timeout_config = aiohttp.ClientTimeout(
+        total=request_timeout or config.default_timeout,
+    )
 
-    last_error: Exception | None = None
-    for attempt in range(retries):
-        retry_after_delay: float | None = None
-        try:
-            async with session.request(
-                method,
-                url,
-                headers=headers,
-                timeout=timeout_config,
-                allow_redirects=True,
-            ) as response:
-                payload = await response.read()
-                if response.status < 400:
-                    return payload, dict(response.headers)
-                detail = _format_http_error(response, payload)
-                error = RuntimeError(f"Request to {url} failed: {detail}")
-                if response.status == 429:
-                    last_error = error
-                    retry_after_delay = _parse_retry_after(
-                        response.headers.get("Retry-After")
-                    )
-                elif response.status < 500:
-                    raise error
-                else:
-                    last_error = error
-        except (TimeoutError, aiohttp.ClientError) as exc:
-            last_error = exc
+    attempts = max(1, retries)
+    retry_options = ExponentialRetry(
+        attempts=attempts,
+        factor=2.0,
+        start_timeout=max(0.0, backoff),
+        statuses={429, 500, 502, 503, 504},
+        exceptions={aiohttp.ClientError, TimeoutError, asyncio.TimeoutError},
+    )
 
-        if attempt < retries - 1:
-            delay = retry_after_delay
-            if delay is None:
-                delay = backoff * (2**attempt)
-                delay = _apply_retry_jitter(
-                    delay, jitter_ratio=config.retry_jitter_ratio
-                )
-            await asyncio.sleep(delay)
-
-    msg = f"Request to {url} failed after {retries} attempts: {last_error}"
-    raise RuntimeError(msg)
+    retry_client = RetryClient(
+        client_session=session,
+        retry_options=retry_options,
+        raise_for_status=False,
+    )
+    async with retry_client.request(
+        method,
+        url,
+        headers=headers,
+        timeout=timeout_config,
+        allow_redirects=True,
+    ) as response:
+        payload = await response.read()
+        if response.status < HTTP_BAD_REQUEST:
+            return payload, dict(response.headers)
+        detail = _format_http_error(response, payload)
+        msg = f"Request to {url} failed after {attempts} attempts: {detail}"
+        raise RuntimeError(msg)
 
 
 async def fetch_url(
@@ -161,12 +155,22 @@ async def fetch_url(
     url: str,
     *,
     user_agent: str | None = None,
-    timeout: float | None = None,
+    request_timeout: float | None = None,
     config: UpdateConfig | None = None,
+    **kwargs: object,
 ) -> bytes:
+    """Fetch raw bytes from ``url`` with retry and timeout config."""
+    request_timeout = _resolve_timeout_alias(
+        request_timeout=request_timeout,
+        kwargs=kwargs,
+    )
     config = _resolve_active_config(config)
     payload, _ = await _request(
-        session, url, user_agent=user_agent, timeout=timeout, config=config
+        session,
+        url,
+        user_agent=user_agent,
+        request_timeout=request_timeout,
+        config=config,
     )
     return payload
 
@@ -176,18 +180,32 @@ async def fetch_json(
     url: str,
     *,
     user_agent: str | None = None,
-    timeout: float | None = None,
+    request_timeout: float | None = None,
     config: UpdateConfig | None = None,
+    **kwargs: object,
 ) -> JSONValue:
+    """Fetch and decode JSON data from ``url``."""
+    request_timeout = _resolve_timeout_alias(
+        request_timeout=request_timeout,
+        kwargs=kwargs,
+    )
     config = _resolve_active_config(config)
     if url.startswith("https://api.github.com/"):
         payload, headers = await _request(
-            session, url, user_agent=user_agent, timeout=timeout, config=config
+            session,
+            url,
+            user_agent=user_agent,
+            request_timeout=request_timeout,
+            config=config,
         )
         _check_github_rate_limit(headers, url)
     else:
         payload = await fetch_url(
-            session, url, user_agent=user_agent, timeout=timeout, config=config
+            session,
+            url,
+            user_agent=user_agent,
+            request_timeout=request_timeout,
+            config=config,
         )
     try:
         return json.loads(payload.decode())
@@ -197,10 +215,12 @@ async def fetch_json(
 
 
 def github_raw_url(owner: str, repo: str, rev: str, path: str) -> str:
+    """Return a GitHub raw-content URL for a repo path and revision."""
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{rev}/{path}"
 
 
 def github_api_url(path: str) -> str:
+    """Return a GitHub API URL for an API path."""
     return f"https://api.github.com/{path}"
 
 
@@ -211,15 +231,16 @@ async def fetch_github_api(
     config: UpdateConfig | None = None,
     **params: str,
 ) -> JSONValue:
+    """Fetch JSON from a GitHub API path with optional query parameters."""
     config = _resolve_active_config(config)
     url = github_api_url(api_path)
     if params:
-        url = f"{url}?{'&'.join(f'{k}={v}' for k, v in params.items())}"
+        url = f"{url}?{urllib.parse.urlencode(params)}"
     return await fetch_json(
         session,
         url,
         user_agent=config.default_user_agent,
-        timeout=config.default_timeout,
+        request_timeout=config.default_timeout,
         config=config,
     )
 
@@ -231,6 +252,7 @@ async def fetch_github_default_branch(
     *,
     config: UpdateConfig | None = None,
 ) -> str:
+    """Fetch the default branch name for a GitHub repository."""
     data = cast(
         "JSONDict",
         await fetch_github_api(session, f"repos/{owner}/{repo}", config=config),
@@ -238,7 +260,7 @@ async def fetch_github_default_branch(
     return data["default_branch"]
 
 
-async def fetch_github_latest_commit(
+async def fetch_github_latest_commit(  # noqa: PLR0913
     session: aiohttp.ClientSession,
     owner: str,
     repo: str,
@@ -247,12 +269,13 @@ async def fetch_github_latest_commit(
     *,
     config: UpdateConfig | None = None,
 ) -> str:
+    """Fetch the latest commit SHA that touched ``file_path`` on ``branch``."""
     data = cast(
         "list[JSONDict]",
         await fetch_github_api(
             session,
             f"repos/{owner}/{repo}/commits",
-            path=urllib.parse.quote(file_path),
+            path=file_path,
             sha=branch,
             per_page="1",
             config=config,

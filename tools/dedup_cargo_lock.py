@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-"""
-Convert git-sourced gitoxide crates to crates.io sources in Cargo.lock.
+"""Convert git-sourced gitoxide crates to crates.io sources in Cargo.lock.
 
 GitButler uses gitoxide crates from git (branch=main), but these same versions
 exist on crates.io. This causes issues with Nix's cargo vendor because having
@@ -20,12 +18,14 @@ import json
 import logging
 import sys
 import tomllib
+import urllib.error
 import urllib.request
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
 from enum import Enum, IntEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -183,16 +183,22 @@ def fetch_checksum(name: str, version: str) -> str | None:
         return checksum
 
     # Fall back to crates.io API
-    url = f"https://crates.io/api/v1/crates/{name}/{version}"
+    url = (
+        "https://crates.io/api/v1/crates/"
+        f"{quote(name, safe='')}/{quote(version, safe='')}"
+    )
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "nix-cargo-dedup/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as response:
+        req = urllib.request.Request(  # noqa: S310
+            url,
+            headers={"User-Agent": "nix-cargo-dedup/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310
             data = json.loads(response.read().decode())
             checksum = data.get("version", {}).get("checksum")
             if checksum:
                 _checksum_cache[key] = checksum
                 return checksum
-    except Exception as e:
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
         logger.warning("Failed to fetch checksum for %s %s: %s", name, version, e)
     return None
 
@@ -248,8 +254,7 @@ REGISTRY_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
 
 
 def convert_gitoxide_to_registry(packages: list[Package]) -> tuple[list[Package], int]:
-    """
-    Convert git-sourced gitoxide packages to crates.io sources.
+    """Convert git-sourced gitoxide packages to crates.io sources.
 
     Returns (converted_packages, conversion_count).
     """
@@ -262,7 +267,7 @@ def convert_gitoxide_to_registry(packages: list[Package]) -> tuple[list[Package]
             if checksum:
                 logger.info("  Converting to crates.io: %s %s", pkg.name, pkg.version)
                 converted.append(
-                    replace(pkg, source=REGISTRY_SOURCE, checksum=checksum)
+                    replace(pkg, source=REGISTRY_SOURCE, checksum=checksum),
                 )
                 conversion_count += 1
             else:
@@ -279,8 +284,7 @@ def convert_gitoxide_to_registry(packages: list[Package]) -> tuple[list[Package]
 
 
 def remove_duplicates(packages: list[Package]) -> tuple[list[Package], int]:
-    """
-    Remove duplicate packages (same name+version from multiple sources).
+    """Remove duplicate packages (same name+version from multiple sources).
 
     Prefers registry sources over git sources.
     """
@@ -316,8 +320,7 @@ def remove_duplicates(packages: list[Package]) -> tuple[list[Package], int]:
 
 
 def strip_git_commit_hash(source: str) -> str:
-    """
-    Strip the commit hash from a git source URL.
+    """Strip the commit hash from a git source URL.
 
     Cargo.lock dependency strings use the shortened form:
       git+https://github.com/GitoxideLabs/gitoxide?branch=main
@@ -332,10 +335,10 @@ def strip_git_commit_hash(source: str) -> str:
 
 
 def build_dep_replacement_map(
-    original: list[Package], final: list[Package]
+    original: list[Package],
+    final: list[Package],
 ) -> dict[str, str]:
-    """
-    Build a map of old dependency strings to new ones.
+    """Build a map of old dependency strings to new ones.
 
     Maps qualified dependency strings to simple "pkg version" format for:
     - Packages converted from git to registry
@@ -351,8 +354,6 @@ def build_dep_replacement_map(
     final_by_key = {p.to_key(): p for p in final}
 
     # Find all packages that were deduplicated (had multiple sources)
-    from collections import Counter
-
     key_counts = Counter(p.to_key() for p in original)
     deduped_keys = {k for k, count in key_counts.items() if count > 1}
 
@@ -391,7 +392,8 @@ def build_dep_replacement_map(
 
 
 def fix_dependency_references(
-    packages: list[Package], replacement_map: dict[str, str]
+    packages: list[Package],
+    replacement_map: dict[str, str],
 ) -> list[Package]:
     """Update dependency references using the replacement map."""
     if not replacement_map:
@@ -462,7 +464,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def configure_logging(quiet: bool, verbose: bool) -> None:
+def configure_logging(*, quiet: bool, verbose: bool) -> None:
     """Configure logging based on command-line flags."""
     if quiet:
         level = logging.WARNING
@@ -483,9 +485,9 @@ class ExitCode(IntEnum):
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Main entry point. Returns exit code."""
+    """Run the CLI workflow and return an exit code."""
     args = parse_args(argv)
-    configure_logging(args.quiet, args.verbose)
+    configure_logging(quiet=args.quiet, verbose=args.verbose)
 
     cargo_lock: Path = args.cargo_lock
 
@@ -500,8 +502,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         packages, lock_version = parse_cargo_lock(content)
-    except tomllib.TOMLDecodeError as e:
-        logger.exception("Error parsing Cargo.lock: %s", e)
+    except tomllib.TOMLDecodeError:
+        logger.exception("Error parsing Cargo.lock")
         return ExitCode.ERROR
 
     logger.info("  Found %d packages", len(packages))

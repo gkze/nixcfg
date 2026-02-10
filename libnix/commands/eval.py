@@ -1,28 +1,34 @@
 """Typed wrappers around ``nix eval`` for JSON, Pydantic, and raw output."""
 
-import json
-from typing import Any
-
 from pydantic import TypeAdapter
 
+from ._json import JsonValue, run_nix_json
 from .base import run_nix
 
 
-async def nix_eval_json(expr: str, *, timeout: float = 60.0) -> Any:
+async def nix_eval_json(
+    expr: str,
+    *,
+    timeout: float = 60.0,  # noqa: ASYNC109
+) -> JsonValue:
     """Evaluate a Nix expression and return the parsed JSON value.
 
     Runs ``nix eval --json --expr <expr>`` and decodes stdout as JSON.
     The return type is whatever ``json.loads`` produces (dict, list, str,
     int, bool, or None).
     """
-    result = await run_nix(
+    return await run_nix_json(
         ["nix", "eval", "--json", "--expr", expr],
         timeout=timeout,
     )
-    return json.loads(result.stdout)
 
 
-async def nix_eval_typed[T](expr: str, model: type[T], *, timeout: float = 60.0) -> T:
+async def nix_eval_typed[T](
+    expr: str,
+    model: type[T],
+    *,
+    timeout: float = 60.0,  # noqa: ASYNC109
+) -> T:
     """Evaluate a Nix expression and validate the result against a Pydantic model.
 
     Calls :func:`nix_eval_json` then validates the parsed data with
@@ -32,7 +38,11 @@ async def nix_eval_typed[T](expr: str, model: type[T], *, timeout: float = 60.0)
     return TypeAdapter(model).validate_python(data)
 
 
-async def nix_eval_raw(expr: str, *, timeout: float = 60.0) -> str:
+async def nix_eval_raw(
+    expr: str,
+    *,
+    timeout: float = 60.0,  # noqa: ASYNC109
+) -> str:
     """Evaluate a Nix expression and return the raw string output.
 
     Runs ``nix eval --raw --expr <expr>``, which prints the value without
