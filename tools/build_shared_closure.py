@@ -16,8 +16,8 @@ from libnix.commands.store import nix_store_realise
 
 log = logging.getLogger(__name__)
 
-# Timeout for nix evaluation (10 min — large configs can take 5+ min)
-EVAL_TIMEOUT = 600.0
+# Timeout for nix evaluation (15 min — Darwin eval can exceed 10 min in CI)
+EVAL_TIMEOUT = 900.0
 
 # Timeout for nix-store builds (2 hours — Zed can take up to 1 hour from source)
 BUILD_TIMEOUT = 21600.0
