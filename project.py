@@ -7,11 +7,14 @@ from typing import Annotated
 
 import typer
 
+_is_tty = sys.stdout.isatty()
+
 app = typer.Typer(
     name="project",
     help="Unified CLI for nixcfg project tasks.",
     no_args_is_help=True,
     pretty_exceptions_enable=False,
+    rich_markup_mode="rich" if _is_tty else None,
 )
 
 # ---------------------------------------------------------------------------
@@ -52,6 +55,7 @@ ci_app = typer.Typer(
     name="ci",
     help="CI helper tools for update pipelines.",
     no_args_is_help=True,
+    rich_markup_mode="rich" if _is_tty else None,
 )
 app.add_typer(ci_app)
 
@@ -210,6 +214,7 @@ schema_app = typer.Typer(
     name="schema",
     help="Nix JSON schema utilities (fetch, codegen).",
     no_args_is_help=True,
+    rich_markup_mode="rich" if _is_tty else None,
 )
 app.add_typer(schema_app)
 

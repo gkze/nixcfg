@@ -576,7 +576,10 @@ class Renderer:
 
     def _print_final_status(self) -> None:
         """Render the final full output snapshot to stdout."""
-        console = Console()
+        import sys
+
+        _no_color = not sys.stdout.isatty()
+        console = Console(no_color=_no_color, highlight=not _no_color)
         console.print(self._build_display(full_output=True))
 
     def render(self) -> None:

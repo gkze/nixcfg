@@ -315,6 +315,7 @@
                   enable = true;
                   files = lintFiles.shell.regex;
                   excludes = lintFiles.shell.excludeRegex;
+                  settings.simplify = false; # let .editorconfig control style
                 };
                 # Markdown
                 mdformat = {

@@ -97,9 +97,14 @@ class OutputOptions:
     _err_console: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        """Initialize stdout/stderr rich consoles."""
-        self._console = Console()
-        self._err_console = Console(stderr=True)
+        """Initialize stdout/stderr rich consoles (plain when not a TTY)."""
+        no_color = not sys.stdout.isatty()
+        self._console = Console(no_color=no_color, highlight=not no_color)
+        self._err_console = Console(
+            stderr=True,
+            no_color=not sys.stderr.isatty(),
+            highlight=sys.stderr.isatty(),
+        )
 
     def print(
         self,
@@ -404,7 +409,8 @@ async def _run_updates(args: argparse.Namespace) -> int:  # noqa: C901, PLR0911,
             sys.stdout.write(f"{json.dumps(payload)}\n")
             return 0
 
-        console = Console()
+        _no_color = not sys.stdout.isatty()
+        console = Console(no_color=_no_color, highlight=not _no_color)
         console.print("[bold]Available sources (sources.json):[/bold]")
         console.print(Columns(sorted(UPDATERS.keys()), padding=(0, 2)))
         console.print()
