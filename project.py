@@ -60,9 +60,19 @@ ci_app = typer.Typer(
 app.add_typer(ci_app)
 
 
+_FORWARDED_ARGS_CONTEXT_SETTINGS = {
+    "allow_extra_args": True,
+    "allow_interspersed_args": False,
+    # CI subcommands forward args into argparse-based helpers. These helpers
+    # define their own option parsing, so Typer/Click must not reject unknown
+    # options like --output.
+    "ignore_unknown_options": True,
+}
+
+
 @ci_app.command(
     name="build-shared-closure",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
     help="Build the union of derivations needed by multiple flake outputs.",
 )
 def ci_build_shared_closure(ctx: typer.Context) -> None:
@@ -74,7 +84,7 @@ def ci_build_shared_closure(ctx: typer.Context) -> None:
 
 @ci_app.command(
     name="dedup-cargo-lock",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
     help="Convert git-sourced gitoxide crates to crates.io and remove duplicates.",
 )
 def ci_dedup_cargo_lock(ctx: typer.Context) -> None:
@@ -86,7 +96,7 @@ def ci_dedup_cargo_lock(ctx: typer.Context) -> None:
 
 @ci_app.command(
     name="flake-lock-diff",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
     help="Generate a human-readable diff of flake.lock changes.",
 )
 def ci_flake_lock_diff(ctx: typer.Context) -> None:
@@ -98,7 +108,7 @@ def ci_flake_lock_diff(ctx: typer.Context) -> None:
 
 @ci_app.command(
     name="merge-sources",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
     help="Merge per-package sources.json trees from multiple CI platform artifacts.",
 )
 def ci_merge_sources(ctx: typer.Context) -> None:
@@ -110,7 +120,7 @@ def ci_merge_sources(ctx: typer.Context) -> None:
 
 @ci_app.command(
     name="sources-diff",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
     help="Generate a Graphtage or unified diff for source entry JSON changes.",
 )
 def ci_sources_diff(ctx: typer.Context) -> None:
@@ -128,7 +138,7 @@ def _run_ci_workflow_step(step: str, ctx: typer.Context) -> None:
 
 @ci_app.command(
     name="nix-flake-update",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
     help="Run nix flake update.",
 )
 def ci_nix_flake_update(ctx: typer.Context) -> None:
@@ -138,7 +148,7 @@ def ci_nix_flake_update(ctx: typer.Context) -> None:
 
 @ci_app.command(
     name="free-disk-space",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
     help="Free disk space on macOS runners.",
 )
 def ci_free_disk_space(ctx: typer.Context) -> None:
@@ -148,7 +158,7 @@ def ci_free_disk_space(ctx: typer.Context) -> None:
 
 @ci_app.command(
     name="install-darwin-tools",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
     help="Install macOS-specific tooling for CI builds.",
 )
 def ci_install_darwin_tools(ctx: typer.Context) -> None:
@@ -158,7 +168,7 @@ def ci_install_darwin_tools(ctx: typer.Context) -> None:
 
 @ci_app.command(
     name="prefetch-flake-inputs",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
     help="Pre-fetch flake inputs for build jobs.",
 )
 def ci_prefetch_flake_inputs(ctx: typer.Context) -> None:
@@ -168,7 +178,7 @@ def ci_prefetch_flake_inputs(ctx: typer.Context) -> None:
 
 @ci_app.command(
     name="build-darwin-config",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
     help="Build one darwin configuration by host name.",
 )
 def ci_build_darwin_config(ctx: typer.Context) -> None:
@@ -178,7 +188,7 @@ def ci_build_darwin_config(ctx: typer.Context) -> None:
 
 @ci_app.command(
     name="smoke-check-update-app",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
     help="Smoke-check that the update app evaluates.",
 )
 def ci_smoke_check_update_app(ctx: typer.Context) -> None:
@@ -188,7 +198,7 @@ def ci_smoke_check_update_app(ctx: typer.Context) -> None:
 
 @ci_app.command(
     name="list-update-targets",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
     help="List update targets discovered by the update app.",
 )
 def ci_list_update_targets(ctx: typer.Context) -> None:
@@ -198,12 +208,31 @@ def ci_list_update_targets(ctx: typer.Context) -> None:
 
 @ci_app.command(
     name="generate-pr-body",
-    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
     help="Generate pull request body markdown for update runs.",
 )
-def ci_generate_pr_body(ctx: typer.Context) -> None:
+def ci_generate_pr_body(  # noqa: PLR0913
+    output: Annotated[str, typer.Option(help="Path to write PR body")],
+    workflow_url: Annotated[str, typer.Option(help="Workflow run URL")],
+    server_url: Annotated[str, typer.Option(help="GitHub server URL")],
+    repository: Annotated[str, typer.Option(help="owner/repo")],
+    base_ref: Annotated[str, typer.Option(help="Base branch for compare")],
+    compare_head: Annotated[
+        str, typer.Option(help="Head branch used in compare links")
+    ] = "update_flake_lock_action",
+) -> None:
     """Render update summary markdown consumed by create-pull-request."""
-    _run_ci_workflow_step("generate-pr-body", ctx)
+    from lib.update.ci.workflow_steps import generate_pr_body
+
+    raise typer.Exit(
+        code=generate_pr_body(
+            output=output,
+            workflow_url=workflow_url,
+            server_url=server_url,
+            repository=repository,
+            base_ref=base_ref,
+            compare_head=compare_head,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -126,8 +126,21 @@ def _git_show(pathspec: str) -> str:
     return result.stdout
 
 
-def _cmd_generate_pr_body(args: argparse.Namespace) -> int:
-    output_path = Path(args.output)
+def generate_pr_body(  # noqa: PLR0913
+    *,
+    output: str | Path,
+    workflow_url: str,
+    server_url: str,
+    repository: str,
+    base_ref: str,
+    compare_head: str = "update_flake_lock_action",
+) -> int:
+    """Generate pull-request body markdown for update runs.
+
+    This is the shared implementation called by both the typer CLI command
+    and the argparse-based ``main()`` entrypoint.
+    """
+    output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -136,12 +149,9 @@ def _cmd_generate_pr_body(args: argparse.Namespace) -> int:
         old_lock_path.write_text(_git_show("HEAD:flake.lock"), encoding="utf-8")
 
         flake_diff = run_flake_lock_diff(old_lock_path, Path("flake.lock"))
-        compare_url = (
-            f"{args.server_url}/{args.repository}/compare/"
-            f"{args.base_ref}...{args.compare_head}"
-        )
+        compare_url = f"{server_url}/{repository}/compare/{base_ref}...{compare_head}"
         body_lines = [
-            f"**[Workflow run]({args.workflow_url})**",
+            f"**[Workflow run]({workflow_url})**",
             "",
             f"**[Compare]({compare_url})**",
             "",
@@ -207,10 +217,7 @@ def _cmd_generate_pr_body(args: argparse.Namespace) -> int:
                 body_lines.extend(["", "### Per-package sources.json changes"])
                 rendered_sources_diffs = True
 
-            file_diff_url = (
-                f"{args.server_url}/{args.repository}/blob/"
-                f"{args.compare_head}/{file_path}"
-            )
+            file_diff_url = f"{server_url}/{repository}/blob/{compare_head}/{file_path}"
             body_lines.extend([
                 "",
                 "<details>",
@@ -224,6 +231,17 @@ def _cmd_generate_pr_body(args: argparse.Namespace) -> int:
 
     output_path.write_text("\n".join(body_lines) + "\n", encoding="utf-8")
     return 0
+
+
+def _cmd_generate_pr_body(args: argparse.Namespace) -> int:
+    return generate_pr_body(
+        output=args.output,
+        workflow_url=args.workflow_url,
+        server_url=args.server_url,
+        repository=args.repository,
+        base_ref=args.base_ref,
+        compare_head=args.compare_head,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
