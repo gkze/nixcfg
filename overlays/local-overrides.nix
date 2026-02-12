@@ -113,43 +113,62 @@
     }
   );
 
-  update-script =
+  project-script =
     let
       inherit (inputs.pyproject-nix.lib) scripts;
 
       # pyproject-nix's scripts.renderWithPackages maps PEP-508 deps to
       # pythonPackages.<name>. nix-manipulator is a local flake input, so we
       # provide it as a Python package override for the interpreter used to
-      # render update.py.
-      nix-manipulator-py =
+      # render project.py.
+      nix-manipulator-pySet =
         let
           uv = prev.lib.getExe prev.uv;
           pythonExe = prev.lib.getExe prev.python314;
 
-          workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
-            workspaceRoot = prev.stdenv.mkDerivation {
-              name = "nix-manipulator-locked";
-              src = inputs.nix-manipulator;
-              buildPhase = ''
-                export SETUPTOOLS_SCM_PRETEND_VERSION=${slib.getFlakeVersion "nix-manipulator"}
-                UV_PYTHON=${pythonExe} ${uv} -n lock
-              '';
-              installPhase = "cp -r . $out";
-            };
+          # FOD that runs `uv lock` with network access, producing just the lockfile.
+          uvLock = prev.stdenv.mkDerivation {
+            name = "nix-manipulator-uv-lock";
+            src = inputs.nix-manipulator;
+            nativeBuildInputs = [
+              prev.uv
+              prev.python314
+              prev.cacert
+            ];
+            buildPhase = ''
+              export HOME=$TMPDIR
+              export SSL_CERT_FILE=${prev.cacert}/etc/ssl/certs/ca-bundle.crt
+              export SETUPTOOLS_SCM_PRETEND_VERSION=${slib.getFlakeVersion "nix-manipulator"}
+              UV_PYTHON=${pythonExe} ${uv} -n lock
+            '';
+            installPhase = "cp uv.lock $out";
+            outputHashMode = "flat";
+            outputHashAlgo = "sha256";
+            outputHash = slib.sourceHash "nix-manipulator" "uvLockHash";
           };
 
-          pySet =
-            (prev.callPackage inputs.pyproject-nix.build.packages {
-              python = prev.python314;
-            }).overrideScope
-              (
-                prev.lib.composeManyExtensions [
-                  inputs.pyproject-build-systems.overlays.default
-                  (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
-                ]
-              );
+          # Combine source + lockfile for uv2nix workspace loading.
+          workspaceRoot = prev.runCommand "nix-manipulator-workspace" { } ''
+            cp -r ${inputs.nix-manipulator} $out
+            chmod -R u+w $out
+            cp -f ${uvLock} $out/uv.lock
+          '';
+
+          workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
+            inherit workspaceRoot;
+          };
         in
-        pySet."nix-manipulator";
+        (prev.callPackage inputs.pyproject-nix.build.packages {
+          python = prev.python314;
+        }).overrideScope
+          (
+            prev.lib.composeManyExtensions [
+              inputs.pyproject-build-systems.overlays.default
+              (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+            ]
+          );
+
+      nix-manipulator-py = nix-manipulator-pySet."nix-manipulator";
 
       python = prev.python314.override {
         packageOverrides = _: _pyPrev: {
@@ -158,8 +177,8 @@
       };
 
       script = scripts.loadScript {
-        name = "update";
-        script = ./.. + "/update.py";
+        name = "project";
+        script = ./.. + "/project.py";
       };
       unwrapped = prev.writeScriptBin script.name (
         scripts.renderWithPackages {
@@ -169,11 +188,11 @@
       );
     in
     prev.symlinkJoin {
-      name = "update-script";
+      name = "project-script";
       paths = [ unwrapped ];
       nativeBuildInputs = [ prev.makeWrapper ];
       postBuild = ''
-        wrapProgram $out/bin/update \
+        wrapProgram $out/bin/project \
           --prefix PATH : ${
             prev.lib.makeBinPath [
               final.flake-edit
@@ -181,7 +200,15 @@
             ]
           } \
           --prefix PYTHONPATH : ${
-            prev.lib.makeSearchPath prev.python314.sitePackages [ final.nix-manipulator ]
+            prev.lib.makeSearchPath prev.python314.sitePackages (
+              with nix-manipulator-pySet;
+              [
+                nix-manipulator
+                tree-sitter
+                tree-sitter-nix
+                pygments
+              ]
+            )
           } \
           --prefix PYTHONPATH : ${./..}
       '';

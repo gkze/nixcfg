@@ -46,6 +46,7 @@ HashType = Literal[
     "spectaOutputHash",  # For specta git dependency hash
     "tauriOutputHash",  # For tauri git dependency hash
     "tauriSpectaOutputHash",  # For tauri-specta git dependency hash
+    "uvLockHash",  # For uv.lock fixed-output derivation hash
     "vendorHash",
 ]
 

@@ -1,1 +1,1 @@
-{ update = { update-script, ... }: "${update-script}/bin/update"; }
+{ project = { project-script, ... }: "${project-script}/bin/project"; }
