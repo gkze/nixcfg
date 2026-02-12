@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-yjP9YLkikSLdUsnvrvzYoHsTSsh2GKPyoETaHDFF+mY=",
+    "x86_64-darwin": "sha256-yjP9YLkikSLdUsnvrvzYoHsTSsh2GKPyoETaHDFF+mY="
+  },
+  "urls": {
+    "aarch64-darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.027_1769832365.dmg",
+    "x86_64-darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.027_1769832365.dmg"
+  },
+  "version": "1.2026.027"
+}

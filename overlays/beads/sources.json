@@ -1,0 +1,10 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-/KvQZtWGcNt2N3VxqRAmBVHs9bEj7zBlvdHZEZ7IXFk=",
+      "hashType": "vendorHash"
+    }
+  ],
+  "input": "beads",
+  "version": "v0.49.6"
+}

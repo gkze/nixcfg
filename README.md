@@ -32,6 +32,11 @@ After changes are made:
 nh (os|darwin) switch -a . # os for NixOS, darwin for macOS
 ```
 
+## Development
+
+- Enter the dev environment with `nix develop` (or `direnv allow` if you use direnv).
+- Run `uv sync` once to create `.venv`; `.envrc` will auto-activate it when present.
+
 ## Roadmap
 
 | Feature :arrow_down: / OS :arrow_right: | macOS | NixOS | Debian | Any Linux distribution |

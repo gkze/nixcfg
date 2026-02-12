@@ -64,6 +64,7 @@
       red-reddit-cli
       rsync
       rustup
+      scratch
       sculptor
       sd
       sentry-cli

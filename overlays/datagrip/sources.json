@@ -1,0 +1,13 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-lE0b8s37mBHJ7e0iHfKSW/9vpE95d/+wpjIgkcGDcr8=",
+    "aarch64-linux": "sha256-75OME+CICrLNkUT0tFqzUe/qAGtCGNKC6kAGeTuSK6w=",
+    "x86_64-linux": "sha256-s9Zw7SUhmAzjhTf52nEerXNaP0l7kO/6J35xFtKf6TQ="
+  },
+  "urls": {
+    "aarch64-darwin": "https://download.jetbrains.com/datagrip/datagrip-2025.3.5-aarch64.dmg",
+    "aarch64-linux": "https://download.jetbrains.com/datagrip/datagrip-2025.3.5-aarch64.tar.gz",
+    "x86_64-linux": "https://download.jetbrains.com/datagrip/datagrip-2025.3.5.tar.gz"
+  },
+  "version": "2025.3.5"
+}

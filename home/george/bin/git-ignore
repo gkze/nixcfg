@@ -1,52 +1,74 @@
 #!/usr/bin/env python
-# vi: ft=python
-# .gitignore creation utility
+"""Fetch `.gitignore` templates from github/gitignore.
+
+With no arguments, print the list of available template names.
+With one argument, print the corresponding `.gitignore` contents.
+"""
+
 from __future__ import annotations
 
 import base64
 import json
 import sys
+from typing import Final
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
-GITIGNORE_URL: str = "https://api.github.com/repos/github/gitignore/contents"
+GITIGNORE_API: Final[str] = "https://api.github.com/repos/github/gitignore/contents"
+HTTP_NOT_FOUND: Final[int] = 404
 
 
-class GitignoreNotFound(Exception):
-    def __init__(self, language: str, *args: object) -> None:
-        super().__init__(f"gitignore for {language} not found!", *args)
+class GitignoreNotFoundError(Exception):
+    """Raise when a requested template is missing."""
+
+    def __init__(self, language: str) -> None:
+        """Initialize the error for `language`."""
+        self.language = language
+        super().__init__(language)
 
 
 def list_gitignore_languages() -> list[str]:
-    return [
-        blob["path"].rstrip(".gitignore") for blob in json.load(urlopen(GITIGNORE_URL))
-    ]
+    """Return template names available in github/gitignore."""
+    with urlopen(GITIGNORE_API) as response:
+        blobs = json.load(response)
+
+    return [blob["path"].removesuffix(".gitignore") for blob in blobs]
 
 
-def get_gitignore(language: str) -> str | None:
+def get_gitignore(language: str) -> str:
+    """Return the `.gitignore` template for `language`."""
+    url = f"{GITIGNORE_API}/{language.capitalize()}.gitignore"
     try:
-        return base64.b64decode(
-            json.load(urlopen(f"{GITIGNORE_URL}/{language.capitalize()}.gitignore"))[
-                "content"
-            ]
-        ).decode()
+        with urlopen(url) as response:  # noqa: S310
+            blob = json.load(response)
+    except HTTPError as exc:
+        if exc.code == HTTP_NOT_FOUND:
+            raise GitignoreNotFoundError(language) from exc
+        raise
 
-    except HTTPError as e:
-        if e.code == 404:
-            raise GitignoreNotFound(language)
+    return base64.b64decode(blob["content"]).decode()
 
 
 def main(argv: list[str]) -> int:
+    """Run the CLI."""
     if len(argv) > 1:
-        raise RuntimeError("Cannot request more than 1 .gitignore template at a time!")
+        sys.stderr.write("usage: git-ignore [language]\n")
+        return 2
 
     if len(argv) == 0:
-        for language_gitignore in list_gitignore_languages():
-            print(language_gitignore)
-
+        for language in list_gitignore_languages():
+            sys.stdout.write(f"{language}\n")
         return 0
 
-    print(get_gitignore(argv[0]))
+    try:
+        template = get_gitignore(argv[0])
+    except GitignoreNotFoundError:
+        sys.stderr.write(f"error: unknown template: {argv[0]}\n")
+        return 1
+
+    sys.stdout.write(template)
+    if not template.endswith("\n"):
+        sys.stdout.write("\n")
     return 0
 
 

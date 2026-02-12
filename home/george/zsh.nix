@@ -27,6 +27,7 @@
     completionInit = ''
       autoload -U compinit bashcompinit
       compinit && bashcompinit
+      compdef _gpg gpg-sq
     '';
     initContent = lib.mkOrder 550 ''
       unalias &>/dev/null run-help && autoload run-help
@@ -37,8 +38,6 @@
       bindkey -M menuselect '^[[Z' reverse-menu-complete
       bindkey "^R" history-incremental-search-backward
       typeset -U PATH MANPATH
-
-      compdef _gpg gpg-sq
 
       # GPG pinentry support
       export GPG_TTY=$(tty)

@@ -18,6 +18,10 @@ result
 .pre-commit-config.yaml
 
 # Python
-__pycache__
+.mypy_cache
+.pytest_cache
 .venv
-sources.json.lock
+__pycache__
+
+# Per-package update lock artifacts
+**/sources.json.lock

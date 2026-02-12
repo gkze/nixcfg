@@ -4,40 +4,49 @@ version = "0.0.0"
 description = "Editor tooling dependencies"
 requires-python = ">=3.14"
 dependencies = [
-  "aiohttp>=3.13.3",
-  "aiohttp-retry>=2.9.1",
-  "filelock>=3.20.3",
-  "lz4>=4.4.4",
-  "packaging>=25.0",
-  "pydantic>=2.12.5",
-  "pydantic-settings>=2.11.0",
-  "pyyaml>=6.0.2",
-  "rich>=14.3.1",
+    "aiohttp>=3.13.3",
+    "aiohttp-retry>=2.9.1",
+    "filelock>=3.20.3",
+    "keyring>=25.7.0",
+    "lz4>=4.4.5",
+    "nix-manipulator",
+    "packaging>=26.0",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "pyyaml>=6.0.3",
+    "rich>=14.3.2",
+    "typer>=0.23.0",
 ]
 
 [project.optional-dependencies]
-codegen = [
-  "datamodel-code-generator[http]>=0.53.0",
-  "referencing>=0.36.2",
-]
+codegen = ["datamodel-code-generator[http]>=0.53.0", "referencing>=0.37.0"]
 
 [tool.ruff]
 target-version = "py314"
 preview = true
+namespace-packages = ["overlays", "packages"]
 
 [tool.ruff.lint]
 select = ["ALL"]
+# D203 and D213 conflict with each other; keep D211-style spacing.
+# COM812 conflicts with the Ruff formatter.
+# FBT002 is unavoidable with typer Option() boolean defaults.
+# PLC0415 — lazy imports in CLI entrypoints are intentional for startup perf.
+ignore = ["COM812", "D203", "D213", "FBT002", "PLC0415"]
 preview = true
 explicit-preview-rules = true
 
 [tool.ruff.lint.isort]
-known-first-party = ["libnix", "update"]
+known-first-party = ["lib"]
 
 [tool.ruff.lint.pycodestyle]
-max-line-length = 100  # allow up to 100, flag above
+max-line-length = 100 # allow up to 100, flag above
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+nix-manipulator = { git = "https://github.com/hoh/nix-manipulator.git", rev = "dbe47853d2f48b6314a9e07e5bad6ba78bdbf6bc" }
 
 [tool.setuptools]
 py-modules = []
@@ -51,6 +60,8 @@ python-version = "3.14"
 [tool.ty.rules]
 # Maximum strictness: promote everything to error
 all = "error"
+# Not all transitive dependencies are visible to Ty in the venv.
+unresolved-import = "ignore"
 
 [tool.ty.terminal]
 error-on-warning = true
@@ -58,11 +69,7 @@ error-on-warning = true
 [tool.ty.analysis]
 
 [tool.pytest.ini_options]
-testpaths = ["libnix/tests"]
+testpaths = ["lib/nix/tests"]
 
 [dependency-groups]
-dev = [
-    "mypy>=1.19.1",
-    "pytest>=9.0.2",
-    "ruff>=0.15.0",
-]
+dev = ["pytest>=9.0.2", "ruff>=0.15.0", "ty>=0.0.16"]

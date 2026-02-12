@@ -1,0 +1,13 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-zO6Bfnw0reGs1xUHRpFj641aREIIQZJepcBMQqFkPBs=",
+    "aarch64-linux": "sha256-iJ8A3OibaP+QO9qHhVlORYxO2OjNo48ZCweIVP61NJQ=",
+    "x86_64-linux": "sha256-HjMMDTWEFJTBxpUrl3uoqCSj50Etdp2sGNfSCjhcUrY="
+  },
+  "urls": {
+    "aarch64-darwin": "https://update.code.visualstudio.com/1.110.0-insider/darwin-arm64/insider",
+    "aarch64-linux": "https://update.code.visualstudio.com/1.110.0-insider/linux-arm64/insider",
+    "x86_64-linux": "https://update.code.visualstudio.com/1.110.0-insider/linux-x64/insider"
+  },
+  "version": "1.110.0-insider"
+}

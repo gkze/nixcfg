@@ -1,6 +1,8 @@
 { primaryUser, ... }:
 {
   system.defaults.dock = {
+    # Keeping this list explicit: app ordering is user-visible, and merging
+    # shared/base lists has repeatedly made preserving exact order brittle.
     persistent-apps = [
       { app = "/System/Applications/Calendar.app"; }
       { app = "/System/Applications/Messages.app"; }

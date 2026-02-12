@@ -178,14 +178,7 @@
     };
     gitui = {
       enable = true;
-      keyConfig =
-        let
-          source = slib.sourceHashEntry "gitui-key-config" "sha256";
-        in
-        pkgs.fetchurl {
-          inherit (source) url;
-          inherit (source) hash;
-        };
+      keyConfig = "${inputs.gitui-key-config}/vim_style_key_config.ron";
     };
     gpg = {
       enable = true;
@@ -319,6 +312,9 @@
             enabled = true;
             settings = { }; # Token injected by activation script
           };
+        };
+        file_types = {
+          "Shell Script" = [ ".envrc" ];
         };
         format_on_save = "on";
         icon_theme = "Catppuccin Frappé";

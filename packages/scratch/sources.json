@@ -1,0 +1,15 @@
+{
+  "commit": "bd9bb74d63491360e48259575ec6abe6f4da4b5d",
+  "hashes": [
+    {
+      "hash": "sha256-LdWgTcWMYTPuqHAWM0dDQL32Wor4EuGhlHP+pjMuLOI=",
+      "hashType": "npmDepsHash"
+    },
+    {
+      "hash": "sha256-qJ0G12TDDXE1qrFEd+rScQjWEPcotPvLIBqSoUbNZiA=",
+      "hashType": "cargoHash"
+    }
+  ],
+  "input": "scratch",
+  "version": "v0.4.0"
+}
