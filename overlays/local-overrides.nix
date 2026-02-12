@@ -127,6 +127,20 @@
             prev.lib.composeManyExtensions [
               inputs.pyproject-build-systems.overlays.default
               (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+              # nix-manipulator is a git source needing hatchling + hatch-vcs
+              # to build; uv.lock doesn't capture build-system deps for git
+              # sources, so pyproject-build-systems can't auto-provide them.
+              # Use resolveBuildSystem to transitively resolve all build deps.
+              (pfinal: pprev: {
+                nix-manipulator = pprev.nix-manipulator.overrideAttrs (old: {
+                  nativeBuildInputs =
+                    (old.nativeBuildInputs or [ ])
+                    ++ pfinal.resolveBuildSystem {
+                      hatchling = [ ];
+                      hatch-vcs = [ ];
+                    };
+                });
+              })
             ]
           );
 
