@@ -66,22 +66,43 @@
       mainProgram,
       packageName ? name,
       venvName ? name,
+      uvLockHash ? slib.sourceHash name "uvLockHash",
       extraBuildPhase ? "",
       extraOverlays ? [ ],
     }:
     let
       uv = prev.lib.getExe prev.uv;
       python = prev.lib.getExe pythonVersion;
+
+      # FOD that runs `uv lock` with network access, producing just the lockfile.
+      uvLock = prev.stdenv.mkDerivation {
+        name = "${name}-uv-lock";
+        inherit src;
+        nativeBuildInputs = [
+          prev.uv
+          pythonVersion
+          prev.cacert
+        ];
+        buildPhase = ''
+          export HOME=$TMPDIR
+          export SSL_CERT_FILE=${prev.cacert}/etc/ssl/certs/ca-bundle.crt
+          ${extraBuildPhase}
+          UV_PYTHON=${python} ${uv} -n lock
+        '';
+        installPhase = "cp uv.lock $out";
+        outputHashMode = "flat";
+        outputHashAlgo = "sha256";
+        outputHash = uvLockHash;
+      };
+
+      workspaceRoot = prev.runCommand "${name}-workspace" { } ''
+        cp -r ${src} $out
+        chmod -R u+w $out
+        cp -f ${uvLock} $out/uv.lock
+      '';
+
       workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
-        workspaceRoot = prev.stdenv.mkDerivation {
-          name = "${name}-locked";
-          inherit src;
-          buildPhase = ''
-            ${extraBuildPhase}
-            UV_PYTHON=${python} ${uv} -n lock
-          '';
-          installPhase = "cp -r . $out";
-        };
+        inherit workspaceRoot;
       };
       pySet =
         (prev.callPackage inputs.pyproject-nix.build.packages {

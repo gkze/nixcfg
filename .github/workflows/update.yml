@@ -1,4 +1,4 @@
----
+--- # !yamlfmt!:ignore
 name: Periodic Flake Update
 
 env:
@@ -6,7 +6,7 @@ env:
 
 on:
   schedule:
-    - cron: "0 */6 * * *"  # Every 6 hours
+    - cron: "0 */6 * * *" # Every 6 hours
   push:
     branches:
       - main
@@ -29,15 +29,13 @@ jobs:
         uses: actions/checkout@v4
       - &setup_nix
         uses: DeterminateSystems/determinate-nix-action@v3
-      - &setup_uv
-        uses: astral-sh/setup-uv@v7
       - &cache_nix
         uses: actions/cache@v4
         with:
           path: ~/.cache/nix
           key: nix-cache-${{ runner.os }}-${{ hashFiles('flake.lock') }}
           restore-keys: nix-cache-${{ runner.os }}-
-      - run: uv run project.py ci nix-flake-update
+      - run: nix run .#project -- ci nix-flake-update
       - uses: actions/upload-artifact@v4
         with:
           name: flake-lock
@@ -59,10 +57,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - *checkout
-      - *setup_uv
-      - name: Free disk space
-        if: runner.os == 'macOS'
-        run: uv run project.py ci free-disk-space
       - *setup_nix
       - &cachix
         uses: cachix/cachix-action@v15
@@ -78,17 +72,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/nix
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock')
-            }}
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
           restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
-      - name: Install flake-edit
-        run: uv run project.py ci install-flake-edit
+      - name: Free disk space
+        if: runner.os == 'macOS'
+        run: nix run .#project -- ci free-disk-space
       - name: Compute hashes for ${{ matrix.platform }}
         # Run update command directly via project CLI to avoid flake evaluation
         # (which fails when sources.json has stale hashes)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: uv run project.py update -- --native-only
+        run: nix run .#project -- update -- --native-only
       - uses: actions/upload-artifact@v4
         with:
           name: sources-${{ matrix.platform }}
@@ -103,7 +97,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - *checkout
-      - *setup_uv
+      - *setup_nix
+      - *cache_nix
       - *download_flake_lock
       - uses: actions/download-artifact@v4
         with:
@@ -119,7 +114,7 @@ jobs:
           path: sources-aarch64-linux
       - name: Merge per-package sources files
         run: |
-          uv run project.py ci merge-sources \
+          nix run .#project -- ci merge-sources \
             sources-aarch64-darwin \
             sources-x86_64-linux \
             sources-aarch64-linux
@@ -137,9 +132,6 @@ jobs:
     runs-on: macos-15
     steps:
       - *checkout
-      - *setup_uv
-      - name: Free disk space
-        run: uv run project.py ci free-disk-space
       - *setup_nix
       - *cachix
       - &download_merged_sources
@@ -148,12 +140,14 @@ jobs:
           name: merged-sources
           path: .
       - *cache_nix_arch
-      - run: uv run project.py ci install-darwin-tools
+      - name: Free disk space
+        run: nix run .#project -- ci free-disk-space
+      - run: nix run .#project -- ci install-darwin-tools
       - name: Pre-fetch flake inputs
-        run: uv run project.py ci prefetch-flake-inputs
+        run: nix run .#project -- ci prefetch-flake-inputs
       - name: Build shared Darwin closure
         run: |
-          uv run project.py ci build-shared-closure \
+          nix run .#project -- ci build-shared-closure \
             .#darwinConfigurations.argus.system \
             .#darwinConfigurations.rocinante.system
 
@@ -171,17 +165,16 @@ jobs:
           - rocinante
     steps:
       - *checkout
-      - *setup_uv
-      - name: Free disk space
-        run: uv run project.py ci free-disk-space
       - *setup_nix
       - *cachix
       - *download_merged_sources
       - *cache_nix_arch
-      - run: uv run project.py ci install-darwin-tools
+      - name: Free disk space
+        run: nix run .#project -- ci free-disk-space
+      - run: nix run .#project -- ci install-darwin-tools
       - name: Pre-fetch flake inputs
-        run: uv run project.py ci prefetch-flake-inputs
-      - run: uv run project.py ci build-darwin-config "${{ matrix.host }}"
+        run: nix run .#project -- ci prefetch-flake-inputs
+      - run: nix run .#project -- ci build-darwin-config "${{ matrix.host }}"
 
   # Phase 6: Placeholder for future NixOS configuration builds
   linux:
@@ -190,13 +183,12 @@ jobs:
     steps:
       - *checkout
       - *setup_nix
-      - *setup_uv
       - *cachix
       - *download_merged_sources
       - *cache_nix_arch
       - name: Smoke-check update app evaluation
-        run: uv run project.py ci smoke-check-update-app
-      - run: uv run project.py ci list-update-targets
+        run: nix run .#project -- ci smoke-check-update-app
+      - run: nix run .#project -- ci list-update-targets
 
   # Phase 7: Create PR with updates
   create-pr:
@@ -216,11 +208,12 @@ jobs:
       pull-requests: write
     steps:
       - *checkout
-      - *setup_uv
+      - *setup_nix
+      - *cache_nix
       - *download_merged_sources
       - name: Generate PR body
         run: |
-          uv run project.py ci generate-pr-body \
+          nix run .#project -- ci generate-pr-body \
             --output /tmp/pr-body.md \
             --workflow-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --server-url "${{ github.server_url }}" \

@@ -28,7 +28,6 @@ _CI_COMMANDS = {
     "flake-lock-diff": flake_lock_diff_main,
     "merge-sources": merge_sources_main,
     "nix-flake-update": partial(_workflow_step, "nix-flake-update"),
-    "install-flake-edit": partial(_workflow_step, "install-flake-edit"),
     "free-disk-space": partial(_workflow_step, "free-disk-space"),
     "install-darwin-tools": partial(_workflow_step, "install-darwin-tools"),
     "prefetch-flake-inputs": partial(_workflow_step, "prefetch-flake-inputs"),

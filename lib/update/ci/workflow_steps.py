@@ -40,11 +40,6 @@ def _cmd_nix_flake_update(_: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_install_flake_edit(_: argparse.Namespace) -> int:
-    _run(["nix", "profile", "install", "nixpkgs#flake-edit"])
-    return 0
-
-
 def _xcode_version_key(app_path: Path) -> tuple[int, ...]:
     stem = app_path.stem.removeprefix("Xcode")
     parts = [
@@ -103,7 +98,7 @@ def _cmd_build_darwin_config(args: argparse.Namespace) -> int:
 
 def _cmd_smoke_check_update_app(_: argparse.Namespace) -> int:
     _run(
-        ["nix", "eval", "--raw", ".#apps.x86_64-linux.update.program"],
+        ["nix", "eval", "--raw", ".#apps.x86_64-linux.project.program"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -111,7 +106,7 @@ def _cmd_smoke_check_update_app(_: argparse.Namespace) -> int:
 
 
 def _cmd_list_update_targets(_: argparse.Namespace) -> int:
-    _run(["nix", "run", ".#update", "--", "--list"])
+    _run(["nix", "run", ".#project", "--", "update", "--list"])
     return 0
 
 
@@ -229,9 +224,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     step_nix_update = subparsers.add_parser("nix-flake-update")
     step_nix_update.set_defaults(func=_cmd_nix_flake_update)
-
-    step_install_flake_edit = subparsers.add_parser("install-flake-edit")
-    step_install_flake_edit.set_defaults(func=_cmd_install_flake_edit)
 
     step_free_disk = subparsers.add_parser("free-disk-space")
     step_free_disk.set_defaults(func=_cmd_free_disk_space)

@@ -1,0 +1,9 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-EW24v7Id0YVDoRN5BHnJAxF4zWhQzgoWdb6LhZxj2Jg=",
+      "hashType": "uvLockHash"
+    }
+  ],
+  "input": "nix-manipulator"
+}
