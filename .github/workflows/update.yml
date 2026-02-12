@@ -1,6 +1,9 @@
 ---
 name: Periodic Flake Update
 
+env:
+  CACHIX_NAME: gkze
+
 on:
   schedule:
     - cron: "0 */6 * * *"  # Every 6 hours
@@ -13,22 +16,28 @@ concurrency:
   group: flake-update
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   # Phase 1: Update flake.lock
   update-lock:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/determinate-nix-action@v3
-      - uses: actions/cache@v4
+      - &checkout
+        uses: actions/checkout@v4
+      - &setup_nix
+        uses: DeterminateSystems/determinate-nix-action@v3
+      - &setup_uv
+        uses: astral-sh/setup-uv@v7
+      - &cache_nix
+        uses: actions/cache@v4
         with:
           path: ~/.cache/nix
           key: nix-cache-${{ runner.os }}-${{ hashFiles('flake.lock') }}
           restore-keys: nix-cache-${{ runner.os }}-
-      - run: nix flake update
+      - run: uv run project.py ci nix-flake-update
       - uses: actions/upload-artifact@v4
         with:
           name: flake-lock
@@ -48,51 +57,54 @@ jobs:
           - runner: ubuntu-24.04-arm
             platform: aarch64-linux
     runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/determinate-nix-action@v3
-      - uses: cachix/cachix-action@v15
+      - *checkout
+      - *setup_uv
+      - name: Free disk space
+        if: runner.os == 'macOS'
+        run: uv run project.py ci free-disk-space
+      - *setup_nix
+      - &cachix
+        uses: cachix/cachix-action@v15
         with:
-          name: gkze
+          name: ${{ env.CACHIX_NAME }}
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
-      - uses: astral-sh/setup-uv@v7
-      - uses: actions/download-artifact@v4
+      - &download_flake_lock
+        uses: actions/download-artifact@v4
         with:
           name: flake-lock
           path: .
-      - uses: actions/cache@v4
+      - &cache_nix_arch
+        uses: actions/cache@v4
         with:
           path: ~/.cache/nix
           key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock')
             }}
           restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
       - name: Install flake-edit
-        run: nix profile install nixpkgs#flake-edit
+        run: uv run project.py ci install-flake-edit
       - name: Compute hashes for ${{ matrix.platform }}
-        # Run update.py directly with uv to avoid flake evaluation
+        # Run update command directly via project CLI to avoid flake evaluation
         # (which fails when sources.json has stale hashes)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: uv run update.py --native-only
+        run: uv run project.py update -- --native-only
       - uses: actions/upload-artifact@v4
         with:
           name: sources-${{ matrix.platform }}
-          path: sources.json
+          if-no-files-found: error
+          path: |
+            packages/**/sources.json
+            overlays/**/sources.json
 
   # Phase 3: Merge platform-specific hashes
   merge-hashes:
     needs: compute-hashes
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
-      - uses: actions/download-artifact@v4
-        with:
-          name: flake-lock
-          path: .
+      - *checkout
+      - *setup_uv
+      - *download_flake_lock
       - uses: actions/download-artifact@v4
         with:
           name: sources-aarch64-darwin
@@ -105,54 +117,43 @@ jobs:
         with:
           name: sources-aarch64-linux
           path: sources-aarch64-linux
-      - name: Merge sources.json files
+      - name: Merge per-package sources files
         run: |
-          uv run python -m tools.merge_sources \
-            sources.json \
-            sources-aarch64-darwin/sources.json \
-            sources-x86_64-linux/sources.json \
-            sources-aarch64-linux/sources.json \
-            -o sources.json
+          uv run project.py ci merge-sources \
+            sources-aarch64-darwin \
+            sources-x86_64-linux \
+            sources-aarch64-linux
       - uses: actions/upload-artifact@v4
         with:
           name: merged-sources
           path: |
             flake.lock
-            sources.json
+            packages/**/sources.json
+            overlays/**/sources.json
 
   # Phase 4: Build shared Darwin derivations to populate cache
   darwin-shared:
     needs: merge-hashes
     runs-on: macos-15
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - *checkout
+      - *setup_uv
       - name: Free disk space
-        run: bash .github/scripts/free_disk_space.sh
-      - uses: DeterminateSystems/determinate-nix-action@v3
-      - uses: cachix/cachix-action@v15
-        with:
-          name: gkze
-          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
-      - uses: actions/download-artifact@v4
+        run: uv run project.py ci free-disk-space
+      - *setup_nix
+      - *cachix
+      - &download_merged_sources
+        uses: actions/download-artifact@v4
         with:
           name: merged-sources
           path: .
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/nix
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock')
-            }}
-          restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
-      - uses: astral-sh/setup-uv@v7
-      - run: brew install --cask macfuse && brew install 1password-cli
+      - *cache_nix_arch
+      - run: uv run project.py ci install-darwin-tools
       - name: Pre-fetch flake inputs
-        run: nix flake archive --json > /dev/null
+        run: uv run project.py ci prefetch-flake-inputs
       - name: Build shared Darwin closure
         run: |
-          uv run python -m tools.build_shared_closure \
+          uv run project.py ci build-shared-closure \
             .#darwinConfigurations.argus.system \
             .#darwinConfigurations.rocinante.system
 
@@ -168,58 +169,34 @@ jobs:
         host:
           - argus
           - rocinante
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - *checkout
+      - *setup_uv
       - name: Free disk space
-        run: bash .github/scripts/free_disk_space.sh
-      - uses: DeterminateSystems/determinate-nix-action@v3
-      - uses: cachix/cachix-action@v15
-        with:
-          name: gkze
-          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
-      - uses: actions/download-artifact@v4
-        with:
-          name: merged-sources
-          path: .
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/nix
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock')
-            }}
-          restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
-      - run: brew install --cask macfuse && brew install 1password-cli
+        run: uv run project.py ci free-disk-space
+      - *setup_nix
+      - *cachix
+      - *download_merged_sources
+      - *cache_nix_arch
+      - run: uv run project.py ci install-darwin-tools
       - name: Pre-fetch flake inputs
-        run: nix flake archive --json > /dev/null
-      - run: nix build --impure .#darwinConfigurations.${{ matrix.host }}.system
+        run: uv run project.py ci prefetch-flake-inputs
+      - run: uv run project.py ci build-darwin-config "${{ matrix.host }}"
 
   # Phase 6: Placeholder for future NixOS configuration builds
   linux:
     needs: merge-hashes
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/determinate-nix-action@v3
-      - uses: cachix/cachix-action@v15
-        with:
-          name: gkze
-          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
-      - uses: actions/download-artifact@v4
-        with:
-          name: merged-sources
-          path: .
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/nix
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock')
-            }}
-          restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
-      - run: nix run .#update -- --list
+      - *checkout
+      - *setup_nix
+      - *setup_uv
+      - *cachix
+      - *download_merged_sources
+      - *cache_nix_arch
+      - name: Smoke-check update app evaluation
+        run: uv run project.py ci smoke-check-update-app
+      - run: uv run project.py ci list-update-targets
 
   # Phase 7: Create PR with updates
   create-pr:
@@ -238,50 +215,17 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
-      - uses: actions/download-artifact@v4
-        with:
-          name: merged-sources
-          path: .
-      - name: Generate update diff
-        id: diff
+      - *checkout
+      - *setup_uv
+      - *download_merged_sources
+      - name: Generate PR body
         run: |
-          git show HEAD:flake.lock > /tmp/old-flake.lock
-          flake_diff=$(uv run python -m tools.flake_lock_diff /tmp/old-flake.lock flake.lock)
-
-          # Handle multiline output for GitHub Actions
-          {
-            echo 'body<<EOF'
-            echo "$flake_diff"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-      - name: Generate sources.json Graphtage diff
-        id: sources_diff
-        run: |
-          if git diff --quiet HEAD -- sources.json 2>/dev/null; then
-            {
-              echo "has_sources_diff=false"
-              echo "comment_file="
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git show HEAD:sources.json > /tmp/old-sources.json
-          uv run --with graphtage python -m tools.sources_json_diff /tmp/old-sources.json sources.json > /tmp/sources-diff.txt
-
-          {
-            echo "### sources.json Diff (Graphtage)"
-            echo ""
-            echo '```diff'
-            cat /tmp/sources-diff.txt
-            echo '```'
-          } > /tmp/sources-diff-comment.md
-
-          {
-            echo "has_sources_diff=true"
-            echo "comment_file=/tmp/sources-diff-comment.md"
-          } >> "$GITHUB_OUTPUT"
+          uv run project.py ci generate-pr-body \
+            --output /tmp/pr-body.md \
+            --workflow-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --server-url "${{ github.server_url }}" \
+            --repository "${{ github.repository }}" \
+            --base-ref "${{ github.base_ref || github.event.repository.default_branch }}"
 
       - uses: peter-evans/create-pull-request@v7
         id: cpr
@@ -291,29 +235,4 @@ jobs:
           delete-branch: true
           title: "nix: Update flake.lock and sources"
           commit-message: "nix: Update flake.lock and sources"
-          body: |-
-            Automated changes by the Periodic Flake Update workflow.
-
-            **Workflow run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            ```
-            ${{ steps.diff.outputs.body }}
-            ```
-
-            ### Running GitHub Actions on this PR
-
-            GitHub Actions will not run workflows on pull requests which are opened by a GitHub Action.
-
-            **To run GitHub Actions workflows on this PR, close and re-open this pull request.**
-
-      - name: Post sources.json Graphtage comment
-        if: >-
-          steps.cpr.outputs.pull-request-number != '' &&
-          steps.sources_diff.outputs.has_sources_diff == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |-
-          gh pr comment "${{ steps.cpr.outputs.pull-request-number }}" \
-            --edit-last \
-            --create-if-none \
-            --body-file "${{ steps.sources_diff.outputs.comment_file }}"
+          body-path: /tmp/pr-body.md

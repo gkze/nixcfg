@@ -10,11 +10,25 @@ Guide you through adding a new package to this nixcfg repository. There are thre
 
 Use this when you want to add a new package, tool, or application to the Nix configuration. Ask clarifying questions if unsure which pattern to apply.
 
+## Repository Architecture
+
+This repo uses **flakelight** with `nixDir = ./.` and a vertical per-package layout:
+
+- **`packages/`** — Flakelight `callPackage` convention. Each file returns a **single derivation**. Flakelight auto-discovers these, calls them via `callPackage`, and adds them to both `packages.<system>` output and the overlay.
+- **`overlays/`** — For things that need `final`/`prev` (overriding existing nixpkgs packages, nested overrides, multi-attr returns). `overlays/default.nix` auto-imports all `overlays/<name>/default.nix` fragments.
+- **Per-package `sources.json`** — Each package that needs hashes stores them in `<dir>/<name>/sources.json` as a bare entry (not wrapped in a name key).
+- **Per-package `updater.py`** — Each package that needs a custom updater stores it in `<dir>/<name>/updater.py`. Reusable base classes live in `update/updaters/`.
+
 ## Decision tree
 
 1. **Is the source a Nix flake that exports packages or overlays?** -> Pattern 1
 1. **Is the source a Git repo (flake=false) you build from source?** -> Pattern 2
 1. **Is the source a pre-built binary, .dmg, AppImage, or rolling-release app?** -> Pattern 3
+
+### Choosing `packages/` vs `overlays/`
+
+- **`packages/<name>.nix`** — Use when the package is a standalone new derivation that doesn't need `final`/`prev` overlay semantics. The file receives `callPackage` args (e.g., `{ lib, stdenv, fetchurl, mkGoCliPackage, ... }:`).
+- **`overlays/<name>/default.nix`** — Use when you need `final`/`prev` to override an existing nixpkgs package, access `inputs.*`, return multiple attrs, or use builders that reference `sources`/`outputs`.
 
 ______________________________________________________________________
 
@@ -45,22 +59,25 @@ withOverlays = [
 ];
 ```
 
-No changes to `overlays.nix` needed.
+No changes to `overlays/default.nix` needed.
 
-#### Option B: Direct package assignment in overlay
+#### Option B: Direct package assignment in overlay fragment
 
-In `overlays.nix`, inside `default = final: prev: { ... }`:
+Create `overlays/my-package/default.nix`:
 
 ```nix
-my-package = inputs.my-package.packages.${system}.default;
+{ inputs, system, ... }:
+{
+  my-package = inputs.my-package.packages.${system}.default;
+}
 ```
 
 ### Checklist
 
 - [ ] Add flake input with `inputs.nixpkgs.follows = "nixpkgs"`
-- [ ] Either add overlay to `withOverlays` OR add assignment in `overlays.nix`
+- [ ] Either add overlay to `withOverlays` OR create overlay fragment
 - [ ] Run `nix flake lock --update-input my-package` to populate lock
-- [ ] No `sources.json` or `update` changes needed
+- [ ] No `sources.json` or updater changes needed
 
 ______________________________________________________________________
 
@@ -86,207 +103,163 @@ my-tool = {
 };
 ```
 
-#### `overlays.nix` - Add derivation
+#### Option A: `packages/my-tool.nix` (standalone callPackage derivation)
 
-Choose the appropriate helper based on the build system:
-
-##### Go CLI (with shell completions)
+Best for Go CLIs, Python packages, Rust crates — any standalone derivation:
 
 ```nix
-my-tool = mkGoCliPackage {
+{
+  lib,
+  mkGoCliPackage,
+  inputs,
+  ...
+}:
+mkGoCliPackage {
   pname = "my-tool";
   input = inputs.my-tool;
-  subPackages = [ "cmd/my-tool" ];  # or [ "." ]
-  cmdName = "my-tool";  # binary name (defaults to pname)
-  meta = with prev.lib; {
+  subPackages = [ "cmd/my-tool" ];
+  cmdName = "my-tool";
+  meta = with lib; {
     description = "Description";
     homepage = "https://github.com/owner/repo";
     license = licenses.mit;
   };
-};
+}
 ```
 
-Requires `vendorHash` in sources.json (see below).
+Requires `vendorHash` in per-package `sources.json` (see below).
 
-##### Python (uv2nix)
+#### Option B: `overlays/my-tool/default.nix` (overlay fragment)
 
-```nix
-my-tool = mkUv2nixPackage {
-  name = "my-tool";
-  src = inputs.my-tool;          # or "${inputs.my-tool}/subdir"
-  mainProgram = "my-tool";
-  # Optional:
-  # pythonVersion = prev.python314;
-  # packageName = "pypi-name";   # if different from name
-  # venvName = "my-tool";
-};
-```
-
-No sources.json entry needed (uv2nix handles deps).
-
-##### Cargo/Rust override
-
-```nix
-my-tool = prev.my-tool.overrideAttrs (old: {
-  version = getFlakeVersion "my-tool";
-  src = inputs.my-tool;
-  cargoDeps = prev.rustPlatform.fetchCargoVendor {
-    src = inputs.my-tool;
-    hash = outputs.lib.sourceHash "my-tool" "cargoHash";
-  };
-});
-```
-
-Requires `cargoHash` in sources.json.
+Best for overriding existing nixpkgs packages or when you need `final`/`prev`:
 
 ##### Go override (existing nixpkgs package)
 
 ```nix
-my-tool = prev.my-tool.overrideAttrs {
-  version = getFlakeVersion "my-tool";
-  src = inputs.my-tool;
-  vendorHash = outputs.lib.sourceHash "my-tool" "vendorHash";
-};
+{ inputs, outputs, prev, slib, ... }:
+{
+  my-tool = prev.my-tool.overrideAttrs {
+    version = slib.getFlakeVersion "my-tool";
+    src = inputs.my-tool;
+    vendorHash = slib.sourceHash "my-tool" "vendorHash";
+  };
+}
 ```
 
-Requires `vendorHash` in sources.json.
+##### Cargo/Rust override
+
+```nix
+{ inputs, prev, slib, ... }:
+{
+  my-tool = prev.my-tool.overrideAttrs (old: {
+    version = slib.getFlakeVersion "my-tool";
+    src = inputs.my-tool;
+    cargoDeps = prev.rustPlatform.fetchCargoVendor {
+      src = inputs.my-tool;
+      hash = slib.sourceHash "my-tool" "cargoHash";
+    };
+  });
+}
+```
 
 ##### npm/Node override
 
 ```nix
-my-tool =
-  let
-    version = getFlakeVersion "my-tool";
-    npmDepsHash = outputs.lib.sourceHash "my-tool" "npmDepsHash";
-    npmDeps = prev.fetchNpmDeps {
-      src = inputs.my-tool;
-      hash = npmDepsHash;
-    };
-  in
-  prev.my-tool.overrideAttrs (old: {
+{ inputs, prev, slib, ... }:
+let
+  version = slib.getFlakeVersion "my-tool";
+  npmDepsHash = slib.sourceHash "my-tool" "npmDepsHash";
+  npmDeps = prev.fetchNpmDeps {
+    src = inputs.my-tool;
+    hash = npmDepsHash;
+  };
+in
+{
+  my-tool = prev.my-tool.overrideAttrs (old: {
     inherit version npmDepsHash npmDeps;
     src = inputs.my-tool;
   });
+}
 ```
 
-Requires `npmDepsHash` in sources.json.
-
-##### Deno package (like linear-cli)
+##### Python (uv2nix)
 
 ```nix
-my-tool =
-  let
-    version = "1.0.0";
-    # FOD: fetch Deno dependencies (needs network)
-    denoDeps = prev.stdenvNoCC.mkDerivation {
-      pname = "my-tool-deps";
-      inherit version;
-      src = inputs.my-tool;
-      nativeBuildInputs = [ prev.deno prev.cacert ];
-      outputHashAlgo = "sha256";
-      outputHashMode = "recursive";
-      outputHash = outputs.lib.sourceHash "my-tool" "denoDepsHash";
-      buildPhase = ''
-        export DENO_DIR=$TMPDIR/deno-cache
-        export SSL_CERT_FILE=${prev.cacert}/etc/ssl/certs/ca-bundle.crt
-        export HOME=$TMPDIR
-        deno cache src/main.ts
-      '';
-      installPhase = ''
-        mkdir -p $out
-        cp -r $TMPDIR/deno-cache $out/deno-cache
-      '';
-    };
-  in
-  prev.stdenvNoCC.mkDerivation {
-    pname = "my-tool";
-    inherit version;
+{ inputs, prev, final, ... }:
+{
+  my-tool = final.mkUv2nixPackage {
+    name = "my-tool";
     src = inputs.my-tool;
-    nativeBuildInputs = [ prev.deno prev.installShellFiles ];
-    buildPhase = ''
-      export DENO_DIR=$(mktemp -d)
-      cp -r ${denoDeps}/deno-cache/* $DENO_DIR/
-      chmod -R u+w $DENO_DIR
-      deno compile -A --output my-tool src/main.ts
-    '';
-    installPhase = ''
-      mkdir -p $out/bin
-      cp my-tool $out/bin/
-    '';
+    mainProgram = "my-tool";
   };
+}
 ```
 
-Requires `denoDepsHash` in sources.json.
+No sources.json entry needed (uv2nix handles deps).
 
 ##### Vim plugin
 
 ```nix
-# Inside vimPlugins = prev.vimPlugins.extend (_: vprev: { ... }):
-
-# New plugin from source:
+# Inside overlays/default.nix vimPlugins extend block:
 my-plugin = prev.vimUtils.buildVimPlugin {
   pname = "my-plugin";
   version = inputs.my-plugin.rev;
   src = inputs.my-plugin;
 };
-
-# Override existing plugin's source:
-my-plugin = vprev.my-plugin.overrideAttrs {
-  src = inputs.my-plugin;
-};
 ```
 
-No sources.json entry needed.
+#### Per-package `sources.json` (if needed)
 
-#### `sources.json` - Add hash entry (if needed)
-
-Only needed for Go (`vendorHash`), Cargo (`cargoHash`), npm (`npmDepsHash`), or Deno (`denoDepsHash`) builds. The entry stores the input name and computed hashes:
+Only for Go (`vendorHash`), Cargo (`cargoHash`), npm (`npmDepsHash`), Deno (`denoDepsHash`), or bun (`nodeModulesHash`) builds. Create `packages/my-tool/sources.json` or `overlays/my-tool/sources.json` as a **bare entry**:
 
 ```json
 {
-  "my-tool": {
-    "hashes": [
-      {
-        "drvType": "buildGoModule",
-        "hash": "sha256-PLACEHOLDER",
-        "hashType": "vendorHash"
-      }
-    ],
-    "input": "my-tool"
-  }
+  "hashes": [
+    {
+      "hash": "sha256-PLACEHOLDER",
+      "hashType": "vendorHash"
+    }
+  ],
+  "input": "my-tool"
 }
 ```
 
 To compute the actual hash, temporarily use `lib.fakeHash` and build to get the expected hash from the error output, or run `uv run update.py my-tool`.
 
-#### `update/updaters/builtin.py` - Register updater (if sources.json entry exists)
+Note: If using `packages/my-tool.nix` (a single file, not a directory), you'll need to create `packages/my-tool/` as a directory instead and rename the nix file to `packages/my-tool/default.nix` so the `sources.json` can be co-located.
 
-Use the appropriate factory function near the bottom of the updater registrations section:
+#### Per-package `updater.py` (if needed)
+
+Create `packages/my-tool/updater.py` or `overlays/my-tool/updater.py`:
 
 ```python
 # Go:
-go_vendor_updater("my-tool", subpackages=["cmd/my-tool"])
-# With proxy vendor:
-go_vendor_updater("my-tool", subpackages=["cmd/my-tool"], proxy_vendor=True)
+from lib.update.updaters.base import go_vendor_updater
+go_vendor_updater("my-tool")
 
 # Cargo:
+from lib.update.updaters.base import cargo_vendor_updater
 cargo_vendor_updater("my-tool")
-# With subdirectory:
-cargo_vendor_updater("my-tool", subdir="my-subdir")
 
 # npm:
+from lib.update.updaters.base import npm_deps_updater
 npm_deps_updater("my-tool")
 
 # Deno:
+from lib.update.updaters.base import deno_deps_updater
 deno_deps_updater("my-tool")
+
+# Bun:
+from lib.update.updaters.base import bun_node_modules_updater
+bun_node_modules_updater("my-tool")
 ```
 
 ### Checklist
 
 - [ ] Add flake input with `flake = false;` (and version tag if applicable)
-- [ ] Add derivation in `overlays.nix` using appropriate helper
-- [ ] If Go/Cargo/npm/Deno: add hash entry in `sources.json`
-- [ ] If Go/Cargo/npm/Deno: register updater in `update/updaters/builtin.py`
+- [ ] Add derivation in `packages/` or `overlays/` as appropriate
+- [ ] If Go/Cargo/npm/Deno/Bun: add `sources.json` in the package directory
+- [ ] If Go/Cargo/npm/Deno/Bun: add `updater.py` in the package directory
 - [ ] Run `nix flake lock --update-input my-tool`
 - [ ] Build to verify: `nix build .#my-tool` or `nh darwin switch --no-nom .`
 
@@ -298,29 +271,29 @@ For pre-built binaries, .dmg apps, AppImages, or apps with their own update APIs
 
 ### Files to modify
 
-#### `sources.json` - Add full entry
+#### Per-package `sources.json`
+
+Create `overlays/my-app/sources.json` as a **bare entry**:
 
 ```json
 {
-  "my-app": {
-    "hashes": {
-      "aarch64-darwin": "sha256-...",
-      "x86_64-darwin": "sha256-...",
-      "x86_64-linux": "sha256-..."
-    },
-    "urls": {
-      "aarch64-darwin": "https://example.com/my-app-arm64.dmg",
-      "x86_64-darwin": "https://example.com/my-app-x64.dmg",
-      "x86_64-linux": "https://example.com/my-app-x64.AppImage"
-    },
-    "version": "1.0.0"
-  }
+  "hashes": {
+    "aarch64-darwin": "sha256-...",
+    "x86_64-darwin": "sha256-...",
+    "x86_64-linux": "sha256-..."
+  },
+  "urls": {
+    "aarch64-darwin": "https://example.com/my-app-arm64.dmg",
+    "x86_64-darwin": "https://example.com/my-app-x64.dmg",
+    "x86_64-linux": "https://example.com/my-app-x64.AppImage"
+  },
+  "version": "1.0.0"
 }
 ```
 
 Compute hashes with: `nix-prefetch-url --type sha256 <url>` then convert with `nix hash convert --hash-algo sha256 --to sri <hash>`
 
-#### `overlays.nix` - Add derivation
+#### `overlays/my-app/default.nix` - Add overlay fragment
 
 Choose based on delivery format:
 
@@ -329,40 +302,52 @@ Choose based on delivery format:
 Uses the `mkSourceOverride` helper:
 
 ```nix
-my-app = mkSourceOverride "my-app" prev.my-app;
+{ final, sources, ... }:
+{
+  my-app = final.mkSourceOverride "my-app" prev.my-app;
+}
+```
 
-# For nested packages:
-jetbrains = prev.jetbrains // {
-  my-ide = mkSourceOverride "my-ide" prev.jetbrains.my-ide;
-};
+For nested packages:
+
+```nix
+{ final, prev, sources, ... }:
+{
+  jetbrains = prev.jetbrains // {
+    my-ide = final.mkSourceOverride "my-ide" prev.jetbrains.my-ide;
+  };
+}
 ```
 
 ##### macOS .dmg app
 
 ```nix
-my-app = mkDmgApp {
-  pname = "my-app";
-  info = sources.my-app;
-  # appName = "my-app";  # if capitalized name differs from pname
-  meta = with prev.lib; {
-    description = "Description";
-    homepage = "https://example.com";
-    license = licenses.unfree;
-    platforms = platforms.darwin;
-    sourceProvenance = with sourceTypes; [ binaryNativeCode ];
-    mainProgram = "my-app";
+{ final, prev, sources, ... }:
+{
+  my-app = final.mkDmgApp {
+    pname = "my-app";
+    info = sources.my-app;
+    meta = with prev.lib; {
+      description = "Description";
+      homepage = "https://example.com";
+      license = licenses.unfree;
+      platforms = platforms.darwin;
+      sourceProvenance = with sourceTypes; [ binaryNativeCode ];
+      mainProgram = "my-app";
+    };
   };
-};
+}
 ```
 
 ##### Pre-built binary
 
 ```nix
-my-tool =
-  let
-    info = sources.my-tool;
-  in
-  prev.stdenvNoCC.mkDerivation {
+{ prev, sources, system, ... }:
+let
+  info = sources.my-tool;
+in
+{
+  my-tool = prev.stdenvNoCC.mkDerivation {
     pname = "my-tool";
     inherit (info) version;
     src = prev.fetchurl {
@@ -386,38 +371,51 @@ my-tool =
       mainProgram = "my-tool";
     };
   };
+}
 ```
 
 ##### Single file from GitHub (like homebrew-zsh-completion)
 
+For source-only files, place them under `packages/` (same update/discovery flow):
+
 ```nix
-my-config =
-  let
-    source = outputs.lib.sourceHashEntry "my-config" "sha256";
-  in
-  prev.stdenvNoCC.mkDerivation {
-    name = "my-config";
-    src = builtins.fetchurl {
-      inherit (source) url;
-      sha256 = source.hash;
-    };
-    dontUnpack = true;
-    installPhase = ''
-      mkdir -p $out
-      cp $src $out/my-config
-    '';
+# In packages/ or via outputs.lib:
+let
+  source = outputs.lib.sourceHashEntry "my-config" "sha256";
+in
+prev.stdenvNoCC.mkDerivation {
+  name = "my-config";
+  src = builtins.fetchurl {
+    inherit (source) url;
+    sha256 = source.hash;
   };
+  dontUnpack = true;
+  installPhase = ''
+    mkdir -p $out
+    cp $src $out/my-config
+  '';
+};
 ```
 
-#### `update/updaters/builtin.py` - Add Updater class
+#### Per-package `updater.py` - Add Updater class
 
-Choose the base class that fits:
+Create `overlays/my-app/updater.py`:
 
 ##### `DownloadHashUpdater` - must download to compute hash
 
 ```python
+"""Updater for MyApp."""
+
+import aiohttp
+
+from lib.nix.models.sources import SourceEntry, SourceHashes
+from lib.update.net import fetch_json
+from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
+
+
 class MyAppUpdater(DownloadHashUpdater):
     """Update MyApp to latest version."""
+
     name = "my-app"
 
     PLATFORMS = {
@@ -426,7 +424,6 @@ class MyAppUpdater(DownloadHashUpdater):
     }
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        # Fetch version from API, appcast, install script, etc.
         data = await fetch_json(session, "https://api.example.com/latest")
         return VersionInfo(version=data["version"], metadata={})
 
@@ -441,8 +438,18 @@ class MyAppUpdater(DownloadHashUpdater):
 ##### `ChecksumProvidedUpdater` - API provides checksums (no download needed)
 
 ```python
+"""Updater for MyApp."""
+
+import aiohttp
+
+from lib.nix.models.sources import SourceEntry, SourceHashes
+from lib.update.net import fetch_json
+from lib.update.updaters.base import ChecksumProvidedUpdater, VersionInfo
+
+
 class MyAppUpdater(ChecksumProvidedUpdater):
     """Update MyApp to latest version."""
+
     name = "my-app"
 
     PLATFORMS = {
@@ -471,6 +478,8 @@ class MyAppUpdater(ChecksumProvidedUpdater):
 ##### `GitHubRawFileUpdater` - single file from a GitHub repo
 
 ```python
+from lib.update.updaters.github_raw_file import github_raw_file_updater
+
 github_raw_file_updater(
     "my-config-file",
     owner="owner",
@@ -479,17 +488,45 @@ github_raw_file_updater(
 )
 ```
 
+##### `PlatformAPIUpdater` - per-platform API with version/checksum fields
+
+```python
+"""Updater for MyApp platform builds."""
+
+from lib.update.updaters.base import VersionInfo
+from lib.update.updaters.platform_api import PlatformAPIUpdater
+
+
+class MyAppUpdater(PlatformAPIUpdater):
+    """Updater for MyApp builds."""
+
+    name = "my-app"
+    PLATFORMS = {
+        "aarch64-darwin": "darwin-arm64",
+        "x86_64-linux": "linux-x64",
+    }
+    VERSION_KEY = "productVersion"
+    CHECKSUM_KEY = "sha256hash"
+
+    def _api_url(self, api_platform: str) -> str:
+        return f"https://api.example.com/update/{api_platform}/latest"
+
+    def _download_url(self, api_platform: str, info: VersionInfo) -> str:
+        return f"https://example.com/{info.version}/{api_platform}"
+```
+
 ### Checklist
 
-- [ ] Add entry in `sources.json` with version, urls, and hashes
-- [ ] Add derivation in `overlays.nix`
-- [ ] Add Updater class or factory call in `update/updaters/builtin.py`
+- [ ] Create package directory: `overlays/my-app/` or `packages/my-app/`
+- [ ] Add `sources.json` with version, urls, and hashes (bare entry format)
+- [ ] Add `default.nix` overlay fragment
+- [ ] Add `updater.py` with Updater class or factory call
 - [ ] Verify: `uv run update.py --validate` and `uv run update.py my-app`
 - [ ] Build to verify: `nix build .#my-app` or `nh darwin switch --no-nom .`
 
 ______________________________________________________________________
 
-## Key helpers in overlays.nix
+## Key helpers in overlays/default.nix
 
 | Helper | Purpose | Needs sources.json? |
 |---|---|---|
@@ -497,25 +534,24 @@ ______________________________________________________________________
 | `mkUv2nixPackage` | Build Python package via uv2nix | No |
 | `mkDmgApp` | Install macOS .dmg app | Yes (full entry) |
 | `mkSourceOverride` | Override nixpkgs pkg version+src | Yes (full entry) |
-| `getFlakeVersion` | Extract version from flake lock ref | No |
 
 ## Key utilities in outputs.lib
 
 | Function | What it does |
 |---|---|
-| `outputs.lib.sourceHash "name" "hashType"` | Read hash from sources.json by hashType |
+| `outputs.lib.sourceHash "name" "hashType"` | Read hash from per-package sources.json by hashType |
 | `outputs.lib.sourceHashEntry "name" "hashType"` | Read full hash entry (url + hash) from sources.json |
-| `outputs.lib.sources` | Pre-parsed sources.json entries |
+| `outputs.lib.sources` | Pre-parsed sources entries (aggregated from all per-package files) |
 | `outputs.lib.flakeLock` | Pre-parsed flake.lock nodes |
 
-## Helper functions in overlays.nix
+## Helper functions in overlays/default.nix
 
 | Function | What it does |
 |---|---|
 | `normalizeName s` | Replace `.` and `_` with `-` |
 | `stripVersionPrefix s` | Remove `v` / `rust-v` prefixes |
 
-## Updater factory functions in update/updaters
+## Updater factory functions (in `update/updaters/base.py`)
 
 | Factory | Registers | Hash type |
 |---|---|---|
@@ -523,4 +559,16 @@ ______________________________________________________________________
 | `cargo_vendor_updater(name, ...)` | `CargoVendorHashUpdater` | cargoHash |
 | `npm_deps_updater(name, ...)` | `NpmDepsHashUpdater` | npmDepsHash |
 | `deno_deps_updater(name, ...)` | `DenoDepsHashUpdater` | denoDepsHash |
+| `bun_node_modules_updater(name, ...)` | `BunNodeModulesHashUpdater` | nodeModulesHash |
 | `github_raw_file_updater(name, ...)` | `GitHubRawFileUpdater` | sha256 |
+
+## Overlay fragment convention
+
+Each overlay fragment in `overlays/<name>/default.nix` receives these args and returns an attrset:
+
+```nix
+{ inputs, outputs, final, prev, system, slib, sources, ... }:
+{
+  # attrs to merge into the overlay
+}
+```

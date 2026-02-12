@@ -16,19 +16,6 @@ mkDarwinHost {
   ];
   extraSystemModules = [
     "${modulesPath}/darwin/george/dock-apps.nix"
-    (
-      { primaryUser, ... }:
-      {
-        launchd.user.agents.set-opencode-env = {
-          script = ''
-            launchctl setenv OPENCODE_CONFIG "/Users/${primaryUser}/.config/opencode/personal.json"
-          '';
-          serviceConfig = {
-            Label = "com.george.set-opencode-env";
-            RunAtLoad = true;
-          };
-        };
-      }
-    )
+    (mkSetOpencodeEnvModule "personal.json")
   ];
 }

@@ -61,10 +61,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crane.url = "github:ipetkov/crane";
-    # openchamber = {
-    #   url = "github:btriapitsyn/openchamber/v1.6.5";
-    #   flake = false;
-    # };
     opencode = {
       url = "github:anomalyco/opencode";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -93,6 +89,10 @@
       url = "github:Mic92/sops-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    scratch = {
+      url = "github:erictli/scratch/v0.4.0";
+      flake = false;
+    };
     stylix = {
       url = "github:danth/stylix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -111,7 +111,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.23.1";
+      url = "github:max-sixty/worktrunk/v0.23.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -127,24 +127,28 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.98.0";
+      url = "github:openai/codex/rust-v0.99.0";
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.2.4";
+      url = "github:gkze/curator/v0.3.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.41.0";
+      url = "github:charmbracelet/crush/v0.42.0";
       flake = false;
     };
     gemini-cli = {
-      url = "github:google-gemini/gemini-cli/v0.27.3";
+      url = "github:google-gemini/gemini-cli/v0.28.2";
       flake = false;
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
     gogcli = {
       url = "github:steipete/gogcli/v0.9.0";
+      flake = false;
+    };
+    gitui-key-config = {
+      url = "github:extrawurst/gitui/8876c1d0f616d55a0c0957683781fd32af815ae3";
       flake = false;
     };
     catppuccin-delta = {
@@ -231,9 +235,10 @@
         # and formatter (treefmt-nix, globs).
         lintFiles = {
           ruff = {
-            regex = "(\\.py$|home/george/bin/git-ignore)";
+            regex = "(\\.(py|pyi)$|home/george/bin/git-ignore)";
             globs = [
               "*.py"
+              "*.pyi"
               "home/george/bin/git-ignore"
             ];
           };
@@ -324,21 +329,6 @@
                 trim-trailing-whitespace.enable = true;
               };
             };
-            editorWorkspace = inputs.uv2nix.lib.workspace.loadWorkspace {
-              workspaceRoot = ./.;
-            };
-            editorPython = pkgs.python314;
-            editorPySet =
-              (pkgs.callPackage inputs.pyproject-nix.build.packages {
-                python = editorPython;
-              }).overrideScope
-                (
-                  lib.composeManyExtensions [
-                    inputs.pyproject-build-systems.overlays.default
-                    (editorWorkspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
-                  ]
-                );
-            editorVenv = editorPySet.mkVirtualEnv "nixcfg-venv" editorWorkspace.deps.default;
           in
           pkgs.devshell.mkShell {
             name = "nixcfg";
@@ -358,17 +348,10 @@
                 yamlfmt
               ]
               ++ lib.optional pkgs.stdenv.isLinux dconf2nix
-              ++ pre-commit-check.enabledPackages
-              ++ [ editorVenv ];
+              ++ pre-commit-check.enabledPackages;
 
             devshell.startup = {
               pre-commit.text = pre-commit-check.shellHook;
-              editor-venv.text = ''
-                if [ -e .venv ] && [ ! -L .venv ]; then
-                  rm -rf .venv
-                fi
-                ln -sfn ${editorVenv} .venv
-              '';
             };
           };
 
@@ -403,14 +386,30 @@
                   };
                   yamlfmt.enable = true;
                 };
-                settings.formatter."markdown-table-formatter" = {
-                  command = lib.getExe' (pkgs.python3.withPackages (
-                    ps: with ps; [
-                      mdformat
-                      mdformat-tables
-                    ]
-                  )) "mdformat";
-                  includes = [ "*.md" ];
+                # treefmt/ruff normally auto-discovers `pyproject.toml`, but being
+                # explicit keeps `nix fmt` aligned with uv-managed Ruff config,
+                # even when invoked from subdirectories.
+                settings = {
+                  formatter = {
+                    ruff-check.options = [
+                      "--config"
+                      "pyproject.toml"
+                      "--fix-only"
+                    ];
+                    ruff-format.options = [
+                      "--config"
+                      "pyproject.toml"
+                    ];
+                    "markdown-table-formatter" = {
+                      command = lib.getExe' (pkgs.python3.withPackages (
+                        ps: with ps; [
+                          mdformat
+                          mdformat-tables
+                        ]
+                      )) "mdformat";
+                      includes = [ "*.md" ];
+                    };
+                  };
                 };
               })
               config

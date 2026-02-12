@@ -8,13 +8,17 @@
 }:
 let
   inherit (builtins)
+    attrNames
     elemAt
+    filter
     fromJSON
     getEnv
     hasAttr
     length
     listToAttrs
+    map
     pathExists
+    readDir
     readFile
     split
     ;
@@ -26,19 +30,27 @@ let
   maybePath = p: if pathExists p then p else null;
   userMetaPath = u: maybePath "${src}/home/${u}/meta.nix";
   modulesPath = "${src}/modules";
+
+  scanSourcesIn =
+    dir:
+    let
+      entries = if pathExists dir then readDir dir else { };
+      names = filter (
+        name: entries.${name} == "directory" && pathExists (dir + "/${name}/sources.json")
+      ) (attrNames entries);
+    in
+    listToAttrs (
+      map (name: {
+        inherit name;
+        value = fromJSON (readFile (dir + "/${name}/sources.json"));
+      }) names
+    );
+  packageSources = scanSourcesIn ./packages // scanSourcesIn ./overlays;
 in
 rec {
   inherit modulesPath;
   flakeLock = (fromJSON (readFile ./flake.lock)).nodes;
-  sourcesPath =
-    let
-      envPath = getEnv "SOURCES_JSON";
-    in
-    if envPath != "" then
-      if pathExists envPath then envPath else throw "SOURCES_JSON does not exist: ${envPath}"
-    else
-      ./sources.json;
-  sources = fromJSON (readFile sourcesPath);
+  sources = packageSources;
 
   # When FAKE_HASHES=1, all sourceHash* functions return lib.fakeHash instead
   # of reading from sources.json.  This lets the update script evaluate the
@@ -48,7 +60,7 @@ rec {
   fakeHashMode = getEnv "FAKE_HASHES" == "1";
 
   sourceEntry =
-    name: if hasAttr name sources then sources.${name} else throw "sources.json missing entry: ${name}";
+    name: if hasAttr name sources then sources.${name} else throw "sources.json missing for '${name}'";
 
   # Find hash entry matching hashType and optionally platform
   sourceHashEntry =
@@ -63,9 +75,9 @@ rec {
       let
         entry = sourceEntry name;
         hashes = entry.hashes or [ ];
-        match = findFirst (hash: hash.hashType == hashType && !(hash ? platform)) null hashes;
+        matchEntry = findFirst (hash: hash.hashType == hashType && !(hash ? platform)) null hashes;
       in
-      if match == null then throw "sources.json missing ${hashType} for ${name}" else match;
+      if matchEntry == null then throw "sources.json for '${name}' missing ${hashType}" else matchEntry;
 
   # Find hash entry matching hashType and specific platform
   sourceHashEntryForPlatform =
@@ -80,14 +92,14 @@ rec {
       let
         entry = sourceEntry name;
         hashes = entry.hashes or [ ];
-        match = findFirst (
+        matchEntry = findFirst (
           hash: hash.hashType == hashType && (hash.platform or null) == platform
         ) null hashes;
       in
-      if match == null then
-        throw "sources.json missing ${hashType} for ${name} on ${platform}"
+      if matchEntry == null then
+        throw "sources.json for '${name}' missing ${hashType} on ${platform}"
       else
-        match;
+        matchEntry;
 
   sourceHash = name: hashType: (sourceHashEntry name hashType).hash;
 
@@ -100,7 +112,25 @@ rec {
     let
       entry = sourceHashEntry name hashType;
     in
-    entry.url or (throw "sources.json missing url for ${name}:${hashType}");
+    entry.url or (throw "sources.json for '${name}' missing url for ${hashType}");
+
+  normalizeName = s: builtins.replaceStrings [ "." "_" ] [ "-" "-" ] s;
+
+  # Helper to strip version prefixes from flake refs
+  stripVersionPrefix = s: builtins.replaceStrings [ "rust-v" "v" ] [ "" "" ] s;
+
+  # Get version from flake lock ref, stripping common prefixes.
+  # This expects the input to be pinned with an `original.ref` (tag/branch).
+  getFlakeVersion =
+    name:
+    let
+      node = flakeLock.${name};
+      ref = node.original.ref or null;
+    in
+    if ref == null then
+      throw "flake.lock input '${name}' missing original.ref (pin with a tag/branch ref to use getFlakeVersion)"
+    else
+      stripVersionPrefix ref;
 
   # Convert a Nix value to JSONC format with trailing commas
   toJSONC =
@@ -122,18 +152,13 @@ rec {
         ;
       inherit (lib) concatMapStringsSep;
 
-      # Generate indentation string
       mkIndent = level: concatStringsSep "" (map (_: " ") (lib.range 1 (level * indent)));
-
-      # Escape special characters in strings
       escapeString =
         s:
         let
           escaped = replaceStrings [ "\\" "\"" "\n" "\r" "\t" ] [ "\\\\" "\\\"" "\\n" "\\r" "\\t" ] s;
         in
         "\"${escaped}\"";
-
-      # Convert value to JSONC recursively
       toJSONCImpl =
         level: v:
         let
@@ -338,6 +363,21 @@ rec {
           };
         }
       ];
+    };
+
+  mkSetOpencodeEnvModule =
+    configName:
+    { primaryUser, ... }:
+    {
+      launchd.user.agents.set-opencode-env = {
+        script = ''
+          launchctl setenv OPENCODE_CONFIG "/Users/${primaryUser}/.config/opencode/${configName}"
+        '';
+        serviceConfig = {
+          Label = "com.george.set-opencode-env";
+          RunAtLoad = true;
+        };
+      };
     };
 
   # Common base for all Darwin hosts — captures shared boilerplate so each

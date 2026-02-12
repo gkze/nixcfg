@@ -1,0 +1,20 @@
+{
+  "branch": "master",
+  "checksums": {
+    "build-result-v1.yaml": "7180bd9d0d9c26055b21cb4f86dc8a8ce5042c99c3a6d1fa6ac6e6ad8456f00f",
+    "build-trace-entry-v2.yaml": "d881a485b2ce43c3361570e5a80b9f804cf7413f6ed3ec09feac68e1e1963217",
+    "content-address-v1.yaml": "e7786375efac3ab5b5963f7f300a5256b38218b8f0f90c0f32481055d73c8728",
+    "derivation-options-v1.yaml": "62dc8abfebfcad0da963d1615a77a28f8c85338b2b1ac4534126053961789165",
+    "derivation-v4.yaml": "59db4d59df4012071f4c2cff7669b86efd1fc7db73fda925c08d8a8eb0bb6f62",
+    "deriving-path-v1.yaml": "74085d5190e8335cdca556b89920fdd41251e3c5f621754c73cf0c296dc2eeb4",
+    "file-system-object-v1.yaml": "d4982ef739448852ef8e15a2c2cbadc78f3406f83750690d5cbda178b1565a3e",
+    "hash-v1.yaml": "e4dd726cb02f72d5738672ad9767742f3bfc1507317868e9b153ec91bde733ee",
+    "store-object-info-v2.yaml": "d74caaf7b9bc5fb96b3156b4f9a106354db5cb99fbb06f9114039bc6662f11f0",
+    "store-path-v1.yaml": "ea6ad8828984d090352da8ae6a0c44016981c44ee6ddcac68fecfd52f25b78ef",
+    "store-v1.yaml": "6c5ce4f84830894a694807cf6b0a7035d8081f2bd38de365e4a178ed4bf8976f"
+  },
+  "commit": "a4c421da22eec487e817fadf306ab0259bd2e803",
+  "fetched": "2026-02-11T20:43:42.826258+00:00",
+  "path": "doc/manual/source/protocols/json/schema",
+  "repo": "NixOS/nix"
+}

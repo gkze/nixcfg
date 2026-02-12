@@ -1,0 +1,10 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-nig3GI7eM1XRtIoAh1qH+9PxPPGynl01dCZ2ppyhmzU=",
+      "hashType": "vendorHash"
+    }
+  ],
+  "input": "gogcli",
+  "version": "v0.9.0"
+}

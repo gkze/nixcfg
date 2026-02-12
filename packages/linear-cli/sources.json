@@ -1,0 +1,21 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-fOnqYLfqVb7rbhik0DKJGgZFWS1pwy7vhVpsdhQvcig=",
+      "hashType": "denoDepsHash",
+      "platform": "aarch64-darwin"
+    },
+    {
+      "hash": "sha256-9Z+1qY7gcHQ13sH1e8FKYIIo3nqBitArhSw12VH2MXo=",
+      "hashType": "denoDepsHash",
+      "platform": "aarch64-linux"
+    },
+    {
+      "hash": "sha256-VWjAr8xXOWpjwsLDIOaJ+O3XPpLui6XcGAAnnG4UK3w=",
+      "hashType": "denoDepsHash",
+      "platform": "x86_64-linux"
+    }
+  ],
+  "input": "linear-cli",
+  "version": "v1.9.1"
+}

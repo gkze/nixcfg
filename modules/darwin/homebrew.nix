@@ -1,21 +1,24 @@
 { inputs, primaryUser, ... }:
+let
+  mkHomebrewTaps =
+    tapNames:
+    builtins.listToAttrs (
+      map (tap: {
+        name = "homebrew/homebrew-${tap}";
+        value = inputs."homebrew-${tap}";
+      }) tapNames
+    );
+in
 {
   nix-homebrew = {
     enable = true;
     enableRosetta = true;
     user = primaryUser;
     taps =
-      builtins.listToAttrs (
-        map
-          (tap: {
-            name = "homebrew/homebrew-${tap}";
-            value = inputs."homebrew-${tap}";
-          })
-          [
-            "core"
-            "cask"
-          ]
-      )
+      mkHomebrewTaps [
+        "core"
+        "cask"
+      ]
       // {
         "pantsbuild/homebrew-tap" = inputs.pantsbuild-tap;
       };

@@ -1,0 +1,10 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-tDl2pmHPNXxpUdFLCBM33SQX/SsNtn7XqrZkZsy8k6o=",
+      "hashType": "vendorHash"
+    }
+  ],
+  "input": "axiom-cli",
+  "version": "v0.14.8"
+}

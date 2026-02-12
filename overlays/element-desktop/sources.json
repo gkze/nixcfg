@@ -1,0 +1,12 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-J+ITqHLxbmhhjFnyfBlHFzxrPeIvsCv+iaxa8DiWorM=",
+      "hashType": "srcHash"
+    },
+    {
+      "hash": "sha256-coa2AMNGLDtqcrQJDc/DDkcaWBCLa76VTKJLGlr7dpQ=",
+      "hashType": "sha256"
+    }
+  ]
+}

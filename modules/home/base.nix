@@ -15,7 +15,7 @@
     stateVersion = lib.removeSuffix "\n" (builtins.readFile "${src}/NIXOS_VERSION");
   };
   nix = {
-    package = lib.mkForce pkgs.nixVersions.latest;
+    package = lib.mkForce pkgs.nixVersions.git;
     checkConfig = true;
   };
 }

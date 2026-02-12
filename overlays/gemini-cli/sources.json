@@ -1,0 +1,10 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-XfD+PmmeLsbb9rC7DCmqu08/+cXZpGewMN5olrHhH4M=",
+      "hashType": "npmDepsHash"
+    }
+  ],
+  "input": "gemini-cli",
+  "version": "v0.28.2"
+}
