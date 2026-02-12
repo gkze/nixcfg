@@ -115,49 +115,11 @@
 
   project-script =
     let
-      inherit (inputs.pyproject-nix.lib) scripts;
+      workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
+        workspaceRoot = ./..;
+      };
 
-      # pyproject-nix's scripts.renderWithPackages maps PEP-508 deps to
-      # pythonPackages.<name>. nix-manipulator is a local flake input, so we
-      # provide it as a Python package override for the interpreter used to
-      # render project.py.
-      nix-manipulator-pySet =
-        let
-          uv = prev.lib.getExe prev.uv;
-          pythonExe = prev.lib.getExe prev.python314;
-
-          # FOD that runs `uv lock` with network access, producing just the lockfile.
-          uvLock = prev.stdenv.mkDerivation {
-            name = "nix-manipulator-uv-lock";
-            src = inputs.nix-manipulator;
-            nativeBuildInputs = [
-              prev.uv
-              prev.python314
-              prev.cacert
-            ];
-            buildPhase = ''
-              export HOME=$TMPDIR
-              export SSL_CERT_FILE=${prev.cacert}/etc/ssl/certs/ca-bundle.crt
-              export SETUPTOOLS_SCM_PRETEND_VERSION=${slib.getFlakeVersion "nix-manipulator"}
-              UV_PYTHON=${pythonExe} ${uv} -n lock
-            '';
-            installPhase = "cp uv.lock $out";
-            outputHashMode = "flat";
-            outputHashAlgo = "sha256";
-            outputHash = slib.sourceHash "nix-manipulator" "uvLockHash";
-          };
-
-          # Combine source + lockfile for uv2nix workspace loading.
-          workspaceRoot = prev.runCommand "nix-manipulator-workspace" { } ''
-            cp -r ${inputs.nix-manipulator} $out
-            chmod -R u+w $out
-            cp -f ${uvLock} $out/uv.lock
-          '';
-
-          workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
-            inherit workspaceRoot;
-          };
-        in
+      pySet =
         (prev.callPackage inputs.pyproject-nix.build.packages {
           python = prev.python314;
         }).overrideScope
@@ -168,24 +130,14 @@
             ]
           );
 
-      nix-manipulator-py = nix-manipulator-pySet."nix-manipulator";
+      venv = pySet.mkVirtualEnv "project-venv" workspace.deps.all;
 
-      python = prev.python314.override {
-        packageOverrides = _: _pyPrev: {
-          "nix-manipulator" = nix-manipulator-py;
-        };
-      };
-
-      script = scripts.loadScript {
-        name = "project";
-        script = ./.. + "/project.py";
-      };
-      unwrapped = prev.writeScriptBin script.name (
-        scripts.renderWithPackages {
-          inherit script;
-          inherit python;
-        }
-      );
+      unwrapped = prev.writeScriptBin "project" ''
+        #!${venv}/bin/python
+        import runpy, sys, os
+        sys.argv[0] = os.path.join("${./..}", "project.py")
+        runpy.run_path(sys.argv[0], run_name="__main__")
+      '';
     in
     prev.symlinkJoin {
       name = "project-script";
@@ -198,17 +150,6 @@
               final.flake-edit
               prev.nix-prefetch-git
             ]
-          } \
-          --prefix PYTHONPATH : ${
-            prev.lib.makeSearchPath prev.python314.sitePackages (
-              with nix-manipulator-pySet;
-              [
-                nix-manipulator
-                tree-sitter
-                tree-sitter-nix
-                pygments
-              ]
-            )
           } \
           --prefix PYTHONPATH : ${./..}
       '';
