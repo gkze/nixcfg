@@ -1,22 +1,3 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.14"
-# dependencies = [
-#   "aiohttp>=3.13.3",
-#   "aiohttp-retry>=2.9.1",
-#   "filelock>=3.20.3",
-#   "keyring>=25.7.0",
-#   "lz4>=4.4.5",
-#   "nix-manipulator @ git+https://github.com/hoh/nix-manipulator.git@dbe47853d2f48b6314a9e07e5bad6ba78bdbf6bc",
-#   "packaging>=26.0",
-#   "pydantic>=2.12.5",
-#   "pydantic-settings>=2.12.0",
-#   "pyyaml>=6.0.3",
-#   "rich>=14.3.2",
-#   "typer>=0.23.0",
-# ]
-# ///
-
 """Unified CLI for nixcfg project tasks."""
 
 from __future__ import annotations

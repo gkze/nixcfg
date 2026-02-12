@@ -106,7 +106,16 @@ def _cmd_smoke_check_update_app(_: argparse.Namespace) -> int:
 
 
 def _cmd_list_update_targets(_: argparse.Namespace) -> int:
-    _run(["nix", "run", ".#project", "--", "update", "--list"])
+    from lib.update.cli import main as update_main
+
+    original_argv = sys.argv
+    sys.argv = ["project update", "--list"]
+    try:
+        update_main()
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else 0
+    finally:
+        sys.argv = original_argv
     return 0
 
 
