@@ -50,7 +50,7 @@ def test_build_overlay_expr_supports_explicit_system() -> None:
 
     parse(expr)
     assert 'system = "x86_64-linux";' in expr  # noqa: S101
-    assert 'in pkgs."chatgpt"' in expr  # noqa: S101
+    assert 'in applied."chatgpt"' in expr  # noqa: S101
 
 
 def test_nix_source_names_uses_parseable_ast_expression(

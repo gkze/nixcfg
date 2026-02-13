@@ -220,39 +220,34 @@ def _build_nix_expr(body: str) -> str:
 def _build_overlay_expr(source: str, *, system: str | None = None) -> str:
     """Build a Nix expression that evaluates an overlay package.
 
-    Imports nixpkgs with the flake's overlay and permissive config.  We allow
-    all unfree and insecure packages since hash discovery only triggers a
-    build failure — nothing is actually installed.
+    Uses a manual fixed-point (``lib.fix``) to apply the flake overlay on top
+    of a plain nixpkgs import.  This avoids infinite recursion that occurs
+    when using ``import nixpkgs { overlays = [ ... ]; }`` — that codepath
+    triggers ``with self;`` in ``pkgs/top-level/aliases.nix`` which re-enters
+    the overlay before its own attributes are defined, producing an infinite
+    recursion on newer nixpkgs revisions.
+
+    The ``lib.fix`` approach creates the self-referential attribute set
+    *outside* of nixpkgs' own overlay machinery, so the overlay's ``final``
+    parameter correctly resolves to ``pkgs // overlay final pkgs`` without
+    hitting the aliases.nix ``with self`` trap.
     """
-    system_expr = parse("builtins.currentSystem").expr if system is None else system
+    system_nix = "builtins.currentSystem" if system is None else f'"{system}"'
     flake_url = f"git+file://{get_repo_file('.')}?dirty=1"
-    flake_expr = FunctionCall(
-        name="builtins.getFlake",
-        argument=parse(f'"{flake_url}"').expr,
+    # Build the expression as a raw Nix string — the nix-manipulator AST
+    # does not have a node type for `lib.fix (self: ...)` lambdas, so a
+    # raw template is cleaner and easier to audit than splicing AST nodes.
+    return (
+        "let"
+        f'  flake = builtins.getFlake "{flake_url}";'
+        f"  system = {system_nix};"
+        "  pkgs = import flake.inputs.nixpkgs {"
+        "    inherit system;"
+        "    config = { allowUnfree = true; allowInsecurePredicate = _: true; };"
+        "  };"
+        "  applied = pkgs.lib.fix (self: pkgs // flake.overlays.default self pkgs);"
+        f'in applied."{source}"'
     )
-    import_nixpkgs = FunctionCall(
-        name="import flake.inputs.nixpkgs",
-        argument=AttributeSet.from_dict(
-            {
-                "system": system_expr,
-                "config": AttributeSet.from_dict(
-                    {
-                        "allowUnfree": True,
-                        "allowInsecurePredicate": parse("_: true").expr,
-                    },
-                ),
-                "overlays": parse("[ flake.overlays.default ]").expr,
-            },
-        ),
-    )
-    expression = LetExpression(
-        local_variables=[
-            Binding(name="flake", value=flake_expr),
-            Binding(name="pkgs", value=import_nixpkgs),
-        ],
-        value=parse(f'pkgs."{source}"').expr,
-    )
-    return compact_nix_expr(expression.rebuild())
 
 
 async def compute_overlay_hash(
