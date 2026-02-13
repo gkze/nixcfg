@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import shlex
 from collections import deque
 from typing import TYPE_CHECKING, cast
@@ -12,7 +13,12 @@ from rich.text import Text
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable, Mapping
 
-from lib.nix.commands.base import ProcessDone, ProcessLine, stream_process
+from lib.nix.commands.base import (
+    NixCommandError,
+    ProcessDone,
+    ProcessLine,
+    stream_process,
+)
 from lib.nix.commands.hash import nix_hash_convert as libnix_hash_convert
 from lib.nix.commands.hash import nix_prefetch_url as libnix_prefetch_url
 from lib.update.config import UpdateConfig, resolve_active_config
@@ -25,13 +31,23 @@ from lib.update.events import (
     UpdateEvent,
     UpdateEventKind,
     ValueDrain,
-    _is_nix_build_command,
-    _require_value,
     gather_event_streams,
+    is_nix_build_command,
+    require_value,
 )
 
+_TASK_ERROR_TYPES: tuple[type[Exception], ...] = (
+    RuntimeError,
+    ValueError,
+    TypeError,
+    OSError,
+    KeyError,
+    NixCommandError,
+)
+_LOG = logging.getLogger(__name__)
 
-async def _run_queue_task(
+
+async def run_queue_task(
     *,
     source: str,
     queue: asyncio.Queue[UpdateEvent | None],
@@ -42,7 +58,11 @@ async def _run_queue_task(
         await task()
     except asyncio.CancelledError:
         await queue.put(UpdateEvent.error(source, "Operation cancelled"))
-    except (RuntimeError, ValueError, TypeError, OSError, KeyError) as exc:
+    except Exception as exc:
+        if not isinstance(exc, _TASK_ERROR_TYPES):
+            _LOG.exception("Unexpected task failure for %s", source)
+            raise
+        _LOG.debug("Handled task failure for %s", source, exc_info=exc)
         await queue.put(UpdateEvent.error(source, format_exception(exc)))
 
 
@@ -110,7 +130,7 @@ async def stream_command(  # noqa: PLR0913
     )
 
     tail_lines: deque[str] | None = None
-    if _is_nix_build_command(args):
+    if is_nix_build_command(args):
         tail_lines = deque(maxlen=NIX_BUILD_FAILURE_TAIL_LINES)
     result: ProcessDone | None = None
     try:
@@ -180,7 +200,7 @@ async def run_command(  # noqa: PLR0913
         ):
             result_drain.value = event.payload
         yield event
-    result = _require_value(result_drain, error)
+    result = require_value(result_drain, error)
     yield UpdateEvent.value(source, result)
 
 

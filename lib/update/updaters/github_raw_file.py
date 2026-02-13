@@ -12,8 +12,8 @@ from lib.update.events import (
     EventStream,
     UpdateEvent,
     ValueDrain,
-    _require_value,
     drain_value_events,
+    require_value,
 )
 from lib.update.net import (
     fetch_github_default_branch,
@@ -75,7 +75,7 @@ class GitHubRawFileUpdater(HashEntryUpdater):
             hash_drain,
         ):
             yield event
-        hashes_by_url = _require_value(hash_drain, "Missing hash output")
+        hashes_by_url = require_value(hash_drain, "Missing hash output")
         hash_value = hashes_by_url[url]
         yield UpdateEvent.value(
             self.name,

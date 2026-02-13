@@ -8,6 +8,8 @@ import difflib
 import importlib
 import io
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -88,7 +90,19 @@ def _render_graphtage_diff(
 
 def _render_jd_diff(_old_path: Path, _new_path: Path) -> str:
     """Render optional external ``jd`` integration output."""
-    return ""
+    jd_binary = shutil.which("jd")
+    if jd_binary is None:
+        return ""
+
+    result = subprocess.run(  # noqa: S603
+        [jd_binary, str(_old_path), str(_new_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout:
+        return ""
+    return result.stdout.strip()
 
 
 def _json_value(value: JsonValue) -> str:

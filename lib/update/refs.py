@@ -24,7 +24,7 @@ from lib.update.events import (
 )
 from lib.update.flake import load_flake_lock
 from lib.update.net import fetch_github_api
-from lib.update.process import _run_queue_task, stream_command
+from lib.update.process import run_queue_task, stream_command
 
 _BRANCH_REF_PATTERNS = {
     "master",
@@ -332,7 +332,7 @@ async def _run_checked_command(
     raise RuntimeError(msg)
 
 
-async def _update_refs_task(  # noqa: PLR0913
+async def update_refs_task(  # noqa: PLR0913
     input_ref: FlakeInputRef,
     session: aiohttp.ClientSession,
     queue: asyncio.Queue[UpdateEvent | None],
@@ -341,6 +341,8 @@ async def _update_refs_task(  # noqa: PLR0913
     flake_edit_lock: asyncio.Lock | None = None,
     config: UpdateConfig | None = None,
 ) -> None:
+    """Run a single flake-ref update, emitting events to *queue*."""
+
     async def _run() -> None:
         resolved_config = resolve_active_config(config)
         source = input_ref.name
@@ -400,13 +402,13 @@ async def _update_refs_task(  # noqa: PLR0913
 
         await put(UpdateEvent.result(source, update_payload))
 
-    await _run_queue_task(source=input_ref.name, queue=queue, task=_run)
+    await run_queue_task(source=input_ref.name, queue=queue, task=_run)
 
 
 __all__ = [
     "FlakeInputRef",
     "RefUpdateResult",
-    "_update_refs_task",
     "check_flake_ref_update",
     "get_flake_inputs_with_refs",
+    "update_refs_task",
 ]

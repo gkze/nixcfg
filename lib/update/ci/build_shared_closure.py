@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 # Timeout for nix evaluation (3 hours — large configs can take significantly longer)
 EVAL_TIMEOUT = 10800.0
 
-# Timeout for nix-store builds (2 hours — Zed can take up to 1 hour from source)
+# Timeout for nix-store builds (6 hours — Zed can take up to 1 hour from source)
 BUILD_TIMEOUT = 21600.0
 
 # Maximum derivations per batch to avoid ARG_MAX limits

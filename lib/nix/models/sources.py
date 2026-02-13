@@ -4,11 +4,11 @@ Defines the schema for package source entries, hashes, and the
 top-level sources file used by the update machinery.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
-import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -17,6 +17,7 @@ from .hash import NixHash  # noqa: TC001
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # SRI hash validation (sha256-only, matching the existing sources.json format)
@@ -339,30 +340,10 @@ class SourcesFile(BaseModel):
 
     def save(self, path: Path) -> None:
         """Atomically write the file contents to *path*."""
-        data = self.to_dict()
-        payload = json.dumps(data, indent=2, sort_keys=True) + "\n"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        mode = path.stat().st_mode & 0o777 if path.exists() else None
-        tmp_path: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                "w",
-                encoding="utf-8",
-                dir=path.parent,
-                prefix=f".{path.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as tmp_file:
-                tmp_file.write(payload)
-                tmp_file.flush()
-                os.fsync(tmp_file.fileno())
-                tmp_path = Path(tmp_file.name)
-                if mode is not None:
-                    os.fchmod(tmp_file.fileno(), mode)
-            tmp_path.replace(path)
-        finally:
-            if tmp_path is not None and tmp_path.exists():
-                tmp_path.unlink()
+        from lib.update.io import atomic_write_text
+
+        payload = json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
+        atomic_write_text(path, payload, mkdir=True)
 
     @classmethod
     def json_schema(cls) -> dict[str, Any]:
