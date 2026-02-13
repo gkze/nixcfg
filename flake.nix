@@ -269,7 +269,7 @@
         nixpkgs.config = {
           allowUnfree = true;
           permittedInsecurePackages = [
-            "google-chrome-145.0.7632.68"
+            "google-chrome-145.0.7632.76"
           ];
         };
 
