@@ -149,15 +149,38 @@
     prev.symlinkJoin {
       name = "nixcfg-script";
       paths = [ venv ];
-      nativeBuildInputs = [ prev.makeWrapper ];
-      postBuild = ''
-        wrapProgram $out/bin/nixcfg \
-          --prefix PATH : ${
-            prev.lib.makeBinPath [
-              final.flake-edit
-              prev.nix-prefetch-git
-            ]
-          }
-      '';
+      nativeBuildInputs = [
+        prev.makeWrapper
+        prev.installShellFiles
+      ];
+      postBuild =
+        let
+          mkCompletionScript =
+            shell:
+            prev.runCommand "nixcfg-completion-${shell}" { } ''
+              ${venv}/bin/python -c "
+              from typer._completion_shared import get_completion_script
+              print(get_completion_script(
+                  prog_name='nixcfg',
+                  complete_var='_NIXCFG_COMPLETE',
+                  shell='${shell}',
+              ))
+              " > $out
+            '';
+        in
+        ''
+          wrapProgram $out/bin/nixcfg \
+            --prefix PATH : ${
+              prev.lib.makeBinPath [
+                final.flake-edit
+                prev.nix-prefetch-git
+              ]
+            }
+
+          installShellCompletion --cmd nixcfg \
+            --zsh ${mkCompletionScript "zsh"} \
+            --bash ${mkCompletionScript "bash"} \
+            --fish ${mkCompletionScript "fish"}
+        '';
     };
 }
