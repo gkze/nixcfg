@@ -353,12 +353,27 @@
                 prek
                 sops
                 yamlfmt
+                # Shell completions only (no bin/) for nixcfg Typer CLI
+                (runCommand "nixcfg-completions" { } ''
+                  mkdir -p $out/share
+                  cp -r ${nixcfg-script}/share/zsh $out/share/
+                  cp -r ${nixcfg-script}/share/bash-completion $out/share/
+                  cp -r ${nixcfg-script}/share/fish $out/share/
+                '')
               ]
               ++ lib.optional pkgs.stdenv.isLinux dconf2nix
               ++ pre-commit-check.enabledPackages;
 
             devshell.startup = {
               pre-commit.text = pre-commit-check.shellHook;
+              nixcfg-completion.text = ''
+                # Register nixcfg Typer shell completion.
+                if [[ -n "''${ZSH_VERSION-}" ]]; then
+                  source "${pkgs.nixcfg-script}/share/zsh/site-functions/_nixcfg" 2>/dev/null
+                elif [[ -n "''${BASH_VERSION-}" ]]; then
+                  source "${pkgs.nixcfg-script}/share/bash-completion/completions/nixcfg.bash" 2>/dev/null
+                fi
+              '';
             };
           };
 
