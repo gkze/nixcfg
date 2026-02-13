@@ -1,5 +1,4 @@
 {
-  "drvHash": "3k0v3km9ph13bsm0k4bjlk7jpnyzhl7x",
   "hashes": [
     {
       "hash": "sha256-Cgr+kj3IYWD26rjvp+7wIlRWWlUC0wQ5uAZkw9Kji00=",
@@ -7,12 +6,12 @@
       "platform": "aarch64-darwin"
     },
     {
-      "hash": "sha256-9Z+1qY7gcHQ13sH1e8FKYIIo3nqBitArhSw12VH2MXo=",
+      "hash": "sha256-P4pbVS/gO2WIHX3Ku5k/UqKSeHRiYy7GelmoTWLDzqk=",
       "hashType": "denoDepsHash",
       "platform": "aarch64-linux"
     },
     {
-      "hash": "sha256-VWjAr8xXOWpjwsLDIOaJ+O3XPpLui6XcGAAnnG4UK3w=",
+      "hash": "sha256-KwrHzBqph9mFzEG68flqt26bQMA1wk4zU9+sT66eI5k=",
       "hashType": "denoDepsHash",
       "platform": "x86_64-linux"
     }
