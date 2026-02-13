@@ -1,6 +1,5 @@
 {
   config,
-  outputs,
   lib,
   pkgs,
   ...
@@ -15,7 +14,6 @@ in
       enable = true;
       enableMan = true;
       files."ftplugin/json.lua".opts.shiftwidth = 2;
-      nixpkgs.overlays = [ outputs.overlays.default ];
       globals.mapleader = " ";
       opts = {
         colorcolumn = [

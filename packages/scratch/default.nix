@@ -6,6 +6,10 @@
   nodejs,
   pkg-config,
   makeWrapper,
+  wrapGAppsHook4,
+  webkitgtk_4_1,
+  librsvg,
+  openssl,
   inputs,
   outputs,
   lib,
@@ -40,6 +44,15 @@ rustPlatform.buildRustPackage {
     nodejs
     pkg-config
     makeWrapper
+  ]
+  ++ lib.optionals stdenv.hostPlatform.isLinux [
+    wrapGAppsHook4
+  ];
+
+  buildInputs = lib.optionals stdenv.hostPlatform.isLinux [
+    openssl
+    webkitgtk_4_1
+    librsvg
   ];
 
   doCheck = false;
@@ -54,6 +67,6 @@ rustPlatform.buildRustPackage {
     homepage = "https://github.com/erictli/scratch";
     license = lib.licenses.mit;
     mainProgram = name;
-    platforms = lib.platforms.darwin;
+    platforms = lib.platforms.darwin ++ lib.platforms.linux;
   };
 }
