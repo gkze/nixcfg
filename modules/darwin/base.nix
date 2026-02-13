@@ -41,6 +41,16 @@
     stateVersion = 6;
   };
 
+  users.users.${primaryUser} = {
+    uid = 501;
+    shell = pkgs.zsh;
+  };
+
+  environment.systemPackages = with pkgs; [
+    betterdisplay
+    rectangle
+  ];
+
   networking.applicationFirewall.allowSignedApp = true;
 
   security.pam.services.sudo_local.touchIdAuth = true;

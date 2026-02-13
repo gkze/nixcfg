@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import os
 import shutil
 import sys
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import aiohttp
 from rich.columns import Columns
@@ -18,10 +17,9 @@ from rich.console import Console
 from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update.config import (
     UpdateConfig,
-    _env_bool,
-    _resolve_active_config,
-    _resolve_config,
-    default_max_nix_builds,
+    env_bool,
+    resolve_active_config,
+    resolve_config,
 )
 from lib.update.constants import ALL_TOOLS, NIX_BUILD_FAILURE_TAIL_LINES, REQUIRED_TOOLS
 from lib.update.events import UpdateEvent
@@ -38,15 +36,51 @@ from lib.update.updaters import UPDATERS
 from lib.update.updaters.base import DenoDepsHashUpdater
 
 
-def _check_required_tools(
+@dataclass(frozen=True)
+class UpdateOptions:
+    """Typed options for the update CLI — replaces argparse.Namespace."""
+
+    source: str | None = None
+    list_targets: bool = False
+    no_refs: bool = False
+    no_sources: bool = False
+    no_input: bool = False
+    check: bool = False
+    validate: bool = False
+    schema: bool = False
+    json: bool = False
+    verbose: bool = False
+    quiet: bool = False
+    tty: Literal["auto", "force", "off", "full"] = "auto"
+    zellij_guard: bool | None = None
+    native_only: bool = False
+    # config overrides (None = use env/defaults)
+    http_timeout: int | None = None
+    subprocess_timeout: int | None = None
+    max_nix_builds: int | None = None
+    log_tail_lines: int | None = None
+    render_interval: float | None = None
+    user_agent: str | None = None
+    retries: int | None = None
+    retry_backoff: float | None = None
+    fake_hash: str | None = None
+    deno_platforms: str | None = None
+
+
+def check_required_tools(
     *,
     include_flake_edit: bool = False,
     source: str | None = None,
+    needs_sources: bool = True,
 ) -> list[str]:
-    if source:
+    """Return names of required CLI tools that are missing from ``$PATH``."""
+    if not needs_sources:
+        # refs-only (or explicit --no-sources) mode: don't require hash tooling.
+        tools = list(REQUIRED_TOOLS)
+    elif source:
         if source in UPDATERS:
             updater_cls = UPDATERS[source]
-            tools = list(getattr(updater_cls, "required_tools", REQUIRED_TOOLS))
+            tools = list(getattr(updater_cls, "required_tools", ALL_TOOLS))
         else:
             # ref-only source - only needs nix (and possibly flake-edit)
             tools = list(REQUIRED_TOOLS)
@@ -60,7 +94,7 @@ def _check_required_tools(
 def _resolve_full_output(*, full_output: bool | None = None) -> bool:
     if full_output is not None:
         return full_output
-    return _env_bool("UPDATE_LOG_FULL", default=False)
+    return env_bool("UPDATE_LOG_FULL", default=False)
 
 
 def _is_tty(
@@ -70,11 +104,11 @@ def _is_tty(
     zellij_guard: bool | None = None,
 ) -> bool:
     if force_tty is None:
-        force_tty = _env_bool("UPDATE_FORCE_TTY", default=False)
+        force_tty = env_bool("UPDATE_FORCE_TTY", default=False)
     if no_tty is None:
-        no_tty = _env_bool("UPDATE_NO_TTY", default=False)
+        no_tty = env_bool("UPDATE_NO_TTY", default=False)
     if zellij_guard is None:
-        zellij_guard = _env_bool("UPDATE_ZELLIJ_GUARD", default=False)
+        zellij_guard = env_bool("UPDATE_ZELLIJ_GUARD", default=False)
     if force_tty:
         return True
     if no_tty:
@@ -93,18 +127,26 @@ class OutputOptions:
 
     json_output: bool = False
     quiet: bool = False
-    _console: Any = field(default=None, repr=False)
-    _err_console: Any = field(default=None, repr=False)
+    _console: Console | None = field(default=None, repr=False, init=False)
+    _err_console: Console | None = field(default=None, repr=False, init=False)
 
-    def __post_init__(self) -> None:
-        """Initialize stdout/stderr rich consoles (plain when not a TTY)."""
-        no_color = not sys.stdout.isatty()
-        self._console = Console(no_color=no_color, highlight=not no_color)
-        self._err_console = Console(
-            stderr=True,
-            no_color=not sys.stderr.isatty(),
-            highlight=sys.stderr.isatty(),
-        )
+    @property
+    def console(self) -> Console:
+        """Lazily create stdout console on first access."""
+        if self._console is None:
+            no_color = not sys.stdout.isatty()
+            self._console = Console(no_color=no_color, highlight=not no_color)
+        return self._console
+
+    @property
+    def err_console(self) -> Console:
+        """Lazily create stderr console on first access."""
+        if self._err_console is None:
+            no_color = not sys.stderr.isatty()
+            self._err_console = Console(
+                stderr=True, no_color=no_color, highlight=not no_color
+            )
+        return self._err_console
 
     def print(
         self,
@@ -115,14 +157,13 @@ class OutputOptions:
     ) -> None:
         """Print a message unless quiet or json mode is enabled."""
         if not self.quiet and not self.json_output:
-            console = self._err_console if stderr else self._console
-            if console is not None:
-                console.print(message, style=style)
+            target = self.err_console if stderr else self.console
+            target.print(message, style=style)
 
     def print_error(self, message: str) -> None:
         """Print an error message to stderr when not in json mode."""
-        if not self.json_output and self._err_console is not None:
-            self._err_console.print(message, style="red")
+        if not self.json_output:
+            self.err_console.print(message, style="red")
 
 
 _ORIGIN_FLAKE_ONLY = "(flake.nix)"
@@ -199,8 +240,8 @@ class ResolvedTargets:
     source_names: list[str]
 
     @classmethod
-    def from_args(cls, args: argparse.Namespace) -> ResolvedTargets:
-        """Resolve target sets and operational flags from CLI args."""
+    def from_options(cls, opts: UpdateOptions) -> ResolvedTargets:
+        """Resolve target sets and operational flags from update options."""
         all_source_names = set(UPDATERS.keys())
         all_ref_inputs = get_flake_inputs_with_refs()
         all_ref_names = {i.name for i in all_ref_inputs}
@@ -208,24 +249,24 @@ class ResolvedTargets:
 
         # --native-only implies --no-refs: in CI, refs are managed by the
         # pipeline (nix flake update + create-pr).
-        do_refs = not args.no_refs and not args.native_only
-        do_sources = not args.no_sources
-        if args.source:
-            if args.source not in all_ref_names:
+        do_refs = not opts.no_refs and not opts.native_only
+        do_sources = not opts.no_sources
+        if opts.source:
+            if opts.source not in all_ref_names:
                 do_refs = False
-            if args.source not in all_source_names:
+            if opts.source not in all_source_names:
                 do_sources = False
 
         ref_inputs = (
-            [i for i in all_ref_inputs if i.name == args.source]
-            if args.source
+            [i for i in all_ref_inputs if i.name == opts.source]
+            if opts.source
             else all_ref_inputs
         )
         source_names = (
-            [args.source]
-            if args.source in all_source_names
+            [opts.source]
+            if opts.source in all_source_names
             else []
-            if args.source
+            if opts.source
             else list(UPDATERS.keys())
         )
         if not do_refs:
@@ -240,9 +281,9 @@ class ResolvedTargets:
             all_known_names=all_known_names,
             do_refs=do_refs,
             do_sources=do_sources,
-            do_input_refresh=not args.no_input,
-            dry_run=args.check,
-            native_only=args.native_only,
+            do_input_refresh=not opts.no_input,
+            dry_run=opts.check,
+            native_only=opts.native_only,
             ref_inputs=ref_inputs,
             source_names=source_names,
         )
@@ -302,14 +343,13 @@ def _build_item_meta(
 
 
 def _emit_summary(
-    args: argparse.Namespace,
     summary: UpdateSummary,
     *,
     had_errors: bool,
     out: OutputOptions,
     dry_run: bool,
 ) -> int:
-    if args.json:
+    if out.json_output:
         sys.stdout.write(f"{json.dumps(summary.to_dict())}\n")
         return 1 if had_errors else 0
 
@@ -361,7 +401,7 @@ async def _update_source_task(  # noqa: PLR0913
     config: UpdateConfig | None = None,
 ) -> None:
     async def _run() -> None:
-        resolved_config = _resolve_active_config(config)
+        resolved_config = resolve_active_config(config)
         current = sources.entries.get(name)
         updater = UPDATERS[name](config=resolved_config)
         if isinstance(updater, DenoDepsHashUpdater):
@@ -384,16 +424,28 @@ async def _update_source_task(  # noqa: PLR0913
     await _run_queue_task(source=name, queue=queue, task=_run)
 
 
-async def _run_updates(args: argparse.Namespace) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915
-    out = OutputOptions(json_output=args.json, quiet=args.quiet)
-    config = _resolve_config(args)
+async def run_updates(opts: UpdateOptions) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915
+    """Core update workflow — accepts typed UpdateOptions, returns exit code."""
+    out = OutputOptions(json_output=opts.json, quiet=opts.quiet)
+    config = resolve_config(
+        http_timeout=opts.http_timeout,
+        subprocess_timeout=opts.subprocess_timeout,
+        log_tail_lines=opts.log_tail_lines,
+        render_interval=opts.render_interval,
+        user_agent=opts.user_agent,
+        retries=opts.retries,
+        retry_backoff=opts.retry_backoff,
+        fake_hash=opts.fake_hash,
+        max_nix_builds=opts.max_nix_builds,
+        deno_platforms=opts.deno_platforms,
+    )
 
-    if args.schema:
+    if opts.schema:
         sys.stdout.write(f"{json.dumps(SourcesFile.json_schema())}\n")
         return 0
 
-    if args.list:
-        if args.json:
+    if opts.list_targets:
+        if opts.json:
             payload = {
                 "sources": sorted(UPDATERS.keys()),
                 "inputs": [
@@ -421,11 +473,11 @@ async def _run_updates(args: argparse.Namespace) -> int:  # noqa: C901, PLR0911,
                 console.print(f"  {inp.name}: {inp.owner}/{inp.repo} @ {inp.ref}")
         return 0
 
-    if args.validate:
+    if opts.validate:
         try:
             sources = load_all_sources()
             validate_source_discovery_consistency()
-            if args.json:
+            if opts.json:
                 sys.stdout.write(
                     f"{json.dumps({'valid': True, 'sources': len(sources.entries)})}\n",
                 )
@@ -436,7 +488,7 @@ async def _run_updates(args: argparse.Namespace) -> int:  # noqa: C901, PLR0911,
                     style="green",
                 )
         except (RuntimeError, ValueError, TypeError, OSError) as exc:
-            if args.json:
+            if opts.json:
                 sys.stdout.write(
                     f"{json.dumps({'valid': False, 'error': str(exc)})}\n",
                 )
@@ -446,16 +498,16 @@ async def _run_updates(args: argparse.Namespace) -> int:  # noqa: C901, PLR0911,
         else:
             return 0
 
-    resolved = ResolvedTargets.from_args(args)
-    tty_mode = getattr(args, "tty", "auto")
+    resolved = ResolvedTargets.from_options(opts)
+    tty_mode = opts.tty
     tty_enabled = _is_tty(
         force_tty=True if tty_mode in ("force", "full") else None,
         no_tty=True if tty_mode == "off" else None,
-        zellij_guard=args.zellij_guard,
+        zellij_guard=opts.zellij_guard,
     )
     show_phase_headers = (
-        not args.json
-        and not args.quiet
+        not opts.json
+        and not opts.quiet
         and not tty_enabled
         and resolved.do_refs
         and resolved.do_sources
@@ -463,8 +515,8 @@ async def _run_updates(args: argparse.Namespace) -> int:  # noqa: C901, PLR0911,
         and resolved.source_names
     )
 
-    if args.source and args.source not in resolved.all_known_names:
-        out.print_error(f"Error: Unknown source or input '{args.source}'")
+    if opts.source and opts.source not in resolved.all_known_names:
+        out.print_error(f"Error: Unknown source or input '{opts.source}'")
         out.print_error(f"Available: {', '.join(sorted(resolved.all_known_names))}")
         return 1
 
@@ -472,7 +524,6 @@ async def _run_updates(args: argparse.Namespace) -> int:  # noqa: C901, PLR0911,
 
     if not resolved.ref_inputs and not resolved.source_names:
         return _emit_summary(
-            args,
             summary,
             had_errors=False,
             out=out,
@@ -491,7 +542,6 @@ async def _run_updates(args: argparse.Namespace) -> int:  # noqa: C901, PLR0911,
 
     if not order:
         return _emit_summary(
-            args,
             summary,
             had_errors=False,
             out=out,
@@ -500,7 +550,7 @@ async def _run_updates(args: argparse.Namespace) -> int:  # noqa: C901, PLR0911,
 
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
     max_lines = config.default_log_tail_lines
-    is_tty = tty_enabled and not args.quiet and not args.json
+    is_tty = tty_enabled and not opts.quiet and not opts.json
     full_output = _resolve_full_output(
         full_output=True if tty_mode == "full" else None,
     )
@@ -513,10 +563,10 @@ async def _run_updates(args: argparse.Namespace) -> int:  # noqa: C901, PLR0911,
             max_lines=max_lines,
             is_tty=is_tty,
             full_output=full_output,
-            verbose=getattr(args, "verbose", False),
+            verbose=opts.verbose,
             render_interval=config.default_render_interval,
             build_failure_tail_lines=NIX_BUILD_FAILURE_TAIL_LINES,
-            quiet=args.quiet or args.json,
+            quiet=opts.quiet or opts.json,
         ),
     )
 
@@ -550,7 +600,7 @@ async def _run_updates(args: argparse.Namespace) -> int:  # noqa: C901, PLR0911,
                     _update_source_task(
                         name,
                         sources,
-                        update_input=resolved.do_input_refresh,
+                        update_input=resolved.do_input_refresh and not resolved.dry_run,
                         native_only=resolved.native_only,
                         session=session,
                         update_input_lock=update_input_lock,
@@ -575,204 +625,14 @@ async def _run_updates(args: argparse.Namespace) -> int:  # noqa: C901, PLR0911,
                 native_only=resolved.native_only,
             )
             sources.entries.update(source_updates)
-        if any(details.get(name) == "updated" for name in resolved.source_names):
+        if not resolved.dry_run and any(
+            details.get(name) == "updated" for name in resolved.source_names
+        ):
             save_sources(sources)
 
     return _emit_summary(
-        args,
         summary,
         had_errors=had_errors,
         out=out,
         dry_run=resolved.dry_run,
     )
-
-
-def main() -> None:
-    """Parse arguments, validate tools, and run updates."""
-    parser = argparse.ArgumentParser(
-        description="Update source versions/hashes and flake input refs",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"Available sources: {', '.join(sorted(UPDATERS.keys()))}",
-    )
-    parser.add_argument(
-        "source",
-        nargs="?",
-        help="Source or flake input to update (default: all)",
-    )
-    parser.add_argument(
-        "-l",
-        "--list",
-        action="store_true",
-        help="List available sources and inputs",
-    )
-    parser.add_argument(
-        "-R",
-        "--no-refs",
-        action="store_true",
-        help="Skip flake input ref updates",
-    )
-    parser.add_argument(
-        "-S",
-        "--no-sources",
-        action="store_true",
-        help="Skip sources.json hash updates",
-    )
-    parser.add_argument(
-        "-I",
-        "--no-input",
-        action="store_true",
-        help="Skip flake input lock refresh before hashing",
-    )
-    parser.add_argument(
-        "-c",
-        "--check",
-        action="store_true",
-        help="Dry run: check for updates without applying",
-    )
-    parser.add_argument(
-        "-v",
-        "--validate",
-        action="store_true",
-        help="Validate sources.json and exit",
-    )
-    parser.add_argument(
-        "-s",
-        "--schema",
-        action="store_true",
-        help="Output JSON schema for sources.json and exit",
-    )
-    parser.add_argument(
-        "-j",
-        "--json",
-        action="store_true",
-        help="Output results as JSON (for scripting/automation)",
-    )
-    parser.add_argument(
-        "-V",
-        "--verbose",
-        action="store_true",
-        help="Stream build log lines to stdout (useful in non-TTY mode)",
-    )
-    parser.add_argument(
-        "-q",
-        "--quiet",
-        action="store_true",
-        help="Suppress progress output, only show errors and final summary",
-    )
-    parser.add_argument(
-        "-t",
-        "--tty",
-        choices=["auto", "force", "off", "full"],
-        default="auto",
-        help=(
-            "TTY rendering: auto=detect, force=always, off=disable, "
-            "full=force+verbose output "
-            "(env: UPDATE_FORCE_TTY, UPDATE_NO_TTY, UPDATE_LOG_FULL)"
-        ),
-    )
-    parser.add_argument(
-        "--zellij-guard",
-        dest="zellij_guard",
-        action="store_true",
-        default=None,
-        help="Disable live rendering under Zellij (env: UPDATE_ZELLIJ_GUARD)",
-    )
-    parser.add_argument(
-        "--no-zellij-guard",
-        dest="zellij_guard",
-        action="store_false",
-        help="Allow live rendering under Zellij (env: UPDATE_ZELLIJ_GUARD)",
-    )
-    parser.add_argument(
-        "--http-timeout",
-        type=int,
-        default=None,
-        help="HTTP timeout seconds (env: UPDATE_HTTP_TIMEOUT)",
-    )
-    parser.add_argument(
-        "--subprocess-timeout",
-        type=int,
-        default=None,
-        help="Subprocess timeout seconds (env: UPDATE_SUBPROCESS_TIMEOUT)",
-    )
-    parser.add_argument(
-        "--max-nix-builds",
-        type=int,
-        default=None,
-        help=(
-            "Max concurrent nix build processes "
-            f"(default: {default_max_nix_builds()} ~= 70 percent of CPU cores, "
-            "env: UPDATE_MAX_NIX_BUILDS)"
-        ),
-    )
-    parser.add_argument(
-        "--log-tail-lines",
-        type=int,
-        default=None,
-        help="Log tail lines (env: UPDATE_LOG_TAIL_LINES)",
-    )
-    parser.add_argument(
-        "--render-interval",
-        type=float,
-        default=None,
-        help="TTY render interval seconds (env: UPDATE_RENDER_INTERVAL)",
-    )
-    parser.add_argument(
-        "--user-agent",
-        type=str,
-        default=None,
-        help="HTTP user agent (env: UPDATE_USER_AGENT)",
-    )
-    parser.add_argument(
-        "--retries",
-        type=int,
-        default=None,
-        help="HTTP retries (env: UPDATE_RETRIES)",
-    )
-    parser.add_argument(
-        "--retry-backoff",
-        type=float,
-        default=None,
-        help="HTTP retry backoff seconds (env: UPDATE_RETRY_BACKOFF)",
-    )
-    parser.add_argument(
-        "--fake-hash",
-        type=str,
-        default=None,
-        help="Fake hash placeholder (env: UPDATE_FAKE_HASH)",
-    )
-    parser.add_argument(
-        "--deno-platforms",
-        type=str,
-        default=None,
-        help="Comma-separated Deno platforms (env: UPDATE_DENO_DEPS_PLATFORMS)",
-    )
-    parser.add_argument(
-        "-n",
-        "--native-only",
-        action="store_true",
-        help=(
-            "Only compute platform-specific hashes for current platform"
-            " (for CI). Implies --no-refs."
-        ),
-    )
-    args = parser.parse_args()
-
-    if args.list or args.schema or args.validate:
-        raise SystemExit(asyncio.run(_run_updates(args)))
-
-    needs_flake_edit = not args.no_refs and not args.native_only
-    if needs_flake_edit and args.source:
-        ref_names = {i.name for i in get_flake_inputs_with_refs()}
-        needs_flake_edit = args.source in ref_names
-
-    missing = _check_required_tools(
-        include_flake_edit=needs_flake_edit,
-        source=args.source,
-    )
-    if missing:
-        sys.stderr.write(f"Error: Required tools not found: {', '.join(missing)}\n")
-        sys.stderr.write("Please install them and ensure they are in your PATH.\n")
-        raise SystemExit(1)
-
-    raise SystemExit(asyncio.run(_run_updates(args)))

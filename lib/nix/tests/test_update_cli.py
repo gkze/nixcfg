@@ -1,6 +1,5 @@
 """Unit tests for source-update merge behavior in the update CLI."""
 
-import argparse
 import asyncio
 import json
 from types import SimpleNamespace
@@ -9,11 +8,12 @@ from typing import Protocol
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.update.cli import (
     OutputOptions,
+    UpdateOptions,
     UpdateSummary,
     _emit_summary,
     _merge_source_updates,
+    run_updates,
 )
-from lib.update.cli import _run_updates as run_updates
 
 
 class _MonkeyPatchLike(Protocol):
@@ -101,14 +101,8 @@ def test_run_updates_list_json_outputs_sources_and_inputs(
         ],
     )
 
-    args = argparse.Namespace(
-        schema=False,
-        list=True,
-        validate=False,
-        json=True,
-        quiet=False,
-    )
-    exit_code = asyncio.run(run_updates(args))
+    opts = UpdateOptions(list_targets=True, json=True)
+    exit_code = asyncio.run(run_updates(opts))
 
     assert exit_code == 0  # noqa: S101
     payload = json.loads(capsys.readouterr().out)
@@ -127,15 +121,8 @@ def test_run_updates_list_json_outputs_sources_and_inputs(
 
 def test_run_updates_schema_outputs_json(capsys: _CaptureLike) -> None:
     """Emit sources.json JSON schema and succeed."""
-    args = argparse.Namespace(
-        schema=True,
-        list=False,
-        validate=False,
-        json=False,
-        quiet=False,
-    )
-
-    exit_code = asyncio.run(run_updates(args))
+    opts = UpdateOptions(schema=True)
+    exit_code = asyncio.run(run_updates(opts))
 
     assert exit_code == 0  # noqa: S101
     payload = json.loads(capsys.readouterr().out)
@@ -157,14 +144,8 @@ def test_run_updates_validate_json_outputs_success(
         lambda: None,
     )
 
-    args = argparse.Namespace(
-        schema=False,
-        list=False,
-        validate=True,
-        json=True,
-        quiet=False,
-    )
-    exit_code = asyncio.run(run_updates(args))
+    opts = UpdateOptions(validate=True, json=True)
+    exit_code = asyncio.run(run_updates(opts))
 
     assert exit_code == 0  # noqa: S101
     payload = json.loads(capsys.readouterr().out)
@@ -187,14 +168,8 @@ def test_run_updates_validate_json_outputs_error(
 
     monkeypatch.setattr("lib.update.cli.validate_source_discovery_consistency", _boom)
 
-    args = argparse.Namespace(
-        schema=False,
-        list=False,
-        validate=True,
-        json=True,
-        quiet=False,
-    )
-    exit_code = asyncio.run(run_updates(args))
+    opts = UpdateOptions(validate=True, json=True)
+    exit_code = asyncio.run(run_updates(opts))
 
     assert exit_code == 1  # noqa: S101
     payload = json.loads(capsys.readouterr().out)
@@ -205,10 +180,8 @@ def test_run_updates_validate_json_outputs_error(
 def test_emit_summary_json_outputs_payload(capsys: _CaptureLike) -> None:
     """Write summary payload to stdout in json mode."""
     summary = UpdateSummary(updated=["demo"], errors=[], no_change=["stable"])
-    args = argparse.Namespace(json=True)
 
     exit_code = _emit_summary(
-        args,
         summary,
         had_errors=False,
         out=OutputOptions(json_output=True, quiet=True),

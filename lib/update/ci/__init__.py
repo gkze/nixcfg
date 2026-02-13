@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -14,7 +15,7 @@ from lib.update.ci.sources_json_diff import main as sources_json_diff_main
 from lib.update.ci.workflow_steps import main as workflow_steps_main
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 def _workflow_step(step: str, argv: Sequence[str] | None = None) -> int:
@@ -22,35 +23,83 @@ def _workflow_step(step: str, argv: Sequence[str] | None = None) -> int:
     return workflow_steps_main([step, *args])
 
 
-_CI_COMMANDS = {
-    "build-shared-closure": build_shared_closure_main,
-    "dedup-cargo-lock": dedup_cargo_lock_main,
-    "flake-lock-diff": flake_lock_diff_main,
-    "merge-sources": merge_sources_main,
-    "nix-flake-update": partial(_workflow_step, "nix-flake-update"),
-    "free-disk-space": partial(_workflow_step, "free-disk-space"),
-    "install-darwin-tools": partial(_workflow_step, "install-darwin-tools"),
-    "prefetch-flake-inputs": partial(_workflow_step, "prefetch-flake-inputs"),
-    "build-darwin-config": partial(_workflow_step, "build-darwin-config"),
-    "smoke-check-update-app": partial(_workflow_step, "smoke-check-update-app"),
-    "list-update-targets": partial(_workflow_step, "list-update-targets"),
-    "generate-pr-body": partial(_workflow_step, "generate-pr-body"),
-    "sources-diff": sources_json_diff_main,
-    "sources-json-diff": sources_json_diff_main,
-}
+@dataclass(frozen=True)
+class CICommand:
+    """A CI subcommand with its callable and help text."""
 
-CI_COMMANDS: frozenset[str] = frozenset(_CI_COMMANDS)
+    func: Callable[..., int]
+    help: str
+
+
+CI_COMMANDS: dict[str, CICommand] = {
+    "build-shared-closure": CICommand(
+        build_shared_closure_main,
+        "Build the union of derivations needed by multiple flake outputs.",
+    ),
+    "dedup-cargo-lock": CICommand(
+        dedup_cargo_lock_main,
+        "Convert git-sourced gitoxide crates to crates.io and remove duplicates.",
+    ),
+    "flake-lock-diff": CICommand(
+        flake_lock_diff_main,
+        "Generate a human-readable diff of flake.lock changes.",
+    ),
+    "merge-sources": CICommand(
+        merge_sources_main,
+        "Merge per-package sources.json trees from multiple CI platform artifacts.",
+    ),
+    "nix-flake-update": CICommand(
+        partial(_workflow_step, "nix-flake-update"),
+        "Run nix flake update.",
+    ),
+    "free-disk-space": CICommand(
+        partial(_workflow_step, "free-disk-space"),
+        "Free disk space on macOS runners.",
+    ),
+    "install-darwin-tools": CICommand(
+        partial(_workflow_step, "install-darwin-tools"),
+        "Install macOS-specific tooling for CI builds.",
+    ),
+    "prefetch-flake-inputs": CICommand(
+        partial(_workflow_step, "prefetch-flake-inputs"),
+        "Pre-fetch flake inputs for build jobs.",
+    ),
+    "build-darwin-config": CICommand(
+        partial(_workflow_step, "build-darwin-config"),
+        "Build one darwin configuration by host name.",
+    ),
+    "smoke-check-update-app": CICommand(
+        partial(_workflow_step, "smoke-check-update-app"),
+        "Smoke-check that the update app evaluates.",
+    ),
+    "list-update-targets": CICommand(
+        partial(_workflow_step, "list-update-targets"),
+        "List update targets discovered by the update app.",
+    ),
+    "generate-pr-body": CICommand(
+        partial(_workflow_step, "generate-pr-body"),
+        "Generate pull request body markdown for update runs.",
+    ),
+    "sources-diff": CICommand(
+        sources_json_diff_main,
+        "Generate a diff for source entry JSON changes.",
+    ),
+    "sources-json-diff": CICommand(
+        sources_json_diff_main,
+        "Generate a diff for source entry JSON changes (alias).",
+    ),
+}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Dispatch CI utility subcommands."""
     parser = argparse.ArgumentParser(
-        prog="update.py ci",
+        prog="nixcfg ci",
         description="Run CI helper tools through a single entrypoint",
     )
     parser.add_argument(
         "command",
-        choices=sorted(_CI_COMMANDS.keys()),
+        choices=sorted(CI_COMMANDS.keys()),
         help="CI helper command to execute",
     )
     parser.add_argument(
@@ -60,5 +109,5 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parsed = parser.parse_args(argv)
 
-    command = _CI_COMMANDS[parsed.command]
-    return command(parsed.args)
+    command = CI_COMMANDS[parsed.command]
+    return command.func(parsed.args)

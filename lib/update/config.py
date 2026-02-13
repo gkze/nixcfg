@@ -4,13 +4,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-if TYPE_CHECKING:
-    import argparse
 
 
 def default_max_nix_builds() -> int:
@@ -44,7 +40,7 @@ class UpdateSettings(BaseSettings):
     subprocess_timeout: int = 1200
     log_tail_lines: int = 10
     render_interval: float = 0.05
-    user_agent: str = "update.py"
+    user_agent: str = "nixcfg"
     retries: int = 3
     retry_backoff: float = 1.0
     fake_hash: str = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -87,11 +83,13 @@ DEFAULT_SETTINGS = UpdateSettings()
 DEFAULT_CONFIG = _settings_to_config(DEFAULT_SETTINGS)
 
 
-def _resolve_active_config(config: UpdateConfig | None) -> UpdateConfig:
+def resolve_active_config(config: UpdateConfig | None) -> UpdateConfig:
+    """Return *config* if provided, otherwise the default configuration."""
     return config or DEFAULT_CONFIG
 
 
-def _env_bool(name: str, *, default: bool = False) -> bool:
+def env_bool(name: str, *, default: bool = False) -> bool:
+    """Read an environment variable as a boolean flag."""
     truthy = {"1", "true", "yes", "on"}
     falsy = {"0", "false", "no", "off"}
     value = os.environ.get(name)
@@ -105,25 +103,36 @@ def _env_bool(name: str, *, default: bool = False) -> bool:
     return default
 
 
-def _resolve_config(args: argparse.Namespace | None = None) -> UpdateConfig:
+def resolve_config(  # noqa: PLR0913
+    *,
+    http_timeout: int | None = None,
+    subprocess_timeout: int | None = None,
+    log_tail_lines: int | None = None,
+    render_interval: float | None = None,
+    user_agent: str | None = None,
+    retries: int | None = None,
+    retry_backoff: float | None = None,
+    fake_hash: str | None = None,
+    max_nix_builds: int | None = None,
+    deno_platforms: str | None = None,
+) -> UpdateConfig:
+    """Build an UpdateConfig by merging explicit overrides onto env defaults."""
     settings_data = DEFAULT_SETTINGS.model_dump()
-    if args is not None:
-        arg_to_setting = {
-            "http_timeout": "http_timeout",
-            "subprocess_timeout": "subprocess_timeout",
-            "log_tail_lines": "log_tail_lines",
-            "render_interval": "render_interval",
-            "user_agent": "user_agent",
-            "retries": "retries",
-            "retry_backoff": "retry_backoff",
-            "fake_hash": "fake_hash",
-            "max_nix_builds": "max_nix_builds",
-            "deno_platforms": "deno_deps_platforms",
-        }
-        for arg_name, setting_name in arg_to_setting.items():
-            value = getattr(args, arg_name, None)
-            if value is not None:
-                settings_data[setting_name] = value
+    overrides: dict[str, object] = {
+        "http_timeout": http_timeout,
+        "subprocess_timeout": subprocess_timeout,
+        "log_tail_lines": log_tail_lines,
+        "render_interval": render_interval,
+        "user_agent": user_agent,
+        "retries": retries,
+        "retry_backoff": retry_backoff,
+        "fake_hash": fake_hash,
+        "max_nix_builds": max_nix_builds,
+        "deno_deps_platforms": deno_platforms,
+    }
+    for setting_name, value in overrides.items():
+        if value is not None:
+            settings_data[setting_name] = value
 
     merged_settings = UpdateSettings.model_validate(settings_data)
     return _settings_to_config(merged_settings)
@@ -132,8 +141,8 @@ def _resolve_config(args: argparse.Namespace | None = None) -> UpdateConfig:
 __all__ = [
     "DEFAULT_CONFIG",
     "UpdateConfig",
-    "_env_bool",
-    "_resolve_active_config",
-    "_resolve_config",
     "default_max_nix_builds",
+    "env_bool",
+    "resolve_active_config",
+    "resolve_config",
 ]

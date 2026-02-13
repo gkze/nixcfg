@@ -127,7 +127,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.99.0";
+      url = "github:openai/codex/rust-v0.101.0";
       flake = false;
     };
     curator = {
@@ -266,8 +266,14 @@
           "x86_64-linux"
         ];
 
-        nixpkgs.config.allowUnfree = true;
-        nixpkgs.config.permittedInsecurePackages = [ "google-chrome-145.0.7632.46" ];
+        nixpkgs.config = {
+          allowUnfree = true;
+          permittedInsecurePackages = [
+            "google-chrome-145.0.7632.68"
+          ];
+        };
+
+        apps.nixcfg = { nixcfg-script, ... }: "${nixcfg-script}/bin/nixcfg";
 
         imports = [ flakelight-darwin.flakelightModules.default ];
 

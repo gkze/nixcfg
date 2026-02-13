@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 from lib.nix.commands.base import ProcessDone, ProcessLine, stream_process
 from lib.nix.commands.hash import nix_hash_convert as libnix_hash_convert
 from lib.nix.commands.hash import nix_prefetch_url as libnix_prefetch_url
-from lib.update.config import UpdateConfig, _resolve_active_config
+from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.constants import NIX_BUILD_FAILURE_TAIL_LINES
 from lib.update.errors import format_exception
 from lib.update.events import (
@@ -98,7 +98,7 @@ async def stream_command(  # noqa: PLR0913
         command_timeout=command_timeout,
         kwargs=kwargs,
     )
-    config = _resolve_active_config(config)
+    config = resolve_active_config(config)
     if command_timeout is None:
         command_timeout = config.default_subprocess_timeout
     command_text = _truncate_command(shlex.join(args))

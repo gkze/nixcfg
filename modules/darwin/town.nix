@@ -4,6 +4,7 @@
       "1password"
       "cleanshot"
       "freelens"
+      "ia-writer"
       "pants"
       "tailscale"
       "warp@preview"

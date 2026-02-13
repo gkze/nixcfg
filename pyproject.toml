@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "nixcfg"
 version = "0.0.0"
@@ -18,6 +22,9 @@ dependencies = [
     "typer>=0.23.0",
 ]
 
+[project.scripts]
+nixcfg = "nixcfg:app"
+
 [project.optional-dependencies]
 codegen = ["datamodel-code-generator[http]>=0.53.0", "referencing>=0.37.0"]
 
@@ -37,20 +44,22 @@ preview = true
 explicit-preview-rules = true
 
 [tool.ruff.lint.isort]
-known-first-party = ["lib"]
+known-first-party = ["lib", "nixcfg"]
 
 [tool.ruff.lint.pycodestyle]
 max-line-length = 100 # allow up to 100, flag above
 
 [tool.uv]
-package = false
+package = true
 
 [tool.uv.sources]
 nix-manipulator = { git = "https://github.com/hoh/nix-manipulator.git", rev = "dbe47853d2f48b6314a9e07e5bad6ba78bdbf6bc" }
 
 [tool.setuptools]
-py-modules = []
-packages = []
+py-modules = ["nixcfg"]
+
+[tool.setuptools.packages.find]
+include = ["lib*"]
 
 [tool.ty]
 

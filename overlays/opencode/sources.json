@@ -1,10 +1,12 @@
 {
+  "drvHash": "kx63myjmwa2qb2jsv3ig4ai21705p135",
   "hashes": [
     {
-      "hash": "sha256-DPONXP52XOg/ApdSnLp32a+K5XCOnDGhbTUto2Rme0g=",
+      "hash": "sha256-wC7bbbIyZ62uMxTr9FElTbEBMrfz0S/ndqwZZ3V9EOA=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     }
   ],
-  "input": "opencode"
+  "input": "opencode",
+  "version": "1fb6c0b5b356e3816398ba71ac1b01485697bc31"
 }

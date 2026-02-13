@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
     import aiohttp
 
-from lib.update.config import UpdateConfig, _resolve_active_config
+from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.events import (
     CommandResult,
     EventStream,
@@ -211,7 +211,7 @@ async def fetch_github_latest_version_ref(
     *,
     config: UpdateConfig | None = None,
 ) -> str | None:
-    config = _resolve_active_config(config)
+    config = resolve_active_config(config)
     for candidate_prefix in _build_version_prefixes(prefix):
         tag = await _fetch_first_matching_tag(
             session,
@@ -243,7 +243,7 @@ async def check_flake_ref_update(
     config: UpdateConfig | None = None,
 ) -> RefUpdateResult:
     """Check a flake input ref against the latest matching upstream tag."""
-    config = _resolve_active_config(config)
+    config = resolve_active_config(config)
     prefix = _extract_version_prefix(input_ref.ref)
 
     if input_ref.input_type == "github":
@@ -342,7 +342,7 @@ async def _update_refs_task(  # noqa: PLR0913
     config: UpdateConfig | None = None,
 ) -> None:
     async def _run() -> None:
-        resolved_config = _resolve_active_config(config)
+        resolved_config = resolve_active_config(config)
         source = input_ref.name
         put = queue.put
 

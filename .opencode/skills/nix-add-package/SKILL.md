@@ -224,7 +224,7 @@ Only for Go (`vendorHash`), Cargo (`cargoHash`), npm (`npmDepsHash`), Deno (`den
 }
 ```
 
-To compute the actual hash, temporarily use `lib.fakeHash` and build to get the expected hash from the error output, or run `uv run update.py my-tool`.
+To compute the actual hash, temporarily use `lib.fakeHash` and build to get the expected hash from the error output, or run `nixcfg update my-tool`.
 
 Note: If using `packages/my-tool.nix` (a single file, not a directory), you'll need to create `packages/my-tool/` as a directory instead and rename the nix file to `packages/my-tool/default.nix` so the `sources.json` can be co-located.
 
@@ -521,7 +521,7 @@ class MyAppUpdater(PlatformAPIUpdater):
 - [ ] Add `sources.json` with version, urls, and hashes (bare entry format)
 - [ ] Add `default.nix` overlay fragment
 - [ ] Add `updater.py` with Updater class or factory call
-- [ ] Verify: `uv run update.py --validate` and `uv run update.py my-app`
+- [ ] Verify: `nixcfg update --validate` and `nixcfg update my-app`
 - [ ] Build to verify: `nix build .#my-app` or `nh darwin switch --no-nom .`
 
 ______________________________________________________________________

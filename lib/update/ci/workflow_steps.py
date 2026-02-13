@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import subprocess
 import sys
 import tempfile
@@ -98,7 +99,7 @@ def _cmd_build_darwin_config(args: argparse.Namespace) -> int:
 
 def _cmd_smoke_check_update_app(_: argparse.Namespace) -> int:
     _run(
-        ["nix", "eval", "--raw", ".#apps.x86_64-linux.project.program"],
+        ["nix", "eval", "--raw", ".#apps.x86_64-linux.nixcfg.program"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -106,17 +107,9 @@ def _cmd_smoke_check_update_app(_: argparse.Namespace) -> int:
 
 
 def _cmd_list_update_targets(_: argparse.Namespace) -> int:
-    from lib.update.cli import main as update_main
+    from lib.update.cli import UpdateOptions, run_updates
 
-    original_argv = sys.argv
-    sys.argv = ["project update", "--list"]
-    try:
-        update_main()
-    except SystemExit as exc:
-        return exc.code if isinstance(exc.code, int) else 0
-    finally:
-        sys.argv = original_argv
-    return 0
+    return asyncio.run(run_updates(UpdateOptions(list_targets=True)))
 
 
 def _git_show(pathspec: str) -> str:

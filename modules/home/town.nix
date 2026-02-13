@@ -25,6 +25,10 @@ in
   xdg.configFile."opencode/work.json".text = builtins.toJSON {
     "$schema" = "https://opencode.ai/config.json";
     mcp = {
+      axiom = {
+        type = "remote";
+        url = "https://mcp.axiom.co/mcp";
+      };
       convex = {
         type = "local";
         command = [

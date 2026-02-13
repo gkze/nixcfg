@@ -31,6 +31,7 @@
       tinyOverlays = {
         chatgpt = final.mkSourceOverride "chatgpt" prev.chatgpt;
         code-cursor = final.mkSourceOverride "code-cursor" prev.code-cursor;
+        flake-edit = inputs.flake-edit.packages.${system}.default;
         google-chrome = final.mkSourceOverride "google-chrome" prev.google-chrome;
         worktrunk = inputs.worktrunk.packages.${system}.default;
         zed-editor-nightly = inputs.zed.packages.${system}.default;

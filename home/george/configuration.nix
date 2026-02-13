@@ -241,6 +241,7 @@
         misc.disable = [
           # "brew_cask"
           "brew_formula"
+          "home_manager"
           # "cursor"
         ];
         git.repos = [ (slib.srcDirBase system) ];
