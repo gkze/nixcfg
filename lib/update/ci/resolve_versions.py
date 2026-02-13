@@ -26,11 +26,34 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
+type _JsonSafe = (
+    str | int | float | bool | None | dict[str, _JsonSafe] | list[_JsonSafe]
+)
+
+
+def _make_json_safe(obj: object) -> _JsonSafe:
+    """Recursively convert *obj* to JSON-serializable types.
+
+    Pydantic models are dumped via ``model_dump()``, dicts and lists are
+    traversed recursively, and everything else is passed through (the
+    stdlib JSON encoder will raise on truly un-serializable objects).
+    """
+    from pydantic import BaseModel
+
+    if isinstance(obj, BaseModel):
+        return obj.model_dump()
+    if isinstance(obj, dict):
+        return {k: _make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_make_json_safe(v) for v in obj]
+    return obj  # type: ignore[return-value]
+
+
 def _serialize_version_info(info: VersionInfo) -> dict[str, Any]:
     """Serialize a VersionInfo to a JSON-safe dict."""
     return {
         "version": info.version,
-        "metadata": info.metadata,
+        "metadata": _make_json_safe(info.metadata),
     }
 
 
