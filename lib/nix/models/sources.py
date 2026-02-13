@@ -257,6 +257,7 @@ class SourceEntry(BaseModel):
     input: str | None = None
     urls: dict[str, str] | None = None
     commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+    drv_hash: str | None = Field(default=None, alias="drvHash")
 
     def to_dict(self) -> dict[str, Any]:
         """Return this source entry as a stable, JSON-serializable mapping."""
@@ -265,6 +266,7 @@ class SourceEntry(BaseModel):
                 {
                     k: v
                     for k, v in {
+                        "drvHash": self.drv_hash,
                         "hashes": self.hashes.to_json(),
                         "commit": self.commit,
                         "input": self.input,
@@ -288,6 +290,7 @@ class SourceEntry(BaseModel):
             input=other.input or self.input,
             urls=merged_urls,
             commit=other.commit or self.commit,
+            drv_hash=other.drv_hash or self.drv_hash,
         )
 
 

@@ -1,12 +1,14 @@
 """TTY and non-TTY rendering for update progress events."""
 
+import asyncio
+import contextlib
 import re
 import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import Any, Literal, cast
 
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
@@ -22,9 +24,6 @@ from lib.update.events import (
     UpdateEventKind,
     _is_nix_build_command,
 )
-
-if TYPE_CHECKING:
-    import asyncio
 
 SummaryStatus = Literal["updated", "error", "no_change"]
 
@@ -523,10 +522,12 @@ class Renderer:
 
         return Group(*lines)
 
-    def log_line(self, _source: str, _message: str) -> None:
+    def log_line(self, source: str, message: str) -> None:
         """Print a build log line in verbose non-TTY mode."""
         if not self.is_tty and self.verbose and not self.quiet:
-            pass
+            import sys
+
+            sys.stdout.write(f"[{source}] {message}\n")
 
     def _append_detail_line(self, source: str, message: str) -> bool:
         item = self.items.get(source)
@@ -543,14 +544,18 @@ class Renderer:
         if self.is_tty:
             self._append_detail_line(source, message)
         elif not self.quiet:
-            pass
+            import sys
+
+            sys.stdout.write(f"[{source}] {message}\n")
 
     def log_error(self, source: str, message: str) -> None:
         """Record an error message for a source item."""
         if self.is_tty:
             self._append_detail_line(source, message)
         elif not self.quiet:
-            pass
+            import sys
+
+            sys.stderr.write(f"[{source}] ERROR: {message}\n")
 
     def request_render(self) -> None:
         """Mark the live panel as needing refresh."""
@@ -637,6 +642,14 @@ async def consume_events(  # noqa: C901, PLR0912, PLR0913, PLR0915
         quiet=quiet,
     )
 
+    async def _render_ticker() -> None:
+        """Periodically refresh the display so spinners stay animated."""
+        while True:
+            await asyncio.sleep(render_interval)
+            renderer.request_render()
+            renderer.render_if_due(time.monotonic())
+
+    ticker = asyncio.create_task(_render_ticker()) if is_tty else None
     try:
         while True:
             event = await queue.get()
@@ -836,6 +849,10 @@ async def consume_events(  # noqa: C901, PLR0912, PLR0913, PLR0915
             renderer.request_render()
             renderer.render_if_due(time.monotonic())
     finally:
+        if ticker is not None:
+            ticker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await ticker
         renderer.finalize()
 
     return updated, errors, update_details, source_updates

@@ -1,7 +1,8 @@
 {
+  "drvHash": "3k0v3km9ph13bsm0k4bjlk7jpnyzhl7x",
   "hashes": [
     {
-      "hash": "sha256-fOnqYLfqVb7rbhik0DKJGgZFWS1pwy7vhVpsdhQvcig=",
+      "hash": "sha256-Cgr+kj3IYWD26rjvp+7wIlRWWlUC0wQ5uAZkw9Kji00=",
       "hashType": "denoDepsHash",
       "platform": "aarch64-darwin"
     },

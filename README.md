@@ -36,6 +36,7 @@ nh (os|darwin) switch -a . # os for NixOS, darwin for macOS
 
 - Enter the dev environment with `nix develop` (or `direnv allow` if you use direnv).
 - Run `uv sync` once to create `.venv`; `.envrc` will auto-activate it when present.
+- Repo CLI (update/CI helpers): `nix run .#nixcfg -- update --help` and `nix run .#nixcfg -- ci --help`.
 
 ## Roadmap
 

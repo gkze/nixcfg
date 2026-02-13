@@ -20,7 +20,7 @@ from lib.nix.models.sources import (
     SourceEntry,
     SourceHashes,
 )
-from lib.update.config import UpdateConfig, _resolve_active_config
+from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.events import (
     EventStream,
     GatheredValues,
@@ -36,6 +36,7 @@ from lib.update.nix import (
     compute_bun_node_modules_hash,
     compute_cargo_vendor_hash,
     compute_deno_deps_hash,
+    compute_drv_fingerprint,
     compute_go_vendor_hash,
     compute_npm_deps_hash,
     get_current_nix_platform,
@@ -87,7 +88,7 @@ class Updater(ABC):
 
     def __init__(self, *, config: UpdateConfig | None = None) -> None:
         """Create an updater bound to active config values."""
-        self.config = _resolve_active_config(config)
+        self.config = resolve_active_config(config)
 
     @abstractmethod
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
@@ -125,7 +126,7 @@ class Updater(ABC):
             commit=commit,
         )
 
-    def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:
+    async def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:
         if current is None:
             return False
         if current.version != info.version:
@@ -134,6 +135,16 @@ class Updater(ABC):
         if upstream_commit and current.commit:
             return current.commit == upstream_commit
         return True
+
+    async def _finalize_result(self, result: SourceEntry) -> EventStream:
+        """Attach additional metadata to *result* before the equality check.
+
+        Subclasses can override this to attach additional metadata (e.g. a
+        derivation fingerprint) to the result entry.  The implementation
+        **must** yield the (possibly updated) result as a
+        :class:`UpdateEvent.value` event so the caller can retrieve it.
+        """
+        yield UpdateEvent.value(self.name, result)
 
     async def update_stream(
         self,
@@ -145,7 +156,7 @@ class Updater(ABC):
         info = await self.fetch_latest(session)
 
         yield UpdateEvent.status(self.name, f"Latest version: {info.version}")
-        if self._is_latest(current, info):
+        if await self._is_latest(current, info):
             yield UpdateEvent.status(self.name, f"Up to date (version: {info.version})")
             yield UpdateEvent.result(self.name)
             return
@@ -159,6 +170,15 @@ class Updater(ABC):
             yield event
         hashes = _require_value(hashes_drain, "Missing hash output")
         result = self.build_result(info, hashes)
+
+        result_drain = ValueDrain[SourceEntry]()
+        async for event in drain_value_events(
+            self._finalize_result(result),
+            result_drain,
+        ):
+            yield event
+        result = _require_value(result_drain, "Missing finalized result")
+
         if current is not None and result == current:
             yield UpdateEvent.status(self.name, "Up to date")
             yield UpdateEvent.result(self.name)
@@ -306,7 +326,15 @@ class HashEntryUpdater(Updater):
 
 
 class FlakeInputHashUpdater(HashEntryUpdater):
-    """Base updater for hash-only sources backed by flake inputs."""
+    """Base updater for hash-only sources backed by flake inputs.
+
+    Uses derivation fingerprinting for maximally precise staleness detection.
+    Instead of comparing version strings (which miss nixpkgs bumps, toolchain
+    changes, and build-script edits), we evaluate the package with a sentinel
+    hash and compare the resulting ``.drv`` path.  Since the sentinel is
+    constant, the ``.drv`` hash is a pure function of the entire transitive
+    build-input closure — equivalent to Nix's own rebuild detection.
+    """
 
     input_name: str | None = None
     hash_type: HashType
@@ -329,6 +357,40 @@ class FlakeInputHashUpdater(HashEntryUpdater):
         node = get_flake_input_node(self._input)
         version = get_flake_input_version(node)
         return VersionInfo(version=version, metadata={"node": node})
+
+    async def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:  # noqa: ARG002
+        """Check staleness via derivation fingerprint comparison.
+
+        Computes the ``.drv`` hash with ``FAKE_HASHES=1`` and compares it to
+        the stored ``drvHash`` in ``sources.json``.  Returns ``True`` only
+        when the fingerprint matches exactly — meaning no build input in the
+        entire transitive closure has changed.
+        """
+        if current is None or current.drv_hash is None:
+            return False
+        try:
+            new_fingerprint = await compute_drv_fingerprint(
+                self.name, config=self.config
+            )
+        except RuntimeError:
+            # If fingerprint computation fails, conservatively recompute.
+            return False
+        # Cache the fingerprint so _finalize_result can reuse it.
+        self._cached_fingerprint = new_fingerprint
+        return current.drv_hash == new_fingerprint
+
+    async def _finalize_result(self, result: SourceEntry) -> EventStream:
+        """Attach a derivation fingerprint to the result entry."""
+        yield UpdateEvent.status(self.name, "Computing derivation fingerprint...")
+        try:
+            # Reuse cached fingerprint from _is_latest when available.
+            drv_hash = getattr(self, "_cached_fingerprint", None)
+            if drv_hash is None:
+                drv_hash = await compute_drv_fingerprint(self.name, config=self.config)
+            result = result.model_copy(update={"drv_hash": drv_hash})
+        except RuntimeError:
+            pass  # Store without fingerprint; will recompute next run
+        yield UpdateEvent.value(self.name, result)
 
     @abstractmethod
     def _compute_hash(self, info: VersionInfo) -> EventStream:

@@ -113,7 +113,7 @@
     }
   );
 
-  project-script =
+  nixcfg-script =
     let
       workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
         workspaceRoot = ./..;
@@ -144,28 +144,20 @@
             ]
           );
 
-      venv = pySet.mkVirtualEnv "project-venv" workspace.deps.all;
-
-      unwrapped = prev.writeScriptBin "project" ''
-        #!${venv}/bin/python
-        import runpy, sys, os
-        sys.argv[0] = os.path.join("${./..}", "project.py")
-        runpy.run_path(sys.argv[0], run_name="__main__")
-      '';
+      venv = pySet.mkVirtualEnv "nixcfg-venv" workspace.deps.all;
     in
     prev.symlinkJoin {
-      name = "project-script";
-      paths = [ unwrapped ];
+      name = "nixcfg-script";
+      paths = [ venv ];
       nativeBuildInputs = [ prev.makeWrapper ];
       postBuild = ''
-        wrapProgram $out/bin/project \
+        wrapProgram $out/bin/nixcfg \
           --prefix PATH : ${
             prev.lib.makeBinPath [
               final.flake-edit
               prev.nix-prefetch-git
             ]
-          } \
-          --prefix PYTHONPATH : ${./..}
+          }
       '';
     };
 }

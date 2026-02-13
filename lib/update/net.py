@@ -12,7 +12,7 @@ from typing import Any, cast
 import aiohttp
 from aiohttp_retry import ExponentialRetry, RetryClient
 
-from lib.update.config import UpdateConfig, _resolve_active_config
+from lib.update.config import UpdateConfig, resolve_active_config
 
 type JSONDict = dict[str, Any]
 type JSONList = list[Any]
@@ -108,7 +108,7 @@ async def _request(  # noqa: PLR0913
     backoff: float | None = None,
     config: UpdateConfig | None = None,
 ) -> tuple[bytes, dict[str, str]]:
-    config = _resolve_active_config(config)
+    config = resolve_active_config(config)
     if retries is None:
         retries = config.default_retries
     if backoff is None:
@@ -163,7 +163,7 @@ async def fetch_url(
         request_timeout=request_timeout,
         kwargs=kwargs,
     )
-    config = _resolve_active_config(config)
+    config = resolve_active_config(config)
     payload, _ = await _request(
         session,
         url,
@@ -188,7 +188,7 @@ async def fetch_json(
         request_timeout=request_timeout,
         kwargs=kwargs,
     )
-    config = _resolve_active_config(config)
+    config = resolve_active_config(config)
     if url.startswith("https://api.github.com/"):
         payload, headers = await _request(
             session,
@@ -231,7 +231,7 @@ async def fetch_github_api(
     **params: str,
 ) -> JSONValue:
     """Fetch JSON from a GitHub API path with optional query parameters."""
-    config = _resolve_active_config(config)
+    config = resolve_active_config(config)
     url = github_api_url(api_path)
     if params:
         url = f"{url}?{urllib.parse.urlencode(params)}"

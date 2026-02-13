@@ -30,10 +30,6 @@
         #   ];
         #   environment.AWS_PROFILE = "default";
         # };
-        axiom = {
-          type = "remote";
-          url = "https://mcp.axiom.co/mcp";
-        };
         chrome-devtools = {
           type = "local";
           command = [

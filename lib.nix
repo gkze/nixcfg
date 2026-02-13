@@ -394,11 +394,9 @@ rec {
       users = [ user ];
       homeModules = extraHomeModules;
       systemModules = [
-        "${modulesPath}/darwin/display-management.nix"
         inputs.nix-homebrew.darwinModules.nix-homebrew
         "${modulesPath}/darwin/homebrew.nix"
         { nix-homebrew = { inherit user; }; }
-        "${modulesPath}/darwin/${user}/shell.nix"
         "${modulesPath}/darwin/${user}/brew-apps.nix"
         # Linux builder for cross-platform Nix builds on Apple Silicon.
         # nix-rosetta-builder provides aarch64-linux and x86_64-linux builders

@@ -8,6 +8,8 @@
       { app = "/System/Applications/Messages.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Slack.app"; }
       { app = "/Applications/1Password.app"; }
+      { app = "/Users/${primaryUser}/Applications/Home Manager Apps/ChatGPT.app"; }
+      { app = "/Applications/Claude.app"; }
       { app = "/Applications/Twilight.app"; }
       { app = "/Applications/Ghostty.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/OpenCode Dev.app"; }

@@ -20,7 +20,7 @@ from lib.nix.commands.base import CommandResult as LibnixResult
 from lib.nix.commands.base import HashMismatchError
 from lib.nix.models.hash import is_sri
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
-from lib.update.config import UpdateConfig, _resolve_active_config
+from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.constants import FIXED_OUTPUT_NOISE
 from lib.update.events import (
     CommandResult,
@@ -76,7 +76,7 @@ def _extract_nix_hash(output: str, *, config: UpdateConfig | None = None) -> str
     err = HashMismatchError.from_output(output, dummy)
     if err is not None:
         return err.hash
-    config = _resolve_active_config(config)
+    config = resolve_active_config(config)
     has_mismatch_signal = any(
         indicator in output for indicator in _HASH_MISMATCH_INDICATORS
     )
@@ -181,7 +181,7 @@ async def compute_fixed_output_hash(
     config: UpdateConfig | None = None,
 ) -> EventStream:
     """Compute an SRI hash by extracting nix fixed-output mismatch output."""
-    config = _resolve_active_config(config)
+    config = resolve_active_config(config)
     expr = compact_nix_expr(expr)
     semaphore = _get_nix_build_semaphore(config)
     async with semaphore:
@@ -278,6 +278,71 @@ async def compute_overlay_hash(
         env={"FAKE_HASHES": "1"},
     ):
         yield event
+
+
+async def compute_drv_fingerprint(
+    source: str,
+    *,
+    system: str | None = None,
+    config: UpdateConfig | None = None,
+) -> str:
+    """Compute a stable derivation fingerprint for staleness detection.
+
+    Evaluates the package with ``FAKE_HASHES=1`` and extracts the ``.drv``
+    store-path hash using ``nix derivation show``.  Because the fake hash is
+    a constant sentinel, the ``.drv`` path is a pure function of the build
+    input closure (source, toolchain, build script, stdenv, etc.).
+
+    Any change to *any* transitive build input — a nixpkgs bump, a Deno
+    version change, a source force-push, a build-script edit — changes the
+    ``.drv`` hash.  Conversely, identical inputs always produce the same
+    hash.  This gives us maximally precise staleness detection: zero false
+    negatives and zero false positives.
+    """
+    config = resolve_active_config(config)
+    expr = _build_overlay_expr(source, system=system)
+    expr = compact_nix_expr(expr)
+    args = ["nix", "derivation", "show", "--quiet", "--impure", "--expr", expr]
+
+    result_drain = ValueDrain[CommandResult]()
+    async for _event in drain_value_events(
+        run_command(
+            args,
+            source=source,
+            error="nix derivation show did not return output",
+            env={"FAKE_HASHES": "1"},
+            config=config,
+        ),
+        result_drain,
+    ):
+        pass  # discard streaming events during fingerprint eval
+    result = _require_value(result_drain, "nix derivation show did not return output")
+    if result.returncode != 0:
+        msg = f"nix derivation show failed:\n{result.stderr}"
+        raise RuntimeError(msg)
+
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        msg = f"Failed to parse nix derivation show output: {exc}"
+        raise RuntimeError(msg) from exc
+
+    # New Nix versions (2.20+) wrap derivations under a "derivations" key;
+    # older versions use the .drv path directly as a top-level key.
+    if "derivations" in data and isinstance(data["derivations"], dict):
+        drv_path = next(iter(data["derivations"]))
+    else:
+        drv_path = next(iter(data))
+
+    # The .drv key is "<hash>-<name>.drv" (Nix 2.20+) or the full
+    # "/nix/store/<hash>-<name>.drv" (older).  Strip the store prefix if
+    # present so the fingerprint is just the Nix hash portion regardless
+    # of Nix version.  A Nix version change that alters the derivation
+    # hash algorithm would change the fingerprint, conservatively
+    # triggering recomputation — the correct behaviour.
+    if "/" in drv_path:
+        drv_path = drv_path.rsplit("/", 1)[-1]
+    return drv_path.split("-", 1)[0]
 
 
 def _build_deno_deps_expr(source: str, platform: str) -> str:
@@ -455,7 +520,7 @@ async def _prefetch_git_hash(
     config: UpdateConfig | None = None,
 ) -> EventStream:
     """Fetch a git repo and yield its SRI narHash via ``builtins.fetchGit``."""
-    config = _resolve_active_config(config)
+    config = resolve_active_config(config)
     fetch_git = FunctionCall(
         name="builtins.fetchGit",
         argument=AttributeSet.from_dict(
@@ -504,7 +569,7 @@ async def compute_import_cargo_lock_output_hashes(
     then prefetches each one directly.  This avoids evaluating nixpkgs entirely
     and works regardless of inter-repo workspace dependencies.
     """
-    config = _resolve_active_config(config)
+    config = resolve_active_config(config)
 
     yield UpdateEvent.status(source, "Fetching upstream Cargo.lock...")
     node = get_flake_input_node(input_name)
@@ -610,7 +675,7 @@ async def compute_deno_deps_hash(  # noqa: C901, PLR0912, PLR0915
     imports, so we write temporary hash entries directly to the real
     per-package file (with a file lock) before each platform build.
     """
-    config = _resolve_active_config(config)
+    config = resolve_active_config(config)
     current_platform = get_current_nix_platform()
     platforms = config.deno_deps_platforms
     if current_platform not in platforms:
@@ -718,6 +783,7 @@ __all__ = [
     "compute_bun_node_modules_hash",
     "compute_cargo_vendor_hash",
     "compute_deno_deps_hash",
+    "compute_drv_fingerprint",
     "compute_fixed_output_hash",
     "compute_go_vendor_hash",
     "compute_import_cargo_lock_output_hashes",
