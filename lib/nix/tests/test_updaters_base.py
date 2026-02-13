@@ -120,7 +120,7 @@ class _FakeFlakeInputUpdater(FlakeInputHashUpdater):
         self.fetch_hashes_called = True
         return self._yield_fake_hash()
 
-    async def _yield_fake_hash(self) -> EventStream:  # type: ignore[override]
+    async def _yield_fake_hash(self) -> EventStream:
         yield UpdateEvent.value(
             self.name,
             "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",

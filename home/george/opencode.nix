@@ -1,4 +1,3 @@
-{ config, ... }:
 {
   programs.opencode = {
     enable = true;
@@ -30,24 +29,24 @@
         #   ];
         #   environment.AWS_PROFILE = "default";
         # };
-        chrome-devtools = {
-          type = "local";
-          command = [
-            "bunx"
-            "--bun"
-            "chrome-devtools-mcp@latest"
-            "--executablePath=${config.home.homeDirectory}/Applications/Home Manager Apps/Google Chrome.app/Contents/MacOS/Google Chrome"
-          ];
-        };
-        firefox-devtools = {
-          type = "local";
-          command = [
-            "bunx"
-            "--bun"
-            "@padenot/firefox-devtools-mcp@latest"
-            "--firefoxPath=/Applications/Twilight.app/Contents/MacOS/zen"
-          ];
-        };
+        # chrome-devtools = {
+        #   type = "local";
+        #   command = [
+        #     "bunx"
+        #     "--bun"
+        #     "chrome-devtools-mcp@latest"
+        #     "--executablePath=${config.home.homeDirectory}/Applications/Home Manager Apps/Google Chrome.app/Contents/MacOS/Google Chrome"
+        #   ];
+        # };
+        # firefox-devtools = {
+        #   type = "local";
+        #   command = [
+        #     "bunx"
+        #     "--bun"
+        #     "@padenot/firefox-devtools-mcp@latest"
+        #     "--firefoxPath=/Applications/Twilight.app/Contents/MacOS/zen"
+        #   ];
+        # };
         next-devtools = {
           type = "local";
           command = [
