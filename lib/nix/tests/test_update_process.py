@@ -59,7 +59,7 @@ def test_format_exception_includes_traceback_when_enabled() -> None:
     assert "ValueError" in formatted  # noqa: S101
 
 
-def testrun_queue_task_reports_known_runtime_errors_to_events() -> None:
+def test_run_queue_task_reports_known_runtime_errors_to_events() -> None:
     """Translate known task exceptions into update error events."""
 
     async def _task() -> None:
@@ -73,7 +73,7 @@ def testrun_queue_task_reports_known_runtime_errors_to_events() -> None:
     assert event.message == "boom"  # noqa: S101
 
 
-def testrun_queue_task_reports_cancelled_as_error_event() -> None:
+def test_run_queue_task_reports_cancelled_as_error_event() -> None:
     """Keep cancellation visible in the queue consumer."""
 
     async def _task() -> None:
@@ -86,7 +86,7 @@ def testrun_queue_task_reports_cancelled_as_error_event() -> None:
     assert event.message == "Operation cancelled"  # noqa: S101
 
 
-def testrun_queue_task_re_raises_unknown_exceptions() -> None:
+def test_run_queue_task_re_raises_unknown_exceptions() -> None:
     """Propagate unexpected exceptions so bug-level failures stay visible."""
 
     async def _task() -> None:

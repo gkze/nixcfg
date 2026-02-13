@@ -100,7 +100,8 @@ def _render_jd_diff(_old_path: Path, _new_path: Path) -> str:
         text=True,
         check=False,
     )
-    if result.returncode != 0 or not result.stdout:
+    # jd exits 0=identical, 1=different, 2+=error
+    if result.returncode > 1 or not result.stdout:
         return ""
     return result.stdout.strip()
 

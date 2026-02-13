@@ -69,7 +69,7 @@ def test_run_diff_uses_jd_command_output_on_auto_mode(
     def _fake_run(cmd: list[str], **_kw: object) -> SimpleNamespace:
         executed["cmd"] = list(cmd)
         return SimpleNamespace(
-            returncode=0,
+            returncode=1,
             stdout='@ ["version"]\n- "1.0.0"\n+ "1.1.0"',
             stderr="",
         )
