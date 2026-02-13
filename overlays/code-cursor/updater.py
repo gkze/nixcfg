@@ -36,8 +36,11 @@ class CodeCursorUpdater(PlatformAPIUpdater):
         return f"{self.API_BASE}?platform={_api_platform}&releaseTrack=stable"
 
     def _download_url(self, _api_platform: str, info: VersionInfo) -> str:
+        # platform_info is keyed by nix platform (aarch64-darwin, etc.);
+        # reverse-lookup the nix key for the given API platform name.
+        nix_plat = next(n for n, a in self.PLATFORMS.items() if a == _api_platform)
         platform_info = info.metadata["platform_info"]
-        return platform_info[_api_platform]["downloadUrl"]
+        return platform_info[nix_plat]["downloadUrl"]
 
     async def fetch_checksums(
         self,
