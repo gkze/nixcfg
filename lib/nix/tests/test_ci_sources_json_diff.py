@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
 
 from lib.update.ci.sources_json_diff import run_diff
@@ -51,6 +52,37 @@ def test_run_diff_prefers_jd_output_when_available(
 
     assert diff.startswith('@ ["version"]')  # noqa: S101
     assert '+ "1.1.0"' in diff  # noqa: S101
+
+
+def test_run_diff_uses_jd_command_output_on_auto_mode(
+    tmp_path: Path,
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Execute external ``jd`` output path when it returns diff data."""
+    old_file = tmp_path / "old.json"
+    new_file = tmp_path / "new.json"
+    _write_json(old_file, {"version": "1.0.0"})
+    _write_json(new_file, {"version": "1.1.0"})
+
+    executed: dict[str, list[str]] = {}
+
+    def _fake_run(cmd: list[str], **_kw: object) -> SimpleNamespace:
+        executed["cmd"] = list(cmd)
+        return SimpleNamespace(
+            returncode=0,
+            stdout='@ ["version"]\n- "1.0.0"\n+ "1.1.0"',
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        "lib.update.ci.sources_json_diff.shutil.which", lambda _: "/usr/bin/jd"
+    )
+    monkeypatch.setattr("lib.update.ci.sources_json_diff.subprocess.run", _fake_run)
+
+    diff = run_diff(old_file, new_file)
+
+    assert diff == '@ ["version"]\n- "1.0.0"\n+ "1.1.0"'  # noqa: S101
+    assert executed["cmd"] == ["/usr/bin/jd", str(old_file), str(new_file)]  # noqa: S101
 
 
 def test_run_diff_uses_structural_fallback_when_jd_not_available(

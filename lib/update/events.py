@@ -9,7 +9,8 @@ from typing import TypedDict, cast
 from lib.nix.models.sources import SourceEntry, SourceHashes
 
 
-def _is_nix_build_command(args: list[str] | None) -> bool:
+def is_nix_build_command(args: list[str] | None) -> bool:
+    """Return ``True`` if *args* looks like a ``nix build`` invocation."""
     return bool(args) and args[:2] == ["nix", "build"]
 
 
@@ -116,7 +117,8 @@ async def drain_value_events[T](
             yield event
 
 
-def _require_value[T](drain: ValueDrain[T], error: str) -> T:
+def require_value[T](drain: ValueDrain[T], error: str) -> T:
+    """Extract the captured value from *drain*, raising on ``None``."""
     if drain.value is None:
         raise RuntimeError(error)
     return drain.value
@@ -137,12 +139,12 @@ async def capture_stream_value[T](
     """Yield non-VALUE events, then emit one :class:`CapturedValue`.
 
     This wraps the common ``ValueDrain`` + ``drain_value_events`` +
-    ``_require_value`` sequence while preserving streaming behavior.
+    ``require_value`` sequence while preserving streaming behavior.
     """
     drain = ValueDrain[T]()
     async for event in drain_value_events(events, drain):
         yield event
-    yield CapturedValue(_require_value(drain, error))
+    yield CapturedValue(require_value(drain, error))
 
 
 @dataclass(frozen=True)

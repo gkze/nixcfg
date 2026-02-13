@@ -118,6 +118,13 @@ def update_cmd(  # noqa: PLR0913
     deno_platforms: Annotated[
         str | None, typer.Option(help="Comma-separated Deno platforms")
     ] = None,
+    pinned_versions: Annotated[
+        str | None,
+        typer.Option(
+            "--pinned-versions",
+            help="Path to pinned-versions.json (use pre-resolved versions, skip fetch_latest)",
+        ),
+    ] = None,
 ) -> None:
     """Update source versions/hashes and flake input refs."""
     from lib.update.cli import UpdateOptions, check_required_tools, run_updates
@@ -153,6 +160,7 @@ def update_cmd(  # noqa: PLR0913
         retry_backoff=retry_backoff,
         fake_hash=fake_hash,
         deno_platforms=deno_platforms,
+        pinned_versions=pinned_versions,
     )
 
     if not (opts.list_targets or opts.schema or opts.validate):

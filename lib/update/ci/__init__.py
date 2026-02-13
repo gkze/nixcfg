@@ -11,6 +11,7 @@ from lib.update.ci.build_shared_closure import main as build_shared_closure_main
 from lib.update.ci.dedup_cargo_lock import main as dedup_cargo_lock_main
 from lib.update.ci.flake_lock_diff import main as flake_lock_diff_main
 from lib.update.ci.merge_sources import main as merge_sources_main
+from lib.update.ci.resolve_versions import main as resolve_versions_main
 from lib.update.ci.sources_json_diff import main as sources_json_diff_main
 from lib.update.ci.workflow_steps import main as workflow_steps_main
 
@@ -47,6 +48,10 @@ CI_COMMANDS: dict[str, CICommand] = {
     "merge-sources": CICommand(
         merge_sources_main,
         "Merge per-package sources.json trees from multiple CI platform artifacts.",
+    ),
+    "resolve-versions": CICommand(
+        resolve_versions_main,
+        "Resolve upstream versions for all updaters (version-pinning phase).",
     ),
     "nix-flake-update": CICommand(
         partial(_workflow_step, "nix-flake-update"),

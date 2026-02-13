@@ -3,12 +3,13 @@
 import asyncio
 import contextlib
 import re
+import sys
 import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Literal, cast
+from typing import Any, ClassVar, Literal, cast
 
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
@@ -22,7 +23,7 @@ from lib.update.events import (
     CommandResult,
     UpdateEvent,
     UpdateEventKind,
-    _is_nix_build_command,
+    is_nix_build_command,
 )
 
 SummaryStatus = Literal["updated", "error", "no_change"]
@@ -51,7 +52,16 @@ class OperationKind(StrEnum):
 
 OperationStatus = Literal["pending", "running", "no_change", "success", "error"]
 type StatusMatcher = Callable[[str], object]
-type StatusRule = tuple[StatusMatcher, str, Callable[[Any], str] | None, bool]
+
+
+@dataclass(frozen=True)
+class StatusRule:
+    """Declarative matcher for a status transition."""
+
+    matcher: StatusMatcher
+    status: OperationStatus
+    formatter: Callable[[Any], str] | None = None
+    clear_message: bool = False
 
 
 _OPERATION_LABELS: dict[OperationKind, str] = {
@@ -150,90 +160,93 @@ def _msg_startswith(prefix: str) -> StatusMatcher:
     return lambda message: message.startswith(prefix)
 
 
-_CHECK_VERSION_STATUS_RULES: list[StatusRule] = [
-    (
+_CHECK_VERSION_STATUS_RULES: tuple[StatusRule, ...] = (
+    StatusRule(
         _STATUS_UPDATE_AVAILABLE.match,
         "success",
         lambda m: f"{m.group(1)} → {m.group(2)}",
-        False,
     ),
-    (
+    StatusRule(
         _STATUS_UP_TO_DATE_VERSION.match,
         "no_change",
         lambda m: f"{m.group(1)} (up to date)",
-        False,
     ),
-    (
+    StatusRule(
         _STATUS_UP_TO_DATE_REF.match,
         "no_change",
         lambda m: f"{m.group(1)} (up to date)",
-        False,
     ),
-    (
+    StatusRule(
         _STATUS_LATEST_VERSION.match,
         "running",
         lambda m: m.group(1),
-        False,
     ),
-    (
+    StatusRule(
         _STATUS_CHECKING.match,
         "running",
         lambda m: f"current {m.group(1)}",
-        False,
     ),
-]
+)
 
-_UPDATE_REF_STATUS_RULES: list[StatusRule] = [
-    (
+_UPDATE_REF_STATUS_RULES: tuple[StatusRule, ...] = (
+    StatusRule(
         _STATUS_UPDATE_REF.match,
         "running",
         lambda m: f"{m.group(1)} → {m.group(2)}",
-        False,
     ),
-]
+)
 
-_REFRESH_LOCK_STATUS_RULES: list[StatusRule] = [
-    (
+_REFRESH_LOCK_STATUS_RULES: tuple[StatusRule, ...] = (
+    StatusRule(
         _STATUS_UPDATE_INPUT.match,
         "running",
         lambda m: m.group(1),
-        False,
     ),
-]
+)
 
-_COMPUTE_HASH_STATUS_RULES: list[StatusRule] = [
-    (
-        _msg_equals("Up to date"),
-        "no_change",
-        None,
-        True,
-    ),
-    (
+_COMPUTE_HASH_STATUS_RULES: tuple[StatusRule, ...] = (
+    StatusRule(_msg_equals("Up to date"), "no_change", None, clear_message=True),
+    StatusRule(
         _msg_startswith("Fetching hashes"),
         "running",
         lambda _m: "all platforms",
-        False,
     ),
-    (
+    StatusRule(
         _STATUS_COMPUTING_HASH.match,
         "running",
         lambda m: m.group(1),
-        False,
     ),
-]
+)
 
-_STATUS_RULES_BY_OPERATION: dict[OperationKind, list[StatusRule]] = {
-    OperationKind.CHECK_VERSION: _CHECK_VERSION_STATUS_RULES,
-    OperationKind.UPDATE_REF: _UPDATE_REF_STATUS_RULES,
-    OperationKind.REFRESH_LOCK: _REFRESH_LOCK_STATUS_RULES,
-    OperationKind.COMPUTE_HASH: _COMPUTE_HASH_STATUS_RULES,
-}
 
-_STATUS_DEFAULTS: dict[OperationKind, tuple[OperationStatus, bool]] = {
-    OperationKind.CHECK_VERSION: ("running", False),
-    OperationKind.UPDATE_REF: ("running", False),
-    OperationKind.REFRESH_LOCK: ("running", False),
-    OperationKind.COMPUTE_HASH: ("running", True),
+@dataclass(frozen=True)
+class _StatusPolicy:
+    rules: tuple[StatusRule, ...]
+    default_status: OperationStatus
+    pass_message: bool
+
+
+_STATUS_POLICIES: dict[OperationKind, _StatusPolicy] = {
+    OperationKind.CHECK_VERSION: _StatusPolicy(
+        _CHECK_VERSION_STATUS_RULES,
+        default_status="running",
+        pass_message=False,
+    ),
+    OperationKind.UPDATE_REF: _StatusPolicy(
+        _UPDATE_REF_STATUS_RULES,
+        default_status="running",
+        pass_message=False,
+    ),
+    OperationKind.REFRESH_LOCK: _StatusPolicy(
+        _REFRESH_LOCK_STATUS_RULES,
+        default_status="running",
+        pass_message=False,
+    ),
+    OperationKind.COMPUTE_HASH: _StatusPolicy(
+        _COMPUTE_HASH_STATUS_RULES,
+        default_status="running",
+        pass_message=True,
+    ),
 }
 
 
@@ -306,20 +319,20 @@ def _set_operation_status(
 def _apply_status_rules(
     operation: OperationState,
     message: str,
-    rules: list[StatusRule],
+    rules: tuple[StatusRule, ...],
     *,
     default_status: OperationStatus = "running",
     default_message: str | None = None,
 ) -> None:
-    for matcher, status, formatter, clear_message in rules:
-        match = matcher(message)
+    for rule in rules:
+        match = rule.matcher(message)
         if match:
-            formatted = formatter(match) if formatter else None
+            formatted = rule.formatter(match) if rule.formatter else None
             _set_operation_status(
                 operation,
-                cast("OperationStatus", status),
+                rule.status,
                 message=formatted,
-                clear_message=clear_message,
+                clear_message=rule.clear_message,
             )
             return
     _set_operation_status(operation, default_status, message=default_message)
@@ -333,14 +346,14 @@ def _apply_status(item: ItemState, message: str) -> None:
     if operation is None:
         return
     item.last_operation = kind
-    rules = _STATUS_RULES_BY_OPERATION[kind]
-    default_status, pass_message = _STATUS_DEFAULTS[kind]
+    policy = _STATUS_POLICIES[kind]
+    rules = policy.rules
     _apply_status_rules(
         operation,
         message,
         rules,
-        default_status=default_status,
-        default_message=message if pass_message else None,
+        default_status=policy.default_status,
+        default_message=message if policy.pass_message else None,
     )
 
 
@@ -525,8 +538,6 @@ class Renderer:
     def log_line(self, source: str, message: str) -> None:
         """Print a build log line in verbose non-TTY mode."""
         if not self.is_tty and self.verbose and not self.quiet:
-            import sys
-
             sys.stdout.write(f"[{source}] {message}\n")
 
     def _append_detail_line(self, source: str, message: str) -> bool:
@@ -544,8 +555,6 @@ class Renderer:
         if self.is_tty:
             self._append_detail_line(source, message)
         elif not self.quiet:
-            import sys
-
             sys.stdout.write(f"[{source}] {message}\n")
 
     def log_error(self, source: str, message: str) -> None:
@@ -553,8 +562,6 @@ class Renderer:
         if self.is_tty:
             self._append_detail_line(source, message)
         elif not self.quiet:
-            import sys
-
             sys.stderr.write(f"[{source}] ERROR: {message}\n")
 
     def request_render(self) -> None:
@@ -581,8 +588,6 @@ class Renderer:
 
     def _print_final_status(self) -> None:
         """Render the final full output snapshot to stdout."""
-        import sys
-
         _no_color = not sys.stdout.isatty()
         console = Console(no_color=_no_color, highlight=not _no_color)
         console.print(self._build_display(full_output=True))
@@ -594,7 +599,328 @@ class Renderer:
         self._live.update(self._build_display(), refresh=True)
 
 
-async def consume_events(  # noqa: C901, PLR0912, PLR0913, PLR0915
+class EventConsumer:
+    """Processes queued update events, driving the renderer and collecting results."""
+
+    _DETAIL_PRIORITY: ClassVar[dict[SummaryStatus, int]] = {
+        "no_change": 0,
+        "updated": 1,
+        "error": 2,
+    }
+
+    def __init__(  # noqa: PLR0913
+        self,
+        queue: asyncio.Queue[UpdateEvent | None],
+        order: list[str],
+        sources: SourcesFile,
+        *,
+        item_meta: dict[str, ItemMeta],
+        max_lines: int,
+        is_tty: bool,
+        full_output: bool,
+        verbose: bool = False,
+        render_interval: float,
+        build_failure_tail_lines: int,
+        quiet: bool = False,
+    ) -> None:
+        """Initialize consumer state, item map, and renderer."""
+        self._queue = queue
+        self._order = order
+        self._sources = sources
+        self._is_tty = is_tty
+        self._render_interval = render_interval
+        self.build_failure_tail_lines = build_failure_tail_lines
+
+        self.items: dict[str, ItemState] = {
+            name: ItemState.from_meta(item_meta[name], max_lines=max_lines)
+            for name in order
+            if name in item_meta
+        }
+        self.updated = False
+        self.errors = 0
+        self.update_details: dict[str, SummaryStatus] = {}
+        self.source_updates: dict[str, SourceEntry] = {}
+
+        self.renderer = Renderer(
+            self.items,
+            order,
+            is_tty=is_tty,
+            full_output=full_output,
+            verbose=verbose,
+            render_interval=render_interval,
+            quiet=quiet,
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _set_detail(self, name: str, status: SummaryStatus) -> None:
+        current = self.update_details.get(name)
+        if (
+            current is None
+            or self._DETAIL_PRIORITY[status] > self._DETAIL_PRIORITY[current]
+        ):
+            self.update_details[name] = status
+        if status == "updated":
+            self.updated = True
+
+    @property
+    def result(
+        self,
+    ) -> tuple[bool, int, dict[str, SummaryStatus], dict[str, SourceEntry]]:
+        """Return the aggregate ``(updated, errors, update_details, source_updates)`` tuple."""
+        return self.updated, self.errors, self.update_details, self.source_updates
+
+    # ------------------------------------------------------------------
+    # Per-event-kind handlers
+    # ------------------------------------------------------------------
+
+    def _handle_status(self, event: UpdateEvent, item: ItemState) -> None:
+        if event.message:
+            _apply_status(item, event.message)
+            if _is_terminal_status(event.message):
+                self.renderer.log(event.source, event.message)
+            elif self.renderer.verbose:
+                self.renderer.log_line(event.source, event.message)
+
+    def _handle_command_start(self, event: UpdateEvent, item: ItemState) -> None:
+        args = _command_args_from_payload(event.payload)
+        op_kind = _operation_for_command(args)
+        operation = item.operations.get(op_kind)
+        if operation:
+            item.last_operation = op_kind
+            item.active_command_op = op_kind
+            operation.status = "running"
+            operation.active_commands += 1
+            if operation.active_commands == 1:
+                operation.tail.clear()
+                operation.detail_lines.clear()
+        if event.message and self.renderer.verbose:
+            self.renderer.log_line(event.source, f"$ {event.message}")
+
+    def _handle_line(self, event: UpdateEvent, item: ItemState) -> None:
+        label = event.stream or "stdout"
+        message = event.message or ""
+        line_text = f"[{label}] {message}" if label else message
+        op_kind = item.active_command_op or item.last_operation
+        if op_kind is None:
+            op_kind = OperationKind.COMPUTE_HASH
+        operation = item.operations.get(op_kind)
+        if (
+            operation
+            and operation.active_commands > 0
+            and (not operation.tail or operation.tail[-1] != line_text)
+        ):
+            operation.tail.append(line_text)
+        self.renderer.log_line(event.source, message)
+
+    def _handle_command_end(self, event: UpdateEvent, item: ItemState) -> None:
+        result = event.payload
+        if not isinstance(result, CommandResult):
+            return
+        op_kind = _operation_for_command(result.args)
+        operation = item.operations.get(op_kind)
+        if not operation:
+            return
+        operation.active_commands = max(0, operation.active_commands - 1)
+        if operation.active_commands == 0:
+            operation.tail.clear()
+            if item.active_command_op == op_kind:
+                item.active_command_op = None
+        if result.returncode != 0 and not result.allow_failure:
+            operation.status = "error"
+            if is_nix_build_command(result.args) and result.tail_lines:
+                operation.detail_lines = [
+                    f"Output tail (last {self.build_failure_tail_lines} lines):",
+                    *result.tail_lines,
+                ]
+        elif (
+            op_kind in (OperationKind.UPDATE_REF, OperationKind.REFRESH_LOCK)
+            and operation.status != "error"
+        ):
+            operation.status = "success"
+
+    def _handle_result(self, event: UpdateEvent, item: ItemState) -> bool:
+        """Handle a RESULT event.  Returns True when the loop should ``continue``."""
+        result = event.payload
+        if result is not None:
+            if isinstance(result, dict):
+                return self._handle_ref_result(
+                    event, item, cast("dict[str, object]", result)
+                )
+            if isinstance(result, SourceEntry):
+                self._handle_source_result(event, item, result)
+            else:
+                self._set_detail(event.source, "updated")
+        else:
+            self._set_detail(event.source, "no_change")
+            check_op = item.operations.get(OperationKind.CHECK_VERSION)
+            if check_op and check_op.status == "pending":
+                check_op.status = "no_change"
+        return False
+
+    def _handle_ref_result(
+        self,
+        event: UpdateEvent,
+        item: ItemState,
+        result_map: dict[str, object],
+    ) -> bool:
+        """Handle a RESULT whose payload is a ref-update dict.
+
+        Returns True when the main loop should ``continue`` (skip remaining
+        processing for this event).
+        """
+        current_payload = result_map.get("current")
+        latest_payload = result_map.get("latest")
+        if not isinstance(current_payload, str) or not isinstance(latest_payload, str):
+            return True
+        self._set_detail(event.source, "updated")
+        current_ref = current_payload
+        latest_ref = latest_payload
+        check_op = item.operations.get(OperationKind.CHECK_VERSION)
+        if check_op:
+            check_op.status = "success"
+            check_op.message = f"{current_ref} → {latest_ref}"
+            item.last_operation = OperationKind.CHECK_VERSION
+        for op_kind in (OperationKind.UPDATE_REF, OperationKind.REFRESH_LOCK):
+            op = item.operations.get(op_kind)
+            if op and op.status == "running":
+                op.status = "success"
+        self.renderer.log(event.source, f"Updated: {current_ref} -> {latest_ref}")
+        return False
+
+    def _handle_source_result(
+        self,
+        event: UpdateEvent,
+        item: ItemState,
+        result: SourceEntry,
+    ) -> None:
+        old_entry = self._sources.entries.get(event.source)
+        old_version = old_entry.version if old_entry else None
+        new_version = result.version
+        self.source_updates[event.source] = result
+        self._set_detail(event.source, "updated")
+
+        check_op = item.operations.get(OperationKind.CHECK_VERSION)
+        if check_op:
+            if old_version and new_version and old_version != new_version:
+                check_op.status = "success"
+                check_op.message = f"{old_version} → {new_version}"
+            elif new_version:
+                check_op.status = "success"
+                if check_op.message is None:
+                    check_op.message = new_version
+
+        hash_op = item.operations.get(OperationKind.COMPUTE_HASH)
+        if hash_op:
+            hash_op.status = "success"
+            hash_op.detail_lines = _hash_diff_lines(old_entry, result)
+            hash_op.message = None
+
+        if old_version and new_version and old_version != new_version:
+            self.renderer.log(
+                event.source,
+                f"Updated: {old_version} -> {new_version}",
+            )
+        else:
+            old_hash = old_entry.hashes.primary_hash() if old_entry else None
+            new_hash = result.hashes.primary_hash()
+            if old_hash and new_hash and old_hash != new_hash:
+                self.renderer.log(
+                    event.source,
+                    f"Updated: hash {old_hash} -> {new_hash}",
+                )
+            else:
+                self.renderer.log(event.source, "Updated")
+
+    def _handle_error(self, event: UpdateEvent, item: ItemState) -> None:
+        self.errors += 1
+        self._set_detail(event.source, "error")
+        message = event.message or "Unknown error"
+        message_lines = message.splitlines()
+        if message_lines:
+            message = message_lines[0]
+        error_op: OperationState | None = None
+        if item.active_command_op:
+            error_op = item.operations.get(item.active_command_op)
+        if error_op is None and item.last_operation:
+            error_op = item.operations.get(item.last_operation)
+        if error_op:
+            error_op.status = "error"
+            error_op.message = message
+            error_op.active_commands = 0
+            error_op.tail.clear()
+            if len(message_lines) > 1:
+                error_op.detail_lines.extend(message_lines[1:])
+        if not error_op or not self.renderer.is_tty:
+            self.renderer.log_error(event.source, message)
+
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
+
+    def _dispatch(self, event: UpdateEvent, item: ItemState) -> bool:
+        """Dispatch *event* to the appropriate handler.
+
+        Returns ``True`` when the caller should skip post-event rendering
+        (mirrors the ``continue`` that the RESULT handler may trigger).
+        """
+        kind = event.kind
+        if kind is UpdateEventKind.STATUS:
+            self._handle_status(event, item)
+        elif kind is UpdateEventKind.COMMAND_START:
+            self._handle_command_start(event, item)
+        elif kind is UpdateEventKind.LINE:
+            self._handle_line(event, item)
+        elif kind is UpdateEventKind.COMMAND_END:
+            self._handle_command_end(event, item)
+        elif kind is UpdateEventKind.RESULT:
+            if self._handle_result(event, item):
+                return True
+        elif kind is UpdateEventKind.ERROR:
+            self._handle_error(event, item)
+        return False
+
+    async def run(
+        self,
+    ) -> tuple[bool, int, dict[str, SummaryStatus], dict[str, SourceEntry]]:
+        """Consume events until a ``None`` sentinel, then return results."""
+        render_interval = self._render_interval
+        renderer = self.renderer
+
+        async def _render_ticker() -> None:
+            while True:
+                await asyncio.sleep(render_interval)
+                renderer.request_render()
+                renderer.render_if_due(time.monotonic())
+
+        ticker = asyncio.create_task(_render_ticker()) if self._is_tty else None
+        try:
+            while True:
+                event = await self._queue.get()
+                if event is None:
+                    break
+                item = self.items.get(event.source)
+                if item is None:
+                    continue
+
+                if self._dispatch(event, item):
+                    continue
+
+                renderer.request_render()
+                renderer.render_if_due(time.monotonic())
+        finally:
+            if ticker is not None:
+                ticker.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await ticker
+            renderer.finalize()
+
+        return self.result
+
+
+async def consume_events(  # noqa: PLR0913
     queue: asyncio.Queue[UpdateEvent | None],
     order: list[str],
     sources: SourcesFile,
@@ -609,250 +935,17 @@ async def consume_events(  # noqa: C901, PLR0912, PLR0913, PLR0915
     quiet: bool = False,
 ) -> tuple[bool, int, dict[str, SummaryStatus], dict[str, SourceEntry]]:
     """Consume queued update events and return aggregate UI/update state."""
-    items = {
-        name: ItemState.from_meta(item_meta[name], max_lines=max_lines)
-        for name in order
-        if name in item_meta
-    }
-    updated = False
-    errors = 0
-    update_details: dict[str, SummaryStatus] = {}
-    source_updates: dict[str, SourceEntry] = {}
-    detail_priority: dict[SummaryStatus, int] = {
-        "no_change": 0,
-        "updated": 1,
-        "error": 2,
-    }
-
-    def set_detail(name: str, status: SummaryStatus) -> None:
-        nonlocal updated
-        current = update_details.get(name)
-        if current is None or detail_priority[status] > detail_priority[current]:
-            update_details[name] = status
-        if status == "updated":
-            updated = True
-
-    renderer = Renderer(
-        items,
+    consumer = EventConsumer(
+        queue,
         order,
+        sources,
+        item_meta=item_meta,
+        max_lines=max_lines,
         is_tty=is_tty,
         full_output=full_output,
         verbose=verbose,
         render_interval=render_interval,
+        build_failure_tail_lines=build_failure_tail_lines,
         quiet=quiet,
     )
-
-    async def _render_ticker() -> None:
-        """Periodically refresh the display so spinners stay animated."""
-        while True:
-            await asyncio.sleep(render_interval)
-            renderer.request_render()
-            renderer.render_if_due(time.monotonic())
-
-    ticker = asyncio.create_task(_render_ticker()) if is_tty else None
-    try:
-        while True:
-            event = await queue.get()
-            if event is None:
-                break
-            item = items.get(event.source)
-            if item is None:
-                continue
-
-            match event.kind:
-                case UpdateEventKind.STATUS:
-                    if event.message:
-                        _apply_status(item, event.message)
-                        if _is_terminal_status(event.message):
-                            renderer.log(event.source, event.message)
-                        elif renderer.verbose:
-                            renderer.log_line(event.source, event.message)
-
-                case UpdateEventKind.COMMAND_START:
-                    args = _command_args_from_payload(event.payload)
-                    op_kind = _operation_for_command(args)
-                    operation = item.operations.get(op_kind)
-                    if operation:
-                        item.last_operation = op_kind
-                        item.active_command_op = op_kind
-                        operation.status = "running"
-                        operation.active_commands += 1
-                        if operation.active_commands == 1:
-                            operation.tail.clear()
-                            operation.detail_lines.clear()
-                    if event.message and renderer.verbose:
-                        renderer.log_line(event.source, f"$ {event.message}")
-
-                case UpdateEventKind.LINE:
-                    label = event.stream or "stdout"
-                    message = event.message or ""
-                    line_text = f"[{label}] {message}" if label else message
-                    op_kind = item.active_command_op or item.last_operation
-                    if op_kind is None:
-                        op_kind = OperationKind.COMPUTE_HASH
-                    operation = item.operations.get(op_kind)
-                    if (
-                        operation
-                        and operation.active_commands > 0
-                        and (not operation.tail or operation.tail[-1] != line_text)
-                    ):
-                        operation.tail.append(line_text)
-                    renderer.log_line(event.source, message)
-
-                case UpdateEventKind.COMMAND_END:
-                    result = event.payload
-                    if isinstance(result, CommandResult):
-                        op_kind = _operation_for_command(result.args)
-                        operation = item.operations.get(op_kind)
-                        if operation:
-                            operation.active_commands = max(
-                                0,
-                                operation.active_commands - 1,
-                            )
-                            if operation.active_commands == 0:
-                                operation.tail.clear()
-                                if item.active_command_op == op_kind:
-                                    item.active_command_op = None
-                            if result.returncode != 0 and not result.allow_failure:
-                                operation.status = "error"
-                                if (
-                                    _is_nix_build_command(result.args)
-                                    and result.tail_lines
-                                ):
-                                    operation.detail_lines = [
-                                        f"Output tail (last {build_failure_tail_lines} lines):",
-                                        *result.tail_lines,
-                                    ]
-                            elif (
-                                op_kind
-                                in (
-                                    OperationKind.UPDATE_REF,
-                                    OperationKind.REFRESH_LOCK,
-                                )
-                                and operation.status != "error"
-                            ):
-                                operation.status = "success"
-
-                case UpdateEventKind.RESULT:
-                    result = event.payload
-                    if result is not None:
-                        if isinstance(result, dict):
-                            result_map = cast("dict[str, object]", result)
-                            current_payload = result_map.get("current")
-                            latest_payload = result_map.get("latest")
-                            if not isinstance(current_payload, str) or not isinstance(
-                                latest_payload,
-                                str,
-                            ):
-                                continue
-                            set_detail(event.source, "updated")
-                            current_ref = current_payload
-                            latest_ref = latest_payload
-                            check_op = item.operations.get(OperationKind.CHECK_VERSION)
-                            if check_op:
-                                check_op.status = "success"
-                                check_op.message = f"{current_ref} → {latest_ref}"
-                                item.last_operation = OperationKind.CHECK_VERSION
-                            for op_kind in (
-                                OperationKind.UPDATE_REF,
-                                OperationKind.REFRESH_LOCK,
-                            ):
-                                op = item.operations.get(op_kind)
-                                if op and op.status == "running":
-                                    op.status = "success"
-                            renderer.log(
-                                event.source,
-                                f"Updated: {current_ref} -> {latest_ref}",
-                            )
-                        elif isinstance(result, SourceEntry):
-                            old_entry = sources.entries.get(event.source)
-                            old_version = old_entry.version if old_entry else None
-                            new_version = result.version
-                            source_updates[event.source] = result
-                            set_detail(event.source, "updated")
-
-                            check_op = item.operations.get(OperationKind.CHECK_VERSION)
-                            if check_op:
-                                if (
-                                    old_version
-                                    and new_version
-                                    and old_version != new_version
-                                ):
-                                    check_op.status = "success"
-                                    check_op.message = f"{old_version} → {new_version}"
-                                elif new_version:
-                                    check_op.status = "success"
-                                    if check_op.message is None:
-                                        check_op.message = new_version
-
-                            hash_op = item.operations.get(OperationKind.COMPUTE_HASH)
-                            if hash_op:
-                                hash_op.status = "success"
-                                hash_op.detail_lines = _hash_diff_lines(
-                                    old_entry,
-                                    result,
-                                )
-                                hash_op.message = None
-                            if (
-                                old_version
-                                and new_version
-                                and old_version != new_version
-                            ):
-                                renderer.log(
-                                    event.source,
-                                    f"Updated: {old_version} -> {new_version}",
-                                )
-                            else:
-                                old_hash = (
-                                    old_entry.hashes.primary_hash()
-                                    if old_entry
-                                    else None
-                                )
-                                new_hash = result.hashes.primary_hash()
-                                if old_hash and new_hash and old_hash != new_hash:
-                                    renderer.log(
-                                        event.source,
-                                        f"Updated: hash {old_hash} -> {new_hash}",
-                                    )
-                                else:
-                                    renderer.log(event.source, "Updated")
-                        else:
-                            set_detail(event.source, "updated")
-                    else:
-                        set_detail(event.source, "no_change")
-                        check_op = item.operations.get(OperationKind.CHECK_VERSION)
-                        if check_op and check_op.status == "pending":
-                            check_op.status = "no_change"
-
-                case UpdateEventKind.ERROR:
-                    errors += 1
-                    set_detail(event.source, "error")
-                    message = event.message or "Unknown error"
-                    message_lines = message.splitlines()
-                    if message_lines:
-                        message = message_lines[0]
-                    error_op: OperationState | None = None
-                    if item.active_command_op:
-                        error_op = item.operations.get(item.active_command_op)
-                    if error_op is None and item.last_operation:
-                        error_op = item.operations.get(item.last_operation)
-                    if error_op:
-                        error_op.status = "error"
-                        error_op.message = message
-                        error_op.active_commands = 0
-                        error_op.tail.clear()
-                        if len(message_lines) > 1:
-                            error_op.detail_lines.extend(message_lines[1:])
-                    if not error_op or not renderer.is_tty:
-                        renderer.log_error(event.source, message)
-
-            renderer.request_render()
-            renderer.render_if_due(time.monotonic())
-    finally:
-        if ticker is not None:
-            ticker.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await ticker
-        renderer.finalize()
-
-    return updated, errors, update_details, source_updates
+    return await consumer.run()

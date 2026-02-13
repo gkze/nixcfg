@@ -55,7 +55,7 @@ class CodeCursorUpdater(PlatformAPIUpdater):
         _ = session
         from lib.update.events import ValueDrain, drain_value_events
         from lib.update.process import compute_url_hashes
-        from lib.update.updaters.base import HashMapping, _require_value
+        from lib.update.updaters.base import HashMapping, require_value
 
         urls = {
             nix_plat: self._download_url(api_plat, info)
@@ -67,5 +67,5 @@ class CodeCursorUpdater(PlatformAPIUpdater):
             hashes_drain,
         ):
             pass
-        hashes_by_url = _require_value(hashes_drain, "Missing hash output")
+        hashes_by_url = require_value(hashes_drain, "Missing hash output")
         return {plat: hashes_by_url[url] for plat, url in urls.items()}

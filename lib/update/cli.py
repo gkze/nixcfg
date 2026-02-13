@@ -24,8 +24,8 @@ from lib.update.config import (
 from lib.update.constants import ALL_TOOLS, NIX_BUILD_FAILURE_TAIL_LINES, REQUIRED_TOOLS
 from lib.update.events import UpdateEvent
 from lib.update.flake import update_flake_input
-from lib.update.process import _run_queue_task
-from lib.update.refs import FlakeInputRef, _update_refs_task, get_flake_inputs_with_refs
+from lib.update.process import run_queue_task
+from lib.update.refs import FlakeInputRef, get_flake_inputs_with_refs, update_refs_task
 from lib.update.sources import (
     load_all_sources,
     save_sources,
@@ -33,7 +33,7 @@ from lib.update.sources import (
 )
 from lib.update.ui import ItemMeta, OperationKind, SummaryStatus, consume_events
 from lib.update.updaters import UPDATERS
-from lib.update.updaters.base import DenoDepsHashUpdater
+from lib.update.updaters.base import DenoDepsHashUpdater, VersionInfo
 
 
 @dataclass(frozen=True)
@@ -65,6 +65,7 @@ class UpdateOptions:
     retry_backoff: float | None = None
     fake_hash: str | None = None
     deno_platforms: str | None = None
+    pinned_versions: str | None = None
 
 
 def check_required_tools(
@@ -399,6 +400,7 @@ async def _update_source_task(  # noqa: PLR0913
     update_input_lock: asyncio.Lock,
     queue: asyncio.Queue[UpdateEvent | None],
     config: UpdateConfig | None = None,
+    pinned_version: VersionInfo | None = None,
 ) -> None:
     async def _run() -> None:
         resolved_config = resolve_active_config(config)
@@ -418,10 +420,12 @@ async def _update_source_task(  # noqa: PLR0913
                 async for event in update_flake_input(input_name, source=name):
                     await put(event)
 
-        async for event in updater.update_stream(current, session):
+        async for event in updater.update_stream(
+            current, session, pinned_version=pinned_version
+        ):
             await put(event)
 
-    await _run_queue_task(source=name, queue=queue, task=_run)
+    await run_queue_task(source=name, queue=queue, task=_run)
 
 
 async def run_updates(opts: UpdateOptions) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915
@@ -577,7 +581,7 @@ async def run_updates(opts: UpdateOptions) -> int:  # noqa: C901, PLR0911, PLR09
             flake_edit_lock = asyncio.Lock()
             tasks = [
                 asyncio.create_task(
-                    _update_refs_task(
+                    update_refs_task(
                         inp,
                         session,
                         queue,
@@ -593,6 +597,19 @@ async def run_updates(opts: UpdateOptions) -> int:  # noqa: C901, PLR0911, PLR09
     if resolved.do_sources and resolved.source_names:
         if show_phase_headers:
             out.print("\nPhase 2: sources.json updates", style="dim")
+
+        pinned: dict[str, VersionInfo] = {}
+        if opts.pinned_versions:
+            from pathlib import Path
+
+            from lib.update.ci.resolve_versions import load_pinned_versions
+
+            pinned = load_pinned_versions(Path(opts.pinned_versions))
+            out.print(
+                f"Loaded {len(pinned)} pinned versions from {opts.pinned_versions}",
+                style="dim",
+            )
+
         async with aiohttp.ClientSession() as session:
             update_input_lock = asyncio.Lock()
             tasks = [
@@ -606,6 +623,7 @@ async def run_updates(opts: UpdateOptions) -> int:  # noqa: C901, PLR0911, PLR09
                         update_input_lock=update_input_lock,
                         queue=queue,
                         config=config,
+                        pinned_version=pinned.get(name),
                     ),
                 )
                 for name in resolved.source_names

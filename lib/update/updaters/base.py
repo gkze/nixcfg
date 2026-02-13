@@ -26,21 +26,21 @@ from lib.update.events import (
     GatheredValues,
     UpdateEvent,
     ValueDrain,
-    _require_value,
     drain_value_events,
     gather_event_streams,
+    require_value,
 )
 from lib.update.flake import get_flake_input_node, get_flake_input_version
 from lib.update.net import fetch_url
 from lib.update.nix import (
     compute_bun_node_modules_hash,
     compute_cargo_vendor_hash,
-    compute_deno_deps_hash,
     compute_drv_fingerprint,
     compute_go_vendor_hash,
     compute_npm_deps_hash,
     get_current_nix_platform,
 )
+from lib.update.nix_deno import compute_deno_deps_hash
 from lib.update.process import compute_url_hashes, convert_nix_hash_to_sri
 
 
@@ -150,10 +150,21 @@ class Updater(ABC):
         self,
         current: SourceEntry | None,
         session: aiohttp.ClientSession,
+        *,
+        pinned_version: VersionInfo | None = None,
     ) -> EventStream:
         """Run fetch/check/hash/update flow and emit update events."""
-        yield UpdateEvent.status(self.name, f"Fetching latest {self.name} version...")
-        info = await self.fetch_latest(session)
+        if pinned_version is not None:
+            yield UpdateEvent.status(
+                self.name,
+                f"Using pinned version: {pinned_version.version}",
+            )
+            info = pinned_version
+        else:
+            yield UpdateEvent.status(
+                self.name, f"Fetching latest {self.name} version..."
+            )
+            info = await self.fetch_latest(session)
 
         yield UpdateEvent.status(self.name, f"Latest version: {info.version}")
         if await self._is_latest(current, info):
@@ -168,7 +179,7 @@ class Updater(ABC):
             hashes_drain,
         ):
             yield event
-        hashes = _require_value(hashes_drain, "Missing hash output")
+        hashes = require_value(hashes_drain, "Missing hash output")
         result = self.build_result(info, hashes)
 
         result_drain = ValueDrain[SourceEntry]()
@@ -177,7 +188,7 @@ class Updater(ABC):
             result_drain,
         ):
             yield event
-        result = _require_value(result_drain, "Missing finalized result")
+        result = require_value(result_drain, "Missing finalized result")
 
         if current is not None and result == current:
             yield UpdateEvent.status(self.name, "Up to date")
@@ -288,7 +299,7 @@ class DownloadHashUpdater(Updater):
             hashes_drain,
         ):
             yield event
-        hashes_by_url = _require_value(hashes_drain, "Missing hash output")
+        hashes_by_url = require_value(hashes_drain, "Missing hash output")
 
         hashes: dict[str, str] = {
             platform: hashes_by_url[platform_urls[platform]]
@@ -321,7 +332,7 @@ class HashEntryUpdater(Updater):
         hash_drain = ValueDrain[str]()
         async for event in drain_value_events(events, hash_drain):
             yield event
-        hash_value = _require_value(hash_drain, error)
+        hash_value = require_value(hash_drain, error)
         yield UpdateEvent.value(self.name, [HashEntry.create(hash_type, hash_value)])
 
 
@@ -461,7 +472,7 @@ class BunNodeModulesHashUpdater(FlakeInputHashUpdater):
         hash_drain = ValueDrain[str]()
         async for event in drain_value_events(self._compute_hash(info), hash_drain):
             yield event
-        hash_value = _require_value(hash_drain, error)
+        hash_value = require_value(hash_drain, error)
         platform = get_current_nix_platform()
         entries = [HashEntry.create(self.hash_type, hash_value, platform=platform)]
         yield UpdateEvent.value(self.name, entries)
@@ -495,7 +506,7 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
             hash_drain,
         ):
             yield event
-        platform_hashes = _require_value(hash_drain, error)
+        platform_hashes = require_value(hash_drain, error)
         if not isinstance(platform_hashes, dict):
             msg = f"Expected dict of platform hashes, got {type(platform_hashes)}"
             raise TypeError(msg)

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from filelock import FileLock
 from nix_manipulator.expressions.binding import Binding
@@ -16,6 +17,7 @@ from nix_manipulator.expressions.let import LetExpression
 from nix_manipulator.parser import parse
 
 from lib.nix.models.sources import SourceEntry, SourcesFile
+from lib.update.io import atomic_write_text
 from lib.update.paths import REPO_ROOT, package_dir_for, package_file_map
 
 
@@ -110,28 +112,8 @@ def validate_source_discovery_consistency() -> None:
 
 
 def _atomic_write_json(path: Path, payload: object) -> None:
-    mode = path.stat().st_mode & 0o777 if path.exists() else None
-    tmp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as tmp_file:
-            json.dump(payload, tmp_file, indent=2, sort_keys=True)
-            tmp_file.write("\n")
-            tmp_file.flush()
-            os.fsync(tmp_file.fileno())
-            tmp_path = Path(tmp_file.name)
-            if mode is not None:
-                os.fchmod(tmp_file.fileno(), mode)
-        tmp_path.replace(path)
-    finally:
-        if tmp_path is not None and tmp_path.exists():
-            tmp_path.unlink()
+    content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    atomic_write_text(path, content)
 
 
 def save_sources(sources: SourcesFile) -> None:
