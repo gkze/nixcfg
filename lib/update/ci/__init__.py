@@ -13,6 +13,7 @@ from lib.update.ci.flake_lock_diff import main as flake_lock_diff_main
 from lib.update.ci.merge_sources import main as merge_sources_main
 from lib.update.ci.resolve_versions import main as resolve_versions_main
 from lib.update.ci.sources_json_diff import main as sources_json_diff_main
+from lib.update.ci.test_pipeline import main as test_pipeline_main
 from lib.update.ci.workflow_steps import main as workflow_steps_main
 
 if TYPE_CHECKING:
@@ -92,6 +93,10 @@ CI_COMMANDS: dict[str, CICommand] = {
     "sources-json-diff": CICommand(
         sources_json_diff_main,
         "Generate a diff for source entry JSON changes (alias).",
+    ),
+    "test-pipeline": CICommand(
+        test_pipeline_main,
+        "Simulate the CI update pipeline locally (resolve, compute, merge, validate).",
     ),
 }
 
