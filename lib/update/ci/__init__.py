@@ -14,6 +14,7 @@ from lib.update.ci.merge_sources import main as merge_sources_main
 from lib.update.ci.resolve_versions import main as resolve_versions_main
 from lib.update.ci.sources_json_diff import main as sources_json_diff_main
 from lib.update.ci.test_pipeline import main as test_pipeline_main
+from lib.update.ci.warm_fod_cache import main as warm_fod_cache_main
 from lib.update.ci.workflow_steps import main as workflow_steps_main
 
 if TYPE_CHECKING:
@@ -97,6 +98,10 @@ CI_COMMANDS: dict[str, CICommand] = {
     "test-pipeline": CICommand(
         test_pipeline_main,
         "Simulate the CI update pipeline locally (resolve, compute, merge, validate).",
+    ),
+    "warm-fod-cache": CICommand(
+        warm_fod_cache_main,
+        "Build packages with platform-specific FOD hashes to populate the cache.",
     ),
 }
 
