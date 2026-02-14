@@ -72,6 +72,7 @@ stdenvNoCC.mkDerivation {
       --fish <($out/bin/linear completions fish) \
       --zsh <($out/bin/linear completions zsh)
   '';
+  passthru = { inherit denoDeps; };
   meta = with lib; {
     description = "Linear issue tracker CLI";
     homepage = "https://github.com/schpet/linear-cli";

@@ -1,12 +1,16 @@
-"""Build packages with platform-specific FOD hashes to populate the Nix cache.
+"""Build platform-specific FOD sub-derivations to populate the Nix cache.
 
 After ``compute-hashes`` discovers correct hashes and writes them to
-``sources.json``, this step builds each package that contains a
-platform-specific fixed-output derivation (FOD) on the *same* runner.
-The Cachix daemon automatically pushes the result, so downstream jobs
-(e.g. ``darwin-shared``) get a cache hit instead of rebuilding the FOD
-— which would produce a different hash due to non-determinism (e.g.
-Deno's SQLite cache, HTTP metadata, timestamps).
+``sources.json``, this step builds each **FOD sub-derivation** (not the
+full package) on the *same* runner.  The Cachix daemon automatically
+pushes the result, so downstream jobs (e.g. ``darwin-shared``) get a
+cache hit instead of rebuilding the FOD — which would produce a
+different hash due to non-determinism (e.g. Deno's SQLite cache, HTTP
+metadata, timestamps).
+
+Only the FOD is built because the full package may need resources not
+available inside the Nix sandbox (e.g. ``deno compile`` downloads a
+runtime binary).
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import asyncio
 import logging
 import platform as platform_mod
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from lib.nix.commands.base import NixCommandError
@@ -26,7 +31,7 @@ from lib.update.paths import package_file_map
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from lib.nix.models.sources import SourceEntry
+    from lib.nix.models.sources import HashEntry, SourceEntry
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +40,23 @@ BUILD_TIMEOUT = 3600.0
 
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_HOUR = 3600
+
+# Map from hash type to the Nix attribute suffix that evaluates to the
+# FOD sub-derivation.  Each entry uses dot-separated path components
+# appended to the package expression (e.g. ``applied."linear-cli".passthru.denoDeps``).
+_HASH_TYPE_TO_FOD_ATTR: dict[str, str] = {
+    "denoDepsHash": ".passthru.denoDeps",
+    "nodeModulesHash": ".node_modules",
+}
+
+
+@dataclass(frozen=True)
+class FodTarget:
+    """A single FOD sub-derivation to build."""
+
+    package: str
+    hash_type: str
+    fod_attr: str
 
 
 def _format_duration(seconds: float) -> str:
@@ -54,7 +76,6 @@ def _format_duration(seconds: float) -> str:
 def _detect_system() -> str:
     """Return the current Nix system identifier (e.g. ``aarch64-darwin``)."""
     machine = platform_mod.machine()
-    # Normalize x86_64 / arm64 to Nix conventions.
     arch_map = {"x86_64": "x86_64", "arm64": "aarch64", "aarch64": "aarch64"}
     arch = arch_map.get(machine, machine)
 
@@ -65,35 +86,57 @@ def _detect_system() -> str:
     return f"{arch}-{nix_os}"
 
 
-def _has_platform_fod(entry: SourceEntry, system: str) -> bool:
-    """Return ``True`` if *entry* contains a FOD hash for *system*."""
+def _platform_fod_entries(entry: SourceEntry, system: str) -> list[HashEntry]:
+    """Return hash entries that are platform-specific FODs for *system*."""
     if entry.hashes.entries is None:
-        return False
-    return any(
-        h.platform == system for h in entry.hashes.entries if h.platform is not None
-    )
+        return []
+    return [
+        h
+        for h in entry.hashes.entries
+        if h.platform == system and h.platform is not None
+    ]
 
 
-def _find_fod_packages(system: str) -> list[str]:
-    """Return package names whose ``sources.json`` has a platform-specific FOD for *system*."""
+def _find_fod_targets(system: str) -> list[FodTarget]:
+    """Discover FOD sub-derivations that need building for *system*."""
     from lib.update.sources import load_source_entry
 
-    packages: list[str] = []
+    targets: list[FodTarget] = []
     for name, path in sorted(package_file_map("sources.json").items()):
         try:
             entry = load_source_entry(path)
         except Exception:
             log.warning("Skipping %s: failed to load sources.json", name, exc_info=True)
             continue
-        if _has_platform_fod(entry, system):
-            packages.append(name)
-    return packages
+        for h in _platform_fod_entries(entry, system):
+            fod_attr = _HASH_TYPE_TO_FOD_ATTR.get(h.hash_type)
+            if fod_attr is None:
+                log.warning(
+                    "No FOD attribute mapping for hash type %s in %s — skipping",
+                    h.hash_type,
+                    name,
+                )
+                continue
+            targets.append(
+                FodTarget(package=name, hash_type=h.hash_type, fod_attr=fod_attr)
+            )
+    return targets
 
 
-async def _build_one(name: str, system: str) -> bool:
-    """Build a single overlay package, returning ``True`` on success."""
-    expr = _build_overlay_expr(name, system=system)
-    log.info("Building %s for %s ...", name, system)
+def _build_fod_expr(package: str, fod_attr: str, *, system: str | None = None) -> str:
+    """Build a Nix expression that evaluates to a package's FOD sub-derivation."""
+    base_expr = _build_overlay_expr(package, system=system)
+    # _build_overlay_expr returns: let ... in applied."<package>"
+    # We append the FOD attribute path: let ... in (applied."<package>").passthru.denoDeps
+    # Wrap in parens to ensure the attribute access binds to the full let expression.
+    return f"({base_expr}){fod_attr}"
+
+
+async def _build_one(target: FodTarget, system: str) -> bool:
+    """Build a single FOD sub-derivation, returning ``True`` on success."""
+    expr = _build_fod_expr(target.package, target.fod_attr, system=system)
+    label = f"{target.package}{target.fod_attr}"
+    log.info("Building %s for %s ...", label, system)
     start = time.monotonic()
     try:
         await nix_build(
@@ -107,12 +150,12 @@ async def _build_one(name: str, system: str) -> bool:
         elapsed = time.monotonic() - start
         log.exception(
             "FAILED %s after %s",
-            name,
+            label,
             _format_duration(elapsed),
         )
         return False
     elapsed = time.monotonic() - start
-    log.info("OK     %s in %s", name, _format_duration(elapsed))
+    log.info("OK     %s in %s", label, _format_duration(elapsed))
     return True
 
 
@@ -120,39 +163,38 @@ async def _async_main(args: argparse.Namespace) -> int:
     system = args.system or _detect_system()
     log.info("System: %s", system)
 
-    packages = _find_fod_packages(system)
-    if not packages:
-        log.info("No packages with platform-specific FOD hashes for %s", system)
+    targets = _find_fod_targets(system)
+    if not targets:
+        log.info("No FOD sub-derivations to build for %s", system)
         return 0
 
     log.info(
-        "Found %d package(s) with platform-specific FODs: %s",
-        len(packages),
-        ", ".join(packages),
+        "Found %d FOD target(s): %s",
+        len(targets),
+        ", ".join(f"{t.package}{t.fod_attr}" for t in targets),
     )
 
     if args.dry_run:
         log.info("DRY RUN — skipping builds")
         return 0
 
-    # Build sequentially to avoid overwhelming the runner and to get
-    # clear per-package log output.
+    # Build sequentially for clear per-target log output.
     failed: list[str] = []
-    for name in packages:
-        ok = await _build_one(name, system)
+    for target in targets:
+        ok = await _build_one(target, system)
         if not ok:
-            failed.append(name)
+            failed.append(f"{target.package}{target.fod_attr}")
 
     if failed:
         log.error(
-            "%d/%d package(s) failed to build: %s",
+            "%d/%d target(s) failed to build: %s",
             len(failed),
-            len(packages),
+            len(targets),
             ", ".join(failed),
         )
         return 1
 
-    log.info("All %d package(s) built successfully", len(packages))
+    log.info("All %d target(s) built successfully", len(targets))
     return 0
 
 
@@ -166,7 +208,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="List packages that would be built without building",
+        help="List targets that would be built without building",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
