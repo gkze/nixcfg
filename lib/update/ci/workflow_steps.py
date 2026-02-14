@@ -202,7 +202,7 @@ def generate_pr_body(  # noqa: PLR0913
             else:
                 new_json.write_text("{}\n", encoding="utf-8")
 
-            pkg_diff = run_sources_diff(old_json, new_json, output_format="summary")
+            pkg_diff = run_sources_diff(old_json, new_json, output_format="unified")
             if pkg_diff == NoChangesMessage:
                 continue
 
@@ -216,7 +216,7 @@ def generate_pr_body(  # noqa: PLR0913
                 "<details>",
                 f'<summary><a href="{file_diff_url}"><code>{file_path}</code></a></summary>',
                 "",
-                "```text",
+                "```diff",
                 pkg_diff,
                 "```",
                 "</details>",
