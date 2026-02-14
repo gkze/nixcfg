@@ -63,13 +63,20 @@ def test_generate_pr_body_includes_sources_section(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(workflow_steps, "_run", _fake_run)
     monkeypatch.setattr(workflow_steps, "run_flake_lock_diff", lambda _old, _new: "")
+    _unified_diff = (
+        "--- old/source-entry.json\n"
+        "+++ new/source-entry.json\n"
+        "@@ -1,3 +1,3 @@\n"
+        " {\n"
+        '-  "version": "1.0.0"\n'
+        '+  "version": "2.0.0"\n'
+        " }"
+    )
     monkeypatch.setattr(
         workflow_steps,
         "run_sources_diff",
         lambda _old, _new, output_format: (
-            'changed $.version: "1.0.0" -> "2.0.0"'
-            if output_format == "summary"
-            else ""
+            _unified_diff if output_format == "unified" else ""
         ),
     )
 
@@ -91,7 +98,8 @@ def test_generate_pr_body_includes_sources_section(
     rendered = output_file.read_text(encoding="utf-8")
     assert "No flake.lock input changes detected." in rendered  # noqa: S101
     assert "### Per-package sources.json changes" in rendered  # noqa: S101
-    assert 'changed $.version: "1.0.0" -> "2.0.0"' in rendered  # noqa: S101
+    assert '-  "version": "1.0.0"' in rendered  # noqa: S101
+    assert '+  "version": "2.0.0"' in rendered  # noqa: S101
     assert (  # noqa: S101
         "https://github.com/acme/nixcfg/blob/update_flake_lock_action/packages/demo/sources.json"
         in rendered
