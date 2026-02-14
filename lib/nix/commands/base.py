@@ -274,7 +274,7 @@ type ProcessEvent = ProcessLine | ProcessDone
 async def stream_process(
     args: list[str],
     *,
-    timeout: float = 1200.0,  # noqa: ASYNC109
+    timeout: float = 2400.0,  # noqa: ASYNC109
     env: Mapping[str, str] | None = None,
 ) -> AsyncIterator[ProcessEvent]:
     """Yield line events from both stdout and stderr until process completion."""
@@ -348,7 +348,7 @@ async def stream_process(
 async def run_nix(
     args: list[str],
     *,
-    timeout: float = 1200.0,  # noqa: ASYNC109
+    timeout: float = 2400.0,  # noqa: ASYNC109
     check: bool = True,
     capture: bool = True,
     env: Mapping[str, str] | None = None,
@@ -422,7 +422,7 @@ async def run_nix(
 async def stream_nix(  # noqa: C901
     args: list[str],
     *,
-    timeout: float = 1200.0,  # noqa: ASYNC109
+    timeout: float = 2400.0,  # noqa: ASYNC109
     env: Mapping[str, str] | None = None,
 ) -> AsyncIterator[str]:
     """Yield stdout lines from a Nix command as they arrive.
