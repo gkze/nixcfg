@@ -121,10 +121,6 @@ jobs:
         # Build packages with platform-specific FOD hashes so the Cachix
         # daemon pushes them.  Downstream jobs get a cache hit instead of
         # rebuilding the FOD (which is non-deterministic across runners).
-        # Non-fatal: full-package builds may fail in the sandbox (e.g.
-        # deno compile needs network).  This is a best-effort optimisation
-        # until mkDenoApplication replaces the non-deterministic FODs.
-        continue-on-error: true
         run: nix run .#nixcfg -- ci warm-fod-cache
       - uses: actions/upload-artifact@v4
         with:
