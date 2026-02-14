@@ -268,9 +268,12 @@
 
         nixpkgs.config = {
           allowUnfree = true;
-          permittedInsecurePackages = [
-            "google-chrome-145.0.7632.76"
-          ];
+          # Allow Google Chrome regardless of insecure status — we pin the
+          # version ourselves via overlays/google-chrome/sources.json and the
+          # update pipeline, so nixpkgs marking a release as insecure should
+          # not block builds.  Using a pname predicate avoids the brittle
+          # version-string coupling that permittedInsecurePackages requires.
+          allowInsecurePredicate = pkg: (pkg.pname or "") == "google-chrome";
         };
 
         apps.nixcfg = { nixcfg-script, ... }: "${nixcfg-script}/bin/nixcfg";

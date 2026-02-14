@@ -22,7 +22,7 @@ class UpdateConfig:
     """Resolved runtime configuration for update operations."""
 
     default_timeout: int
-    default_subprocess_timeout: int  # 20 minutes for nix builds
+    default_subprocess_timeout: int  # 40 minutes for nix builds
     default_log_tail_lines: int
     default_render_interval: float
     default_user_agent: str
@@ -37,7 +37,7 @@ class UpdateSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="UPDATE_", extra="ignore")
 
     http_timeout: int = 30
-    subprocess_timeout: int = 1200
+    subprocess_timeout: int = 2400
     log_tail_lines: int = 10
     render_interval: float = 0.05
     user_agent: str = "nixcfg"

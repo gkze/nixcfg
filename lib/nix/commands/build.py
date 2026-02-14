@@ -60,7 +60,7 @@ async def nix_build(  # noqa: PLR0913
     no_link: bool = True,
     json_output: bool = True,
     extra_args: list[str] | None = None,
-    timeout: float = 1200.0,  # noqa: ASYNC109
+    timeout: float = 2400.0,  # noqa: ASYNC109
 ) -> list[BuildResult]:
     """Run ``nix build`` and return parsed build results.
 

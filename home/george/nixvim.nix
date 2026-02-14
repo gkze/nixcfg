@@ -221,6 +221,7 @@ in
         };
         codesnap = {
           enable = true;
+          package = pkgs.vimPlugins.codesnap-nvim;
           settings.watermark = "";
         };
         conform-nvim = {
