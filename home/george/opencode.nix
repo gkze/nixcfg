@@ -47,6 +47,14 @@
         #     "--firefoxPath=/Applications/Twilight.app/Contents/MacOS/zen"
         #   ];
         # };
+        macos-automator = {
+          type = "local";
+          command = [
+            "bunx"
+            "--bun"
+            "@steipete/macos-automator-mcp@latest"
+          ];
+        };
         next-devtools = {
           type = "local";
           command = [

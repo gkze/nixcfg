@@ -18,6 +18,7 @@
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Visual Studio Code - Insiders.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/DataGrip.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Notion.app"; }
+      { app = "/System/Applications/Notes.app"; }
       { app = "/Applications/Figma.app"; }
       { app = "/Applications/Linear.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Spotify.app"; }

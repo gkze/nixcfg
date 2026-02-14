@@ -43,9 +43,8 @@ SECONDS_PER_HOUR = 3600
 
 # Map from hash type to the Nix attribute suffix that evaluates to the
 # FOD sub-derivation.  Each entry uses dot-separated path components
-# appended to the package expression (e.g. ``applied."linear-cli".passthru.denoDeps``).
+# appended to the package expression.
 _HASH_TYPE_TO_FOD_ATTR: dict[str, str] = {
-    "denoDepsHash": ".passthru.denoDeps",
     "nodeModulesHash": ".node_modules",
 }
 
