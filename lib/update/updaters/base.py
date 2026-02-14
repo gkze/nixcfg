@@ -479,7 +479,13 @@ class BunNodeModulesHashUpdater(FlakeInputHashUpdater):
 
 
 class DenoDepsHashUpdater(FlakeInputHashUpdater):
-    """Hash updater for per-platform Deno dependency derivations."""
+    """Hash updater for per-platform Deno dependency derivations.
+
+    .. deprecated::
+        Use :class:`DenoManifestUpdater` for packages built with
+        ``mkDenoApplication`` (deterministic individual ``fetchurl`` calls).
+        This class only applies to the legacy FOD-based Deno builder.
+    """
 
     hash_type = "denoDepsHash"
     native_only: bool = False
@@ -516,6 +522,111 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
             for platform, hash_val in sorted(platform_hashes.items())
         ]
         yield UpdateEvent.value(self.name, entries)
+
+
+class DenoManifestUpdater(Updater):
+    """Updater for Deno packages built with ``mkDenoApplication``.
+
+    Instead of computing FOD hashes, this updater resolves the ``deno.lock``
+    file from the flake input source and writes a deterministic
+    ``deno-deps.json`` manifest that ``mkDenoApplication`` consumes to fetch
+    each dependency individually via ``fetchurl``.
+
+    No hash entries are stored in ``sources.json`` — only the version and
+    flake input name.  The manifest file itself is committed alongside the
+    package definition.
+    """
+
+    input_name: str | None = None
+    lock_file: str = "deno.lock"
+    manifest_file: str = "deno-deps.json"
+    required_tools: tuple[str, ...] = ()
+
+    def __init__(self, *, config: UpdateConfig | None = None) -> None:
+        """Create an updater bound to active config values."""
+        super().__init__(config=config)
+        if self.input_name is None:
+            self.input_name = self.name
+
+    @property
+    def _input(self) -> str:
+        if self.input_name is None:
+            msg = "Missing input name"
+            raise RuntimeError(msg)
+        return self.input_name
+
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        """Fetch latest version from the flake lock."""
+        _ = session
+        node = get_flake_input_node(self._input)
+        version = get_flake_input_version(node)
+        return VersionInfo(version=version, metadata={"node": node})
+
+    async def fetch_hashes(
+        self,
+        info: VersionInfo,
+        session: aiohttp.ClientSession,
+    ) -> EventStream:
+        """Resolve ``deno.lock`` and write ``deno-deps.json``."""
+        from lib.update.deno_lock import resolve_deno_deps
+        from lib.update.paths import package_dir_for
+
+        node = info.metadata.get("node")
+        if node is None:
+            node = get_flake_input_node(self._input)
+
+        # Download deno.lock from the GitHub source.
+        locked = node.locked
+        if locked is None or not locked.owner or not locked.repo or not locked.rev:
+            msg = f"Cannot resolve source for {self._input}: incomplete lock"
+            raise RuntimeError(msg)
+
+        lock_url = (
+            f"https://raw.githubusercontent.com/"
+            f"{locked.owner}/{locked.repo}/{locked.rev}/{self.lock_file}"
+        )
+        yield UpdateEvent.status(
+            self.name, f"Fetching {self.lock_file} from {locked.owner}/{locked.repo}..."
+        )
+        lock_bytes = await fetch_url(
+            session,
+            lock_url,
+            request_timeout=self.config.default_timeout,
+            config=self.config,
+        )
+
+        # Write lock content to a temp file for the resolver.
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".lock", delete=False) as tmp:
+            tmp.write(lock_bytes.decode())
+            tmp_name = tmp.name
+
+        try:
+            yield UpdateEvent.status(self.name, "Resolving Deno dependencies...")
+            manifest = await resolve_deno_deps(Path(tmp_name))
+        finally:
+            Path(tmp_name).unlink()  # noqa: ASYNC240
+
+        # Write the manifest to the package directory.
+        pkg_dir = package_dir_for(self.name)
+        if pkg_dir is None:
+            msg = f"Package directory not found for {self.name}"
+            raise RuntimeError(msg)
+        manifest_path = pkg_dir / self.manifest_file
+        manifest.save(manifest_path)
+
+        total_files = sum(len(p.files) for p in manifest.jsr_packages)
+        yield UpdateEvent.status(
+            self.name,
+            f"Wrote {manifest_path.name}: "
+            f"{len(manifest.jsr_packages)} JSR ({total_files} files) + "
+            f"{len(manifest.npm_packages)} npm packages",
+        )
+
+        # No hash entries — mkDenoApplication uses the manifest directly.
+        yield UpdateEvent.value(self.name, [])
 
 
 def go_vendor_updater(
@@ -565,15 +676,42 @@ def deno_deps_updater(
     *,
     input_name: str | None = None,
 ) -> type[DenoDepsHashUpdater]:
-    """Create a :class:`DenoDepsHashUpdater` subclass for ``name``."""
-    attrs = {"name": name, "input_name": input_name}
+    """Create a :class:`DenoDepsHashUpdater` subclass for ``name``.
+
+    .. deprecated::
+        Use :func:`deno_manifest_updater` for ``mkDenoApplication`` packages.
+    """
+    attrs: dict[str, Any] = {"name": name, "input_name": input_name}
     return type(f"{name}Updater", (DenoDepsHashUpdater,), attrs)
+
+
+def deno_manifest_updater(
+    name: str,
+    *,
+    input_name: str | None = None,
+    lock_file: str = "deno.lock",
+    manifest_file: str = "deno-deps.json",
+) -> type[DenoManifestUpdater]:
+    """Create a :class:`DenoManifestUpdater` subclass for *name*.
+
+    Use this for packages built with ``mkDenoApplication``.  The updater
+    resolves ``deno.lock`` from the flake input source and writes
+    ``deno-deps.json`` — no FOD hashes are involved.
+    """
+    attrs: dict[str, Any] = {
+        "name": name,
+        "input_name": input_name,
+        "lock_file": lock_file,
+        "manifest_file": manifest_file,
+    }
+    return type(f"{name}Updater", (DenoManifestUpdater,), attrs)
 
 
 __all__ = [
     "UPDATERS",
     "CargoLockGitDep",
     "ChecksumProvidedUpdater",
+    "DenoManifestUpdater",
     "DownloadHashUpdater",
     "HashEntryUpdater",
     "UpdateConfig",
@@ -583,6 +721,7 @@ __all__ = [
     "bun_node_modules_updater",
     "cargo_vendor_updater",
     "deno_deps_updater",
+    "deno_manifest_updater",
     "go_vendor_updater",
     "npm_deps_updater",
 ]

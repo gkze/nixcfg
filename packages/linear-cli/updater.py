@@ -1,5 +1,5 @@
-"""Updater for linear-cli Deno deps hash."""
+"""Updater for linear-cli Deno dependency manifest."""
 
-from lib.update.updaters.base import deno_deps_updater
+from lib.update.updaters.base import deno_manifest_updater
 
-deno_deps_updater("linear-cli")
+deno_manifest_updater("linear-cli")
