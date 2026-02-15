@@ -1,21 +1,21 @@
 {
   "hashes": [
     {
-      "hash": "sha256-uRgWfuOlLECRCOszm8XhySiWxu9IdDhpSbosPZPAZVI=",
+      "hash": "sha256-iZv0w1NthV53pY5uvuf3JlI14GeKmCu7WHwGSRdEQeM=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     },
     {
-      "hash": "sha256-FsFTitxnN2brebZDBRGJB0NWTOVYDa/QcNRH0ip/Gk4=",
+      "hash": "sha256-5pgd2xuvIIkTbIOGIdK5MIXo6O9qRpvk1RKQZ1e1R+8=",
       "hashType": "nodeModulesHash",
       "platform": "x86_64-linux"
     },
     {
-      "hash": "sha256-knSEqEPyonBUfmGZKTq5Om4HikItWbfPdfT7p6iljzs=",
+      "hash": "sha256-FZiHwihM4b82ipQ9XfW08X+sd5CvZhx/+pU/8X1zsns=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-linux"
     }
   ],
   "input": "opencode",
-  "version": "d30e91738570ee9ea06ca6f2d49bdae65b0ff3ec"
+  "version": "c190f5f611c1520a553facc362749f8aefaa5005"
 }
