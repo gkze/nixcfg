@@ -6,11 +6,8 @@
 with outputs.lib;
 with inputs;
 mkDarwinHost {
-  extraHomeModules = [
-    "${modulesPath}/home/town.nix"
-  ];
+  work = true;
   extraSystemModules = [
-    "${modulesPath}/darwin/town.nix"
     "${modulesPath}/darwin/george/town-dock-apps.nix"
     (mkSetOpencodeEnvModule "work.json")
   ];

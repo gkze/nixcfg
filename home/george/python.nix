@@ -22,7 +22,7 @@ in
     };
     ptpythonTheme = mkOption {
       type = types.enum [ "catppuccin" ];
-      default = "catppuccin";
+      default = config.theme.name;
     };
   };
 

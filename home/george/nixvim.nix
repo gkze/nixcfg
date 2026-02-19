@@ -65,7 +65,7 @@ in
       colorschemes.catppuccin = {
         enable = true;
         settings = {
-          flavour = "frappe";
+          flavour = config.theme.variant;
           integrations = {
             aerial = true;
             alpha = true;
@@ -720,7 +720,7 @@ in
             ''
               if vim.g.neovide then
                 -- vim.g.neovide_scale_factor = 0.7
-                vim.o.guifont = "Hack Nerd Font Mono:h10"
+                vim.o.guifont = "${config.fonts.monospace.name}:h10"
               end
             ''
           ]

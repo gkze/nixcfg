@@ -15,12 +15,14 @@
       linux = ./nixos.nix;
     }
     .${slib.kernel system}
+    ./bun.nix
     ./git.nix
     ./go.nix
     ./nixvim.nix
     ./opencode.nix
     ./packages.nix
     ./python.nix
+    ./rust.nix
     ./stylix.nix
     ./zsh.nix
   ];
@@ -79,8 +81,6 @@
       };
     };
     sessionPath = [
-      "$HOME/.bun/bin"
-      "$HOME/.cargo/bin"
       "$HOME/.local/bin"
     ];
     sessionVariables = {
@@ -112,8 +112,10 @@
   xdg.configFile."zen-folders.yaml".source = ./zen-folders.yaml;
 
   languages = {
+    bun.enable = true;
     go.enable = true;
     python.enable = true;
+    rust.enable = true;
   };
 
   programs = {
@@ -137,11 +139,11 @@
         src = pkgs.sublime-kdl;
         file = "KDL1.sublime-syntax";
       };
-      themes."Catppuccin Frappe" = {
+      themes.${config.theme.displayName} = {
         src = inputs.catppuccin-bat;
-        file = "themes/Catppuccin Frappe.tmTheme";
+        file = "themes/${config.theme.displayName}.tmTheme";
       };
-      config.theme = "Catppuccin Frappe";
+      config.theme = config.theme.displayName;
     };
     direnv = {
       enable = true;
@@ -167,11 +169,11 @@
       package = null; # installed via Homebrew on macOS
       enableZshIntegration = true;
       settings = {
-        font-family = "Hack Nerd Font Mono";
+        font-family = config.fonts.monospace.name;
         font-size = 12;
         macos-option-as-alt = "left";
         keybind = "alt+left=unbind";
-        theme = "Catppuccin Frappe";
+        theme = config.theme.displayName;
         window-height = 80;
         window-width = 220;
       };
@@ -300,9 +302,9 @@
           };
           model_parameters = [ ];
         };
-        buffer_font_family = "Hack Nerd Font Mono";
+        buffer_font_family = config.fonts.monospace.name;
         buffer_font_size = 12.0;
-        font_family = "Hack Nerd Font Mono";
+        font_family = config.fonts.monospace.name;
         context_servers = {
           browser-tools-context-server = {
             enabled = true;
@@ -318,16 +320,16 @@
           "Shell Script" = [ ".envrc" ];
         };
         format_on_save = "on";
-        icon_theme = "Catppuccin Frappé";
+        icon_theme = config.theme.displayNameAccented;
         minimap.show = "always";
         outline_panel.dock = "right";
         show_whitespaces = "all";
         theme = {
-          dark = "Catppuccin Frappé";
+          dark = config.theme.displayNameAccented;
           light = "One Light";
           mode = "system";
         };
-        ui_font_family = "Cantarell";
+        ui_font_family = config.fonts.sansSerif.name;
         ui_font_size = 15.0;
         vim_mode = true;
         wrap_guides = [
@@ -360,7 +362,6 @@
     # Simple enable-only programs (alphabetical)
     awscli.enable = true;
     bottom.enable = true;
-    bun.enable = true;
     codex.enable = true;
     discord.enable = true;
     element-desktop.enable = true;
@@ -375,7 +376,7 @@
     neovide.enable = true;
     nh = {
       enable = true;
-      flake = "/Users/george/.config/nixcfg";
+      flake = config.nixcfg.flakePath;
     };
     nix-index.enable = true;
     nushell.enable = true;

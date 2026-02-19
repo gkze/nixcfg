@@ -8,6 +8,7 @@
       "claude"
       "claude-code"
       "codeedit"
+      "comet"
       "docker-desktop"
       "figma"
       "framer"

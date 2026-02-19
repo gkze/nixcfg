@@ -70,6 +70,7 @@
       codesnap-nvim = vprev.codesnap-nvim.overrideAttrs (old: {
         postPatch =
           let
+            libExt = if prev.stdenv.isDarwin then "dylib" else "so";
             moduleLuaOld = ''package.cpath = path_utils.join(";", package.cpath, generator_path)'';
             moduleLuaNew = ''
               local lib_dir = vim.fn.fnamemodify(generator_path, ":h")
@@ -77,7 +78,7 @@
             fetchLuaOld = "function fetch.ensure_lib()";
             fetchLuaNew = ''
               function fetch.ensure_lib()
-                return "${vprev.codesnap-nvim.passthru.codesnap-lib}/lib/libgenerator.dylib"
+                return "${vprev.codesnap-nvim.passthru.codesnap-lib}/lib/libgenerator.${libExt}"
               end
               function fetch._original_ensure_lib()'';
           in

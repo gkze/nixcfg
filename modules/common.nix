@@ -17,6 +17,7 @@
     {
       gc = {
         automatic = true;
+        options = "--delete-older-than 3d";
       }
       // {
         darwin.interval = {
@@ -31,6 +32,8 @@
           "nix-command"
           "flakes"
         ];
+        keep-derivations = true;
+        keep-outputs = true;
         substituters = [
           "https://gkze.cachix.org"
           "https://zed.cachix.org"

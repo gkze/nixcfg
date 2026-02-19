@@ -270,6 +270,9 @@ rec {
     }:
     homeExternalModules
     ++ [
+      "${modulesPath}/home/theme.nix"
+      "${modulesPath}/home/fonts.nix"
+      "${modulesPath}/home/profiles.nix"
       "${modulesPath}/home/base.nix"
       "${modulesPath}/home/${kernel system}.nix"
       (userConfigPath username)
@@ -326,6 +329,7 @@ rec {
       modules = [
         "${modulesPath}/common.nix"
         "${modulesPath}/${kernel system}/base.nix"
+        "${modulesPath}/${kernel system}/profiles.nix"
       ]
       ++ systemModules
       ++ optionals (length homeModules > 0) [
@@ -386,13 +390,14 @@ rec {
   mkDarwinHost =
     {
       user ? "george",
+      work ? false,
       extraHomeModules ? [ ],
       extraSystemModules ? [ ],
     }:
     mkSystem {
       system = "aarch64-darwin";
       users = [ user ];
-      homeModules = extraHomeModules;
+      homeModules = extraHomeModules ++ optionals work [ (_: { profiles.work.enable = true; }) ];
       systemModules = [
         inputs.nix-homebrew.darwinModules.nix-homebrew
         "${modulesPath}/darwin/homebrew.nix"
@@ -408,6 +413,7 @@ rec {
         inputs.nix-rosetta-builder.darwinModules.default
         { nix-rosetta-builder.onDemand = true; }
       ]
+      ++ optionals work [ { profiles.work.enable = true; } ]
       ++ extraSystemModules;
     };
 }
