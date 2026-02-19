@@ -1,9 +1,12 @@
-{ pkgs, ... }:
+{ config, pkgs, ... }:
+let
+  inherit (config) theme fonts;
+in
 {
   stylix = with pkgs; {
     enable = true;
-    base16Scheme = "${base16-schemes}/share/themes/catppuccin-frappe.yaml";
-    polarity = "dark";
+    base16Scheme = "${base16-schemes}/share/themes/${theme.slug}.yaml";
+    inherit (theme) polarity;
     image = ./wallpaper.jpeg;
     targets = {
       # Disabled: using catppuccin-bat theme directly in bat config
@@ -27,28 +30,31 @@
       dark = "Papirus-Dark";
     };
     cursor = {
-      name = "catppuccin-frappe-blue-cursors";
-      package = catppuccin-cursors.frappeBlue;
-      size = 11;
+      name = "${theme.slug}-${theme.accentColor}-cursors";
+      package =
+        catppuccin-cursors."${theme.variant}${
+          let
+            c = theme.accentColor;
+          in
+          (lib.toUpper (builtins.substring 0 1 c)) + (builtins.substring 1 (builtins.stringLength c - 1) c)
+        }";
+      inherit (fonts.monospace) size;
     };
     fonts = {
       serif = {
-        package = cantarell-fonts;
-        name = "Cantarell";
+        inherit (fonts.serif) package name;
       };
       sansSerif = {
-        package = cantarell-fonts;
-        name = "Cantarell";
+        inherit (fonts.sansSerif) package name;
       };
       monospace = {
-        package = nerd-fonts.hack;
-        name = "Hack Nerd Font Mono";
+        inherit (fonts.monospace) package name;
       };
       sizes = {
-        applications = 11;
-        desktop = 11;
-        popups = 11;
-        terminal = 11;
+        applications = fonts.monospace.size;
+        desktop = fonts.monospace.size;
+        popups = fonts.monospace.size;
+        terminal = fonts.monospace.size;
       };
     };
   };
