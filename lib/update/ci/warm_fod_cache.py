@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import platform as platform_mod
@@ -138,20 +139,44 @@ def _build_fod_expr(package: str, fod_attr: str, *, system: str | None = None) -
     return f"({base_expr}){fod_attr}"
 
 
-def _extract_store_paths(results: list) -> list[str]:
-    """Extract output store paths from ``nix build --json`` results."""
+async def _resolve_output_paths(expr: str) -> list[str]:
+    """Resolve the output store paths for a Nix expression.
+
+    Runs ``nix build --json --dry-run`` which evaluates the expression
+    and returns output paths without performing a build (the derivation
+    must already be realised).  The JSON format is::
+
+        [{"drvPath": "/nix/store/...", "outputs": {"out": "/nix/store/..."}}]
+
+    This is intentionally separate from the main build step so that the
+    build itself can use ``json_output=False`` (avoiding Pydantic model
+    validation against the simpler ``nix build --json`` schema).
+    """
+    from lib.nix.commands.base import run_nix
+
+    args = ["nix", "build", "--expr", expr, "--impure", "--no-link", "--json"]
+    result = await run_nix(args, check=False, timeout=60)
+    if result.returncode != 0:
+        log.debug(
+            "nix build --json (dry path resolution) failed: %s", result.stderr[:200]
+        )
+        return []
+
+    try:
+        entries = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        log.debug("Failed to parse nix build --json output")
+        return []
+
     paths: list[str] = []
-    for r in results:
-        if not getattr(r, "success", False):
-            continue
-        for output in (getattr(r, "built_outputs", None) or {}).values():
-            out_path = (
-                output.get("outPath")
-                if isinstance(output, dict)
-                else getattr(output, "out_path", None)
+    for entry in entries:
+        if isinstance(entry, dict):
+            outputs = entry.get("outputs", {})
+            paths.extend(
+                path
+                for path in outputs.values()
+                if isinstance(path, str) and path.startswith("/nix/store/")
             )
-            if out_path:
-                paths.append(str(out_path))
     return paths
 
 
@@ -211,11 +236,11 @@ async def _build_one(target: FodTarget, system: str, *, cache_name: str | None) 
     log.info("Building %s for %s ...", label, system)
     start = time.monotonic()
     try:
-        results = await nix_build(
+        await nix_build(
             expr=expr,
             impure=True,
             no_link=True,
-            json_output=True,
+            json_output=False,
             timeout=BUILD_TIMEOUT,
         )
     except NixCommandError:
@@ -230,13 +255,15 @@ async def _build_one(target: FodTarget, system: str, *, cache_name: str | None) 
     log.info("OK     %s in %s", label, _format_duration(elapsed))
 
     # Explicitly push the FOD to Cachix so downstream jobs get a cache hit.
+    # We resolve the output path separately (the derivation is already built,
+    # so this is essentially instant).
     if cache_name:
-        store_paths = _extract_store_paths(results)
+        store_paths = await _resolve_output_paths(expr)
         if store_paths:
             await _push_to_cachix(store_paths, cache_name)
         else:
             log.warning(
-                "Could not extract store path from build results for %s — "
+                "Could not resolve store path for %s — "
                 "skipping cachix push (daemon may still pick it up)",
                 label,
             )
