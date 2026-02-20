@@ -1,12 +1,17 @@
-"""Build platform-specific FOD sub-derivations to populate the Nix cache.
+"""Build platform-specific FOD sub-derivations and push them to Cachix.
 
 After ``compute-hashes`` discovers correct hashes and writes them to
 ``sources.json``, this step builds each **FOD sub-derivation** (not the
-full package) on the *same* runner.  The Cachix daemon automatically
-pushes the result, so downstream jobs (e.g. ``darwin-shared``) get a
-cache hit instead of rebuilding the FOD — which would produce a
-different hash due to non-determinism (e.g. Deno's SQLite cache, HTTP
-metadata, timestamps).
+full package) on the *same* runner and then **explicitly pushes** the
+resulting store path to Cachix.  Downstream jobs (e.g. ``darwin-shared``)
+then get a cache hit instead of rebuilding the FOD — which would produce
+a different hash due to non-determinism (e.g. Bun's ``node_modules``
+layout, Deno's SQLite cache, HTTP metadata, timestamps).
+
+The explicit ``cachix push`` is necessary because the Cachix daemon's
+automatic store-path detection may miss FODs built inside nested ``nix
+build`` invocations (e.g. ``nix run .#nixcfg -- ci warm-fod-cache``
+spawns its own ``nix build --impure``).
 
 Only the FOD is built because the full package may need resources not
 available inside the Nix sandbox (e.g. ``deno compile`` downloads a
@@ -18,7 +23,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import platform as platform_mod
+import shutil
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -131,18 +138,84 @@ def _build_fod_expr(package: str, fod_attr: str, *, system: str | None = None) -
     return f"({base_expr}){fod_attr}"
 
 
-async def _build_one(target: FodTarget, system: str) -> bool:
-    """Build a single FOD sub-derivation, returning ``True`` on success."""
+def _extract_store_paths(results: list) -> list[str]:
+    """Extract output store paths from ``nix build --json`` results."""
+    paths: list[str] = []
+    for r in results:
+        if not getattr(r, "success", False):
+            continue
+        for output in (getattr(r, "built_outputs", None) or {}).values():
+            out_path = (
+                output.get("outPath")
+                if isinstance(output, dict)
+                else getattr(output, "out_path", None)
+            )
+            if out_path:
+                paths.append(str(out_path))
+    return paths
+
+
+async def _push_to_cachix(store_paths: list[str], cache_name: str) -> bool:
+    """Push store paths to Cachix, returning ``True`` on success.
+
+    Falls back gracefully: if ``cachix`` is not installed or the push
+    fails, a warning is logged but the build is still considered
+    successful (the FOD exists locally and may still be served by
+    the Cachix daemon).
+    """
+    if not store_paths:
+        log.debug("No store paths to push")
+        return True
+
+    cachix_bin = shutil.which("cachix")
+    if cachix_bin is None:
+        log.warning("cachix not found on PATH — skipping explicit push")
+        return False
+
+    cmd = [cachix_bin, "push", cache_name, *store_paths]
+    log.info("Pushing %d path(s) to cachix cache %r ...", len(store_paths), cache_name)
+    log.debug("cachix push command: %s", cmd)
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_bytes, stderr_bytes = await proc.communicate()
+    stdout = (stdout_bytes or b"").decode(errors="replace").strip()
+    stderr = (stderr_bytes or b"").decode(errors="replace").strip()
+
+    if proc.returncode != 0:
+        log.warning(
+            "cachix push exited %d:\n  stdout: %s\n  stderr: %s",
+            proc.returncode,
+            stdout or "(empty)",
+            stderr or "(empty)",
+        )
+        return False
+
+    if stdout:
+        log.debug("cachix push stdout: %s", stdout)
+    log.info("Successfully pushed %d path(s) to cachix", len(store_paths))
+    return True
+
+
+async def _build_one(target: FodTarget, system: str, *, cache_name: str | None) -> bool:
+    """Build a single FOD sub-derivation, returning ``True`` on success.
+
+    When *cache_name* is set, the built store path is explicitly pushed
+    to the named Cachix cache after a successful build.
+    """
     expr = _build_fod_expr(target.package, target.fod_attr, system=system)
     label = f"{target.package}{target.fod_attr}"
     log.info("Building %s for %s ...", label, system)
     start = time.monotonic()
     try:
-        await nix_build(
+        results = await nix_build(
             expr=expr,
             impure=True,
             no_link=True,
-            json_output=False,
+            json_output=True,
             timeout=BUILD_TIMEOUT,
         )
     except NixCommandError:
@@ -155,12 +228,32 @@ async def _build_one(target: FodTarget, system: str) -> bool:
         return False
     elapsed = time.monotonic() - start
     log.info("OK     %s in %s", label, _format_duration(elapsed))
+
+    # Explicitly push the FOD to Cachix so downstream jobs get a cache hit.
+    if cache_name:
+        store_paths = _extract_store_paths(results)
+        if store_paths:
+            await _push_to_cachix(store_paths, cache_name)
+        else:
+            log.warning(
+                "Could not extract store path from build results for %s — "
+                "skipping cachix push (daemon may still pick it up)",
+                label,
+            )
+
     return True
 
 
 async def _async_main(args: argparse.Namespace) -> int:
     system = args.system or _detect_system()
     log.info("System: %s", system)
+
+    # Resolve the Cachix cache name for explicit pushes.
+    cache_name = args.cachix_cache or os.environ.get("CACHIX_NAME")
+    if cache_name:
+        log.info("Cachix cache: %s (will push FODs after build)", cache_name)
+    else:
+        log.info("No Cachix cache configured — relying on daemon for pushes")
 
     targets = _find_fod_targets(system)
     if not targets:
@@ -180,7 +273,7 @@ async def _async_main(args: argparse.Namespace) -> int:
     # Build sequentially for clear per-target log output.
     failed: list[str] = []
     for target in targets:
-        ok = await _build_one(target, system)
+        ok = await _build_one(target, system, cache_name=cache_name)
         if not ok:
             failed.append(f"{target.package}{target.fod_attr}")
 
@@ -208,6 +301,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--dry-run",
         action="store_true",
         help="List targets that would be built without building",
+    )
+    parser.add_argument(
+        "--cachix-cache",
+        help=(
+            "Cachix cache name for explicit pushes after build. "
+            "Falls back to $CACHIX_NAME if not set."
+        ),
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
