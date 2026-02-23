@@ -83,7 +83,7 @@ class OperationState:
     tail: deque[str] = field(default_factory=deque)
     detail_lines: list[str] = field(default_factory=list)
     active_commands: int = 0
-    spinner: Any | None = field(default=None, repr=False)
+    spinner: Spinner | None = field(default=None, repr=False)
 
     def visible(self) -> bool:
         """Return ``True`` when this operation should be rendered."""
@@ -427,8 +427,8 @@ class Renderer:
         self.last_render = 0.0
         self.needs_render = False
 
-        self._console: Any = None
-        self._live: Any = None
+        self._console: Console | None = None
+        self._live: Live | None = None
         if is_tty and not quiet:
             self._console = Console(force_terminal=True)
             self._live = Live(
@@ -494,7 +494,7 @@ class Renderer:
         if full_output is None:
             full_output = self.full_output
 
-        trees: list[Any] = []
+        trees: list[Tree] = []
         for name in self.order:
             item = self.items[name]
             header = Text()
@@ -518,7 +518,7 @@ class Renderer:
 
             trees.append(tree)
 
-        renderable: Any = Group(*trees) if trees else Text("")
+        renderable: RenderableType = Group(*trees) if trees else Text("")
         if full_output:
             return renderable
 
@@ -544,7 +544,7 @@ class Renderer:
         item = self.items.get(source)
         if item is None or item.last_operation is None:
             return False
-        operation = item.operations.get(cast("OperationKind", item.last_operation))
+        operation = item.operations.get(item.last_operation)
         if operation is None:
             return False
         operation.detail_lines.append(message)

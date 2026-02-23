@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, ClassVar
 if TYPE_CHECKING:
     import aiohttp
 
-from lib.update.net import _request
+from lib.update.net import fetch_headers
 from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
 
 
@@ -26,10 +26,9 @@ class ConductorUpdater(DownloadHashUpdater):
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Infer the current version from the download filename."""
         url = f"{self.BASE_URL}/dmg-aarch64"
-        _payload, headers = await _request(
+        headers = await fetch_headers(
             session,
             url,
-            method="HEAD",
             request_timeout=self.config.default_timeout,
             config=self.config,
         )

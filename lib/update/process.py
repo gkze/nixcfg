@@ -22,7 +22,7 @@ from lib.nix.commands.base import (
 from lib.nix.commands.hash import nix_hash_convert as libnix_hash_convert
 from lib.nix.commands.hash import nix_prefetch_url as libnix_prefetch_url
 from lib.update.config import UpdateConfig, resolve_active_config
-from lib.update.constants import NIX_BUILD_FAILURE_TAIL_LINES
+from lib.update.constants import NIX_BUILD_FAILURE_TAIL_LINES, resolve_timeout_alias
 from lib.update.errors import format_exception
 from lib.update.events import (
     CommandResult,
@@ -86,20 +86,11 @@ def _resolve_timeout_alias(
     command_timeout: float | None,
     kwargs: dict[str, object],
 ) -> float | None:
-    timeout_alias = kwargs.pop("timeout", None)
-    if timeout_alias is not None:
-        if command_timeout is not None:
-            msg = "Pass only one of 'command_timeout' or legacy 'timeout'"
-            raise TypeError(msg)
-        if not isinstance(timeout_alias, int | float):
-            msg = "timeout must be a number"
-            raise TypeError(msg)
-        command_timeout = float(timeout_alias)
-    if kwargs:
-        unknown = ", ".join(sorted(kwargs))
-        msg = f"Unexpected keyword argument(s): {unknown}"
-        raise TypeError(msg)
-    return command_timeout
+    return resolve_timeout_alias(
+        named_timeout=command_timeout,
+        named_timeout_label="command_timeout",
+        kwargs=kwargs,
+    )
 
 
 async def stream_command(  # noqa: PLR0913

@@ -11,7 +11,7 @@ from nix_manipulator.parser import parse
 if TYPE_CHECKING:
     import aiohttp
 
-from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
+from lib.nix.models.sources import HashEntry
 from lib.update.events import (
     CapturedValue,
     EventStream,
@@ -20,6 +20,7 @@ from lib.update.events import (
 )
 from lib.update.net import fetch_github_api
 from lib.update.nix import _build_nix_expr, compute_fixed_output_hash
+from lib.update.nix_expr import compact_nix_expr
 from lib.update.updaters.base import Updater, VersionInfo
 
 
@@ -31,10 +32,6 @@ class SentryCliUpdater(Updater):
     GITHUB_OWNER = "getsentry"
     GITHUB_REPO = "sentry-cli"
     XCARCHIVE_FILTER = "find $out -name '*.xcarchive' -type d -exec rm -rf {} +"
-
-    @staticmethod
-    def _compact_nix_expr(expr: str) -> str:
-        return " ".join(line.strip() for line in expr.splitlines() if line.strip())
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch latest release tag from GitHub."""
@@ -70,7 +67,7 @@ class SentryCliUpdater(Updater):
         )
 
     def _src_nix_expr(self, version: str, hash_value: str | None = None) -> str:
-        return self._compact_nix_expr(
+        return compact_nix_expr(
             self._src_nix_expression(version, hash_value).rebuild(),
         )
 
@@ -84,7 +81,7 @@ class SentryCliUpdater(Updater):
                 },
             ),
         )
-        return self._compact_nix_expr(cargo_vendor_expr.rebuild())
+        return compact_nix_expr(cargo_vendor_expr.rebuild())
 
     async def fetch_hashes(
         self,
@@ -131,11 +128,4 @@ class SentryCliUpdater(Updater):
                 HashEntry.create("srcHash", src_hash),
                 HashEntry.create("cargoHash", cargo_hash),
             ],
-        )
-
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
-        """Build source entry for sentry-cli."""
-        return SourceEntry(
-            version=info.version,
-            hashes=HashCollection.from_value(hashes),
         )
