@@ -327,86 +327,13 @@ async def compute_drv_fingerprint(
     return drv_path.split("-", 1)[0]
 
 
-def compute_uv_lock_hash(
-    source: str,
-    _input_name: str = "",
-    *,
-    config: UpdateConfig | None = None,
-    **_kwargs: object,
-) -> EventStream:
-    """Compute uv.lock FOD hash via overlay with ``FAKE_HASHES=1``."""
-    return _compute_overlay_based_hash(source, config=config)
-
-
-def compute_go_vendor_hash(
-    source: str,
-    _input_name: str = "",
-    *,
-    config: UpdateConfig | None = None,
-    **_kwargs: object,
-) -> EventStream:
-    """Compute Go vendor hash via overlay with ``FAKE_HASHES=1``."""
-    return _compute_overlay_based_hash(source, config=config)
-
-
-def compute_cargo_vendor_hash(
-    source: str,
-    _input_name: str = "",
-    *,
-    config: UpdateConfig | None = None,
-    **_kwargs: object,
-) -> EventStream:
-    """Compute Cargo vendor hash via overlay with ``FAKE_HASHES=1``."""
-    return _compute_overlay_based_hash(source, config=config)
-
-
-def compute_npm_deps_hash(
-    source: str,
-    _input_name: str = "",
-    *,
-    config: UpdateConfig | None = None,
-) -> EventStream:
-    """Compute NPM deps hash via overlay with ``FAKE_HASHES=1``."""
-    return _compute_overlay_based_hash(source, config=config)
-
-
-def compute_bun_node_modules_hash(
-    source: str,
-    _input_name: str = "",
-    *,
-    config: UpdateConfig | None = None,
-) -> EventStream:
-    """Compute bun node_modules hash via overlay with ``FAKE_HASHES=1``."""
-    return _compute_overlay_based_hash(
-        source,
-        system=get_current_nix_platform(),
-        config=config,
-    )
-
-
-async def _compute_overlay_based_hash(
-    source: str,
-    *,
-    system: str | None = None,
-    config: UpdateConfig | None = None,
-) -> EventStream:
-    """Compute a fixed-output hash via the package overlay."""
-    async for event in compute_overlay_hash(source, system=system, config=config):
-        yield event
-
-
 __all__ = [
     "_build_nix_expr",
     "_build_overlay_expr",
     "_emit_sri_hash_from_build_result",
     "_run_fixed_output_build",
-    "compute_bun_node_modules_hash",
-    "compute_cargo_vendor_hash",
     "compute_drv_fingerprint",
     "compute_fixed_output_hash",
-    "compute_go_vendor_hash",
-    "compute_npm_deps_hash",
     "compute_overlay_hash",
-    "compute_uv_lock_hash",
     "get_current_nix_platform",
 ]

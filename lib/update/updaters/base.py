@@ -33,12 +33,8 @@ from lib.update.events import (
 from lib.update.flake import get_flake_input_node, get_flake_input_version
 from lib.update.net import fetch_url
 from lib.update.nix import (
-    compute_bun_node_modules_hash,
-    compute_cargo_vendor_hash,
     compute_drv_fingerprint,
-    compute_go_vendor_hash,
-    compute_npm_deps_hash,
-    compute_uv_lock_hash,
+    compute_overlay_hash,
     get_current_nix_platform,
 )
 from lib.update.nix_deno import compute_deno_deps_hash
@@ -276,6 +272,7 @@ class DownloadHashUpdater(Updater):
         return self.PLATFORMS[platform]
 
     def _platform_urls(self, info: VersionInfo) -> dict[str, str]:
+        """Build per-platform URL mapping."""
         return {
             platform: self.get_download_url(platform, info)
             for platform in self.PLATFORMS
@@ -346,13 +343,19 @@ class FlakeInputHashUpdater(HashEntryUpdater):
     hash and compare the resulting ``.drv`` path.  Since the sentinel is
     constant, the ``.drv`` hash is a pure function of the entire transitive
     build-input closure — equivalent to Nix's own rebuild detection.
+
+    Simple subclasses only need to set ``hash_type`` (and optionally
+    ``platform_specific = True`` for platform-keyed hashes like Bun).  The
+    default ``_compute_hash`` calls :func:`compute_overlay_hash` directly.
     """
 
     input_name: str | None = None
     hash_type: HashType
+    platform_specific: bool = False
     required_tools = ("nix",)
 
     def __init__(self, *, config: UpdateConfig | None = None) -> None:
+        """Initialize and default ``input_name`` to the package name."""
         super().__init__(config=config)
         if self.input_name is None:
             self.input_name = self.name
@@ -365,6 +368,7 @@ class FlakeInputHashUpdater(HashEntryUpdater):
         return self.input_name
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        """Resolve the latest version from the flake lock node."""
         _ = session
         node = get_flake_input_node(self._input)
         version = get_flake_input_version(node)
@@ -404,23 +408,42 @@ class FlakeInputHashUpdater(HashEntryUpdater):
             pass  # Store without fingerprint; will recompute next run
         yield UpdateEvent.value(self.name, result)
 
-    @abstractmethod
     def _compute_hash(self, info: VersionInfo) -> EventStream:
-        """Return an event stream that yields the computed hash value."""
-        raise NotImplementedError
+        """Return an event stream that yields the computed hash value.
+
+        The default implementation builds the overlay package with
+        ``FAKE_HASHES=1`` and extracts the hash from the mismatch error.
+        When ``platform_specific`` is ``True``, the build is pinned to the
+        current Nix platform.
+        """
+        _ = info
+        system = get_current_nix_platform() if self.platform_specific else None
+        return compute_overlay_hash(self.name, system=system, config=self.config)
 
     async def fetch_hashes(
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
     ) -> EventStream:
+        """Compute FOD hashes for the package overlay build."""
         _ = session
-        async for event in self._emit_single_hash_entry(
-            self._compute_hash(info),
-            error=f"Missing {self.hash_type} output",
-            hash_type=self.hash_type,
-        ):
-            yield event
+        if self.platform_specific:
+            # Platform-specific: emit a HashEntry tagged with the current platform.
+            error = f"Missing {self.hash_type} output"
+            hash_drain = ValueDrain[str]()
+            async for event in drain_value_events(self._compute_hash(info), hash_drain):
+                yield event
+            hash_value = require_value(hash_drain, error)
+            platform = get_current_nix_platform()
+            entries = [HashEntry.create(self.hash_type, hash_value, platform=platform)]
+            yield UpdateEvent.value(self.name, entries)
+        else:
+            async for event in self._emit_single_hash_entry(
+                self._compute_hash(info),
+                error=f"Missing {self.hash_type} output",
+                hash_type=self.hash_type,
+            ):
+                yield event
 
 
 class GoVendorHashUpdater(FlakeInputHashUpdater):
@@ -428,19 +451,11 @@ class GoVendorHashUpdater(FlakeInputHashUpdater):
 
     hash_type = "vendorHash"
 
-    def _compute_hash(self, info: VersionInfo) -> EventStream:
-        _ = info
-        return compute_go_vendor_hash(self.name, config=self.config)
-
 
 class CargoVendorHashUpdater(FlakeInputHashUpdater):
     """Hash updater for Cargo vendoring outputs."""
 
     hash_type = "cargoHash"
-
-    def _compute_hash(self, info: VersionInfo) -> EventStream:
-        _ = info
-        return compute_cargo_vendor_hash(self.name, config=self.config)
 
 
 class NpmDepsHashUpdater(FlakeInputHashUpdater):
@@ -448,45 +463,18 @@ class NpmDepsHashUpdater(FlakeInputHashUpdater):
 
     hash_type = "npmDepsHash"
 
-    def _compute_hash(self, info: VersionInfo) -> EventStream:
-        _ = info
-        return compute_npm_deps_hash(self.name, config=self.config)
-
 
 class UvLockHashUpdater(FlakeInputHashUpdater):
     """Hash updater for uv.lock fixed-output derivations."""
 
     hash_type = "uvLockHash"
 
-    def _compute_hash(self, info: VersionInfo) -> EventStream:
-        _ = info
-        return compute_uv_lock_hash(self.name, config=self.config)
-
 
 class BunNodeModulesHashUpdater(FlakeInputHashUpdater):
-    """Hash updater for Bun node_modules derivations."""
+    """Hash updater for Bun node_modules derivations (platform-specific)."""
 
     hash_type = "nodeModulesHash"
-
-    def _compute_hash(self, info: VersionInfo) -> EventStream:
-        _ = info
-        return compute_bun_node_modules_hash(self.name, config=self.config)
-
-    async def fetch_hashes(
-        self,
-        info: VersionInfo,
-        session: aiohttp.ClientSession,
-    ) -> EventStream:
-        """Compute hash for current platform only, emit platform-specific entry."""
-        _ = session
-        error = f"Missing {self.hash_type} output"
-        hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(self._compute_hash(info), hash_drain):
-            yield event
-        hash_value = require_value(hash_drain, error)
-        platform = get_current_nix_platform()
-        entries = [HashEntry.create(self.hash_type, hash_value, platform=platform)]
-        yield UpdateEvent.value(self.name, entries)
+    platform_specific = True
 
 
 class DenoDepsHashUpdater(FlakeInputHashUpdater):
@@ -515,6 +503,7 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
     ) -> EventStream:
+        """Compute a single FOD hash entry for the Deno deps overlay."""
         _ = session
         error = f"Missing {self.hash_type} output"
         hash_drain = ValueDrain[HashMapping]()
@@ -640,56 +629,80 @@ class DenoManifestUpdater(Updater):
         yield UpdateEvent.value(self.name, [])
 
 
-def go_vendor_updater(
+def flake_input_hash_updater(
     name: str,
+    hash_type: HashType,
     *,
     input_name: str | None = None,
-    **_kwargs: object,
-) -> type[GoVendorHashUpdater]:
-    """Create a :class:`GoVendorHashUpdater` subclass for *name*."""
-    attrs: dict[str, Any] = {"name": name, "input_name": input_name}
-    return type(f"{name}Updater", (GoVendorHashUpdater,), attrs)
+    platform_specific: bool = False,
+) -> type[FlakeInputHashUpdater]:
+    """Create a :class:`FlakeInputHashUpdater` subclass for *name*.
+
+    This is the **only** factory needed for simple overlay-based hash
+    updaters.  Adding a new hash type requires only a single call to this
+    function in the per-package ``updater.py`` — no infrastructure changes.
+
+    Parameters
+    ----------
+    name:
+        Package name (must match the overlay/package attribute).
+    hash_type:
+        The hash key in ``sources.json`` (e.g. ``"vendorHash"``).
+    input_name:
+        Flake input name if different from *name*.
+    platform_specific:
+        When ``True``, the hash is built for the current Nix platform
+        and the resulting ``HashEntry`` is tagged with a platform key
+        (used by Bun node_modules and similar platform-specific FODs).
+
+    """
+    attrs: dict[str, Any] = {
+        "name": name,
+        "input_name": input_name,
+        "hash_type": hash_type,
+        "platform_specific": platform_specific,
+    }
+    return type(f"{name}Updater", (FlakeInputHashUpdater,), attrs)
+
+
+# ── Convenience aliases (thin wrappers around flake_input_hash_updater) ──
+
+
+def go_vendor_updater(
+    name: str, *, input_name: str | None = None, **_kw: object
+) -> type[FlakeInputHashUpdater]:
+    """Shorthand: ``flake_input_hash_updater(name, "vendorHash", ...)``."""
+    return flake_input_hash_updater(name, "vendorHash", input_name=input_name)
 
 
 def cargo_vendor_updater(
-    name: str,
-    *,
-    input_name: str | None = None,
-    **_kwargs: object,
-) -> type[CargoVendorHashUpdater]:
-    """Create a :class:`CargoVendorHashUpdater` subclass for *name*."""
-    attrs: dict[str, Any] = {"name": name, "input_name": input_name}
-    return type(f"{name}Updater", (CargoVendorHashUpdater,), attrs)
+    name: str, *, input_name: str | None = None, **_kw: object
+) -> type[FlakeInputHashUpdater]:
+    """Shorthand: ``flake_input_hash_updater(name, "cargoHash", ...)``."""
+    return flake_input_hash_updater(name, "cargoHash", input_name=input_name)
 
 
 def npm_deps_updater(
-    name: str,
-    *,
-    input_name: str | None = None,
-) -> type[NpmDepsHashUpdater]:
-    """Create an :class:`NpmDepsHashUpdater` subclass for ``name``."""
-    attrs = {"name": name, "input_name": input_name}
-    return type(f"{name}Updater", (NpmDepsHashUpdater,), attrs)
+    name: str, *, input_name: str | None = None
+) -> type[FlakeInputHashUpdater]:
+    """Shorthand: ``flake_input_hash_updater(name, "npmDepsHash", ...)``."""
+    return flake_input_hash_updater(name, "npmDepsHash", input_name=input_name)
 
 
 def bun_node_modules_updater(
-    name: str,
-    *,
-    input_name: str | None = None,
-) -> type[BunNodeModulesHashUpdater]:
-    """Create a :class:`BunNodeModulesHashUpdater` subclass for ``name``."""
-    attrs = {"name": name, "input_name": input_name}
-    return type(f"{name}Updater", (BunNodeModulesHashUpdater,), attrs)
+    name: str, *, input_name: str | None = None
+) -> type[FlakeInputHashUpdater]:
+    """Shorthand for ``flake_input_hash_updater(name, "nodeModulesHash", ...)``."""
+    return flake_input_hash_updater(
+        name, "nodeModulesHash", input_name=input_name, platform_specific=True
+    )
 
 
 def uv_lock_hash_updater(
-    name: str,
-    *,
-    input_name: str | None = None,
-) -> type[UvLockHashUpdater]:
-    """Create a :class:`UvLockHashUpdater` subclass for ``name``."""
-    attrs: dict[str, Any] = {"name": name, "input_name": input_name}
-    return type(f"{name}Updater", (UvLockHashUpdater,), attrs)
+    name: str, *, input_name: str | None = None
+) -> type[FlakeInputHashUpdater]:
+    """Shorthand: ``flake_input_hash_updater(name, "uvLockHash", ...)``."""
+    return flake_input_hash_updater(name, "uvLockHash", input_name=input_name)
 
 
 def deno_deps_updater(
@@ -732,8 +745,10 @@ __all__ = [
     "UPDATERS",
     "CargoLockGitDep",
     "ChecksumProvidedUpdater",
+    "DenoDepsHashUpdater",
     "DenoManifestUpdater",
     "DownloadHashUpdater",
+    "FlakeInputHashUpdater",
     "HashEntryUpdater",
     "UpdateConfig",
     "Updater",
@@ -743,6 +758,7 @@ __all__ = [
     "cargo_vendor_updater",
     "deno_deps_updater",
     "deno_manifest_updater",
+    "flake_input_hash_updater",
     "go_vendor_updater",
     "npm_deps_updater",
     "uv_lock_hash_updater",

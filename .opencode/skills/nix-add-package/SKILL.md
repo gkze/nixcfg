@@ -233,25 +233,20 @@ Note: If using `packages/my-tool.nix` (a single file, not a directory), you'll n
 Create `packages/my-tool/updater.py` or `overlays/my-tool/updater.py`:
 
 ```python
-# Go:
+# Generic (preferred) — specify any hash type directly:
+from lib.update.updaters.base import flake_input_hash_updater
+flake_input_hash_updater("my-tool", "vendorHash")       # Go
+flake_input_hash_updater("my-tool", "cargoHash")        # Cargo
+flake_input_hash_updater("my-tool", "npmDepsHash")      # npm
+flake_input_hash_updater("my-tool", "uvLockHash")       # uv (Python)
+flake_input_hash_updater("my-tool", "nodeModulesHash",  # Bun (platform-specific)
+                         platform_specific=True)
+# With a different flake input name:
+flake_input_hash_updater("my-tool", "vendorHash", input_name="my-flake-input")
+
+# Convenience aliases (thin wrappers, also available):
 from lib.update.updaters.base import go_vendor_updater
 go_vendor_updater("my-tool")
-
-# Cargo:
-from lib.update.updaters.base import cargo_vendor_updater
-cargo_vendor_updater("my-tool")
-
-# npm:
-from lib.update.updaters.base import npm_deps_updater
-npm_deps_updater("my-tool")
-
-# Deno:
-from lib.update.updaters.base import deno_deps_updater
-deno_deps_updater("my-tool")
-
-# Bun:
-from lib.update.updaters.base import bun_node_modules_updater
-bun_node_modules_updater("my-tool")
 ```
 
 ### Checklist
@@ -553,14 +548,17 @@ ______________________________________________________________________
 
 ## Updater factory functions (in `update/updaters/base.py`)
 
-| Factory | Registers | Hash type |
+| Factory | Hash type | Notes |
 |---|---|---|
-| `go_vendor_updater(name, ...)` | `GoVendorHashUpdater` | vendorHash |
-| `cargo_vendor_updater(name, ...)` | `CargoVendorHashUpdater` | cargoHash |
-| `npm_deps_updater(name, ...)` | `NpmDepsHashUpdater` | npmDepsHash |
-| `deno_deps_updater(name, ...)` | `DenoDepsHashUpdater` | denoDepsHash |
-| `bun_node_modules_updater(name, ...)` | `BunNodeModulesHashUpdater` | nodeModulesHash |
-| `github_raw_file_updater(name, ...)` | `GitHubRawFileUpdater` | sha256 |
+| `flake_input_hash_updater(name, hash_type, ...)` | any | **Generic — preferred for new packages** |
+| `go_vendor_updater(name, ...)` | vendorHash | Convenience alias |
+| `cargo_vendor_updater(name, ...)` | cargoHash | Convenience alias |
+| `npm_deps_updater(name, ...)` | npmDepsHash | Convenience alias |
+| `uv_lock_hash_updater(name, ...)` | uvLockHash | Convenience alias |
+| `bun_node_modules_updater(name, ...)` | nodeModulesHash | Convenience alias (platform_specific=True) |
+| `deno_deps_updater(name, ...)` | denoDepsHash | Deprecated — use deno_manifest_updater |
+| `deno_manifest_updater(name, ...)` | — | For mkDenoApplication packages |
+| `github_raw_file_updater(name, ...)` | sha256 | Different base class |
 
 ## Overlay fragment convention
 
