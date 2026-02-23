@@ -327,6 +327,17 @@ async def compute_drv_fingerprint(
     return drv_path.split("-", 1)[0]
 
 
+def compute_uv_lock_hash(
+    source: str,
+    _input_name: str = "",
+    *,
+    config: UpdateConfig | None = None,
+    **_kwargs: object,
+) -> EventStream:
+    """Compute uv.lock FOD hash via overlay with ``FAKE_HASHES=1``."""
+    return _compute_overlay_based_hash(source, config=config)
+
+
 def compute_go_vendor_hash(
     source: str,
     _input_name: str = "",
@@ -396,5 +407,6 @@ __all__ = [
     "compute_go_vendor_hash",
     "compute_npm_deps_hash",
     "compute_overlay_hash",
+    "compute_uv_lock_hash",
     "get_current_nix_platform",
 ]
