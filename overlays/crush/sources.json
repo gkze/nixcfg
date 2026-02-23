@@ -1,10 +1,11 @@
 {
+  "drvHash": "090qrzihsm3il8gys306scvbp6fy50x3",
   "hashes": [
     {
-      "hash": "sha256-u2K0CmCFFrlNVUJhof/8/OtX2ruKvVAIhyyE5Uyoj6Y=",
+      "hash": "sha256-f0cQEZrwo1diUdA4B8Xjm66Ws5l/nMLJoPP6Azsibvk=",
       "hashType": "vendorHash"
     }
   ],
   "input": "crush",
-  "version": "v0.42.0"
+  "version": "v0.44.0"
 }

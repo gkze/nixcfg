@@ -5,5 +5,6 @@
       "hashType": "uvLockHash"
     }
   ],
-  "input": "nix-manipulator"
+  "input": "nix-manipulator",
+  "version": "0.1.3"
 }

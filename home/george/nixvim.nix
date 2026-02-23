@@ -237,7 +237,7 @@ in
                 ruff_fix.command = ruffCmd;
                 ruff_format.command = ruffCmd;
                 ruff_organize_imports.command = ruffCmd;
-                jsonnetfmt.command = lib.getExe pkgs.jsonnet;
+                jsonnetfmt.command = lib.getExe' pkgs.jsonnet "jsonnetfmt";
               };
             formatters_by_ft = {
               jsonnet = [ "jsonnetfmt" ];
@@ -700,7 +700,7 @@ in
           vim-nickel
         ]
         ++ lib.lists.optionals (!pkgs.stdenv.isDarwin) [ nvim-dbee ];
-      extraConfigLua =
+      initLua =
         let
           helpers = config.lib.nixvim;
           extraPluginsConfig = {

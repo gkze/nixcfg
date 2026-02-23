@@ -21,6 +21,28 @@ let
   slib = outputs.lib;
   version = slib.getFlakeVersion name;
   tauriDir = "src-tauri";
+  rustTarget = stdenv.hostPlatform.rust.rustcTarget;
+  rustTargetEnv = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] rustTarget);
+  baseTauriHook = cargo-tauri.hook;
+  tauriHook =
+    if stdenv.hostPlatform.isLinux then
+      baseTauriHook.overrideAttrs (_: {
+        name = "scratch-tauri-hook-${rustTarget}";
+
+        buildCommand = ''
+          mkdir -p "$out/nix-support"
+          cp ${baseTauriHook}/nix-support/setup-hook "$out/nix-support/setup-hook"
+
+          substituteInPlace "$out/nix-support/setup-hook" \
+            --replace-fail '"x86_64-unknown-linux-gnu"' '"${rustTarget}"' \
+            --replace-fail 'target/x86_64-unknown-linux-gnu' 'target/${rustTarget}' \
+            --replace-fail 'CC_X86_64_UNKNOWN_LINUX_GNU' 'CC_${rustTargetEnv}' \
+            --replace-fail 'CXX_X86_64_UNKNOWN_LINUX_GNU' 'CXX_${rustTargetEnv}' \
+            --replace-fail 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER' 'CARGO_TARGET_${rustTargetEnv}_LINKER'
+        '';
+      })
+    else
+      cargo-tauri.hook;
 in
 rustPlatform.buildRustPackage {
   pname = name;
@@ -37,9 +59,10 @@ rustPlatform.buildRustPackage {
 
   cargoRoot = tauriDir;
   buildAndTestSubdir = tauriDir;
+  tauriBuildFlags = lib.optionals stdenv.hostPlatform.isDarwin [ "--no-sign" ];
 
   nativeBuildInputs = [
-    cargo-tauri.hook
+    tauriHook
     npmHooks.npmConfigHook
     nodejs
     pkg-config
@@ -47,6 +70,7 @@ rustPlatform.buildRustPackage {
   ]
   ++ lib.optionals stdenv.hostPlatform.isLinux [
     wrapGAppsHook4
+    cargo-tauri
   ];
 
   buildInputs = lib.optionals stdenv.hostPlatform.isLinux [

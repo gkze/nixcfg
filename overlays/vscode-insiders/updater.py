@@ -23,6 +23,7 @@ class VSCodeInsidersUpdater(PlatformAPIUpdater):
     PLATFORMS = VSCODE_PLATFORMS
     VERSION_KEY = "productVersion"
     CHECKSUM_KEY = "sha256hash"
+    COMMIT_METADATA_KEY = "version"
 
     def _api_url(self, _api_platform: str) -> str:
         return (
