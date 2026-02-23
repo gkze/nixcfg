@@ -151,6 +151,37 @@ def test_flake_input_updater_recomputes_when_no_drv_hash() -> None:
     assert result is False  # noqa: S101
 
 
+def test_flake_input_updater_recomputes_when_version_differs() -> None:
+    """Version mismatch must force recomputation before fingerprint checks."""
+
+    async def _run() -> bool:
+        updater = _FakeFlakeInputUpdater(version="v2.0.0")
+        current = SourceEntry.model_validate(
+            {
+                "version": "v1.0.0",
+                "hashes": [
+                    {
+                        "hashType": "sha256",
+                        "hash": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
+                    },
+                ],
+                "drvHash": "abc123deadbeef",
+            },
+        )
+        info = VersionInfo(version="v2.0.0", metadata={})
+        with patch(
+            "lib.update.updaters.base.compute_drv_fingerprint",
+            new_callable=AsyncMock,
+            return_value="abc123deadbeef",
+        ) as compute_drv_fingerprint:
+            result = await updater._is_latest(current, info)  # noqa: SLF001
+            compute_drv_fingerprint.assert_not_awaited()
+            return result
+
+    result = asyncio.run(_run())
+    assert result is False  # noqa: S101
+
+
 def test_flake_input_updater_skips_when_fingerprint_matches() -> None:
     """Matching drvHash means nothing in the build closure changed."""
 
