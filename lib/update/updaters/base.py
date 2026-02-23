@@ -390,15 +390,23 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
         super().__init__(config=config)
         self._init_input_name()
 
-    async def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:  # noqa: ARG002
+    async def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:
         """Check staleness via derivation fingerprint comparison.
+
+        The source version must match first.  Even when derivation inputs are
+        unchanged, a stale version field in ``sources.json`` should trigger a
+        refresh so merged CI artifacts agree on scalar metadata.
 
         Computes the ``.drv`` hash with ``FAKE_HASHES=1`` and compares it to
         the stored ``drvHash`` in ``sources.json``.  Returns ``True`` only
         when the fingerprint matches exactly — meaning no build input in the
         entire transitive closure has changed.
         """
-        if current is None or current.drv_hash is None:
+        if current is None:
+            return False
+        if current.version != info.version:
+            return False
+        if current.drv_hash is None:
             return False
         try:
             new_fingerprint = await compute_drv_fingerprint(
