@@ -1,17 +1,19 @@
 {
   inputs,
   slib,
+  final,
   prev,
   ...
 }:
 {
-  crush =
-    let
-      version = slib.getFlakeVersion "crush";
-    in
-    prev.crush.overrideAttrs {
-      inherit version;
-      src = inputs.crush;
-      vendorHash = slib.sourceHash "crush" "vendorHash";
-    };
+  crush = final.mkGoCliPackage {
+    pname = "crush";
+    input = inputs.crush;
+    subPackages = [ "." ];
+    cmdName = "crush";
+    version = slib.getFlakeVersion "crush";
+    vendorHash = slib.sourceHash "crush" "vendorHash";
+    go = prev.go_1_26;
+    doCheck = false;
+  };
 }

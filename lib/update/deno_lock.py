@@ -15,7 +15,7 @@ import logging
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
-import httpx
+import aiohttp
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -144,20 +144,20 @@ def _guess_media_type(path: str) -> str:
 
 
 async def _fetch_jsr_meta(
-    client: httpx.AsyncClient,
+    client: aiohttp.ClientSession,
     scope: str,
     name: str,
     version: str,
 ) -> dict[str, Any]:
     """Fetch the ``_meta.json`` for a JSR package version."""
     url = f"{JSR_REGISTRY}/{scope}/{name}/{version}_meta.json"
-    resp = await client.get(url)
-    resp.raise_for_status()
-    return resp.json()
+    async with client.get(url) as resp:
+        resp.raise_for_status()
+        return await resp.json()
 
 
 async def _resolve_jsr_package(
-    client: httpx.AsyncClient,
+    client: aiohttp.ClientSession,
     pkg_key: str,
     pkg_info: dict[str, Any],
 ) -> JsrPackage:
@@ -195,9 +195,10 @@ async def _resolve_jsr_package(
     ]:
         meta_url = f"{JSR_REGISTRY}{meta_path}"
         cache_path = _url_to_cache_path(meta_url)
-        meta_resp = await client.get(meta_url)
-        meta_resp.raise_for_status()
-        meta_sha256 = hashlib.sha256(meta_resp.content).hexdigest()
+        async with client.get(meta_url) as meta_resp:
+            meta_resp.raise_for_status()
+            meta_content = await meta_resp.read()
+        meta_sha256 = hashlib.sha256(meta_content).hexdigest()
         files.append(
             JsrFile(
                 url=meta_url,
@@ -225,7 +226,8 @@ async def _resolve_all_jsr(
         async with sem:
             return await coro
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    timeout = aiohttp.ClientTimeout(total=30.0)
+    async with aiohttp.ClientSession(timeout=timeout) as client:
         tasks = [
             _with_sem(_resolve_jsr_package(client, pkg_key, pkg_info))
             for pkg_key, pkg_info in lock_jsr.items()

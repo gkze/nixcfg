@@ -1,7 +1,8 @@
 {
+  "drvHash": "1amnmrl0kbbz2ggblml8yja9nkkgf3l8",
   "hashes": [
     {
-      "hash": "sha256-/KvQZtWGcNt2N3VxqRAmBVHs9bEj7zBlvdHZEZ7IXFk=",
+      "hash": "sha256-wfRJHCgoaLViehy6EXWxGJldZdbkneYEzFvYTSZqIaA=",
       "hashType": "vendorHash"
     }
   ],

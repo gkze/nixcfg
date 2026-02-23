@@ -58,6 +58,13 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
         for key in self.EXTRA_EQUALITY_KEYS:
             values = {p: info[key] for p, info in platform_info.items()}
             metadata[key] = _verify_platform_versions(values, f"{self.name} {key}")
+        if self.COMMIT_METADATA_KEY:
+            commits = {
+                p: info[self.COMMIT_METADATA_KEY] for p, info in platform_info.items()
+            }
+            metadata["commit"] = _verify_platform_versions(
+                commits, f"{self.name} commit"
+            )
         return VersionInfo(version=version, metadata=metadata)
 
     async def fetch_checksums(
@@ -80,7 +87,5 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
             nix_plat: self._download_url(api_plat, info)
             for nix_plat, api_plat in self.PLATFORMS.items()
         }
-        commit = None
-        if self.COMMIT_METADATA_KEY:
-            commit = cast("str | None", info.metadata.get(self.COMMIT_METADATA_KEY))
+        commit = cast("str | None", info.metadata.get("commit"))
         return self._build_result_with_urls(info, hashes, urls, commit=commit)

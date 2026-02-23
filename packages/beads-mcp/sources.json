@@ -1,9 +1,10 @@
 {
   "hashes": [
     {
-      "hash": "sha256-Fg2S+/STXWrpkj1Ge9nMmIIE7lP6rkoWJXaoohAoB8Y=",
+      "hash": "sha256-AbEf5Ps0coJGqLObNO+0GZ9SpFaM212iV3vvc+6Ro5g=",
       "hashType": "uvLockHash"
     }
   ],
-  "input": "beads-mcp"
+  "input": "beads",
+  "version": "v0.56.1"
 }

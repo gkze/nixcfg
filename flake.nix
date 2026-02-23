@@ -90,7 +90,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     scratch = {
-      url = "github:erictli/scratch/v0.4.0";
+      url = "github:erictli/scratch/v0.7.1";
       flake = false;
     };
     stylix = {
@@ -111,7 +111,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.23.2";
+      url = "github:max-sixty/worktrunk/v0.27.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -119,7 +119,7 @@
       flake = false;
     };
     beads = {
-      url = "github:steveyegge/beads/v0.49.6";
+      url = "github:steveyegge/beads/v0.56.1";
       flake = false;
     };
     catppuccin-bat = {
@@ -127,24 +127,24 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.101.0";
+      url = "github:openai/codex/rust-v0.104.0";
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.3.1";
+      url = "github:gkze/curator/v0.3.3";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.42.0";
+      url = "github:charmbracelet/crush/v0.44.0";
       flake = false;
     };
     gemini-cli = {
-      url = "github:google-gemini/gemini-cli/v0.28.2";
+      url = "github:google-gemini/gemini-cli/v0.29.6";
       flake = false;
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
     gogcli = {
-      url = "github:steipete/gogcli/v0.9.0";
+      url = "github:steipete/gogcli/v0.11.0";
       flake = false;
     };
     gitui-key-config = {
@@ -164,7 +164,7 @@
       flake = false;
     };
     linear-cli = {
-      url = "github:schpet/linear-cli/v1.9.1";
+      url = "github:schpet/linear-cli/v1.10.0";
       flake = false;
     };
     macfuse = {

@@ -260,6 +260,7 @@
     yazi = {
       enable = true;
       enableZshIntegration = true;
+      shellWrapperName = "y";
       settings.manager.sort_by = "alphabetical";
     };
     zellij = {
