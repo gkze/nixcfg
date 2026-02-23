@@ -38,6 +38,7 @@ from lib.update.nix import (
     compute_drv_fingerprint,
     compute_go_vendor_hash,
     compute_npm_deps_hash,
+    compute_uv_lock_hash,
     get_current_nix_platform,
 )
 from lib.update.nix_deno import compute_deno_deps_hash
@@ -452,6 +453,16 @@ class NpmDepsHashUpdater(FlakeInputHashUpdater):
         return compute_npm_deps_hash(self.name, config=self.config)
 
 
+class UvLockHashUpdater(FlakeInputHashUpdater):
+    """Hash updater for uv.lock fixed-output derivations."""
+
+    hash_type = "uvLockHash"
+
+    def _compute_hash(self, info: VersionInfo) -> EventStream:
+        _ = info
+        return compute_uv_lock_hash(self.name, config=self.config)
+
+
 class BunNodeModulesHashUpdater(FlakeInputHashUpdater):
     """Hash updater for Bun node_modules derivations."""
 
@@ -671,6 +682,16 @@ def bun_node_modules_updater(
     return type(f"{name}Updater", (BunNodeModulesHashUpdater,), attrs)
 
 
+def uv_lock_hash_updater(
+    name: str,
+    *,
+    input_name: str | None = None,
+) -> type[UvLockHashUpdater]:
+    """Create a :class:`UvLockHashUpdater` subclass for ``name``."""
+    attrs: dict[str, Any] = {"name": name, "input_name": input_name}
+    return type(f"{name}Updater", (UvLockHashUpdater,), attrs)
+
+
 def deno_deps_updater(
     name: str,
     *,
@@ -724,4 +745,5 @@ __all__ = [
     "deno_manifest_updater",
     "go_vendor_updater",
     "npm_deps_updater",
+    "uv_lock_hash_updater",
 ]

@@ -23,6 +23,7 @@ from lib.update.updaters.base import (
     deno_deps_updater,
     go_vendor_updater,
     npm_deps_updater,
+    uv_lock_hash_updater,
 )
 from lib.update.updaters.github_raw_file import (
     GitHubRawFileUpdater,
@@ -65,4 +66,5 @@ __all__ = [
     "github_raw_file_updater",
     "go_vendor_updater",
     "npm_deps_updater",
+    "uv_lock_hash_updater",
 ]
