@@ -13,6 +13,7 @@ import aiohttp
 from aiohttp_retry import ExponentialRetry, RetryClient
 
 from lib.update.config import UpdateConfig, resolve_active_config
+from lib.update.constants import resolve_timeout_alias
 
 type JSONDict = dict[str, Any]
 type JSONList = list[Any]
@@ -81,20 +82,11 @@ def _resolve_timeout_alias(
     request_timeout: float | None,
     kwargs: dict[str, object],
 ) -> float | None:
-    timeout_alias = kwargs.pop("timeout", None)
-    if timeout_alias is not None:
-        if request_timeout is not None:
-            msg = "Pass only one of 'request_timeout' or legacy 'timeout'"
-            raise TypeError(msg)
-        if not isinstance(timeout_alias, int | float):
-            msg = "timeout must be a number"
-            raise TypeError(msg)
-        request_timeout = float(timeout_alias)
-    if kwargs:
-        unknown = ", ".join(sorted(kwargs))
-        msg = f"Unexpected keyword argument(s): {unknown}"
-        raise TypeError(msg)
-    return request_timeout
+    return resolve_timeout_alias(
+        named_timeout=request_timeout,
+        named_timeout_label="request_timeout",
+        kwargs=kwargs,
+    )
 
 
 async def _request(  # noqa: PLR0913
@@ -172,6 +164,25 @@ async def fetch_url(
         config=config,
     )
     return payload
+
+
+async def fetch_headers(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    request_timeout: float | None = None,
+    config: UpdateConfig | None = None,
+) -> dict[str, str]:
+    """Send a HEAD request and return the response headers."""
+    config = resolve_active_config(config)
+    _, headers = await _request(
+        session,
+        url,
+        method="HEAD",
+        request_timeout=request_timeout,
+        config=config,
+    )
+    return headers
 
 
 async def fetch_json(

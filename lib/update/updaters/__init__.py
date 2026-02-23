@@ -10,7 +10,7 @@ import importlib.util
 import sys
 
 from lib.update.paths import package_file_map
-from lib.update.updaters.base import (
+from lib.update.updaters.base import (  # noqa: F401  (re-exports)
     UPDATERS,
     CargoLockGitDep,
     ChecksumProvidedUpdater,
@@ -28,6 +28,7 @@ from lib.update.updaters.base import (
     npm_deps_updater,
     uv_lock_hash_updater,
 )
+from lib.update.updaters.base import __all__ as _base_all
 from lib.update.updaters.github_raw_file import (
     GitHubRawFileUpdater,
     github_raw_file_updater,
@@ -53,24 +54,10 @@ def _discover_updaters() -> None:
 
 _discover_updaters()
 
-__all__ = [
-    "UPDATERS",
-    "CargoLockGitDep",
-    "ChecksumProvidedUpdater",
-    "DenoDepsHashUpdater",
-    "DownloadHashUpdater",
-    "FlakeInputHashUpdater",
+# Re-export base.__all__ plus this package's own additions.
+__all__ = [  # noqa: PLE0604
+    *_base_all,
     "GitHubRawFileUpdater",
-    "HashEntryUpdater",
     "PlatformAPIUpdater",
-    "Updater",
-    "VersionInfo",
-    "bun_node_modules_updater",
-    "cargo_vendor_updater",
-    "deno_deps_updater",
-    "flake_input_hash_updater",
     "github_raw_file_updater",
-    "go_vendor_updater",
-    "npm_deps_updater",
-    "uv_lock_hash_updater",
 ]

@@ -74,7 +74,7 @@ class Updater(ABC):
 
     name: str
     config: UpdateConfig
-    required_tools: tuple[str, ...] = ("nix",)
+    required_tools: ClassVar[tuple[str, ...]] = ("nix",)
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Register concrete updater subclasses in :data:`UPDATERS`."""
@@ -261,8 +261,8 @@ class DownloadHashUpdater(Updater):
     """Updater that computes hashes from downloadable platform artifacts."""
 
     PLATFORMS: ClassVar[dict[str, str]]
-    BASE_URL: str = ""
-    required_tools = ("nix", "nix-prefetch-url")
+    BASE_URL: ClassVar[str] = ""
+    required_tools: ClassVar[tuple[str, ...]] = ("nix", "nix-prefetch-url")
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         """Return artifact URL for ``platform``."""
@@ -310,7 +310,7 @@ class HashEntryUpdater(Updater):
     """Updater that emits structured :class:`HashEntry` values."""
 
     input_name: str | None = None
-    required_tools = ("nix", "nix-prefetch-url")
+    required_tools: ClassVar[tuple[str, ...]] = ("nix", "nix-prefetch-url")
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build a source entry containing hash entries and optional input."""
@@ -334,31 +334,21 @@ class HashEntryUpdater(Updater):
         yield UpdateEvent.value(self.name, [HashEntry.create(hash_type, hash_value)])
 
 
-class FlakeInputHashUpdater(HashEntryUpdater):
-    """Base updater for hash-only sources backed by flake inputs.
+class FlakeInputMixin:
+    """Shared logic for updaters backed by a flake input.
 
-    Uses derivation fingerprinting for maximally precise staleness detection.
-    Instead of comparing version strings (which miss nixpkgs bumps, toolchain
-    changes, and build-script edits), we evaluate the package with a sentinel
-    hash and compare the resulting ``.drv`` path.  Since the sentinel is
-    constant, the ``.drv`` hash is a pure function of the entire transitive
-    build-input closure — equivalent to Nix's own rebuild detection.
-
-    Simple subclasses only need to set ``hash_type`` (and optionally
-    ``platform_specific = True`` for platform-keyed hashes like Bun).  The
-    default ``_compute_hash`` calls :func:`compute_overlay_hash` directly.
+    Provides ``input_name`` defaulting (to ``self.name``), the ``_input``
+    accessor property, and a ``fetch_latest`` implementation that reads
+    the flake lock.  Used by :class:`FlakeInputHashUpdater` and
+    :class:`DenoManifestUpdater`.
     """
 
     input_name: str | None = None
-    hash_type: HashType
-    platform_specific: bool = False
-    required_tools = ("nix",)
 
-    def __init__(self, *, config: UpdateConfig | None = None) -> None:
-        """Initialize and default ``input_name`` to the package name."""
-        super().__init__(config=config)
+    def _init_input_name(self) -> None:
+        """Default ``input_name`` to ``self.name`` when unset."""
         if self.input_name is None:
-            self.input_name = self.name
+            self.input_name = self.name  # type: ignore[attr-defined]
 
     @property
     def _input(self) -> str:
@@ -373,6 +363,32 @@ class FlakeInputHashUpdater(HashEntryUpdater):
         node = get_flake_input_node(self._input)
         version = get_flake_input_version(node)
         return VersionInfo(version=version, metadata={"node": node})
+
+
+class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
+    """Base updater for hash-only sources backed by flake inputs.
+
+    Uses derivation fingerprinting for maximally precise staleness detection.
+    Instead of comparing version strings (which miss nixpkgs bumps, toolchain
+    changes, and build-script edits), we evaluate the package with a sentinel
+    hash and compare the resulting ``.drv`` path.  Since the sentinel is
+    constant, the ``.drv`` hash is a pure function of the entire transitive
+    build-input closure — equivalent to Nix's own rebuild detection.
+
+    Simple subclasses only need to set ``hash_type`` (and optionally
+    ``platform_specific = True`` for platform-keyed hashes like Bun).  The
+    default ``_compute_hash`` calls :func:`compute_overlay_hash` directly.
+    """
+
+    hash_type: HashType
+    platform_specific: bool = False
+    _cached_fingerprint: str | None = None
+    required_tools: ClassVar[tuple[str, ...]] = ("nix",)
+
+    def __init__(self, *, config: UpdateConfig | None = None) -> None:
+        """Initialize and default ``input_name`` to the package name."""
+        super().__init__(config=config)
+        self._init_input_name()
 
     async def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:  # noqa: ARG002
         """Check staleness via derivation fingerprint comparison.
@@ -446,37 +462,6 @@ class FlakeInputHashUpdater(HashEntryUpdater):
                 yield event
 
 
-class GoVendorHashUpdater(FlakeInputHashUpdater):
-    """Hash updater for Go vendoring outputs."""
-
-    hash_type = "vendorHash"
-
-
-class CargoVendorHashUpdater(FlakeInputHashUpdater):
-    """Hash updater for Cargo vendoring outputs."""
-
-    hash_type = "cargoHash"
-
-
-class NpmDepsHashUpdater(FlakeInputHashUpdater):
-    """Hash updater for npm dependency derivations."""
-
-    hash_type = "npmDepsHash"
-
-
-class UvLockHashUpdater(FlakeInputHashUpdater):
-    """Hash updater for uv.lock fixed-output derivations."""
-
-    hash_type = "uvLockHash"
-
-
-class BunNodeModulesHashUpdater(FlakeInputHashUpdater):
-    """Hash updater for Bun node_modules derivations (platform-specific)."""
-
-    hash_type = "nodeModulesHash"
-    platform_specific = True
-
-
 class DenoDepsHashUpdater(FlakeInputHashUpdater):
     """Hash updater for per-platform Deno dependency derivations.
 
@@ -524,7 +509,7 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
         yield UpdateEvent.value(self.name, entries)
 
 
-class DenoManifestUpdater(Updater):
+class DenoManifestUpdater(FlakeInputMixin, Updater):
     """Updater for Deno packages built with ``mkDenoApplication``.
 
     Instead of computing FOD hashes, this updater resolves the ``deno.lock``
@@ -537,30 +522,14 @@ class DenoManifestUpdater(Updater):
     package definition.
     """
 
-    input_name: str | None = None
     lock_file: str = "deno.lock"
     manifest_file: str = "deno-deps.json"
-    required_tools: tuple[str, ...] = ()
+    required_tools: ClassVar[tuple[str, ...]] = ()
 
     def __init__(self, *, config: UpdateConfig | None = None) -> None:
         """Create an updater bound to active config values."""
         super().__init__(config=config)
-        if self.input_name is None:
-            self.input_name = self.name
-
-    @property
-    def _input(self) -> str:
-        if self.input_name is None:
-            msg = "Missing input name"
-            raise RuntimeError(msg)
-        return self.input_name
-
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Fetch latest version from the flake lock."""
-        _ = session
-        node = get_flake_input_node(self._input)
-        version = get_flake_input_version(node)
-        return VersionInfo(version=version, metadata={"node": node})
+        self._init_input_name()
 
     async def fetch_hashes(
         self,

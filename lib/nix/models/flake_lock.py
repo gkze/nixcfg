@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -140,7 +141,7 @@ class FlakeLock(BaseModel):
         return cls.model_validate(data)
 
     @classmethod
-    def from_dict(cls, data: dict) -> FlakeLock:
+    def from_dict(cls, data: dict[str, Any]) -> FlakeLock:
         """Parse from an already-loaded JSON dictionary."""
         return cls.model_validate(data)
 

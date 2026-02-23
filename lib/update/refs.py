@@ -11,6 +11,7 @@ from packaging.version import InvalidVersion, Version
 if TYPE_CHECKING:
     import asyncio
     from collections.abc import Iterable
+    from typing import Any
 
     import aiohttp
 
@@ -147,7 +148,7 @@ def _select_tag(tags: Iterable[str], prefix: str) -> str | None:
 
 
 def _select_tag_from_releases(
-    releases: Iterable[dict[str, str]],
+    releases: Iterable[dict[str, Any]],
     prefix: str,
 ) -> str | None:
     return _select_tag(

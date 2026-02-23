@@ -23,6 +23,7 @@ from lib.update.events import (
 )
 from lib.update.flake import get_flake_input_node, get_flake_input_version, nixpkgs_expr
 from lib.update.nix import compute_fixed_output_hash
+from lib.update.nix_expr import compact_nix_expr
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import HashEntryUpdater, VersionInfo
 
@@ -33,10 +34,6 @@ class ScratchUpdater(HashEntryUpdater):
     name = "scratch"
     input_name = "scratch"
     required_tools = ("nix",)
-
-    @staticmethod
-    def _compact_nix_expr(expr: str) -> str:
-        return " ".join(line.strip() for line in expr.splitlines() if line.strip())
 
     @staticmethod
     def _wrap_expr_with_flake_and_pkgs(body_expr: NixExpression) -> str:
@@ -54,7 +51,7 @@ class ScratchUpdater(HashEntryUpdater):
             ],
             value=body_expr,
         )
-        return ScratchUpdater._compact_nix_expr(expression.rebuild())
+        return compact_nix_expr(expression.rebuild())
 
     @staticmethod
     def _expr_for_npm_deps() -> str:

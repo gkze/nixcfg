@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, ClassVar
 if TYPE_CHECKING:
     import aiohttp
 
-from lib.update.net import _request
+from lib.update.net import fetch_headers
 from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
 
 
@@ -27,10 +27,9 @@ class SculptorUpdater(DownloadHashUpdater):
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Read the Last-Modified header and derive a date-based version."""
         url = f"{self.BASE_URL}/Sculptor.dmg"
-        _payload, headers = await _request(
+        headers = await fetch_headers(
             session,
             url,
-            method="HEAD",
             request_timeout=self.config.default_timeout,
             config=self.config,
         )

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from lib.update.constants import FAKE_HASH
+
 
 def default_max_nix_builds() -> int:
     """Return a conservative default for concurrent nix build jobs."""
@@ -43,7 +45,7 @@ class UpdateSettings(BaseSettings):
     user_agent: str = "nixcfg"
     retries: int = 3
     retry_backoff: float = 1.0
-    fake_hash: str = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    fake_hash: str = FAKE_HASH
     max_nix_builds: int = default_max_nix_builds()
     deno_deps_platforms: tuple[str, ...] = (
         "aarch64-darwin",

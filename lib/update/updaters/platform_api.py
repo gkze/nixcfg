@@ -67,11 +67,12 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
     ) -> dict[str, str]:
         """Extract per-platform checksums from fetched metadata."""
         _ = session
-        if not self.CHECKSUM_KEY:
+        checksum_key = self.CHECKSUM_KEY
+        if not checksum_key:
             msg = "No CHECKSUM_KEY defined"
             raise NotImplementedError(msg)
         platform_info = info.metadata["platform_info"]
-        return {p: platform_info[p][self.CHECKSUM_KEY] for p in self.PLATFORMS}
+        return {p: platform_info[p][checksum_key] for p in self.PLATFORMS}
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build result with platform download URLs and computed hashes."""

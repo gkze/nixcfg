@@ -9,11 +9,10 @@ if TYPE_CHECKING:
 
 from lib.nix.models.sources import HashEntry, HashMapping
 from lib.update.events import (
+    CapturedValue,
     EventStream,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    require_value,
+    capture_stream_value,
 )
 from lib.update.net import (
     fetch_github_default_branch,
@@ -69,15 +68,15 @@ class GitHubRawFileUpdater(HashEntryUpdater):
         """Compute a sha256 hash entry for the resolved raw file URL."""
         _ = session
         url = github_raw_url(self.owner, self.repo, info.metadata["rev"], self.path)
-        hash_drain = ValueDrain[HashMapping]()
-        async for event in drain_value_events(
+        async for item in capture_stream_value[HashMapping](
             compute_url_hashes(self.name, [url]),
-            hash_drain,
+            error="Missing hash output",
         ):
-            yield event
-        hashes_by_url = require_value(hash_drain, "Missing hash output")
-        hash_value = hashes_by_url[url]
-        yield UpdateEvent.value(
-            self.name,
-            [HashEntry.create("sha256", hash_value, url=url)],
-        )
+            if isinstance(item, CapturedValue):
+                hash_value = item.captured[url]
+                yield UpdateEvent.value(
+                    self.name,
+                    [HashEntry.create("sha256", hash_value, url=url)],
+                )
+            else:
+                yield item

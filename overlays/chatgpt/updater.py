@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING, ClassVar
 if TYPE_CHECKING:
     import aiohttp
 
-    from lib.nix.models.sources import SourceEntry, SourceHashes
-
 from lib.update.net import fetch_url
 from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
 
@@ -73,10 +71,3 @@ class ChatGPTUpdater(DownloadHashUpdater):
         """Return the appcast-provided download URL for Darwin builds."""
         _ = platform
         return info.metadata["url"]
-
-    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
-        """Build sources entry with per-system URL mapping."""
-        # DownloadHashUpdater's default implementation would already do this,
-        # but keep it explicit since the download URL comes from appcast.
-        urls = self._platform_urls(info)
-        return self._build_result_with_urls(info, hashes, urls)
