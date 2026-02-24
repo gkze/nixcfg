@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.scripts]
-nixcfg = "nixcfg:app"
+nixcfg = "nixcfg:main"
 
 [project.optional-dependencies]
 codegen = ["datamodel-code-generator[http]>=0.53.0", "referencing>=0.37.0"]

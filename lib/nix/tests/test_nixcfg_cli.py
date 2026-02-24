@@ -65,3 +65,17 @@ def test_nixcfg_ci_registers_sources_json_diff(monkeypatch: _MonkeyPatchLike) ->
 
     assert result.exit_code == 0  # noqa: S101
     assert called == [[]]  # noqa: S101
+
+
+def test_nixcfg_main_uses_stable_prog_name(monkeypatch: _MonkeyPatchLike) -> None:
+    """Ensure help usage keeps `nixcfg` instead of wrapper/store paths."""
+    called: dict[str, str] = {}
+
+    def _fake_app(*, prog_name: str) -> None:
+        called["prog_name"] = prog_name
+
+    monkeypatch.setattr("nixcfg.app", _fake_app)
+
+    nixcfg.main()
+
+    assert called["prog_name"] == "nixcfg"  # noqa: S101
