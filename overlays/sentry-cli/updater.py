@@ -11,7 +11,7 @@ from nix_manipulator.parser import parse
 if TYPE_CHECKING:
     import aiohttp
 
-from lib.nix.models.sources import HashEntry
+from lib.nix.models.sources import HashEntry, SourceHashes
 from lib.update.events import (
     CapturedValue,
     EventStream,
@@ -124,8 +124,11 @@ class SentryCliUpdater(Updater):
 
         yield UpdateEvent.value(
             self.name,
-            [
-                HashEntry.create("srcHash", src_hash),
-                HashEntry.create("cargoHash", cargo_hash),
-            ],
+            cast(
+                "SourceHashes",
+                [
+                    HashEntry.create("srcHash", src_hash),
+                    HashEntry.create("cargoHash", cargo_hash),
+                ],
+            ),
         )

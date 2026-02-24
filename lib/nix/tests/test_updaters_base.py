@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import aiohttp
 
-from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.updaters.base import (
     FlakeInputHashUpdater,
@@ -38,12 +39,15 @@ class _FakeHashEntryUpdater(HashEntryUpdater):
         self.fetch_hashes_called = True
         yield UpdateEvent.value(
             self.name,
-            [
-                HashEntry.create(
-                    hash_type="sha256",
-                    hash_value="sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
-                ),
-            ],
+            cast(
+                "SourceHashes",
+                [
+                    HashEntry.create(
+                        hash_type="sha256",
+                        hash_value="sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
+                    ),
+                ],
+            ),
         )
 
 

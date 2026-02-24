@@ -346,10 +346,21 @@
                 ruff = {
                   enable = true;
                   files = lintFiles.ruff.regex;
+                  entry = "${lib.getExe pkgs.ruff} check --config pyproject.toml .";
+                  pass_filenames = false;
+                  always_run = true;
                 };
                 ruff-format = {
                   enable = true;
                   files = lintFiles.ruff.regex;
+                };
+                ty = {
+                  enable = true;
+                  files = lintFiles.ruff.regex;
+                  package = pkgs.ty;
+                  entry = "${lib.getExe pkgs.ty} check .";
+                  pass_filenames = false;
+                  always_run = true;
                 };
                 # Shell
                 shellcheck = {
@@ -477,6 +488,18 @@
             ${lib.getExe outputs'.formatter} .
           ''
         );
+
+        checks.python =
+          { lib, pkgs, ... }:
+          pkgs.runCommand "check-python" { } ''
+            export HOME="$TMPDIR"
+            export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
+            cp -a ${./.} src
+            cd src
+            ${lib.getExe pkgs.ruff} check --config pyproject.toml .
+            ${lib.getExe pkgs.ty} check .
+            touch $out
+          '';
       }
     );
 }
