@@ -27,7 +27,7 @@ let
 in
 {
   options.profiles.work = {
-    enable = mkEnableOption "work (Town.com) profile — adds work packages, MCP servers, and shell integrations";
+    enable = mkEnableOption "work profile — adds work packages, MCP servers, and shell integrations";
   };
 
   config = mkIf cfg.enable {
@@ -110,7 +110,7 @@ in
     programs = {
       topgrade.settings.misc.disable = [
         # "bun"
-        # "gcloud"
+        "gcloud"
         # "jetbrains_datagrip"
         # "uv"
       ];

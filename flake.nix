@@ -131,7 +131,7 @@
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.3.3";
+      url = "github:gkze/curator/v0.3.4";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
@@ -281,6 +281,38 @@
         imports = [ flakelight-darwin.flakelightModules.default ];
 
         homeConfigurations.george = import ./home/george { outputs = self; };
+
+        # Public module API for consuming this repo as a framework.
+        nixosModules = {
+          nixcfgCommon = ./modules/common.nix;
+          nixcfgBase = ./modules/nixos/base.nix;
+          nixcfgProfiles = ./modules/nixos/profiles.nix;
+        };
+
+        darwinModules = {
+          nixcfgCommon = ./modules/common.nix;
+          nixcfgBase = ./modules/darwin/base.nix;
+          nixcfgProfiles = ./modules/darwin/profiles.nix;
+          nixcfgHomebrew = ./modules/darwin/homebrew.nix;
+        };
+
+        homeModules = {
+          nixcfgBase = ./modules/home/base.nix;
+          nixcfgGit = ./modules/home/git.nix;
+          nixcfgProfiles = ./modules/home/profiles.nix;
+          nixcfgPackages = ./modules/home/packages.nix;
+          nixcfgOpencode = ./modules/home/opencode.nix;
+          nixcfgTheme = ./modules/home/theme.nix;
+          nixcfgFonts = ./modules/home/fonts.nix;
+          nixcfgStylix = ./modules/home/stylix.nix;
+          nixcfgZsh = ./modules/home/zsh.nix;
+          nixcfgDarwin = ./modules/home/darwin.nix;
+          nixcfgLinux = ./modules/home/linux.nix;
+          nixcfgLanguageBun = ./modules/home/languages/bun.nix;
+          nixcfgLanguageGo = ./modules/home/languages/go.nix;
+          nixcfgLanguagePython = ./modules/home/languages/python.nix;
+          nixcfgLanguageRust = ./modules/home/languages/rust.nix;
+        };
 
         withOverlays = [
           devshell.overlays.default

@@ -32,6 +32,20 @@ After changes are made:
 nh (os|darwin) switch -a . # os for NixOS, darwin for macOS
 ```
 
+## Reuse as a framework
+
+This flake can be consumed by another repository as a module framework.
+
+- Exported module sets:
+  - `darwinModules` (`nixcfgCommon`, `nixcfgBase`, `nixcfgProfiles`, `nixcfgHomebrew`)
+  - `nixosModules` (`nixcfgCommon`, `nixcfgBase`, `nixcfgProfiles`)
+  - `homeModules` (base/profile/theme/fonts, git, package sets, opencode, stylix, zsh, darwin/linux, and language modules)
+- Exported constructors in `lib`:
+  - `mkSystem`, `mkDarwinHost`, `mkHome`, `mkHomeModules`
+
+Site-specific policy (for example cache keys, org profile settings, host/user modules)
+should live in the consuming repository, while these shared modules stay generic.
+
 ## Development
 
 - Enter the dev environment with `nix develop` (or `direnv allow` if you use direnv).

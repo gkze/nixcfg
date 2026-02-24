@@ -8,7 +8,7 @@
   };
   emails = {
     personal = "george.kontridze@gmail.com";
-    town = "george@town.com";
+    town = "george@corp.town.com";
   };
   gpg.keys = {
     primary = "4FE536354F4B603BD260AD33EF550412DBEBCE71";

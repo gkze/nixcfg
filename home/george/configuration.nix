@@ -15,16 +15,16 @@
       linux = ./nixos.nix;
     }
     .${slib.kernel system}
-    ./bun.nix
-    ./git.nix
-    ./go.nix
+    "${slib.modulesPath}/home/languages/bun.nix"
+    "${slib.modulesPath}/home/git.nix"
+    "${slib.modulesPath}/home/languages/go.nix"
     ./nixvim.nix
-    ./opencode.nix
-    ./packages.nix
-    ./python.nix
-    ./rust.nix
-    ./stylix.nix
-    ./zsh.nix
+    "${slib.modulesPath}/home/opencode.nix"
+    "${slib.modulesPath}/home/packages.nix"
+    "${slib.modulesPath}/home/languages/python.nix"
+    "${slib.modulesPath}/home/languages/rust.nix"
+    "${slib.modulesPath}/home/stylix.nix"
+    "${slib.modulesPath}/home/zsh.nix"
   ];
 
   sops = {
@@ -111,11 +111,34 @@
 
   xdg.configFile."zen-folders.yaml".source = ./zen-folders.yaml;
 
-  languages = {
-    bun.enable = true;
-    go.enable = true;
-    python.enable = true;
-    rust.enable = true;
+  nixcfg = {
+    languages = {
+      bun.enable = true;
+      go.enable = true;
+      python.enable = true;
+      rust.enable = true;
+    };
+    git = {
+      signingKey = userMeta.gpg.keys.signing;
+      identities = {
+        personal = {
+          name = userMeta.name.user.github;
+          email = userMeta.emails.personal;
+          conditions = [
+            "gitdir:${config.xdg.configHome}/nixcfg/**"
+            "gitdir:~/${slib.srcDirBase system}/github.com/**"
+          ];
+        };
+        work = {
+          name = userMeta.name.user.github;
+          email = userMeta.emails.town;
+          conditions = [
+            "gitdir:~/${slib.srcDirBase system}/github.com/townco/**"
+          ];
+        };
+      };
+    };
+    stylix.wallpaper = ./wallpaper.jpeg;
   };
 
   programs = {
