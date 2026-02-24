@@ -331,7 +331,10 @@ class HashEntryUpdater(Updater):
         async for event in drain_value_events(events, hash_drain):
             yield event
         hash_value = require_value(hash_drain, error)
-        yield UpdateEvent.value(self.name, [HashEntry.create(hash_type, hash_value)])
+        yield UpdateEvent.value(
+            self.name,
+            cast("SourceHashes", [HashEntry.create(hash_type, hash_value)]),
+        )
 
 
 class FlakeInputMixin:
@@ -603,7 +606,7 @@ class DenoManifestUpdater(FlakeInputMixin, Updater):
         )
 
         # No hash entries — mkDenoApplication uses the manifest directly.
-        yield UpdateEvent.value(self.name, [])
+        yield UpdateEvent.value(self.name, cast("SourceHashes", []))
 
 
 def flake_input_hash_updater(

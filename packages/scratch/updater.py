@@ -135,10 +135,13 @@ class ScratchUpdater(HashEntryUpdater):
 
         yield UpdateEvent.value(
             self.name,
-            [
-                HashEntry.create("npmDepsHash", npm_hash),
-                HashEntry.create("cargoHash", cargo_hash),
-            ],
+            cast(
+                "SourceHashes",
+                [
+                    HashEntry.create("npmDepsHash", npm_hash),
+                    HashEntry.create("cargoHash", cargo_hash),
+                ],
+            ),
         )
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:

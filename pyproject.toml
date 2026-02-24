@@ -71,6 +71,9 @@ python-version = "3.14"
 all = "error"
 # Not all transitive dependencies are visible to Ty in the venv.
 unresolved-import = "ignore"
+# Ty can report this inconsistently when dependency visibility differs
+# (e.g., Nix sandbox checks vs local venv checks).
+unused-type-ignore-comment = "ignore"
 
 [tool.ty.terminal]
 error-on-warning = true

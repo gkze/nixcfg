@@ -24,6 +24,19 @@
     };
   });
 
+  # nixpkgs#487201 added wayland unconditionally for czkawka, which breaks
+  # Darwin evaluation because wayland is marked badPlatforms on Darwin.
+  # Upstream Czkawka ships macOS GUI builds, so keep it available on Darwin.
+  czkawka =
+    if prev.stdenv.hostPlatform.isDarwin then
+      prev.czkawka.overrideAttrs (old: {
+        buildInputs = builtins.filter (dep: (dep.pname or "") != "wayland") (old.buildInputs or [ ]);
+        dontWrapGApps = false;
+        postFixup = "";
+      })
+    else
+      prev.czkawka;
+
   # nushell: Skip sandbox-incompatible test on Darwin
   nushell = prev.nushell.overrideAttrs (old: {
     checkPhase =

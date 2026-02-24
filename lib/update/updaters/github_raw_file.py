@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     import aiohttp
 
-from lib.nix.models.sources import HashEntry, HashMapping
+from lib.nix.models.sources import HashEntry, HashMapping, SourceHashes
 from lib.update.events import (
     CapturedValue,
     EventStream,
@@ -68,15 +68,19 @@ class GitHubRawFileUpdater(HashEntryUpdater):
         """Compute a sha256 hash entry for the resolved raw file URL."""
         _ = session
         url = github_raw_url(self.owner, self.repo, info.metadata["rev"], self.path)
-        async for item in capture_stream_value[HashMapping](
+        async for item in capture_stream_value(
             compute_url_hashes(self.name, [url]),
             error="Missing hash output",
         ):
             if isinstance(item, CapturedValue):
-                hash_value = item.captured[url]
+                hash_mapping = cast("HashMapping", item.captured)
+                hash_value = hash_mapping[url]
                 yield UpdateEvent.value(
                     self.name,
-                    [HashEntry.create("sha256", hash_value, url=url)],
+                    cast(
+                        "SourceHashes",
+                        [HashEntry.create("sha256", hash_value, url=url)],
+                    ),
                 )
             else:
                 yield item
