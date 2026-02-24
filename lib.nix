@@ -305,15 +305,19 @@ rec {
       modules ? [ ],
       userModule ? null,
       includeDefaultUserModule ? true,
+      extraSpecialArgs ? { },
       system,
       username,
       ...
     }:
     {
       inherit system;
-      extraSpecialArgs = mkHomeModuleArgs { inherit system username; } // {
-        pkgs = pkgsFor.${system};
-      };
+      extraSpecialArgs =
+        mkHomeModuleArgs { inherit system username; }
+        // {
+          pkgs = pkgsFor.${system};
+        }
+        // extraSpecialArgs;
       modules = mkHomeModules {
         inherit
           includeDefaultUserModule
@@ -328,7 +332,10 @@ rec {
     {
       homeModules ? [ ],
       homeModulesByUser ? { },
+      homeModuleArgsByUser ? { },
       includeDefaultUserModules ? true,
+      extraSpecialArgs ? { },
+      homeManagerExtraSpecialArgs ? { },
       system,
       systemModules ? [ ],
       users ? [ ],
@@ -343,8 +350,15 @@ rec {
         .${kernel system};
       homeModulesList = toList homeModules;
       hasPerUserHomeModules = attrNames homeModulesByUser != [ ];
+      hasPerUserHomeModuleArgs = attrNames homeModuleArgsByUser != [ ];
       enableHomeManager =
-        users != [ ] && (includeDefaultUserModules || homeModulesList != [ ] || hasPerUserHomeModules);
+        users != [ ]
+        && (
+          includeDefaultUserModules
+          || homeModulesList != [ ]
+          || hasPerUserHomeModules
+          || hasPerUserHomeModuleArgs
+        );
     in
     {
       inherit system;
@@ -355,11 +369,10 @@ rec {
           src
           system
           ;
-        primaryUser = elemAt users 0;
-      }
-      // {
+        primaryUser = if users == [ ] then null else elemAt users 0;
         slib = outputs.lib;
-      };
+      }
+      // extraSpecialArgs;
       modules = [
         "${modulesPath}/common.nix"
         "${modulesPath}/${kernel system}/base.nix"
@@ -381,7 +394,8 @@ rec {
                 ;
               slib = outputs.lib;
               pkgs = pkgsFor.${system};
-            };
+            }
+            // homeManagerExtraSpecialArgs;
             users = listToAttrs (
               map (user: {
                 name = user;
@@ -389,7 +403,8 @@ rec {
                   _module.args = {
                     username = user;
                   }
-                  // userMetaIfExists user;
+                  // userMetaIfExists user
+                  // (homeModuleArgsByUser.${user} or { });
                   imports =
                     let
                       userModules = toList (homeModulesByUser.${user} or [ ]);
@@ -429,20 +444,33 @@ rec {
   mkDarwinHost =
     {
       user,
+      system ? "aarch64-darwin",
       work ? false,
       brewAppsModule ? null,
       extraHomeModules ? [ ],
+      homeModulesByUser ? { },
+      homeModuleArgsByUser ? { },
+      includeDefaultUserModule ? true,
+      extraSpecialArgs ? { },
+      homeManagerExtraSpecialArgs ? { },
       extraSystemModules ? [ ],
       enableRosettaBuilder ? !isCI,
     }:
     mkSystem {
-      system = "aarch64-darwin";
+      inherit
+        extraSpecialArgs
+        homeManagerExtraSpecialArgs
+        homeModuleArgsByUser
+        homeModulesByUser
+        system
+        ;
+      includeDefaultUserModules = includeDefaultUserModule;
       users = [ user ];
       homeModules = toList extraHomeModules ++ optionals work [ (_: { profiles.work.enable = true; }) ];
       systemModules = [
         inputs.nix-homebrew.darwinModules.nix-homebrew
         "${modulesPath}/darwin/homebrew.nix"
-        { nix-homebrew = { inherit user; }; }
+        { nixcfg.darwin.homebrew.user = lib.mkDefault user; }
         # Linux builder for cross-platform Nix builds on Apple Silicon.
         # nix-rosetta-builder provides aarch64-linux and x86_64-linux builders
         # via Rosetta 2. Requires initial bootstrap with nix.linux-builder.
