@@ -83,6 +83,7 @@ in
       };
       defaults = {
         NSGlobalDomain = {
+          AppleEnableSwipeNavigateWithScrolls = true;
           "com.apple.mouse.tapBehavior" = 1;
           "com.apple.sound.beep.feedback" = 0;
           "com.apple.trackpad.enableSecondaryClick" = true;
@@ -105,7 +106,10 @@ in
           askForPassword = true;
           askForPasswordDelay = 0;
         };
-        trackpad.Clicking = true;
+        trackpad = {
+          Clicking = true;
+          TrackpadThreeFingerHorizSwipeGesture = 0;
+        };
       };
       inherit primaryUser;
       stateVersion = 6;

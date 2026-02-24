@@ -1,65 +1,145 @@
-# nixcfg: Nix configuration
+# nixcfg
 
-Unified configuration for macOS and Linux systems from a single point of control
+Unified Nix flake for macOS hosts, Home Manager user configuration, and reusable module building blocks.
 
-- **Darwin (macOS)**
+## Current state
 
-  - 2021 M1 Max MacBook Pro (16")
-  - 2024 M4 Max MacBook Pro (16") (WIP)
+- Primary focus is `nix-darwin` plus Home Manager.
+- Active Darwin hosts: `argus` (work profile enabled) and `rocinante` (personal profile).
+- Active Home Manager output: `homeConfigurations.george`.
+- Exported systems: `aarch64-darwin`, `aarch64-linux`, `x86_64-linux`.
+- NixOS modules are exported, but there are currently no `nixosConfigurations` defined.
 
-- **Linux (NixOS)**
+## Repository layout
 
-  - HP ZBook Firefly 14 G7 (WIP)
+- `darwin/`: host entrypoints.
+- `home/`: user configuration (`home/george`).
+- `modules/`: reusable modules (`common`, `darwin`, `nixos`, `home`).
+- `packages/`: custom package outputs (`axiom-cli`, `beads-mcp`, `conductor`, `droid`, `gogcli`, `homebrew-zsh-completion`, `linear-cli`, `nix-manipulator`, `scratch`, `sculptor`, `sublime-kdl`, `toad`).
+- `overlays/`: package overrides and source pinning.
+- `lib/`: Python libraries for update tooling and Nix model/schema helpers.
+- `nixcfg.py`: Typer CLI exposed through `nix run .#nixcfg -- ...`.
 
-## Installation
+## Install and apply
 
-- **Darwin (macOS)**
+1. Install Nix (recommended: [Determinate Nix Installer](https://github.com/DeterminateSystems/nix-installer)).
+1. Clone this repository to `~/.config/nixcfg`.
+1. Apply the Darwin configuration:
 
-  - Use the [Determinate Systems Nix Installer](https://github.com/DeterminateSystems/nix-installer) to install Nix on macOS
-  - For the first run, use `nix -v run`
-
-- **Linux (nixOS)**
-
-  For an existing system, use `sudo nixos-rebuild switch --flake .`
-
-  (fresh install instruction wip)
-
-## Usage
-
-After changes are made:
-
+```bash
+nh darwin switch --no-nom .
 ```
-nh (os|darwin) switch -a . # os for NixOS, darwin for macOS
+
+Useful build-only checks:
+
+```bash
+nix build .#darwinConfigurations.argus.system
+nix build .#darwinConfigurations.rocinante.system
+nix build .#homeConfigurations.george.activationPackage
 ```
+
+## Day-to-day commands
+
+```bash
+# Enter the dev environment (tooling + pre-commit hooks)
+nix develop
+
+# Keep Python tooling in sync for editor/test workflows
+uv sync
+
+# Format and evaluate
+nix fmt
+nix flake check
+
+# Python test suite
+uv run pytest
+```
+
+## Update automation
+
+The repo ships a dedicated update CLI:
+
+```bash
+nix run .#nixcfg -- --help
+nix run .#nixcfg -- update --help
+nix run .#nixcfg -- ci --help
+nix run .#nixcfg -- schema --help
+```
+
+GitHub Actions workflow `.github/workflows/update.yml` runs every 6 hours and:
+
+- updates `flake.lock`
+- resolves upstream versions once
+- computes per-platform `sources.json` hashes
+- builds Darwin outputs (`argus`, `rocinante`)
+- opens a signed PR with update details
 
 ## Reuse as a framework
 
 This flake can be consumed by another repository as a module framework.
 
 - Exported module sets:
+
   - `darwinModules` (`nixcfgCommon`, `nixcfgBase`, `nixcfgProfiles`, `nixcfgHomebrew`)
   - `nixosModules` (`nixcfgCommon`, `nixcfgBase`, `nixcfgProfiles`)
-  - `homeModules` (base/profile/theme/fonts, git, package sets, opencode, stylix, zsh, darwin/linux, and language modules)
+  - `homeModules` (`nixcfgBase`, `nixcfgGit`, `nixcfgProfiles`, `nixcfgPackages`, `nixcfgOpencode`, `nixcfgTheme`, `nixcfgFonts`, `nixcfgStylix`, `nixcfgZsh`, `nixcfgDarwin`, `nixcfgLinux`, `nixcfgLanguageBun`, `nixcfgLanguageGo`, `nixcfgLanguagePython`, `nixcfgLanguageRust`)
+
 - Exported constructors in `lib`:
+
   - `mkSystem`, `mkDarwinHost`, `mkHome`, `mkHomeModules`
 
-Site-specific policy (for example cache keys, org profile settings, host/user modules)
-should live in the consuming repository, while these shared modules stay generic.
+- Downstream-oriented controls:
 
-## Development
+  - `mkHome` supports `extraSpecialArgs` for downstream-only module arguments
+  - `mkSystem` supports `extraSpecialArgs`, `homeManagerExtraSpecialArgs`, `homeModuleArgsByUser`, and tolerates `users = [ ]` (it sets `primaryUser = null`)
+  - `mkDarwinHost` forwards `extraSpecialArgs`, `homeManagerExtraSpecialArgs`, `homeModuleArgsByUser`, supports `includeDefaultUserModule = false`, `homeModulesByUser`, and custom `system`
 
-- Enter the dev environment with `nix develop` (or `direnv allow` if you use direnv).
-- Run `uv sync` once to create `.venv`; `.envrc` will auto-activate it when present.
-- Repo CLI (update/CI helpers): `nix run .#nixcfg -- update --help` and `nix run .#nixcfg -- ci --help`.
+- Policy knobs intended to be overridden in downstream repos:
 
-## Roadmap
+  - `nixcfg.common.hostname`
+  - `nixcfg.common.nix.substituters`
+  - `nixcfg.common.nix.trustedPublicKeys`
+  - `nixcfg.darwin.homebrew.{user,taps,mutableTaps,enableRosetta}`
 
-| Feature :arrow_down: / OS :arrow_right: | macOS | NixOS | Debian | Any Linux distribution |
-| --------------------------------------- | ----- | ----- | ------ | ---------------------- |
-| Automatic setup | :x: | :x: | :x: | :x: |
-| Automatic backups | :x: | :x: | :x: | :x: |
-| Storage encryption | :x: | :x: | :x: | :x: |
-| Secret management | :x: | :x: | :x: | :x: |
+Example downstream pattern:
+
+```nix
+{
+  outputs = { nixcfg, ... }: {
+    darwinConfigurations.my-host = nixcfg.lib.mkDarwinHost {
+      user = "alice";
+      includeDefaultUserModule = false;
+
+      extraSpecialArgs = {
+        org = "acme";
+      };
+      homeManagerExtraSpecialArgs = {
+        privateRoot = ./.;
+      };
+      homeModuleArgsByUser.alice = {
+        role = "platform";
+      };
+
+      extraHomeModules = [
+        nixcfg.homeModules.nixcfgBase
+        nixcfg.homeModules.nixcfgGit
+        ./home/alice.nix
+      ];
+
+      extraSystemModules = [
+        {
+          nixcfg.common.nix.substituters = [ "https://cache.nixos.org" ];
+          nixcfg.common.nix.trustedPublicKeys = [
+            "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+          ];
+        }
+      ];
+    };
+  };
+}
+```
+
+Site-specific policy (for example cache keys, org profile settings, host/user modules) should live in the consuming repository, while these shared modules stay generic.
 
 ## License
 

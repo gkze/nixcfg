@@ -1,31 +1,53 @@
 { config, lib, ... }:
 let
-  inherit (lib) mkEnableOption mkIf;
+  inherit (lib)
+    mkEnableOption
+    mkIf
+    mkOption
+    types
+    ;
+
   cfg = config.profiles.work;
 in
 {
   options.profiles.work = {
     enable = mkEnableOption "work profile — adds work Homebrew casks and Mac App Store apps";
+
+    darwin = {
+      casks = mkOption {
+        type = types.listOf types.str;
+        default = [
+          "1password"
+          "cleanshot"
+          "freelens"
+          "pants"
+          "tailscale"
+          "warp@preview"
+        ];
+        description = "Homebrew casks installed when the Darwin work profile is enabled.";
+      };
+
+      masApps = mkOption {
+        type = types.attrsOf types.int;
+        default = {
+          # "iA Writer" = 775737590; # TODO: re-enable after purchasing/signing into App Store
+          "Microsoft Excel" = 462058435;
+          "Microsoft OneNote" = 784801555;
+          "Microsoft Outlook" = 985367838;
+          "Microsoft PowerPoint" = 462062816;
+          "Microsoft Word" = 462054704;
+        };
+        description = "Mac App Store applications installed when the Darwin work profile is enabled.";
+      };
+    };
   };
 
   config = mkIf cfg.enable {
     homebrew = {
-      casks = [
-        "1password"
-        "cleanshot"
-        "freelens"
-        "pants"
-        "tailscale"
-        "warp@preview"
-      ];
-      masApps = {
-        # "iA Writer" = 775737590; # TODO: re-enable after purchasing/signing into App Store
-        "Microsoft Excel" = 462058435;
-        "Microsoft OneNote" = 784801555;
-        "Microsoft Outlook" = 985367838;
-        "Microsoft PowerPoint" = 462062816;
-        "Microsoft Word" = 462054704;
-      };
+      inherit (cfg.darwin)
+        casks
+        masApps
+        ;
     };
   };
 }
