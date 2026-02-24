@@ -1,7 +1,5 @@
 { inputs, outputs, ... }:
 {
-  neovimLuaCompat = import ./neovimLuaCompat.nix;
-
   default =
     final: prev:
     let

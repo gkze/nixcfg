@@ -676,8 +676,7 @@ in
         rest.enable = true;
         scope.enable = true;
         smart-splits.enable = true;
-        # TODO: fix spectre_oxi build missing lua symbols during linking
-        spectre.enable = false;
+        spectre.enable = true;
         todo-comments.enable = true;
         trouble.enable = true;
         undotree.enable = true;

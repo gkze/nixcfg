@@ -139,7 +139,7 @@
       flake = false;
     };
     gemini-cli = {
-      url = "github:google-gemini/gemini-cli/v0.29.6";
+      url = "github:google-gemini/gemini-cli/v0.29.7";
       flake = false;
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
@@ -196,7 +196,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad/v0.5.38";
+      url = "github:batrachianai/toad/v6.0.2";
       flake = false;
     };
     treesitter-textobjects = {
@@ -324,7 +324,6 @@
           inputs.bun2nix.overlays.default
           inputs.curator.overlays.default
           inputs.lumen.overlays.default
-          self.overlays.neovimLuaCompat # Must be before neovim-nightly-overlay
           inputs.neovim-nightly-overlay.overlays.default
           inputs.red.overlays.default
           inputs.rust-overlay.overlays.default

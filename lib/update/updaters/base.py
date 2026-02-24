@@ -347,11 +347,12 @@ class FlakeInputMixin:
     """
 
     input_name: str | None = None
+    name: str
 
     def _init_input_name(self) -> None:
         """Default ``input_name`` to ``self.name`` when unset."""
         if self.input_name is None:
-            self.input_name = self.name  # type: ignore[attr-defined]
+            self.input_name = self.name
 
     @property
     def _input(self) -> str:
