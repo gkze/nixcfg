@@ -34,19 +34,23 @@ type _JsonSafe = (
 def _make_json_safe(obj: object) -> _JsonSafe:
     """Recursively convert *obj* to JSON-serializable types.
 
-    Pydantic models are dumped via ``model_dump()``, dicts and lists are
-    traversed recursively, and everything else is passed through (the
-    stdlib JSON encoder will raise on truly un-serializable objects).
+    Pydantic models are dumped via ``model_dump()``, dicts and sequences are
+    traversed recursively, and unsupported values raise ``TypeError``.
     """
     from pydantic import BaseModel
 
     if isinstance(obj, BaseModel):
-        return obj.model_dump()
+        return _make_json_safe(obj.model_dump())
     if isinstance(obj, dict):
         return {str(k): _make_json_safe(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_make_json_safe(v) for v in obj]
-    return obj  # type: ignore[return-value]
+    if isinstance(obj, tuple):
+        return [_make_json_safe(v) for v in obj]
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+    msg = f"Value is not JSON-serializable: {obj!r}"
+    raise TypeError(msg)
 
 
 def _serialize_version_info(info: VersionInfo) -> dict[str, Any]:

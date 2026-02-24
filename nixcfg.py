@@ -213,7 +213,7 @@ def _make_ci_callback(
 
     # Typer uses the function name for internal dedup — give each a unique name.
     _callback.__name__ = f"ci_{cmd_name.replace('-', '_')}"
-    return _callback  # type: ignore[return-value]
+    return cast("typer.models.CommandFunctionType", _callback)
 
 
 def _register_ci_commands() -> None:
@@ -282,6 +282,7 @@ app.add_typer(schema_app)
     name="fetch", help="Fetch Nix JSON schemas from the NixOS/nix repo."
 )
 def schema_fetch(
+    *,
     check: Annotated[
         bool,
         typer.Option(

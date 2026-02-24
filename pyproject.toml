@@ -37,9 +37,8 @@ namespace-packages = ["overlays", "packages"]
 select = ["ALL"]
 # D203 and D213 conflict with each other; keep D211-style spacing.
 # COM812 conflicts with the Ruff formatter.
-# FBT002 is unavoidable with typer Option() boolean defaults.
 # PLC0415 — lazy imports in CLI entrypoints are intentional for startup perf.
-ignore = ["COM812", "D203", "D213", "FBT002", "PLC0415"]
+ignore = ["COM812", "D203", "D213", "PLC0415"]
 preview = true
 explicit-preview-rules = true
 
@@ -69,16 +68,15 @@ python-version = "3.14"
 [tool.ty.rules]
 # Maximum strictness: promote everything to error
 all = "error"
-# Not all transitive dependencies are visible to Ty in the venv.
-unresolved-import = "ignore"
-# Ty can report this inconsistently when dependency visibility differs
-# (e.g., Nix sandbox checks vs local venv checks).
-unused-type-ignore-comment = "ignore"
+# Generated Pydantic models use constrained type helpers (e.g., constr(...))
+# inside annotations; valid for runtime model parsing but rejected by Ty.
+invalid-type-form = "ignore"
 
 [tool.ty.terminal]
 error-on-warning = true
 
 [tool.ty.analysis]
+respect-type-ignore-comments = false
 
 [tool.pytest.ini_options]
 testpaths = ["lib/nix/tests"]

@@ -7,12 +7,7 @@ let
   ) entryNames;
   fragFiles = builtins.filter (
     name:
-    entries.${name} == "regular"
-    && builtins.match ".*\\.nix" name != null
-    && !(builtins.elem name [
-      "default.nix"
-      "neovimLuaCompat.nix"
-    ])
+    entries.${name} == "regular" && builtins.match ".*\\.nix" name != null && name != "default.nix"
   ) entryNames;
   dirPairs = builtins.map (name: {
     inherit name;

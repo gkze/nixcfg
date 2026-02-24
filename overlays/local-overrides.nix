@@ -77,6 +77,12 @@
     };
   });
 
+  # sequoia-wot: upstream clique tests are currently failing on Darwin
+  # (panic in backward_propagation::tests::cliques).
+  sequoia-wot = prev.sequoia-wot.overrideAttrs (_: {
+    doCheck = !prev.stdenv.hostPlatform.isDarwin;
+  });
+
   # Extend vimPlugins with fixes and custom plugins
   vimPlugins = prev.vimPlugins.extend (
     _: vprev: {

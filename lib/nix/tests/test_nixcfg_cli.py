@@ -6,7 +6,7 @@ implementation (which is covered elsewhere).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from typer.testing import CliRunner
 
@@ -18,11 +18,18 @@ if TYPE_CHECKING:
     from lib.update.cli import UpdateOptions
 
 
+_KT = TypeVar("_KT")
+_VT = TypeVar("_VT")
+
+
 class _MonkeyPatchLike(Protocol):
     def setattr(self, target: str, value: object) -> None: ...
 
     def setitem(
-        self, mapping: MutableMapping[object, object], name: object, value: object
+        self,
+        mapping: MutableMapping[_KT, _VT],
+        name: _KT,
+        value: _VT,
     ) -> None: ...
 
 
@@ -55,7 +62,7 @@ def test_nixcfg_ci_registers_sources_json_diff(monkeypatch: _MonkeyPatchLike) ->
         return 0
 
     monkeypatch.setitem(
-        ci.CI_COMMANDS,  # type: ignore[arg-type]
+        ci.CI_COMMANDS,
         "sources-json-diff",
         ci.CICommand(func=_fake, help="test"),
     )
