@@ -313,5 +313,11 @@ def schema_codegen() -> None:
 # main
 # ---------------------------------------------------------------------------
 
+
+def main() -> None:
+    """Run the CLI with a stable program name for help output."""
+    app(prog_name="nixcfg")
+
+
 if __name__ == "__main__":
-    app()
+    main()
