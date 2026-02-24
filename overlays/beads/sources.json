@@ -1,5 +1,4 @@
 {
-  "drvHash": "1amnmrl0kbbz2ggblml8yja9nkkgf3l8",
   "hashes": [
     {
       "hash": "sha256-wfRJHCgoaLViehy6EXWxGJldZdbkneYEzFvYTSZqIaA=",
@@ -7,5 +6,5 @@
     }
   ],
   "input": "beads",
-  "version": "v0.49.6"
+  "version": "v0.56.1"
 }
