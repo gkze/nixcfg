@@ -276,7 +276,12 @@
           allowInsecurePredicate = pkg: (pkg.pname or "") == "google-chrome";
         };
 
-        apps.nixcfg = { nixcfg-script, ... }: "${nixcfg-script}/bin/nixcfg";
+        apps.nixcfg =
+          { nixcfg-script, ... }:
+          {
+            program = "${nixcfg-script}/bin/nixcfg";
+            meta.description = "Unified CLI for nixcfg project tasks.";
+          };
 
         imports = [ flakelight-darwin.flakelightModules.default ];
 
