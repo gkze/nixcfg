@@ -14,6 +14,7 @@ let
     fromJSON
     getEnv
     hasAttr
+    isList
     length
     listToAttrs
     map
@@ -28,6 +29,14 @@ let
   isCI = getEnv "CI" != "";
 
   maybePath = p: if pathExists p then p else null;
+  toList =
+    value:
+    if value == null then
+      [ ]
+    else if isList value then
+      value
+    else
+      [ value ];
   userMetaPath = u: maybePath "${src}/home/${u}/meta.nix";
   modulesPath = "${src}/modules";
 
@@ -204,6 +213,7 @@ rec {
     in
     optionalAttrs (userMetaFile != null) { userMeta = import userMetaFile; };
   userConfigPath = u: "${src}/home/${u}/configuration.nix";
+  defaultUserModule = user: maybePath (userConfigPath user);
   kernel =
     system:
     let
@@ -265,9 +275,20 @@ rec {
   mkHomeModules =
     {
       system,
-      username,
+      username ? null,
+      userModule ? null,
       extraModules ? [ ],
+      includeDefaultUserModule ? true,
     }:
+    let
+      resolvedUserModule =
+        if userModule != null then
+          userModule
+        else if includeDefaultUserModule && username != null then
+          defaultUserModule username
+        else
+          null;
+    in
     homeExternalModules
     ++ [
       "${modulesPath}/home/theme.nix"
@@ -275,13 +296,15 @@ rec {
       "${modulesPath}/home/profiles.nix"
       "${modulesPath}/home/base.nix"
       "${modulesPath}/home/${kernel system}.nix"
-      (userConfigPath username)
     ]
-    ++ extraModules;
+    ++ optionals (resolvedUserModule != null) [ resolvedUserModule ]
+    ++ toList extraModules;
 
   mkHome =
     {
       modules ? [ ],
+      userModule ? null,
+      includeDefaultUserModule ? true,
       system,
       username,
       ...
@@ -292,13 +315,20 @@ rec {
         pkgs = pkgsFor.${system};
       };
       modules = mkHomeModules {
-        inherit system username;
+        inherit
+          includeDefaultUserModule
+          system
+          userModule
+          username
+          ;
         extraModules = modules;
       };
     };
   mkSystem =
     {
       homeModules ? [ ],
+      homeModulesByUser ? { },
+      includeDefaultUserModules ? true,
       system,
       systemModules ? [ ],
       users ? [ ],
@@ -311,6 +341,10 @@ rec {
           linux = "nixos";
         }
         .${kernel system};
+      homeModulesList = toList homeModules;
+      hasPerUserHomeModules = attrNames homeModulesByUser != [ ];
+      enableHomeManager =
+        users != [ ] && (includeDefaultUserModules || homeModulesList != [ ] || hasPerUserHomeModules);
     in
     {
       inherit system;
@@ -332,7 +366,7 @@ rec {
         "${modulesPath}/${kernel system}/profiles.nix"
       ]
       ++ systemModules
-      ++ optionals (length homeModules > 0) [
+      ++ optionals enableHomeManager [
         inputs.home-manager."${hmEntryPoint}Modules".home-manager
         {
           home-manager = {
@@ -356,11 +390,16 @@ rec {
                     username = user;
                   }
                   // userMetaIfExists user;
-                  imports = mkHomeModules {
-                    inherit system;
-                    username = user;
-                    extraModules = homeModules;
-                  };
+                  imports =
+                    let
+                      userModules = toList (homeModulesByUser.${user} or [ ]);
+                    in
+                    mkHomeModules {
+                      inherit system;
+                      includeDefaultUserModule = includeDefaultUserModules;
+                      username = user;
+                      extraModules = homeModulesList ++ userModules;
+                    };
                 };
               }) users
             );
@@ -378,7 +417,7 @@ rec {
           launchctl setenv OPENCODE_CONFIG "/Users/${primaryUser}/.config/opencode/${configName}"
         '';
         serviceConfig = {
-          Label = "com.george.set-opencode-env";
+          Label = "com.nixcfg.set-opencode-env";
           RunAtLoad = true;
         };
       };
@@ -389,31 +428,33 @@ rec {
   # flakelight-darwin from the attrset key (i.e. the filename).
   mkDarwinHost =
     {
-      user ? "george",
+      user,
       work ? false,
+      brewAppsModule ? null,
       extraHomeModules ? [ ],
       extraSystemModules ? [ ],
+      enableRosettaBuilder ? !isCI,
     }:
     mkSystem {
       system = "aarch64-darwin";
       users = [ user ];
-      homeModules = extraHomeModules ++ optionals work [ (_: { profiles.work.enable = true; }) ];
+      homeModules = toList extraHomeModules ++ optionals work [ (_: { profiles.work.enable = true; }) ];
       systemModules = [
         inputs.nix-homebrew.darwinModules.nix-homebrew
         "${modulesPath}/darwin/homebrew.nix"
         { nix-homebrew = { inherit user; }; }
-        "${modulesPath}/darwin/${user}/brew-apps.nix"
         # Linux builder for cross-platform Nix builds on Apple Silicon.
         # nix-rosetta-builder provides aarch64-linux and x86_64-linux builders
         # via Rosetta 2. Requires initial bootstrap with nix.linux-builder.
         # Skipped in CI — the builder VM image requires aarch64-linux to build
         # and GitHub Actions macOS runners lack a Linux builder.
       ]
-      ++ optionals (!isCI) [
+      ++ optionals (brewAppsModule != null) [ brewAppsModule ]
+      ++ optionals enableRosettaBuilder [
         inputs.nix-rosetta-builder.darwinModules.default
         { nix-rosetta-builder.onDemand = true; }
       ]
       ++ optionals work [ { profiles.work.enable = true; } ]
-      ++ extraSystemModules;
+      ++ toList extraSystemModules;
     };
 }

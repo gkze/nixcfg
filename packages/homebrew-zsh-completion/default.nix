@@ -20,5 +20,5 @@ stdenvNoCC.mkDerivation {
     cp -r $src $out/_brew
     chmod +x $out/_brew
   '';
-  meta.platforms = lib.platforms.darwin;
+  meta.platforms = lib.platforms.darwin ++ lib.platforms.linux;
 }

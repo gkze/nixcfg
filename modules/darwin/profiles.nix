@@ -5,7 +5,7 @@ let
 in
 {
   options.profiles.work = {
-    enable = mkEnableOption "work (Town.com) profile — adds work Homebrew casks and Mac App Store apps";
+    enable = mkEnableOption "work profile — adds work Homebrew casks and Mac App Store apps";
   };
 
   config = mkIf cfg.enable {

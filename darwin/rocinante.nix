@@ -6,6 +6,8 @@
 with outputs.lib;
 with inputs;
 mkDarwinHost {
+  user = "george";
+  brewAppsModule = "${modulesPath}/darwin/george/brew-apps.nix";
   extraHomeModules = [
     (_: {
       xdg.configFile."opencode/personal.json".text = builtins.toJSON {
