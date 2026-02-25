@@ -19,7 +19,31 @@ if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
 
-ZEN_FOLDERS_PATH = REPO_ROOT / f"home/{getpass.getuser()}/bin/zen-folders"
+
+def _resolve_zen_folders_path() -> Path:
+    preferred = REPO_ROOT / f"home/{getpass.getuser()}/bin/zen-folders"
+    if preferred.is_file():
+        return preferred
+
+    candidates = sorted((REPO_ROOT / "home").glob("*/bin/zen-folders"))
+    if len(candidates) == 1:
+        return candidates[0]
+
+    if candidates:
+        candidate_paths = ", ".join(
+            str(path.relative_to(REPO_ROOT)) for path in candidates
+        )
+        msg = (
+            f"Unable to resolve zen-folders for user {getpass.getuser()!r}; "
+            f"candidates: {candidate_paths}"
+        )
+        raise RuntimeError(msg)
+
+    msg = "Unable to locate zen-folders under home/*/bin/zen-folders"
+    raise RuntimeError(msg)
+
+
+ZEN_FOLDERS_PATH = _resolve_zen_folders_path()
 
 
 def _load_zen_folders_module() -> ModuleType:
