@@ -1090,6 +1090,22 @@
         "type": "github"
       }
     },
+    "ladybird": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1771987630,
+        "narHash": "sha256-Gmd3gf0lpNKo1S88w4BWuUm5/QMFNUyt1m7HOy997ns=",
+        "owner": "LadybirdBrowser",
+        "repo": "ladybird",
+        "rev": "e803c381a90c861be57e5d8b44f8095753ff40fc",
+        "type": "github"
+      },
+      "original": {
+        "owner": "LadybirdBrowser",
+        "repo": "ladybird",
+        "type": "github"
+      }
+    },
     "linear-cli": {
       "flake": false,
       "locked": {
@@ -1725,6 +1741,7 @@
         "home-manager": "home-manager",
         "homebrew-cask": "homebrew-cask",
         "homebrew-core": "homebrew-core",
+        "ladybird": "ladybird",
         "linear-cli": "linear-cli",
         "lumen": "lumen",
         "mac-app-util": "mac-app-util",

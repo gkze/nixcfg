@@ -163,6 +163,10 @@
       url = "github:homebrew/homebrew-core";
       flake = false;
     };
+    ladybird = {
+      url = "github:LadybirdBrowser/ladybird";
+      flake = false;
+    };
     linear-cli = {
       url = "github:schpet/linear-cli/v1.10.0";
       flake = false;
