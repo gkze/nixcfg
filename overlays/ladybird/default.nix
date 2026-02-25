@@ -35,6 +35,7 @@
 
       nativeBuildInputs =
         replaceLibtommath (old.nativeBuildInputs or [ ])
+        ++ [ prev.python3 ]
         ++ prev.lib.optionals isDarwin [
           prev.git
         ];
