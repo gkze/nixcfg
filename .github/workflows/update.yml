@@ -26,22 +26,22 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - &checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - &setup_nix
         uses: DeterminateSystems/determinate-nix-action@v3
       - &cachix
-        uses: cachix/cachix-action@v15
+        uses: cachix/cachix-action@v16
         with:
           name: ${{ env.CACHIX_NAME }}
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
       - &cache_nix
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/nix
           key: nix-cache-${{ runner.os }}-${{ hashFiles('flake.lock') }}
           restore-keys: nix-cache-${{ runner.os }}-
       - run: nix run .#nixcfg -- ci nix-flake-update
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: flake-lock
           path: flake.lock
@@ -55,12 +55,12 @@ jobs:
       - *setup_nix
       - *cachix
       - &download_flake_lock
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: flake-lock
           path: .
       - &cache_nix_arch
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/nix
           key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
@@ -69,7 +69,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: nix run .#nixcfg -- ci resolve-versions --output pinned-versions.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: pinned-versions
           if-no-files-found: error
@@ -95,16 +95,16 @@ jobs:
       - *checkout
       - *setup_nix
       - *cachix
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: flake-lock
           path: .
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.cache/nix
           key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
           restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: pinned-versions
           path: .
@@ -123,7 +123,7 @@ jobs:
         # daemon pushes them.  Downstream jobs get a cache hit instead of
         # rebuilding the FOD (which is non-deterministic across runners).
         run: nix run .#nixcfg -- ci warm-fod-cache
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: sources-${{ matrix.platform }}
           if-no-files-found: error
@@ -141,15 +141,15 @@ jobs:
       - *cachix
       - *cache_nix
       - *download_flake_lock
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: sources-aarch64-darwin
           path: sources-aarch64-darwin
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: sources-x86_64-linux
           path: sources-x86_64-linux
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: sources-aarch64-linux
           path: sources-aarch64-linux
@@ -159,7 +159,7 @@ jobs:
             sources-aarch64-darwin \
             sources-x86_64-linux \
             sources-aarch64-linux
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: merged-sources
           path: |
@@ -176,7 +176,7 @@ jobs:
       - *setup_nix
       - *cachix
       - &download_merged_sources
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: merged-sources
           path: .
@@ -262,7 +262,7 @@ jobs:
             --repository "${{ github.repository }}" \
             --base-ref "${{ github.base_ref || github.event.repository.default_branch }}"
 
-      - uses: peter-evans/create-pull-request@v7
+      - uses: peter-evans/create-pull-request@v8
         id: cpr
         with:
           sign-commits: true
