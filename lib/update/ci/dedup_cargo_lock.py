@@ -14,12 +14,11 @@ Usage: python3 dedup_cargo_lock.py <path-to-Cargo.lock>
 """
 
 import argparse
+import http.client
 import json
 import logging
 import sys
 import tomllib
-import urllib.error
-import urllib.request
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
 from enum import Enum, IntEnum
@@ -34,6 +33,7 @@ if TYPE_CHECKING:
 type PackageKey = tuple[str, str]  # (name, version)
 
 logger = logging.getLogger(__name__)
+_HTTP_BAD_REQUEST = 400
 
 # Pre-fetched checksums for gitoxide packages (GitButler 0.18.6)
 # These versions exist on both git and crates.io with identical content
@@ -183,23 +183,23 @@ def fetch_checksum(name: str, version: str) -> str | None:
         return checksum
 
     # Fall back to crates.io API
-    url = (
-        "https://crates.io/api/v1/crates/"
-        f"{quote(name, safe='')}/{quote(version, safe='')}"
-    )
+    path = f"/api/v1/crates/{quote(name, safe='')}/{quote(version, safe='')}"
+    conn = http.client.HTTPSConnection("crates.io", timeout=10)
     try:
-        req = urllib.request.Request(  # noqa: S310
-            url,
-            headers={"User-Agent": "nix-cargo-dedup/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310
-            data = json.loads(response.read().decode())
-            checksum = data.get("version", {}).get("checksum")
-            if checksum:
-                _checksum_cache[key] = checksum
-                return checksum
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        conn.request("GET", path, headers={"User-Agent": "nix-cargo-dedup/1.0"})
+        response = conn.getresponse()
+        if response.status >= _HTTP_BAD_REQUEST:
+            return None
+
+        data = json.loads(response.read().decode())
+        checksum = data.get("version", {}).get("checksum")
+        if checksum:
+            _checksum_cache[key] = checksum
+            return checksum
+    except (OSError, TimeoutError, json.JSONDecodeError) as e:
         logger.warning("Failed to fetch checksum for %s %s: %s", name, version, e)
+    finally:
+        conn.close()
     return None
 
 

@@ -13,7 +13,7 @@ import hashlib
 import json
 import logging
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import aiohttp
 
@@ -32,6 +32,50 @@ NPM_REGISTRY = "https://registry.npmjs.org"
 
 # Concurrency limit for fetching JSR meta files.
 JSR_FETCH_CONCURRENCY = 20
+
+
+def _as_object_dict(value: object, *, context: str) -> dict[str, object]:
+    """Return *value* as a ``dict[str, object]`` or raise ``TypeError``."""
+    if not isinstance(value, dict):
+        msg = f"Expected JSON object for {context}, got {type(value).__name__}"
+        raise TypeError(msg)
+    result: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            msg = f"Expected string key in {context}, got {type(key).__name__}"
+            raise TypeError(msg)
+        result[key] = item
+    return result
+
+
+def _as_object_list(value: object, *, context: str) -> list[object]:
+    """Return *value* as a list or raise ``TypeError``."""
+    if not isinstance(value, list):
+        msg = f"Expected JSON array for {context}, got {type(value).__name__}"
+        raise TypeError(msg)
+    result: list[object] = list(value)
+    return result
+
+
+def _get_required_str(mapping: dict[str, object], key: str, *, context: str) -> str:
+    """Get required string field *key* from *mapping*."""
+    value = mapping.get(key)
+    if isinstance(value, str):
+        return value
+    msg = f"Expected string field {key!r} in {context}"
+    raise TypeError(msg)
+
+
+def _as_package_map(value: object, *, context: str) -> dict[str, dict[str, object]]:
+    """Normalize a package map keyed by package name/version."""
+    raw_map = _as_object_dict(value, context=context)
+    package_map: dict[str, dict[str, object]] = {}
+    for package_key, package_info in raw_map.items():
+        package_map[package_key] = _as_object_dict(
+            package_info,
+            context=f"{context}.{package_key}",
+        )
+    return package_map
 
 
 @dataclass(frozen=True)
@@ -73,7 +117,7 @@ class DenoDepManifest:
     jsr_packages: list[JsrPackage] = field(default_factory=list)
     npm_packages: list[NpmPackage] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         """Serialize to a JSON-friendly dict."""
         return asdict(self)
 
@@ -85,19 +129,114 @@ class DenoDepManifest:
     @classmethod
     def load(cls, path: Path) -> DenoDepManifest:
         """Load a manifest from *path*."""
-        data = json.loads(path.read_text())
-        return cls(
-            lock_version=data["lock_version"],
-            jsr_packages=[
-                JsrPackage(
-                    name=p["name"],
-                    version=p["version"],
-                    integrity=p["integrity"],
-                    files=[JsrFile(**f) for f in p["files"]],
+        data = _as_object_dict(json.loads(path.read_text()), context="manifest")
+        lock_version = _get_required_str(data, "lock_version", context="manifest")
+
+        jsr_raw = _as_object_list(
+            data.get("jsr_packages", []), context="manifest.jsr_packages"
+        )
+        jsr_packages: list[JsrPackage] = []
+        for idx, package in enumerate(jsr_raw):
+            package_obj = _as_object_dict(
+                package, context=f"manifest.jsr_packages[{idx}]"
+            )
+            files_raw = _as_object_list(
+                package_obj.get("files", []),
+                context=f"manifest.jsr_packages[{idx}].files",
+            )
+            files: list[JsrFile] = []
+            for file_idx, file_entry in enumerate(files_raw):
+                file_obj = _as_object_dict(
+                    file_entry,
+                    context=f"manifest.jsr_packages[{idx}].files[{file_idx}]",
                 )
-                for p in data.get("jsr_packages", [])
-            ],
-            npm_packages=[NpmPackage(**p) for p in data.get("npm_packages", [])],
+                files.append(
+                    JsrFile(
+                        url=_get_required_str(
+                            file_obj,
+                            "url",
+                            context=f"manifest.jsr_packages[{idx}].files[{file_idx}]",
+                        ),
+                        sha256=_get_required_str(
+                            file_obj,
+                            "sha256",
+                            context=f"manifest.jsr_packages[{idx}].files[{file_idx}]",
+                        ),
+                        cache_path=_get_required_str(
+                            file_obj,
+                            "cache_path",
+                            context=f"manifest.jsr_packages[{idx}].files[{file_idx}]",
+                        ),
+                        media_type=_get_required_str(
+                            file_obj,
+                            "media_type",
+                            context=f"manifest.jsr_packages[{idx}].files[{file_idx}]",
+                        ),
+                    )
+                )
+            jsr_packages.append(
+                JsrPackage(
+                    name=_get_required_str(
+                        package_obj,
+                        "name",
+                        context=f"manifest.jsr_packages[{idx}]",
+                    ),
+                    version=_get_required_str(
+                        package_obj,
+                        "version",
+                        context=f"manifest.jsr_packages[{idx}]",
+                    ),
+                    integrity=_get_required_str(
+                        package_obj,
+                        "integrity",
+                        context=f"manifest.jsr_packages[{idx}]",
+                    ),
+                    files=files,
+                )
+            )
+
+        npm_raw = _as_object_list(
+            data.get("npm_packages", []), context="manifest.npm_packages"
+        )
+        npm_packages: list[NpmPackage] = []
+        for idx, package in enumerate(npm_raw):
+            package_obj = _as_object_dict(
+                package, context=f"manifest.npm_packages[{idx}]"
+            )
+            npm_packages.append(
+                NpmPackage(
+                    name=_get_required_str(
+                        package_obj,
+                        "name",
+                        context=f"manifest.npm_packages[{idx}]",
+                    ),
+                    version=_get_required_str(
+                        package_obj,
+                        "version",
+                        context=f"manifest.npm_packages[{idx}]",
+                    ),
+                    integrity=_get_required_str(
+                        package_obj,
+                        "integrity",
+                        context=f"manifest.npm_packages[{idx}]",
+                    ),
+                    tarball_url=_get_required_str(
+                        package_obj,
+                        "tarball_url",
+                        context=f"manifest.npm_packages[{idx}]",
+                    ),
+                    cache_path=_get_required_str(
+                        package_obj,
+                        "cache_path",
+                        context=f"manifest.npm_packages[{idx}]",
+                    ),
+                )
+            )
+
+        return cls(
+            lock_version=lock_version,
+            jsr_packages=jsr_packages,
+            npm_packages=npm_packages,
         )
 
 
@@ -148,18 +287,21 @@ async def _fetch_jsr_meta(
     scope: str,
     name: str,
     version: str,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Fetch the ``_meta.json`` for a JSR package version."""
     url = f"{JSR_REGISTRY}/{scope}/{name}/{version}_meta.json"
     async with client.get(url) as resp:
         resp.raise_for_status()
-        return await resp.json()
+        return _as_object_dict(
+            await resp.json(),
+            context=f"jsr meta for {scope}/{name}@{version}",
+        )
 
 
 async def _resolve_jsr_package(
     client: aiohttp.ClientSession,
     pkg_key: str,
-    pkg_info: dict[str, Any],
+    pkg_info: dict[str, object],
 ) -> JsrPackage:
     """Resolve a single JSR package into its files."""
     # pkg_key is like "@cliffy/ansi@1.0.0-rc.8"
@@ -167,12 +309,23 @@ async def _resolve_jsr_package(
     name, version = rest.rsplit("@", 1)
 
     meta = await _fetch_jsr_meta(client, scope, name, version)
-    manifest = meta.get("manifest", {})
+    manifest = _as_object_dict(
+        meta.get("manifest", {}),
+        context=f"manifest for {pkg_key}",
+    )
 
     files: list[JsrFile] = []
-    for file_path, file_info in sorted(manifest.items()):
+    for file_path, file_info_obj in sorted(manifest.items()):
+        file_info = _as_object_dict(
+            file_info_obj,
+            context=f"manifest file entry {pkg_key}:{file_path}",
+        )
         url = f"{JSR_REGISTRY}/{scope}/{name}/{version}{file_path}"
-        checksum = file_info["checksum"]
+        checksum = _get_required_str(
+            file_info,
+            "checksum",
+            context=f"manifest file entry {pkg_key}:{file_path}",
+        )
         # JSR checksums are "sha256-<hex>" format
         sha256_hex = checksum.removeprefix("sha256-")
         cache_path = _url_to_cache_path(url)
@@ -211,13 +364,15 @@ async def _resolve_jsr_package(
     return JsrPackage(
         name=f"{scope}/{name}",
         version=version,
-        integrity=pkg_info["integrity"],
+        integrity=_get_required_str(
+            pkg_info, "integrity", context=f"jsr package {pkg_key}"
+        ),
         files=files,
     )
 
 
 async def _resolve_all_jsr(
-    lock_jsr: dict[str, Any],
+    lock_jsr: dict[str, dict[str, object]],
 ) -> list[JsrPackage]:
     """Resolve all JSR packages from the lock file."""
     sem = asyncio.Semaphore(JSR_FETCH_CONCURRENCY)
@@ -273,7 +428,7 @@ def _npm_tarball_url(name: str, version: str) -> str:
     return f"{NPM_REGISTRY}/{name}/-/{basename}-{version}.tgz"
 
 
-def _resolve_all_npm(lock_npm: dict[str, Any]) -> list[NpmPackage]:
+def _resolve_all_npm(lock_npm: dict[str, dict[str, object]]) -> list[NpmPackage]:
     """Resolve all npm packages from the lock file."""
     seen: set[tuple[str, str]] = set()
     packages: list[NpmPackage] = []
@@ -292,7 +447,11 @@ def _resolve_all_npm(lock_npm: dict[str, Any]) -> list[NpmPackage]:
             NpmPackage(
                 name=name,
                 version=version,
-                integrity=pkg_info["integrity"],
+                integrity=_get_required_str(
+                    pkg_info,
+                    "integrity",
+                    context=f"npm package {pkg_key}",
+                ),
                 tarball_url=tarball_url,
                 cache_path=cache_path,
             )
@@ -321,14 +480,14 @@ async def resolve_deno_deps(lock_path: Path) -> DenoDepManifest:
 
     """
     with lock_path.open() as f:
-        lock = json.load(f)
+        lock = _as_object_dict(json.load(f), context="deno.lock")
 
     version = str(lock.get("version", ""))
     if version not in ("4", "5"):
         log.warning("Unexpected deno.lock version %s (expected 4 or 5)", version)
 
-    lock_jsr = lock.get("jsr", {})
-    lock_npm = lock.get("npm", {})
+    lock_jsr = _as_package_map(lock.get("jsr", {}), context="deno.lock.jsr")
+    lock_npm = _as_package_map(lock.get("npm", {}), context="deno.lock.npm")
 
     log.info(
         "Resolving %d JSR + %d npm packages from %s",

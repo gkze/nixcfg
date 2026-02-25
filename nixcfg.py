@@ -3,16 +3,49 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import importlib
 import sys
-from typing import Annotated, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, cast
 
 import typer
+
+from lib.nix.schemas._codegen import main as codegen_main
+from lib.nix.schemas._fetch import check as schema_check
+from lib.nix.schemas._fetch import fetch as fetch_schemas
+from lib.update.ci import CI_COMMANDS
+from lib.update.refs import get_flake_inputs_with_refs
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from lib.update.cli import UpdateOptions
+
+
+class _UpdateCliModule(Protocol):
+    UpdateOptions: type[UpdateOptions]
+
+    def check_required_tools(
+        self,
+        *,
+        include_flake_edit: bool,
+        source: str | None,
+        needs_sources: bool,
+    ) -> list[str]: ...
+
+    async def run_updates(self, opts: UpdateOptions) -> int: ...
+
 
 _is_tty = sys.stdout.isatty()
 
 TTYMode = Literal["auto", "force", "off", "full"]
 _TTY_MODES: tuple[str, ...] = ("auto", "force", "off", "full")
+
+
+def _update_cli() -> _UpdateCliModule:
+    return cast("_UpdateCliModule", importlib.import_module("lib.update.cli"))
+
 
 app = typer.Typer(
     name="nixcfg",
@@ -22,145 +55,111 @@ app = typer.Typer(
     rich_markup_mode="rich" if _is_tty else None,
 )
 
+_FORWARDED_ARGS_CONTEXT_SETTINGS = {
+    "allow_extra_args": True,
+    "allow_interspersed_args": False,
+    "ignore_unknown_options": True,
+}
+
+
+def _parse_tty_mode(value: str) -> TTYMode:
+    if value == "auto":
+        return "auto"
+    if value == "force":
+        return "force"
+    if value == "off":
+        return "off"
+    if value == "full":
+        return "full"
+    msg = f"Invalid --tty value: {value!r}. Expected one of: {', '.join(_TTY_MODES)}"
+    raise typer.BadParameter(msg)
+
+
+def _build_update_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="nixcfg update")
+    parser.add_argument(
+        "source",
+        nargs="?",
+        help="Source or flake input to update (default: all)",
+    )
+    parser.add_argument("--list", "-l", action="store_true", dest="list_targets")
+    parser.add_argument("--no-refs", "-R", action="store_true")
+    parser.add_argument("--no-sources", "-S", action="store_true")
+    parser.add_argument("--no-input", "-I", action="store_true")
+    parser.add_argument("--check", "-c", action="store_true")
+    parser.add_argument("--validate", "-v", action="store_true")
+    parser.add_argument("--schema", "-s", action="store_true")
+    parser.add_argument("--json", "-j", action="store_true", dest="json_output")
+    parser.add_argument("--verbose", "-V", action="store_true")
+    parser.add_argument("--quiet", "-q", action="store_true")
+    parser.add_argument("--tty", "-t", default="auto")
+    parser.add_argument(
+        "--zellij-guard",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument("--native-only", "-n", action="store_true")
+    parser.add_argument("--http-timeout", type=int, default=None)
+    parser.add_argument("--subprocess-timeout", type=int, default=None)
+    parser.add_argument("--max-nix-builds", type=int, default=None)
+    parser.add_argument("--log-tail-lines", type=int, default=None)
+    parser.add_argument("--render-interval", type=float, default=None)
+    parser.add_argument("--user-agent", default=None)
+    parser.add_argument("--retries", type=int, default=None)
+    parser.add_argument("--retry-backoff", type=float, default=None)
+    parser.add_argument("--fake-hash", default=None)
+    parser.add_argument("--deno-platforms", default=None)
+    parser.add_argument("--pinned-versions", default=None)
+    return parser
+
+
 # ---------------------------------------------------------------------------
-# update — native Typer command that builds UpdateOptions directly
+# update — update workflow entrypoint
 # ---------------------------------------------------------------------------
 
 
-@app.command(name="update")
-def update_cmd(  # noqa: PLR0913
-    source: Annotated[
-        str | None,
-        typer.Argument(help="Source or flake input to update (default: all)"),
-    ] = None,
-    *,
-    list_targets: Annotated[
-        bool,
-        typer.Option("--list", "-l", help="List available sources and inputs"),
-    ] = False,
-    no_refs: Annotated[
-        bool,
-        typer.Option("--no-refs", "-R", help="Skip flake input ref updates"),
-    ] = False,
-    no_sources: Annotated[
-        bool,
-        typer.Option("--no-sources", "-S", help="Skip sources.json hash updates"),
-    ] = False,
-    no_input: Annotated[
-        bool,
-        typer.Option(
-            "--no-input", "-I", help="Skip flake input lock refresh before hashing"
-        ),
-    ] = False,
-    check: Annotated[
-        bool,
-        typer.Option("--check", "-c", help="Dry run: check without applying"),
-    ] = False,
-    validate: Annotated[
-        bool,
-        typer.Option("--validate", "-v", help="Validate sources.json and exit"),
-    ] = False,
-    schema: Annotated[
-        bool,
-        typer.Option("--schema", "-s", help="Output JSON schema for sources.json"),
-    ] = False,
-    json_output: Annotated[
-        bool,
-        typer.Option("--json", "-j", help="Output results as JSON"),
-    ] = False,
-    verbose: Annotated[
-        bool,
-        typer.Option("--verbose", "-V", help="Stream build log lines to stdout"),
-    ] = False,
-    quiet: Annotated[
-        bool,
-        typer.Option("--quiet", "-q", help="Suppress progress output"),
-    ] = False,
-    tty: Annotated[
-        str,
-        typer.Option(
-            "--tty",
-            "-t",
-            help="TTY rendering: auto|force|off|full",
-        ),
-    ] = "auto",
-    zellij_guard: Annotated[
-        bool | None,
-        typer.Option(help="Disable live rendering under Zellij"),
-    ] = None,
-    native_only: Annotated[
-        bool,
-        typer.Option(
-            "--native-only",
-            "-n",
-            help="Only compute hashes for current platform (CI). Implies --no-refs.",
-        ),
-    ] = False,
-    http_timeout: Annotated[
-        int | None, typer.Option(help="HTTP timeout seconds")
-    ] = None,
-    subprocess_timeout: Annotated[
-        int | None, typer.Option(help="Subprocess timeout seconds")
-    ] = None,
-    max_nix_builds: Annotated[
-        int | None, typer.Option(help="Max concurrent nix build processes")
-    ] = None,
-    log_tail_lines: Annotated[int | None, typer.Option(help="Log tail lines")] = None,
-    render_interval: Annotated[
-        float | None, typer.Option(help="TTY render interval seconds")
-    ] = None,
-    user_agent: Annotated[str | None, typer.Option(help="HTTP user agent")] = None,
-    retries: Annotated[int | None, typer.Option(help="HTTP retries")] = None,
-    retry_backoff: Annotated[
-        float | None, typer.Option(help="HTTP retry backoff seconds")
-    ] = None,
-    fake_hash: Annotated[str | None, typer.Option(help="Fake hash placeholder")] = None,
-    deno_platforms: Annotated[
-        str | None, typer.Option(help="Comma-separated Deno platforms")
-    ] = None,
-    pinned_versions: Annotated[
-        str | None,
-        typer.Option(
-            "--pinned-versions",
-            help="Path to pinned-versions.json (use pre-resolved versions, skip fetch_latest)",
-        ),
-    ] = None,
-) -> None:
+@app.command(
+    name="update",
+    context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
+    add_help_option=False,
+)
+def update_cmd(ctx: typer.Context) -> None:
     """Update source versions/hashes and flake input refs."""
-    from lib.update.cli import UpdateOptions, check_required_tools, run_updates
-    from lib.update.refs import get_flake_inputs_with_refs
+    update_cli = _update_cli()
+    parser = _build_update_parser()
+    try:
+        parsed = parser.parse_args(list(ctx.args))
+    except SystemExit as exc:
+        if isinstance(exc.code, int):
+            raise typer.Exit(code=exc.code) from None
+        raise typer.Exit(code=0 if exc.code is None else 2) from None
 
-    if tty not in _TTY_MODES:
-        msg = f"Invalid --tty value: {tty!r}. Expected one of: {', '.join(_TTY_MODES)}"
-        raise typer.BadParameter(msg)
-    tty_mode = cast("TTYMode", tty)
-
-    opts = UpdateOptions(
-        source=source,
-        list_targets=list_targets,
-        no_refs=no_refs,
-        no_sources=no_sources,
-        no_input=no_input,
-        check=check,
-        validate=validate,
-        schema=schema,
-        json=json_output,
-        verbose=verbose,
-        quiet=quiet,
-        tty=tty_mode,
-        zellij_guard=zellij_guard,
-        native_only=native_only,
-        http_timeout=http_timeout,
-        subprocess_timeout=subprocess_timeout,
-        max_nix_builds=max_nix_builds,
-        log_tail_lines=log_tail_lines,
-        render_interval=render_interval,
-        user_agent=user_agent,
-        retries=retries,
-        retry_backoff=retry_backoff,
-        fake_hash=fake_hash,
-        deno_platforms=deno_platforms,
-        pinned_versions=pinned_versions,
+    opts = update_cli.UpdateOptions(
+        source=parsed.source,
+        list_targets=parsed.list_targets,
+        no_refs=parsed.no_refs,
+        no_sources=parsed.no_sources,
+        no_input=parsed.no_input,
+        check=parsed.check,
+        validate=parsed.validate,
+        schema=parsed.schema,
+        json=parsed.json_output,
+        verbose=parsed.verbose,
+        quiet=parsed.quiet,
+        tty=_parse_tty_mode(parsed.tty),
+        zellij_guard=parsed.zellij_guard,
+        native_only=parsed.native_only,
+        http_timeout=parsed.http_timeout,
+        subprocess_timeout=parsed.subprocess_timeout,
+        max_nix_builds=parsed.max_nix_builds,
+        log_tail_lines=parsed.log_tail_lines,
+        render_interval=parsed.render_interval,
+        user_agent=parsed.user_agent,
+        retries=parsed.retries,
+        retry_backoff=parsed.retry_backoff,
+        fake_hash=parsed.fake_hash,
+        deno_platforms=parsed.deno_platforms,
+        pinned_versions=parsed.pinned_versions,
     )
 
     if not (opts.list_targets or opts.schema or opts.validate):
@@ -169,7 +168,7 @@ def update_cmd(  # noqa: PLR0913
             ref_names = {i.name for i in get_flake_inputs_with_refs()}
             needs_flake_edit = opts.source in ref_names
 
-        missing = check_required_tools(
+        missing = update_cli.check_required_tools(
             include_flake_edit=needs_flake_edit,
             source=opts.source,
             needs_sources=not opts.no_sources,
@@ -179,7 +178,7 @@ def update_cmd(  # noqa: PLR0913
             sys.stderr.write("Please install them and ensure they are in your PATH.\n")
             raise typer.Exit(code=1)
 
-    raise typer.Exit(code=asyncio.run(run_updates(opts)))
+    raise typer.Exit(code=asyncio.run(update_cli.run_updates(opts)))
 
 
 # ---------------------------------------------------------------------------
@@ -194,75 +193,36 @@ ci_app = typer.Typer(
 )
 app.add_typer(ci_app)
 
-_FORWARDED_ARGS_CONTEXT_SETTINGS = {
-    "allow_extra_args": True,
-    "allow_interspersed_args": False,
-    "ignore_unknown_options": True,
-}
 
-
-def _make_ci_callback(
-    cmd_name: str,
-) -> typer.models.CommandFunctionType:
+def _make_ci_callback(cmd_name: str) -> Callable[[typer.Context], None]:
     """Create a Typer callback that dispatches to a CI_COMMANDS entry."""
 
     def _callback(ctx: typer.Context) -> None:
-        from lib.update.ci import CI_COMMANDS
-
-        raise typer.Exit(code=CI_COMMANDS[cmd_name].func(ctx.args))
+        try:
+            code = CI_COMMANDS[cmd_name].func(ctx.args)
+        except SystemExit as exc:
+            if isinstance(exc.code, int):
+                raise typer.Exit(code=exc.code) from None
+            raise typer.Exit(code=0 if exc.code is None else 2) from None
+        raise typer.Exit(code=code)
 
     # Typer uses the function name for internal dedup — give each a unique name.
     _callback.__name__ = f"ci_{cmd_name.replace('-', '_')}"
-    return cast("typer.models.CommandFunctionType", _callback)
+    return _callback
 
 
 def _register_ci_commands() -> None:
     """Register all CI subcommands from the CI_COMMANDS dict."""
-    from lib.update.ci import CI_COMMANDS
-
-    # generate-pr-body stays as a native Typer command below.
-    skip = {"generate-pr-body"}
     for name, cmd in CI_COMMANDS.items():
-        if name in skip:
-            continue
         ci_app.command(
             name=name,
             context_settings=_FORWARDED_ARGS_CONTEXT_SETTINGS,
+            add_help_option=False,
             help=cmd.help,
         )(_make_ci_callback(name))
 
 
 _register_ci_commands()
-
-
-# generate-pr-body: native Typer command with typed parameters
-@ci_app.command(
-    name="generate-pr-body",
-    help="Generate pull request body markdown for update runs.",
-)
-def ci_generate_pr_body(  # noqa: PLR0913
-    output: Annotated[str, typer.Option(help="Path to write PR body")],
-    workflow_url: Annotated[str, typer.Option(help="Workflow run URL")],
-    server_url: Annotated[str, typer.Option(help="GitHub server URL")],
-    repository: Annotated[str, typer.Option(help="owner/repo")],
-    base_ref: Annotated[str, typer.Option(help="Base branch for compare")],
-    compare_head: Annotated[
-        str, typer.Option(help="Head branch used in compare links")
-    ] = "update_flake_lock_action",
-) -> None:
-    """Render update summary markdown consumed by create-pull-request."""
-    from lib.update.ci.workflow_steps import generate_pr_body
-
-    raise typer.Exit(
-        code=generate_pr_body(
-            output=output,
-            workflow_url=workflow_url,
-            server_url=server_url,
-            repository=repository,
-            base_ref=base_ref,
-            compare_head=compare_head,
-        )
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -291,13 +251,10 @@ def schema_fetch(
     ] = False,
 ) -> None:
     """Download or verify vendored Nix JSON schemas."""
-    from lib.nix.schemas._fetch import check as schema_check
-    from lib.nix.schemas._fetch import fetch
-
     if check:
         ok = schema_check()
         raise typer.Exit(code=0 if ok else 1)
-    fetch()
+    fetch_schemas()
 
 
 @schema_app.command(
@@ -305,8 +262,6 @@ def schema_fetch(
 )
 def schema_codegen() -> None:
     """Run the Pydantic model code generator."""
-    from lib.nix.schemas._codegen import main as codegen_main
-
     codegen_main()
 
 

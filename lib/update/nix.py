@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import platform
 from typing import TYPE_CHECKING
@@ -22,26 +23,49 @@ from lib.update.events import (
     UpdateEvent,
     ValueDrain,
     drain_value_events,
+    expect_command_result,
     require_value,
 )
 from lib.update.flake import nixpkgs_expr
 from lib.update.nix_expr import compact_nix_expr
 from lib.update.paths import get_repo_file
-from lib.update.process import convert_nix_hash_to_sri, run_command, run_nix_build
+from lib.update.process import (
+    NixBuildOptions,
+    RunCommandOptions,
+    convert_nix_hash_to_sri,
+    run_command,
+    run_nix_build,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 
+_ARCH_ALIASES = {
+    "aarch64": "aarch64",
+    "amd64": "x86_64",
+    "arm64": "aarch64",
+    "x86_64": "x86_64",
+}
+
+_OS_ALIASES = {
+    "darwin": "darwin",
+    "linux": "linux",
+}
+
+
+def normalize_nix_platform(machine: str, os_name: str) -> str:
+    """Normalize machine/OS names into a Nix platform identifier."""
+    normalized_machine = machine.lower()
+    normalized_os = os_name.lower()
+    arch = _ARCH_ALIASES.get(normalized_machine, normalized_machine)
+    nix_os = _OS_ALIASES.get(normalized_os, normalized_os)
+    return f"{arch}-{nix_os}"
+
+
 def get_current_nix_platform() -> str:
     """Return the current machine as a Nix platform string."""
-    machine = platform.machine()
-    system = platform.system().lower()
-
-    arch_map = {"arm64": "aarch64", "x86_64": "x86_64", "amd64": "x86_64"}
-    arch = arch_map.get(machine, machine)
-
-    return f"{arch}-{system}"
+    return normalize_nix_platform(platform.machine(), platform.system())
 
 
 _HASH_MISMATCH_INDICATORS = (
@@ -107,39 +131,52 @@ async def _emit_sri_hash_from_build_result(
         yield event
 
 
-async def _run_fixed_output_build(  # noqa: PLR0913
+@dataclasses.dataclass(frozen=True)
+class _FixedOutputBuildOptions:
+    success_error: str
+    allow_failure: bool = False
+    suppress_patterns: tuple[str, ...] | None = None
+    env: Mapping[str, str] | None = None
+    verbose: bool = False
+    config: UpdateConfig | None = None
+
+
+async def _run_fixed_output_build(
     source: str,
     expr: str,
     *,
-    allow_failure: bool = False,
-    suppress_patterns: tuple[str, ...] | None = None,
-    env: Mapping[str, str] | None = None,
-    verbose: bool = False,
-    success_error: str,
-    config: UpdateConfig | None = None,
+    options: _FixedOutputBuildOptions,
 ) -> EventStream:
-    result_drain = ValueDrain[CommandResult]()
+    result_drain = ValueDrain()
     async for event in drain_value_events(
         run_nix_build(
-            source,
             expr,
-            allow_failure=allow_failure,
-            suppress_patterns=suppress_patterns,
-            env=env,
-            verbose=verbose,
-            config=config,
+            options=NixBuildOptions(
+                source=source,
+                allow_failure=options.allow_failure,
+                suppress_patterns=options.suppress_patterns,
+                env=options.env,
+                verbose=options.verbose,
+                config=options.config,
+            ),
         ),
         result_drain,
+        parse=expect_command_result,
     ):
         yield event
     result = require_value(result_drain, "nix build did not return output")
     if result.returncode == 0:
-        raise RuntimeError(success_error)
+        raise RuntimeError(options.success_error)
     yield UpdateEvent.value(source, result)
 
 
-_nix_build_semaphore: asyncio.Semaphore | None = None
-_nix_build_semaphore_size: int | None = None
+@dataclasses.dataclass
+class _NixBuildSemaphoreState:
+    semaphore: asyncio.Semaphore | None = None
+    size: int | None = None
+
+
+_NIX_BUILD_SEMAPHORE_STATE = _NixBuildSemaphoreState()
 
 
 def _get_nix_build_semaphore(config: UpdateConfig) -> asyncio.Semaphore:
@@ -149,15 +186,17 @@ def _get_nix_build_semaphore(config: UpdateConfig) -> asyncio.Semaphore:
     1-2 GB of RAM.  Without a limit, running all sources concurrently can
     exhaust memory.
     """
-    global _nix_build_semaphore  # noqa: PLW0603
-    global _nix_build_semaphore_size  # noqa: PLW0603
     if (
-        _nix_build_semaphore is None
-        or _nix_build_semaphore_size != config.max_nix_builds
+        _NIX_BUILD_SEMAPHORE_STATE.semaphore is None
+        or _NIX_BUILD_SEMAPHORE_STATE.size != config.max_nix_builds
     ):
-        _nix_build_semaphore = asyncio.Semaphore(config.max_nix_builds)
-        _nix_build_semaphore_size = config.max_nix_builds
-    return _nix_build_semaphore
+        _NIX_BUILD_SEMAPHORE_STATE.semaphore = asyncio.Semaphore(config.max_nix_builds)
+        _NIX_BUILD_SEMAPHORE_STATE.size = config.max_nix_builds
+    semaphore = _NIX_BUILD_SEMAPHORE_STATE.semaphore
+    if semaphore is None:
+        msg = "failed to initialize nix build semaphore"
+        raise RuntimeError(msg)
+    return semaphore
 
 
 async def compute_fixed_output_hash(
@@ -172,19 +211,24 @@ async def compute_fixed_output_hash(
     expr = compact_nix_expr(expr)
     semaphore = _get_nix_build_semaphore(config)
     async with semaphore:
-        result_drain = ValueDrain[CommandResult]()
+        result_drain = ValueDrain()
         async for event in drain_value_events(
             _run_fixed_output_build(
                 source,
                 expr,
-                allow_failure=True,
-                suppress_patterns=FIXED_OUTPUT_NOISE,
-                verbose=True,
-                success_error="Expected nix build to fail with hash mismatch, but it succeeded",
-                env=env,
-                config=config,
+                options=_FixedOutputBuildOptions(
+                    allow_failure=True,
+                    suppress_patterns=FIXED_OUTPUT_NOISE,
+                    verbose=True,
+                    success_error=(
+                        "Expected nix build to fail with hash mismatch, but it succeeded"
+                    ),
+                    env=env,
+                    config=config,
+                ),
             ),
             result_drain,
+            parse=expect_command_result,
         ):
             yield event
         result = require_value(result_drain, "nix build did not return output")
@@ -286,16 +330,19 @@ async def compute_drv_fingerprint(
     expr = compact_nix_expr(expr)
     args = ["nix", "derivation", "show", "--quiet", "--impure", "--expr", expr]
 
-    result_drain = ValueDrain[CommandResult]()
+    result_drain = ValueDrain()
     async for _event in drain_value_events(
         run_command(
             args,
-            source=source,
-            error="nix derivation show did not return output",
-            env={"FAKE_HASHES": "1"},
-            config=config,
+            options=RunCommandOptions(
+                source=source,
+                error="nix derivation show did not return output",
+                env={"FAKE_HASHES": "1"},
+                config=config,
+            ),
         ),
         result_drain,
+        parse=expect_command_result,
     ):
         pass  # discard streaming events during fingerprint eval
     result = require_value(result_drain, "nix derivation show did not return output")
@@ -336,4 +383,5 @@ __all__ = [
     "compute_fixed_output_hash",
     "compute_overlay_hash",
     "get_current_nix_platform",
+    "normalize_nix_platform",
 ]

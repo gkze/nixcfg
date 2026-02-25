@@ -1,7 +1,5 @@
 """Configuration for ptpython REPL."""
 
-# ruff: noqa: INP001
-
 import importlib
 from typing import Protocol
 

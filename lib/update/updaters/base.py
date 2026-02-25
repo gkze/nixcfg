@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 from abc import ABC, abstractmethod
+from contextlib import suppress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     import aiohttp
 
+from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import (
     HashCollection,
     HashEntry,
@@ -20,6 +24,9 @@ from lib.nix.models.sources import (
     SourceEntry,
     SourceHashes,
 )
+from lib.update import deno_lock
+from lib.update import paths as update_paths
+from lib.update import process as update_process
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.events import (
     EventStream,
@@ -27,6 +34,10 @@ from lib.update.events import (
     UpdateEvent,
     ValueDrain,
     drain_value_events,
+    expect_hash_mapping,
+    expect_source_entry,
+    expect_source_hashes,
+    expect_str,
     gather_event_streams,
     require_value,
 )
@@ -38,7 +49,23 @@ from lib.update.nix import (
     get_current_nix_platform,
 )
 from lib.update.nix_deno import compute_deno_deps_hash
-from lib.update.process import compute_url_hashes, convert_nix_hash_to_sri
+
+
+def _package_dir_for(name: str) -> Path | None:
+    return update_paths.package_dir_for(name)
+
+
+def _compute_url_hashes(source_name: str, urls: Iterable[str]) -> EventStream:
+    return update_process.compute_url_hashes(source_name, urls)
+
+
+def _convert_nix_hash_to_sri(source_name: str, nix_hash: str) -> EventStream:
+    return update_process.convert_nix_hash_to_sri(source_name, nix_hash)
+
+
+package_dir_for: Callable[[str], Path | None] = _package_dir_for
+compute_url_hashes: Callable[[str, Iterable[str]], EventStream] = _compute_url_hashes
+convert_nix_hash_to_sri: Callable[[str, str], EventStream] = _convert_nix_hash_to_sri
 
 
 @dataclass
@@ -46,7 +73,7 @@ class VersionInfo:
     """Latest upstream version metadata fetched by an updater."""
 
     version: str
-    metadata: dict[str, Any]
+    metadata: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -64,6 +91,21 @@ def _verify_platform_versions(versions: dict[str, str], source_name: str) -> str
         msg = f"{source_name} version mismatch across platforms: {versions}"
         raise RuntimeError(msg)
     return unique.pop()
+
+
+def _ensure_str_mapping(values: object) -> dict[str, str]:
+    """Return ``values`` as ``dict[str, str]`` or raise ``TypeError``."""
+    if not isinstance(values, dict):
+        msg = f"Expected dict for platform/hash mapping, got {type(values)}"
+        raise TypeError(msg)
+
+    result: dict[str, str] = {}
+    for key, value in values.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            msg = "Expected platform/hash string mapping"
+            raise TypeError(msg)
+        result[key] = value
+    return result
 
 
 UPDATERS: dict[str, type[Updater]] = {}
@@ -129,7 +171,7 @@ class Updater(ABC):
         if current.version != info.version:
             return False
         upstream_commit = info.metadata.get("commit")
-        if upstream_commit and current.commit:
+        if isinstance(upstream_commit, str) and current.commit:
             return current.commit == upstream_commit
         return True
 
@@ -174,6 +216,7 @@ class Updater(ABC):
         async for event in drain_value_events(
             self.fetch_hashes(info, session),
             hashes_drain,
+            parse=expect_source_hashes,
         ):
             yield event
         hashes = require_value(hashes_drain, "Missing hash output")
@@ -183,6 +226,7 @@ class Updater(ABC):
         async for event in drain_value_events(
             self._finalize_result(result),
             result_drain,
+            parse=expect_source_entry,
         ):
             yield event
         result = require_value(result_drain, "Missing finalized result")
@@ -221,7 +265,7 @@ class ChecksumProvidedUpdater(Updater):
         }
         async for item in gather_event_streams(streams):
             if isinstance(item, GatheredValues):
-                yield UpdateEvent.value(self.name, cast("dict[str, str]", item.values))
+                yield UpdateEvent.value(self.name, _ensure_str_mapping(item.values))
             else:
                 yield item
 
@@ -295,6 +339,7 @@ class DownloadHashUpdater(Updater):
         async for event in drain_value_events(
             compute_url_hashes(self.name, platform_urls.values()),
             hashes_drain,
+            parse=expect_hash_mapping,
         ):
             yield event
         hashes_by_url = require_value(hashes_drain, "Missing hash output")
@@ -328,12 +373,14 @@ class HashEntryUpdater(Updater):
         hash_type: HashType,
     ) -> EventStream:
         hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(events, hash_drain):
+        async for event in drain_value_events(events, hash_drain, parse=expect_str):
             yield event
         hash_value = require_value(hash_drain, error)
+        entry = HashEntry.create(hash_type, hash_value)
+        entries: list[HashEntry] = [entry]
         yield UpdateEvent.value(
             self.name,
-            cast("SourceHashes", [HashEntry.create(hash_type, hash_value)]),
+            entries,
         )
 
 
@@ -432,8 +479,11 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
             if drv_hash is None:
                 drv_hash = await compute_drv_fingerprint(self.name, config=self.config)
             result = result.model_copy(update={"drv_hash": drv_hash})
-        except RuntimeError:
-            pass  # Store without fingerprint; will recompute next run
+        except RuntimeError as exc:
+            yield UpdateEvent.status(
+                self.name,
+                f"Warning: derivation fingerprint unavailable ({exc})",
+            )
         yield UpdateEvent.value(self.name, result)
 
     def _compute_hash(self, info: VersionInfo) -> EventStream:
@@ -459,7 +509,11 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
             # Platform-specific: emit a HashEntry tagged with the current platform.
             error = f"Missing {self.hash_type} output"
             hash_drain = ValueDrain[str]()
-            async for event in drain_value_events(self._compute_hash(info), hash_drain):
+            async for event in drain_value_events(
+                self._compute_hash(info),
+                hash_drain,
+                parse=expect_str,
+            ):
                 yield event
             hash_value = require_value(hash_drain, error)
             platform = get_current_nix_platform()
@@ -502,11 +556,19 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
     ) -> EventStream:
         """Compute a single FOD hash entry for the Deno deps overlay."""
         _ = session
+
+        def _expect_platform_hashes(payload: object) -> HashMapping:
+            if isinstance(payload, dict):
+                return expect_hash_mapping(payload)
+            msg = f"Expected dict of platform hashes, got {type(payload)}"
+            raise TypeError(msg)
+
         error = f"Missing {self.hash_type} output"
         hash_drain = ValueDrain[HashMapping]()
         async for event in drain_value_events(
             self._compute_hash(info),
             hash_drain,
+            parse=_expect_platform_hashes,
         ):
             yield event
         platform_hashes = require_value(hash_drain, error)
@@ -549,12 +611,14 @@ class DenoManifestUpdater(FlakeInputMixin, Updater):
         session: aiohttp.ClientSession,
     ) -> EventStream:
         """Resolve ``deno.lock`` and write ``deno-deps.json``."""
-        from lib.update.deno_lock import resolve_deno_deps
-        from lib.update.paths import package_dir_for
-
-        node = info.metadata.get("node")
-        if node is None:
+        node_obj = info.metadata.get("node")
+        if node_obj is None:
             node = get_flake_input_node(self._input)
+        elif isinstance(node_obj, FlakeLockNode):
+            node = node_obj
+        else:
+            msg = f"Expected flake lock node in metadata, got {type(node_obj)}"
+            raise TypeError(msg)
 
         # Download deno.lock from the GitHub source.
         locked = node.locked
@@ -577,18 +641,16 @@ class DenoManifestUpdater(FlakeInputMixin, Updater):
         )
 
         # Write lock content to a temp file for the resolver.
-        import tempfile
-        from pathlib import Path
-
         with tempfile.NamedTemporaryFile(mode="w", suffix=".lock", delete=False) as tmp:
             tmp.write(lock_bytes.decode())
             tmp_name = tmp.name
 
         try:
             yield UpdateEvent.status(self.name, "Resolving Deno dependencies...")
-            manifest = await resolve_deno_deps(Path(tmp_name))
+            manifest = await deno_lock.resolve_deno_deps(Path(tmp_name))
         finally:
-            Path(tmp_name).unlink()  # noqa: ASYNC240
+            with suppress(OSError):
+                await asyncio.to_thread(Path(tmp_name).unlink, missing_ok=True)
 
         # Write the manifest to the package directory.
         pkg_dir = package_dir_for(self.name)
@@ -607,7 +669,8 @@ class DenoManifestUpdater(FlakeInputMixin, Updater):
         )
 
         # No hash entries — mkDenoApplication uses the manifest directly.
-        yield UpdateEvent.value(self.name, cast("SourceHashes", []))
+        empty_entries: list[HashEntry] = []
+        yield UpdateEvent.value(self.name, empty_entries)
 
 
 def flake_input_hash_updater(
@@ -637,7 +700,7 @@ def flake_input_hash_updater(
         (used by Bun node_modules and similar platform-specific FODs).
 
     """
-    attrs: dict[str, Any] = {
+    attrs: dict[str, object] = {
         "name": name,
         "input_name": input_name,
         "hash_type": hash_type,
@@ -696,7 +759,7 @@ def deno_deps_updater(
     .. deprecated::
         Use :func:`deno_manifest_updater` for ``mkDenoApplication`` packages.
     """
-    attrs: dict[str, Any] = {"name": name, "input_name": input_name}
+    attrs: dict[str, object] = {"name": name, "input_name": input_name}
     return type(f"{name}Updater", (DenoDepsHashUpdater,), attrs)
 
 
@@ -713,7 +776,7 @@ def deno_manifest_updater(
     resolves ``deno.lock`` from the flake input source and writes
     ``deno-deps.json`` — no FOD hashes are involved.
     """
-    attrs: dict[str, Any] = {
+    attrs: dict[str, object] = {
         "name": name,
         "input_name": input_name,
         "lock_file": lock_file,

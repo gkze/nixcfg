@@ -135,11 +135,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.44.0";
+      url = "github:charmbracelet/crush/v0.45.0";
       flake = false;
     };
     gemini-cli = {
-      url = "github:google-gemini/gemini-cli/v0.29.7";
+      url = "github:google-gemini/gemini-cli/v0.30.0";
       flake = false;
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
@@ -161,6 +161,10 @@
     };
     homebrew-core = {
       url = "github:homebrew/homebrew-core";
+      flake = false;
+    };
+    ladybird = {
+      url = "github:LadybirdBrowser/ladybird";
       flake = false;
     };
     linear-cli = {
@@ -241,6 +245,10 @@
               "*.pyi"
               "home/george/bin/git-ignore"
             ];
+          };
+          toml = {
+            regex = "\\.toml$";
+            globs = [ "*.toml" ];
           };
           shell = {
             regex = "(\\.envrc|misc/zsh-plugins/.*\\.zsh)";
@@ -380,6 +388,12 @@
                 };
                 # YAML
                 yamlfmt.enable = true;
+                # TOML
+                taplo = {
+                  enable = true;
+                  files = lintFiles.toml.regex;
+                  entry = "${lib.getExe pkgs.taplo} format --config .taplo.toml";
+                };
                 # General
                 check-merge-conflicts.enable = true;
                 end-of-file-fixer.enable = true;
@@ -402,6 +416,7 @@
                 nurl
                 prek
                 sops
+                taplo
                 yamlfmt
               ]
               ++ lib.optional pkgs.stdenv.isLinux dconf2nix
@@ -442,6 +457,10 @@
                     excludes = lintFiles.shell.excludeGlobs;
                   };
                   yamlfmt.enable = true;
+                  taplo = {
+                    enable = true;
+                    includes = lintFiles.toml.globs;
+                  };
                 };
                 # treefmt/ruff normally auto-discovers `pyproject.toml`, but being
                 # explicit keeps `nix fmt` aligned with uv-managed Ruff config,
@@ -456,6 +475,12 @@
                     ruff-format.options = [
                       "--config"
                       "pyproject.toml"
+                    ];
+                    # treefmt/taplo normally auto-discovers `.taplo.toml`, but
+                    # this keeps `nix fmt` stable from subdirectories.
+                    taplo.options = [
+                      "--config"
+                      ".taplo.toml"
                     ];
                     "markdown-table-formatter" = {
                       command = lib.getExe' (pkgs.python3.withPackages (

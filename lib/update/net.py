@@ -5,9 +5,9 @@ import json
 import netrc
 import os
 import urllib.parse
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
 
 import aiohttp
 from aiohttp_retry import ExponentialRetry, RetryClient
@@ -15,9 +15,38 @@ from aiohttp_retry import ExponentialRetry, RetryClient
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.constants import resolve_timeout_alias
 
-type JSONDict = dict[str, Any]
-type JSONList = list[Any]
-type JSONValue = JSONDict | JSONList | str | int | float | bool | None
+type JSONScalar = str | int | float | bool | None
+type JSONValue = JSONScalar | dict[str, "JSONValue"] | list["JSONValue"]
+type JSONDict = dict[str, JSONValue]
+type JSONList = list[JSONValue]
+
+
+def _expect_json_dict(payload: JSONValue, *, context: str) -> JSONDict:
+    if isinstance(payload, dict):
+        return payload
+    msg = f"Expected JSON object from {context}, got {type(payload).__name__}"
+    raise RuntimeError(msg)
+
+
+def _expect_json_list(payload: JSONValue, *, context: str) -> JSONList:
+    if isinstance(payload, list):
+        return payload
+    msg = f"Expected JSON array from {context}, got {type(payload).__name__}"
+    raise RuntimeError(msg)
+
+
+def _expect_json_string_field(
+    payload: JSONDict,
+    field: str,
+    *,
+    context: str,
+) -> str:
+    value = payload.get(field)
+    if isinstance(value, str):
+        return value
+    msg = f"Expected string field {field!r} in {context}"
+    raise RuntimeError(msg)
+
 
 HTTP_BAD_REQUEST = 400
 
@@ -89,32 +118,102 @@ def _resolve_timeout_alias(
     )
 
 
-async def _request(  # noqa: PLR0913
-    session: aiohttp.ClientSession,
-    url: str,
-    *,
-    user_agent: str | None = None,
-    request_timeout: float | None = None,
-    method: str = "GET",
-    retries: int | None = None,
-    backoff: float | None = None,
-    config: UpdateConfig | None = None,
-) -> tuple[bytes, dict[str, str]]:
-    config = resolve_active_config(config)
-    if retries is None:
-        retries = config.default_retries
-    if backoff is None:
-        backoff = config.default_retry_backoff
-    headers = _build_request_headers(url, user_agent)
-    timeout_config = aiohttp.ClientTimeout(
-        total=request_timeout or config.default_timeout,
+def _pop_optional_str(kwargs: dict[str, object], key: str) -> str | None:
+    value = kwargs.pop(key, None)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    msg = f"{key} must be a string"
+    raise TypeError(msg)
+
+
+def _pop_optional_numeric(kwargs: dict[str, object], key: str) -> float | None:
+    value = kwargs.pop(key, None)
+    if value is None:
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    msg = f"{key} must be numeric"
+    raise TypeError(msg)
+
+
+def _pop_optional_int(kwargs: dict[str, object], key: str) -> int | None:
+    value = kwargs.pop(key, None)
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    msg = f"{key} must be an integer"
+    raise TypeError(msg)
+
+
+def _pop_optional_config(kwargs: dict[str, object]) -> UpdateConfig | None:
+    value = kwargs.pop("config", None)
+    if value is None:
+        return None
+    if isinstance(value, UpdateConfig):
+        return value
+    msg = "config must be an UpdateConfig"
+    raise TypeError(msg)
+
+
+@dataclass(frozen=True)
+class _RequestOptions:
+    method: str
+    user_agent: str | None
+    request_timeout: float
+    attempts: int
+    backoff: float
+
+
+def _parse_request_options(kwargs: dict[str, object]) -> _RequestOptions:
+    user_agent = _pop_optional_str(kwargs, "user_agent")
+    request_timeout = _pop_optional_numeric(kwargs, "request_timeout")
+    method = kwargs.pop("method", "GET")
+    if not isinstance(method, str):
+        msg = "method must be a string"
+        raise TypeError(msg)
+    retries = _pop_optional_int(kwargs, "retries")
+    backoff = _pop_optional_numeric(kwargs, "backoff")
+    config = resolve_active_config(_pop_optional_config(kwargs))
+
+    if kwargs:
+        unknown = ", ".join(sorted(kwargs))
+        msg = f"Unexpected keyword argument(s): {unknown}"
+        raise TypeError(msg)
+
+    timeout = request_timeout or config.default_timeout
+    attempts = max(1, retries if retries is not None else config.default_retries)
+    resolved_backoff = (
+        max(0.0, backoff)
+        if backoff is not None
+        else max(0.0, config.default_retry_backoff)
+    )
+    return _RequestOptions(
+        method=method,
+        user_agent=user_agent,
+        request_timeout=timeout,
+        attempts=attempts,
+        backoff=resolved_backoff,
     )
 
-    attempts = max(1, retries)
+
+async def _request(
+    session: aiohttp.ClientSession,
+    url: str,
+    **kwargs: object,
+) -> tuple[bytes, dict[str, str]]:
+    options = _parse_request_options(kwargs)
+    headers = _build_request_headers(url, options.user_agent)
+    timeout_config = aiohttp.ClientTimeout(
+        total=options.request_timeout,
+    )
+
     retry_options = ExponentialRetry(
-        attempts=attempts,
+        attempts=options.attempts,
         factor=2.0,
-        start_timeout=max(0.0, backoff),
+        start_timeout=options.backoff,
         statuses={429, 500, 502, 503, 504},
         exceptions={aiohttp.ClientError, TimeoutError, asyncio.TimeoutError},
     )
@@ -124,8 +223,9 @@ async def _request(  # noqa: PLR0913
         retry_options=retry_options,
         raise_for_status=False,
     )
+
     async with retry_client.request(
-        method,
+        options.method,
         url,
         headers=headers,
         timeout=timeout_config,
@@ -135,7 +235,7 @@ async def _request(  # noqa: PLR0913
         if response.status < HTTP_BAD_REQUEST:
             return payload, dict(response.headers)
         detail = _format_http_error(response, payload)
-        msg = f"Request to {url} failed after {attempts} attempts: {detail}"
+        msg = f"Request to {url} failed after {options.attempts} attempts: {detail}"
         raise RuntimeError(
             msg,
         )
@@ -263,25 +363,28 @@ async def fetch_github_default_branch(
     config: UpdateConfig | None = None,
 ) -> str:
     """Fetch the default branch name for a GitHub repository."""
-    data = cast(
-        "JSONDict",
+    data = _expect_json_dict(
         await fetch_github_api(session, f"repos/{owner}/{repo}", config=config),
+        context=f"GitHub repo metadata for {owner}/{repo}",
     )
-    return data["default_branch"]
+    return _expect_json_string_field(
+        data,
+        "default_branch",
+        context=f"GitHub repo metadata for {owner}/{repo}",
+    )
 
 
-async def fetch_github_latest_commit(  # noqa: PLR0913
+async def fetch_github_latest_commit(
     session: aiohttp.ClientSession,
-    owner: str,
-    repo: str,
+    repository: tuple[str, str],
+    *,
     file_path: str,
     branch: str,
-    *,
     config: UpdateConfig | None = None,
 ) -> str:
     """Fetch the latest commit SHA that touched ``file_path`` on ``branch``."""
-    data = cast(
-        "list[JSONDict]",
+    owner, repo = repository
+    data = _expect_json_list(
         await fetch_github_api(
             session,
             f"repos/{owner}/{repo}/commits",
@@ -290,16 +393,26 @@ async def fetch_github_latest_commit(  # noqa: PLR0913
             per_page="1",
             config=config,
         ),
+        context=f"GitHub commits for {owner}/{repo}:{file_path}",
     )
     if not data:
         msg = f"No commits found for {owner}/{repo}:{file_path}"
         raise RuntimeError(msg)
-    return data[0]["sha"]
+    first_commit = _expect_json_dict(
+        data[0],
+        context=f"first commit for {owner}/{repo}:{file_path}",
+    )
+    return _expect_json_string_field(
+        first_commit,
+        "sha",
+        context=f"first commit for {owner}/{repo}:{file_path}",
+    )
 
 
 __all__ = [
     "JSONDict",
     "JSONList",
+    "JSONScalar",
     "JSONValue",
     "_request",
     "fetch_github_api",

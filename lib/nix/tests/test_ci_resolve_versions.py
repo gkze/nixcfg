@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from lib.nix.tests._assertions import check
 from lib.update.ci.resolve_versions import (
     _deserialize_version_info,
     _serialize_version_info,
@@ -23,8 +24,8 @@ def test_serialize_roundtrip() -> None:
     )
     data = _serialize_version_info(info)
     restored = _deserialize_version_info(data)
-    assert restored.version == info.version  # noqa: S101
-    assert restored.metadata == info.metadata  # noqa: S101
+    check(restored.version == info.version)
+    check(restored.metadata == info.metadata)
 
 
 def test_serialize_empty_metadata() -> None:
@@ -32,16 +33,16 @@ def test_serialize_empty_metadata() -> None:
     info = VersionInfo(version="0.0.1", metadata={})
     data = _serialize_version_info(info)
     restored = _deserialize_version_info(data)
-    assert restored.version == "0.0.1"  # noqa: S101
-    assert restored.metadata == {}  # noqa: S101
+    check(restored.version == "0.0.1")
+    check(restored.metadata == {})
 
 
 def test_deserialize_missing_metadata() -> None:
     """Deserialize tolerates missing metadata key (defaults to {})."""
     data = {"version": "2.0.0"}
     info = _deserialize_version_info(data)
-    assert info.version == "2.0.0"  # noqa: S101
-    assert info.metadata == {}  # noqa: S101
+    check(info.version == "2.0.0")
+    check(info.metadata == {})
 
 
 def test_load_pinned_versions(tmp_path: Path) -> None:
@@ -60,10 +61,10 @@ def test_load_pinned_versions(tmp_path: Path) -> None:
     path.write_text(json.dumps(manifest), encoding="utf-8")
 
     result = load_pinned_versions(path)
-    assert set(result.keys()) == {"google-chrome", "vscode-insiders"}  # noqa: S101
-    assert result["google-chrome"].version == "145.0.7632.76"  # noqa: S101
-    assert result["google-chrome"].metadata["commit"] == "abc"  # noqa: S101
-    assert result["vscode-insiders"].version == "1.99.0"  # noqa: S101
+    check(set(result.keys()) == {"google-chrome", "vscode-insiders"})
+    check(result["google-chrome"].version == "145.0.7632.76")
+    check(result["google-chrome"].metadata["commit"] == "abc")
+    check(result["vscode-insiders"].version == "1.99.0")
 
 
 def test_serialize_to_json_string() -> None:
@@ -73,5 +74,5 @@ def test_serialize_to_json_string() -> None:
     json_str = json.dumps(data)
     restored_data = json.loads(json_str)
     restored = _deserialize_version_info(restored_data)
-    assert restored.version == info.version  # noqa: S101
-    assert restored.metadata == info.metadata  # noqa: S101
+    check(restored.version == info.version)
+    check(restored.metadata == info.metadata)

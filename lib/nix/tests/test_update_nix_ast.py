@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from nix_manipulator import parse
 
+from lib.nix.tests._assertions import check
+
 if TYPE_CHECKING:
     import pytest
 
@@ -30,9 +32,9 @@ def test_flake_fetch_expr_builds_parseable_fetch_tree() -> None:
     expr = flake_fetch_expr(node)
 
     parse(expr)
-    assert "builtins.fetchTree" in expr  # noqa: S101
-    assert 'owner = "NixOS";' in expr  # noqa: S101
-    assert 'repo = "nixpkgs";' in expr  # noqa: S101
+    check("builtins.fetchTree" in expr)
+    check('owner = "NixOS";' in expr)
+    check('repo = "nixpkgs";' in expr)
 
 
 def test_build_nix_expr_wraps_body_with_pkgs_binding() -> None:
@@ -40,8 +42,8 @@ def test_build_nix_expr_wraps_body_with_pkgs_binding() -> None:
     expr = _build_nix_expr("pkgs.hello")
 
     parse(expr)
-    assert expr.startswith("let pkgs = ")  # noqa: S101
-    assert expr.endswith("in pkgs.hello")  # noqa: S101
+    check(expr.startswith("let pkgs = "))
+    check(expr.endswith("in pkgs.hello"))
 
 
 def test_build_overlay_expr_supports_explicit_system() -> None:
@@ -49,8 +51,8 @@ def test_build_overlay_expr_supports_explicit_system() -> None:
     expr = _build_overlay_expr("chatgpt", system="x86_64-linux")
 
     parse(expr)
-    assert 'system = "x86_64-linux";' in expr  # noqa: S101
-    assert 'in applied."chatgpt"' in expr  # noqa: S101
+    check('system = "x86_64-linux";' in expr)
+    check('in applied."chatgpt"' in expr)
 
 
 def test_nix_source_names_uses_parseable_ast_expression(
@@ -59,20 +61,21 @@ def test_nix_source_names_uses_parseable_ast_expression(
     """nix_source_names should evaluate a valid expression generated via AST."""
     captured: dict[str, str] = {}
 
-    class _Result:
-        returncode = 0
-        stdout = '["foo", "bar"]'
-        stderr = ""
-
-    def _fake_run(args: list[str], **_: object) -> _Result:
+    async def _fake_run_nix(args: list[str], **_: object) -> object:
         captured["expr"] = args[-1]
+
+        class _Result:
+            returncode = 0
+            stdout = '["foo", "bar"]'
+            stderr = ""
+
         return _Result()
 
     monkeypatch.setattr("lib.update.sources.shutil.which", lambda _tool: "/usr/bin/nix")
-    monkeypatch.setattr("lib.update.sources.subprocess.run", _fake_run)
+    monkeypatch.setattr("lib.update.sources.run_nix", _fake_run_nix)
 
     names = nix_source_names()
 
-    assert names == {"foo", "bar"}  # noqa: S101
+    check(names == {"foo", "bar"})
     parse(captured["expr"])
-    assert "builtins.getFlake" in captured["expr"]  # noqa: S101
+    check("builtins.getFlake" in captured["expr"])

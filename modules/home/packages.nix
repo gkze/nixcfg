@@ -166,6 +166,7 @@ in
             sculptor
             sd
             sentry-cli
+            taplo
             toad
             worktrunk
           ])

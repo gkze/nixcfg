@@ -1,6 +1,6 @@
 """Nix hash conversion and URL prefetching utilities."""
 
-from .base import run_nix
+from .base import _resolve_timeout_alias, run_nix
 
 
 async def nix_hash_convert(
@@ -8,12 +8,17 @@ async def nix_hash_convert(
     *,
     hash_algo: str = "sha256",
     to: str = "sri",
-    timeout: float = 30.0,  # noqa: ASYNC109
+    command_timeout: float = 30.0,
+    **kwargs: object,
 ) -> str:
     """Convert a hash to the specified representation (SRI by default)."""
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
     result = await run_nix(
         ["nix", "hash", "convert", "--hash-algo", hash_algo, "--to", to, hash_value],
-        timeout=timeout,
+        timeout=timeout_seconds,
     )
     return result.stdout.strip()
 
@@ -22,12 +27,17 @@ async def nix_prefetch_url(
     url: str,
     *,
     hash_type: str = "sha256",
-    timeout: float = 300.0,  # noqa: ASYNC109
+    command_timeout: float = 300.0,
+    **kwargs: object,
 ) -> str:
     """Download a URL and return its SRI hash."""
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
     result = await run_nix(
         ["nix-prefetch-url", "--type", hash_type, url],
-        timeout=timeout,
+        timeout=timeout_seconds,
     )
     raw_hash = result.stdout.strip().split("\n")[-1]
     return await nix_hash_convert(raw_hash)

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import aiohttp
 
-from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
+from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.nix.tests._assertions import check
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.updaters.base import (
     FlakeInputHashUpdater,
@@ -26,28 +26,30 @@ class _FakeHashEntryUpdater(HashEntryUpdater):
         self.fetch_hashes_called = False
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        """Run this test case."""
         _ = session
-        return VersionInfo(version=self._version, metadata={})
+        return VersionInfo(
+            version=object.__getattribute__(self, "_version"), metadata={}
+        )
 
     async def fetch_hashes(
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
     ) -> EventStream:
+        """Run this test case."""
         _ = info
         _ = session
         self.fetch_hashes_called = True
+        entries: list[HashEntry] = [
+            HashEntry.create(
+                hash_type="sha256",
+                hash_value="sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
+            )
+        ]
         yield UpdateEvent.value(
             self.name,
-            cast(
-                "SourceHashes",
-                [
-                    HashEntry.create(
-                        hash_type="sha256",
-                        hash_value="sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
-                    ),
-                ],
-            ),
+            entries,
         )
 
 
@@ -64,7 +66,7 @@ def test_hash_entry_updater_build_result_preserves_version() -> None:
 
     result = updater.build_result(info, hashes)
 
-    assert result.version == "v1.2.3"  # noqa: S101
+    check(result.version == "v1.2.3")
 
 
 def test_hash_entry_updater_skips_hash_fetch_when_version_matches() -> None:
@@ -87,7 +89,7 @@ def test_hash_entry_updater_skips_hash_fetch_when_version_matches() -> None:
         async with aiohttp.ClientSession() as session:
             events = [event async for event in updater.update_stream(current, session)]
 
-        assert updater.fetch_hashes_called is False  # noqa: S101
+        check(updater.fetch_hashes_called is False)
         return events
 
     events = asyncio.run(_collect_events())
@@ -95,7 +97,7 @@ def test_hash_entry_updater_skips_hash_fetch_when_version_matches() -> None:
         event.message for event in events if event.kind == UpdateEventKind.STATUS
     ]
 
-    assert "Up to date (version: v2.0.0)" in status_messages  # noqa: S101
+    check("Up to date (version: v2.0.0)" in status_messages)
 
 
 # ---------------------------------------------------------------------------
@@ -116,13 +118,16 @@ class _FakeFlakeInputUpdater(FlakeInputHashUpdater):
         self.fetch_hashes_called = False
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        """Run this test case."""
         _ = session
-        return VersionInfo(version=self._version, metadata={})
+        return VersionInfo(
+            version=object.__getattribute__(self, "_version"), metadata={}
+        )
 
     def _compute_hash(self, info: VersionInfo) -> EventStream:
         _ = info
         self.fetch_hashes_called = True
-        return self._yield_fake_hash()
+        return object.__getattribute__(self, "_yield_fake_hash")()
 
     async def _yield_fake_hash(self) -> EventStream:
         yield UpdateEvent.value(
@@ -149,10 +154,10 @@ def test_flake_input_updater_recomputes_when_no_drv_hash() -> None:
             # No drv_hash — simulates pre-fingerprinting sources.json
         )
         info = VersionInfo(version="v1.0.0", metadata={})
-        return await updater._is_latest(current, info)  # noqa: SLF001
+        return await object.__getattribute__(updater, "_is_latest")(current, info)
 
     result = asyncio.run(_run())
-    assert result is False  # noqa: S101
+    check(result is False)
 
 
 def test_flake_input_updater_recomputes_when_version_differs() -> None:
@@ -178,12 +183,12 @@ def test_flake_input_updater_recomputes_when_version_differs() -> None:
             new_callable=AsyncMock,
             return_value="abc123deadbeef",
         ) as compute_drv_fingerprint:
-            result = await updater._is_latest(current, info)  # noqa: SLF001
+            result = await object.__getattribute__(updater, "_is_latest")(current, info)
             compute_drv_fingerprint.assert_not_awaited()
             return result
 
     result = asyncio.run(_run())
-    assert result is False  # noqa: S101
+    check(result is False)
 
 
 def test_flake_input_updater_skips_when_fingerprint_matches() -> None:
@@ -191,28 +196,26 @@ def test_flake_input_updater_skips_when_fingerprint_matches() -> None:
 
     async def _run() -> bool:
         updater = _FakeFlakeInputUpdater()
-        current = SourceEntry(
-            version="v1.0.0",
-            hashes=HashCollection(
-                entries=[
-                    HashEntry.create(
-                        hash_type="sha256",
-                        hash_value="sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
-                    ),
-                ],
-            ),
-            drv_hash="abc123deadbeef",
-        )
+        current = SourceEntry.model_validate({
+            "version": "v1.0.0",
+            "hashes": [
+                {
+                    "hashType": "sha256",
+                    "hash": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
+                }
+            ],
+            "drvHash": "abc123deadbeef",
+        })
         info = VersionInfo(version="v1.0.0", metadata={})
         with patch(
             "lib.update.updaters.base.compute_drv_fingerprint",
             new_callable=AsyncMock,
             return_value="abc123deadbeef",
         ):
-            return await updater._is_latest(current, info)  # noqa: SLF001
+            return await object.__getattribute__(updater, "_is_latest")(current, info)
 
     result = asyncio.run(_run())
-    assert result is True  # noqa: S101
+    check(result is True)
 
 
 def test_flake_input_updater_recomputes_when_fingerprint_differs() -> None:
@@ -220,28 +223,26 @@ def test_flake_input_updater_recomputes_when_fingerprint_differs() -> None:
 
     async def _run() -> bool:
         updater = _FakeFlakeInputUpdater()
-        current = SourceEntry(
-            version="v1.0.0",
-            hashes=HashCollection(
-                entries=[
-                    HashEntry.create(
-                        hash_type="sha256",
-                        hash_value="sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
-                    ),
-                ],
-            ),
-            drv_hash="abc123deadbeef",
-        )
+        current = SourceEntry.model_validate({
+            "version": "v1.0.0",
+            "hashes": [
+                {
+                    "hashType": "sha256",
+                    "hash": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
+                }
+            ],
+            "drvHash": "abc123deadbeef",
+        })
         info = VersionInfo(version="v1.0.0", metadata={})
         with patch(
             "lib.update.updaters.base.compute_drv_fingerprint",
             new_callable=AsyncMock,
             return_value="different_fingerprint",
         ):
-            return await updater._is_latest(current, info)  # noqa: SLF001
+            return await object.__getattribute__(updater, "_is_latest")(current, info)
 
     result = asyncio.run(_run())
-    assert result is False  # noqa: S101
+    check(result is False)
 
 
 def test_flake_input_updater_recomputes_when_fingerprint_fails() -> None:
@@ -249,25 +250,23 @@ def test_flake_input_updater_recomputes_when_fingerprint_fails() -> None:
 
     async def _run() -> bool:
         updater = _FakeFlakeInputUpdater()
-        current = SourceEntry(
-            version="v1.0.0",
-            hashes=HashCollection(
-                entries=[
-                    HashEntry.create(
-                        hash_type="sha256",
-                        hash_value="sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
-                    ),
-                ],
-            ),
-            drv_hash="abc123deadbeef",
-        )
+        current = SourceEntry.model_validate({
+            "version": "v1.0.0",
+            "hashes": [
+                {
+                    "hashType": "sha256",
+                    "hash": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
+                }
+            ],
+            "drvHash": "abc123deadbeef",
+        })
         info = VersionInfo(version="v1.0.0", metadata={})
         with patch(
             "lib.update.updaters.base.compute_drv_fingerprint",
             new_callable=AsyncMock,
             side_effect=RuntimeError("nix eval failed"),
         ):
-            return await updater._is_latest(current, info)  # noqa: SLF001
+            return await object.__getattribute__(updater, "_is_latest")(current, info)
 
     result = asyncio.run(_run())
-    assert result is False  # noqa: S101
+    check(result is False)

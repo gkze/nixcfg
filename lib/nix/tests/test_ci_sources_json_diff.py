@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
 
+from lib.nix.tests._assertions import check
 from lib.update.ci.sources_json_diff import run_diff
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ def test_run_diff_returns_no_changes_message(tmp_path: Path) -> None:
 
     diff = run_diff(old_file, new_file)
 
-    assert diff == "No source entry changes detected."  # noqa: S101
+    check(diff == "No source entry changes detected.")
 
 
 def test_run_diff_prefers_jd_output_when_available(
@@ -50,8 +51,8 @@ def test_run_diff_prefers_jd_output_when_available(
 
     diff = run_diff(old_file, new_file)
 
-    assert diff.startswith('@ ["version"]')  # noqa: S101
-    assert '+ "1.1.0"' in diff  # noqa: S101
+    check(diff.startswith('@ ["version"]'))
+    check('+ "1.1.0"' in diff)
 
 
 def test_run_diff_uses_jd_command_output_on_auto_mode(
@@ -77,12 +78,12 @@ def test_run_diff_uses_jd_command_output_on_auto_mode(
     monkeypatch.setattr(
         "lib.update.ci.sources_json_diff.shutil.which", lambda _: "/usr/bin/jd"
     )
-    monkeypatch.setattr("lib.update.ci.sources_json_diff.subprocess.run", _fake_run)
+    monkeypatch.setattr("lib.update.ci.sources_json_diff._run_command", _fake_run)
 
     diff = run_diff(old_file, new_file)
 
-    assert diff == '@ ["version"]\n- "1.0.0"\n+ "1.1.0"'  # noqa: S101
-    assert executed["cmd"] == ["/usr/bin/jd", str(old_file), str(new_file)]  # noqa: S101
+    check(diff == '@ ["version"]\n- "1.0.0"\n+ "1.1.0"')
+    check(executed["cmd"] == ["/usr/bin/jd", str(old_file), str(new_file)])
 
 
 def test_run_diff_uses_structural_fallback_when_jd_not_available(
@@ -106,9 +107,9 @@ def test_run_diff_uses_structural_fallback_when_jd_not_available(
 
     diff = run_diff(old_file, new_file)
 
-    assert '@ ["hashes", 0, "hash"]' in diff  # noqa: S101
-    assert '- "old"' in diff  # noqa: S101
-    assert '+ "new"' in diff  # noqa: S101
+    check('@ ["hashes", 0, "hash"]' in diff)
+    check('- "old"' in diff)
+    check('+ "new"' in diff)
 
 
 def test_run_diff_explicit_jd_format_falls_back_when_jd_unavailable(
@@ -128,8 +129,8 @@ def test_run_diff_explicit_jd_format_falls_back_when_jd_unavailable(
 
     diff = run_diff(old_file, new_file, output_format="jd")
 
-    assert diff != "No source entry changes detected."  # noqa: S101
-    assert '@ ["version"]' in diff  # noqa: S101
+    check(diff != "No source entry changes detected.")
+    check('@ ["version"]' in diff)
 
 
 def test_run_diff_summary_format_is_legible(tmp_path: Path) -> None:
@@ -153,11 +154,9 @@ def test_run_diff_summary_format_is_legible(tmp_path: Path) -> None:
 
     diff = run_diff(old_file, new_file, output_format="summary")
 
-    assert 'changed version: "1.0.0" -> "1.1.0"' in diff  # noqa: S101
-    assert (  # noqa: S101
-        'changed hashes.x86_64-linux: "oldhash" -> "newhash"' in diff
-    )
-    assert 'added hashes.aarch64-darwin: "darwinhash"' in diff  # noqa: S101
+    check('changed version: "1.0.0" -> "1.1.0"' in diff)
+    check('changed hashes.x86_64-linux: "oldhash" -> "newhash"' in diff)
+    check('added hashes.aarch64-darwin: "darwinhash"' in diff)
 
 
 def test_run_diff_summary_format_handles_removed_fields(tmp_path: Path) -> None:
@@ -169,4 +168,4 @@ def test_run_diff_summary_format_handles_removed_fields(tmp_path: Path) -> None:
 
     diff = run_diff(old_file, new_file, output_format="summary")
 
-    assert 'removed urls.linux: "https://example.test"' in diff  # noqa: S101
+    check('removed urls.linux: "https://example.test"' in diff)

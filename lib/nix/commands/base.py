@@ -253,6 +253,28 @@ def _merge_env(env: Mapping[str, str] | None) -> dict[str, str]:
     return merged
 
 
+def _resolve_timeout_alias(
+    *,
+    command_timeout: float,
+    kwargs: dict[str, object],
+) -> float:
+    timeout_alias = kwargs.pop("timeout", None)
+    if timeout_alias is None:
+        if kwargs:
+            unknown = ", ".join(sorted(kwargs))
+            msg = f"Unexpected keyword argument(s): {unknown}"
+            raise TypeError(msg)
+        return command_timeout
+    if kwargs:
+        unknown = ", ".join(sorted(kwargs))
+        msg = f"Unexpected keyword argument(s): {unknown}"
+        raise TypeError(msg)
+    if not isinstance(timeout_alias, int | float):
+        msg = "timeout must be a number"
+        raise TypeError(msg)
+    return float(timeout_alias)
+
+
 @dataclass(frozen=True)
 class ProcessLine:
     """A single decoded line emitted by a subprocess stream."""
@@ -274,10 +296,15 @@ type ProcessEvent = ProcessLine | ProcessDone
 async def stream_process(
     args: list[str],
     *,
-    timeout: float = 2400.0,  # noqa: ASYNC109
+    command_timeout: float = 2400.0,
     env: Mapping[str, str] | None = None,
+    **kwargs: object,
 ) -> AsyncIterator[ProcessEvent]:
     """Yield line events from both stdout and stderr until process completion."""
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
     merged_env = _merge_env(env)
 
     proc = await asyncio.create_subprocess_exec(
@@ -291,7 +318,7 @@ async def stream_process(
     stderr_chunks: list[str] = []
     queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
+    deadline = loop.time() + timeout_seconds
 
     async def pump(
         stream: asyncio.StreamReader | None,
@@ -348,10 +375,11 @@ async def stream_process(
 async def run_nix(
     args: list[str],
     *,
-    timeout: float = 2400.0,  # noqa: ASYNC109
+    command_timeout: float = 2400.0,
     check: bool = True,
     capture: bool = True,
     env: Mapping[str, str] | None = None,
+    **kwargs: object,
 ) -> CommandResult:
     """Run a Nix command and return the collected output.
 
@@ -359,12 +387,14 @@ async def run_nix(
     ----------
     args:
         Full argument list (e.g. ``["nix", "build", "-L", ...]``).
-    timeout:
+    command_timeout:
         Maximum wall-clock seconds before the process is killed.
     check:
         If ``True`` (default) and the process exits non-zero, raise
         :class:`NixCommandError` (or :class:`HashMismatchError` when
         applicable).
+    **kwargs:
+        Supports legacy ``timeout=...`` alias.
     capture:
         If ``True`` (default), stdout and stderr are captured into the
         returned :class:`CommandResult`.  When ``False`` they are
@@ -373,6 +403,10 @@ async def run_nix(
         Extra environment variables merged on top of :data:`os.environ`.
 
     """
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
     merged_env = _merge_env(env)
 
     if capture:
@@ -392,14 +426,14 @@ async def run_nix(
     try:
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(),
-            timeout=timeout,
+            timeout=timeout_seconds,
         )
     except TimeoutError:
         proc.kill()
         await proc.wait()
         raise NixCommandError(
             CommandResult(args=args, returncode=-1, stdout="", stderr=""),
-            message=f"command timed out after {timeout}s",
+            message=f"command timed out after {timeout_seconds}s",
         ) from None
 
     result = CommandResult(
@@ -419,11 +453,97 @@ async def run_nix(
     return result
 
 
-async def stream_nix(  # noqa: C901
+async def _create_stream_process(
     args: list[str],
     *,
-    timeout: float = 2400.0,  # noqa: ASYNC109
+    env: Mapping[str, str],
+) -> tuple[
+    asyncio.subprocess.Process,
+    asyncio.StreamReader,
+    asyncio.StreamReader,
+]:
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    if proc.stderr is None or proc.stdout is None:
+        msg = "Subprocess was not created with piped stdout/stderr"
+        raise RuntimeError(msg)
+    return proc, proc.stdout, proc.stderr
+
+
+async def _drain_stderr_stream(
+    stderr_stream: asyncio.StreamReader,
+    *,
+    chunks: list[bytes],
+) -> None:
+    while True:
+        chunk = await stderr_stream.read(8192)
+        if not chunk:
+            break
+        chunks.append(chunk)
+
+
+async def _iter_timed_stdout_lines(
+    stdout_stream: asyncio.StreamReader,
+    *,
+    deadline: float,
+    loop: asyncio.AbstractEventLoop,
+) -> AsyncIterator[str]:
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            _raise_timeout()
+        line_bytes = await asyncio.wait_for(stdout_stream.readline(), timeout=remaining)
+        if not line_bytes:
+            break
+        yield line_bytes.decode(errors="replace").rstrip("\n")
+
+
+async def _raise_stream_timeout_error(
+    *,
+    proc: asyncio.subprocess.Process,
+    stderr_task: asyncio.Task[None],
+    args: list[str],
+    timeout_seconds: float,
+) -> None:
+    proc.kill()
+    await proc.wait()
+    stderr_task.cancel()
+    raise NixCommandError(
+        CommandResult(args=args, returncode=-1, stdout="", stderr=""),
+        message=f"command timed out after {timeout_seconds}s",
+    ) from None
+
+
+def _raise_stream_command_failure(
+    *,
+    args: list[str],
+    returncode: int,
+    stderr_text: str,
+) -> None:
+    if returncode == 0:
+        return
+    result = CommandResult(
+        args=args,
+        returncode=returncode,
+        stdout="",
+        stderr=stderr_text,
+    )
+    hash_err = HashMismatchError.from_output(stderr_text, result)
+    if hash_err is not None:
+        raise hash_err
+    raise NixCommandError(result)
+
+
+async def stream_nix(
+    args: list[str],
+    *,
+    command_timeout: float = 2400.0,
     env: Mapping[str, str] | None = None,
+    **kwargs: object,
 ) -> AsyncIterator[str]:
     """Yield stdout lines from a Nix command as they arrive.
 
@@ -434,77 +554,56 @@ async def stream_nix(  # noqa: C901
     ----------
     args:
         Full argument list.
-    timeout:
+    command_timeout:
         Maximum wall-clock seconds before the process is killed.
+    **kwargs:
+        Supports legacy ``timeout=...`` alias.
     env:
         Extra environment variables merged on top of :data:`os.environ`.
 
     """
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
     merged_env = _merge_env(env)
 
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    proc, stdout_stream, stderr_stream = await _create_stream_process(
+        args,
         env=merged_env,
     )
 
     stderr_chunks: list[bytes] = []
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-
-    if proc.stderr is None or proc.stdout is None:
-        msg = "Subprocess was not created with piped stdout/stderr"
-        raise RuntimeError(msg)
-    stderr_stream = proc.stderr
-    stdout_stream = proc.stdout
-
-    async def _drain_stderr() -> None:
-        while True:
-            chunk = await stderr_stream.read(8192)
-            if not chunk:
-                break
-            stderr_chunks.append(chunk)
-
-    stderr_task = asyncio.create_task(_drain_stderr())
+    deadline = loop.time() + timeout_seconds
+    stderr_task = asyncio.create_task(
+        _drain_stderr_stream(stderr_stream, chunks=stderr_chunks)
+    )
+    returncode = 0
 
     try:
-        while True:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                _raise_timeout()
-
-            line_bytes = await asyncio.wait_for(
-                stdout_stream.readline(),
-                timeout=remaining,
-            )
-
-            if not line_bytes:
-                break
-            yield line_bytes.decode(errors="replace").rstrip("\n")
+        async for line in _iter_timed_stdout_lines(
+            stdout_stream,
+            deadline=deadline,
+            loop=loop,
+        ):
+            yield line
 
         # Wait for the process and stderr drain to finish.
         await stderr_task
         returncode = await proc.wait()
 
     except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        stderr_task.cancel()
-        raise NixCommandError(
-            CommandResult(args=args, returncode=-1, stdout="", stderr=""),
-            message=f"command timed out after {timeout}s",
-        ) from None
+        await _raise_stream_timeout_error(
+            proc=proc,
+            stderr_task=stderr_task,
+            args=args,
+            timeout_seconds=timeout_seconds,
+        )
 
     stderr_text = b"".join(stderr_chunks).decode(errors="replace")
-    if returncode != 0:
-        result = CommandResult(
-            args=args,
-            returncode=returncode,
-            stdout="",
-            stderr=stderr_text,
-        )
-        hash_err = HashMismatchError.from_output(stderr_text, result)
-        if hash_err is not None:
-            raise hash_err
-        raise NixCommandError(result)
+    _raise_stream_command_failure(
+        args=args,
+        returncode=returncode,
+        stderr_text=stderr_text,
+    )

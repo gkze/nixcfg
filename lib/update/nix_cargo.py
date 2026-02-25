@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import aiohttp
 from nix_manipulator.expressions.function.call import FunctionCall
@@ -20,12 +20,14 @@ from lib.update.events import (
     UpdateEvent,
     ValueDrain,
     drain_value_events,
+    expect_command_result,
+    expect_str,
     gather_event_streams,
     require_value,
 )
 from lib.update.flake import get_flake_input_node
 from lib.update.net import fetch_url
-from lib.update.process import run_command
+from lib.update.process import RunCommandOptions, run_command
 
 if TYPE_CHECKING:
     from lib.update.updaters.base import CargoLockGitDep
@@ -36,7 +38,58 @@ _CARGO_LOCK_GIT_SOURCE_RE = re.compile(
 )
 
 
-def _parse_cargo_lock_git_sources(  # noqa: C901
+def _parse_quoted_assignment(line: str, field: str) -> str | None:
+    prefix = f'{field} = "'
+    if not line.startswith(prefix) or '"' not in line:
+        return None
+    return line.split('"')[1]
+
+
+def _select_matching_git_dep(
+    unmatched: dict[str, CargoLockGitDep],
+    *,
+    dep_key: str,
+    crate_name: str,
+) -> CargoLockGitDep | None:
+    direct = unmatched.get(dep_key)
+    if direct is not None:
+        return direct
+    prefix_matches = [
+        dep for dep in unmatched.values() if crate_name.startswith(dep.match_name)
+    ]
+    if len(prefix_matches) == 1:
+        return prefix_matches[0]
+    return None
+
+
+def _parse_git_source_line(line: str) -> tuple[str, str] | None:
+    match = _CARGO_LOCK_GIT_SOURCE_RE.match(line)
+    if match is None:
+        return None
+    return match.group("url"), match.group("commit")
+
+
+def _record_git_source_match(
+    *,
+    current_name: str,
+    current_version: str | None,
+    git_source: tuple[str, str],
+    unmatched: dict[str, CargoLockGitDep],
+    result: dict[str, tuple[str, str]],
+) -> None:
+    dep_key = f"{current_name}-{current_version}" if current_version else current_name
+    selected = _select_matching_git_dep(
+        unmatched,
+        dep_key=dep_key,
+        crate_name=current_name,
+    )
+    if selected is None:
+        return
+    result[selected.git_dep] = git_source
+    del unmatched[selected.git_dep]
+
+
+def _parse_cargo_lock_git_sources(
     lockfile_content: str,
     git_deps: list[CargoLockGitDep],
 ) -> dict[str, tuple[str, str]]:
@@ -49,39 +102,35 @@ def _parse_cargo_lock_git_sources(  # noqa: C901
     result: dict[str, tuple[str, str]] = {}
     unmatched = {dep.git_dep: dep for dep in git_deps}
 
-    def _select_dep(dep_key: str, crate_name: str) -> CargoLockGitDep | None:
-        direct = unmatched.get(dep_key)
-        if direct is not None:
-            return direct
-        prefix_matches = [
-            dep for dep in unmatched.values() if crate_name.startswith(dep.match_name)
-        ]
-        if len(prefix_matches) == 1:
-            return prefix_matches[0]
-        return None
-
     current_name: str | None = None
     current_version: str | None = None
 
     for raw_line in lockfile_content.splitlines():
         line = raw_line.strip()
-        if line.startswith("name = "):
-            current_name = line.split('"')[1]
+        name = _parse_quoted_assignment(line, "name")
+        if name is not None:
+            current_name = name
             current_version = None
-        elif line.startswith("version = ") and '"' in line:
-            current_version = line.split('"')[1]
-        elif line.startswith("source = ") and current_name is not None:
-            match = _CARGO_LOCK_GIT_SOURCE_RE.match(line)
-            if match is None:
-                continue
-            url, commit = match.group("url"), match.group("commit")
-            dep_key = (
-                f"{current_name}-{current_version}" if current_version else current_name
-            )
-            selected = _select_dep(dep_key, current_name)
-            if selected is not None:
-                result[selected.git_dep] = (url, commit)
-                del unmatched[selected.git_dep]
+            continue
+
+        version = _parse_quoted_assignment(line, "version")
+        if version is not None:
+            current_version = version
+            continue
+
+        if current_name is None:
+            continue
+
+        git_source = _parse_git_source_line(line)
+        if git_source is None:
+            continue
+        _record_git_source_match(
+            current_name=current_name,
+            current_version=current_version,
+            git_source=git_source,
+            unmatched=unmatched,
+            result=result,
+        )
 
     if unmatched:
         msg = f"Could not find git sources in Cargo.lock for: {list(unmatched)}"
@@ -116,11 +165,14 @@ async def _prefetch_git_hash(
     async for event in drain_value_events(
         run_command(
             args,
-            source=source,
-            error="builtins.fetchGit failed",
-            config=config,
+            options=RunCommandOptions(
+                source=source,
+                error="builtins.fetchGit failed",
+                config=config,
+            ),
         ),
         result_drain,
+        parse=expect_command_result,
     ):
         yield event
     result = require_value(result_drain, "builtins.fetchGit did not return output")
@@ -190,7 +242,13 @@ async def compute_import_cargo_lock_output_hashes(
     }
     async for item in gather_event_streams(streams):
         if isinstance(item, GatheredValues):
-            yield UpdateEvent.value(source, cast("dict[str, str]", item.values))
+            hashes: dict[str, str] = {}
+            for git_dep, hash_value in item.values.items():
+                if not isinstance(git_dep, str):
+                    msg = f"Expected git dep key to be str, got {type(git_dep)}"
+                    raise TypeError(msg)
+                hashes[git_dep] = expect_str(hash_value)
+            yield UpdateEvent.value(source, hashes)
         else:
             yield item
 

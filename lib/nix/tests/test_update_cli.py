@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Protocol
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.nix.tests._assertions import check
 from lib.update.cli import (
     OutputOptions,
     UpdateOptions,
@@ -61,12 +62,16 @@ def test_merge_source_updates_native_only_preserves_other_platform_hashes() -> N
     merged = _merge_source_updates(existing, updates, native_only=True)
 
     result_entries = merged["opencode"].hashes.entries
-    assert result_entries is not None  # noqa: S101
+    if result_entries is None:
+        raise AssertionError
     values_by_platform = {entry.platform: entry.hash for entry in result_entries}
-    assert values_by_platform == {  # noqa: S101
-        "aarch64-darwin": "sha256-DJUI4pMZ7wQTnyOiuDHALmZz7FZtrTbzRzCuNOShmWE=",
-        "x86_64-linux": "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
-    }
+    check(
+        values_by_platform
+        == {
+            "aarch64-darwin": "sha256-DJUI4pMZ7wQTnyOiuDHALmZz7FZtrTbzRzCuNOShmWE=",
+            "x86_64-linux": "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
+        }
+    )
 
 
 def test_merge_source_updates_non_native_returns_updates_unchanged() -> None:
@@ -82,7 +87,7 @@ def test_merge_source_updates_non_native_returns_updates_unchanged() -> None:
 
     merged = _merge_source_updates({}, updates, native_only=False)
 
-    assert merged is updates  # noqa: S101
+    check(merged is updates)
 
 
 def test_run_updates_list_json_outputs_sources_and_inputs(
@@ -104,19 +109,22 @@ def test_run_updates_list_json_outputs_sources_and_inputs(
     opts = UpdateOptions(list_targets=True, json=True)
     exit_code = asyncio.run(run_updates(opts))
 
-    assert exit_code == 0  # noqa: S101
+    check(exit_code == 0)
     payload = json.loads(capsys.readouterr().out)
-    assert payload == {  # noqa: S101
-        "sources": ["alpha", "zeta"],
-        "inputs": [
-            {
-                "name": "tool",
-                "owner": "owner",
-                "repo": "repo",
-                "ref": "v1.2.3",
-            },
-        ],
-    }
+    check(
+        payload
+        == {
+            "sources": ["alpha", "zeta"],
+            "inputs": [
+                {
+                    "name": "tool",
+                    "owner": "owner",
+                    "repo": "repo",
+                    "ref": "v1.2.3",
+                },
+            ],
+        }
+    )
 
 
 def test_run_updates_schema_outputs_json(capsys: _CaptureLike) -> None:
@@ -124,10 +132,10 @@ def test_run_updates_schema_outputs_json(capsys: _CaptureLike) -> None:
     opts = UpdateOptions(schema=True)
     exit_code = asyncio.run(run_updates(opts))
 
-    assert exit_code == 0  # noqa: S101
+    check(exit_code == 0)
     payload = json.loads(capsys.readouterr().out)
-    assert payload["type"] == "object"  # noqa: S101
-    assert payload["additionalProperties"] == {"$ref": "#/$defs/SourceEntry"}  # noqa: S101
+    check(payload["type"] == "object")
+    check(payload["additionalProperties"] == {"$ref": "#/$defs/SourceEntry"})
 
 
 def test_run_updates_validate_json_outputs_success(
@@ -147,9 +155,9 @@ def test_run_updates_validate_json_outputs_success(
     opts = UpdateOptions(validate=True, json=True)
     exit_code = asyncio.run(run_updates(opts))
 
-    assert exit_code == 0  # noqa: S101
+    check(exit_code == 0)
     payload = json.loads(capsys.readouterr().out)
-    assert payload == {"valid": True, "sources": 0}  # noqa: S101
+    check(payload == {"valid": True, "sources": 0})
 
 
 def test_run_updates_validate_json_outputs_error(
@@ -171,10 +179,10 @@ def test_run_updates_validate_json_outputs_error(
     opts = UpdateOptions(validate=True, json=True)
     exit_code = asyncio.run(run_updates(opts))
 
-    assert exit_code == 1  # noqa: S101
+    check(exit_code == 1)
     payload = json.loads(capsys.readouterr().out)
-    assert payload["valid"] is False  # noqa: S101
-    assert "bad metadata" in payload["error"]  # noqa: S101
+    check(payload["valid"] is False)
+    check("bad metadata" in payload["error"])
 
 
 def test_emit_summary_json_outputs_payload(capsys: _CaptureLike) -> None:
@@ -188,11 +196,14 @@ def test_emit_summary_json_outputs_payload(capsys: _CaptureLike) -> None:
         dry_run=False,
     )
 
-    assert exit_code == 0  # noqa: S101
+    check(exit_code == 0)
     payload = json.loads(capsys.readouterr().out)
-    assert payload == {  # noqa: S101
-        "updated": ["demo"],
-        "errors": [],
-        "noChange": ["stable"],
-        "success": True,
-    }
+    check(
+        payload
+        == {
+            "updated": ["demo"],
+            "errors": [],
+            "noChange": ["stable"],
+            "success": True,
+        }
+    )

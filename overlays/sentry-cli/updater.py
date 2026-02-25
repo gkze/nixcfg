@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.set import AttributeSet
@@ -35,15 +35,19 @@ class SentryCliUpdater(Updater):
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch latest release tag from GitHub."""
-        data = cast(
-            "dict[str, str]",
-            await fetch_github_api(
-                session,
-                f"repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/releases/latest",
-                config=self.config,
-            ),
+        payload = await fetch_github_api(
+            session,
+            f"repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/releases/latest",
+            config=self.config,
         )
-        return VersionInfo(version=data["tag_name"], metadata={})
+        if not isinstance(payload, dict):
+            msg = f"Unexpected release payload type: {type(payload).__name__}"
+            raise TypeError(msg)
+        tag_name = payload.get("tag_name")
+        if not isinstance(tag_name, str) or not tag_name:
+            msg = f"Missing tag_name in release payload: {payload!r}"
+            raise RuntimeError(msg)
+        return VersionInfo(version=tag_name, metadata={})
 
     def _src_nix_expression(
         self,
@@ -99,7 +103,10 @@ class SentryCliUpdater(Updater):
             error="Missing srcHash output",
         ):
             if isinstance(item, CapturedValue):
-                src_hash = cast("str", item.captured)
+                if not isinstance(item.captured, str):
+                    msg = f"Expected srcHash as string, got {item.captured!r}"
+                    raise TypeError(msg)
+                src_hash = item.captured
             else:
                 yield item
         if src_hash is None:
@@ -115,20 +122,18 @@ class SentryCliUpdater(Updater):
             error="Missing cargoHash output",
         ):
             if isinstance(item, CapturedValue):
-                cargo_hash = cast("str", item.captured)
+                if not isinstance(item.captured, str):
+                    msg = f"Expected cargoHash as string, got {item.captured!r}"
+                    raise TypeError(msg)
+                cargo_hash = item.captured
             else:
                 yield item
         if cargo_hash is None:
             msg = "Missing cargoHash output"
             raise RuntimeError(msg)
 
-        yield UpdateEvent.value(
-            self.name,
-            cast(
-                "SourceHashes",
-                [
-                    HashEntry.create("srcHash", src_hash),
-                    HashEntry.create("cargoHash", cargo_hash),
-                ],
-            ),
-        )
+        hashes: SourceHashes = [
+            HashEntry.create("srcHash", src_hash),
+            HashEntry.create("cargoHash", cargo_hash),
+        ]
+        yield UpdateEvent.value(self.name, hashes)

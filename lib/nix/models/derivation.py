@@ -6,9 +6,12 @@ a simplified, ergonomic interface over the auto-generated types in
 single ``DerivationOutput`` model with optional fields.
 """
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+type JsonScalar = str | int | float | bool | None
+type JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 
 
 class DerivationOutput(BaseModel):
@@ -54,7 +57,7 @@ class DerivationInputs(BaseModel):
     srcs: list[str] = Field(default_factory=list)
     """Input source store paths (non-derivation dependencies)."""
 
-    drvs: dict[str, list[str] | dict[str, Any]] = Field(default_factory=dict)
+    drvs: dict[str, list[str] | dict[str, JsonValue]] = Field(default_factory=dict)
     """Input derivation paths mapped to requested output names.
 
     Values are typically ``list[str]`` (output names), but may be a dict
@@ -98,7 +101,7 @@ class Derivation(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     """Environment variables passed to the builder."""
 
-    structured_attrs: dict[str, Any] | None = Field(
+    structured_attrs: dict[str, JsonValue] | None = Field(
         default=None,
         alias="structuredAttrs",
     )

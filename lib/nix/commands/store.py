@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from .base import CommandResult, run_nix, stream_nix
+from .base import CommandResult, _resolve_timeout_alias, run_nix, stream_nix
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -14,7 +14,8 @@ async def nix_store_realise(
     on_line: Callable[[str], None] | None = None,
     capture: bool = True,
     check: bool = True,
-    timeout: float = 3600.0,  # noqa: ASYNC109
+    command_timeout: float = 3600.0,
+    **kwargs: object,
 ) -> CommandResult:
     """Build derivations in the store.
 
@@ -35,25 +36,37 @@ async def nix_store_realise(
         If ``True`` (default) and the process exits non-zero, raise
         :class:`NixCommandError`.  Ignored when *on_line* is provided
         (``stream_nix`` always raises on failure).
-    timeout:
+    command_timeout:
         Maximum wall-clock seconds before the process is killed.
+    **kwargs:
+        Supports legacy ``timeout=...`` alias.
 
     """
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
     cmd = ["nix-store", "--realise", *drv_paths]
 
     if on_line is not None:
-        async for line in stream_nix(cmd, timeout=timeout):
+        async for line in stream_nix(cmd, timeout=timeout_seconds):
             on_line(line)
         # stream_nix raises on non-zero exit, so reaching here means success.
         return CommandResult(args=cmd, returncode=0, stdout="", stderr="")
 
-    return await run_nix(cmd, check=check, capture=capture, timeout=timeout)
+    return await run_nix(
+        cmd,
+        check=check,
+        capture=capture,
+        timeout=timeout_seconds,
+    )
 
 
 async def nix_store_query_references(
     path: str,
     *,
-    timeout: float = 30.0,  # noqa: ASYNC109
+    command_timeout: float = 30.0,
+    **kwargs: object,
 ) -> list[str]:
     """Return the immediate references of a store path.
 
@@ -61,13 +74,19 @@ async def nix_store_query_references(
     ----------
     path:
         A Nix store path (e.g. ``/nix/store/...-foo``).
-    timeout:
+    command_timeout:
         Maximum wall-clock seconds before the process is killed.
+    **kwargs:
+        Supports legacy ``timeout=...`` alias.
 
     """
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
     result = await run_nix(
         ["nix-store", "--query", "--references", path],
         check=True,
-        timeout=timeout,
+        timeout=timeout_seconds,
     )
     return [line for line in result.stdout.splitlines() if line]

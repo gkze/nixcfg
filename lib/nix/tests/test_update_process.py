@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import cast
 
 import pytest
 
+from lib.nix.tests._assertions import check
 from lib.update.errors import format_exception
 from lib.update.events import UpdateEvent, UpdateEventKind
 from lib.update.process import run_queue_task
@@ -44,8 +44,8 @@ def test_format_exception_suppresses_traceback_by_default() -> None:
 
     formatted = format_exception(exc_info.value)
 
-    assert formatted == "bad input"  # noqa: S101
-    assert "Traceback" not in formatted  # noqa: S101
+    check(formatted == "bad input")
+    check("Traceback" not in formatted)
 
 
 def test_format_exception_includes_traceback_when_enabled() -> None:
@@ -55,8 +55,8 @@ def test_format_exception_includes_traceback_when_enabled() -> None:
 
     formatted = format_exception(exc_info.value, include_traceback=True)
 
-    assert formatted.startswith("bad input")  # noqa: S101
-    assert "ValueError" in formatted  # noqa: S101
+    check(formatted.startswith("bad input"))
+    check("ValueError" in formatted)
 
 
 def test_run_queue_task_reports_known_runtime_errors_to_events() -> None:
@@ -68,9 +68,12 @@ def test_run_queue_task_reports_known_runtime_errors_to_events() -> None:
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
     asyncio.run(run_queue_task(source="demo", queue=queue, task=_task))
 
-    event = cast("UpdateEvent", queue.get_nowait())
-    assert event.kind == UpdateEventKind.ERROR  # noqa: S101
-    assert event.message == "boom"  # noqa: S101
+    event = queue.get_nowait()
+    if not isinstance(event, UpdateEvent):
+        msg = f"Expected UpdateEvent, got {type(event)}"
+        raise TypeError(msg)
+    check(event.kind == UpdateEventKind.ERROR)
+    check(event.message == "boom")
 
 
 def test_run_queue_task_reports_cancelled_as_error_event() -> None:
@@ -82,8 +85,11 @@ def test_run_queue_task_reports_cancelled_as_error_event() -> None:
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
     asyncio.run(run_queue_task(source="demo", queue=queue, task=_task))
 
-    event = cast("UpdateEvent", queue.get_nowait())
-    assert event.message == "Operation cancelled"  # noqa: S101
+    event = queue.get_nowait()
+    if not isinstance(event, UpdateEvent):
+        msg = f"Expected UpdateEvent, got {type(event)}"
+        raise TypeError(msg)
+    check(event.message == "Operation cancelled")
 
 
 def test_run_queue_task_re_raises_unknown_exceptions() -> None:
@@ -96,4 +102,4 @@ def test_run_queue_task_re_raises_unknown_exceptions() -> None:
     with pytest.raises(_CustomProcessError):
         asyncio.run(run_queue_task(source="demo", queue=queue, task=_task))
 
-    assert queue.empty()  # noqa: S101
+    check(queue.empty())

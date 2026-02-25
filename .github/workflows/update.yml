@@ -116,6 +116,7 @@ jobs:
         # same upstream version (resolved in the resolve-versions job).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPDATE_SUBPROCESS_TIMEOUT: "14400"
         run: nix run .#nixcfg -- update --native-only --pinned-versions pinned-versions.json
       - name: Warm FOD cache for ${{ matrix.platform }}
         # Build packages with platform-specific FOD hashes so the Cachix

@@ -21,32 +21,34 @@ Tabs are matched by URL substring (case-insensitive).
 
 Zen must be closed when making changes -- it overwrites the session on quit.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 import lz4.block
 import yaml
+from yaml.constructor import ConstructorError
+from yaml.resolver import BaseResolver
 
 ZEN_PROFILES: Final = Path.home() / "Library/Application Support/zen/Profiles"
 SESSION_FILENAME: Final = "zen-sessions.jsonlz4"
+SESSION_HEADER_PREFIX: Final[bytes] = b"mozLz40\0"
+SESSION_HEADER_SIZE: Final[int] = 12
 DEFAULT_PROFILE: Final = "ecrjha3i.Default (twilight)"
 DEFAULT_YAML: Final = Path.home() / ".config/nixcfg/home/george/zen-folders.yaml"
 GROUP_COLOR: Final = "zen-workspace-color"
 MAX_SESSION_UNCOMPRESSED_BYTES: Final = 256 * 1024 * 1024
-ZEN_PROCESS_PATTERNS: Final = (
-    "Twilight.app/Contents/MacOS/zen",
-    "Zen.app/Contents/MacOS/zen",
-)
 MAX_ID_ATTEMPTS: Final = 10000
+PROFILE_LOCK_FILENAMES: Final[tuple[str, ...]] = ("parent.lock", ".parentlock", "lock")
 
 
 class ZenFoldersError(RuntimeError):
@@ -61,27 +63,49 @@ class UniqueKeyLoader(yaml.SafeLoader):
     """YAML loader that rejects duplicate mapping keys."""
 
 
+def _stdout(message: str = "") -> None:
+    sys.stdout.write(f"{message}\n")
+
+
+def _stderr(message: str = "") -> None:
+    sys.stderr.write(f"{message}\n")
+
+
+def _stdout_raw(message: str) -> None:
+    sys.stdout.write(message)
+
+
 def _construct_mapping_no_dupes(
     loader: UniqueKeyLoader,
     node: yaml.nodes.MappingNode,
-    deep: bool = False,
 ) -> dict:
+    """Construct a mapping while rejecting duplicate keys."""
     mapping: dict = {}
     for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
+        key = loader.construct_object(key_node)
         if key in mapping:
-            raise yaml.constructor.ConstructorError(
-                "while constructing a mapping",
+            msg = "while constructing a mapping"
+            raise ConstructorError(
+                msg,
                 node.start_mark,
                 f"found duplicate key {key!r}",
                 key_node.start_mark,
             )
-        mapping[key] = loader.construct_object(value_node, deep=deep)
+        mapping[key] = loader.construct_object(value_node)
     return mapping
 
 
+def _load_yaml_with_unique_keys(text: str) -> object:
+    """Load YAML with duplicate-key rejection enabled."""
+    loader = UniqueKeyLoader(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
+
+
 UniqueKeyLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    BaseResolver.DEFAULT_MAPPING_TAG,
     _construct_mapping_no_dupes,
 )
 
@@ -90,6 +114,7 @@ UniqueKeyLoader.add_constructor(
 
 
 def session_file(profile: str) -> Path:
+    """Resolve a profile argument to an on-disk session file path."""
     candidate = Path(profile).expanduser()
 
     if candidate.is_file():
@@ -97,62 +122,79 @@ def session_file(profile: str) -> Path:
 
     profile_path = candidate if candidate.is_absolute() else ZEN_PROFILES / profile
     if not profile_path.exists():
-        raise ZenFoldersError(f"Profile not found: {profile_path}")
+        msg = f"Profile not found: {profile_path}"
+        raise ZenFoldersError(msg)
     if not profile_path.is_dir():
-        raise ZenFoldersError(f"Profile path is not a directory: {profile_path}")
+        msg = f"Profile path is not a directory: {profile_path}"
+        raise ZenFoldersError(msg)
 
     path = profile_path / SESSION_FILENAME
     if not path.exists():
-        raise ZenFoldersError(f"Session file not found: {path}")
+        msg = f"Session file not found: {path}"
+        raise ZenFoldersError(msg)
     if not path.is_file():
-        raise ZenFoldersError(f"Session path is not a file: {path}")
+        msg = f"Session path is not a file: {path}"
+        raise ZenFoldersError(msg)
 
     return path
 
 
 def ensure_session_shape(session: dict) -> None:
+    """Ensure expected top-level session arrays exist and are list-typed."""
     for key in ("tabs", "groups", "folders", "spaces"):
         value = session.get(key)
         if value is None:
             session[key] = []
             continue
         if not isinstance(value, list):
-            raise SessionFormatError(f"Session field '{key}' must be a list.")
+            msg = f"Session field '{key}' must be a list."
+            raise SessionFormatError(msg)
 
 
 def read_session(path: Path) -> dict:
+    """Read and validate a Mozilla LZ4 session file."""
     try:
         data = path.read_bytes()
     except OSError as exc:
-        raise ZenFoldersError(f"Unable to read session file: {path}: {exc}") from exc
+        msg = f"Unable to read session file: {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
 
-    if len(data) < 12:
-        raise SessionFormatError(f"Session file is too small: {path}")
-    if data[:8] != b"mozLz40\0":
-        raise SessionFormatError(f"Not a Mozilla LZ4 file: {path}")
+    if len(data) < SESSION_HEADER_SIZE:
+        msg = f"Session file is too small: {path}"
+        raise SessionFormatError(msg)
+    if data[: len(SESSION_HEADER_PREFIX)] != SESSION_HEADER_PREFIX:
+        msg = f"Not a Mozilla LZ4 file: {path}"
+        raise SessionFormatError(msg)
 
-    size = int.from_bytes(data[8:12], "little")
+    size = int.from_bytes(
+        data[len(SESSION_HEADER_PREFIX) : SESSION_HEADER_SIZE], "little"
+    )
     if size <= 0:
-        raise SessionFormatError(f"Invalid uncompressed size in session header: {size}")
+        msg = f"Invalid uncompressed size in session header: {size}"
+        raise SessionFormatError(msg)
     if size > MAX_SESSION_UNCOMPRESSED_BYTES:
+        msg = f"Session payload too large ({size} bytes > {MAX_SESSION_UNCOMPRESSED_BYTES} bytes)."
         raise SessionFormatError(
-            f"Session payload too large ({size} bytes > {MAX_SESSION_UNCOMPRESSED_BYTES} bytes).",
+            msg,
         )
 
     try:
-        raw = lz4.block.decompress(data[12:], uncompressed_size=size)
+        raw = lz4.block.decompress(data[SESSION_HEADER_SIZE:], uncompressed_size=size)
         decoded = json.loads(raw)
     except (ValueError, lz4.block.LZ4BlockError, json.JSONDecodeError) as exc:
-        raise SessionFormatError(f"Failed to parse session file: {path}: {exc}") from exc
+        msg = f"Failed to parse session file: {path}: {exc}"
+        raise SessionFormatError(msg) from exc
 
     if not isinstance(decoded, dict):
-        raise SessionFormatError(f"Session root must be a JSON object: {path}")
+        msg = f"Session root must be a JSON object: {path}"
+        raise SessionFormatError(msg)
 
     ensure_session_shape(decoded)
     return decoded
 
 
 def write_session(path: Path, obj: dict) -> None:
+    """Write a validated session object back to Mozilla LZ4 format."""
     ensure_session_shape(obj)
     raw = json.dumps(obj, separators=(",", ":")).encode()
     compressed = lz4.block.compress(raw, store_size=False)
@@ -167,14 +209,14 @@ def write_session(path: Path, obj: dict) -> None:
 
     try:
         with temp_path.open("wb") as handle:
-            handle.write(b"mozLz40\0")
+            handle.write(SESSION_HEADER_PREFIX)
             handle.write(len(raw).to_bytes(4, "little"))
             handle.write(compressed)
             handle.flush()
             os.fsync(handle.fileno())
         if mode is not None:
-            os.chmod(temp_path, mode)
-        os.replace(temp_path, path)
+            Path(temp_path).chmod(mode)
+        Path(temp_path).replace(path)
         # Best-effort durability for the directory entry after atomic replace.
         try:
             dir_fd = os.open(path.parent, os.O_RDONLY)
@@ -188,7 +230,8 @@ def write_session(path: Path, obj: dict) -> None:
             finally:
                 os.close(dir_fd)
     except OSError as exc:
-        raise ZenFoldersError(f"Unable to write session file: {path}: {exc}") from exc
+        msg = f"Unable to write session file: {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
     finally:
         if temp_path.exists():
             temp_path.unlink(missing_ok=True)
@@ -198,87 +241,116 @@ def write_session(path: Path, obj: dict) -> None:
 
 
 def load_yaml(path: Path) -> dict:
+    """Load YAML config and validate a mapping root."""
     if not path.exists():
-        raise ZenFoldersError(f"Config file not found: {path}")
+        msg = f"Config file not found: {path}"
+        raise ZenFoldersError(msg)
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise ZenFoldersError(f"Unable to read config file: {path}: {exc}") from exc
+        msg = f"Unable to read config file: {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
 
     try:
-        data = yaml.load(text, Loader=UniqueKeyLoader)
+        data = _load_yaml_with_unique_keys(text)
     except yaml.YAMLError as exc:
-        raise ZenFoldersError(f"Invalid YAML in {path}: {exc}") from exc
+        msg = f"Invalid YAML in {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
 
     if not isinstance(data, dict):
-        raise ZenFoldersError(f"Config root must be a YAML mapping: {path}")
+        msg = f"Config root must be a YAML mapping: {path}"
+        raise ZenFoldersError(msg)
     return data
 
 
-def parse_config(raw: dict) -> tuple[str, list[dict]]:
-    """Parse map-based YAML config into (workspace, normalized_folders).
-
-    Expected format::
-
-        WorkspaceName:
-          FolderName:
-            TabTitle: url_pattern
-
-    Returns (workspace_name, folders) where each folder is
-    ``{"name": str, "tabs": [{"title": str, "url": str}, ...]}``.
-    Dict insertion order determines render order for both folders and tabs.
-    """
+def _parse_workspace_key(raw: dict) -> str:
+    """Extract and validate the single workspace key from raw config."""
     if not raw:
-        raise ZenFoldersError("Config file is empty.")
+        msg = "Config file is empty."
+        raise ZenFoldersError(msg)
     if len(raw) != 1:
-        raise ZenFoldersError(
-            f"Config must have exactly one top-level key (workspace name), "
-            f"got {len(raw)}: {', '.join(str(k) for k in raw)}"
+        keys = ", ".join(str(key) for key in raw)
+        msg = (
+            "Config must have exactly one top-level key (workspace name), "
+            f"got {len(raw)}: {keys}"
         )
+        raise ZenFoldersError(msg)
 
     workspace_key = next(iter(raw))
     if not isinstance(workspace_key, str) or not workspace_key.strip():
-        raise ZenFoldersError("Workspace name (top-level key) must be a non-empty string.")
-    workspace = workspace_key.strip()
+        msg = "Workspace name (top-level key) must be a non-empty string."
+        raise ZenFoldersError(msg)
+    return workspace_key
 
-    folders_raw = raw[workspace_key]
+
+def _normalize_tab_specs(folder_name: str, tabs_raw: object) -> list[dict]:
+    """Normalize one folder's tab mapping into ordered tab spec objects."""
+    if tabs_raw is None:
+        return []
+    if not isinstance(tabs_raw, dict):
+        msg = (
+            f"Folder '{folder_name}' must map to a tab mapping, "
+            f"not {type(tabs_raw).__name__}."
+        )
+        raise ZenFoldersError(msg)
+
+    tabs: list[dict] = []
+    for title, url in tabs_raw.items():
+        if not isinstance(title, str) or not title.strip():
+            msg = f"Tab titles in folder '{folder_name}' must be non-empty strings."
+            raise ZenFoldersError(msg)
+        if not isinstance(url, str) or not url.strip():
+            msg = (
+                f"Tab '{title}' in folder '{folder_name}' "
+                "must have a non-empty URL pattern."
+            )
+            raise ZenFoldersError(msg)
+        tabs.append({"title": title.strip(), "url": url.strip()})
+    return tabs
+
+
+def _normalize_folder_specs(workspace: str, folders_raw: object) -> list[dict]:
+    """Normalize folder definitions for one workspace."""
     if folders_raw is None:
-        return workspace, []
+        return []
     if not isinstance(folders_raw, dict):
-        raise ZenFoldersError(f"Workspace '{workspace}' must map to a folder mapping, not {type(folders_raw).__name__}.")
+        msg = (
+            f"Workspace '{workspace}' must map to a folder mapping, "
+            f"not {type(folders_raw).__name__}."
+        )
+        raise ZenFoldersError(msg)
 
     folders: list[dict] = []
     seen_names: set[str] = set()
     for folder_name, tabs_raw in folders_raw.items():
         if not isinstance(folder_name, str) or not folder_name.strip():
-            raise ZenFoldersError("Folder names must be non-empty strings.")
-        name_cf = folder_name.strip().casefold()
+            msg = "Folder names must be non-empty strings."
+            raise ZenFoldersError(msg)
+        normalized_name = folder_name.strip()
+        name_cf = normalized_name.casefold()
         if name_cf in seen_names:
-            raise ZenFoldersError(f"Duplicate folder name '{folder_name.strip()}' in config.")
+            msg = f"Duplicate folder name '{normalized_name}' in config."
+            raise ZenFoldersError(msg)
         seen_names.add(name_cf)
 
-        tabs: list[dict] = []
-        if tabs_raw is not None:
-            if not isinstance(tabs_raw, dict):
-                raise ZenFoldersError(
-                    f"Folder '{folder_name}' must map to a tab mapping, not {type(tabs_raw).__name__}."
-                )
-            for title, url in tabs_raw.items():
-                if not isinstance(title, str) or not title.strip():
-                    raise ZenFoldersError(f"Tab titles in folder '{folder_name}' must be non-empty strings.")
-                if not isinstance(url, str) or not str(url).strip():
-                    raise ZenFoldersError(f"Tab '{title}' in folder '{folder_name}' must have a non-empty URL pattern.")
-                tabs.append({"title": title.strip(), "url": str(url).strip()})
+        tabs = _normalize_tab_specs(normalized_name, tabs_raw)
+        folders.append({"name": normalized_name, "tabs": tabs})
 
-        folders.append({"name": folder_name.strip(), "tabs": tabs})
+    return folders
 
-    return workspace, folders
+
+def parse_config(raw: dict) -> tuple[str, list[dict]]:
+    """Parse map-based YAML config into workspace name plus normalized folders."""
+    workspace_key = _parse_workspace_key(raw)
+    workspace = workspace_key.strip()
+    return workspace, _normalize_folder_specs(workspace, raw[workspace_key])
 
 
 # -- Helpers ------------------------------------------------------------------
 
 
 def load_session(profile: str) -> tuple[Path, dict]:
+    """Load and decode a profile's session payload."""
     path = session_file(profile)
     return path, read_session(path)
 
@@ -299,10 +371,12 @@ def _tab_entry_field(tab: dict, field: str) -> str:
 
 
 def tab_url(tab: dict) -> str:
+    """Return the active URL for a tab entry."""
     return _tab_entry_field(tab, "url")
 
 
 def tab_title(tab: dict) -> str:
+    """Return the active title for a tab entry."""
     return _tab_entry_field(tab, "title")
 
 
@@ -330,9 +404,8 @@ def resolve_workspace(session: dict, name: str) -> str:
             if isinstance(sname, str):
                 available.append(sname)
     avail_str = ", ".join(available) if available else "<none found>"
-    raise ZenFoldersError(
-        f"Workspace '{name}' not found. Available: {avail_str}"
-    )
+    msg = f"Workspace '{name}' not found. Available: {avail_str}"
+    raise ZenFoldersError(msg)
 
 
 def workspace_name(session: dict, uuid: str) -> str:
@@ -348,56 +421,49 @@ def workspace_name(session: dict, uuid: str) -> str:
 
 
 def folder_matches_workspace(folder: dict, workspace: str) -> bool:
+    """Return whether a folder belongs to the workspace scope."""
     workspace_id = folder.get("workspaceId")
     return workspace_id is None or workspace_id == workspace
 
 
 def folders_for_workspace(session: dict, workspace: str) -> list[dict]:
-    folders: list[dict] = []
-    for folder in session.get("folders", []):
-        if isinstance(folder, dict) and folder_matches_workspace(folder, workspace):
-            folders.append(folder)
-    return folders
+    """Return all folder entries visible in the given workspace."""
+    return [
+        folder
+        for folder in session.get("folders", [])
+        if isinstance(folder, dict) and folder_matches_workspace(folder, workspace)
+    ]
 
 
-def zen_is_running() -> bool:
-    """Check if the actual Zen browser executable is running."""
-    try:
-        result = subprocess.run(
-            ["ps", "axo", "command="],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            return False
-        for line in result.stdout.splitlines():
-            command = line.strip()
-            if not command:
-                continue
-            executable = command.split()[0]
-            if executable.rsplit("/", 1)[-1].lower() != "zen":
-                continue
-            if executable != "zen" and not any(
-                pattern in executable for pattern in ZEN_PROCESS_PATTERNS
-            ):
-                continue
-            return True
-        return False
-    except FileNotFoundError:
-        return False
+def zen_profile_dir(profile: str) -> Path:
+    """Resolve a profile argument to the profile directory path."""
+    candidate = Path(profile).expanduser()
+    if candidate.is_file():
+        return candidate.parent
+    profile_path = candidate if candidate.is_absolute() else ZEN_PROFILES / profile
+    if profile_path.exists() and profile_path.is_dir():
+        return profile_path
+    return session_file(profile).parent
+
+
+def zen_is_running(profile: str) -> bool:
+    """Heuristically detect whether Zen still holds the profile lock."""
+    profile_dir = zen_profile_dir(profile)
+    return any((profile_dir / name).exists() for name in PROFILE_LOCK_FILENAMES)
 
 
 def require_zen_closed(profile: str) -> None:
+    """Abort when Zen is currently running against the target profile."""
     path = session_file(profile)
-    if zen_is_running():
+    if zen_is_running(profile):
+        msg = f"Zen is running. Quit it first. (It may overwrite {path.name} on exit.)"
         raise ZenFoldersError(
-            "Zen is running. Quit it first. "
-            f"(It may overwrite {path.name} on exit.)",
+            msg,
         )
 
 
 def backup_session(path: Path) -> Path:
+    """Create a timestamped backup alongside the session file."""
     ts = time.strftime("%Y%m%d-%H%M%S")
     ns = time.time_ns() % 1_000_000_000
     stem = f"{path.name}.{ts}-{ns:09d}"
@@ -411,11 +477,13 @@ def backup_session(path: Path) -> Path:
     try:
         shutil.copy2(path, bak)
     except OSError as exc:
-        raise ZenFoldersError(f"Failed to create backup {bak.name}: {exc}") from exc
+        msg = f"Failed to create backup {bak.name}: {exc}"
+        raise ZenFoldersError(msg) from exc
     return bak
 
 
 def collect_sync_ids(session: dict) -> set[str]:
+    """Collect all existing sync/group/folder IDs used in session data."""
     existing: set[str] = set()
 
     for group in session.get("groups", []):
@@ -440,6 +508,7 @@ def collect_sync_ids(session: dict) -> set[str]:
 
 
 def next_sync_id(existing: set[str]) -> str:
+    """Generate a unique sync identifier not present in *existing*."""
     base_ms = int(time.time_ns() // 1_000_000)
     for offset in range(MAX_ID_ATTEMPTS):
         stamp = base_ms + offset
@@ -447,10 +516,12 @@ def next_sync_id(existing: set[str]) -> str:
         if candidate not in existing:
             existing.add(candidate)
             return candidate
-    raise ZenFoldersError("Unable to generate a unique sync ID.")
+    msg = "Unable to generate a unique sync ID."
+    raise ZenFoldersError(msg)
 
 
 def folder_by_name(session: dict, name: str, workspace: str) -> dict | None:
+    """Find one folder by name within a workspace, or return ``None``."""
     name_cf = name.casefold()
     matches: list[dict] = []
     for folder in folders_for_workspace(session, workspace):
@@ -459,14 +530,18 @@ def folder_by_name(session: dict, name: str, workspace: str) -> dict | None:
             matches.append(folder)
 
     if len(matches) > 1:
-        raise ZenFoldersError(
+        msg = (
             f"Multiple folders named '{name}' in this workspace. "
-            "Rename duplicates manually in Zen first.",
+            "Rename duplicates manually in Zen first."
+        )
+        raise ZenFoldersError(
+            msg,
         )
     return matches[0] if matches else None
 
 
 def group_by_id(session: dict, gid: str) -> dict | None:
+    """Return the first group object matching *gid*."""
     for group in session.get("groups", []):
         if isinstance(group, dict) and group.get("id") == gid:
             return group
@@ -474,6 +549,7 @@ def group_by_id(session: dict, gid: str) -> dict | None:
 
 
 def pinned_tabs(session: dict, workspace: str) -> list[dict]:
+    """Return pinned, non-placeholder tabs for one workspace."""
     tabs: list[dict] = []
     for tab in session.get("tabs", []):
         if not isinstance(tab, dict):
@@ -490,6 +566,7 @@ def pinned_tabs(session: dict, workspace: str) -> list[dict]:
 def folder_tabs(
     session: dict, folder_id: str, workspace: str | None = None
 ) -> list[dict]:
+    """Return non-placeholder tabs currently assigned to a folder."""
     tabs: list[dict] = []
     for tab in session.get("tabs", []):
         if not isinstance(tab, dict):
@@ -503,11 +580,13 @@ def folder_tabs(
 
 
 def folder_display_name(folder: dict) -> str:
+    """Return a human label for a folder record."""
     name = folder.get("name")
     return name if isinstance(name, str) and name else "<unnamed>"
 
 
 def is_placeholder_tab(tab: dict, folder_id: str, empty_ids: set[str]) -> bool:
+    """Return whether *tab* is the designated placeholder for *folder_id*."""
     if tab.get("groupId") != folder_id:
         return False
     if not tab.get("zenIsEmpty"):
@@ -540,6 +619,7 @@ def make_pinned_tab(
     folder_id: str,
     sync_id: str,
 ) -> dict:
+    """Construct a new pinned tab payload for insertion into session JSON."""
     return {
         "entries": [{"url": url, "title": title}],
         "index": 1,
@@ -561,10 +641,11 @@ class Plan:
     """Describes changes needed to reconcile session with YAML config."""
 
     def __init__(self) -> None:
+        """Initialize empty change collections for one reconciliation run."""
         self.folders_to_create: list[str] = []  # names
         self.folders_to_delete: list[str] = []  # names
         self.tabs_to_create: list[tuple[str, str]] = []  # (url_preview, folder)
-        self.tab_moves: list[tuple[str, str | None, str]] = []  # (url_preview, old_folder, new_folder)
+        self.tab_moves: list[tuple[str, str | None, str]] = []
         self.tab_ungroups: list[tuple[str, str]] = []  # (url_preview, old_folder)
         self.reorder_folders: bool = False
         self.reorder_tabs: dict[str, bool] = {}  # folder_name -> needs reorder
@@ -572,6 +653,7 @@ class Plan:
 
     @property
     def has_changes(self) -> bool:
+        """Return whether this plan has any data-mutating operations."""
         return bool(
             self.folders_to_create
             or self.folders_to_delete
@@ -583,203 +665,651 @@ class Plan:
         )
 
 
-def compute_plan(
-    session: dict, config_folders: list[dict], workspace_uuid: str
-) -> Plan:
-    """Compare session state against YAML config and produce a reconciliation plan."""
-    plan = Plan()
-    session_folders = folders_for_workspace(session, workspace_uuid)
+@dataclass
+class _PlanTabContext:
+    """Shared mutable state used while planning folder tab actions."""
 
-    # Build lookup: session folder name (casefolded) -> folder dict
+    session: dict
+    workspace_uuid: str
+    all_pinned: list[dict]
+    folder_id_to_name: dict[str, str]
+    claimed_tab_indices: set[int]
+
+
+@dataclass
+class _AssignTabContext:
+    """Shared mutable state used while assigning tabs during apply."""
+
+    session: dict
+    all_pinned: list[dict]
+    workspace_uuid: str
+    existing_ids: set[str]
+    claimed_tab_indices: set[int]
+
+
+def _build_session_folder_map(session_folders: list[dict]) -> dict[str, dict]:
+    """Map lowercased folder names to folder objects, rejecting duplicates."""
     session_folder_map: dict[str, dict] = {}
-    for f in session_folders:
-        name = folder_display_name(f)
+    for folder in session_folders:
+        name = folder_display_name(folder)
         name_cf = name.casefold()
         if name_cf in session_folder_map:
-            raise ZenFoldersError(
+            msg = (
                 f"Workspace has duplicate folder names matching '{name}' "
-                "(case-insensitive). Rename duplicates in Zen first.",
+                "(case-insensitive). Rename duplicates in Zen first."
             )
-        session_folder_map[name_cf] = f
+            raise ZenFoldersError(msg)
+        session_folder_map[name_cf] = folder
+    return session_folder_map
 
-    # Build lookup: config folder name (casefolded) -> config dict
+
+def _config_folder_data(
+    config_folders: list[dict],
+) -> tuple[list[str], dict[str, list[dict]]]:
+    """Return ordered folder names and tab specs keyed by casefolded name."""
     config_folder_names: list[str] = []
     config_folder_tabs: dict[str, list[dict]] = {}
-    for cf in config_folders:
-        name = cf["name"].strip()
+    for folder in config_folders:
+        name = folder["name"].strip()
         config_folder_names.append(name)
-        config_folder_tabs[name.casefold()] = cf.get("tabs") or []
+        config_folder_tabs[name.casefold()] = folder.get("tabs") or []
+    return config_folder_names, config_folder_tabs
 
-    config_names_cf = {n.casefold() for n in config_folder_names}
+
+def _plan_folder_presence(
+    plan: Plan,
+    config_folder_names: list[str],
+    session_folder_map: dict[str, dict],
+) -> None:
+    """Populate folder create/delete lists on the plan."""
+    config_names_cf = {name.casefold() for name in config_folder_names}
     session_names_cf = set(session_folder_map.keys())
 
-    # Folders to create (in config but not in session)
     for name in config_folder_names:
         if name.casefold() not in session_names_cf:
             plan.folders_to_create.append(name)
 
-    # Folders to delete (in session but not in config)
     for name_cf, folder in session_folder_map.items():
         if name_cf not in config_names_cf:
             plan.folders_to_delete.append(folder_display_name(folder))
 
-    # Check folder ordering - compare session order to YAML order
-    session_order = [folder_display_name(f) for f in _ordered_folders(session_folders)]
-    config_order = config_folder_names
-    # Only compare names that exist in both
-    existing_session_order = [n for n in session_order if n.casefold() in config_names_cf]
-    existing_config_order = [n for n in config_order if n.casefold() in session_names_cf]
-    if [n.casefold() for n in existing_session_order] != [
-        n.casefold() for n in existing_config_order
+
+def _plan_folder_order(
+    plan: Plan,
+    session_folders: list[dict],
+    config_folder_names: list[str],
+    session_folder_map: dict[str, dict],
+) -> None:
+    """Mark whether folder ordering must be updated."""
+    config_names_cf = {name.casefold() for name in config_folder_names}
+    session_names_cf = set(session_folder_map.keys())
+    session_order = [
+        folder_display_name(folder) for folder in _ordered_folders(session_folders)
+    ]
+    existing_session_order = [
+        name for name in session_order if name.casefold() in config_names_cf
+    ]
+    existing_config_order = [
+        name for name in config_folder_names if name.casefold() in session_names_cf
+    ]
+    if [name.casefold() for name in existing_session_order] != [
+        name.casefold() for name in existing_config_order
     ]:
         plan.reorder_folders = True
 
-    # Tab assignments - for each folder in config, figure out tab moves
-    all_pinned = pinned_tabs(session, workspace_uuid)
 
-    # Build current assignment: tab -> folder_name
-    folder_id_to_name: dict[str, str] = {}
-    for f in session_folders:
-        fid = f.get("id")
-        if isinstance(fid, str):
-            folder_id_to_name[fid] = folder_display_name(f)
+def _folder_name_by_id(session_folders: list[dict]) -> dict[str, str]:
+    """Return mapping from folder/group ID to display name."""
+    mapping: dict[str, str] = {}
+    for folder in session_folders:
+        folder_id = folder.get("id")
+        if isinstance(folder_id, str):
+            mapping[folder_id] = folder_display_name(folder)
+    return mapping
 
-    # Track which tabs are claimed by the config
-    claimed_tab_indices: set[int] = set()
 
-    for folder_name in config_folder_names:
-        tab_specs = config_folder_tabs[folder_name.casefold()]
-        session_folder = session_folder_map.get(folder_name.casefold())
-        session_folder_id = session_folder.get("id") if session_folder else None
+def _find_tab_matches(all_pinned: list[dict], pattern: str) -> list[tuple[int, dict]]:
+    """Return all pinned tabs whose URL matches *pattern*."""
+    return [
+        (index, tab)
+        for index, tab in enumerate(all_pinned)
+        if match_tab_by_url(tab, pattern)
+    ]
 
-        desired_urls_ordered: list[str] = []
 
-        for spec in tab_specs:
-            pattern = spec["url"].strip()
-            target_url = pattern_to_tab_url(pattern)
-            # Find matching pinned tab(s)
-            matches = []
-            for idx, tab in enumerate(all_pinned):
-                if match_tab_by_url(tab, pattern):
-                    matches.append((idx, tab))
+def _first_unclaimed_match(
+    matches: list[tuple[int, dict]],
+    claimed_tab_indices: set[int],
+) -> tuple[int, dict] | None:
+    """Return the first match that is not already claimed."""
+    for index, tab in matches:
+        if index not in claimed_tab_indices:
+            return index, tab
+    return None
 
-            if not matches:
-                plan.tabs_to_create.append((target_url[:70], folder_name))
-                desired_urls_ordered.append(target_url.casefold())
-                continue
 
-            if len(matches) > 1:
-                plan.warnings.append(
-                    f"Pattern '{pattern}' matches {len(matches)} tabs for folder "
-                    f"'{folder_name}'; using first match"
-                )
+def _needs_folder_tab_reorder(
+    session: dict,
+    workspace_uuid: str,
+    session_folder_id: object,
+    desired_urls_ordered: list[str],
+) -> bool:
+    """Return whether tab order differs from desired order for one folder."""
+    if not isinstance(session_folder_id, str) or not desired_urls_ordered:
+        return False
+    current_urls = [
+        tab_url(tab).casefold()
+        for tab in folder_tabs(session, session_folder_id, workspace_uuid)
+    ]
+    desired_set = set(desired_urls_ordered)
+    current_in_desired = [url for url in current_urls if url in desired_set]
+    return current_in_desired != desired_urls_ordered
 
-            # Skip unclaimed matches to find the first unclaimed tab
-            chosen = None
-            for idx, tab in matches:
-                if idx not in claimed_tab_indices:
-                    chosen = (idx, tab)
-                    break
-            if chosen is None:
-                plan.tabs_to_create.append((target_url[:70], folder_name))
-                desired_urls_ordered.append(target_url.casefold())
-                continue
 
-            idx, tab = chosen
-            claimed_tab_indices.add(idx)
-            url_preview = tab_url(tab)[:70]
-            desired_urls_ordered.append(tab_url(tab).casefold())
+def _plan_tabs_for_folder(
+    plan: Plan,
+    context: _PlanTabContext,
+    folder_name: str,
+    tab_specs: list[dict],
+    session_folder: dict | None,
+) -> None:
+    """Plan tab creation/moves/order for one configured folder."""
+    desired_urls_ordered: list[str] = []
+    session_folder_id = session_folder.get("id") if session_folder else None
 
-            current_group = tab.get("groupId")
-            current_folder_name = (
-                folder_id_to_name.get(current_group) if isinstance(current_group, str) else None
-            )
-
-            if current_folder_name and current_folder_name.casefold() == folder_name.casefold():
-                # Already in the right folder
-                pass
-            else:
-                plan.tab_moves.append((url_preview, current_folder_name, folder_name))
-
-        # Check tab ordering within folder
-        if session_folder_id and desired_urls_ordered:
-            current_urls = [
-                tab_url(t).casefold()
-                for t in folder_tabs(session, session_folder_id, workspace_uuid)
-            ]
-            desired_set = set(desired_urls_ordered)
-            # Filter to only tabs that are in both lists
-            current_in_desired = [u for u in current_urls if u in desired_set]
-            if current_in_desired != desired_urls_ordered:
-                plan.reorder_tabs[folder_name] = True
-
-    # Tabs that are currently in a folder but not claimed by any config folder
-    for idx, tab in enumerate(all_pinned):
-        if idx in claimed_tab_indices:
+    for spec in tab_specs:
+        pattern = spec["url"].strip()
+        target_url = pattern_to_tab_url(pattern)
+        matches = _find_tab_matches(context.all_pinned, pattern)
+        if not matches:
+            plan.tabs_to_create.append((target_url[:70], folder_name))
+            desired_urls_ordered.append(target_url.casefold())
             continue
-        gid = tab.get("groupId")
-        if isinstance(gid, str) and gid in folder_id_to_name:
-            fname = folder_id_to_name[gid]
-            if fname.casefold() not in config_names_cf:
-                # This tab's folder is being deleted, it'll be ungrouped
-                continue
-            # Tab is in a config folder but not listed in config -- ungroup it
-            plan.tab_ungroups.append((tab_url(tab)[:70], fname))
 
+        if len(matches) > 1:
+            warning = (
+                f"Pattern '{pattern}' matches {len(matches)} tabs for folder "
+                f"'{folder_name}'; using first match"
+            )
+            plan.warnings.append(warning)
+
+        chosen = _first_unclaimed_match(matches, context.claimed_tab_indices)
+        if chosen is None:
+            plan.tabs_to_create.append((target_url[:70], folder_name))
+            desired_urls_ordered.append(target_url.casefold())
+            continue
+
+        index, tab = chosen
+        context.claimed_tab_indices.add(index)
+        preview_url = tab_url(tab)
+        desired_urls_ordered.append(preview_url.casefold())
+
+        group_id = tab.get("groupId")
+        current_folder_name = (
+            context.folder_id_to_name.get(group_id)
+            if isinstance(group_id, str)
+            else None
+        )
+        if (
+            current_folder_name
+            and current_folder_name.casefold() == folder_name.casefold()
+        ):
+            continue
+        plan.tab_moves.append((preview_url[:70], current_folder_name, folder_name))
+
+    if _needs_folder_tab_reorder(
+        context.session,
+        context.workspace_uuid,
+        session_folder_id,
+        desired_urls_ordered,
+    ):
+        plan.reorder_tabs[folder_name] = True
+
+
+def _plan_ungrouped_tabs(
+    plan: Plan,
+    all_pinned: list[dict],
+    claimed_tab_indices: set[int],
+    folder_id_to_name: dict[str, str],
+    config_names_cf: set[str],
+) -> None:
+    """Plan tabs that should be ungrouped because config no longer claims them."""
+    for index, tab in enumerate(all_pinned):
+        if index in claimed_tab_indices:
+            continue
+        group_id = tab.get("groupId")
+        if not isinstance(group_id, str):
+            continue
+        current_folder_name = folder_id_to_name.get(group_id)
+        if current_folder_name is None:
+            continue
+        if current_folder_name.casefold() not in config_names_cf:
+            continue
+        plan.tab_ungroups.append((tab_url(tab)[:70], current_folder_name))
+
+
+def compute_plan(
+    session: dict,
+    config_folders: list[dict],
+    workspace_uuid: str,
+) -> Plan:
+    """Compare session state against YAML config and produce a reconciliation plan."""
+    plan = Plan()
+    session_folders = folders_for_workspace(session, workspace_uuid)
+    session_folder_map = _build_session_folder_map(session_folders)
+    config_folder_names, config_folder_tabs = _config_folder_data(config_folders)
+
+    _plan_folder_presence(plan, config_folder_names, session_folder_map)
+    _plan_folder_order(plan, session_folders, config_folder_names, session_folder_map)
+
+    plan_context = _PlanTabContext(
+        session=session,
+        workspace_uuid=workspace_uuid,
+        all_pinned=pinned_tabs(session, workspace_uuid),
+        folder_id_to_name=_folder_name_by_id(session_folders),
+        claimed_tab_indices=set(),
+    )
+    for folder_name in config_folder_names:
+        _plan_tabs_for_folder(
+            plan,
+            plan_context,
+            folder_name,
+            config_folder_tabs[folder_name.casefold()],
+            session_folder_map.get(folder_name.casefold()),
+        )
+
+    config_names_cf = {name.casefold() for name in config_folder_names}
+    _plan_ungrouped_tabs(
+        plan,
+        plan_context.all_pinned,
+        plan_context.claimed_tab_indices,
+        plan_context.folder_id_to_name,
+        config_names_cf,
+    )
     return plan
 
 
-def _ordered_folders(folders: list[dict]) -> list[dict]:
-    """Sort folders by their prevSiblingInfo chain."""
-    if not folders:
-        return []
-
-    by_id: dict[str, dict] = {}
+def _folder_chain_maps(
+    folders: list[dict],
+) -> tuple[dict | None, dict[str | None, dict]]:
+    """Build start pointer and next-folder mapping from sibling metadata."""
     start_folder: dict | None = None
-    # Map: prev_id -> folder (for chain reconstruction)
     after_map: dict[str | None, dict] = {}
-
-    for f in folders:
-        fid = f.get("id")
-        if isinstance(fid, str):
-            by_id[fid] = f
-        prev = f.get("prevSiblingInfo")
+    for folder in folders:
+        prev = folder.get("prevSiblingInfo")
         if isinstance(prev, dict):
             if prev.get("type") == "start":
-                start_folder = f
-                after_map[None] = f
+                start_folder = folder
+                after_map[None] = folder
             else:
-                prev_id = prev.get("id")
-                after_map[prev_id] = f
-        else:
-            # No prevSiblingInfo, treat as potential start
-            if start_folder is None:
-                start_folder = f
-                after_map[None] = f
+                after_map[prev.get("id")] = folder
+        elif start_folder is None:
+            start_folder = folder
+            after_map[None] = folder
+    return start_folder, after_map
 
-    # Walk the chain
+
+def _walk_folder_chain(
+    start_folder: dict | None,
+    after_map: dict[str | None, dict],
+    max_items: int,
+) -> tuple[list[dict], set[str]]:
+    """Walk the folder chain from the start sentinel."""
     ordered: list[dict] = []
     visited: set[str] = set()
     current = start_folder
-
-    while current is not None and len(ordered) < len(folders):
-        fid = current.get("id")
-        if isinstance(fid, str):
-            if fid in visited:
-                break  # cycle protection
-            visited.add(fid)
+    while current is not None and len(ordered) < max_items:
+        folder_id = current.get("id")
+        if isinstance(folder_id, str):
+            if folder_id in visited:
+                break
+            visited.add(folder_id)
         ordered.append(current)
-        # Find next: something whose prevSiblingInfo points to current's id
-        fid = current.get("id")
-        current = after_map.get(fid)
+        current = after_map.get(folder_id)
+    return ordered, visited
 
-    # Append any we missed (broken chain)
-    for f in folders:
-        fid = f.get("id")
-        if isinstance(fid, str) and fid not in visited:
-            ordered.append(f)
 
+def _ordered_folders(folders: list[dict]) -> list[dict]:
+    """Sort folders by their ``prevSiblingInfo`` chain."""
+    if not folders:
+        return []
+    start_folder, after_map = _folder_chain_maps(folders)
+    ordered, visited = _walk_folder_chain(
+        start_folder, after_map, max_items=len(folders)
+    )
+    for folder in folders:
+        folder_id = folder.get("id")
+        if isinstance(folder_id, str) and folder_id not in visited:
+            ordered.append(folder)
     return ordered
+
+
+def _delete_folder(session: dict, folder_id: str, empty_ids: set[str]) -> None:
+    """Remove one folder and ungroup/delete all related tabs."""
+    for tab in session["tabs"]:
+        if (
+            isinstance(tab, dict)
+            and tab.get("groupId") == folder_id
+            and not tab.get("zenIsEmpty")
+        ):
+            tab.pop("groupId", None)
+
+    session["tabs"] = [
+        tab
+        for tab in session["tabs"]
+        if not (isinstance(tab, dict) and is_placeholder_tab(tab, folder_id, empty_ids))
+    ]
+    session["groups"] = [
+        group
+        for group in session["groups"]
+        if not (isinstance(group, dict) and group.get("id") == folder_id)
+    ]
+    session["folders"] = [
+        folder
+        for folder in session["folders"]
+        if not (isinstance(folder, dict) and folder.get("id") == folder_id)
+    ]
+
+
+def _delete_removed_folders(
+    session: dict, workspace_uuid: str, folder_names: list[str]
+) -> None:
+    """Delete folders that are no longer present in config."""
+    for name in folder_names:
+        folder = folder_by_name(session, name, workspace_uuid)
+        if not folder:
+            continue
+        folder_id = folder.get("id")
+        if not isinstance(folder_id, str):
+            continue
+        raw_empty_ids = folder.get("emptyTabIds", [])
+        empty_ids = {item for item in raw_empty_ids if isinstance(item, str) and item}
+        _delete_folder(session, folder_id, empty_ids)
+
+
+def _create_folder(
+    session: dict, workspace_uuid: str, name: str, existing_ids: set[str]
+) -> None:
+    """Create a folder plus group and placeholder tab entries."""
+    folder_id = next_sync_id(existing_ids)
+    empty_id = next_sync_id(existing_ids)
+    session["tabs"].append({
+        "entries": [],
+        "lastAccessed": 0,
+        "hidden": False,
+        "pinned": True,
+        "zenWorkspace": workspace_uuid,
+        "zenSyncId": empty_id,
+        "groupId": folder_id,
+        "zenIsEmpty": True,
+        "searchMode": 0,
+        "userContextId": 0,
+    })
+    session["groups"].append({
+        "pinned": True,
+        "splitView": False,
+        "id": folder_id,
+        "name": name,
+        "color": GROUP_COLOR,
+        "collapsed": False,
+        "saveOnWindowClose": True,
+    })
+    session["folders"].append({
+        "pinned": True,
+        "essential": False,
+        "splitViewGroup": False,
+        "id": folder_id,
+        "name": name,
+        "collapsed": False,
+        "saveOnWindowClose": True,
+        "parentId": None,
+        "prevSiblingInfo": {"type": "start", "id": None},
+        "emptyTabIds": [empty_id],
+        "userIcon": "",
+        "workspaceId": workspace_uuid,
+    })
+
+
+def _create_missing_folders(
+    session: dict,
+    workspace_uuid: str,
+    folder_names: list[str],
+    existing_ids: set[str],
+) -> None:
+    """Create all folders listed by the plan as missing."""
+    for name in folder_names:
+        _create_folder(session, workspace_uuid, name, existing_ids)
+
+
+def _folder_name_to_id(session: dict, workspace_uuid: str) -> dict[str, str]:
+    """Map casefolded folder names to IDs for a workspace."""
+    mapping: dict[str, str] = {}
+    for folder in folders_for_workspace(session, workspace_uuid):
+        folder_id = folder.get("id")
+        if isinstance(folder_id, str):
+            mapping[folder_display_name(folder).casefold()] = folder_id
+    return mapping
+
+
+def _assign_tabs_for_folder(
+    context: _AssignTabContext,
+    folder_id: str,
+    tab_specs: list[dict],
+) -> list[dict]:
+    """Assign/create tabs for one folder and return desired tab order."""
+    ordered_tabs: list[dict] = []
+    for spec in tab_specs:
+        pattern = spec["url"].strip()
+        target_url = pattern_to_tab_url(pattern)
+        target_title = spec.get("title", "")
+        if not isinstance(target_title, str) or not target_title.strip():
+            target_title = target_url
+
+        matches = _find_tab_matches(context.all_pinned, pattern)
+        chosen = _first_unclaimed_match(matches, context.claimed_tab_indices)
+        if chosen is None:
+            tab = make_pinned_tab(
+                url=target_url,
+                title=target_title.strip(),
+                workspace_uuid=context.workspace_uuid,
+                folder_id=folder_id,
+                sync_id=next_sync_id(context.existing_ids),
+            )
+            context.session["tabs"].append(tab)
+            context.all_pinned.append(tab)
+            chosen = (len(context.all_pinned) - 1, tab)
+
+        index, tab = chosen
+        context.claimed_tab_indices.add(index)
+        tab["groupId"] = folder_id
+        ordered_tabs.append(tab)
+    return ordered_tabs
+
+
+def _assign_tabs_to_folders(
+    session: dict,
+    config_folders: list[dict],
+    workspace_uuid: str,
+    existing_ids: set[str],
+) -> tuple[dict[str, list[dict]], list[dict], set[int]]:
+    """Assign all configured tabs and return desired ordering structures."""
+    all_pinned = pinned_tabs(session, workspace_uuid)
+    folder_name_to_id = _folder_name_to_id(session, workspace_uuid)
+    desired_tab_order: dict[str, list[dict]] = {}
+    apply_context = _AssignTabContext(
+        session=session,
+        all_pinned=all_pinned,
+        workspace_uuid=workspace_uuid,
+        existing_ids=existing_ids,
+        claimed_tab_indices=set(),
+    )
+
+    for folder_spec in config_folders:
+        folder_name = folder_spec["name"].strip()
+        folder_id = folder_name_to_id.get(folder_name.casefold())
+        if not folder_id:
+            continue
+        tab_specs = folder_spec.get("tabs") or []
+        desired_tab_order[folder_id] = _assign_tabs_for_folder(
+            apply_context,
+            folder_id,
+            tab_specs,
+        )
+
+    return desired_tab_order, all_pinned, apply_context.claimed_tab_indices
+
+
+def _ungroup_unclaimed_tabs(
+    session: dict,
+    config_folders: list[dict],
+    workspace_uuid: str,
+    all_pinned: list[dict],
+    claimed_tab_indices: set[int],
+) -> None:
+    """Ungroup tabs left in configured folders that are no longer claimed."""
+    config_names_cf = {folder["name"].strip().casefold() for folder in config_folders}
+    workspace_folders = folders_for_workspace(session, workspace_uuid)
+    for index, tab in enumerate(all_pinned):
+        if index in claimed_tab_indices:
+            continue
+        group_id = tab.get("groupId")
+        if not isinstance(group_id, str):
+            continue
+        for folder in workspace_folders:
+            if folder.get("id") != group_id:
+                continue
+            if folder_display_name(folder).casefold() in config_names_cf:
+                tab.pop("groupId", None)
+            break
+
+
+def _rebuild_folder_and_group_order(
+    session: dict,
+    config_folders: list[dict],
+    workspace_uuid: str,
+) -> list[dict]:
+    """Rewrite workspace folder/group arrays to match config ordering."""
+    workspace_folders = folders_for_workspace(session, workspace_uuid)
+    config_name_order = {
+        folder["name"].strip().casefold(): index
+        for index, folder in enumerate(config_folders)
+    }
+    workspace_folders.sort(
+        key=lambda folder: config_name_order.get(
+            folder_display_name(folder).casefold(), 999
+        )
+    )
+
+    prev_id: str | None = None
+    for folder in workspace_folders:
+        if prev_id is None:
+            folder["prevSiblingInfo"] = {"type": "start", "id": None}
+        else:
+            folder["prevSiblingInfo"] = {"type": "group", "id": prev_id}
+        folder_id = folder.get("id")
+        prev_id = folder_id if isinstance(folder_id, str) else None
+
+    workspace_folder_ids = {id(folder) for folder in workspace_folders}
+    other_folders = [
+        folder
+        for folder in session["folders"]
+        if id(folder) not in workspace_folder_ids
+    ]
+    session["folders"] = workspace_folders + other_folders
+
+    workspace_group_ids = {
+        folder_id
+        for folder_id in (folder.get("id") for folder in workspace_folders)
+        if isinstance(folder_id, str)
+    }
+    workspace_groups: list[dict] = []
+    for folder in workspace_folders:
+        folder_id = folder.get("id")
+        for group in session["groups"]:
+            if isinstance(group, dict) and group.get("id") == folder_id:
+                workspace_groups.append(group)
+                break
+    other_groups = [
+        group
+        for group in session["groups"]
+        if not isinstance(group, dict) or group.get("id") not in workspace_group_ids
+    ]
+    session["groups"] = workspace_groups + other_groups
+    return workspace_folders
+
+
+def _reorder_tabs_within_folders(
+    session: dict, desired_tab_order: dict[str, list[dict]]
+) -> None:
+    """Reorder tabs inside each folder block according to desired order."""
+    for folder_id, ordered_tabs in desired_tab_order.items():
+        if not ordered_tabs:
+            continue
+        ordered_ids = {id(tab) for tab in ordered_tabs}
+        placeholder_tabs = [
+            tab
+            for tab in session["tabs"]
+            if isinstance(tab, dict)
+            and tab.get("groupId") == folder_id
+            and tab.get("zenIsEmpty")
+        ]
+        all_folder_tab_ids = ordered_ids | {id(tab) for tab in placeholder_tabs}
+        remaining_tabs = [
+            tab for tab in session["tabs"] if id(tab) not in all_folder_tab_ids
+        ]
+
+        insert_at = len(remaining_tabs)
+        for index, tab in enumerate(session["tabs"]):
+            if id(tab) in all_folder_tab_ids:
+                insert_at = sum(
+                    1
+                    for prior_tab in session["tabs"][:index]
+                    if id(prior_tab) not in all_folder_tab_ids
+                )
+                break
+
+        session["tabs"] = (
+            remaining_tabs[:insert_at]
+            + placeholder_tabs
+            + ordered_tabs
+            + remaining_tabs[insert_at:]
+        )
+
+
+def _reorder_workspace_folder_blocks(
+    session: dict, workspace_folders: list[dict]
+) -> None:
+    """Reorder tab blocks so workspace folders render in config order."""
+    workspace_folder_ids = [
+        folder_id
+        for folder_id in (folder.get("id") for folder in workspace_folders)
+        if isinstance(folder_id, str)
+    ]
+    workspace_folder_id_set = set(workspace_folder_ids)
+
+    unfiled_pinned: list[object] = []
+    folder_blocks: dict[str, list[dict]] = {
+        folder_id: [] for folder_id in workspace_folder_ids
+    }
+    unpinned: list[object] = []
+
+    for tab in session["tabs"]:
+        if not isinstance(tab, dict):
+            unpinned.append(tab)
+            continue
+        group_id = tab.get("groupId")
+        if isinstance(group_id, str) and group_id in workspace_folder_id_set:
+            folder_blocks[group_id].append(tab)
+        elif tab.get("pinned"):
+            unfiled_pinned.append(tab)
+        else:
+            unpinned.append(tab)
+
+    rebuilt_tabs: list[object] = list(unfiled_pinned)
+    for folder_id in workspace_folder_ids:
+        rebuilt_tabs.extend(folder_blocks[folder_id])
+    rebuilt_tabs.extend(unpinned)
+    session["tabs"] = rebuilt_tabs
 
 
 def apply_plan(
@@ -788,284 +1318,267 @@ def apply_plan(
     workspace_uuid: str,
     plan: Plan,
 ) -> None:
-    """Mutate session to match YAML config."""
+    """Mutate session in-place to match the planned configuration."""
     existing_ids = collect_sync_ids(session)
-
-    # -- Delete folders not in config -----------------------------------------
-    for name in plan.folders_to_delete:
-        folder = folder_by_name(session, name, workspace_uuid)
-        if not folder:
-            continue
-        folder_id = folder.get("id")
-        if not isinstance(folder_id, str):
-            continue
-
-        # Ungroup member tabs
-        for tab in session["tabs"]:
-            if isinstance(tab, dict) and tab.get("groupId") == folder_id:
-                if not tab.get("zenIsEmpty"):
-                    tab.pop("groupId", None)
-
-        # Remove placeholder tabs
-        raw_empty = folder.get("emptyTabIds", [])
-        empty_ids = {eid for eid in raw_empty if isinstance(eid, str) and eid}
-        session["tabs"] = [
-            t
-            for t in session["tabs"]
-            if not (isinstance(t, dict) and is_placeholder_tab(t, folder_id, empty_ids))
-        ]
-
-        # Remove from groups and folders arrays
-        session["groups"] = [
-            g
-            for g in session["groups"]
-            if not (isinstance(g, dict) and g.get("id") == folder_id)
-        ]
-        session["folders"] = [
-            f
-            for f in session["folders"]
-            if not (isinstance(f, dict) and f.get("id") == folder_id)
-        ]
-
-    # -- Create folders in config but not in session --------------------------
-    for name in plan.folders_to_create:
-        folder_id = next_sync_id(existing_ids)
-        empty_id = next_sync_id(existing_ids)
-
-        # Placeholder tab
-        session["tabs"].append(
-            {
-                "entries": [],
-                "lastAccessed": 0,
-                "hidden": False,
-                "pinned": True,
-                "zenWorkspace": workspace_uuid,
-                "zenSyncId": empty_id,
-                "groupId": folder_id,
-                "zenIsEmpty": True,
-                "searchMode": 0,
-                "userContextId": 0,
-            }
-        )
-
-        # Group entry
-        session["groups"].append(
-            {
-                "pinned": True,
-                "splitView": False,
-                "id": folder_id,
-                "name": name,
-                "color": GROUP_COLOR,
-                "collapsed": False,
-                "saveOnWindowClose": True,
-            }
-        )
-
-        # Folder entry (prevSiblingInfo will be rebuilt below)
-        session["folders"].append(
-            {
-                "pinned": True,
-                "essential": False,
-                "splitViewGroup": False,
-                "id": folder_id,
-                "name": name,
-                "collapsed": False,
-                "saveOnWindowClose": True,
-                "parentId": None,
-                "prevSiblingInfo": {"type": "start", "id": None},
-                "emptyTabIds": [empty_id],
-                "userIcon": "",
-                "workspaceId": workspace_uuid,
-            }
-        )
-
-    # -- Assign tabs to folders -----------------------------------------------
-    all_pinned = pinned_tabs(session, workspace_uuid)
-
-    # Build config folder name -> session folder id
-    folder_name_to_id: dict[str, str] = {}
-    for f in folders_for_workspace(session, workspace_uuid):
-        name = folder_display_name(f)
-        fid = f.get("id")
-        if isinstance(fid, str):
-            folder_name_to_id[name.casefold()] = fid
-
-    claimed_tab_indices: set[int] = set()
-
-    # For tab reordering within folders, we collect desired order per folder
-    desired_tab_order: dict[str, list[dict]] = {}  # folder_id -> [tab, ...]
-
-    for cf in config_folders:
-        fname = cf["name"].strip()
-        fid = folder_name_to_id.get(fname.casefold())
-        if not fid:
-            continue
-
-        tab_specs = cf.get("tabs") or []
-        ordered_tabs: list[dict] = []
-
-        for spec in tab_specs:
-            pattern = spec["url"].strip()
-            target_url = pattern_to_tab_url(pattern)
-            target_title = spec.get("title", "")
-            if not isinstance(target_title, str) or not target_title.strip():
-                target_title = target_url
-            matches = [
-                (idx, tab)
-                for idx, tab in enumerate(all_pinned)
-                if match_tab_by_url(tab, pattern)
-            ]
-            # Pick the first unclaimed match to avoid double-assignment
-            chosen = None
-            for idx, tab in matches:
-                if idx not in claimed_tab_indices:
-                    chosen = (idx, tab)
-                    break
-
-            if chosen is None:
-                tab = make_pinned_tab(
-                    url=target_url,
-                    title=target_title.strip(),
-                    workspace_uuid=workspace_uuid,
-                    folder_id=fid,
-                    sync_id=next_sync_id(existing_ids),
-                )
-                session["tabs"].append(tab)
-                all_pinned.append(tab)
-                chosen = (len(all_pinned) - 1, tab)
-
-            idx, tab = chosen
-            claimed_tab_indices.add(idx)
-            tab["groupId"] = fid
-            ordered_tabs.append(tab)
-
-        desired_tab_order[fid] = ordered_tabs
-
-    # Ungroup tabs that are in config folders but not claimed
-    config_names_cf = {cf["name"].strip().casefold() for cf in config_folders}
-    for idx, tab in enumerate(all_pinned):
-        if idx in claimed_tab_indices:
-            continue
-        gid = tab.get("groupId")
-        if not isinstance(gid, str):
-            continue
-        # Check if this tab's folder is a config folder
-        for f in folders_for_workspace(session, workspace_uuid):
-            if f.get("id") == gid and folder_display_name(f).casefold() in config_names_cf:
-                tab.pop("groupId", None)
-                break
-
-    # -- Rebuild folder order (prevSiblingInfo chain) -------------------------
-    ws_folders = folders_for_workspace(session, workspace_uuid)
-    # Sort ws_folders to match config order
-    config_name_order = {
-        cf["name"].strip().casefold(): i for i, cf in enumerate(config_folders)
-    }
-    ws_folders.sort(
-        key=lambda f: config_name_order.get(folder_display_name(f).casefold(), 999)
+    _delete_removed_folders(session, workspace_uuid, plan.folders_to_delete)
+    _create_missing_folders(
+        session, workspace_uuid, plan.folders_to_create, existing_ids
     )
 
-    prev_id: str | None = None
-    for folder in ws_folders:
-        if prev_id is None:
-            folder["prevSiblingInfo"] = {"type": "start", "id": None}
-        else:
-            folder["prevSiblingInfo"] = {"type": "group", "id": prev_id}
-        prev_id = folder.get("id")
+    desired_tab_order, all_pinned, claimed_tab_indices = _assign_tabs_to_folders(
+        session,
+        config_folders,
+        workspace_uuid,
+        existing_ids,
+    )
+    _ungroup_unclaimed_tabs(
+        session,
+        config_folders,
+        workspace_uuid,
+        all_pinned,
+        claimed_tab_indices,
+    )
 
-    # Rebuild session arrays so array position matches desired order.
-    # Zen uses array position (not prevSiblingInfo) for rendering order.
-    ws_folder_ids = {id(f) for f in ws_folders}
-    other_folders = [f for f in session["folders"] if id(f) not in ws_folder_ids]
-    session["folders"] = ws_folders + other_folders
-
-    # Mirror the same order into groups
-    ws_group_ids = {f.get("id") for f in ws_folders}
-    ws_groups_sorted = []
-    for folder in ws_folders:
-        fid = folder.get("id")
-        for g in session["groups"]:
-            if isinstance(g, dict) and g.get("id") == fid:
-                ws_groups_sorted.append(g)
-                break
-    other_groups = [
-        g
-        for g in session["groups"]
-        if not isinstance(g, dict) or g.get("id") not in ws_group_ids
-    ]
-    session["groups"] = ws_groups_sorted + other_groups
-
-    # -- Reorder tabs within folders ------------------------------------------
-    # Tab order in session is determined by position in the `tabs` array.
-    # We need to splice the folder's tabs in the desired order.
-    for fid, ordered in desired_tab_order.items():
-        if not ordered:
-            continue
-
-        # Find all current positions of these tabs plus the placeholder
-        tab_set = set(id(t) for t in ordered)
-        placeholder_tabs = [
-            t
-            for t in session["tabs"]
-            if isinstance(t, dict) and t.get("groupId") == fid and t.get("zenIsEmpty")
-        ]
-
-        # Remove all folder-related tabs from the main array
-        all_folder_tab_ids = tab_set | {id(t) for t in placeholder_tabs}
-        remaining = [t for t in session["tabs"] if id(t) not in all_folder_tab_ids]
-
-        # Find insertion point: where the first folder tab was, or end of pinned tabs
-        # We insert placeholder first, then ordered tabs
-        insert_at = len(remaining)
-        for i, t in enumerate(session["tabs"]):
-            if id(t) in all_folder_tab_ids:
-                # Count how many remain before this position
-                insert_at = sum(1 for x in session["tabs"][:i] if id(x) not in all_folder_tab_ids)
-                break
-
-        # Reassemble: remaining[:insert_at] + placeholders + ordered + remaining[insert_at:]
-        session["tabs"] = (
-            remaining[:insert_at] + placeholder_tabs + ordered + remaining[insert_at:]
-        )
-
-    # -- Reorder folder tab-blocks in tabs array to match config order ---------
-    # Zen renders folders in the order their first tab appears in the tabs
-    # array.  Extract all folder tab-blocks, then re-insert them in config
-    # order after the last unfiled pinned tab.
-    ws_fids_ordered = [
-        fid for fid in (f.get("id") for f in ws_folders) if isinstance(fid, str)
-    ]  # already config-sorted
-    ws_fids_set = set(ws_fids_ordered)
-
-    # Partition tabs: unfiled pinned, folder blocks (keyed by fid), unpinned
-    unfiled_pinned: list[object] = []
-    folder_blocks: dict[str, list[dict]] = {fid: [] for fid in ws_fids_ordered}
-    unpinned: list[object] = []
-
-    for tab in session["tabs"]:
-        if not isinstance(tab, dict):
-            unpinned.append(tab)
-            continue
-        gid = tab.get("groupId")
-        if isinstance(gid, str) and gid in ws_fids_set:
-            folder_blocks[gid].append(tab)
-        elif tab.get("pinned"):
-            unfiled_pinned.append(tab)
-        else:
-            unpinned.append(tab)
-
-    # Reassemble: unfiled pinned, then folder blocks in config order, then unpinned
-    rebuilt: list[object] = list(unfiled_pinned)
-    for fid in ws_fids_ordered:
-        rebuilt.extend(folder_blocks[fid])
-    rebuilt.extend(unpinned)
-    session["tabs"] = rebuilt
+    workspace_folders = _rebuild_folder_and_group_order(
+        session,
+        config_folders,
+        workspace_uuid,
+    )
+    _reorder_tabs_within_folders(session, desired_tab_order)
+    _reorder_workspace_folder_blocks(session, workspace_folders)
 
 
 # -- Commands -----------------------------------------------------------------
 
 
+def _print_lines(lines: list[str]) -> None:
+    """Write one line per item to stdout."""
+    for line in lines:
+        _stdout(line)
+
+
+def _plan_summary_parts(plan: Plan) -> list[str]:
+    """Build a short human summary of plan operations."""
+    parts: list[str] = []
+    if plan.folders_to_create:
+        parts.append(f"create {len(plan.folders_to_create)} folder(s)")
+    if plan.folders_to_delete:
+        parts.append(f"delete {len(plan.folders_to_delete)} folder(s)")
+    if plan.tabs_to_create:
+        parts.append(f"create {len(plan.tabs_to_create)} tab(s)")
+    if plan.tab_moves:
+        parts.append(f"move {len(plan.tab_moves)} tab(s)")
+    if plan.tab_ungroups:
+        parts.append(f"ungroup {len(plan.tab_ungroups)} tab(s)")
+    if plan.reorder_folders:
+        parts.append("reorder folders")
+    reordered = [name for name, needs in plan.reorder_tabs.items() if needs]
+    if reordered:
+        parts.append(f"reorder tabs in {len(reordered)} folder(s)")
+    return parts
+
+
+def _print_plan_warnings(plan: Plan) -> None:
+    """Render plan warnings to stdout."""
+    if not plan.warnings:
+        return
+    _stdout("Warnings:")
+    for warning in plan.warnings:
+        _stdout(f"  ! {warning}")
+    _stdout()
+
+
+def _print_plan_collection(title: str, prefix: str, items: list[str]) -> None:
+    """Render a titled list using one prefixed line per item."""
+    if not items:
+        return
+    _stdout(title)
+    for item in items:
+        _stdout(f"  {prefix} {item}")
+    _stdout()
+
+
+def _print_tab_moves(tab_moves: list[tuple[str, str | None, str]]) -> None:
+    """Render planned tab move operations."""
+    if not tab_moves:
+        return
+    _stdout("Tab moves:")
+    for url, old, new in tab_moves:
+        _stdout(f"  {url}")
+        _stdout(f"    {old or 'unfiled'} -> {new}")
+    _stdout()
+
+
+def _print_tabs_to_create(tabs_to_create: list[tuple[str, str]]) -> None:
+    """Render planned tab creations."""
+    if not tabs_to_create:
+        return
+    _stdout("Tabs to create:")
+    for url, folder in tabs_to_create:
+        _stdout(f"  + {url}")
+        _stdout(f"    -> {folder}")
+    _stdout()
+
+
+def _print_tabs_to_ungroup(tab_ungroups: list[tuple[str, str]]) -> None:
+    """Render planned tab ungroup operations."""
+    if not tab_ungroups:
+        return
+    _stdout("Tabs to ungroup:")
+    for url, old in tab_ungroups:
+        _stdout(f"  {url}")
+        _stdout(f"    {old} -> unfiled")
+    _stdout()
+
+
+def _print_reorder_details(plan: Plan) -> None:
+    """Render folder/tab reorder details from a plan."""
+    if plan.reorder_folders:
+        _stdout("Folder order will be updated to match config.")
+        _stdout()
+
+    reordered = [name for name, needs in plan.reorder_tabs.items() if needs]
+    if reordered:
+        _stdout("Tab order will be updated in:")
+        for name in reordered:
+            _stdout(f"  ~ {name}")
+        _stdout()
+
+
+def _print_check_warnings(warnings: list[str]) -> None:
+    """Render check warnings, if any."""
+    if not warnings:
+        return
+    _stdout(f"Warnings ({len(warnings)}):")
+    for warning in warnings:
+        _stdout(f"  ~ {warning}")
+
+
+def _has_placeholder_tab(session: dict, folder_id: str, empty_id: str) -> bool:
+    """Return whether session contains a placeholder tab for one empty ID."""
+    for tab in session.get("tabs", []):
+        if not isinstance(tab, dict):
+            continue
+        if (
+            tab.get("zenSyncId") == empty_id
+            and tab.get("groupId") == folder_id
+            and tab.get("zenIsEmpty")
+        ):
+            return True
+    return False
+
+
+def _check_folder_placeholders(
+    session: dict,
+    workspace_uuid: str,
+    folder: dict,
+    folder_id: str,
+    name: str,
+) -> tuple[list[str], list[str]]:
+    """Validate placeholder IDs and tabs for one folder."""
+    errors: list[str] = []
+    warnings: list[str] = []
+    raw_empty_ids = folder.get("emptyTabIds", [])
+    if not isinstance(raw_empty_ids, list):
+        return [f"Folder '{name}' has malformed emptyTabIds."], []
+
+    empty_ids = [value for value in raw_empty_ids if isinstance(value, str) and value]
+    has_real_tabs = bool(folder_tabs(session, folder_id, workspace_uuid))
+    if not empty_ids:
+        if has_real_tabs:
+            warnings.append(
+                f"Folder '{name}' has no placeholder tab IDs (has real tabs, benign)."
+            )
+        else:
+            errors.append(
+                f"Folder '{name}' has no placeholder tab IDs and no real tabs."
+            )
+        return errors, warnings
+
+    errors.extend(
+        f"Folder '{name}' references missing placeholder tab {empty_id}."
+        for empty_id in empty_ids
+        if not _has_placeholder_tab(session, folder_id, empty_id)
+    )
+    return errors, warnings
+
+
+def _check_single_folder(
+    session: dict,
+    workspace_uuid: str,
+    folder: dict,
+) -> tuple[list[str], list[str], str | None]:
+    """Validate one folder record and return its usable ID if present."""
+    errors: list[str] = []
+    warnings: list[str] = []
+    name = folder_display_name(folder)
+    folder_id = folder.get("id")
+    if not isinstance(folder_id, str) or not folder_id:
+        errors.append(f"Folder '{name}' has missing/invalid id.")
+        return errors, warnings, None
+
+    if group_by_id(session, folder_id) is None:
+        errors.append(
+            f"Folder '{name}' has no matching entry in groups (id={folder_id})."
+        )
+
+    placeholder_errors, placeholder_warnings = _check_folder_placeholders(
+        session,
+        workspace_uuid,
+        folder,
+        folder_id,
+        name,
+    )
+    errors.extend(placeholder_errors)
+    warnings.extend(placeholder_warnings)
+    return errors, warnings, folder_id
+
+
+def _check_folder_structures(
+    session: dict,
+    workspace_uuid: str,
+    folders: list[dict],
+) -> tuple[list[str], list[str], set[str]]:
+    """Validate folder/group/placeholder consistency and collect IDs."""
+    errors: list[str] = []
+    warnings: list[str] = []
+    folder_ids: set[str] = set()
+
+    for folder in folders:
+        folder_errors, folder_warnings, folder_id = _check_single_folder(
+            session,
+            workspace_uuid,
+            folder,
+        )
+        errors.extend(folder_errors)
+        warnings.extend(folder_warnings)
+        if folder_id is None:
+            continue
+        if folder_id in folder_ids:
+            errors.append(f"Duplicate folder id detected: {folder_id}.")
+            continue
+        folder_ids.add(folder_id)
+
+    return errors, warnings, folder_ids
+
+
+def _check_tab_group_refs(
+    session: dict, workspace_uuid: str, folder_ids: set[str]
+) -> list[str]:
+    """Validate that pinned tabs reference known folder IDs."""
+    errors: list[str] = []
+    for tab in pinned_tabs(session, workspace_uuid):
+        group_id = tab.get("groupId")
+        if isinstance(group_id, str) and group_id and group_id not in folder_ids:
+            url = tab_url(tab)[:70] or "<empty-url>"
+            errors.append(
+                f"Pinned tab '{url}' references unknown folder/group id {group_id}."
+            )
+    return errors
+
+
 def cmd_list(args: argparse.Namespace) -> int:
+    """List folders for one workspace, preserving render order."""
     _, session = load_session(args.profile)
     workspace_uuid = resolve_workspace(session, args.workspace)
     folders = folders_for_workspace(session, workspace_uuid)
@@ -1076,28 +1589,33 @@ def cmd_list(args: argparse.Namespace) -> int:
     }
 
     if not folders:
-        print(f"No folders in workspace {workspace_name(session, workspace_uuid)}.")
+        _stdout(f"No folders in workspace {workspace_name(session, workspace_uuid)}.")
         return 0
 
     ordered = _ordered_folders(folders)
-    for i, folder in enumerate(ordered):
+    for index, folder in enumerate(ordered):
         folder_id = folder.get("id")
         synced = (
-            "ok" if isinstance(folder_id, str) and folder_id in group_ids else "NO GROUP"
+            "ok"
+            if isinstance(folder_id, str) and folder_id in group_ids
+            else "NO GROUP"
         )
         members = (
             folder_tabs(session, folder_id, workspace_uuid)
             if isinstance(folder_id, str)
             else []
         )
-        print(f"{i + 1:2d}. {folder_display_name(folder)}  ({len(members)} tabs)  [{synced}]")
+        _stdout(
+            f"{index + 1:2d}. {folder_display_name(folder)}  ({len(members)} tabs)  [{synced}]"
+        )
         if args.verbose:
             for tab in members:
-                print(f"      {tab_url(tab)[:76]}")
+                _stdout(f"      {tab_url(tab)[:76]}")
     return 0
 
 
 def cmd_tabs(args: argparse.Namespace) -> int:
+    """List pinned tabs grouped by folder membership."""
     _, session = load_session(args.profile)
     workspace_uuid = resolve_workspace(session, args.workspace)
     tabs = pinned_tabs(session, workspace_uuid)
@@ -1118,23 +1636,27 @@ def cmd_tabs(args: argparse.Namespace) -> int:
             unfiled.append(tab)
 
     if unfiled:
-        print(f"Unfiled ({len(unfiled)}):")
+        _stdout(f"Unfiled ({len(unfiled)}):")
         for tab in unfiled:
             essential = " [essential]" if tab.get("zenEssential") else ""
-            print(f"  {tab_url(tab)[:78]}{essential}")
+            _stdout(f"  {tab_url(tab)[:78]}{essential}")
 
     for name, members in sorted(grouped.items()):
-        print(f"\n{name} ({len(members)}):")
+        _stdout()
+        _stdout(f"{name} ({len(members)}):")
         for tab in members:
-            print(f"  {tab_url(tab)[:80]}")
+            _stdout(f"  {tab_url(tab)[:80]}")
 
-    print(
-        f"\nTotal: {len(tabs)} pinned tabs, {len(grouped)} folders, {len(unfiled)} unfiled"
+    _stdout()
+    _stdout(
+        f"Total: {len(tabs)} pinned tabs, {len(grouped)} folders, {len(unfiled)} unfiled"
     )
+
     return 0
 
 
 def cmd_dump(args: argparse.Namespace) -> int:
+    """Dump current workspace folders/tabs into declarative YAML."""
     _, session = load_session(args.profile)
     workspace_uuid = resolve_workspace(session, args.workspace)
     ws_name = workspace_name(session, workspace_uuid)
@@ -1160,224 +1682,109 @@ def cmd_dump(args: argparse.Namespace) -> int:
         folders_map[folder_display_name(folder)] = tabs_map
 
     result: dict = {ws_name: folders_map}
-    output = yaml.dump(result, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    output = yaml.dump(
+        result, default_flow_style=False, sort_keys=False, allow_unicode=True
+    )
 
     if args.output:
         out_path = Path(args.output)
         try:
             out_path.write_text(output, encoding="utf-8")
         except OSError as exc:
-            raise ZenFoldersError(f"Unable to write output file: {out_path}: {exc}") from exc
-        print(f"Written to {out_path}")
+            msg = f"Unable to write output file: {out_path}: {exc}"
+            raise ZenFoldersError(msg) from exc
+        _stdout(f"Written to {out_path}")
     else:
-        print(output, end="")
+        _stdout_raw(output)
 
     return 0
 
 
 def cmd_diff(args: argparse.Namespace) -> int:
+    """Show a dry-run reconciliation plan for the provided config."""
     _, session = load_session(args.profile)
     raw_config = load_yaml(Path(args.config))
-    workspace_name, config_folders = parse_config(raw_config)
+    config_workspace_name, config_folders = parse_config(raw_config)
 
-    workspace_uuid = resolve_workspace(session, workspace_name)
+    workspace_uuid = resolve_workspace(session, config_workspace_name)
     plan = compute_plan(session, config_folders, workspace_uuid)
 
     if not plan.has_changes and not plan.warnings:
-        print("No changes needed. Session matches config.")
+        _stdout("No changes needed. Session matches config.")
         return 0
 
-    if plan.warnings:
-        print("Warnings:")
-        for w in plan.warnings:
-            print(f"  ! {w}")
-        print()
-
-    if plan.folders_to_create:
-        print("Folders to create:")
-        for name in plan.folders_to_create:
-            print(f"  + {name}")
-        print()
-
-    if plan.folders_to_delete:
-        print("Folders to delete:")
-        for name in plan.folders_to_delete:
-            print(f"  - {name}")
-        print()
-
-    if plan.tab_moves:
-        print("Tab moves:")
-        for url, old, new in plan.tab_moves:
-            old_str = old or "unfiled"
-            print(f"  {url}")
-            print(f"    {old_str} -> {new}")
-        print()
-
-    if plan.tabs_to_create:
-        print("Tabs to create:")
-        for url, folder in plan.tabs_to_create:
-            print(f"  + {url}")
-            print(f"    -> {folder}")
-        print()
-
-    if plan.tab_ungroups:
-        print("Tabs to ungroup:")
-        for url, old in plan.tab_ungroups:
-            print(f"  {url}")
-            print(f"    {old} -> unfiled")
-        print()
-
-    if plan.reorder_folders:
-        print("Folder order will be updated to match config.")
-        print()
-
-    reordered = [name for name, needs in plan.reorder_tabs.items() if needs]
-    if reordered:
-        print("Tab order will be updated in:")
-        for name in reordered:
-            print(f"  ~ {name}")
-        print()
+    _print_plan_warnings(plan)
+    _print_plan_collection("Folders to create:", "+", plan.folders_to_create)
+    _print_plan_collection("Folders to delete:", "-", plan.folders_to_delete)
+    _print_tab_moves(plan.tab_moves)
+    _print_tabs_to_create(plan.tabs_to_create)
+    _print_tabs_to_ungroup(plan.tab_ungroups)
+    _print_reorder_details(plan)
 
     return 0
 
 
 def cmd_apply(args: argparse.Namespace) -> int:
+    """Apply reconciliation plan to session file (with backup)."""
     require_zen_closed(args.profile)
     path, session = load_session(args.profile)
     raw_config = load_yaml(Path(args.config))
-    workspace_name, config_folders = parse_config(raw_config)
+    config_workspace_name, config_folders = parse_config(raw_config)
 
-    workspace_uuid = resolve_workspace(session, workspace_name)
+    workspace_uuid = resolve_workspace(session, config_workspace_name)
     plan = compute_plan(session, config_folders, workspace_uuid)
 
     if plan.warnings:
-        for w in plan.warnings:
-            print(f"Warning: {w}", file=sys.stderr)
+        for warning in plan.warnings:
+            _stderr(f"Warning: {warning}")
 
     if not plan.has_changes:
-        print("No changes needed. Session matches config.")
+        _stdout("No changes needed. Session matches config.")
         return 0
 
-    # Show summary
-    parts = []
-    if plan.folders_to_create:
-        parts.append(f"create {len(plan.folders_to_create)} folder(s)")
-    if plan.folders_to_delete:
-        parts.append(f"delete {len(plan.folders_to_delete)} folder(s)")
-    if plan.tabs_to_create:
-        parts.append(f"create {len(plan.tabs_to_create)} tab(s)")
-    if plan.tab_moves:
-        parts.append(f"move {len(plan.tab_moves)} tab(s)")
-    if plan.tab_ungroups:
-        parts.append(f"ungroup {len(plan.tab_ungroups)} tab(s)")
-    if plan.reorder_folders:
-        parts.append("reorder folders")
-    reordered = [name for name, needs in plan.reorder_tabs.items() if needs]
-    if reordered:
-        parts.append(f"reorder tabs in {len(reordered)} folder(s)")
-
-    print(f"Plan: {', '.join(parts)}")
+    _stdout(f"Plan: {', '.join(_plan_summary_parts(plan))}")
 
     if not args.yes:
         try:
             answer = input("Apply? [y/N] ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print("\nAborted.")
+        except EOFError, KeyboardInterrupt:
+            _stdout("\nAborted.")
             return 1
         if answer not in ("y", "yes"):
-            print("Aborted.")
+            _stdout("Aborted.")
             return 1
 
-    bak = backup_session(path)
-    print(f"Backup: {bak.name}")
+    backup = backup_session(path)
+    _stdout(f"Backup: {backup.name}")
 
     apply_plan(session, config_folders, workspace_uuid, plan)
     write_session(path, session)
-    print("Applied successfully.")
+    _stdout("Applied successfully.")
     return 0
 
 
 def cmd_check(args: argparse.Namespace) -> int:
+    """Run consistency checks for folder/group placeholder invariants."""
     _, session = load_session(args.profile)
     workspace_uuid = resolve_workspace(session, args.workspace)
-    errors: list[str] = []
-    warnings: list[str] = []
-
     folders = folders_for_workspace(session, workspace_uuid)
-    folder_ids: set[str] = set()
+    errors, warnings, folder_ids = _check_folder_structures(
+        session, workspace_uuid, folders
+    )
+    errors.extend(_check_tab_group_refs(session, workspace_uuid, folder_ids))
 
-    for folder in folders:
-        name = folder_display_name(folder)
-        folder_id = folder.get("id")
-        if not isinstance(folder_id, str) or not folder_id:
-            errors.append(f"Folder '{name}' has missing/invalid id.")
-            continue
-
-        if folder_id in folder_ids:
-            errors.append(f"Duplicate folder id detected: {folder_id}.")
-        folder_ids.add(folder_id)
-
-        if group_by_id(session, folder_id) is None:
-            errors.append(
-                f"Folder '{name}' has no matching entry in groups (id={folder_id})."
-            )
-
-        raw_empty_ids = folder.get("emptyTabIds", [])
-        if not isinstance(raw_empty_ids, list):
-            errors.append(f"Folder '{name}' has malformed emptyTabIds.")
-            continue
-
-        empty_ids = [v for v in raw_empty_ids if isinstance(v, str) and v]
-        has_real_tabs = bool(folder_tabs(session, folder_id, workspace_uuid))
-        if not empty_ids:
-            if has_real_tabs:
-                # Zen clears emptyTabIds when a folder has real tabs — benign
-                warnings.append(f"Folder '{name}' has no placeholder tab IDs (has real tabs, benign).")
-            else:
-                errors.append(f"Folder '{name}' has no placeholder tab IDs and no real tabs.")
-            continue
-
-        for empty_id in empty_ids:
-            found = False
-            for tab in session.get("tabs", []):
-                if not isinstance(tab, dict):
-                    continue
-                if (
-                    tab.get("zenSyncId") == empty_id
-                    and tab.get("groupId") == folder_id
-                    and tab.get("zenIsEmpty")
-                ):
-                    found = True
-                    break
-            if not found:
-                errors.append(
-                    f"Folder '{name}' references missing placeholder tab {empty_id}."
-                )
-
-    for tab in pinned_tabs(session, workspace_uuid):
-        group_id = tab.get("groupId")
-        if isinstance(group_id, str) and group_id and group_id not in folder_ids:
-            url = tab_url(tab)[:70] or "<empty-url>"
-            errors.append(
-                f"Pinned tab '{url}' references unknown folder/group id {group_id}."
-            )
-
-    if warnings:
-        print(f"Warnings ({len(warnings)}):")
-        for w in warnings:
-            print(f"  ~ {w}")
+    _print_check_warnings(warnings)
 
     if not errors:
         if warnings:
-            print()
-        print("Session check passed: no structural errors found.")
+            _stdout()
+        _stdout("Session check passed: no structural errors found.")
         return 0
 
     if warnings:
-        print()
-    print(f"Session check found {len(errors)} error(s):")
-    for error in errors:
-        print(f"  - {error}")
+        _stdout()
+    _stdout(f"Session check found {len(errors)} error(s):")
+    _print_lines([f"  - {error}" for error in errors])
     return 1
 
 
@@ -1385,6 +1792,7 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    """Parse CLI arguments and dispatch to the selected subcommand."""
     parser = argparse.ArgumentParser(
         description="Declarative pinned-tab folder management for Zen browser.",
         epilog="Zen must be closed for commands that modify the session.",
@@ -1416,17 +1824,13 @@ def main() -> int:
     sub.add_parser("tabs", help="List all pinned tabs with folder assignments")
 
     # -- dump --
-    dm = sub.add_parser(
-        "dump", help="Generate YAML config from current session state"
-    )
+    dm = sub.add_parser("dump", help="Generate YAML config from current session state")
     dm.add_argument(
         "-o", "--output", metavar="FILE", help="Write to file instead of stdout"
     )
 
     # -- diff --
-    df = sub.add_parser(
-        "diff", help="Show what changes would be made (dry run)"
-    )
+    df = sub.add_parser("diff", help="Show what changes would be made (dry run)")
     df.add_argument(
         "-c",
         "--config",
@@ -1444,14 +1848,10 @@ def main() -> int:
         default=str(DEFAULT_YAML),
         help=f"YAML config file (default: {DEFAULT_YAML})",
     )
-    ap.add_argument(
-        "-y", "--yes", action="store_true", help="Skip confirmation prompt"
-    )
+    ap.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
 
     # -- check --
-    sub.add_parser(
-        "check", help="Run structural consistency check for folders"
-    )
+    sub.add_parser("check", help="Run structural consistency check for folders")
 
     args = parser.parse_args()
     if not args.command:
@@ -1470,10 +1870,10 @@ def main() -> int:
     try:
         return dispatch[args.command](args)
     except ZenFoldersError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _stderr(f"Error: {exc}")
         return 1
     except KeyboardInterrupt:
-        print("\nInterrupted.", file=sys.stderr)
+        _stderr("Interrupted.")
         return 130
 
 

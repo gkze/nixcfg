@@ -1,11 +1,11 @@
 {
-  "drvHash": "bv3a1ndfg524pv9g1ismrpnyd6q151lw",
+  "drvHash": "xwfg0s9vp0k4f2fhsrd353fn2vqflj31",
   "hashes": [
     {
-      "hash": "sha256-acE4AAWEIJVL6KQN2S0VjGPRwOqlJKPLixcCc6a7CtM=",
+      "hash": "sha256-Nkd5Q2ugRqsTqaFbCSniC3Obl++uEjVUmoa8MVT5++8=",
       "hashType": "npmDepsHash"
     }
   ],
   "input": "gemini-cli",
-  "version": "v0.29.7"
+  "version": "v0.30.0"
 }

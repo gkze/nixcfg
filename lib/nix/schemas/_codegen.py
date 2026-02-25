@@ -13,10 +13,14 @@ from __future__ import annotations
 import importlib
 import json
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, TypeGuard
 
 import yaml
+
+if TYPE_CHECKING:
+    from referencing import Resource
 
 SCHEMAS_DIR = Path(__file__).resolve().parent
 MODELS_DIR = SCHEMAS_DIR.parent / "models"
@@ -42,6 +46,47 @@ type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
 
 
+def _as_object_dict(value: object, *, context: str) -> dict[str, object]:
+    """Return *value* as ``dict[str, object]`` or raise ``TypeError``."""
+    if not isinstance(value, dict):
+        msg = f"Expected object for {context}, got {type(value).__name__}"
+        raise TypeError(msg)
+    result: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            msg = f"Expected string key in {context}, got {type(key).__name__}"
+            raise TypeError(msg)
+        result[key] = item
+    return result
+
+
+def _coerce_json_value(value: object, *, context: str) -> JsonValue:
+    """Convert *value* to :data:`JsonValue` recursively."""
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, list):
+        return [_coerce_json_value(item, context=f"{context}[]") for item in value]
+    obj = _as_object_dict(value, context=context)
+    return {
+        key: _coerce_json_value(item, context=f"{context}.{key}")
+        for key, item in obj.items()
+    }
+
+
+def _coerce_json_object(value: object, *, context: str) -> JsonObject:
+    """Convert *value* to :data:`JsonObject` or raise ``TypeError``."""
+    json_value = _coerce_json_value(value, context=context)
+    if not isinstance(json_value, dict):
+        msg = f"Expected JSON object for {context}, got {type(json_value).__name__}"
+        raise TypeError(msg)
+    return json_value
+
+
+def _is_registry_like(value: object) -> TypeGuard[_RegistryLike]:
+    """Return ``True`` when *value* exposes a ``resolver()`` method."""
+    return hasattr(value, "resolver")
+
+
 class _ResolvedResourceLike(Protocol):
     contents: object
 
@@ -58,7 +103,7 @@ def _load_yaml(name: str) -> JsonObject:
     """Load a YAML schema file by base name (without .yaml extension)."""
     path = SCHEMAS_DIR / f"{name}.yaml"
     with path.open() as f:
-        return yaml.safe_load(f)
+        return _coerce_json_object(yaml.safe_load(f), context=f"schema {path.name}")
 
 
 def _build_registry() -> object:
@@ -71,7 +116,7 @@ def _build_registry() -> object:
     referencing = importlib.import_module("referencing")
     referencing_jsonschema = importlib.import_module("referencing.jsonschema")
 
-    resources: list[tuple[str, object]] = []
+    resources: list[tuple[str, Resource[object]]] = []
 
     for yaml_file in sorted(SCHEMAS_DIR.glob("*.yaml")):
         schema = _load_yaml(yaml_file.stem)
@@ -94,8 +139,7 @@ def _build_registry() -> object:
         if isinstance(schema_id, str) and schema_id:
             resources.append((schema_id, resource))
 
-    typed_resources = cast("list[tuple[str, Any]]", resources)
-    return referencing.Registry().with_resources(typed_resources)
+    return referencing.Registry().with_resources(resources)
 
 
 def _walk_pointer(doc: object, fragment: str) -> object:
@@ -104,7 +148,7 @@ def _walk_pointer(doc: object, fragment: str) -> object:
     current = doc
     for part in parts:
         if isinstance(current, dict):
-            current_dict = cast("dict[str, object]", current)
+            current_dict = _as_object_dict(current, context=f"pointer {fragment}")
             current = current_dict[part]
             continue
         msg = f"Cannot walk pointer /{'/'.join(parts)}: hit non-dict at {part!r}"
@@ -112,107 +156,183 @@ def _walk_pointer(doc: object, fragment: str) -> object:
     return current
 
 
-def _resolve_refs(schema: JsonObject, registry: object) -> JsonObject:  # noqa: C901, PLR0915
+@dataclass
+class _SchemaRefResolver:
+    schema: JsonObject
+    registry: _RegistryLike
+    file_cache: dict[str, JsonObject] = field(default_factory=dict)
+
+    def _load_remote_schema(self, uri_part: str) -> JsonObject:
+        cached = self.file_cache.get(uri_part)
+        if cached is not None:
+            return cached
+        resolved_resource = self.registry.resolver().lookup(uri_part)
+        loaded = _coerce_json_object(
+            resolved_resource.contents,
+            context=f"referenced schema {uri_part}",
+        )
+        self.file_cache[uri_part] = loaded
+        return loaded
+
+    @staticmethod
+    def _split_ref(ref: str) -> tuple[str, str]:
+        if "#" in ref:
+            uri_part, fragment = ref.split("#", 1)
+            return uri_part, fragment
+        return ref, ""
+
+    @staticmethod
+    def _merge_ref_siblings(resolved: object, obj_dict: dict[str, object]) -> object:
+        extra = {key: value for key, value in obj_dict.items() if key != "$ref"}
+        if extra and isinstance(resolved, dict):
+            return {**resolved, **extra}
+        return resolved
+
+    def _resolve_ref_target(
+        self,
+        ref: str,
+        *,
+        root: JsonObject,
+    ) -> tuple[object, JsonObject] | None:
+        uri_part, fragment = self._split_ref(ref)
+        if uri_part:
+            remote_schema = self._load_remote_schema(uri_part)
+            resolved = (
+                _walk_pointer(remote_schema, fragment) if fragment else remote_schema
+            )
+            return resolved, remote_schema
+        if fragment:
+            return _walk_pointer(root, fragment), root
+        return None
+
+    def _resolve_ref(
+        self,
+        *,
+        ref: str,
+        obj_dict: dict[str, object],
+        seen: set[str],
+        root: JsonObject,
+    ) -> object:
+        if ref in seen:
+            return {"type": "object", "description": f"Circular ref: {ref}"}
+        target = self._resolve_ref_target(ref, root=root)
+        if target is None:
+            return obj_dict
+        resolved, new_root = target
+        if isinstance(resolved, dict):
+            resolved = dict(resolved)
+        merged = self._merge_ref_siblings(resolved, obj_dict)
+        return self.resolve(merged, seen=seen | {ref}, root=new_root)
+
+    def resolve(self, obj: object, *, seen: set[str], root: JsonObject) -> object:
+        if isinstance(obj, list):
+            return [self.resolve(item, seen=seen, root=root) for item in obj]
+
+        if not isinstance(obj, dict):
+            return obj
+
+        obj_dict = _as_object_dict(obj, context="schema object")
+        ref_obj = obj_dict.get("$ref")
+        if ref_obj is None:
+            return {
+                key: self.resolve(value, seen=seen, root=root)
+                for key, value in obj_dict.items()
+            }
+        if not isinstance(ref_obj, str):
+            msg = "$ref value must be a string"
+            raise TypeError(msg)
+        return self._resolve_ref(ref=ref_obj, obj_dict=obj_dict, seen=seen, root=root)
+
+
+def _resolve_refs(schema: JsonObject, registry: object) -> JsonObject:
     """Recursively resolve all $ref pointers in a schema to produce a self-contained dict.
 
     Uses the registry for cross-file references and JSON pointer
     fragment resolution for intra-file references.
     """
-    # Cache for loaded cross-file schemas (by URI part)
-    file_cache: dict[str, JsonObject] = {}
-
-    if not hasattr(registry, "resolver"):
+    if not _is_registry_like(registry):
         msg = "Invalid schema registry instance"
         raise TypeError(msg)
-    typed_registry = cast("_RegistryLike", registry)
 
-    def _load_remote(uri_part: str) -> JsonObject:
-        """Load a cross-file schema by its URI part, with caching."""
-        if uri_part not in file_cache:
-            resolved_resource = typed_registry.resolver().lookup(uri_part)
-            contents = resolved_resource.contents
-            if not isinstance(contents, dict):
-                msg = f"Referenced schema {uri_part!r} is not an object"
-                raise TypeError(msg)
-            file_cache[uri_part] = cast("JsonObject", contents)
-        return file_cache[uri_part]
-
-    def _resolve(  # noqa: C901, PLR0912
-        obj: object,
-        seen: set[str] | None = None,
-        root: JsonObject | None = None,
-    ) -> object:
-        if seen is None:
-            seen = set()
-        if root is None:
-            root = schema
-
-        if isinstance(obj, list):
-            return [_resolve(item, seen, root) for item in obj]
-
-        if not isinstance(obj, dict):
-            return obj
-
-        obj_dict = cast("dict[str, object]", obj)
-
-        if "$ref" in obj_dict:
-            ref_obj = obj_dict["$ref"]
-            if not isinstance(ref_obj, str):
-                msg = "$ref value must be a string"
-                raise TypeError(msg)
-            ref = ref_obj
-
-            # Prevent infinite recursion on circular refs
-            if ref in seen:
-                return {"type": "object", "description": f"Circular ref: {ref}"}
-            seen = seen | {ref}
-
-            # Split into URI part and fragment
-            if "#" in ref:
-                uri_part, fragment = ref.split("#", 1)
-            else:
-                uri_part = ref
-                fragment = ""
-
-            if uri_part:
-                # Cross-file reference: load the remote schema
-                remote_schema = _load_remote(uri_part)
-                new_root = remote_schema  # switch root context
-                resolved = (
-                    _walk_pointer(remote_schema, fragment)
-                    if fragment
-                    else remote_schema
-                )
-            elif fragment:
-                # Intra-file fragment reference (e.g., #/$defs/foo)
-                # Use current root (which may be a remote schema we jumped into)
-                resolved = _walk_pointer(root, fragment)
-                new_root = root
-            else:
-                return obj
-
-            # Ensure we have a mutable copy
-            if isinstance(resolved, dict):
-                resolved = dict(resolved)
-
-            # Merge any sibling keys (e.g., title, description alongside $ref)
-            extra = {k: v for k, v in obj_dict.items() if k != "$ref"}
-            if extra and isinstance(resolved, dict):
-                resolved = {**resolved, **extra}
-
-            return _resolve(resolved, seen, new_root)
-
-        # Recurse into all dict values
-        return {k: _resolve(v, seen, root) for k, v in obj_dict.items()}
-
-    resolved_root = _resolve(schema)
-    if not isinstance(resolved_root, dict):
-        msg = "Resolved schema root must be an object"
-        raise TypeError(msg)
-    return cast("JsonObject", resolved_root)
+    resolver = _SchemaRefResolver(schema=schema, registry=registry)
+    resolved_root = resolver.resolve(schema, seen=set(), root=schema)
+    return _coerce_json_object(resolved_root, context="resolved schema root")
 
 
-def _merge_allof_branches(result: dict[str, object]) -> None:  # noqa: C901, PLR0912
+_ALL_OF_EXCLUDED_KEYS = frozenset({
+    "properties",
+    "required",
+    "type",
+    "title",
+    "description",
+})
+
+
+def _parse_mergeable_allof_branch(
+    branch_obj: object,
+) -> tuple[dict[str, object], dict[str, object], list[str]] | None:
+    if not isinstance(branch_obj, dict):
+        return None
+    branch = _as_object_dict(branch_obj, context="allOf branch")
+    props_obj = branch.get("properties")
+    if not isinstance(props_obj, dict):
+        return None
+    props = _as_object_dict(props_obj, context="allOf branch properties")
+    required_obj = branch.get("required")
+    required = (
+        [req for req in required_obj if isinstance(req, str)]
+        if isinstance(required_obj, list)
+        else []
+    )
+    return branch, props, required
+
+
+def _merge_allof_extras(result: dict[str, object], branch: dict[str, object]) -> None:
+    for key, value in branch.items():
+        if key in _ALL_OF_EXCLUDED_KEYS or key in result:
+            continue
+        result[key] = value
+
+
+def _merge_allof_properties(
+    result: dict[str, object],
+    merged_props: dict[str, object],
+) -> None:
+    if not merged_props:
+        return
+    existing_props_obj = result.get("properties")
+    existing_props = (
+        _as_object_dict(existing_props_obj, context="schema properties")
+        if isinstance(existing_props_obj, dict)
+        else {}
+    )
+    for key, value in merged_props.items():
+        if key not in existing_props:
+            existing_props[key] = value
+    result["properties"] = existing_props
+
+
+def _merge_allof_required(
+    result: dict[str, object], merged_required: list[str]
+) -> None:
+    if not merged_required:
+        return
+    existing_req_obj = result.get("required")
+    existing_req = (
+        [req for req in existing_req_obj if isinstance(req, str)]
+        if isinstance(existing_req_obj, list)
+        else []
+    )
+    seen = set(existing_req)
+    for requirement in merged_required:
+        if requirement in seen:
+            continue
+        existing_req.append(requirement)
+        seen.add(requirement)
+    result["required"] = existing_req
+
+
+def _merge_allof_branches(result: dict[str, object]) -> None:
     """Inline ``allOf`` object branches into the parent schema object."""
     all_of = result.get("allOf")
     if not isinstance(all_of, list):
@@ -223,60 +343,22 @@ def _merge_allof_branches(result: dict[str, object]) -> None:  # noqa: C901, PLR
     remaining: list[object] = []
 
     for branch_obj in all_of:
-        if not isinstance(branch_obj, dict):
+        parsed = _parse_mergeable_allof_branch(branch_obj)
+        if parsed is None:
             remaining.append(branch_obj)
             continue
-        branch = cast("dict[str, object]", branch_obj)
+        branch, branch_props, branch_required = parsed
+        merged_props.update(branch_props)
+        merged_required.extend(branch_required)
+        _merge_allof_extras(result, branch)
 
-        if "properties" not in branch:
-            remaining.append(branch)
-            continue
-
-        branch_props_obj = branch.get("properties")
-        if isinstance(branch_props_obj, dict):
-            merged_props.update(cast("dict[str, object]", branch_props_obj))
-
-        branch_req_obj = branch.get("required")
-        if isinstance(branch_req_obj, list):
-            merged_required.extend(
-                req for req in branch_req_obj if isinstance(req, str)
-            )
-
-        for key, value in branch.items():
-            if (
-                key not in ("properties", "required", "type", "title", "description")
-                and key not in result
-            ):
-                result[key] = value
-
-    if merged_props:
-        existing_props_obj = result.get("properties")
-        if isinstance(existing_props_obj, dict):
-            existing_props = cast("dict[str, object]", existing_props_obj)
-        else:
-            existing_props = {}
-        for key, value in merged_props.items():
-            if key not in existing_props:
-                existing_props[key] = value
-        result["properties"] = existing_props
-
-    if merged_required:
-        existing_req_obj = result.get("required")
-        if isinstance(existing_req_obj, list):
-            existing_req = [req for req in existing_req_obj if isinstance(req, str)]
-        else:
-            existing_req = []
-        seen = set(existing_req)
-        for requirement in merged_required:
-            if requirement not in seen:
-                existing_req.append(requirement)
-                seen.add(requirement)
-        result["required"] = existing_req
+    _merge_allof_properties(result, merged_props)
+    _merge_allof_required(result, merged_required)
 
     if remaining:
         result["allOf"] = remaining
-    else:
-        result.pop("allOf", None)
+        return
+    result.pop("allOf", None)
 
 
 def _fixup_schema(obj: object) -> object:
@@ -318,10 +400,7 @@ def _generate_models(name: str, resolved_schema: JsonObject) -> str:
     )
 
     fixed_schema = _fixup_schema(resolved_schema)
-    if not isinstance(fixed_schema, dict):
-        msg = f"Fixed schema for {name} is not an object"
-        raise TypeError(msg)
-    resolved_schema = cast("JsonObject", fixed_schema)
+    resolved_schema = _coerce_json_object(fixed_schema, context=f"fixed schema {name}")
     schema_json = json.dumps(resolved_schema, indent=2)
 
     datamodel_code_generator_format = importlib.import_module(

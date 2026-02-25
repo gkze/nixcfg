@@ -13,6 +13,8 @@ Usage:
 
 from __future__ import annotations
 
+import base64
+import functools
 import hashlib
 import http.client
 import json
@@ -23,6 +25,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import keyring
+from keyring.errors import KeyringError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 REPO = "NixOS/nix"
@@ -57,7 +60,7 @@ def _resolve_github_token() -> str | None:
     # Read from the same keychain entry that ``gh auth token`` uses.
     try:
         raw = keyring.get_password("gh:github.com", "")
-    except Exception:  # noqa: BLE001
+    except KeyringError, RuntimeError:
         return None
     return _unwrap_gh_token(raw) if raw else None
 
@@ -67,22 +70,15 @@ _GO_KEYRING_PREFIX = "go-keyring-base64:"
 
 def _unwrap_gh_token(raw: str) -> str | None:
     """Decode the ``go-keyring-base64:`` wrapper that gh uses in keychains."""
-    import base64
-
     if raw.startswith(_GO_KEYRING_PREFIX):
         raw = base64.b64decode(raw[len(_GO_KEYRING_PREFIX) :]).decode()
     return raw.strip() or None
 
 
-_GITHUB_TOKEN: str | None = None
-
-
+@functools.lru_cache(maxsize=1)
 def _get_github_token() -> str | None:
     """Lazy-resolve and cache the GitHub token for this process."""
-    global _GITHUB_TOKEN  # noqa: PLW0603
-    if _GITHUB_TOKEN is None:
-        _GITHUB_TOKEN = _resolve_github_token() or ""
-    return _GITHUB_TOKEN or None
+    return _resolve_github_token()
 
 
 def _github_get(url: str) -> bytes:
@@ -137,7 +133,7 @@ def _https_get(url: str, headers: dict[str, str] | None = None) -> bytes:
     if headers:
         all_headers.update(headers)
 
-    conn = http.client.HTTPSConnection(parsed.netloc, timeout=30)
+    conn = http.client.HTTPSConnection(parsed.netloc, 30)
     try:
         conn.request("GET", path, headers=all_headers)
         response = conn.getresponse()

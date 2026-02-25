@@ -26,3 +26,8 @@ keep_padding = true
 [*.nix]
 indent_style = space
 indent_size = 2
+
+# TOML
+[*.toml]
+indent_style = space
+indent_size = 2

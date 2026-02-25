@@ -25,15 +25,16 @@ import asyncio
 import json
 import logging
 import os
-import platform as platform_mod
+import platform
 import shutil
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from lib.nix.commands.base import NixCommandError
+from lib.nix.commands import base as nix_base
 from lib.nix.commands.build import nix_build
-from lib.update.nix import _build_overlay_expr
+from lib.update import sources as update_sources
+from lib.update.nix import _build_overlay_expr, normalize_nix_platform
 from lib.update.paths import package_file_map
 
 if TYPE_CHECKING:
@@ -82,15 +83,7 @@ def _format_duration(seconds: float) -> str:
 
 def _detect_system() -> str:
     """Return the current Nix system identifier (e.g. ``aarch64-darwin``)."""
-    machine = platform_mod.machine()
-    arch_map = {"x86_64": "x86_64", "arm64": "aarch64", "aarch64": "aarch64"}
-    arch = arch_map.get(machine, machine)
-
-    os_name = platform_mod.system().lower()
-    os_map = {"darwin": "darwin", "linux": "linux"}
-    nix_os = os_map.get(os_name, os_name)
-
-    return f"{arch}-{nix_os}"
+    return normalize_nix_platform(platform.machine(), platform.system())
 
 
 def _platform_fod_entries(entry: SourceEntry, system: str) -> list[HashEntry]:
@@ -106,12 +99,10 @@ def _platform_fod_entries(entry: SourceEntry, system: str) -> list[HashEntry]:
 
 def _find_fod_targets(system: str) -> list[FodTarget]:
     """Discover FOD sub-derivations that need building for *system*."""
-    from lib.update.sources import load_source_entry
-
     targets: list[FodTarget] = []
     for name, path in sorted(package_file_map("sources.json").items()):
         try:
-            entry = load_source_entry(path)
+            entry = update_sources.load_source_entry(path)
         except Exception:
             log.warning("Skipping %s: failed to load sources.json", name, exc_info=True)
             continue
@@ -152,10 +143,8 @@ async def _resolve_output_paths(expr: str) -> list[str]:
     build itself can use ``json_output=False`` (avoiding Pydantic model
     validation against the simpler ``nix build --json`` schema).
     """
-    from lib.nix.commands.base import run_nix
-
     args = ["nix", "build", "--expr", expr, "--impure", "--no-link", "--json"]
-    result = await run_nix(args, check=False, timeout=60)
+    result = await nix_base.run_nix(args, check=False, timeout=60)
     if result.returncode != 0:
         log.debug(
             "nix build --json (dry path resolution) failed: %s", result.stderr[:200]
@@ -243,7 +232,7 @@ async def _build_one(target: FodTarget, system: str, *, cache_name: str | None) 
             json_output=False,
             timeout=BUILD_TIMEOUT,
         )
-    except NixCommandError:
+    except nix_base.NixCommandError:
         elapsed = time.monotonic() - start
         log.exception(
             "FAILED %s after %s",

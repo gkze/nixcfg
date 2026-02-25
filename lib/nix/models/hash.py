@@ -9,8 +9,6 @@ from typing import Annotated
 
 from pydantic import StringConstraints
 
-from ._generated import Algorithm as _GeneratedAlgorithm  # noqa: F401
-
 _SRI_PATTERN = r"^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$"
 _SRI_RE = re.compile(_SRI_PATTERN)
 

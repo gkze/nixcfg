@@ -1,18 +1,18 @@
 """Regression tests for the zen-folders script."""
 
-# ruff: noqa: S101
-
 from __future__ import annotations
 
 import argparse
 import getpass
 import importlib.machinery
 import importlib.util
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
 import yaml
 
+from lib.nix.tests._assertions import check
 from lib.update.paths import REPO_ROOT
 
 if TYPE_CHECKING:
@@ -32,6 +32,7 @@ def _load_zen_folders_module() -> ModuleType:
         msg = "failed to load zen-folders module spec"
         raise RuntimeError(msg)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[loader.name] = module
     loader.exec_module(module)
     return module
 
@@ -80,8 +81,8 @@ def test_tab_entry_field_handles_non_numeric_index(zen_folders: ModuleType) -> N
         "index": "2",
     }
 
-    assert zen_folders.tab_url(tab) == "https://example.com/second"
-    assert zen_folders.tab_title(tab) == "Second"
+    check(zen_folders.tab_url(tab) == "https://example.com/second")
+    check(zen_folders.tab_title(tab) == "Second")
 
 
 def test_compute_plan_rejects_duplicate_session_folder_names(
@@ -139,8 +140,8 @@ def test_apply_plan_handles_non_dict_rows_in_tabs_and_groups(
 
     zen_folders.apply_plan(session, config_folders, "ws1", plan)
 
-    assert any(not isinstance(group, dict) for group in session["groups"])
-    assert any(not isinstance(tab, dict) for tab in session["tabs"])
+    check(any(not isinstance(group, dict) for group in session["groups"]))
+    check(any(not isinstance(tab, dict) for tab in session["tabs"]))
 
 
 def test_cmd_dump_disambiguates_duplicate_titles(
@@ -188,12 +189,12 @@ def test_cmd_dump_disambiguates_duplicate_titles(
         output=str(output_path),
     )
 
-    assert zen_folders.cmd_dump(args) == 0
+    check(zen_folders.cmd_dump(args) == 0)
 
     dumped = yaml.safe_load(output_path.read_text(encoding="utf-8"))
     tabs = dumped["Work"]["AI"]
-    assert tabs["Dashboard"] == "https://a.example.com"
-    assert tabs["Dashboard (2)"] == "https://b.example.com"
+    check(tabs["Dashboard"] == "https://a.example.com")
+    check(tabs["Dashboard (2)"] == "https://b.example.com")
 
 
 def test_read_session_rejects_oversized_payload_header(

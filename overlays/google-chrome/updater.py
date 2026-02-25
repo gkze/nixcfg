@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     import aiohttp
@@ -22,19 +22,24 @@ class GoogleChromeUpdater(DownloadHashUpdater):
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch the latest stable Chrome version from Chromium Dash."""
-        data = cast(
-            "list[dict[str, str]]",
-            await fetch_json(
-                session,
-                "https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Mac&num=1",
-                config=self.config,
-            ),
+        payload = await fetch_json(
+            session,
+            "https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Mac&num=1",
+            config=self.config,
         )
+        if not isinstance(payload, list):
+            msg = f"Unexpected chromiumdash payload type: {type(payload).__name__}"
+            raise TypeError(msg)
+        data = payload
         if not data:
             msg = "No Chrome releases returned from chromiumdash"
             raise RuntimeError(msg)
-        version = data[0].get("version")
-        if not version:
+        release = data[0]
+        if not isinstance(release, dict):
+            msg = f"Unexpected chromiumdash release payload: {release!r}"
+            raise TypeError(msg)
+        version = release.get("version")
+        if not isinstance(version, str) or not version:
             msg = f"Missing version in chromiumdash response: {data[0]}"
             raise RuntimeError(msg)
         return VersionInfo(version=version, metadata={})
