@@ -20,6 +20,8 @@ import http.client
 import json
 import os
 import sys
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -36,6 +38,13 @@ RAW_BASE = f"https://raw.githubusercontent.com/{REPO}"
 SCHEMAS_DIR = Path(__file__).resolve().parent
 VERSION_FILE = SCHEMAS_DIR / "_version.json"
 _HTTP_BAD_REQUEST = 400
+_HTTP_TIMEOUT_SECONDS = 5
+_HTTP_MAX_ATTEMPTS = 3
+_HTTP_BACKOFF_BASE_SECONDS = 0.5
+_HTTP_BACKOFF_MAX_SECONDS = 5.0
+_RETRYABLE_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+type ProgressReporter = Callable[[str], None]
 
 
 class SchemaVersionManifest(BaseModel):
@@ -129,27 +138,78 @@ def _https_get(url: str, headers: dict[str, str] | None = None) -> bytes:
     if parsed.query:
         path = f"{path}?{parsed.query}"
 
+    host = parsed.hostname
+    if host is None:
+        msg = f"Could not parse host from URL: {url!r}"
+        raise ValueError(msg)
+    port = parsed.port or 443
+
     all_headers = {"User-Agent": "nixcfg-schema-fetch"}
     if headers:
         all_headers.update(headers)
 
-    conn = http.client.HTTPSConnection(parsed.netloc, 30)
-    try:
-        conn.request("GET", path, headers=all_headers)
-        response = conn.getresponse()
-        body = response.read()
-    finally:
-        conn.close()
+    for attempt in range(1, _HTTP_MAX_ATTEMPTS + 1):
+        conn = http.client.HTTPSConnection(
+            host,
+            port=port,
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+        try:
+            conn.request("GET", path, headers=all_headers)
+            response = conn.getresponse()
+            body = response.read()
+        except TimeoutError as exc:
+            if attempt >= _HTTP_MAX_ATTEMPTS:
+                msg = f"Timed out fetching {url} after {attempt} attempt(s)"
+                raise RuntimeError(msg) from exc
 
-    if response.status >= _HTTP_BAD_REQUEST:
-        msg = f"HTTP {response.status} fetching {url}"
-        raise RuntimeError(msg)
-    return body
+            time.sleep(_retry_delay_seconds(attempt))
+            continue
+        except OSError as exc:
+            if attempt >= _HTTP_MAX_ATTEMPTS:
+                msg = f"Network error fetching {url} after {attempt} attempt(s): {exc}"
+                raise RuntimeError(msg) from exc
+
+            time.sleep(_retry_delay_seconds(attempt))
+            continue
+        finally:
+            conn.close()
+
+        if response.status >= _HTTP_BAD_REQUEST:
+            if (
+                response.status in _RETRYABLE_HTTP_STATUS_CODES
+                and attempt < _HTTP_MAX_ATTEMPTS
+            ):
+                time.sleep(_retry_delay_seconds(attempt))
+                continue
+
+            msg = f"HTTP {response.status} fetching {url}"
+            if attempt > 1:
+                msg = f"{msg} after {attempt} attempt(s)"
+            raise RuntimeError(msg)
+        return body
+
+    msg = f"Failed fetching {url}"
+    raise RuntimeError(msg)
 
 
 def _sha256(data: bytes) -> str:
     """Return hex SHA-256 digest of ``data``."""
     return hashlib.sha256(data).hexdigest()
+
+
+def _emit_progress(progress: ProgressReporter | None, message: str) -> None:
+    """Invoke the optional fetch progress reporter."""
+    if progress is None:
+        return
+    progress(message)
+
+
+def _retry_delay_seconds(attempt: int) -> float:
+    """Return the exponential backoff delay before the next attempt."""
+    return min(
+        _HTTP_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)), _HTTP_BACKOFF_MAX_SECONDS
+    )
 
 
 def _write_version(commit_sha: str, branch: str, files: list[dict[str, str]]) -> None:
@@ -185,17 +245,26 @@ def _parse_version() -> SchemaVersionManifest | None:
         return None
 
 
-def fetch() -> None:
+def fetch(*, progress: ProgressReporter | None = None) -> None:
     """Fetch schemas from the latest commit on the default branch."""
+    _emit_progress(progress, f"Resolving default branch head for {REPO}.")
     commit_sha, branch = _get_default_branch_head()
 
+    _emit_progress(progress, f"Listing schema files for {branch}@{commit_sha}.")
     files = _list_schema_files(commit_sha)
+    total = len(files)
+    _emit_progress(
+        progress, f"Fetching {total} schema file(s) from {branch}@{commit_sha}."
+    )
 
-    for f in files:
+    for index, f in enumerate(files, start=1):
+        _emit_progress(progress, f"Downloading {index}/{total}: {f['name']}")
         content = _download_schema(f["download_url"])
         (SCHEMAS_DIR / f["name"]).write_bytes(content)
 
+    _emit_progress(progress, "Updating schema version manifest.")
     _write_version(commit_sha, branch, files)
+    _emit_progress(progress, "Schema fetch complete.")
 
 
 def check() -> bool:

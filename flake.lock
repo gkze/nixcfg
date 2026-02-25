@@ -199,16 +199,16 @@
     "codex": {
       "flake": false,
       "locked": {
-        "lastModified": 1771396484,
-        "narHash": "sha256-spWb/msjl9am7E4UkZfEoH0diFbvAfydJKJQM1N1aoI=",
+        "lastModified": 1772037396,
+        "narHash": "sha256-xVWGvcM2lyJdaZKzAKHn/+1A/o4ec9RtfmxW7GyEijE=",
         "owner": "openai",
         "repo": "codex",
-        "rev": "74d1f7b2b3af383bd3605344f3c842b194fd1d70",
+        "rev": "a7eda6a29b3ee25549f385197ff109508dc49a90",
         "type": "github"
       },
       "original": {
         "owner": "openai",
-        "ref": "rust-v0.104.0",
+        "ref": "rust-v0.105.0",
         "repo": "codex",
         "type": "github"
       }
@@ -292,16 +292,16 @@
     "crush": {
       "flake": false,
       "locked": {
-        "lastModified": 1771966775,
-        "narHash": "sha256-fr8R00JM3bd+L/S809BhVma5y3fbaR9bR5x0atAPtqY=",
+        "lastModified": 1772053677,
+        "narHash": "sha256-B29989hPftZg3PV1/p/tQfftqox6rvZRlLkJln9kQ88=",
         "owner": "charmbracelet",
         "repo": "crush",
-        "rev": "d159984ed22a0c4860be3415c5ae82d61c59d680",
+        "rev": "234a87c50f05c1ead87059cf7b8aadde2556df9f",
         "type": "github"
       },
       "original": {
         "owner": "charmbracelet",
-        "ref": "v0.45.0",
+        "ref": "v0.45.1",
         "repo": "crush",
         "type": "github"
       }
@@ -2175,16 +2175,16 @@
     "toad": {
       "flake": false,
       "locked": {
-        "lastModified": 1771953394,
-        "narHash": "sha256-DR6qWDJUQERhkymiuOX7paoEMjIR+aI95dEy+zyBZ7U=",
+        "lastModified": 1772049476,
+        "narHash": "sha256-fcqBT/BMx1QQBbxgm8dLsr0IusGdG+8BGRYmZLtVXJk=",
         "owner": "batrachianai",
         "repo": "toad",
-        "rev": "e62a0b3428cb0a51b5737ea2fbd85cd939643a94",
+        "rev": "b258d470e30ebdc50c8339ba2c2a78dc0f7e1cbc",
         "type": "github"
       },
       "original": {
         "owner": "batrachianai",
-        "ref": "v6.0.2",
+        "ref": "v0.6.3",
         "repo": "toad",
         "type": "github"
       }

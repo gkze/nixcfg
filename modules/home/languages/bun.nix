@@ -1,19 +1,18 @@
 { config, lib, ... }:
 let
-  cfg = config.nixcfg.languages.bun;
+  mkPathModule = import ./_path-module.nix { inherit config lib; };
 in
-{
-  options.nixcfg.languages.bun = {
-    enable = lib.mkEnableOption "Bun JavaScript runtime";
-    binPath = lib.mkOption {
-      type = lib.types.str;
-      default = "$HOME/.bun/bin";
-      description = "Path to add to PATH for bun-installed executables.";
-    };
-  };
-
-  config = lib.mkIf cfg.enable {
+mkPathModule {
+  optionPath = [
+    "nixcfg"
+    "languages"
+    "bun"
+  ];
+  enableDescription = "Bun JavaScript runtime";
+  pathOptionName = "binPath";
+  pathDefault = "$HOME/.bun/bin";
+  pathDescription = "Path to add to PATH for bun-installed executables.";
+  extraConfig = {
     programs.bun.enable = true;
-    home.sessionPath = [ cfg.binPath ];
   };
 }

@@ -9,7 +9,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, constr
+from pydantic import BaseModel, ConfigDict, Field, RootModel, StringConstraints
 
 # === hash-v1 ===
 
@@ -170,7 +170,12 @@ class Key(BaseModel):
 class Value(BaseModel):
     out_path: Annotated[
         dict[
-            constr(pattern=r"^sha256:[0-9a-f]{64}![a-zA-Z_][a-zA-Z0-9_-]*$"),
+            Annotated[
+                str,
+                StringConstraints(
+                    pattern=r"^sha256:[0-9a-f]{64}![a-zA-Z_][a-zA-Z0-9_-]*$"
+                ),
+            ],
             dict[str, Any],
         ],
         Field(
@@ -406,7 +411,12 @@ class Inputs(BaseModel):
     srcs: Annotated[list[Src], Field(title="Input source paths")]
     drvs: Annotated[
         dict[
-            constr(pattern=r"^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+\.drv$"),
+            Annotated[
+                str,
+                StringConstraints(
+                    pattern=r"^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+\.drv$"
+                ),
+            ],
             list[str] | Drvs,
         ],
         Field(title="Input derivations"),

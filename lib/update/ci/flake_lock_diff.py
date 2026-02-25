@@ -1,12 +1,15 @@
 """Generate a human-readable diff of flake.lock changes."""
 
-import argparse
+import pathlib
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import Annotated
+
+import typer
 
 from lib.nix.models.flake_lock import FlakeLock, LockedRef
+from lib.update.ci._cli import make_typer_app, run_main
 
 
 @dataclass
@@ -128,8 +131,10 @@ def _append_table(
     )
 
 
-def run_diff(old_lock_path: Path, new_lock_path: Path) -> str:
+def run_diff(old_lock_path: pathlib.Path, new_lock_path: pathlib.Path) -> str:
     """Compare two flake.lock files and return a readable summary."""
+    old_lock_path = pathlib.Path(old_lock_path)
+    new_lock_path = pathlib.Path(new_lock_path)
     old_lock = FlakeLock.from_file(old_lock_path)
     new_lock = FlakeLock.from_file(new_lock_path)
 
@@ -205,21 +210,52 @@ def get_input_info(lock: FlakeLock, name: str) -> InputInfo | None:
     )
 
 
-def _run_diff(old_lock_path: Path, new_lock_path: Path) -> None:
+def _run_diff(old_lock_path: pathlib.Path, new_lock_path: pathlib.Path) -> None:
     """Compare two flake.lock files and print the differences."""
     diff = run_diff(old_lock_path, new_lock_path)
     if diff:
         sys.stdout.write(f"{diff}\n")
 
 
+def run(*, old_lock: pathlib.Path, new_lock: pathlib.Path) -> int:
+    """Run lock-file diff rendering for two paths."""
+    old_lock = pathlib.Path(old_lock)
+    new_lock = pathlib.Path(new_lock)
+    _run_diff(old_lock, new_lock)
+    return 0
+
+
+app = make_typer_app(
+    help_text="Generate a human-readable diff of flake.lock changes.",
+    no_args_is_help=False,
+)
+
+
+_standalone_app = make_typer_app(
+    help_text="Generate a human-readable diff of flake.lock changes.",
+    no_args_is_help=False,
+)
+
+
+@_standalone_app.command()
+@app.callback(invoke_without_command=True)
+def cli(
+    old_lock: Annotated[
+        pathlib.Path,
+        typer.Argument(help="Path to old flake.lock."),
+    ],
+    new_lock: Annotated[
+        pathlib.Path,
+        typer.Argument(help="Path to new flake.lock."),
+    ],
+) -> None:
+    """Compare two flake.lock files and print differences."""
+    raise typer.Exit(code=run(old_lock=old_lock, new_lock=new_lock))
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the CLI entrypoint."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("old_lock", type=Path, help="Path to old flake.lock")
-    parser.add_argument("new_lock", type=Path, help="Path to new flake.lock")
-    args = parser.parse_args(argv)
-    _run_diff(args.old_lock, args.new_lock)
-    return 0
+    return run_main(_standalone_app, argv=argv, prog_name="flake-lock-diff")
 
 
 if __name__ == "__main__":

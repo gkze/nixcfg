@@ -4,14 +4,20 @@
   lib,
   ...
 }:
-mkGoCliPackage {
-  pname = "gogcli";
-  input = inputs.gogcli;
-  subPackages = [ "cmd/gog" ];
-  cmdName = "gog";
-  meta = with lib; {
-    description = "Google Suite CLI: Gmail, GCal, GDrive, GContacts";
-    homepage = "https://github.com/steipete/gogcli";
-    license = licenses.mit;
+let
+  mkGoCli = import ../../lib/go_cli_package.nix {
+    inherit
+      mkGoCliPackage
+      inputs
+      lib
+      ;
   };
+in
+mkGoCli {
+  pname = "gogcli";
+  inputName = "gogcli";
+  subPackage = "cmd/gog";
+  cmdName = "gog";
+  description = "Google Suite CLI: Gmail, GCal, GDrive, GContacts";
+  homepage = "https://github.com/steipete/gogcli";
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -38,3 +39,16 @@ def atomic_write_text(path: Path, content: str, *, mkdir: bool = False) -> None:
     finally:
         if tmp_path is not None and tmp_path.exists():
             tmp_path.unlink()
+
+
+def atomic_write_json(
+    path: Path,
+    payload: object,
+    *,
+    mkdir: bool = False,
+    indent: int = 2,
+    sort_keys: bool = True,
+) -> None:
+    """Atomically write JSON payload with stable formatting and newline."""
+    content = json.dumps(payload, indent=indent, sort_keys=sort_keys)
+    atomic_write_text(path, f"{content}\n", mkdir=mkdir)

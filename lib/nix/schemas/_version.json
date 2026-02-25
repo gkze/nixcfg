@@ -13,8 +13,8 @@
     "store-path-v1.yaml": "ea6ad8828984d090352da8ae6a0c44016981c44ee6ddcac68fecfd52f25b78ef",
     "store-v1.yaml": "6c5ce4f84830894a694807cf6b0a7035d8081f2bd38de365e4a178ed4bf8976f"
   },
-  "commit": "003b64476e3bb3cb8159512fbdb612425d3c088a",
-  "fetched": "2026-02-24T18:37:31.432469Z",
+  "commit": "c8b02e6ff3d31273b16d147fa963539ee5bdd68a",
+  "fetched": "2026-02-25T21:32:21.896233Z",
   "path": "doc/manual/source/protocols/json/schema",
   "repo": "NixOS/nix"
 }

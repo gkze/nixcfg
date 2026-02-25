@@ -212,10 +212,22 @@ def test_fetch_https_get_success_and_error(monkeypatch: pytest.MonkeyPatch) -> N
     ok_response = _FakeHTTPResponse(status=200, reason="OK", body=b"payload")
     ok_conn = _FakeHTTPSConnection(ok_response)
 
+    https_port = 443
+    expected_timeout = object.__getattribute__(fetch, "_HTTP_TIMEOUT_SECONDS")
+
+    def _ok_connection(
+        _host: str,
+        port: int | None = None,
+        timeout: int | None = None,
+    ) -> _FakeHTTPSConnection:
+        check(port == https_port)
+        check(timeout == expected_timeout)
+        return ok_conn
+
     monkeypatch.setattr(
         fetch.http.client,
         "HTTPSConnection",
-        lambda _netloc, _timeout=30: ok_conn,
+        _ok_connection,
     )
     body = object.__getattribute__(fetch, "_https_get")(
         "https://example.com/path?q=1", headers={"X-Test": "1"}
@@ -229,13 +241,131 @@ def test_fetch_https_get_success_and_error(monkeypatch: pytest.MonkeyPatch) -> N
 
     bad_response = _FakeHTTPResponse(status=404, reason="Not Found", body=b"nope")
     bad_conn = _FakeHTTPSConnection(bad_response)
+
+    def _bad_connection(
+        _host: str,
+        port: int | None = None,
+        timeout: int | None = None,
+    ) -> _FakeHTTPSConnection:
+        check(port == https_port)
+        check(timeout == expected_timeout)
+        return bad_conn
+
     monkeypatch.setattr(
         fetch.http.client,
         "HTTPSConnection",
-        lambda _netloc, _timeout=30: bad_conn,
+        _bad_connection,
     )
     with pytest.raises(RuntimeError, match="HTTP 404"):
         object.__getattribute__(fetch, "_https_get")("https://example.com/missing")
+
+
+def test_fetch_https_get_wraps_timeout_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this test case."""
+
+    class _TimeoutHTTPSConnection:
+        def __init__(self) -> None:
+            self.closed_count = 0
+            self.request_calls = 0
+
+        def request(self, _method: str, _path: str, headers: dict[str, str]) -> None:
+            self.request_calls += 1
+            check(headers["User-Agent"] == "nixcfg-schema-fetch")
+            msg = "timed out"
+            raise TimeoutError(msg)
+
+        def close(self) -> None:
+            self.closed_count += 1
+
+    timeout_conn = _TimeoutHTTPSConnection()
+    sleep_calls: list[float] = []
+    https_port = 443
+    expected_timeout = object.__getattribute__(fetch, "_HTTP_TIMEOUT_SECONDS")
+
+    def _sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+
+    def _connection_factory(
+        _host: str,
+        port: int | None = None,
+        timeout: int | None = None,
+    ) -> _TimeoutHTTPSConnection:
+        check(port == https_port)
+        check(timeout == expected_timeout)
+        return timeout_conn
+
+    monkeypatch.setattr(
+        fetch.time,
+        "sleep",
+        _sleep,
+    )
+    monkeypatch.setattr(
+        fetch.http.client,
+        "HTTPSConnection",
+        _connection_factory,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"Timed out fetching https://example\.com/slow after 3 attempt\(s\)",
+    ):
+        object.__getattribute__(fetch, "_https_get")("https://example.com/slow")
+
+    max_attempts = object.__getattribute__(fetch, "_HTTP_MAX_ATTEMPTS")
+    check(timeout_conn.request_calls == max_attempts)
+    check(timeout_conn.closed_count == max_attempts)
+    check(
+        sleep_calls
+        == [
+            object.__getattribute__(fetch, "_retry_delay_seconds")(1),
+            object.__getattribute__(fetch, "_retry_delay_seconds")(2),
+        ]
+    )
+
+
+def test_fetch_https_get_retries_retryable_http_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run this test case."""
+    responses = iter([
+        _FakeHTTPResponse(status=503, reason="Busy", body=b"busy"),
+        _FakeHTTPResponse(status=200, reason="OK", body=b"ok"),
+    ])
+    connections: list[_FakeHTTPSConnection] = []
+
+    https_port = 443
+    expected_timeout = object.__getattribute__(fetch, "_HTTP_TIMEOUT_SECONDS")
+
+    def _make_conn(
+        _host: str,
+        port: int | None = None,
+        timeout: int | None = None,
+    ) -> _FakeHTTPSConnection:
+        check(port == https_port)
+        check(timeout == expected_timeout)
+        response = next(responses)
+        conn = _FakeHTTPSConnection(response)
+        connections.append(conn)
+        return conn
+
+    sleep_calls: list[float] = []
+
+    def _sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(
+        fetch.time,
+        "sleep",
+        _sleep,
+    )
+    monkeypatch.setattr(fetch.http.client, "HTTPSConnection", _make_conn)
+
+    body = object.__getattribute__(fetch, "_https_get")("https://example.com/retry")
+
+    expected_attempts = 2
+    check(body == b"ok")
+    check(len(connections) == expected_attempts)
+    check(sleep_calls == [object.__getattribute__(fetch, "_retry_delay_seconds")(1)])
 
 
 def test_fetch_write_and_parse_version_manifest(
@@ -308,11 +438,24 @@ def test_fetch_downloads_files_and_writes_manifest(
         writes.append((commit, branch, version_files))
 
     monkeypatch.setattr(fetch, "_write_version", _write_version)
-    fetch.fetch()
+    progress: list[str] = []
+    fetch.fetch(progress=progress.append)
 
     check((schemas_dir / "a.yaml").read_bytes() == b"https://example.com/a")
     check((schemas_dir / "b.yaml").read_bytes() == b"https://example.com/b")
     check(writes == [("abc", "main", files)])
+    check(
+        progress
+        == [
+            f"Resolving default branch head for {fetch.REPO}.",
+            "Listing schema files for main@abc.",
+            "Fetching 2 schema file(s) from main@abc.",
+            "Downloading 1/2: a.yaml",
+            "Downloading 2/2: b.yaml",
+            "Updating schema version manifest.",
+            "Schema fetch complete.",
+        ]
+    )
 
 
 def test_fetch_check_happy_path_and_failure_modes(
@@ -693,7 +836,8 @@ def test_codegen_main_writes_deduped_output(
         )
 
     monkeypatch.setattr(codegen, "_generate_models", _generate)
-    codegen.main()
+    progress: list[str] = []
+    codegen.main(progress=progress.append)
 
     content = output_file.read_text(encoding="utf-8")
     check("class Shared(" in content)
@@ -702,3 +846,14 @@ def test_codegen_main_writes_deduped_output(
     check("class Two(" in content)
     check("from pydantic import BaseModel" in content)
     check(content.count("from typing import Optional") == 1)
+    check(
+        progress
+        == [
+            "Building schema registry.",
+            "Generating models for 2 top-level schema(s).",
+            "Processing 1/2: one",
+            "Processing 2/2: two",
+            f"Writing generated models to {output_file}.",
+            "Schema codegen complete.",
+        ]
+    )

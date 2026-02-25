@@ -20,7 +20,6 @@ runtime binary).
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import logging
@@ -29,26 +28,25 @@ import platform
 import shutil
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
+
+import typer
 
 from lib.nix.commands import base as nix_base
 from lib.nix.commands.build import nix_build
 from lib.update import sources as update_sources
+from lib.update.ci._cli import make_typer_app, run_main
+from lib.update.ci._time import format_duration
 from lib.update.nix import _build_overlay_expr, normalize_nix_platform
 from lib.update.paths import package_file_map
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from lib.nix.models.sources import HashEntry, SourceEntry
 
 log = logging.getLogger(__name__)
 
 # Generous timeout — FODs may download large dependency trees.
 BUILD_TIMEOUT = 3600.0
-
-SECONDS_PER_MINUTE = 60
-SECONDS_PER_HOUR = 3600
 
 # Map from hash type to the Nix attribute suffix that evaluates to the
 # FOD sub-derivation.  Each entry uses dot-separated path components
@@ -67,18 +65,7 @@ class FodTarget:
     fod_attr: str
 
 
-def _format_duration(seconds: float) -> str:
-    """Format seconds as a human-readable duration."""
-    if seconds < SECONDS_PER_MINUTE:
-        return f"{seconds:.1f}s"
-    if seconds < SECONDS_PER_HOUR:
-        return (
-            f"{int(seconds // SECONDS_PER_MINUTE)}m "
-            f"{int(seconds % SECONDS_PER_MINUTE)}s"
-        )
-    hours = int(seconds // SECONDS_PER_HOUR)
-    minutes = int((seconds % SECONDS_PER_HOUR) // SECONDS_PER_MINUTE)
-    return f"{hours}h {minutes}m"
+_format_duration = format_duration
 
 
 def _detect_system() -> str:
@@ -260,12 +247,17 @@ async def _build_one(target: FodTarget, system: str, *, cache_name: str | None) 
     return True
 
 
-async def _async_main(args: argparse.Namespace) -> int:
-    system = args.system or _detect_system()
+async def _async_main(
+    *,
+    system: str | None = None,
+    dry_run: bool = False,
+    cachix_cache: str | None = None,
+) -> int:
+    system = system or _detect_system()
     log.info("System: %s", system)
 
     # Resolve the Cachix cache name for explicit pushes.
-    cache_name = args.cachix_cache or os.environ.get("CACHIX_NAME")
+    cache_name = cachix_cache or os.environ.get("CACHIX_NAME")
     if cache_name:
         log.info("Cachix cache: %s (will push FODs after build)", cache_name)
     else:
@@ -282,7 +274,7 @@ async def _async_main(args: argparse.Namespace) -> int:
         ", ".join(f"{t.package}{t.fod_attr}" for t in targets),
     )
 
-    if args.dry_run:
+    if dry_run:
         log.info("DRY RUN — skipping builds")
         return 0
 
@@ -306,35 +298,76 @@ async def _async_main(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI entrypoint."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--system",
-        help="Nix system identifier (default: auto-detect)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="List targets that would be built without building",
-    )
-    parser.add_argument(
-        "--cachix-cache",
-        help=(
-            "Cachix cache name for explicit pushes after build. "
-            "Falls back to $CACHIX_NAME if not set."
-        ),
-    )
-    parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args(argv)
-
+def run(
+    *,
+    system: str | None = None,
+    dry_run: bool = False,
+    cachix_cache: str | None = None,
+    verbose: bool = False,
+) -> int:
+    """Build cache-warming fixed-output derivations."""
     logging.basicConfig(
         format="[%(asctime)s] %(message)s",
         datefmt="%H:%M:%S",
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if verbose else logging.INFO,
+    )
+    return asyncio.run(
+        _async_main(system=system, dry_run=dry_run, cachix_cache=cachix_cache)
     )
 
-    return asyncio.run(_async_main(args))
+
+app = make_typer_app(
+    help_text="Build platform-specific FODs to populate binary caches.",
+    no_args_is_help=False,
+)
+
+
+@app.callback(invoke_without_command=True)
+def cli(
+    *,
+    system: Annotated[
+        str | None,
+        typer.Option(
+            "--system",
+            help="Nix system identifier (default: auto-detect).",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="List targets that would be built without building.",
+        ),
+    ] = False,
+    cachix_cache: Annotated[
+        str | None,
+        typer.Option(
+            "--cachix-cache",
+            help=(
+                "Cachix cache name for explicit pushes after build. "
+                "Falls back to $CACHIX_NAME if not set."
+            ),
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option("-v", "--verbose", help="Enable debug logging."),
+    ] = False,
+) -> None:
+    """Run FOD cache warming for the selected system."""
+    raise typer.Exit(
+        code=run(
+            system=system,
+            dry_run=dry_run,
+            cachix_cache=cachix_cache,
+            verbose=verbose,
+        )
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the CLI entrypoint."""
+    return run_main(app, argv=argv, prog_name="warm-fod-cache")
 
 
 if __name__ == "__main__":

@@ -127,7 +127,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.104.0";
+      url = "github:openai/codex/rust-v0.105.0";
       flake = false;
     };
     curator = {
@@ -135,7 +135,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.45.0";
+      url = "github:charmbracelet/crush/v0.45.1";
       flake = false;
     };
     gemini-cli = {
@@ -200,7 +200,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad/v6.0.2";
+      url = "github:batrachianai/toad/v0.6.3";
       flake = false;
     };
     treesitter-textobjects = {

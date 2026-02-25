@@ -8,16 +8,18 @@ different CI runners see different upstream versions for the same package.
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 import aiohttp
+import typer
 from pydantic import BaseModel
 
+from lib.update import io as update_io
+from lib.update.ci._cli import make_typer_app, run_main
 from lib.update.config import resolve_active_config
 from lib.update.sources import load_all_sources
 from lib.update.updaters import UPDATERS
@@ -31,6 +33,8 @@ type _JsonSafe = (
     str | int | float | bool | None | dict[str, _JsonSafe] | list[_JsonSafe]
 )
 type _JsonObject = dict[str, _JsonSafe]
+
+DEFAULT_PINNED_VERSIONS_PATH = Path("pinned-versions.json")
 
 
 def _make_json_safe(obj: object) -> _JsonSafe:
@@ -95,10 +99,11 @@ def load_pinned_versions(path: Path) -> dict[str, VersionInfo]:
     return results
 
 
-async def _resolve_all() -> dict[str, _JsonObject]:
-    """Run ``fetch_latest()`` for every updater and return serialized results."""
+async def _resolve_all() -> tuple[dict[str, _JsonObject], list[str]]:
+    """Run ``fetch_latest()`` for every updater and return results and failures."""
     config = resolve_active_config(None)
     results: dict[str, _JsonObject] = {}
+    failures: list[str] = []
 
     async with aiohttp.ClientSession() as session:
         tasks: dict[str, asyncio.Task[VersionInfo]] = {}
@@ -115,46 +120,71 @@ async def _resolve_all() -> dict[str, _JsonObject]:
         for name, outcome in zip(tasks, outcomes, strict=True):
             if isinstance(outcome, BaseException):
                 sys.stderr.write(f"Warning: failed to resolve {name}: {outcome}\n")
+                failures.append(name)
                 continue
             if not isinstance(outcome, VersionInfo):
                 msg = f"unexpected version payload for {name}: {type(outcome)}"
                 raise TypeError(msg)
             results[name] = _serialize_version_info(outcome)
 
-    return results
+    return results, failures
 
 
-def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Resolve upstream versions for all updaters",
-    )
-    parser.add_argument(
-        "--output",
-        "-o",
-        default="pinned-versions.json",
-        help="Path to write the pinned versions manifest (default: pinned-versions.json)",
-    )
-    return parser.parse_args(argv)
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI entrypoint."""
-    args = _parse_args(argv)
+def run(*, output: Path, strict: bool = False) -> int:
+    """Resolve versions and write a pinned-versions manifest."""
     # Ensure updater modules are imported (triggers discovery).
     load_all_sources()
-    results = asyncio.run(_resolve_all())
+    results, failures = asyncio.run(_resolve_all())
+
+    if strict and failures:
+        sys.stderr.write(
+            "Error: strict mode enabled and some updaters failed: "
+            f"{', '.join(sorted(failures))}\n"
+        )
+        return 1
 
     if not results:
         sys.stderr.write("Error: no versions resolved\n")
         return 1
 
-    output = Path(args.output)
-    with output.open("w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, sort_keys=True)
-        f.write("\n")
+    update_io.atomic_write_json(output, results)
 
     sys.stderr.write(f"Resolved {len(results)} versions -> {output}\n")
     return 0
+
+
+app = make_typer_app(
+    help_text="Resolve upstream versions for all updaters.",
+    no_args_is_help=False,
+)
+
+
+@app.callback(invoke_without_command=True)
+def cli(
+    *,
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Path to write the pinned versions manifest.",
+        ),
+    ] = DEFAULT_PINNED_VERSIONS_PATH,
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict",
+            help="Fail if any updater fails to resolve.",
+        ),
+    ] = False,
+) -> None:
+    """Resolve upstream versions and write a manifest."""
+    raise typer.Exit(code=run(output=output, strict=strict))
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the CLI entrypoint."""
+    return run_main(app, argv=argv, prog_name="resolve-versions")
 
 
 if __name__ == "__main__":

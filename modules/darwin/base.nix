@@ -129,32 +129,25 @@ in
 
     security.pam.services.sudo_local.touchIdAuth = cfg.security.touchIdSudo;
 
-    launchd.daemons = {
-      maxfiles.serviceConfig = {
-        Label = "limit.maxfiles";
-        RunAtLoad = true;
-        ServiceIPC = true;
-        ProgramArguments = [
-          "launchctl"
-          "limit"
-          "maxfiles"
-          (toString cfg.launchd.maxfiles)
-          (toString cfg.launchd.maxfiles)
-        ];
-      };
-      maxproc.serviceConfig = {
-        Label = "limit.maxproc";
-        RunAtLoad = true;
-        ServiceIPC = true;
-        ProgramArguments = [
-          "launchctl"
-          "limit"
-          "maxproc"
-          (toString cfg.launchd.maxproc)
-          (toString cfg.launchd.maxproc)
-        ];
-      };
-    };
+    launchd.daemons =
+      lib.mapAttrs
+        (name: limit: {
+          serviceConfig = {
+            Label = "limit.${name}";
+            RunAtLoad = true;
+            ServiceIPC = true;
+            ProgramArguments = [
+              "launchctl"
+              "limit"
+              name
+              (toString limit)
+              (toString limit)
+            ];
+          };
+        })
+        {
+          inherit (cfg.launchd) maxfiles maxproc;
+        };
 
     homebrew = {
       enable = pkgs.stdenv.isDarwin;

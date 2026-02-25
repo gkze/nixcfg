@@ -15,20 +15,21 @@ artifact directories, then merges them back — exactly as CI does.
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
+import typer
 from pydantic import ValidationError
 
 from lib.nix.models.sources import SourceEntry
 from lib.update import cli as update_cli
 from lib.update.ci import merge_sources, resolve_versions
+from lib.update.ci._cli import make_typer_app, run_main
 from lib.update.paths import package_file_map
 
 if TYPE_CHECKING:
@@ -149,35 +150,14 @@ def _phase_validate() -> bool:
 # ── Entrypoint ────────────────────────────────────────────────────────
 
 
-def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Simulate the CI update pipeline locally",
-    )
-    parser.add_argument(
-        "--full",
-        action="store_true",
-        help="Also run the split-and-merge phase (tests merge logic)",
-    )
-    parser.add_argument(
-        "--source",
-        help="Only compute hashes for a single source (faster iteration)",
-    )
-    parser.add_argument(
-        "--resolve-only",
-        action="store_true",
-        help="Only run the version resolution phase (fastest smoke test)",
-    )
-    parser.add_argument(
-        "--keep-artifacts",
-        action="store_true",
-        help="Keep the temp directory with intermediate artifacts",
-    )
-    return parser.parse_args(argv)
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the local CI pipeline simulation."""
-    args = _parse_args(argv)
+def run(
+    *,
+    full: bool = False,
+    source: str | None = None,
+    resolve_only: bool = False,
+    keep_artifacts: bool = False,
+) -> int:
+    """Run the local CI pipeline simulation with explicit options."""
     work_dir = Path(tempfile.mkdtemp("nixcfg-ci-test-"))
     pinned_path = work_dir / "pinned-versions.json"
 
@@ -188,31 +168,85 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Phase 1: Resolve versions
     ok = _phase_resolve(pinned_path)
     phases.append(("resolve-versions", ok))
-    if not ok or args.resolve_only:
-        _print_summary(phases, work_dir, keep=args.keep_artifacts)
+    if not ok or resolve_only:
+        _print_summary(phases, work_dir, keep=keep_artifacts)
         return 0 if ok else 1
 
     # Phase 2: Compute hashes
-    ok = _phase_compute(pinned_path, args.source)
+    ok = _phase_compute(pinned_path, source)
     phases.append(("compute-hashes", ok))
     if not ok:
-        _print_summary(phases, work_dir, keep=args.keep_artifacts)
+        _print_summary(phases, work_dir, keep=keep_artifacts)
         return 1
 
     # Phase 3: Split & merge (optional)
-    if args.full:
+    if full:
         ok = _phase_merge(work_dir)
         phases.append(("merge-sources", ok))
         if not ok:
-            _print_summary(phases, work_dir, keep=args.keep_artifacts)
+            _print_summary(phases, work_dir, keep=keep_artifacts)
             return 1
 
     # Phase 4: Validate
     ok = _phase_validate()
     phases.append(("validate", ok))
 
-    _print_summary(phases, work_dir, keep=args.keep_artifacts)
+    _print_summary(phases, work_dir, keep=keep_artifacts)
     return 0 if ok else 1
+
+
+app = make_typer_app(
+    help_text="Simulate the CI update pipeline locally.",
+    no_args_is_help=False,
+)
+
+
+@app.callback(invoke_without_command=True)
+def cli(
+    *,
+    full: Annotated[
+        bool,
+        typer.Option(
+            "--full",
+            help="Also run the split-and-merge phase (tests merge logic).",
+        ),
+    ] = False,
+    source: Annotated[
+        str | None,
+        typer.Option(
+            "--source",
+            help="Only compute hashes for a single source (faster iteration).",
+        ),
+    ] = None,
+    resolve_only: Annotated[
+        bool,
+        typer.Option(
+            "--resolve-only",
+            help="Only run the version resolution phase (fastest smoke test).",
+        ),
+    ] = False,
+    keep_artifacts: Annotated[
+        bool,
+        typer.Option(
+            "--keep-artifacts",
+            help="Keep the temp directory with intermediate artifacts.",
+        ),
+    ] = False,
+) -> None:
+    """Run the local CI pipeline simulation."""
+    raise typer.Exit(
+        code=run(
+            full=full,
+            source=source,
+            resolve_only=resolve_only,
+            keep_artifacts=keep_artifacts,
+        )
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the local CI pipeline simulation."""
+    return run_main(app, argv=argv, prog_name="test-pipeline")
 
 
 def _print_summary(

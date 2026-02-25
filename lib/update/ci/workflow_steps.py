@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import dataclasses
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
+import typer
+
+from lib.update.ci._cli import make_typer_app, run_main
+from lib.update.ci._subprocess import run_command as _run
 from lib.update.ci.flake_lock_diff import run_diff as run_flake_lock_diff
 from lib.update.ci.sources_json_diff import NoChangesMessage
 from lib.update.ci.sources_json_diff import run_diff as run_sources_diff
@@ -31,63 +35,7 @@ class PRBodyOptions:
     compare_head: str = "update_flake_lock_action"
 
 
-async def _run_async(
-    args: list[str],
-    *,
-    check: bool,
-    capture_output: bool,
-    stdout: int | None,
-    stderr: int | None,
-) -> subprocess.CompletedProcess[str]:
-    process_stdout = stdout
-    process_stderr = stderr
-    if capture_output:
-        process_stdout = asyncio.subprocess.PIPE
-        process_stderr = asyncio.subprocess.PIPE
-
-    process = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=process_stdout,
-        stderr=process_stderr,
-    )
-    stdout_data, stderr_data = await process.communicate()
-    returncode = int(process.returncode or 0)
-    result = subprocess.CompletedProcess(
-        args=args,
-        returncode=returncode,
-        stdout=(stdout_data or b"").decode(),
-        stderr=(stderr_data or b"").decode(),
-    )
-    if check and result.returncode != 0:
-        raise subprocess.CalledProcessError(
-            result.returncode,
-            args,
-            output=result.stdout,
-            stderr=result.stderr,
-        )
-    return result
-
-
-def _run(
-    args: list[str],
-    *,
-    check: bool = True,
-    capture_output: bool = False,
-    stdout: int | None = None,
-    stderr: int | None = None,
-) -> subprocess.CompletedProcess[str]:
-    return asyncio.run(
-        _run_async(
-            args,
-            check=check,
-            capture_output=capture_output,
-            stdout=stdout,
-            stderr=stderr,
-        )
-    )
-
-
-def _cmd_nix_flake_update(_: argparse.Namespace) -> int:
+def _cmd_nix_flake_update() -> int:
     _run(["nix", "flake", "update"])
     return 0
 
@@ -100,7 +48,15 @@ def _xcode_version_key(app_path: Path) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def _cmd_free_disk_space(_: argparse.Namespace) -> int:
+def _cmd_free_disk_space(*, force_local: bool = False) -> int:
+    running_in_ci = os.environ.get("CI", "").lower() in {"1", "true", "yes"}
+    if not running_in_ci and not force_local:
+        sys.stderr.write(
+            "Refusing to run free-disk-space outside CI. "
+            "Re-run with --force-local to override.\n"
+        )
+        return 2
+
     sys.stdout.write("=== Before cleanup ===\n")
     _run(["df", "-h", "/"])
 
@@ -128,13 +84,13 @@ def _cmd_free_disk_space(_: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_install_darwin_tools(_: argparse.Namespace) -> int:
+def _cmd_install_darwin_tools() -> int:
     _run(["brew", "install", "--cask", "macfuse"])
     _run(["brew", "install", "1password-cli"])
     return 0
 
 
-def _cmd_prefetch_flake_inputs(_: argparse.Namespace) -> int:
+def _cmd_prefetch_flake_inputs() -> int:
     _run(
         ["nix", "flake", "archive", "--json"],
         stdout=subprocess.DEVNULL,
@@ -143,12 +99,12 @@ def _cmd_prefetch_flake_inputs(_: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_build_darwin_config(args: argparse.Namespace) -> int:
-    _run(["nix", "build", "--impure", f".#darwinConfigurations.{args.host}.system"])
+def _cmd_build_darwin_config(*, host: str) -> int:
+    _run(["nix", "build", "--impure", f".#darwinConfigurations.{host}.system"])
     return 0
 
 
-def _cmd_smoke_check_update_app(_: argparse.Namespace) -> int:
+def _cmd_smoke_check_update_app() -> int:
     _run(
         ["nix", "eval", "--raw", ".#apps.x86_64-linux.nixcfg.program"],
         stdout=subprocess.DEVNULL,
@@ -157,7 +113,7 @@ def _cmd_smoke_check_update_app(_: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_list_update_targets(_: argparse.Namespace) -> int:
+def _cmd_list_update_targets() -> int:
     return asyncio.run(run_updates(UpdateOptions(list_targets=True)))
 
 
@@ -175,8 +131,7 @@ def generate_pr_body(
 ) -> int:
     """Generate pull-request body markdown for update runs.
 
-    This is the shared implementation called by both the typer CLI command
-    and the argparse-based ``main()`` entrypoint.
+    This is the shared implementation called by the Typer CLI command.
     """
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -277,63 +232,130 @@ def generate_pr_body(
     return 0
 
 
-def _cmd_generate_pr_body(args: argparse.Namespace) -> int:
+def _cmd_generate_pr_body(
+    *,
+    output: str | Path,
+    workflow_url: str,
+    server_url: str,
+    repository: str,
+    base_ref: str,
+    compare_head: str,
+) -> int:
     return generate_pr_body(
-        output=args.output,
+        output=output,
         options=PRBodyOptions(
-            workflow_url=args.workflow_url,
-            server_url=args.server_url,
-            repository=args.repository,
-            base_ref=args.base_ref,
-            compare_head=args.compare_head,
+            workflow_url=workflow_url,
+            server_url=server_url,
+            repository=repository,
+            base_ref=base_ref,
+            compare_head=compare_head,
         ),
+    )
+
+
+app = make_typer_app(
+    help_text="CI workflow helper steps.",
+    no_args_is_help=True,
+)
+
+
+@app.command("nix-flake-update")
+def command_nix_flake_update() -> None:
+    """Run `nix flake update`."""
+    raise typer.Exit(code=_cmd_nix_flake_update())
+
+
+@app.command("free-disk-space")
+def command_free_disk_space(
+    *,
+    force_local: Annotated[
+        bool,
+        typer.Option(
+            "--force-local",
+            help="Allow destructive cleanup when not running in CI.",
+        ),
+    ] = False,
+) -> None:
+    """Free disk space on macOS CI runners."""
+    raise typer.Exit(code=_cmd_free_disk_space(force_local=force_local))
+
+
+@app.command("install-darwin-tools")
+def command_install_darwin_tools() -> None:
+    """Install macOS-specific tools for CI."""
+    raise typer.Exit(code=_cmd_install_darwin_tools())
+
+
+@app.command("prefetch-flake-inputs")
+def command_prefetch_flake_inputs() -> None:
+    """Pre-fetch flake inputs for CI jobs."""
+    raise typer.Exit(code=_cmd_prefetch_flake_inputs())
+
+
+@app.command("build-darwin-config")
+def command_build_darwin_config(
+    host: str = typer.Argument(..., help="Darwin host from matrix, e.g. argus."),
+) -> None:
+    """Build one darwin configuration by host name."""
+    raise typer.Exit(code=_cmd_build_darwin_config(host=host))
+
+
+@app.command("smoke-check-update-app")
+def command_smoke_check_update_app() -> None:
+    """Smoke-check that the update app evaluates."""
+    raise typer.Exit(code=_cmd_smoke_check_update_app())
+
+
+@app.command("list-update-targets")
+def command_list_update_targets() -> None:
+    """List update targets discovered by the update app."""
+    raise typer.Exit(code=_cmd_list_update_targets())
+
+
+@app.command("generate-pr-body")
+def command_generate_pr_body(
+    *,
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="Path to write PR body."),
+    ],
+    workflow_url: Annotated[
+        str,
+        typer.Option("--workflow-url", help="Workflow run URL."),
+    ],
+    server_url: Annotated[
+        str,
+        typer.Option("--server-url", help="GitHub server URL."),
+    ],
+    repository: Annotated[
+        str,
+        typer.Option("--repository", help="owner/repo."),
+    ],
+    base_ref: Annotated[
+        str,
+        typer.Option("--base-ref", help="Base branch for compare."),
+    ],
+    compare_head: Annotated[
+        str,
+        typer.Option("--compare-head", help="Head branch used in compare links."),
+    ] = "update_flake_lock_action",
+) -> None:
+    """Generate pull request body markdown for update runs."""
+    raise typer.Exit(
+        code=_cmd_generate_pr_body(
+            output=output,
+            workflow_url=workflow_url,
+            server_url=server_url,
+            repository=repository,
+            base_ref=base_ref,
+            compare_head=compare_head,
+        )
     )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run CI helper steps that replace shell snippets in workflow files."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    subparsers = parser.add_subparsers(dest="step", required=True)
-
-    step_nix_update = subparsers.add_parser("nix-flake-update")
-    step_nix_update.set_defaults(func=_cmd_nix_flake_update)
-
-    step_free_disk = subparsers.add_parser("free-disk-space")
-    step_free_disk.set_defaults(func=_cmd_free_disk_space)
-
-    step_install_darwin_tools = subparsers.add_parser("install-darwin-tools")
-    step_install_darwin_tools.set_defaults(func=_cmd_install_darwin_tools)
-
-    step_prefetch = subparsers.add_parser("prefetch-flake-inputs")
-    step_prefetch.set_defaults(func=_cmd_prefetch_flake_inputs)
-
-    step_build_darwin = subparsers.add_parser("build-darwin-config")
-    step_build_darwin.add_argument("host", help="Darwin host from matrix, e.g. argus")
-    step_build_darwin.set_defaults(func=_cmd_build_darwin_config)
-
-    step_smoke = subparsers.add_parser("smoke-check-update-app")
-    step_smoke.set_defaults(func=_cmd_smoke_check_update_app)
-
-    step_list = subparsers.add_parser("list-update-targets")
-    step_list.set_defaults(func=_cmd_list_update_targets)
-
-    step_pr_body = subparsers.add_parser("generate-pr-body")
-    step_pr_body.add_argument("--output", required=True, help="Path to write PR body")
-    step_pr_body.add_argument("--workflow-url", required=True, help="Workflow run URL")
-    step_pr_body.add_argument("--server-url", required=True, help="GitHub server URL")
-    step_pr_body.add_argument("--repository", required=True, help="owner/repo")
-    step_pr_body.add_argument(
-        "--base-ref", required=True, help="Base branch for compare"
-    )
-    step_pr_body.add_argument(
-        "--compare-head",
-        default="update_flake_lock_action",
-        help="Head branch used in compare links",
-    )
-    step_pr_body.set_defaults(func=_cmd_generate_pr_body)
-
-    args = parser.parse_args(argv)
-    return args.func(args)
+    return run_main(app, argv=argv, prog_name="workflow-steps")
 
 
 if __name__ == "__main__":

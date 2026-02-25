@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from argparse import Namespace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -244,8 +243,16 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
     monkeypatch.setattr(wfc, "_detect_system", lambda: "x86_64-linux")
     monkeypatch.setattr(wfc, "_find_fod_targets", lambda _system: [])
-    args = Namespace(system=None, dry_run=False, cachix_cache=None)
-    check(asyncio.run(object.__getattribute__(wfc, "_async_main")(args)) == 0)
+    check(
+        asyncio.run(
+            object.__getattribute__(wfc, "_async_main")(
+                system=None,
+                dry_run=False,
+                cachix_cache=None,
+            )
+        )
+        == 0
+    )
 
     targets = [
         wfc.FodTarget(
@@ -254,19 +261,44 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
     monkeypatch.setattr(wfc, "_find_fod_targets", lambda _system: targets)
 
-    args_dry = Namespace(system="x86_64-linux", dry_run=True, cachix_cache="cache")
-    check(asyncio.run(object.__getattribute__(wfc, "_async_main")(args_dry)) == 0)
+    check(
+        asyncio.run(
+            object.__getattribute__(wfc, "_async_main")(
+                system="x86_64-linux",
+                dry_run=True,
+                cachix_cache="cache",
+            )
+        )
+        == 0
+    )
 
     monkeypatch.setattr(
         wfc, "_build_one", lambda *_a, **_k: asyncio.sleep(0, result=True)
     )
-    args_ok = Namespace(system="x86_64-linux", dry_run=False, cachix_cache="cache")
-    check(asyncio.run(object.__getattribute__(wfc, "_async_main")(args_ok)) == 0)
+    check(
+        asyncio.run(
+            object.__getattribute__(wfc, "_async_main")(
+                system="x86_64-linux",
+                dry_run=False,
+                cachix_cache="cache",
+            )
+        )
+        == 0
+    )
 
     monkeypatch.setattr(
         wfc, "_build_one", lambda *_a, **_k: asyncio.sleep(0, result=False)
     )
-    check(asyncio.run(object.__getattribute__(wfc, "_async_main")(args_ok)) == 1)
+    check(
+        asyncio.run(
+            object.__getattribute__(wfc, "_async_main")(
+                system="x86_64-linux",
+                dry_run=False,
+                cachix_cache="cache",
+            )
+        )
+        == 1
+    )
 
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(

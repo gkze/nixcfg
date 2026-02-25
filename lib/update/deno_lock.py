@@ -12,10 +12,13 @@ import asyncio
 import hashlib
 import json
 import logging
+import mimetypes
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING
 
 import aiohttp
+from pydantic import TypeAdapter, ValidationError
+from yarl import URL
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -33,49 +36,49 @@ NPM_REGISTRY = "https://registry.npmjs.org"
 # Concurrency limit for fetching JSR meta files.
 JSR_FETCH_CONCURRENCY = 20
 
+_OBJECT_DICT_ADAPTER = TypeAdapter(dict[str, object])
+_OBJECT_LIST_ADAPTER = TypeAdapter(list[object])
+_STRING_ADAPTER = TypeAdapter(str)
+_PACKAGE_MAP_ADAPTER = TypeAdapter(dict[str, dict[str, object]])
+
 
 def _as_object_dict(value: object, *, context: str) -> dict[str, object]:
     """Return *value* as a ``dict[str, object]`` or raise ``TypeError``."""
-    if not isinstance(value, dict):
-        msg = f"Expected JSON object for {context}, got {type(value).__name__}"
-        raise TypeError(msg)
-    result: dict[str, object] = {}
-    for key, item in value.items():
-        if not isinstance(key, str):
-            msg = f"Expected string key in {context}, got {type(key).__name__}"
-            raise TypeError(msg)
-        result[key] = item
-    return result
+    try:
+        return _OBJECT_DICT_ADAPTER.validate_python(value, strict=True)
+    except ValidationError as exc:
+        msg = f"Expected JSON object for {context}"
+        raise TypeError(msg) from exc
 
 
 def _as_object_list(value: object, *, context: str) -> list[object]:
     """Return *value* as a list or raise ``TypeError``."""
-    if not isinstance(value, list):
-        msg = f"Expected JSON array for {context}, got {type(value).__name__}"
-        raise TypeError(msg)
-    result: list[object] = list(value)
-    return result
+    try:
+        return _OBJECT_LIST_ADAPTER.validate_python(value, strict=True)
+    except ValidationError as exc:
+        msg = f"Expected JSON array for {context}"
+        raise TypeError(msg) from exc
 
 
 def _get_required_str(mapping: dict[str, object], key: str, *, context: str) -> str:
     """Get required string field *key* from *mapping*."""
-    value = mapping.get(key)
-    if isinstance(value, str):
-        return value
-    msg = f"Expected string field {key!r} in {context}"
-    raise TypeError(msg)
+    if key not in mapping:
+        msg = f"Expected string field {key!r} in {context}"
+        raise TypeError(msg)
+    try:
+        return _STRING_ADAPTER.validate_python(mapping[key], strict=True)
+    except ValidationError as exc:
+        msg = f"Expected string field {key!r} in {context}"
+        raise TypeError(msg) from exc
 
 
 def _as_package_map(value: object, *, context: str) -> dict[str, dict[str, object]]:
     """Normalize a package map keyed by package name/version."""
-    raw_map = _as_object_dict(value, context=context)
-    package_map: dict[str, dict[str, object]] = {}
-    for package_key, package_info in raw_map.items():
-        package_map[package_key] = _as_object_dict(
-            package_info,
-            context=f"{context}.{package_key}",
-        )
-    return package_map
+    try:
+        return _PACKAGE_MAP_ADAPTER.validate_python(value, strict=True)
+    except ValidationError as exc:
+        msg = f"Expected package map for {context}"
+        raise TypeError(msg) from exc
 
 
 @dataclass(frozen=True)
@@ -124,120 +127,20 @@ class DenoDepManifest:
     def save(self, path: Path) -> None:
         """Write the manifest to *path*."""
         payload = json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
-        path.write_text(payload)
+        path.write_text(payload, encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> DenoDepManifest:
         """Load a manifest from *path*."""
-        data = _as_object_dict(json.loads(path.read_text()), context="manifest")
-        lock_version = _get_required_str(data, "lock_version", context="manifest")
+        raw_manifest = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            return _MANIFEST_ADAPTER.validate_python(raw_manifest, strict=False)
+        except ValidationError as exc:
+            msg = f"Invalid Deno dependency manifest: {path}"
+            raise TypeError(msg) from exc
 
-        jsr_raw = _as_object_list(
-            data.get("jsr_packages", []), context="manifest.jsr_packages"
-        )
-        jsr_packages: list[JsrPackage] = []
-        for idx, package in enumerate(jsr_raw):
-            package_obj = _as_object_dict(
-                package, context=f"manifest.jsr_packages[{idx}]"
-            )
-            files_raw = _as_object_list(
-                package_obj.get("files", []),
-                context=f"manifest.jsr_packages[{idx}].files",
-            )
-            files: list[JsrFile] = []
-            for file_idx, file_entry in enumerate(files_raw):
-                file_obj = _as_object_dict(
-                    file_entry,
-                    context=f"manifest.jsr_packages[{idx}].files[{file_idx}]",
-                )
-                files.append(
-                    JsrFile(
-                        url=_get_required_str(
-                            file_obj,
-                            "url",
-                            context=f"manifest.jsr_packages[{idx}].files[{file_idx}]",
-                        ),
-                        sha256=_get_required_str(
-                            file_obj,
-                            "sha256",
-                            context=f"manifest.jsr_packages[{idx}].files[{file_idx}]",
-                        ),
-                        cache_path=_get_required_str(
-                            file_obj,
-                            "cache_path",
-                            context=f"manifest.jsr_packages[{idx}].files[{file_idx}]",
-                        ),
-                        media_type=_get_required_str(
-                            file_obj,
-                            "media_type",
-                            context=f"manifest.jsr_packages[{idx}].files[{file_idx}]",
-                        ),
-                    )
-                )
-            jsr_packages.append(
-                JsrPackage(
-                    name=_get_required_str(
-                        package_obj,
-                        "name",
-                        context=f"manifest.jsr_packages[{idx}]",
-                    ),
-                    version=_get_required_str(
-                        package_obj,
-                        "version",
-                        context=f"manifest.jsr_packages[{idx}]",
-                    ),
-                    integrity=_get_required_str(
-                        package_obj,
-                        "integrity",
-                        context=f"manifest.jsr_packages[{idx}]",
-                    ),
-                    files=files,
-                )
-            )
 
-        npm_raw = _as_object_list(
-            data.get("npm_packages", []), context="manifest.npm_packages"
-        )
-        npm_packages: list[NpmPackage] = []
-        for idx, package in enumerate(npm_raw):
-            package_obj = _as_object_dict(
-                package, context=f"manifest.npm_packages[{idx}]"
-            )
-            npm_packages.append(
-                NpmPackage(
-                    name=_get_required_str(
-                        package_obj,
-                        "name",
-                        context=f"manifest.npm_packages[{idx}]",
-                    ),
-                    version=_get_required_str(
-                        package_obj,
-                        "version",
-                        context=f"manifest.npm_packages[{idx}]",
-                    ),
-                    integrity=_get_required_str(
-                        package_obj,
-                        "integrity",
-                        context=f"manifest.npm_packages[{idx}]",
-                    ),
-                    tarball_url=_get_required_str(
-                        package_obj,
-                        "tarball_url",
-                        context=f"manifest.npm_packages[{idx}]",
-                    ),
-                    cache_path=_get_required_str(
-                        package_obj,
-                        "cache_path",
-                        context=f"manifest.npm_packages[{idx}]",
-                    ),
-                )
-            )
-
-        return cls(
-            lock_version=lock_version,
-            jsr_packages=jsr_packages,
-            npm_packages=npm_packages,
-        )
+_MANIFEST_ADAPTER = TypeAdapter(DenoDepManifest)
 
 
 # ---------------------------------------------------------------------------
@@ -251,17 +154,13 @@ def _url_to_cache_path(url: str) -> str:
     Deno stores cached files at ``remote/{scheme}/{host}/{sha256_of_path}``.
     The hash is computed over the *raw* URL path + query (fragment ignored).
     """
-    # Parse URL manually (avoid urllib overhead for this simple case)
-    if not url.startswith("https://"):
+    parsed = URL(url)
+    if parsed.scheme != "https" or parsed.host is None:
         msg = f"Expected https URL: {url}"
         raise ValueError(msg)
-    rest = url[len("https://") :]
-    host, _, path = rest.partition("/")
-    path = "/" + path
-    # Strip fragment
-    path = path.split("#")[0]
-    path_hash = hashlib.sha256(path.encode()).hexdigest()
-    return f"remote/https/{host}/{path_hash}"
+    path_qs = parsed.raw_path_qs or "/"
+    path_hash = hashlib.sha256(path_qs.encode()).hexdigest()
+    return f"remote/https/{parsed.host}/{path_hash}"
 
 
 def _guess_media_type(path: str) -> str:
@@ -270,10 +169,9 @@ def _guess_media_type(path: str) -> str:
         return "text/typescript"
     if path.endswith((".js", ".jsx", ".mjs")):
         return "text/javascript"
-    if path.endswith(".json"):
-        return "application/json"
-    if path.endswith(".wasm"):
-        return "application/wasm"
+    guessed_type, _encoding = mimetypes.guess_type(path, strict=False)
+    if guessed_type is not None:
+        return guessed_type
     return "text/plain"
 
 

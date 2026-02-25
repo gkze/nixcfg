@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from argparse import Namespace
 from typing import TYPE_CHECKING
 
 from lib.nix.commands.base import CommandResult, NixCommandError
@@ -109,10 +108,24 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bsc, "_collect_derivations", _collect)
     monkeypatch.setattr(bsc, "_build_derivations", _build)
 
-    ok_args = Namespace(flake_refs=[".#a"], dry_run=False)
-    fail_args = Namespace(flake_refs=[".#a"], dry_run=True)
-    check(asyncio.run(object.__getattribute__(bsc, "_async_main")(ok_args)) == 0)
-    check(asyncio.run(object.__getattribute__(bsc, "_async_main")(fail_args)) == 1)
+    check(
+        asyncio.run(
+            object.__getattribute__(bsc, "_async_main")(
+                flake_refs=[".#a"],
+                dry_run=False,
+            )
+        )
+        == 0
+    )
+    check(
+        asyncio.run(
+            object.__getattribute__(bsc, "_async_main")(
+                flake_refs=[".#a"],
+                dry_run=True,
+            )
+        )
+        == 1
+    )
 
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(
