@@ -1,5 +1,7 @@
 # nixcfg
 
+[![Update workflow](https://github.com/gkze/nixcfg/actions/workflows/update.yml/badge.svg)](https://github.com/gkze/nixcfg/actions/workflows/update.yml) [![License: MIT](https://img.shields.io/github/license/gkze/nixcfg?style=flat-square)](https://github.com/gkze/nixcfg/blob/main/LICENSE) [![Last commit](https://img.shields.io/github/last-commit/gkze/nixcfg/main?style=flat-square)](https://github.com/gkze/nixcfg/commits/main) [![Commit activity](https://img.shields.io/github/commit-activity/m/gkze/nixcfg?style=flat-square)](https://github.com/gkze/nixcfg/commits/main) [![Nix flake](https://img.shields.io/badge/Nix-flake-5277C3?logo=nixos&logoColor=white&style=flat-square)](https://nixos.org) [![Platforms](https://img.shields.io/badge/platform-aarch64--darwin%20%7C%20aarch64--linux%20%7C%20x86_64--linux-334155?style=flat-square)](https://github.com/gkze/nixcfg#current-state) [![Update cadence](https://img.shields.io/badge/update-every%206h-0ea5e9?style=flat-square)](https://github.com/gkze/nixcfg/actions/workflows/update.yml)
+
 Unified Nix flake for macOS hosts, Home Manager user configuration, and reusable module building blocks.
 
 ## Current state
