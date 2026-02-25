@@ -23,7 +23,7 @@ from lib.update.events import (
     UpdateEventKind,
 )
 from lib.update.flake import load_flake_lock
-from lib.update.net import fetch_github_api
+from lib.update.net import fetch_github_api_paginated
 from lib.update.process import StreamCommandOptions, run_queue_task, stream_command
 
 _BRANCH_REF_PATTERNS = {
@@ -182,26 +182,25 @@ async def _fetch_first_matching_tag(
     candidates = (
         (
             f"repos/{owner}/{repo}/releases",
-            "20",
+            50,
             _select_tag_from_releases,
         ),
         (
             f"repos/{owner}/{repo}/tags",
-            "30",
+            100,
             _select_tag_from_tags,
         ),
     )
     for path, per_page, selector in candidates:
         try:
-            payload_raw = await fetch_github_api(
+            payload_raw = await fetch_github_api_paginated(
                 session,
                 path,
-                per_page=per_page,
                 config=config,
+                per_page=per_page,
+                max_pages=5,
             )
         except RuntimeError:
-            continue
-        if not isinstance(payload_raw, list):
             continue
         payload = [item for item in payload_raw if isinstance(item, dict)]
         tag = selector(payload, prefix)

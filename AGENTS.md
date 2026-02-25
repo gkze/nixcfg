@@ -33,4 +33,5 @@ bd sync               # Sync with git
 **CRITICAL RULES:**
 
 - ALWAYS sign commits with `-S` flag (e.g., `git commit -S -m "message"`)
+- Keep commit message subject and body lines at 80 characters or fewer
 - Do NOT push automatically - let the user decide when to push

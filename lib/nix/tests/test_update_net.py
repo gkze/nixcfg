@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Self
+from typing import TYPE_CHECKING
 
 import aiohttp
 import pytest
 
-from lib.nix.tests._assertions import check, expect_instance
+from lib.nix.tests._assertions import check
 from lib.update import net
 from lib.update.config import resolve_config
 
@@ -22,15 +23,6 @@ _REQUEST_TIMEOUT = 3.0
 _DEFAULT_RETRIES = 4
 _DEFAULT_BACKOFF = 1.5
 _MIN_POSITIONAL_ARGS = 2
-
-
-def _as_object_dict(value: object) -> dict[str, object]:
-    raw = expect_instance(value, dict)
-    mapping: dict[str, object] = {}
-    for raw_key, item in raw.items():
-        key = expect_instance(raw_key, str)
-        mapping[key] = item
-    return mapping
 
 
 def _run_with_session[T](
@@ -74,31 +66,6 @@ class _FakeResponseCM:
         return False
 
 
-class _FakeRetryClient:
-    response: _FakeResponse
-    created: ClassVar[list[_FakeRetryClient]] = []
-
-    def __init__(self, **kwargs: object) -> None:
-        self.kwargs = kwargs
-        self.requests: list[dict[str, object]] = []
-        self.__class__.created.append(self)
-
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> bool:
-        _ = (exc_type, exc, tb)
-        session = self.kwargs.get("client_session")
-        if isinstance(session, aiohttp.ClientSession):
-            await session.close()
-        return False
-
-    def request(self, method: str, url: str, **kwargs: object) -> _FakeResponseCM:
-        """Run this test case."""
-        self.requests.append({"method": method, "url": url, **kwargs})
-        return _FakeResponseCM(self.__class__.response)
-
-
 def test_get_github_token_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
     monkeypatch.setenv("GITHUB_TOKEN", "env-token")
@@ -127,7 +94,9 @@ def test_get_github_token_from_netrc(
 
 
 def test_get_github_token_netrc_errors(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Run this test case."""
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
@@ -136,7 +105,9 @@ def test_get_github_token_netrc_errors(
     monkeypatch.setattr(
         net.netrc, "netrc", lambda _path: (_ for _ in ()).throw(OSError("boom"))
     )
-    check(object.__getattribute__(net, "_get_github_token")() is None)
+    with caplog.at_level(logging.WARNING):
+        check(object.__getattribute__(net, "_get_github_token")() is None)
+    check("Failed to parse" in caplog.text)
 
 
 def test_check_github_rate_limit_paths() -> None:
@@ -195,15 +166,27 @@ def test_resolve_timeout_alias_delegates(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_request_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
-    _FakeRetryClient.created.clear()
-    _FakeRetryClient.response = _FakeResponse(
-        status=200,
-        reason="OK",
-        payload=b"payload",
-        headers={"X": "1"},
-    )
-    monkeypatch.setattr(net, "RetryClient", _FakeRetryClient)
-    monkeypatch.setattr(net, "ExponentialRetry", lambda **kwargs: {"opts": kwargs})
+    requests: list[dict[str, object]] = []
+    response_queue: list[_FakeResponse] = [
+        _FakeResponse(
+            status=200,
+            reason="OK",
+            payload=b"payload",
+            headers={"X": "1"},
+        )
+    ]
+
+    def _fake_request(
+        self: aiohttp.ClientSession,
+        method: str,
+        url: str,
+        **kwargs: object,
+    ) -> _FakeResponseCM:
+        _ = self
+        requests.append({"method": method, "url": url, **kwargs})
+        return _FakeResponseCM(response_queue.pop(0))
+
+    monkeypatch.setattr(aiohttp.ClientSession, "request", _fake_request)
     monkeypatch.setattr(net, "_build_request_headers", lambda _url, _ua: {"H": "v"})
 
     cfg = resolve_config(
@@ -218,39 +201,62 @@ def test_request_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     check(payload == b"payload")
     check(headers == {"X": "1"})
-    created = _FakeRetryClient.created[0]
-    opts = _as_object_dict(created.kwargs["retry_options"])
-    retry_options = _as_object_dict(opts["opts"])
-    check(retry_options["attempts"] == _DEFAULT_RETRIES)
-    check(retry_options["start_timeout"] == _DEFAULT_BACKOFF)
+    check(len(requests) == 1)
+    check(requests[0]["method"] == "GET")
 
-    _FakeRetryClient.response = _FakeResponse(
-        status=502, reason="Bad", payload=b"upstream"
-    )
-    with pytest.raises(RuntimeError, match="failed after"):
+    requests.clear()
+    response_queue.extend([
+        _FakeResponse(
+            status=502,
+            reason="Bad Gateway",
+            payload=b"upstream",
+        ),
+        _FakeResponse(
+            status=502,
+            reason="Bad Gateway",
+            payload=b"upstream",
+        ),
+    ])
+
+    expected_attempts = 2
+    with pytest.raises(
+        RuntimeError,
+        match=rf"failed after {expected_attempts} attempts",
+    ):
         _run_with_session(
             lambda session: object.__getattribute__(net, "_request")(
                 session,
                 "https://example.com",
-                retries=2,
+                retries=expected_attempts,
                 backoff=0.0,
                 config=cfg,
             )
         )
+
+    check(len(requests) == expected_attempts)
 
 
 def test_request_does_not_close_callers_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Run this test case."""
-    _FakeRetryClient.created.clear()
-    _FakeRetryClient.response = _FakeResponse(
-        status=200,
-        reason="OK",
-        payload=b"payload",
-    )
-    monkeypatch.setattr(net, "RetryClient", _FakeRetryClient)
-    monkeypatch.setattr(net, "ExponentialRetry", lambda **kwargs: {"opts": kwargs})
+
+    def _fake_request(
+        self: aiohttp.ClientSession,
+        method: str,
+        url: str,
+        **kwargs: object,
+    ) -> _FakeResponseCM:
+        _ = (self, method, url, kwargs)
+        return _FakeResponseCM(
+            _FakeResponse(
+                status=200,
+                reason="OK",
+                payload=b"payload",
+            )
+        )
+
+    monkeypatch.setattr(aiohttp.ClientSession, "request", _fake_request)
     monkeypatch.setattr(net, "_build_request_headers", lambda _url, _ua: {})
 
     async def _runner() -> bool:
@@ -262,6 +268,42 @@ def test_request_does_not_close_callers_session(
             return session.closed
 
     check(asyncio.run(_runner()) is False)
+
+
+def test_request_retries_on_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this test case."""
+    call_count = 0
+
+    def _fake_request(
+        self: aiohttp.ClientSession,
+        method: str,
+        url: str,
+        **kwargs: object,
+    ) -> _FakeResponseCM:
+        _ = (self, method, url, kwargs)
+        nonlocal call_count
+        call_count += 1
+        msg = "network down"
+        raise aiohttp.ClientConnectionError(msg)
+
+    monkeypatch.setattr(aiohttp.ClientSession, "request", _fake_request)
+    monkeypatch.setattr(net, "_build_request_headers", lambda _url, _ua: {})
+
+    expected_attempts = 3
+    with pytest.raises(
+        RuntimeError,
+        match=rf"failed after {expected_attempts} attempts",
+    ):
+        _run_with_session(
+            lambda session: object.__getattribute__(net, "_request")(
+                session,
+                "https://example.com",
+                retries=expected_attempts,
+                backoff=0.0,
+            )
+        )
+
+    check(call_count == expected_attempts)
 
 
 def test_fetch_url_and_headers_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -395,5 +437,106 @@ def test_github_url_helpers_and_api_calls(monkeypatch: pytest.MonkeyPatch) -> No
                 ("a", "b"),
                 file_path="p",
                 branch="main",
+            )
+        )
+
+
+def test_fetch_github_api_paginated_stops_after_short_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pagination should stop once a short page is returned."""
+    page_calls: list[str] = []
+
+    async def _fetch(
+        _session: object,
+        _api_path: str,
+        *,
+        config: object,
+        **params: str,
+    ) -> object:
+        _ = config
+        page = params["page"]
+        page_calls.append(page)
+        if page == "1":
+            return [{"name": "v1"}, {"name": "v2"}]
+        return [{"name": "v3"}]
+
+    monkeypatch.setattr(net, "fetch_github_api", _fetch)
+
+    items = _run_with_session(
+        lambda session: net.fetch_github_api_paginated(
+            session,
+            "repos/a/b/tags",
+            per_page=2,
+            max_pages=5,
+        )
+    )
+
+    check(items == [{"name": "v1"}, {"name": "v2"}, {"name": "v3"}])
+    check(page_calls == ["1", "2"])
+
+
+def test_fetch_github_api_paginated_respects_item_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pagination should stop early when item_limit is reached."""
+    call_count = 0
+    page_size = 2
+    item_limit = 3
+    expected_calls = 2
+
+    async def _fetch(
+        _session: object,
+        _api_path: str,
+        *,
+        config: object,
+        **params: str,
+    ) -> object:
+        _ = (config, params)
+        nonlocal call_count
+        call_count += 1
+        return [1, 2]
+
+    monkeypatch.setattr(net, "fetch_github_api", _fetch)
+
+    items = _run_with_session(
+        lambda session: net.fetch_github_api_paginated(
+            session,
+            "repos/a/b/tags",
+            per_page=page_size,
+            max_pages=5,
+            item_limit=item_limit,
+        )
+    )
+
+    check(items == [1, 2, 1])
+    check(call_count == expected_calls)
+
+
+def test_fetch_github_api_paginated_requires_list_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pagination helper should fail for non-list API payloads."""
+
+    async def _fetch(
+        _session: object,
+        _api_path: str,
+        *,
+        config: object,
+        **params: str,
+    ) -> object:
+        _ = (config, params)
+        return {"name": "v1"}
+
+    monkeypatch.setattr(net, "fetch_github_api", _fetch)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Expected JSON array from GitHub API list repos/a/b/tags page 1",
+    ):
+        _run_with_session(
+            lambda session: net.fetch_github_api_paginated(
+                session,
+                "repos/a/b/tags",
             )
         )

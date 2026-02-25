@@ -13,21 +13,23 @@ Usage: python3 dedup_cargo_lock.py <path-to-Cargo.lock>
        python3 dedup_cargo_lock.py --dry-run <path-to-Cargo.lock>
 """
 
-import argparse
-import http.client
 import json
 import logging
+import pathlib
 import sys
-import tomllib
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
 from enum import Enum, IntEnum
-from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Annotated
 from urllib.parse import quote
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+import httpx
+import tomlkit
+import typer
+from httpx_retries import Retry, RetryTransport
+from tomlkit import exceptions as tomlkit_exceptions
+
+from lib.update.ci._cli import make_typer_app, run_main
 
 # Type aliases for clarity
 type PackageKey = tuple[str, str]  # (name, version)
@@ -95,6 +97,17 @@ _GITOXIDE_CHECKSUMS: dict[str, str] = {
 
 # Cache for crates.io checksums (runtime fetches)
 _checksum_cache: dict[PackageKey, str] = {}
+
+
+def _crates_client() -> httpx.Client:
+    retry = Retry(total=3, backoff_factor=0.5)
+    transport = RetryTransport(retry=retry)
+    return httpx.Client(
+        base_url="https://crates.io",
+        transport=transport,
+        timeout=10.0,
+        headers={"User-Agent": "nix-cargo-dedup/1.0"},
+    )
 
 
 class SourceType(Enum):
@@ -184,30 +197,47 @@ def fetch_checksum(name: str, version: str) -> str | None:
 
     # Fall back to crates.io API
     path = f"/api/v1/crates/{quote(name, safe='')}/{quote(version, safe='')}"
-    conn = http.client.HTTPSConnection("crates.io", timeout=10)
     try:
-        conn.request("GET", path, headers={"User-Agent": "nix-cargo-dedup/1.0"})
-        response = conn.getresponse()
-        if response.status >= _HTTP_BAD_REQUEST:
+        with _crates_client() as client:
+            response = client.get(path)
+        if response.status_code >= _HTTP_BAD_REQUEST:
             return None
 
-        data = json.loads(response.read().decode())
+        data = response.json()
         checksum = data.get("version", {}).get("checksum")
         if checksum:
             _checksum_cache[key] = checksum
             return checksum
-    except (OSError, TimeoutError, json.JSONDecodeError) as e:
+    except (httpx.HTTPError, TimeoutError, json.JSONDecodeError, ValueError) as e:
         logger.warning("Failed to fetch checksum for %s %s: %s", name, version, e)
-    finally:
-        conn.close()
     return None
 
 
 def parse_cargo_lock(content: str) -> tuple[list[Package], int]:
     """Parse Cargo.lock into a list of Package objects."""
-    data = tomllib.loads(content)
-    version = data.get("version", 4)
-    packages = [Package.from_dict(pkg) for pkg in data.get("package", [])]
+
+    def _unwrap(value: object) -> object:
+        unwrap = getattr(value, "unwrap", None)
+        if callable(unwrap):
+            return unwrap()
+        return value
+
+    document = tomlkit.parse(content)
+    version_raw = _unwrap(document.get("version", 4))
+    if isinstance(version_raw, int):
+        version = version_raw
+    elif isinstance(version_raw, str) and version_raw.isdigit():
+        version = int(version_raw)
+    else:
+        version = 4
+
+    packages_raw = document.get("package", [])
+    packages: list[Package] = []
+    for package in packages_raw:
+        package_data = _unwrap(package)
+        if not isinstance(package_data, dict):
+            continue
+        packages.append(Package.from_dict(package_data))
     return packages, version
 
 
@@ -223,10 +253,23 @@ def format_value(key: str, value: str | list[str]) -> list[str]:
     return [f'{key} = "{value}"']
 
 
-def format_cargo_lock(packages: Sequence[Package], version: int = 4) -> str:
+def format_cargo_lock(packages: list[Package], version: int = 4) -> str:
     """Format packages back into Cargo.lock format."""
-    lines = [f"version = {version}", ""]
 
+    def _to_toml_value(value: str | list[str]) -> object:
+        if isinstance(value, list):
+            array = tomlkit.array()
+            for item in sorted(value):
+                array.append(item)
+            array.multiline(multiline=True)
+            return array
+        return value
+
+    document = tomlkit.document()
+    document["version"] = version
+    document.add(tomlkit.nl())
+
+    package_entries = tomlkit.aot()
     key_order = [
         ("name", lambda p: p.name),
         ("version", lambda p: p.version),
@@ -237,17 +280,20 @@ def format_cargo_lock(packages: Sequence[Package], version: int = 4) -> str:
     ]
 
     for pkg in packages:
-        lines.append("[[package]]")
+        entry = tomlkit.table()
         for key, getter in key_order:
             value = getter(pkg)
             if value:
-                lines.extend(format_value(key, value))
+                entry.add(key, _to_toml_value(value))
         for key, value in pkg.extra_fields.items():
             if value:
-                lines.extend(format_value(key, value))
-        lines.append("")
+                entry.add(key, _to_toml_value(value))
+        package_entries.append(entry)
 
-    return "\n".join(lines)
+    document["package"] = package_entries
+
+    rendered = tomlkit.dumps(document)
+    return rendered if rendered.endswith("\n") else f"{rendered}\n"
 
 
 REGISTRY_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
@@ -424,46 +470,6 @@ def sort_packages(packages: list[Package]) -> list[Package]:
     return sorted(packages, key=lambda p: p.to_key())
 
 
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "cargo_lock",
-        type=Path,
-        metavar="PATH",
-        help="Path to Cargo.lock file",
-    )
-    parser.add_argument(
-        "-n",
-        "--dry-run",
-        action="store_true",
-        help="Show what would be done without modifying the file",
-    )
-    parser.add_argument(
-        "-q",
-        "--quiet",
-        action="store_true",
-        help="Only show errors and final summary",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Show detailed output",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        metavar="PATH",
-        help="Write output to this file instead of modifying in-place",
-    )
-    return parser.parse_args(argv)
-
-
 def configure_logging(*, quiet: bool, verbose: bool) -> None:
     """Configure logging based on command-line flags."""
     if quiet:
@@ -484,25 +490,30 @@ class ExitCode(IntEnum):
     NO_CHANGES = 2
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI workflow and return an exit code."""
-    args = parse_args(argv)
-    configure_logging(quiet=args.quiet, verbose=args.verbose)
-
-    cargo_lock: Path = args.cargo_lock
+def run(
+    *,
+    cargo_lock: pathlib.Path,
+    dry_run: bool = False,
+    quiet: bool = False,
+    verbose: bool = False,
+    output: pathlib.Path | None = None,
+) -> int:
+    """Run the deduplication workflow and return an exit code."""
+    configure_logging(quiet=quiet, verbose=verbose)
+    cargo_lock = pathlib.Path(cargo_lock)
 
     if not cargo_lock.exists():
         logger.error("Error: %s not found", cargo_lock)
         return ExitCode.ERROR
 
-    action = "Would process" if args.dry_run else "Processing"
+    action = "Would process" if dry_run else "Processing"
     logger.info("%s %s...", action, cargo_lock)
 
     content = cargo_lock.read_text()
 
     try:
         packages, lock_version = parse_cargo_lock(content)
-    except tomllib.TOMLDecodeError:
+    except tomlkit_exceptions.ParseError:
         logger.exception("Error parsing Cargo.lock")
         return ExitCode.ERROR
 
@@ -526,12 +537,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     total_changes = convert_count + dup_count
 
     if total_changes > 0:
-        if not args.dry_run:
+        if not dry_run:
             new_content = format_cargo_lock(sorted_packages, lock_version)
-            output_path = args.output or cargo_lock
+            output_path = pathlib.Path(output) if output is not None else cargo_lock
             output_path.write_text(new_content)
 
-        action = "Would make" if args.dry_run else "Made"
+        action = "Would make" if dry_run else "Made"
         logger.warning(
             "\n%s %d changes: %d conversions, %d duplicates removed",
             action,
@@ -544,6 +555,68 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logger.info("\nNo changes needed")
     return ExitCode.NO_CHANGES
+
+
+app = make_typer_app(
+    help_text="Convert git-sourced gitoxide crates to crates.io and remove duplicates.",
+    no_args_is_help=False,
+)
+
+
+_standalone_app = make_typer_app(
+    help_text="Convert git-sourced gitoxide crates to crates.io and remove duplicates.",
+    no_args_is_help=False,
+)
+
+
+@_standalone_app.command()
+@app.callback(invoke_without_command=True)
+def cli(
+    cargo_lock: Annotated[
+        pathlib.Path,
+        typer.Argument(help="Path to Cargo.lock file."),
+    ],
+    *,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "-n",
+            "--dry-run",
+            help="Show what would be done without modifying the file.",
+        ),
+    ] = False,
+    quiet: Annotated[
+        bool,
+        typer.Option("-q", "--quiet", help="Only show errors and final summary."),
+    ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option("-v", "--verbose", help="Show detailed output."),
+    ] = False,
+    output: Annotated[
+        pathlib.Path | None,
+        typer.Option(
+            "-o",
+            "--output",
+            help="Write output to this file instead of modifying in-place.",
+        ),
+    ] = None,
+) -> None:
+    """Run Cargo.lock deduplication."""
+    raise typer.Exit(
+        code=run(
+            cargo_lock=cargo_lock,
+            dry_run=dry_run,
+            quiet=quiet,
+            verbose=verbose,
+            output=output,
+        )
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the CLI workflow and return an exit code."""
+    return run_main(_standalone_app, argv=argv, prog_name="dedup-cargo-lock")
 
 
 if __name__ == "__main__":

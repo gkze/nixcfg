@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeGuard
@@ -44,6 +45,7 @@ TOP_LEVEL_SCHEMAS = [
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
+type ProgressReporter = Callable[[str], None]
 
 
 def _as_object_dict(value: object, *, context: str) -> dict[str, object]:
@@ -80,6 +82,13 @@ def _coerce_json_object(value: object, *, context: str) -> JsonObject:
         msg = f"Expected JSON object for {context}, got {type(json_value).__name__}"
         raise TypeError(msg)
     return json_value
+
+
+def _emit_progress(progress: ProgressReporter | None, message: str) -> None:
+    """Invoke the optional codegen progress reporter."""
+    if progress is None:
+        return
+    progress(message)
 
 
 def _is_registry_like(value: object) -> TypeGuard[_RegistryLike]:
@@ -459,13 +468,96 @@ def _collect_imports(code: str) -> tuple[set[str], str]:
     return imports, "\n".join(body_lines)
 
 
-def main() -> None:
+_CONSTR_PATTERN = re.compile(
+    r"constr\(\s*pattern=(?P<literal>r?(?:'[^']*'|\"[^\"]*\"))\s*\)"
+)
+
+
+def _rewrite_constr_type_hints(code: str) -> str:
+    """Rewrite ``constr(pattern=...)`` annotations to ``StringConstraints``."""
+
+    def _replace(match: re.Match[str]) -> str:
+        literal = match.group("literal")
+        line_start = match.string.rfind("\n", 0, match.start()) + 1
+        indent = match.string[line_start : match.start()]
+        inner = f"{indent}    "
+        return (
+            "Annotated[\n"
+            f"{inner}str,\n"
+            f"{inner}StringConstraints(pattern={literal}),\n"
+            f"{indent}]"
+        )
+
+    return _CONSTR_PATTERN.sub(_replace, code)
+
+
+def _normalize_pydantic_imports(code: str) -> str:
+    """Replace ``constr`` imports with ``StringConstraints`` when needed."""
+    lines: list[str] = []
+    for raw_line in code.splitlines():
+        line = raw_line
+        if raw_line.startswith("from pydantic import ") and "constr" in raw_line:
+            names = [
+                name.strip()
+                for name in raw_line.split("import ", maxsplit=1)[1].split(",")
+            ]
+            names = [name for name in names if name != "constr"]
+            if "StringConstraints" not in names:
+                names.append("StringConstraints")
+            line = f"from pydantic import {', '.join(sorted(names))}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _import_module_sort_key(module: str) -> tuple[int, str]:
+    """Sort stdlib imports before third-party imports."""
+    module_name = module.removeprefix("from ").split(" import", maxsplit=1)[0]
+    if module_name.startswith("pydantic"):
+        return (1, module_name)
+    return (0, module_name)
+
+
+def _compose_imports_block(all_imports: set[str]) -> str:
+    """Build a deduplicated import block with grouped stdlib/third-party imports."""
+    from_imports: dict[str, set[str]] = {}
+    bare_imports: set[str] = set()
+    for imp in all_imports - {"from __future__ import annotations"}:
+        if imp.startswith("from "):
+            parts = imp.split(" import ", 1)
+            module = parts[0]
+            names = {n.strip() for n in parts[1].split(",")}
+            from_imports.setdefault(module, set()).update(names)
+        else:
+            bare_imports.add(imp)
+
+    import_lines: list[str] = sorted(bare_imports)
+    previous_group: int | None = None
+    for module in sorted(from_imports, key=_import_module_sort_key):
+        group, _module_name = _import_module_sort_key(module)
+        if (
+            previous_group is not None
+            and group != previous_group
+            and import_lines
+            and import_lines[-1] != ""
+        ):
+            import_lines.append("")
+        names = ", ".join(sorted(from_imports[module]))
+        import_lines.append(f"{module} import {names}")
+        previous_group = group
+    return "\n".join(import_lines)
+
+
+def main(*, progress: ProgressReporter | None = None) -> None:
+    _emit_progress(progress, "Building schema registry.")
     registry = _build_registry()
 
     all_imports: set[str] = set()
     all_bodies: list[str] = []
+    total = len(TOP_LEVEL_SCHEMAS)
+    _emit_progress(progress, f"Generating models for {total} top-level schema(s).")
 
-    for name in TOP_LEVEL_SCHEMAS:
+    for index, name in enumerate(TOP_LEVEL_SCHEMAS, start=1):
+        _emit_progress(progress, f"Processing {index}/{total}: {name}")
         schema = _load_yaml(name)
         resolved = _resolve_refs(schema, registry)
 
@@ -485,23 +577,7 @@ def main() -> None:
         "from __future__ import annotations\n"
     )
 
-    # Deduplicate imports by collecting imported names per module.
-    from_imports: dict[str, set[str]] = {}
-    bare_imports: set[str] = set()
-    for imp in all_imports - {"from __future__ import annotations"}:
-        if imp.startswith("from "):
-            parts = imp.split(" import ", 1)
-            module = parts[0]
-            names = {n.strip() for n in parts[1].split(",")}
-            from_imports.setdefault(module, set()).update(names)
-        else:
-            bare_imports.add(imp)
-
-    import_lines: list[str] = sorted(bare_imports)
-    for module in sorted(from_imports):
-        names = ", ".join(sorted(from_imports[module]))
-        import_lines.append(f"{module} import {names}")
-    imports_block = "\n".join(import_lines)
+    imports_block = _compose_imports_block(all_imports)
 
     final_code = f"{header}\n{imports_block}\n{''.join(all_bodies)}\n"
 
@@ -532,7 +608,17 @@ def main() -> None:
     # Clean up excessive blank lines
     final_code = re.sub(r"\n{4,}", "\n\n\n", final_code)
 
+    # Ty does not permit call expressions in type positions.
+    # Convert generated ``constr(pattern=...)`` annotations to
+    # ``Annotated[str, StringConstraints(...)]``.
+    final_code = _rewrite_constr_type_hints(final_code)
+    final_code = _normalize_pydantic_imports(final_code)
+    if not final_code.endswith("\n"):
+        final_code = f"{final_code}\n"
+
+    _emit_progress(progress, f"Writing generated models to {OUTPUT_FILE}.")
     OUTPUT_FILE.write_text(final_code)
+    _emit_progress(progress, "Schema codegen complete.")
 
 
 if __name__ == "__main__":

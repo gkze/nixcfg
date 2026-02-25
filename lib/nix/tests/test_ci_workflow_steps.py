@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lib.nix.tests._assertions import check
 from lib.update.ci import workflow_steps
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import pytest
+
+
+_FREE_DISK_GUARD_EXIT_CODE = 2
 
 
 def _completed(
@@ -105,3 +107,61 @@ def test_generate_pr_body_includes_sources_section(
         "https://github.com/acme/nixcfg/blob/update_flake_lock_action/packages/demo/sources.json"
         in rendered
     )
+
+
+def test_free_disk_space_requires_ci_or_force(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject destructive cleanup outside CI unless explicitly forced."""
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setattr(
+        workflow_steps,
+        "_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("cleanup command should not run")
+        ),
+    )
+
+    exit_code = workflow_steps.main(["free-disk-space"])
+
+    check(exit_code == _FREE_DISK_GUARD_EXIT_CODE)
+    stderr = capsys.readouterr().err
+    check("Refusing to run free-disk-space outside CI" in stderr)
+
+
+def test_free_disk_space_force_local_runs_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allow local cleanup when explicitly forced via CLI flag."""
+    monkeypatch.delenv("CI", raising=False)
+    commands: list[list[str]] = []
+
+    def _fake_run(
+        args: list[str],
+        *,
+        check: bool = True,
+        capture_output: bool = False,
+        stdout: int | None = None,
+        stderr: int | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        del check, capture_output, stdout, stderr
+        commands.append(args)
+        return _completed(args)
+
+    monkeypatch.setattr(workflow_steps, "_run", _fake_run)
+    monkeypatch.setattr(
+        workflow_steps.Path,
+        "home",
+        staticmethod(lambda: Path("/Users/test")),
+    )
+    monkeypatch.setattr(
+        workflow_steps.Path,
+        "glob",
+        lambda _self, _pattern: [],
+    )
+
+    exit_code = workflow_steps.main(["free-disk-space", "--force-local"])
+
+    check(exit_code == 0)
+    check(any(cmd[:2] == ["df", "-h"] for cmd in commands))

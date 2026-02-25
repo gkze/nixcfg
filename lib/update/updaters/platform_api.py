@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from pydantic import TypeAdapter, ValidationError
+
 if TYPE_CHECKING:
     import aiohttp
 
@@ -16,6 +18,9 @@ from lib.update.updaters.base import (
     VersionInfo,
     _verify_platform_versions,
 )
+
+_OBJECT_MAP_ADAPTER = TypeAdapter(dict[str, object])
+_PLATFORM_INFO_ADAPTER = TypeAdapter(dict[str, dict[str, object]])
 
 
 class PlatformAPIUpdater(ChecksumProvidedUpdater):
@@ -62,21 +67,13 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
                 self._api_url(api_plat),
                 config=self.config,
             )
-            if not isinstance(payload, dict):
+            try:
+                data = _OBJECT_MAP_ADAPTER.validate_python(payload, strict=True)
+            except ValidationError as exc:
                 msg = (
-                    "Expected JSON object from platform API for "
-                    f"{self.name}:{api_plat}, got {type(payload).__name__}"
+                    f"Expected JSON object from platform API for {self.name}:{api_plat}"
                 )
-                raise TypeError(msg)
-            data: dict[str, object] = {}
-            for key, value in payload.items():
-                if not isinstance(key, str):
-                    msg = (
-                        "Expected string-keyed platform payload for "
-                        f"{self.name}:{api_plat}, got {payload!r}"
-                    )
-                    raise TypeError(msg)
-                data[key] = value
+                raise TypeError(msg) from exc
             return nix_plat, data
 
         results = await asyncio.gather(
@@ -119,20 +116,14 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
         if not isinstance(platform_info_obj, dict):
             msg = f"Expected platform_info mapping in {self.name} metadata"
             raise TypeError(msg)
-        platform_info: dict[str, dict[str, object]] = {}
-        for platform_obj, payload_obj in platform_info_obj.items():
-            if not isinstance(platform_obj, str) or not isinstance(payload_obj, dict):
-                msg = f"Malformed platform payload for {self.name}: {platform_obj!r}"
-                raise TypeError(msg)
-            normalized_payload: dict[str, object] = {}
-            for key, value in payload_obj.items():
-                if not isinstance(key, str):
-                    msg = (
-                        f"Malformed platform payload for {self.name}: {platform_obj!r}"
-                    )
-                    raise TypeError(msg)
-                normalized_payload[key] = value
-            platform_info[platform_obj] = normalized_payload
+        try:
+            platform_info = _PLATFORM_INFO_ADAPTER.validate_python(
+                platform_info_obj,
+                strict=True,
+            )
+        except ValidationError as exc:
+            msg = f"Malformed platform payload for {self.name}"
+            raise TypeError(msg) from exc
         checksums: dict[str, str] = {}
         for platform in self.PLATFORMS:
             if platform not in platform_info:

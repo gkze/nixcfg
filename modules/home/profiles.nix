@@ -14,27 +14,46 @@ let
 
   cfg = config.profiles.work;
 
+  bunxExe = pkgs.lib.getExe' pkgs.bun "bunx";
+
+  mkMcpRemoteWrapper =
+    {
+      name,
+      tokenCommand,
+      url,
+      extraHeaders ? [ ],
+    }:
+    pkgs.writeShellScript name ''
+      TOKEN="$(${tokenCommand})"
+      args=(
+        "${url}"
+        --header "Authorization: Bearer $TOKEN"
+      )
+      ${lib.concatMapStringsSep "\n      " (
+        header: "args+=(--header ${lib.escapeShellArg header})"
+      ) extraHeaders}
+      exec ${bunxExe} --bun mcp-remote@latest "''${args[@]}"
+    '';
+
   # Render MCP wrapper that reads API key from macOS Keychain and calls remote server
-  render-mcp-wrapper = pkgs.writeShellScript "render-mcp" ''
-    TOKEN="$(security find-internet-password -s "mcp.render.com" -a "$USER" -r "htps" -w)"
-    exec ${pkgs.lib.getExe' pkgs.bun "bunx"} --bun mcp-remote@latest \
-      "https://mcp.render.com/mcp" \
-      --header "Authorization: Bearer $TOKEN"
-  '';
+  render-mcp-wrapper = mkMcpRemoteWrapper {
+    name = "render-mcp";
+    tokenCommand = ''security find-internet-password -s "mcp.render.com" -a "$USER" -r "htps" -w'';
+    url = "https://mcp.render.com/mcp";
+  };
 
   # GitHub MCP wrapper that reads PAT from sops secret and calls remote server
-  github-mcp-wrapper = pkgs.writeShellScript "github-mcp" ''
-    TOKEN="$(cat ${config.sops.secrets.github_pat.path})"
-    exec ${pkgs.lib.getExe' pkgs.bun "bunx"} --bun mcp-remote@latest \
-      "https://api.githubcopilot.com/mcp/" \
-      --header "Authorization: Bearer $TOKEN" \
-      --header "X-MCP-Toolsets: repos,pull_requests,actions"
-  '';
+  github-mcp-wrapper = mkMcpRemoteWrapper {
+    name = "github-mcp";
+    tokenCommand = "cat ${config.sops.secrets.github_pat.path}";
+    url = "https://api.githubcopilot.com/mcp/";
+    extraHeaders = [ "X-MCP-Toolsets: repos,pull_requests,actions" ];
+  };
 
   slack-mcp-wrapper = pkgs.writeShellScript "slack-mcp" ''
     export SLACK_MCP_XOXP_TOKEN="$(security find-generic-password -s "slack-mcp-token" -a "$USER" -w)"
     export SLACK_MCP_ADD_MESSAGE_TOOL=true
-    exec ${pkgs.lib.getExe' pkgs.bun "bunx"} --bun slack-mcp-server@latest --transport stdio
+    exec ${bunxExe} --bun slack-mcp-server@latest --transport stdio
   '';
 
   defaultOpencodeMcp = {

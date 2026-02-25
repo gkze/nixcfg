@@ -1,19 +1,18 @@
 { config, lib, ... }:
 let
-  cfg = config.nixcfg.languages.go;
+  mkPathModule = import ./_path-module.nix { inherit config lib; };
 in
-{
-  options.nixcfg.languages.go = {
-    enable = lib.mkEnableOption "Go toolchain";
-    binPath = lib.mkOption {
-      type = lib.types.str;
-      default = "${config.home.homeDirectory}/go/bin";
-      description = "Path to add to PATH for Go-installed binaries.";
-    };
-  };
-
-  config = lib.mkIf cfg.enable {
+mkPathModule {
+  optionPath = [
+    "nixcfg"
+    "languages"
+    "go"
+  ];
+  enableDescription = "Go toolchain";
+  pathOptionName = "binPath";
+  pathDefault = "${config.home.homeDirectory}/go/bin";
+  pathDescription = "Path to add to PATH for Go-installed binaries.";
+  extraConfig = {
     programs.go.enable = true;
-    home.sessionPath = [ cfg.binPath ];
   };
 }

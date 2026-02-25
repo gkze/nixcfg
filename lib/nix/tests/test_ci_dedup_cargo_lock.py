@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING, Self
 
@@ -62,9 +61,13 @@ def test_fetch_checksum_from_cache_embedded_and_api(
         == object.__getattribute__(dcl, "_GITOXIDE_CHECKSUMS")["gix@0.77.0"]
     )
 
-    class _Resp:
-        status = 200
+    class _Response:
+        status_code = 200
 
+        def json(self) -> dict[str, dict[str, str]]:
+            return {"version": {"checksum": "apisum"}}
+
+    class _Client:
         def __enter__(self) -> Self:
             return self
 
@@ -72,21 +75,13 @@ def test_fetch_checksum_from_cache_embedded_and_api(
             _ = (exc_type, exc, tb)
             return False
 
-        def read(self) -> bytes:
-            """Run this test case."""
-            return json.dumps({"version": {"checksum": "apisum"}}).encode()
+        def get(self, _path: str) -> _Response:
+            return _Response()
 
-    class _Conn:
-        def request(self, *_a: object, **_k: object) -> None:
-            return None
+    def _client_factory() -> _Client:
+        return _Client()
 
-        def getresponse(self) -> _Resp:
-            return _Resp()
-
-        def close(self) -> None:
-            return None
-
-    monkeypatch.setattr(dcl.http.client, "HTTPSConnection", lambda *_a, **_k: _Conn())
+    monkeypatch.setattr(dcl, "_crates_client", _client_factory)
     object.__getattribute__(dcl, "_checksum_cache").pop(("crate", "1.2.3"), None)
     check(dcl.fetch_checksum("crate", "1.2.3") == "apisum")
     check(
@@ -98,21 +93,22 @@ def test_fetch_checksum_api_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
     object.__getattribute__(dcl, "_checksum_cache").clear()
 
-    class _FailConn:
-        def request(self, *_a: object, **_k: object) -> None:
+    class _FailClient:
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+            _ = (exc_type, exc, tb)
+            return False
+
+        def get(self, _path: str) -> object:
             msg = "down"
-            raise OSError(msg)
+            raise dcl.httpx.ConnectError(msg)
 
-        def getresponse(self) -> object:
-            msg = "not reached"
-            raise AssertionError(msg)
+    def _fail_client_factory() -> _FailClient:
+        return _FailClient()
 
-        def close(self) -> None:
-            return None
-
-    monkeypatch.setattr(
-        dcl.http.client, "HTTPSConnection", lambda *_a, **_k: _FailConn()
-    )
+    monkeypatch.setattr(dcl, "_crates_client", _fail_client_factory)
     check(dcl.fetch_checksum("missing", "0") is None)
 
 
@@ -188,12 +184,22 @@ def test_convert_remove_and_dependency_rewrite(monkeypatch: pytest.MonkeyPatch) 
     check(dcl.strip_git_commit_hash("git+https://x#abc") == "git+https://x")
 
 
-def test_parse_args_and_logging_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_parses_flags_and_logging_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Run this test case."""
-    args = dcl.parse_args(["Cargo.lock", "--dry-run", "--verbose"])
-    check(args.dry_run is True)
-    check(args.verbose is True)
-    check(args.cargo_lock.name == "Cargo.lock")
+    observed: dict[str, object] = {}
+
+    def _run(**kwargs: object) -> int:
+        observed.update(kwargs)
+        return 7
+
+    monkeypatch.setattr(dcl, "run", _run)
+    expected_exit_code = 7
+    check(dcl.main(["Cargo.lock", "--dry-run", "--verbose"]) == expected_exit_code)
+    check(observed["dry_run"] is True)
+    check(observed["verbose"] is True)
+    check(getattr(observed["cargo_lock"], "name", None) == "Cargo.lock")
 
     calls: list[dict[str, object]] = []
 

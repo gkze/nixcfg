@@ -1,15 +1,17 @@
 """Merge per-package ``sources.json`` trees from multiple CI artifacts."""
 
-import argparse
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Annotated
+
+import typer
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.update import io as update_io
+from lib.update.ci._cli import make_typer_app, run_main
 from lib.update.paths import package_file_map_in
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+DEFAULT_OUTPUT_ROOT = Path()
 
 
 def _load_entry(path: Path) -> SourceEntry:
@@ -18,9 +20,7 @@ def _load_entry(path: Path) -> SourceEntry:
 
 
 def _save_entry(path: Path, entry: SourceEntry) -> None:
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(entry.to_dict(), f, indent=2, sort_keys=True)
-        f.write("\n")
+    update_io.atomic_write_json(path, entry.to_dict(), mkdir=True)
 
 
 def _infer_platform_from_root_path(root: Path) -> str | None:
@@ -194,29 +194,8 @@ def _merge_entry(
     )
 
 
-def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Merge per-package sources.json files from platform artifacts",
-    )
-    parser.add_argument(
-        "roots",
-        nargs="+",
-        help=(
-            "Input artifact roots to merge. Supports either <path> "
-            "(platform inferred from root name sources-<platform>) or "
-            "<platform>=<path> (e.g. aarch64-darwin=sources-aarch64-darwin)."
-        ),
-    )
-    parser.add_argument(
-        "--output-root",
-        default=".",
-        help="Repository root to write merged files into (default: .)",
-    )
-    return parser.parse_args(argv)
-
-
 def _collect_merged_entries(
-    roots: Sequence[str],
+    roots: list[str],
 ) -> tuple[dict[str, SourceEntry], int, list[str], list[str]]:
     merged: dict[str, SourceEntry] = {}
     loaded = 0
@@ -308,18 +287,61 @@ def _write_merged_entries(output_root: Path, merged: dict[str, SourceEntry]) -> 
     raise RuntimeError(msg)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI entrypoint."""
-    args = _parse_args(argv)
-    merged, loaded, missing_roots, empty_roots = _collect_merged_entries(args.roots)
+def run(*, roots: list[str], output_root: Path) -> int:
+    """Merge sources from artifact roots into the repository tree."""
+    merged, loaded, missing_roots, empty_roots = _collect_merged_entries(roots)
     _validate_input_roots(missing_roots, empty_roots)
 
     if loaded == 0:
         return 1
 
-    _write_merged_entries(Path(args.output_root), merged)
+    _write_merged_entries(output_root, merged)
 
     return 0
+
+
+app = make_typer_app(
+    help_text="Merge per-package sources.json files from platform artifacts.",
+    no_args_is_help=False,
+)
+
+
+_standalone_app = make_typer_app(
+    help_text="Merge per-package sources.json files from platform artifacts.",
+    no_args_is_help=False,
+)
+
+
+@_standalone_app.command()
+@app.callback(invoke_without_command=True)
+def cli(
+    roots: Annotated[
+        list[str],
+        typer.Argument(
+            help=(
+                "Input artifact roots to merge. Supports either <path> "
+                "(platform inferred from root name sources-<platform>) or "
+                "<platform>=<path> (for example "
+                "aarch64-darwin=sources-aarch64-darwin)."
+            )
+        ),
+    ],
+    *,
+    output_root: Annotated[
+        Path,
+        typer.Option(
+            "--output-root",
+            help="Repository root to write merged files into.",
+        ),
+    ] = DEFAULT_OUTPUT_ROOT,
+) -> None:
+    """Merge platform artifact roots into repository sources.json files."""
+    raise typer.Exit(code=run(roots=roots, output_root=output_root))
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the CLI entrypoint."""
+    return run_main(_standalone_app, argv=argv, prog_name="merge-sources")
 
 
 if __name__ == "__main__":

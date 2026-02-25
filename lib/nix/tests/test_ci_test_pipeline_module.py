@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from lib.nix.tests._assertions import check
@@ -97,21 +96,43 @@ def test_phase_validate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     check(not object.__getattribute__(pipeline, "_phase_validate")())
 
 
-def test_parse_args_and_print_summary(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Run this test case."""
-    args = object.__getattribute__(pipeline, "_parse_args")([
+def test_main_parses_typer_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Main delegates option parsing to the Typer app."""
+    called: dict[str, object] = {}
+
+    def _fake_run(
+        *,
+        full: bool = False,
+        source: str | None = None,
+        resolve_only: bool = False,
+        keep_artifacts: bool = False,
+    ) -> int:
+        called.update({
+            "full": full,
+            "source": source,
+            "resolve_only": resolve_only,
+            "keep_artifacts": keep_artifacts,
+        })
+        return 0
+
+    monkeypatch.setattr(pipeline, "run", _fake_run)
+    rc = pipeline.main([
         "--full",
         "--source",
         "demo",
         "--resolve-only",
         "--keep-artifacts",
     ])
-    if not args.full and args.resolve_only and args.keep_artifacts:
-        raise AssertionError
-    check(args.source == "demo")
 
+    check(rc == 0)
+    check(called["full"] is True)
+    check(called["source"] == "demo")
+    check(called["resolve_only"] is True)
+    check(called["keep_artifacts"] is True)
+
+
+def test_print_summary(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Render summary output and cleanup behavior."""
     logs: list[str] = []
     monkeypatch.setattr(pipeline, "_log", logs.append)
     removed: list[Path] = []
@@ -143,51 +164,31 @@ def test_parse_args_and_print_summary(
 def test_main_flow_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Run this test case."""
     work = tmp_path / "work"
+    work.mkdir()
     monkeypatch.setattr(pipeline.tempfile, "mkdtemp", lambda _prefix="": str(work))
     monkeypatch.setattr(pipeline, "_print_summary", lambda *_a, **_k: None)
 
     # resolve-only path
-    monkeypatch.setattr(
-        pipeline,
-        "_parse_args",
-        lambda _argv: SimpleNamespace(
-            full=False, source=None, resolve_only=True, keep_artifacts=False
-        ),
-    )
     monkeypatch.setattr(pipeline, "_phase_resolve", lambda _pinned: True)
-    check(pipeline.main([]) == 0)
+    check(pipeline.main(["--resolve-only"]) == 0)
 
     # resolve failure
     monkeypatch.setattr(pipeline, "_phase_resolve", lambda _pinned: False)
-    check(pipeline.main([]) == 1)
+    check(pipeline.main(["--resolve-only"]) == 1)
 
     # compute failure
-    monkeypatch.setattr(
-        pipeline,
-        "_parse_args",
-        lambda _argv: SimpleNamespace(
-            full=False, source="demo", resolve_only=False, keep_artifacts=False
-        ),
-    )
     monkeypatch.setattr(pipeline, "_phase_resolve", lambda _pinned: True)
     monkeypatch.setattr(pipeline, "_phase_compute", lambda _pinned, _source=None: False)
-    check(pipeline.main([]) == 1)
+    check(pipeline.main(["--source", "demo"]) == 1)
 
     # full merge failure
-    monkeypatch.setattr(
-        pipeline,
-        "_parse_args",
-        lambda _argv: SimpleNamespace(
-            full=True, source=None, resolve_only=False, keep_artifacts=False
-        ),
-    )
     monkeypatch.setattr(pipeline, "_phase_compute", lambda _pinned, _source=None: True)
     monkeypatch.setattr(pipeline, "_phase_merge", lambda _work: False)
-    check(pipeline.main([]) == 1)
+    check(pipeline.main(["--full"]) == 1)
 
     # final validate success/failure
     monkeypatch.setattr(pipeline, "_phase_merge", lambda _work: True)
     monkeypatch.setattr(pipeline, "_phase_validate", lambda: True)
-    check(pipeline.main([]) == 0)
+    check(pipeline.main(["--full"]) == 0)
     monkeypatch.setattr(pipeline, "_phase_validate", lambda: False)
-    check(pipeline.main([]) == 1)
+    check(pipeline.main(["--full"]) == 1)

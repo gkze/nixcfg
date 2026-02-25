@@ -1,7 +1,7 @@
 """HTTP helpers for update data sources and GitHub APIs."""
 
-import asyncio
 import json
+import logging
 import netrc
 import os
 import urllib.parse
@@ -10,7 +10,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import aiohttp
-from aiohttp_retry import ExponentialRetry, RetryClient
+from pydantic import TypeAdapter, ValidationError
+from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt
+from tenacity.wait import wait_exponential
 
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.constants import resolve_timeout_alias
@@ -20,19 +22,25 @@ type JSONValue = JSONScalar | dict[str, "JSONValue"] | list["JSONValue"]
 type JSONDict = dict[str, JSONValue]
 type JSONList = list[JSONValue]
 
+_JSON_DICT_ADAPTER = TypeAdapter(dict[str, JSONValue])
+_JSON_LIST_ADAPTER = TypeAdapter(list[JSONValue])
+_STRING_ADAPTER = TypeAdapter(str)
+
 
 def _expect_json_dict(payload: JSONValue, *, context: str) -> JSONDict:
-    if isinstance(payload, dict):
-        return payload
-    msg = f"Expected JSON object from {context}, got {type(payload).__name__}"
-    raise RuntimeError(msg)
+    try:
+        return _JSON_DICT_ADAPTER.validate_python(payload, strict=True)
+    except ValidationError as exc:
+        msg = f"Expected JSON object from {context}, got {type(payload).__name__}"
+        raise RuntimeError(msg) from exc
 
 
 def _expect_json_list(payload: JSONValue, *, context: str) -> JSONList:
-    if isinstance(payload, list):
-        return payload
-    msg = f"Expected JSON array from {context}, got {type(payload).__name__}"
-    raise RuntimeError(msg)
+    try:
+        return _JSON_LIST_ADAPTER.validate_python(payload, strict=True)
+    except ValidationError as exc:
+        msg = f"Expected JSON array from {context}, got {type(payload).__name__}"
+        raise RuntimeError(msg) from exc
 
 
 def _expect_json_string_field(
@@ -42,13 +50,24 @@ def _expect_json_string_field(
     context: str,
 ) -> str:
     value = payload.get(field)
-    if isinstance(value, str):
-        return value
-    msg = f"Expected string field {field!r} in {context}"
-    raise RuntimeError(msg)
+    try:
+        return _STRING_ADAPTER.validate_python(value, strict=True)
+    except ValidationError as exc:
+        msg = f"Expected string field {field!r} in {context}"
+        raise RuntimeError(msg) from exc
 
 
 HTTP_BAD_REQUEST = 400
+RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+logger = logging.getLogger(__name__)
+
+
+class _RetryableStatusError(RuntimeError):
+    """HTTP status error that should be retried."""
+
+
+class _NonRetryableStatusError(RuntimeError):
+    """HTTP status error that should fail immediately."""
 
 
 def _get_github_token() -> str | None:
@@ -63,8 +82,12 @@ def _get_github_token() -> str | None:
                 auth = netrc_data.authenticators(host)
                 if auth:
                     return auth[2]  # password field contains token
-        except netrc.NetrcParseError, OSError:
-            pass
+        except (netrc.NetrcParseError, OSError) as exc:
+            logger.warning(
+                "Failed to parse %s for GitHub token discovery: %s",
+                netrc_path,
+                exc,
+            )
     return None
 
 
@@ -210,35 +233,47 @@ async def _request(
         total=options.request_timeout,
     )
 
-    retry_options = ExponentialRetry(
-        attempts=options.attempts,
-        factor=2.0,
-        start_timeout=options.backoff,
-        statuses={429, 500, 502, 503, 504},
-        exceptions={aiohttp.ClientError, TimeoutError, asyncio.TimeoutError},
+    async def _perform_request_once() -> tuple[bytes, dict[str, str]]:
+        async with session.request(
+            options.method,
+            url,
+            headers=headers,
+            timeout=timeout_config,
+            allow_redirects=True,
+        ) as response:
+            payload = await response.read()
+            if response.status < HTTP_BAD_REQUEST:
+                return payload, dict(response.headers)
+            detail = _format_http_error(response, payload)
+            if response.status in RETRYABLE_STATUSES:
+                raise _RetryableStatusError(detail)
+            raise _NonRetryableStatusError(detail)
+
+    retryer = AsyncRetrying(
+        stop=stop_after_attempt(options.attempts),
+        wait=wait_exponential(multiplier=options.backoff, exp_base=2),
+        retry=retry_if_exception_type((
+            _RetryableStatusError,
+            aiohttp.ClientError,
+            TimeoutError,
+        )),
+        reraise=True,
     )
 
-    retry_client = RetryClient(
-        client_session=session,
-        retry_options=retry_options,
-        raise_for_status=False,
-    )
-
-    async with retry_client.request(
-        options.method,
-        url,
-        headers=headers,
-        timeout=timeout_config,
-        allow_redirects=True,
-    ) as response:
-        payload = await response.read()
-        if response.status < HTTP_BAD_REQUEST:
-            return payload, dict(response.headers)
-        detail = _format_http_error(response, payload)
-        msg = f"Request to {url} failed after {options.attempts} attempts: {detail}"
-        raise RuntimeError(
-            msg,
-        )
+    try:
+        async for attempt in retryer:
+            with attempt:
+                return await _perform_request_once()
+    except (
+        _NonRetryableStatusError,
+        _RetryableStatusError,
+        aiohttp.ClientError,
+        TimeoutError,
+    ) as exc:
+        msg = f"Request to {url} failed after {options.attempts} attempts: {exc}"
+        raise RuntimeError(msg) from exc
+    msg = f"Request to {url} failed after {options.attempts} attempts"
+    raise RuntimeError(msg)
 
 
 async def fetch_url(
@@ -355,6 +390,55 @@ async def fetch_github_api(
     )
 
 
+async def fetch_github_api_paginated(
+    session: aiohttp.ClientSession,
+    api_path: str,
+    *,
+    config: UpdateConfig | None = None,
+    per_page: int = 100,
+    max_pages: int = 10,
+    item_limit: int | None = None,
+    **params: str,
+) -> JSONList:
+    """Fetch paginated list data from a GitHub API path.
+
+    Stops early when a page returns fewer than ``per_page`` items.
+    """
+    if per_page < 1:
+        msg = "per_page must be >= 1"
+        raise ValueError(msg)
+    if max_pages < 1:
+        msg = "max_pages must be >= 1"
+        raise ValueError(msg)
+    if item_limit is not None and item_limit < 1:
+        msg = "item_limit must be >= 1 when set"
+        raise ValueError(msg)
+
+    config = resolve_active_config(config)
+    all_items: JSONList = []
+
+    for page in range(1, max_pages + 1):
+        page_items = _expect_json_list(
+            await fetch_github_api(
+                session,
+                api_path,
+                config=config,
+                **params,
+                per_page=str(per_page),
+                page=str(page),
+            ),
+            context=f"GitHub API list {api_path} page {page}",
+        )
+        all_items.extend(page_items)
+
+        if item_limit is not None and len(all_items) >= item_limit:
+            return all_items[:item_limit]
+        if len(page_items) < per_page:
+            return all_items
+
+    return all_items
+
+
 async def fetch_github_default_branch(
     session: aiohttp.ClientSession,
     owner: str,
@@ -416,6 +500,7 @@ __all__ = [
     "JSONValue",
     "_request",
     "fetch_github_api",
+    "fetch_github_api_paginated",
     "fetch_github_default_branch",
     "fetch_github_latest_commit",
     "fetch_json",

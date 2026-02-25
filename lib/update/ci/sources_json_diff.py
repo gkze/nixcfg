@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
-import argparse
-import asyncio
 import contextlib
-import dataclasses
 import difflib
 import importlib
 import io
 import json
+import pathlib
+import re
 import shutil
 import sys
-from pathlib import Path
-from typing import TYPE_CHECKING, TypeGuard
+from typing import TYPE_CHECKING, Annotated, TypeGuard
+
+import typer
+from deepdiff import DeepDiff
+
+from lib.update.ci._cli import make_typer_app, run_main
+from lib.update.ci._subprocess import run_command
 
 if TYPE_CHECKING:
+    import subprocess
     from collections.abc import Callable
 
 JsonScalar = str | int | float | bool | None
@@ -30,12 +35,6 @@ class _MissingType:
 
 
 _MISSING = _MissingType()
-
-
-@dataclasses.dataclass(frozen=True)
-class _CommandResult:
-    returncode: int
-    stdout: str
 
 
 class _BufferWriter:
@@ -124,7 +123,7 @@ def _render_graphtage_diff(
     return writer.value().strip()
 
 
-def _render_jd_diff(_old_path: Path, _new_path: Path) -> str:
+def _render_jd_diff(_old_path: pathlib.Path, _new_path: pathlib.Path) -> str:
     """Render optional external ``jd`` integration output."""
     jd_binary = shutil.which("jd")
     if jd_binary is None:
@@ -137,21 +136,8 @@ def _render_jd_diff(_old_path: Path, _new_path: Path) -> str:
     return result.stdout.strip()
 
 
-async def _run_command_async(args: list[str]) -> _CommandResult:
-    process = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout_data, _stderr_data = await process.communicate()
-    return _CommandResult(
-        returncode=int(process.returncode or 0),
-        stdout=(stdout_data or b"").decode(),
-    )
-
-
-def _run_command(args: list[str]) -> _CommandResult:
-    return asyncio.run(_run_command_async(args))
+def _run_command(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return run_command(args, check=False, capture_output=True)
 
 
 def _json_value(value: JsonValue) -> str:
@@ -186,38 +172,117 @@ def _path_sort_key(path: PathTuple) -> tuple[tuple[int, str], ...]:
     )
 
 
-def _flatten_leaves(
-    value: JsonValue, path: PathTuple = ()
-) -> dict[PathTuple, JsonValue]:
+_DEEPDIFF_PATH_SEGMENT_RE = re.compile(r"\['([^']+)'\]|\[(\d+)\]")
+
+
+def _parse_deepdiff_path(path: str) -> PathTuple:
+    if path == "root":
+        return ()
+    segments: list[PathSegment] = []
+    for string_segment, int_segment in _DEEPDIFF_PATH_SEGMENT_RE.findall(path):
+        if int_segment:
+            segments.append(int(int_segment))
+            continue
+        segments.append(string_segment)
+    return tuple(segments)
+
+
+def _path_from_deepdiff_node(node: object) -> PathTuple:
+    path_func = getattr(node, "path", None)
+    if not callable(path_func):
+        return ()
+    with contextlib.suppress(TypeError):
+        path_list = path_func(output_format="list")
+        if isinstance(path_list, list):
+            segments: list[PathSegment] = []
+            for segment in path_list:
+                if isinstance(segment, (int, str)):
+                    segments.append(segment)
+                else:
+                    segments.append(str(segment))
+            return tuple(segments)
+    with contextlib.suppress(TypeError):
+        path_text = path_func()
+        if isinstance(path_text, str):
+            return _parse_deepdiff_path(path_text)
+    return ()
+
+
+def _extract_change_value(node: object, attr: str) -> JsonValue | _MissingType:
+    value = getattr(node, attr, _MISSING)
+    if value is _MISSING:
+        return _MISSING
+    return _coerce_json_value(value, context=f"deepdiff.{attr}")
+
+
+def _iter_leaf_values(
+    path: PathTuple, value: JsonValue
+) -> list[tuple[PathTuple, JsonValue]]:
     if isinstance(value, dict):
-        out: dict[PathTuple, JsonValue] = {}
-        for key in sorted(value):
-            out.update(_flatten_leaves(value[key], (*path, key)))
-        return out
-
+        leaves: list[tuple[PathTuple, JsonValue]] = []
+        for key, item in value.items():
+            leaves.extend(_iter_leaf_values((*path, key), item))
+        return leaves
     if isinstance(value, list):
-        out: dict[PathTuple, JsonValue] = {}
+        leaves = []
         for idx, item in enumerate(value):
-            out.update(_flatten_leaves(item, (*path, idx)))
-        return out
-
-    return {path: value}
+            leaves.extend(_iter_leaf_values((*path, idx), item))
+        return leaves
+    return [(path, value)]
 
 
 def _collect_leaf_changes(
     old_data: JsonValue,
     new_data: JsonValue,
 ) -> list[tuple[list[PathSegment], JsonValue | _MissingType, JsonValue | _MissingType]]:
-    old_leaves = _flatten_leaves(old_data)
-    new_leaves = _flatten_leaves(new_data)
-    all_paths = sorted(set(old_leaves) | set(new_leaves), key=_path_sort_key)
+    diff = DeepDiff(old_data, new_data, view="tree", verbose_level=2)
+    change_map: dict[
+        PathTuple, tuple[JsonValue | _MissingType, JsonValue | _MissingType]
+    ] = {}
+
+    for node in diff.get("values_changed", []):
+        path = _path_from_deepdiff_node(node)
+        change_map[path] = (
+            _extract_change_value(node, "t1"),
+            _extract_change_value(node, "t2"),
+        )
+
+    for node in diff.get("type_changes", []):
+        path = _path_from_deepdiff_node(node)
+        change_map[path] = (
+            _extract_change_value(node, "t1"),
+            _extract_change_value(node, "t2"),
+        )
+
+    for kind in ("dictionary_item_added", "iterable_item_added", "set_item_added"):
+        for node in diff.get(kind, []):
+            path = _path_from_deepdiff_node(node)
+            new_value = _extract_change_value(node, "t2")
+            if _is_json_value(new_value):
+                for leaf_path, leaf_value in _iter_leaf_values(path, new_value):
+                    change_map[leaf_path] = (_MISSING, leaf_value)
+            else:
+                change_map[path] = (_MISSING, new_value)
+
+    for kind in (
+        "dictionary_item_removed",
+        "iterable_item_removed",
+        "set_item_removed",
+    ):
+        for node in diff.get(kind, []):
+            path = _path_from_deepdiff_node(node)
+            old_value = _extract_change_value(node, "t1")
+            if _is_json_value(old_value):
+                for leaf_path, leaf_value in _iter_leaf_values(path, old_value):
+                    change_map[leaf_path] = (leaf_value, _MISSING)
+            else:
+                change_map[path] = (old_value, _MISSING)
 
     changes: list[
         tuple[list[PathSegment], JsonValue | _MissingType, JsonValue | _MissingType]
     ] = []
-    for path in all_paths:
-        old_value = old_leaves.get(path, _MISSING)
-        new_value = new_leaves.get(path, _MISSING)
+    for path in sorted(change_map, key=_path_sort_key):
+        old_value, new_value = change_map[path]
         if old_value == new_value:
             continue
         changes.append((list(path), old_value, new_value))
@@ -276,7 +341,7 @@ def _render_plain_diff(
     return "\n".join(lines).strip()
 
 
-def _read_json(path: Path) -> dict[str, JsonValue]:
+def _read_json(path: pathlib.Path) -> dict[str, JsonValue]:
     with path.open(encoding="utf-8") as handle:
         loaded = json.load(handle)
     return _coerce_json_object(loaded, context=str(path))
@@ -284,8 +349,8 @@ def _read_json(path: Path) -> dict[str, JsonValue]:
 
 def _render_selected_format(
     output_format: str,
-    old_path: Path,
-    new_path: Path,
+    old_path: pathlib.Path,
+    new_path: pathlib.Path,
     old_data: dict[str, JsonValue],
     new_data: dict[str, JsonValue],
 ) -> str:
@@ -316,8 +381,15 @@ def _render_selected_format(
     return ""
 
 
-def run_diff(old_path: Path, new_path: Path, *, output_format: str = "auto") -> str:
+def run_diff(
+    old_path: pathlib.Path,
+    new_path: pathlib.Path,
+    *,
+    output_format: str = "auto",
+) -> str:
     """Compare two source entry JSON files and return a diff string."""
+    old_path = pathlib.Path(old_path)
+    new_path = pathlib.Path(new_path)
     old_data = _read_json(old_path)
     new_data = _read_json(new_path)
 
@@ -330,23 +402,62 @@ def run_diff(old_path: Path, new_path: Path, *, output_format: str = "auto") -> 
     return rendered or NoChangesMessage
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Run the CLI entrypoint."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("old_sources", type=Path, help="Path to old source JSON file")
-    parser.add_argument("new_sources", type=Path, help="Path to new source JSON file")
-    parser.add_argument(
-        "--format",
-        choices=["auto", "summary", "jd", "graphtage", "structural", "unified"],
-        default="auto",
-        help="Diff output format (default: auto)",
-    )
-    args = parser.parse_args(argv)
-    sys.stdout.write(
-        run_diff(args.old_sources, args.new_sources, output_format=args.format)
-    )
+def run(
+    *,
+    old_sources: pathlib.Path,
+    new_sources: pathlib.Path,
+    output_format: str = "auto",
+) -> int:
+    """Render a diff between two source-entry JSON files."""
+    old_sources = pathlib.Path(old_sources)
+    new_sources = pathlib.Path(new_sources)
+    sys.stdout.write(run_diff(old_sources, new_sources, output_format=output_format))
     sys.stdout.write("\n")
     return 0
+
+
+app = make_typer_app(
+    help_text="Generate a diff for source entry JSON changes.",
+    no_args_is_help=False,
+)
+
+
+_standalone_app = make_typer_app(
+    help_text="Generate a diff for source entry JSON changes.",
+    no_args_is_help=False,
+)
+
+
+@_standalone_app.command()
+@app.callback(invoke_without_command=True)
+def cli(
+    old_sources: Annotated[
+        pathlib.Path,
+        typer.Argument(help="Path to old source JSON file."),
+    ],
+    new_sources: Annotated[
+        pathlib.Path,
+        typer.Argument(help="Path to new source JSON file."),
+    ],
+    *,
+    output_format: Annotated[
+        str,
+        typer.Option("--format", help="Diff output format."),
+    ] = "auto",
+) -> None:
+    """Compare source entry JSON files and print a diff."""
+    raise typer.Exit(
+        code=run(
+            old_sources=old_sources,
+            new_sources=new_sources,
+            output_format=output_format,
+        )
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the CLI entrypoint."""
+    return run_main(_standalone_app, argv=argv, prog_name="sources-json-diff")
 
 
 if __name__ == "__main__":

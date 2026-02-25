@@ -9,9 +9,10 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import aiohttp
+import typer
 from rich.columns import Columns
 from rich.console import Console
 
@@ -819,3 +820,233 @@ async def run_updates(opts: UpdateOptions) -> int:
         return run_plan
 
     return await _execute_run_plan(opts, out, config, run_plan)
+
+
+def run_update_command(
+    source: str | None = None,
+    *,
+    list_targets: bool = False,
+    no_refs: bool = False,
+    no_sources: bool = False,
+    no_input: bool = False,
+    check: bool = False,
+    validate: bool = False,
+    schema: bool = False,
+    json_output: bool = False,
+    verbose: bool = False,
+    quiet: bool = False,
+    tty: Literal["auto", "force", "off", "full"] = "auto",
+    zellij_guard: bool | None = None,
+    native_only: bool = False,
+    http_timeout: int | None = None,
+    subprocess_timeout: int | None = None,
+    max_nix_builds: int | None = None,
+    log_tail_lines: int | None = None,
+    render_interval: float | None = None,
+    user_agent: str | None = None,
+    retries: int | None = None,
+    retry_backoff: float | None = None,
+    fake_hash: str | None = None,
+    deno_platforms: str | None = None,
+    pinned_versions: str | None = None,
+) -> int:
+    """Run update workflow from typed CLI options."""
+    opts = UpdateOptions(
+        source=source,
+        list_targets=list_targets,
+        no_refs=no_refs,
+        no_sources=no_sources,
+        no_input=no_input,
+        check=check,
+        validate=validate,
+        schema=schema,
+        json=json_output,
+        verbose=verbose,
+        quiet=quiet,
+        tty=tty,
+        zellij_guard=zellij_guard,
+        native_only=native_only,
+        http_timeout=http_timeout,
+        subprocess_timeout=subprocess_timeout,
+        max_nix_builds=max_nix_builds,
+        log_tail_lines=log_tail_lines,
+        render_interval=render_interval,
+        user_agent=user_agent,
+        retries=retries,
+        retry_backoff=retry_backoff,
+        fake_hash=fake_hash,
+        deno_platforms=deno_platforms,
+        pinned_versions=pinned_versions,
+    )
+
+    if not (opts.list_targets or opts.schema or opts.validate):
+        needs_flake_edit = not opts.no_refs and not opts.native_only
+        if needs_flake_edit and opts.source:
+            ref_names = {i.name for i in get_flake_inputs_with_refs()}
+            needs_flake_edit = opts.source in ref_names
+
+        missing = check_required_tools(
+            include_flake_edit=needs_flake_edit,
+            source=opts.source,
+            needs_sources=not opts.no_sources,
+        )
+        if missing:
+            sys.stderr.write(f"Error: Required tools not found: {', '.join(missing)}\n")
+            sys.stderr.write("Please install them and ensure they are in your PATH.\n")
+            return 1
+
+    return asyncio.run(run_updates(opts))
+
+
+app = typer.Typer(
+    help="Update source versions/hashes and flake input refs.",
+    add_completion=False,
+    no_args_is_help=False,
+)
+
+
+@app.callback(invoke_without_command=True)
+def cli(
+    source: Annotated[
+        str | None,
+        typer.Argument(help="Source or flake input to update (default: all)."),
+    ] = None,
+    *,
+    list_targets: Annotated[
+        bool,
+        typer.Option("--list", "-l", help="List available sources and inputs."),
+    ] = False,
+    no_refs: Annotated[
+        bool,
+        typer.Option("--no-refs", "-R", help="Skip flake input ref updates."),
+    ] = False,
+    no_sources: Annotated[
+        bool,
+        typer.Option("--no-sources", "-S", help="Skip sources.json hash updates."),
+    ] = False,
+    no_input: Annotated[
+        bool,
+        typer.Option(
+            "--no-input",
+            "-I",
+            help="Skip flake input lock refresh before hashing.",
+        ),
+    ] = False,
+    check: Annotated[
+        bool,
+        typer.Option("--check", "-c", help="Dry run: check without applying."),
+    ] = False,
+    validate: Annotated[
+        bool,
+        typer.Option("--validate", "-v", help="Validate sources.json and exit."),
+    ] = False,
+    schema: Annotated[
+        bool,
+        typer.Option("--schema", "-s", help="Output JSON schema for sources.json."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", "-j", help="Output results as JSON."),
+    ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-V", help="Stream build log lines to stdout."),
+    ] = False,
+    quiet: Annotated[
+        bool,
+        typer.Option("--quiet", "-q", help="Suppress progress output."),
+    ] = False,
+    tty: Annotated[
+        Literal["auto", "force", "off", "full"],
+        typer.Option("--tty", "-t", help="TTY rendering mode."),
+    ] = "auto",
+    zellij_guard: Annotated[
+        bool | None,
+        typer.Option(
+            "--zellij-guard/--no-zellij-guard",
+            help="Disable live rendering under Zellij.",
+        ),
+    ] = None,
+    native_only: Annotated[
+        bool,
+        typer.Option(
+            "--native-only",
+            "-n",
+            help="Only compute hashes for current platform (CI). Implies --no-refs.",
+        ),
+    ] = False,
+    http_timeout: Annotated[
+        int | None,
+        typer.Option("--http-timeout", help="HTTP timeout in seconds."),
+    ] = None,
+    subprocess_timeout: Annotated[
+        int | None,
+        typer.Option("--subprocess-timeout", help="Subprocess timeout in seconds."),
+    ] = None,
+    max_nix_builds: Annotated[
+        int | None,
+        typer.Option("--max-nix-builds", help="Max concurrent nix build processes."),
+    ] = None,
+    log_tail_lines: Annotated[
+        int | None,
+        typer.Option("--log-tail-lines", help="Log tail lines."),
+    ] = None,
+    render_interval: Annotated[
+        float | None,
+        typer.Option("--render-interval", help="TTY render interval in seconds."),
+    ] = None,
+    user_agent: Annotated[
+        str | None,
+        typer.Option("--user-agent", help="HTTP user agent."),
+    ] = None,
+    retries: Annotated[
+        int | None,
+        typer.Option("--retries", help="HTTP retries."),
+    ] = None,
+    retry_backoff: Annotated[
+        float | None,
+        typer.Option("--retry-backoff", help="HTTP retry backoff seconds."),
+    ] = None,
+    fake_hash: Annotated[
+        str | None,
+        typer.Option("--fake-hash", help="Fake hash placeholder."),
+    ] = None,
+    deno_platforms: Annotated[
+        str | None,
+        typer.Option("--deno-platforms", help="Comma-separated Deno platforms."),
+    ] = None,
+    pinned_versions: Annotated[
+        str | None,
+        typer.Option("--pinned-versions", help="Path to pinned-versions.json."),
+    ] = None,
+) -> None:
+    """Update source versions/hashes and flake input refs."""
+    raise typer.Exit(
+        code=run_update_command(
+            source=source,
+            list_targets=list_targets,
+            no_refs=no_refs,
+            no_sources=no_sources,
+            no_input=no_input,
+            check=check,
+            validate=validate,
+            schema=schema,
+            json_output=json_output,
+            verbose=verbose,
+            quiet=quiet,
+            tty=tty,
+            zellij_guard=zellij_guard,
+            native_only=native_only,
+            http_timeout=http_timeout,
+            subprocess_timeout=subprocess_timeout,
+            max_nix_builds=max_nix_builds,
+            log_tail_lines=log_tail_lines,
+            render_interval=render_interval,
+            user_agent=user_agent,
+            retries=retries,
+            retry_backoff=retry_backoff,
+            fake_hash=fake_hash,
+            deno_platforms=deno_platforms,
+            pinned_versions=pinned_versions,
+        )
+    )
