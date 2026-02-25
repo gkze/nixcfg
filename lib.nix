@@ -55,11 +55,18 @@ let
       }) names
     );
   packageSources = scanSourcesIn ./packages // scanSourcesIn ./overlays;
+  sourceOverrides =
+    let
+      raw = getEnv "UPDATE_SOURCE_OVERRIDES_JSON";
+    in
+    if raw == "" then { } else fromJSON raw;
 in
 rec {
   inherit modulesPath;
   flakeLock = (fromJSON (readFile ./flake.lock)).nodes;
-  sources = packageSources;
+  # UPDATE_SOURCE_OVERRIDES_JSON allows update tooling to override selected
+  # sources entries during evaluation without mutating tracked sources.json files.
+  sources = packageSources // sourceOverrides;
 
   # When FAKE_HASHES=1, all sourceHash* functions return lib.fakeHash instead
   # of reading from sources.json.  This lets the update script evaluate the

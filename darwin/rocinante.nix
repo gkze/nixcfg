@@ -1,13 +1,13 @@
 {
-  inputs,
   outputs,
   ...
 }:
-with outputs.lib;
-with inputs;
-mkDarwinHost {
+let
+  inherit (outputs) lib;
+in
+lib.mkDarwinHost {
   user = "george";
-  brewAppsModule = "${modulesPath}/darwin/george/brew-apps.nix";
+  brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
   extraHomeModules = [
     (_: {
       xdg.configFile."opencode/personal.json".text = builtins.toJSON {
@@ -17,7 +17,7 @@ mkDarwinHost {
     })
   ];
   extraSystemModules = [
-    "${modulesPath}/darwin/george/dock-apps.nix"
-    (mkSetOpencodeEnvModule "personal.json")
+    "${lib.modulesPath}/darwin/george/dock-apps.nix"
+    (lib.mkSetOpencodeEnvModule "personal.json")
   ];
 }

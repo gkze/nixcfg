@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourcesFile
+from lib.nix.tests._assertions import check
 from lib.update.sources import load_source_entry
 from lib.update.sources import save_sources as save_all_sources
 
@@ -30,9 +31,11 @@ def test_load_source_entry_accepts_object_payload(tmp_path: Path) -> None:
 
     entry = load_source_entry(path)
 
-    assert entry.input == "linear-cli"  # noqa: S101
-    assert entry.hashes.entries is not None  # noqa: S101
-    assert entry.hashes.entries[0].platform == "aarch64-darwin"  # noqa: S101
+    check(entry.input == "linear-cli")
+    entries = entry.hashes.entries
+    if entries is None:
+        raise AssertionError
+    check(entries[0].platform == "aarch64-darwin")
 
 
 def test_load_source_entry_accepts_legacy_list_payload(tmp_path: Path) -> None:
@@ -52,9 +55,11 @@ def test_load_source_entry_accepts_legacy_list_payload(tmp_path: Path) -> None:
 
     entry = load_source_entry(path)
 
-    assert entry.hashes.entries is not None  # noqa: S101
-    assert len(entry.hashes.entries) == 1  # noqa: S101
-    assert entry.hashes.entries[0].platform == "x86_64-linux"  # noqa: S101
+    entries = entry.hashes.entries
+    if entries is None:
+        raise AssertionError
+    check(len(entries) == 1)
+    check(entries[0].platform == "x86_64-linux")
 
 
 def test_save_sources_raises_for_unknown_source_name(
@@ -107,5 +112,5 @@ def test_save_sources_writes_entry_to_mapped_path(
     save_all_sources(SourcesFile(entries={"demo": entry}))
 
     saved = json.loads(dest.read_text(encoding="utf-8"))
-    assert saved["version"] == "1.2.3"  # noqa: S101
-    assert saved["hashes"][0]["hashType"] == "sha256"  # noqa: S101
+    check(saved["version"] == "1.2.3")
+    check(saved["hashes"][0]["hashType"] == "sha256")

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from lib.nix.tests._assertions import check
 from lib.update.ci.merge_sources import main
 
 if TYPE_CHECKING:
@@ -63,8 +64,8 @@ def test_merge_sources_fails_for_missing_and_empty_roots(tmp_path: Path) -> None
         )
 
     message = str(exc.value)
-    assert str(missing_root) in message  # noqa: S101
-    assert str(empty_root) in message  # noqa: S101
+    check(str(missing_root) in message)
+    check(str(empty_root) in message)
 
 
 def test_merge_sources_keeps_platform_hashes_from_matching_roots(
@@ -157,7 +158,7 @@ def test_merge_sources_keeps_platform_hashes_from_matching_roots(
         output_root / "packages" / "demo" / "sources.json",
     )
 
-    assert (  # noqa: S101
+    check(
         main(
             [
                 str(darwin_root),
@@ -177,9 +178,9 @@ def test_merge_sources_keeps_platform_hashes_from_matching_roots(
         for entry in merged["hashes"]
         if entry["hashType"] == "denoDepsHash"
     }
-    assert by_platform["aarch64-darwin"] == fresh_darwin  # noqa: S101
-    assert by_platform["x86_64-linux"] == fresh_linux  # noqa: S101
-    assert by_platform["aarch64-linux"] == fresh_arm_linux  # noqa: S101
+    check(by_platform["aarch64-darwin"] == fresh_darwin)
+    check(by_platform["x86_64-linux"] == fresh_linux)
+    check(by_platform["aarch64-linux"] == fresh_arm_linux)
 
 
 def test_merge_sources_creates_missing_output_destination(tmp_path: Path) -> None:
@@ -203,12 +204,12 @@ def test_merge_sources_creates_missing_output_destination(tmp_path: Path) -> Non
     # Output repo has the package directory but no sources.json yet.
     (output_root / "packages" / "demo").mkdir(parents=True, exist_ok=True)
 
-    assert main([str(linux_root), "--output-root", str(output_root)]) == 0  # noqa: S101
+    check(main([str(linux_root), "--output-root", str(output_root)]) == 0)
 
     merged_path = output_root / "packages" / "demo" / "sources.json"
-    assert merged_path.is_file()  # noqa: S101
+    check(merged_path.is_file())
     merged = json.loads(merged_path.read_text(encoding="utf-8"))
-    assert merged["version"] == "1.2.3"  # noqa: S101
+    check(merged["version"] == "1.2.3")
 
 
 def test_merge_sources_rejects_conflicting_non_platform_hashes(tmp_path: Path) -> None:

@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from packaging.version import InvalidVersion, Version
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import Iterable
-    from typing import Any
+    from collections.abc import Iterable, Mapping
 
     import aiohttp
 
@@ -25,7 +24,7 @@ from lib.update.events import (
 )
 from lib.update.flake import load_flake_lock
 from lib.update.net import fetch_github_api
-from lib.update.process import run_queue_task, stream_command
+from lib.update.process import StreamCommandOptions, run_queue_task, stream_command
 
 _BRANCH_REF_PATTERNS = {
     "master",
@@ -148,21 +147,28 @@ def _select_tag(tags: Iterable[str], prefix: str) -> str | None:
 
 
 def _select_tag_from_releases(
-    releases: Iterable[dict[str, Any]],
+    releases: Iterable[Mapping[str, object]],
     prefix: str,
 ) -> str | None:
     return _select_tag(
         (
-            release.get("tag_name", "")
+            tag_name
             for release in releases
+            if isinstance(tag_name := release.get("tag_name"), str)
             if not release.get("draft") and not release.get("prerelease")
         ),
         prefix,
     )
 
 
-def _select_tag_from_tags(tags: Iterable[dict[str, str]], prefix: str) -> str | None:
-    return _select_tag((tag.get("name", "") for tag in tags), prefix)
+def _select_tag_from_tags(
+    tags: Iterable[Mapping[str, object]],
+    prefix: str,
+) -> str | None:
+    return _select_tag(
+        (name for tag in tags if isinstance(name := tag.get("name"), str)),
+        prefix,
+    )
 
 
 async def _fetch_first_matching_tag(
@@ -187,17 +193,17 @@ async def _fetch_first_matching_tag(
     )
     for path, per_page, selector in candidates:
         try:
-            payload = cast(
-                "list[dict[str, str]]",
-                await fetch_github_api(
-                    session,
-                    path,
-                    per_page=per_page,
-                    config=config,
-                ),
+            payload_raw = await fetch_github_api(
+                session,
+                path,
+                per_page=per_page,
+                config=config,
             )
         except RuntimeError:
             continue
+        if not isinstance(payload_raw, list):
+            continue
+        payload = [item for item in payload_raw if isinstance(item, dict)]
         tag = selector(payload, prefix)
         if tag:
             return tag
@@ -235,6 +241,15 @@ class RefUpdateResult:
     current_ref: str
     latest_ref: str | None
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class RefTaskOptions:
+    """Options controlling ``update_refs_task`` behavior."""
+
+    dry_run: bool = False
+    flake_edit_lock: asyncio.Lock | None = None
+    config: UpdateConfig | None = None
 
 
 async def check_flake_ref_update(
@@ -315,7 +330,10 @@ async def _run_checked_command(
     error_prefix: str,
 ) -> EventStream:
     result: CommandResult | None = None
-    async for event in stream_command(args, source=source):
+    async for event in stream_command(
+        args,
+        options=StreamCommandOptions(source=source),
+    ):
         if event.kind == UpdateEventKind.COMMAND_END and isinstance(
             event.payload,
             CommandResult,
@@ -333,19 +351,18 @@ async def _run_checked_command(
     raise RuntimeError(msg)
 
 
-async def update_refs_task(  # noqa: PLR0913
+async def update_refs_task(
     input_ref: FlakeInputRef,
     session: aiohttp.ClientSession,
     queue: asyncio.Queue[UpdateEvent | None],
     *,
-    dry_run: bool = False,
-    flake_edit_lock: asyncio.Lock | None = None,
-    config: UpdateConfig | None = None,
+    options: RefTaskOptions | None = None,
 ) -> None:
     """Run a single flake-ref update, emitting events to *queue*."""
+    task_options = options or RefTaskOptions()
 
     async def _run() -> None:
-        resolved_config = resolve_active_config(config)
+        resolved_config = resolve_active_config(task_options.config)
         source = input_ref.name
         put = queue.put
 
@@ -372,11 +389,15 @@ async def update_refs_task(  # noqa: PLR0913
             await put(UpdateEvent.result(source))
             return
 
+        latest_ref = result.latest_ref
+        if latest_ref is None:
+            await put(UpdateEvent.error(source, "Missing latest ref"))
+            return
         update_payload: RefUpdatePayload = {
             "current": result.current_ref,
-            "latest": cast("str", result.latest_ref),
+            "latest": latest_ref,
         }
-        if dry_run:
+        if task_options.dry_run:
             await put(
                 UpdateEvent.status(
                     source,
@@ -386,17 +407,12 @@ async def update_refs_task(  # noqa: PLR0913
             await put(UpdateEvent.result(source, update_payload))
             return
 
-        latest_ref = result.latest_ref
-        if latest_ref is None:
-            await put(UpdateEvent.error(source, "Missing latest ref"))
-            return
-
         async def do_update() -> None:
             async for event in update_flake_ref(input_ref, latest_ref, source=source):
                 await put(event)
 
-        if flake_edit_lock:
-            async with flake_edit_lock:
+        if task_options.flake_edit_lock:
+            async with task_options.flake_edit_lock:
                 await do_update()
         else:
             await do_update()
@@ -408,6 +424,7 @@ async def update_refs_task(  # noqa: PLR0913
 
 __all__ = [
     "FlakeInputRef",
+    "RefTaskOptions",
     "RefUpdateResult",
     "check_flake_ref_update",
     "get_flake_inputs_with_refs",

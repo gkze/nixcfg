@@ -20,6 +20,11 @@ result
 # Python
 .mypy_cache
 .pytest_cache
+.coverage
+.coverage.*
+.coverage_html/
+coverage.xml
+htmlcov/
 .venv
 __pycache__
 *.egg-info/

@@ -8,9 +8,14 @@ with ergonomic names and a proper tagged union.
 """
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+type BuildTraceScalar = str | int | float | bool | None
+type BuildTraceValue = (
+    BuildTraceScalar | list["BuildTraceValue"] | dict[str, "BuildTraceValue"]
+)
 
 
 class SuccessStatus(StrEnum):
@@ -61,7 +66,7 @@ class SuccessfulBuild(BaseModel):
     status: SuccessStatus = Field(
         description="Status code indicating how the build succeeded.",
     )
-    built_outputs: dict[str, Any] = Field(
+    built_outputs: dict[str, BuildTraceValue] = Field(
         alias="builtOutputs",
         default_factory=dict,
         description="Mapping from output names to their build trace entries.",

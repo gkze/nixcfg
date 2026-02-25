@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-from typing import Protocol, cast
+from typing import Protocol
 
-from .base import run_nix
+from .base import _resolve_timeout_alias, run_nix
 
 
 class _ModelValidator[T](Protocol):
@@ -20,10 +20,18 @@ type JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 async def run_nix_json(
     args: list[str],
     *,
-    timeout: float,  # noqa: ASYNC109
+    command_timeout: float | None = None,
+    **kwargs: object,
 ) -> JsonValue:
     """Run a Nix command and parse stdout as JSON."""
-    result = await run_nix(args, timeout=timeout)
+    if command_timeout is None and "timeout" not in kwargs:
+        msg = "command_timeout is required"
+        raise TypeError(msg)
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout or 0.0,
+        kwargs=kwargs,
+    )
+    result = await run_nix(args, timeout=timeout_seconds)
     return json.loads(result.stdout)
 
 
@@ -32,10 +40,12 @@ def as_model_mapping[T](raw: object, model: _ModelValidator[T]) -> dict[str, T]:
     if not isinstance(raw, dict):
         msg = f"Expected JSON object, got {type(raw)}"
         raise TypeError(msg)
-    if not all(isinstance(key, str) for key in raw):
-        msg = "Expected JSON object with string keys"
-        raise TypeError(msg)
-    raw_mapping = cast("dict[str, object]", raw)
+    raw_mapping: dict[str, object] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            msg = "Expected JSON object with string keys"
+            raise TypeError(msg)
+        raw_mapping[key] = value
     return {key: model.model_validate(value) for key, value in raw_mapping.items()}
 
 

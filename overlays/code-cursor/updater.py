@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
+from lib.update import process as update_process
+from lib.update.events import (
+    ValueDrain,
+    drain_value_events,
+    expect_hash_mapping,
+    require_value,
+)
 from lib.update.updaters.platform_api import PlatformAPIUpdater
 
 if TYPE_CHECKING:
@@ -39,8 +46,31 @@ class CodeCursorUpdater(PlatformAPIUpdater):
         # platform_info is keyed by nix platform (aarch64-darwin, etc.);
         # reverse-lookup the nix key for the given API platform name.
         nix_plat = next(n for n, a in self.PLATFORMS.items() if a == _api_platform)
-        platform_info = info.metadata["platform_info"]
-        return platform_info[nix_plat]["downloadUrl"]
+        platform_info = info.metadata.get("platform_info")
+        if not isinstance(platform_info, dict):
+            msg = "Expected platform_info mapping in Cursor metadata"
+            raise TypeError(msg)
+        platform_info_map: dict[str, object] = {}
+        for key, value in platform_info.items():
+            if not isinstance(key, str):
+                msg = "Expected string keys in platform_info metadata"
+                raise TypeError(msg)
+            platform_info_map[key] = value
+        payload = platform_info_map.get(nix_plat)
+        if not isinstance(payload, dict):
+            msg = f"Expected platform payload for {nix_plat}"
+            raise TypeError(msg)
+        payload_map: dict[str, object] = {}
+        for key, value in payload.items():
+            if not isinstance(key, str):
+                msg = f"Expected string keys in platform payload for {nix_plat}"
+                raise TypeError(msg)
+            payload_map[key] = value
+        download_url = payload_map.get("downloadUrl")
+        if not isinstance(download_url, str):
+            msg = f"Expected downloadUrl string for {nix_plat}"
+            raise TypeError(msg)
+        return download_url
 
     async def fetch_checksums(
         self,
@@ -53,18 +83,15 @@ class CodeCursorUpdater(PlatformAPIUpdater):
         prefetch each artifact and derive the SRI hash.
         """
         _ = session
-        from lib.update.events import ValueDrain, drain_value_events
-        from lib.update.process import compute_url_hashes
-        from lib.update.updaters.base import HashMapping, require_value
-
         urls = {
             nix_plat: self._download_url(api_plat, info)
             for nix_plat, api_plat in self.PLATFORMS.items()
         }
-        hashes_drain = ValueDrain[HashMapping]()
+        hashes_drain = ValueDrain[dict[str, str]]()
         async for _event in drain_value_events(
-            compute_url_hashes(self.name, urls.values()),
+            update_process.compute_url_hashes(self.name, urls.values()),
             hashes_drain,
+            parse=expect_hash_mapping,
         ):
             pass
         hashes_by_url = require_value(hashes_drain, "Missing hash output")

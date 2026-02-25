@@ -1,8 +1,7 @@
 """Tests for lib.nix model types and utilities."""
 
-# ruff: noqa: S101
-
 import json
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -16,14 +15,18 @@ from lib.nix.models.build_result import (
 )
 from lib.nix.models.flake_lock import FlakeLock, LockedRef
 from lib.nix.models.hash import HashAlgorithm, NixHash, is_sri, make_sri, parse_sri
-from lib.nix.models.sources import SourceEntry, SourcesFile
+from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourcesFile
 from lib.nix.models.store_path import (
     StorePath,
     full_path,
     is_derivation,
     parse_store_path,
 )
+from lib.nix.tests._assertions import check, expect_instance, expect_not_none
 from lib.update.paths import REPO_ROOT, package_file_map
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Reusable adapter for Annotated types that aren't full BaseModels.
 _NixHashAdapter = TypeAdapter(NixHash)
@@ -50,7 +53,7 @@ class TestNixHash:
         ]
         for sri in valid:
             result = _NixHashAdapter.validate_python(sri)
-            assert result == sri
+            check(result == sri)
 
     def test_invalid_sri_hashes(self) -> None:
         """Missing algorithm prefix, bad base64 chars, and empty string all fail."""
@@ -66,8 +69,8 @@ class TestNixHash:
     def test_parse_sri(self) -> None:
         """parse_sri correctly splits algorithm and digest."""
         algo, digest = parse_sri("sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=")
-        assert algo is HashAlgorithm.sha256
-        assert digest == "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
+        check(algo is HashAlgorithm.sha256)
+        check(digest == "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=")
 
     def test_parse_sri_invalid(self) -> None:
         """parse_sri raises ValueError on bad input."""
@@ -82,7 +85,7 @@ class TestNixHash:
             HashAlgorithm.sha256,
             "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=",
         )
-        assert sri == "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
+        check(sri == "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=")
 
     def test_make_sri_invalid_digest(self) -> None:
         """make_sri raises ValueError when the digest is invalid."""
@@ -91,8 +94,8 @@ class TestNixHash:
 
     def test_is_sri_valid(self) -> None:
         """is_sri returns True for well-formed SRI hash strings."""
-        assert is_sri("sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=") is True
-        assert (
+        check(is_sri("sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=") is True)
+        check(
             is_sri(
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             )
@@ -101,10 +104,10 @@ class TestNixHash:
 
     def test_is_sri_invalid(self) -> None:
         """is_sri returns False for non-SRI strings."""
-        assert is_sri("0000000000000000000000000000000000000000000000000000") is False
-        assert is_sri("sha256:abc123") is False
-        assert is_sri("") is False
-        assert is_sri("not-a-hash") is False
+        check(is_sri("0000000000000000000000000000000000000000000000000000") is False)
+        check(is_sri("sha256:abc123") is False)
+        check(is_sri("") is False)
+        check(is_sri("not-a-hash") is False)
 
 
 # =========================================================================
@@ -122,7 +125,7 @@ class TestStorePath:
         """A valid Nix32 hash + name passes validation."""
         sp = f"{self.VALID_HASH}-hello-2.12.1"
         result = _StorePathAdapter.validate_python(sp)
-        assert result == sp
+        check(result == sp)
 
     def test_invalid_store_path(self) -> None:
         """Too short, wrong chars, and missing dash all fail validation."""
@@ -139,24 +142,24 @@ class TestStorePath:
         """parse_store_path correctly splits hash and name parts."""
         sp = f"{self.VALID_HASH}-foo-1.0"
         hash_part, name_part = parse_store_path(sp)
-        assert hash_part == self.VALID_HASH
-        assert name_part == "foo-1.0"
+        check(hash_part == self.VALID_HASH)
+        check(name_part == "foo-1.0")
 
     def test_full_path(self) -> None:
         """full_path prepends /nix/store/."""
         sp = f"{self.VALID_HASH}-foo"
-        assert full_path(sp) == f"/nix/store/{sp}"
+        check(full_path(sp) == f"/nix/store/{sp}")
 
     def test_full_path_custom_store_dir(self) -> None:
         """full_path respects a custom store directory."""
         sp = f"{self.VALID_HASH}-foo"
-        assert full_path(sp, "/custom/store") == f"/custom/store/{sp}"
+        check(full_path(sp, "/custom/store") == f"/custom/store/{sp}")
 
     def test_is_derivation(self) -> None:
         """True for .drv paths, False for others."""
-        assert is_derivation(f"{self.VALID_HASH}-foo.drv") is True
-        assert is_derivation(f"{self.VALID_HASH}-foo") is False
-        assert is_derivation(f"{self.VALID_HASH}-foo-1.0") is False
+        check(is_derivation(f"{self.VALID_HASH}-foo.drv") is True)
+        check(is_derivation(f"{self.VALID_HASH}-foo") is False)
+        check(is_derivation(f"{self.VALID_HASH}-foo-1.0") is False)
 
 
 # =========================================================================
@@ -170,14 +173,14 @@ class TestBuildResult:
     def test_successful_build(self) -> None:
         """SuccessfulBuild has Literal[True] success field."""
         build = SuccessfulBuild(status=SuccessStatus.Built)
-        assert build.success is True
-        assert build.status is SuccessStatus.Built
+        check(build.success is True)
+        check(build.status is SuccessStatus.Built)
 
     def test_successful_build_all_statuses(self) -> None:
         """All SuccessStatus values are accepted."""
         for status in SuccessStatus:
             build = SuccessfulBuild(status=status)
-            assert build.success is True
+            check(build.success is True)
 
     def test_failed_build(self) -> None:
         """FailedBuild has Literal[False] success field."""
@@ -185,9 +188,9 @@ class TestBuildResult:
             status=FailureStatus.PermanentFailure,
             errorMsg="something broke",
         )
-        assert build.success is False
-        assert build.status is FailureStatus.PermanentFailure
-        assert build.error_msg == "something broke"
+        check(build.success is False)
+        check(build.status is FailureStatus.PermanentFailure)
+        check(build.error_msg == "something broke")
 
     def test_hash_mismatch_status(self) -> None:
         """is_hash_mismatch() returns True for HashMismatch status."""
@@ -195,7 +198,7 @@ class TestBuildResult:
             status=FailureStatus.HashMismatch,
             errorMsg="hash mismatch in fixed-output derivation",
         )
-        assert is_hash_mismatch(build) is True
+        check(is_hash_mismatch(build) is True)
 
     def test_non_hash_mismatch_status(self) -> None:
         """is_hash_mismatch() returns False for other failure statuses."""
@@ -203,7 +206,7 @@ class TestBuildResult:
             status=FailureStatus.TransientFailure,
             errorMsg="network error",
         )
-        assert is_hash_mismatch(build) is False
+        check(is_hash_mismatch(build) is False)
 
 
 # =========================================================================
@@ -217,39 +220,88 @@ class TestFlakeLock:
     @pytest.fixture
     def lock(self) -> FlakeLock:
         """Load the real flake.lock from the project root."""
-        assert FLAKE_LOCK_PATH.exists(), f"flake.lock not found at {FLAKE_LOCK_PATH}"
+        check(FLAKE_LOCK_PATH.exists(), f"flake.lock not found at {FLAKE_LOCK_PATH}")
         return FlakeLock.from_file(FLAKE_LOCK_PATH)
 
     def test_flake_lock_from_file(self, lock: FlakeLock) -> None:
         """Load the actual flake.lock; verify version=7, nodes exist, input_names returns a list."""
-        assert lock.version == FLAKE_LOCK_VERSION
-        assert len(lock.nodes) > 0
+        check(lock.version == FLAKE_LOCK_VERSION)
+        check(len(lock.nodes) > 0)
         names = lock.input_names
-        assert isinstance(names, list)
-        assert len(names) > 0
+        check(isinstance(names, list))
+        check(len(names) > 0)
 
     def test_flake_lock_root_node(self, lock: FlakeLock) -> None:
         """root_node property works and has inputs."""
         root = lock.root_node
-        assert root is not None
-        assert root.inputs is not None
-        assert len(root.inputs) > 0
+        root = expect_not_none(root)
+        root_inputs = expect_not_none(root.inputs)
+        check(len(root_inputs) > 0)
         # Root node should not have locked/original
-        assert root.locked is None
-        assert root.original is None
+        check(root.locked is None)
+        check(root.original is None)
 
     def test_flake_lock_get_locked(self, lock: FlakeLock) -> None:
         """get_locked returns LockedRef with narHash for a real input."""
         # Pick the first available input name.
         first_input = lock.input_names[0]
         locked = lock.get_locked(first_input)
-        assert locked is not None
-        assert isinstance(locked, LockedRef)
-        assert locked.nar_hash.startswith("sha256-")
+        locked = expect_not_none(locked)
+        check(isinstance(locked, LockedRef))
+        check(locked.nar_hash.startswith("sha256-"))
 
     def test_flake_lock_get_locked_missing(self, lock: FlakeLock) -> None:
         """get_locked returns None for a non-existent input."""
-        assert lock.get_locked("__nonexistent_input__") is None
+        check(lock.get_locked("__nonexistent_input__") is None)
+
+    def test_flake_lock_from_dict_and_no_root_inputs(self) -> None:
+        """from_dict parses lock data and handles a root without inputs."""
+        lock = FlakeLock.from_dict(
+            {
+                "nodes": {"root": {}},
+                "version": FLAKE_LOCK_VERSION,
+            },
+        )
+        check(lock.version == FLAKE_LOCK_VERSION)
+        check(lock.input_names == [])
+
+    def test_flake_lock_get_locked_path_resolution_edges(self) -> None:
+        """get_locked resolves follow paths and returns None for invalid branches."""
+        sri = "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
+        lock = FlakeLock.from_dict(
+            {
+                "nodes": {
+                    "bridge": {
+                        "inputs": {
+                            "leaf": "target",
+                            "multi": ["not", "a", "string"],
+                        },
+                    },
+                    "root": {
+                        "inputs": {
+                            "badRef": ["bridge", "multi"],
+                            "follows": ["bridge", "leaf"],
+                            "ghostFinal": "missing-target",
+                            "missingNode": ["missing-bridge", "leaf"],
+                        },
+                    },
+                    "target": {
+                        "locked": {
+                            "narHash": sri,
+                            "type": "github",
+                        },
+                    },
+                },
+                "version": FLAKE_LOCK_VERSION,
+            },
+        )
+
+        locked = lock.get_locked("follows")
+        locked = expect_not_none(locked)
+        check(locked.nar_hash == sri)
+        check(lock.get_locked("missingNode") is None)
+        check(lock.get_locked("badRef") is None)
+        check(lock.get_locked("ghostFinal") is None)
 
 
 # =========================================================================
@@ -264,7 +316,7 @@ class TestSourcesFile:
     def sources(self) -> SourcesFile:
         """Aggregate all per-package sources.json into a SourcesFile."""
         pkg_files = package_file_map("sources.json")
-        assert pkg_files, "no per-package sources.json files found"
+        check(pkg_files, "no per-package sources.json files found")
         entries = {
             name: SourceEntry.model_validate(json.loads(path.read_text()))
             for name, path in pkg_files.items()
@@ -273,14 +325,209 @@ class TestSourcesFile:
 
     def test_sources_file_load(self, sources: SourcesFile) -> None:
         """Aggregate per-package sources; verify entries exist."""
-        assert len(sources.entries) > 0
+        check(len(sources.entries) > 0)
         # Each entry should have hashes.
         for name, entry in sources.entries.items():
-            assert entry.hashes is not None, f"entry {name!r} missing hashes"
+            check(entry.hashes is not None, f"entry {name!r} missing hashes")
 
     def test_sources_file_round_trip(self, sources: SourcesFile) -> None:
         """Load, to_dict, from_dict — verify structural equality."""
         as_dict = sources.to_dict()
         reloaded = SourcesFile.from_dict(as_dict)
-        assert reloaded.to_dict() == as_dict
-        assert set(reloaded.entries.keys()) == set(sources.entries.keys())
+        check(reloaded.to_dict() == as_dict)
+        check(set(reloaded.entries.keys()) == set(sources.entries.keys()))
+
+    def test_hash_collection_parsing_and_primary_hash_variants(self) -> None:
+        """HashCollection handles mapping/list/input-shape edge cases."""
+        h1 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        h2 = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+
+        entry = HashEntry.create("sha256", h1)
+        entries_collection = HashCollection.from_value([entry])
+        check(entries_collection.to_json() == [entry.to_dict()])
+        check(entries_collection.primary_hash() == h1)
+
+        mapping_collection = HashCollection.from_value({"darwin": h2, "linux": h2})
+        check(mapping_collection.to_json() == {"darwin": h2, "linux": h2})
+        check(mapping_collection.primary_hash() == h2)
+
+        copied_shape = HashCollection.model_validate(mapping_collection).model_dump()
+        check(
+            copied_shape
+            == {
+                "entries": None,
+                "mapping": {"darwin": h2, "linux": h2},
+            }
+        )
+
+        with pytest.raises(TypeError, match="Hash mapping values must be strings"):
+            HashCollection.model_validate({"darwin": 123})
+
+        with pytest.raises(ValueError, match="SRI format"):
+            HashCollection.from_value({"darwin": "not-a-sri-hash"})
+
+        with pytest.raises(ValidationError, match="Hashes must be a list or dict"):
+            HashCollection.model_validate(1)
+
+        check(HashCollection().to_json() == {})
+
+    def test_hash_collection_merge_paths(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Merge supports entries and mappings, rejects incompatible shapes."""
+        h1 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        h2 = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+        fake = "sha256-FAKEBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+        monkeypatch.setattr(HashCollection, "FAKE_HASH_PREFIX", "sha256-FAKE")
+
+        entry_old = HashEntry.create("sha256", h1)
+        entry_new = HashEntry.create("sha256", h2)
+        entry_fake = HashEntry.create("sha256", fake)
+
+        merged_entries = HashCollection(entries=[entry_old, entry_fake]).merge(
+            HashCollection(entries=[entry_new]),
+        )
+        entries = expect_not_none(merged_entries.entries)
+        check([e.hash for e in entries] == [h2])
+
+        merged_mapping = HashCollection(mapping={"darwin": h1, "linux": fake}).merge(
+            HashCollection(mapping={"linux": h2}),
+        )
+        check(merged_mapping.mapping == {"darwin": h1, "linux": h2})
+
+        with pytest.raises(
+            ValueError,
+            match="Cannot merge hash entries with hash mapping",
+        ):
+            HashCollection(entries=[entry_old]).merge(
+                HashCollection(mapping={"linux": h1})
+            )
+
+        with pytest.raises(
+            ValueError,
+            match="Cannot merge hash mapping with hash entries",
+        ):
+            HashCollection(mapping={"linux": h1}).merge(
+                HashCollection(entries=[entry_old])
+            )
+
+        other = HashCollection(mapping={"linux": h2})
+        empty_constructed = HashCollection.model_construct(entries=None, mapping=None)
+        check(empty_constructed.merge(other) is other)
+
+    def test_source_entry_sources_file_merge_load_save(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """SourceEntry/SourcesFile merging, loading, and saving paths."""
+        h1 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        h2 = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+
+        base_entry = SourceEntry.model_validate({
+            "commit": "a" * 40,
+            "drvHash": "drv-base",
+            "hashes": {"linux": h1},
+            "input": "base-input",
+            "urls": {"upstream": "https://example.invalid/base.tar.gz"},
+            "version": "1.0.0",
+        })
+        incoming_entry = SourceEntry.model_validate({
+            "commit": "b" * 40,
+            "drvHash": "drv-incoming",
+            "hashes": {"linux": h2},
+            "input": "incoming-input",
+            "urls": {"mirror": "https://example.invalid/mirror.tar.gz"},
+            "version": "2.0.0",
+        })
+        merged_entry = base_entry.merge(incoming_entry)
+        check(merged_entry.version == "2.0.0")
+        check(merged_entry.input == "incoming-input")
+        check(
+            merged_entry.urls
+            == {
+                "mirror": "https://example.invalid/mirror.tar.gz",
+                "upstream": "https://example.invalid/base.tar.gz",
+            }
+        )
+
+        with_schema = {
+            "$schema": "https://example.invalid/sources.schema.json",
+            "pkgA": {
+                "hashes": {"linux": h1},
+                "version": "1.0.0",
+            },
+        }
+        parsed = SourcesFile.from_dict(with_schema)
+        check("$schema" not in parsed.entries)
+        check("pkgA" in parsed.entries)
+
+        missing = tmp_path / "missing-sources.json"
+        check(SourcesFile.load(missing).entries == {})
+
+        existing = tmp_path / "sources.json"
+        existing.write_text(json.dumps(with_schema), encoding="utf-8")
+        loaded = SourcesFile.load(existing)
+        check("pkgA" in loaded.entries)
+
+        current = SourcesFile.from_dict(
+            {
+                "pkgA": {
+                    "hashes": {"linux": h1},
+                    "version": "1.0.0",
+                },
+            },
+        )
+        updates = SourcesFile.from_dict(
+            {
+                "pkgA": {
+                    "hashes": {"linux": h2},
+                    "version": "2.0.0",
+                },
+                "pkgB": {
+                    "hashes": {"linux": h1},
+                    "version": "1.0.0",
+                },
+            },
+        )
+        merged_file = current.merge(updates)
+        check(set(merged_file.entries) == {"pkgA", "pkgB"})
+        check(merged_file.entries["pkgA"].version == "2.0.0")
+
+        captured: dict[str, object] = {}
+
+        def _atomic_write_text(path: Path, payload: str, *, mkdir: bool) -> None:
+            captured["mkdir"] = mkdir
+            captured["path"] = path
+            captured["payload"] = payload
+
+        monkeypatch.setattr("lib.update.io.atomic_write_text", _atomic_write_text)
+        out_path = tmp_path / "written-sources.json"
+        merged_file.save(out_path)
+        check(captured["path"] == out_path)
+        check(captured["mkdir"] is True)
+        payload = expect_instance(captured["payload"], str)
+        check(payload.endswith("\n"))
+
+    def test_sources_file_json_schema_structure(self) -> None:
+        """Generated schema exposes hash collection as oneOf array/dict."""
+        schema = SourcesFile.json_schema()
+        defs_obj = expect_instance(schema.get("$defs"), dict)
+        defs: dict[str, object] = {}
+        for raw_key, value in defs_obj.items():
+            key = expect_instance(raw_key, str)
+            defs[key] = value
+
+        hash_collection_def = expect_instance(defs.get("HashCollection"), dict)
+        hash_collection_def_map: dict[str, object] = {}
+        for raw_key, value in hash_collection_def.items():
+            key = expect_instance(raw_key, str)
+            hash_collection_def_map[key] = value
+
+        one_of = expect_instance(hash_collection_def_map.get("oneOf"), list)
+        check(one_of)
+        first_variant_obj = one_of[0]
+        first_variant_obj = expect_instance(first_variant_obj, dict)
+        first_variant: dict[str, object] = {}
+        for raw_key, value in first_variant_obj.items():
+            key = expect_instance(raw_key, str)
+            first_variant[key] = value
+        check(first_variant["type"] == "array")

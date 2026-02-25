@@ -9,11 +9,11 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .hash import NixHash  # noqa: TC001
+from lib.update import io as update_io
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -51,6 +51,8 @@ HashType = Literal[
     "vendorHash",
 ]
 
+type JsonObject = dict[str, object]
+
 # ---------------------------------------------------------------------------
 # HashEntry
 # ---------------------------------------------------------------------------
@@ -65,7 +67,7 @@ class HashEntry(BaseModel):
     )
 
     hash_type: HashType = Field(alias="hashType")
-    hash: NixHash
+    hash: str
     platform: str | None = None  # Optional platform for platform-specific hashes
     url: str | None = None
     urls: dict[str, str] | None = None
@@ -81,17 +83,43 @@ class HashEntry(BaseModel):
         return _validate_sri_hash(v)
 
     @classmethod
-    def create(  # noqa: PLR0913
+    def create(
         cls,
         hash_type: HashType,
         hash_value: str,
-        *,
-        git_dep: str | None = None,
-        platform: str | None = None,
-        url: str | None = None,
-        urls: dict[str, str] | None = None,
+        **kwargs: object,
     ) -> HashEntry:
         """Build a validated hash entry from plain values."""
+
+        def _optional_str(name: str, value: object) -> str | None:
+            if value is None or isinstance(value, str):
+                return value
+            msg = f"{name} must be a string when provided"
+            raise TypeError(msg)
+
+        def _optional_urls(value: object) -> dict[str, str] | None:
+            if value is None:
+                return None
+            if not isinstance(value, dict):
+                msg = "urls must be a mapping of platform to URL"
+                raise TypeError(msg)
+            parsed: dict[str, str] = {}
+            for key, item in value.items():
+                if not isinstance(key, str) or not isinstance(item, str):
+                    msg = "urls must contain only string keys and values"
+                    raise TypeError(msg)
+                parsed[key] = item
+            return parsed
+
+        git_dep = _optional_str("git_dep", kwargs.pop("git_dep", None))
+        platform = _optional_str("platform", kwargs.pop("platform", None))
+        url = _optional_str("url", kwargs.pop("url", None))
+        urls = _optional_urls(kwargs.pop("urls", None))
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            msg = f"Unexpected HashEntry.create kwargs: {unexpected}"
+            raise TypeError(msg)
+
         return cls.model_validate(
             {
                 "gitDep": git_dep,
@@ -103,24 +131,21 @@ class HashEntry(BaseModel):
             },
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> JsonObject:
         """Return this entry as a stable, JSON-serializable mapping."""
-        return dict(
-            sorted(
-                {
-                    k: v
-                    for k, v in {
-                        "gitDep": self.git_dep,
-                        "hash": self.hash,
-                        "hashType": self.hash_type,
-                        "platform": self.platform,
-                        "url": self.url,
-                        "urls": self.urls,
-                    }.items()
-                    if v is not None
-                }.items(),
-            ),
-        )
+        result: JsonObject = {
+            "hash": self.hash,
+            "hashType": self.hash_type,
+        }
+        if self.git_dep is not None:
+            result["gitDep"] = self.git_dep
+        if self.platform is not None:
+            result["platform"] = self.platform
+        if self.url is not None:
+            result["url"] = self.url
+        if self.urls is not None:
+            result["urls"] = dict(self.urls)
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -149,15 +174,24 @@ class HashCollection(BaseModel):
     def parse_input(cls, data: object) -> dict[str, object]:
         """Normalize list/dict input into the model's internal shape."""
         if isinstance(data, dict):
-            data_dict = cast("dict[str, object]", data)
-            if "entries" in data or "mapping" in data:
+            data_dict: dict[str, object] = {}
+            for key, value in data.items():
+                if not isinstance(key, str):
+                    msg = "Hash mapping keys must be strings"
+                    raise TypeError(msg)
+                data_dict[key] = value
+
+            if "entries" in data_dict or "mapping" in data_dict:
                 return data_dict
-            for hash_value in data_dict.values():
+
+            mapping: HashMapping = {}
+            for platform, hash_value in data_dict.items():
                 if not isinstance(hash_value, str):
                     msg = "Hash mapping values must be strings"
                     raise TypeError(msg)
                 _validate_sri_hash(hash_value)
-            return {"mapping": cast("HashMapping", data_dict)}
+                mapping[platform] = hash_value
+            return {"mapping": mapping}
         if isinstance(data, list):
             return {"entries": data}
         if isinstance(data, HashCollection):
@@ -165,7 +199,7 @@ class HashCollection(BaseModel):
         msg = "Hashes must be a list or dict"
         raise ValueError(msg)
 
-    def to_json(self) -> dict[str, Any] | list[dict[str, Any]]:
+    def to_json(self) -> HashMapping | list[JsonObject]:
         """Return hashes in their canonical JSON representation."""
         if self.entries is not None:
             return [entry.to_dict() for entry in self.entries]
@@ -260,24 +294,22 @@ class SourceEntry(BaseModel):
     commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
     drv_hash: str | None = Field(default=None, alias="drvHash")
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> JsonObject:
         """Return this source entry as a stable, JSON-serializable mapping."""
-        return dict(
-            sorted(
-                {
-                    k: v
-                    for k, v in {
-                        "drvHash": self.drv_hash,
-                        "hashes": self.hashes.to_json(),
-                        "commit": self.commit,
-                        "input": self.input,
-                        "urls": self.urls,
-                        "version": self.version,
-                    }.items()
-                    if v is not None
-                }.items(),
-            ),
-        )
+        result: JsonObject = {
+            "hashes": self.hashes.to_json(),
+        }
+        if self.drv_hash is not None:
+            result["drvHash"] = self.drv_hash
+        if self.commit is not None:
+            result["commit"] = self.commit
+        if self.input is not None:
+            result["input"] = self.input
+        if self.urls is not None:
+            result["urls"] = dict(self.urls)
+        if self.version is not None:
+            result["version"] = self.version
+        return result
 
     def merge(self, other: SourceEntry) -> SourceEntry:
         """Merge *other* into this entry (other takes priority for scalars)."""
@@ -285,13 +317,15 @@ class SourceEntry(BaseModel):
         merged_urls: dict[str, str] | None = None
         if self.urls or other.urls:
             merged_urls = {**(self.urls or {}), **(other.urls or {})}
-        return SourceEntry(
-            hashes=merged_hashes,
-            version=other.version or self.version,
-            input=other.input or self.input,
-            urls=merged_urls,
-            commit=other.commit or self.commit,
-            drv_hash=other.drv_hash or self.drv_hash,
+        return SourceEntry.model_validate(
+            {
+                "hashes": merged_hashes,
+                "version": other.version or self.version,
+                "input": other.input or self.input,
+                "urls": merged_urls,
+                "commit": other.commit or self.commit,
+                "drvHash": other.drv_hash or self.drv_hash,
+            },
         )
 
 
@@ -308,10 +342,13 @@ class SourcesFile(BaseModel):
     entries: dict[str, SourceEntry]
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> SourcesFile:
+    def from_dict(cls, data: Mapping[str, object]) -> SourcesFile:
         """Parse raw ``sources.json`` data into typed source entries."""
-        entries = {}
+        entries: dict[str, SourceEntry] = {}
         for name, entry in data.items():
+            if not isinstance(name, str):
+                msg = "sources.json top-level keys must be strings"
+                raise TypeError(msg)
             if name == "$schema":
                 continue
             entries[name] = SourceEntry.model_validate(entry)
@@ -322,9 +359,19 @@ class SourcesFile(BaseModel):
         """Load ``sources.json`` from *path*, returning an empty file if missing."""
         if not path.exists():
             return cls(entries={})
-        return cls.from_dict(json.loads(path.read_text()))
+        raw = json.loads(path.read_text())
+        if not isinstance(raw, dict):
+            msg = "sources.json top-level value must be a JSON object"
+            raise TypeError(msg)
+        data: dict[str, object] = {}
+        for key, value in raw.items():
+            if not isinstance(key, str):
+                msg = "sources.json top-level keys must be strings"
+                raise TypeError(msg)
+            data[key] = value
+        return cls.from_dict(data)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, JsonObject]:
         """Serialize all entries to plain Python objects."""
         return {name: entry.to_dict() for name, entry in self.entries.items()}
 
@@ -340,13 +387,11 @@ class SourcesFile(BaseModel):
 
     def save(self, path: Path) -> None:
         """Atomically write the file contents to *path*."""
-        from lib.update.io import atomic_write_text
-
         payload = json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
-        atomic_write_text(path, payload, mkdir=True)
+        update_io.atomic_write_text(path, payload, mkdir=True)
 
     @classmethod
-    def json_schema(cls) -> dict[str, Any]:
+    def json_schema(cls) -> dict[str, object]:
         """Return the JSON schema for the top-level ``sources.json`` object."""
         entry_schema = SourceEntry.model_json_schema()
         defs = dict(entry_schema.get("$defs", {}))

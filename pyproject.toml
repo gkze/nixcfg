@@ -1,85 +1,170 @@
 [build-system]
-requires = ["setuptools>=75.0"]
+# Build-time backend dependencies required to build/install this project.
+requires = ["setuptools>=82.0.0"]
+# PEP 517 backend implementation used by packaging tools.
 build-backend = "setuptools.build_meta"
 
 [project]
+# Distribution name used by packaging metadata.
 name = "nixcfg"
+# Placeholder project version for local tooling package.
 version = "0.0.0"
+# Short human-readable package description.
 description = "Editor tooling dependencies"
+# Minimum Python interpreter version supported.
 requires-python = ">=3.14"
+# Runtime dependencies required by nixcfg tooling.
 dependencies = [
-    "aiohttp>=3.13.3",
-    "aiohttp-retry>=2.9.1",
-    "filelock>=3.20.3",
-    "keyring>=25.7.0",
-    "lz4>=4.4.5",
-    "nix-manipulator",
-    "packaging>=26.0",
-    "pydantic>=2.12.5",
-    "pydantic-settings>=2.12.0",
-    "pyyaml>=6.0.3",
-    "rich>=14.3.2",
-    "typer>=0.23.0",
+  "aiohttp>=3.13.3",
+  "aiohttp-retry>=2.9.1",
+  "filelock>=3.24.3",
+  "keyring>=25.7.0",
+  "lz4>=4.4.5",
+  "nix-manipulator",
+  "packaging>=26.0",
+  "pydantic>=2.12.5",
+  "pydantic-settings>=2.13.1",
+  "pyyaml>=6.0.3",
+  "rich>=14.3.3",
+  "typer>=0.24.1",
 ]
 
 [project.scripts]
+# Console script entrypoint: `nixcfg` invokes `nixcfg.main`.
 nixcfg = "nixcfg:main"
 
 [project.optional-dependencies]
-codegen = ["datamodel-code-generator[http]>=0.53.0", "referencing>=0.37.0"]
+# Extra dependencies needed for schema code generation workflows.
+codegen = ["datamodel-code-generator[http]>=0.54.0", "referencing>=0.37.0"]
 
 [tool.ruff]
+# Python language level Ruff should target.
 target-version = "py314"
+# Enable preview Ruff behavior/rules for stricter early adoption.
 preview = true
+# Treat these folders as namespace package roots.
 namespace-packages = ["overlays", "packages"]
+# Include extensionless Python scripts in Ruff file discovery.
+extend-include = ["home/george/bin/git-ignore", "home/george/bin/zen-folders"]
 
 [tool.ruff.lint]
+# Enable all lint rules, then selectively carve out intentional exceptions.
 select = ["ALL"]
 # D203 and D213 conflict with each other; keep D211-style spacing.
 # COM812 conflicts with the Ruff formatter.
-# PLC0415 — lazy imports in CLI entrypoints are intentional for startup perf.
-ignore = ["COM812", "D203", "D213", "PLC0415"]
+# Rules intentionally disabled due to formatter/docstyle conflicts.
+ignore = ["COM812", "D203", "D213"]
+# Enable preview lint rules.
 preview = true
+# Require preview rules to be explicitly enabled.
 explicit-preview-rules = true
 
 [tool.ruff.lint.isort]
+# Treat project-local modules as first-party for import sorting.
 known-first-party = ["lib", "nixcfg"]
 
 [tool.ruff.lint.pycodestyle]
+# Soft line-length limit; flag lines above this threshold.
 max-line-length = 100 # allow up to 100, flag above
 
+[tool.ruff.lint.mccabe]
+# Allow moderate orchestration complexity in CLI/update pipeline helpers.
+max-complexity = 20
+
+[tool.ruff.lint.pylint]
+# Keep argument/branch/return limits strict but practical for command APIs.
+max-args = 25
+max-branches = 20
+max-returns = 7
+
 [tool.uv]
+# Indicate that this repository is an installable package project.
 package = true
 
 [tool.uv.sources]
+# Resolve `nix-manipulator` from a pinned git revision instead of PyPI.
 nix-manipulator = { git = "https://github.com/hoh/nix-manipulator.git", rev = "dbe47853d2f48b6314a9e07e5bad6ba78bdbf6bc" }
 
 [tool.setuptools]
+# Declare this project as a single-module distribution.
 py-modules = ["nixcfg"]
 
 [tool.setuptools.packages.find]
+# Include package directories under the `lib` namespace.
 include = ["lib*"]
 
 [tool.ty]
+# Ty configuration namespace (kept explicit for readability).
 
 [tool.ty.environment]
+# Project roots Ty should use for resolution and config discovery.
+root = ["."]
+# Python version Ty should assume when analyzing types.
 python-version = "3.14"
+
+[tool.ty.src]
+# Respect `.gitignore` and related ignore files during discovery.
+respect-ignore-files = true
+# Explicitly enumerate source and script paths Ty must analyze.
+include = [
+  "nixcfg.py",
+  "lib/**/*.py",
+  "lib/**/*.pyi",
+  "overlays/**/*.py",
+  "overlays/**/*.pyi",
+  "packages/**/*.py",
+  "packages/**/*.pyi",
+  "modules/**/*.py",
+  "modules/**/*.pyi",
+  "home/george/bin/git-ignore",
+  "home/george/bin/zen-folders",
+]
 
 [tool.ty.rules]
 # Maximum strictness: promote everything to error
+all = "error"
+
+[[tool.ty.overrides]]
+# Limit the override below to generated model modules.
+include = ["lib/**/_generated.py"]
+
+[tool.ty.overrides.rules]
+# Keep override strict by default unless explicitly relaxed.
 all = "error"
 # Generated Pydantic models use constrained type helpers (e.g., constr(...))
 # inside annotations; valid for runtime model parsing but rejected by Ty.
 invalid-type-form = "ignore"
 
 [tool.ty.terminal]
+# Exit non-zero when warnings are present.
 error-on-warning = true
 
 [tool.ty.analysis]
+# Do not honor inline suppression comments so diagnostics stay visible.
 respect-type-ignore-comments = false
 
 [tool.pytest.ini_options]
-testpaths = ["lib/nix/tests"]
+# Enforce strict config-key and marker validation.
+addopts = ["--strict-config", "--strict-markers"]
+# Restrict test discovery to the `lib` tree.
+testpaths = ["lib"]
+# Treat unexpected xpass results as failures.
+xfail_strict = true
+
+[tool.coverage.run]
+# Measure branch coverage in addition to line coverage.
+branch = true
+# Limit coverage measurement scope to the primary Python package tree.
+source = ["lib/nix"]
+
+[tool.coverage.report]
+# Enforce minimum total coverage percentage.
+fail_under = 95
+# Exclude test modules from coverage totals.
+omit = ["lib/nix/tests/*"]
+# Show line-level misses in text report output.
+show_missing = true
 
 [dependency-groups]
-dev = ["pytest>=9.0.2", "ruff>=0.15.0", "ty>=0.0.16"]
+# Developer-only tooling dependencies for checks and local CI.
+dev = ["coverage>=7.13.4", "pytest>=9.0.2", "ruff>=0.15.2", "ty>=0.0.18"]

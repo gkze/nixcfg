@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import TypedDict, Unpack
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -85,6 +86,20 @@ DEFAULT_SETTINGS = UpdateSettings()
 DEFAULT_CONFIG = _settings_to_config(DEFAULT_SETTINGS)
 
 
+class _ResolveConfigOverrides(TypedDict, total=False):
+    http_timeout: int | None
+    subprocess_timeout: int | None
+    log_tail_lines: int | None
+    render_interval: float | None
+    user_agent: str | None
+    retries: int | None
+    retry_backoff: float | None
+    fake_hash: str | None
+    max_nix_builds: int | None
+    deno_platforms: str | None
+    deno_deps_platforms: str | tuple[str, ...] | None
+
+
 def resolve_active_config(config: UpdateConfig | None) -> UpdateConfig:
     """Return *config* if provided, otherwise the default configuration."""
     return config or DEFAULT_CONFIG
@@ -105,34 +120,16 @@ def env_bool(name: str, *, default: bool = False) -> bool:
     return default
 
 
-def resolve_config(  # noqa: PLR0913
-    *,
-    http_timeout: int | None = None,
-    subprocess_timeout: int | None = None,
-    log_tail_lines: int | None = None,
-    render_interval: float | None = None,
-    user_agent: str | None = None,
-    retries: int | None = None,
-    retry_backoff: float | None = None,
-    fake_hash: str | None = None,
-    max_nix_builds: int | None = None,
-    deno_platforms: str | None = None,
-) -> UpdateConfig:
+def resolve_config(**overrides: Unpack[_ResolveConfigOverrides]) -> UpdateConfig:
     """Build an UpdateConfig by merging explicit overrides onto env defaults."""
     settings_data = DEFAULT_SETTINGS.model_dump()
-    overrides: dict[str, object] = {
-        "http_timeout": http_timeout,
-        "subprocess_timeout": subprocess_timeout,
-        "log_tail_lines": log_tail_lines,
-        "render_interval": render_interval,
-        "user_agent": user_agent,
-        "retries": retries,
-        "retry_backoff": retry_backoff,
-        "fake_hash": fake_hash,
-        "max_nix_builds": max_nix_builds,
-        "deno_deps_platforms": deno_platforms,
-    }
-    for setting_name, value in overrides.items():
+
+    normalized_overrides: dict[str, object] = dict(overrides)
+    deno_platforms = normalized_overrides.pop("deno_platforms", None)
+    if deno_platforms is not None:
+        normalized_overrides["deno_deps_platforms"] = deno_platforms
+
+    for setting_name, value in normalized_overrides.items():
         if value is not None:
             settings_data[setting_name] = value
 

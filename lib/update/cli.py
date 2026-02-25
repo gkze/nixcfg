@@ -8,13 +8,15 @@ import os
 import shutil
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from pathlib import Path
+from typing import Literal
 
 import aiohttp
 from rich.columns import Columns
 from rich.console import Console
 
 from lib.nix.models.sources import SourceEntry, SourcesFile
+from lib.update.ci.resolve_versions import load_pinned_versions
 from lib.update.config import (
     UpdateConfig,
     env_bool,
@@ -25,13 +27,24 @@ from lib.update.constants import ALL_TOOLS, NIX_BUILD_FAILURE_TAIL_LINES, REQUIR
 from lib.update.events import UpdateEvent
 from lib.update.flake import update_flake_input
 from lib.update.process import run_queue_task
-from lib.update.refs import FlakeInputRef, get_flake_inputs_with_refs, update_refs_task
+from lib.update.refs import (
+    FlakeInputRef,
+    RefTaskOptions,
+    get_flake_inputs_with_refs,
+    update_refs_task,
+)
 from lib.update.sources import (
     load_all_sources,
     save_sources,
     validate_source_discovery_consistency,
 )
-from lib.update.ui import ItemMeta, OperationKind, SummaryStatus, consume_events
+from lib.update.ui import (
+    ConsumeEventsOptions,
+    ItemMeta,
+    OperationKind,
+    SummaryStatus,
+    consume_events,
+)
 from lib.update.updaters import UPDATERS
 from lib.update.updaters.base import DenoDepsHashUpdater, VersionInfo
 
@@ -75,18 +88,21 @@ def check_required_tools(
     needs_sources: bool = True,
 ) -> list[str]:
     """Return names of required CLI tools that are missing from ``$PATH``."""
+    tools: list[str]
     if not needs_sources:
         # refs-only (or explicit --no-sources) mode: don't require hash tooling.
-        tools = list(REQUIRED_TOOLS)
+        tools = [str(tool) for tool in REQUIRED_TOOLS]
     elif source:
         if source in UPDATERS:
             updater_cls = UPDATERS[source]
-            tools = list(getattr(updater_cls, "required_tools", ALL_TOOLS))
+            tools = [
+                str(tool) for tool in getattr(updater_cls, "required_tools", ALL_TOOLS)
+            ]
         else:
             # ref-only source - only needs nix (and possibly flake-edit)
-            tools = list(REQUIRED_TOOLS)
+            tools = [str(tool) for tool in REQUIRED_TOOLS]
     else:
-        tools = list(ALL_TOOLS)
+        tools = [str(tool) for tool in ALL_TOOLS]
     if include_flake_edit:
         tools.append("flake-edit")
     return [tool for tool in tools if shutil.which(tool) is None]
@@ -205,7 +221,7 @@ class UpdateSummary:
             else:
                 self.no_change.append(name)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, list[str] | bool]:
         """Return a JSON-serializable summary payload."""
         return {
             "updated": self.updated,
@@ -390,48 +406,64 @@ def _merge_source_updates(
     }
 
 
-async def _update_source_task(  # noqa: PLR0913
+@dataclass(frozen=True)
+class _SourceTaskContext:
+    sources: SourcesFile
+    update_input: bool
+    native_only: bool
+    session: aiohttp.ClientSession
+    update_input_lock: asyncio.Lock
+    queue: asyncio.Queue[UpdateEvent | None]
+    config: UpdateConfig | None = None
+    pinned_version: VersionInfo | None = None
+
+
+@dataclass(frozen=True)
+class _SourcesPhaseContext:
+    source_names: list[str]
+    sources: SourcesFile
+    queue: asyncio.Queue[UpdateEvent | None]
+    update_input: bool
+    native_only: bool
+    config: UpdateConfig
+    pinned: dict[str, VersionInfo]
+
+
+async def _update_source_task(
     name: str,
-    sources: SourcesFile,
     *,
-    update_input: bool,
-    native_only: bool,
-    session: aiohttp.ClientSession,
-    update_input_lock: asyncio.Lock,
-    queue: asyncio.Queue[UpdateEvent | None],
-    config: UpdateConfig | None = None,
-    pinned_version: VersionInfo | None = None,
+    context: _SourceTaskContext,
 ) -> None:
     async def _run() -> None:
-        resolved_config = resolve_active_config(config)
-        current = sources.entries.get(name)
+        resolved_config = resolve_active_config(context.config)
+        current = context.sources.entries.get(name)
         updater = UPDATERS[name](config=resolved_config)
         if isinstance(updater, DenoDepsHashUpdater):
-            updater.native_only = native_only
+            updater.native_only = context.native_only
         input_name = getattr(updater, "input_name", None)
-        put = queue.put
+        put = context.queue.put
 
         await put(UpdateEvent.status(name, "Starting update"))
-        if update_input and input_name:
+        if context.update_input and input_name:
             await put(
                 UpdateEvent.status(name, f"Updating flake input '{input_name}'..."),
             )
-            async with update_input_lock:
+            async with context.update_input_lock:
                 async for event in update_flake_input(input_name, source=name):
                     await put(event)
 
         async for event in updater.update_stream(
-            current, session, pinned_version=pinned_version
+            current,
+            context.session,
+            pinned_version=context.pinned_version,
         ):
             await put(event)
 
-    await run_queue_task(source=name, queue=queue, task=_run)
+    await run_queue_task(source=name, queue=context.queue, task=_run)
 
 
-async def run_updates(opts: UpdateOptions) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915
-    """Core update workflow — accepts typed UpdateOptions, returns exit code."""
-    out = OutputOptions(json_output=opts.json, quiet=opts.quiet)
-    config = resolve_config(
+def _resolve_runtime_config(opts: UpdateOptions) -> UpdateConfig:
+    return resolve_config(
         http_timeout=opts.http_timeout,
         subprocess_timeout=opts.subprocess_timeout,
         log_tail_lines=opts.log_tail_lines,
@@ -444,213 +476,346 @@ async def run_updates(opts: UpdateOptions) -> int:  # noqa: C901, PLR0911, PLR09
         deno_platforms=opts.deno_platforms,
     )
 
-    if opts.schema:
-        sys.stdout.write(f"{json.dumps(SourcesFile.json_schema())}\n")
+
+def _handle_schema_request(opts: UpdateOptions) -> int | None:
+    if not opts.schema:
+        return None
+    sys.stdout.write(f"{json.dumps(SourcesFile.json_schema())}\n")
+    return 0
+
+
+def _handle_list_targets_request(opts: UpdateOptions) -> int | None:
+    if not opts.list_targets:
+        return None
+
+    if opts.json:
+        payload = {
+            "sources": sorted(UPDATERS.keys()),
+            "inputs": [
+                {
+                    "name": inp.name,
+                    "owner": inp.owner,
+                    "repo": inp.repo,
+                    "ref": inp.ref,
+                }
+                for inp in get_flake_inputs_with_refs()
+            ],
+        }
+        sys.stdout.write(f"{json.dumps(payload)}\n")
         return 0
 
-    if opts.list_targets:
+    no_color = not sys.stdout.isatty()
+    console = Console(no_color=no_color, highlight=not no_color)
+    console.print("[bold]Available sources (sources.json):[/bold]")
+    console.print(Columns(sorted(UPDATERS.keys()), padding=(0, 2)))
+    console.print()
+    ref_inputs = get_flake_inputs_with_refs()
+    if ref_inputs:
+        console.print("[bold]Flake inputs with version refs:[/bold]")
+        for inp in ref_inputs:
+            console.print(f"  {inp.name}: {inp.owner}/{inp.repo} @ {inp.ref}")
+    return 0
+
+
+def _handle_validate_request(opts: UpdateOptions, out: OutputOptions) -> int | None:
+    if not opts.validate:
+        return None
+
+    try:
+        sources = load_all_sources()
+        validate_source_discovery_consistency()
         if opts.json:
-            payload = {
-                "sources": sorted(UPDATERS.keys()),
-                "inputs": [
-                    {
-                        "name": inp.name,
-                        "owner": inp.owner,
-                        "repo": inp.repo,
-                        "ref": inp.ref,
-                    }
-                    for inp in get_flake_inputs_with_refs()
-                ],
-            }
-            sys.stdout.write(f"{json.dumps(payload)}\n")
-            return 0
-
-        _no_color = not sys.stdout.isatty()
-        console = Console(no_color=_no_color, highlight=not _no_color)
-        console.print("[bold]Available sources (sources.json):[/bold]")
-        console.print(Columns(sorted(UPDATERS.keys()), padding=(0, 2)))
-        console.print()
-        ref_inputs = get_flake_inputs_with_refs()
-        if ref_inputs:
-            console.print("[bold]Flake inputs with version refs:[/bold]")
-            for inp in ref_inputs:
-                console.print(f"  {inp.name}: {inp.owner}/{inp.repo} @ {inp.ref}")
-        return 0
-
-    if opts.validate:
-        try:
-            sources = load_all_sources()
-            validate_source_discovery_consistency()
-            if opts.json:
-                sys.stdout.write(
-                    f"{json.dumps({'valid': True, 'sources': len(sources.entries)})}\n",
-                )
-            else:
-                out.print(
-                    ":heavy_check_mark: Validated sources.json entries: "
-                    f"{len(sources.entries)} sources OK",
-                    style="green",
-                )
-        except (RuntimeError, ValueError, TypeError, OSError) as exc:
-            if opts.json:
-                sys.stdout.write(
-                    f"{json.dumps({'valid': False, 'error': str(exc)})}\n",
-                )
-            else:
-                out.print_error(f":x: Validation failed: {exc}")
-            return 1
+            sys.stdout.write(
+                f"{json.dumps({'valid': True, 'sources': len(sources.entries)})}\n",
+            )
         else:
-            return 0
+            out.print(
+                ":heavy_check_mark: Validated sources.json entries: "
+                f"{len(sources.entries)} sources OK",
+                style="green",
+            )
+    except (RuntimeError, ValueError, TypeError, OSError) as exc:
+        if opts.json:
+            sys.stdout.write(
+                f"{json.dumps({'valid': False, 'error': str(exc)})}\n",
+            )
+        else:
+            out.print_error(f":x: Validation failed: {exc}")
+        return 1
+    return 0
 
-    resolved = ResolvedTargets.from_options(opts)
-    tty_mode = opts.tty
+
+def _resolve_tty_settings(
+    opts: UpdateOptions,
+    resolved: ResolvedTargets,
+) -> tuple[bool, bool]:
     tty_enabled = _is_tty(
-        force_tty=True if tty_mode in ("force", "full") else None,
-        no_tty=True if tty_mode == "off" else None,
+        force_tty=True if opts.tty in ("force", "full") else None,
+        no_tty=True if opts.tty == "off" else None,
         zellij_guard=opts.zellij_guard,
     )
-    show_phase_headers = (
-        not opts.json
-        and not opts.quiet
-        and not tty_enabled
-        and resolved.do_refs
-        and resolved.do_sources
-        and resolved.ref_inputs
-        and resolved.source_names
+    show_phase_headers = all(
+        (
+            not opts.json,
+            not opts.quiet,
+            not tty_enabled,
+            resolved.do_refs,
+            resolved.do_sources,
+            bool(resolved.ref_inputs),
+            bool(resolved.source_names),
+        ),
     )
+    return tty_enabled, show_phase_headers
+
+
+def _load_sources_for_run(resolved: ResolvedTargets) -> SourcesFile:
+    if resolved.do_sources and resolved.source_names:
+        return load_all_sources()
+    return SourcesFile(entries={})
+
+
+def _load_pinned_versions(
+    opts: UpdateOptions,
+    out: OutputOptions,
+) -> dict[str, VersionInfo]:
+    if not opts.pinned_versions:
+        return {}
+
+    pinned = load_pinned_versions(Path(opts.pinned_versions))
+    out.print(
+        f"Loaded {len(pinned)} pinned versions from {opts.pinned_versions}",
+        style="dim",
+    )
+    return pinned
+
+
+async def _run_ref_phase(
+    *,
+    ref_inputs: list[FlakeInputRef],
+    queue: asyncio.Queue[UpdateEvent | None],
+    dry_run: bool,
+    config: UpdateConfig,
+) -> None:
+    async with aiohttp.ClientSession() as session:
+        flake_edit_lock = asyncio.Lock()
+        tasks = [
+            asyncio.create_task(
+                update_refs_task(
+                    inp,
+                    session,
+                    queue,
+                    options=RefTaskOptions(
+                        dry_run=dry_run,
+                        flake_edit_lock=flake_edit_lock,
+                        config=config,
+                    ),
+                ),
+            )
+            for inp in ref_inputs
+        ]
+        await asyncio.gather(*tasks)
+
+
+async def _run_sources_phase(
+    context: _SourcesPhaseContext,
+) -> None:
+    async with aiohttp.ClientSession() as session:
+        update_input_lock = asyncio.Lock()
+        tasks = [
+            asyncio.create_task(
+                _update_source_task(
+                    name,
+                    context=_SourceTaskContext(
+                        sources=context.sources,
+                        update_input=context.update_input,
+                        native_only=context.native_only,
+                        session=session,
+                        update_input_lock=update_input_lock,
+                        queue=context.queue,
+                        config=context.config,
+                        pinned_version=context.pinned.get(name),
+                    ),
+                ),
+            )
+            for name in context.source_names
+        ]
+        await asyncio.gather(*tasks)
+
+
+def _persist_source_updates(
+    *,
+    resolved: ResolvedTargets,
+    sources: SourcesFile,
+    source_updates: dict[str, SourceEntry],
+    details: dict[str, SummaryStatus],
+) -> None:
+    if not (resolved.do_sources and resolved.source_names):
+        return
+
+    if source_updates:
+        merged_updates = _merge_source_updates(
+            sources.entries,
+            source_updates,
+            native_only=resolved.native_only,
+        )
+        sources.entries.update(merged_updates)
+
+    if not resolved.dry_run and any(
+        details.get(name) == "updated" for name in resolved.source_names
+    ):
+        save_sources(sources)
+
+
+@dataclass(frozen=True)
+class _RunPlan:
+    resolved: ResolvedTargets
+    tty_enabled: bool
+    show_phase_headers: bool
+    sources: SourcesFile
+    item_meta: dict[str, ItemMeta]
+    order: list[str]
+
+
+def _handle_preflight_requests(opts: UpdateOptions, out: OutputOptions) -> int | None:
+    schema_result = _handle_schema_request(opts)
+    if schema_result is not None:
+        return schema_result
+
+    list_result = _handle_list_targets_request(opts)
+    if list_result is not None:
+        return list_result
+
+    return _handle_validate_request(opts, out)
+
+
+def _build_run_plan(opts: UpdateOptions, out: OutputOptions) -> _RunPlan | int:
+    resolved = ResolvedTargets.from_options(opts)
+    tty_enabled, show_phase_headers = _resolve_tty_settings(opts, resolved)
 
     if opts.source and opts.source not in resolved.all_known_names:
         out.print_error(f"Error: Unknown source or input '{opts.source}'")
         out.print_error(f"Available: {', '.join(sorted(resolved.all_known_names))}")
         return 1
 
-    summary = UpdateSummary()
-
     if not resolved.ref_inputs and not resolved.source_names:
         return _emit_summary(
-            summary,
+            UpdateSummary(),
             had_errors=False,
             out=out,
             dry_run=resolved.dry_run,
         )
 
-    sources = (
-        load_all_sources()
-        if resolved.do_sources and resolved.source_names
-        else SourcesFile(entries={})
-    )
+    sources = _load_sources_for_run(resolved)
     item_meta, order = _build_item_meta(
         resolved,
         sources if resolved.do_sources else None,
     )
-
     if not order:
         return _emit_summary(
-            summary,
+            UpdateSummary(),
             had_errors=False,
             out=out,
             dry_run=resolved.dry_run,
         )
 
+    return _RunPlan(
+        resolved=resolved,
+        tty_enabled=tty_enabled,
+        show_phase_headers=show_phase_headers,
+        sources=sources,
+        item_meta=item_meta,
+        order=order,
+    )
+
+
+async def _execute_run_plan(
+    opts: UpdateOptions,
+    out: OutputOptions,
+    config: UpdateConfig,
+    plan: _RunPlan,
+) -> int:
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-    max_lines = config.default_log_tail_lines
-    is_tty = tty_enabled and not opts.quiet and not opts.json
+    is_tty = plan.tty_enabled and not opts.quiet and not opts.json
     full_output = _resolve_full_output(
-        full_output=True if tty_mode == "full" else None,
+        full_output=True if opts.tty == "full" else None,
     )
     consumer = asyncio.create_task(
         consume_events(
             queue,
-            order,
-            sources,
-            item_meta=item_meta,
-            max_lines=max_lines,
-            is_tty=is_tty,
-            full_output=full_output,
-            verbose=opts.verbose,
-            render_interval=config.default_render_interval,
-            build_failure_tail_lines=NIX_BUILD_FAILURE_TAIL_LINES,
-            quiet=opts.quiet or opts.json,
+            plan.order,
+            plan.sources,
+            options=ConsumeEventsOptions(
+                item_meta=plan.item_meta,
+                max_lines=config.default_log_tail_lines,
+                is_tty=is_tty,
+                full_output=full_output,
+                verbose=opts.verbose,
+                render_interval=config.default_render_interval,
+                build_failure_tail_lines=NIX_BUILD_FAILURE_TAIL_LINES,
+                quiet=opts.quiet or opts.json,
+            ),
         ),
     )
 
-    if resolved.do_refs and resolved.ref_inputs:
-        if show_phase_headers:
+    if plan.resolved.do_refs and plan.resolved.ref_inputs:
+        if plan.show_phase_headers:
             out.print("\nPhase 1: flake input refs", style="dim")
-        async with aiohttp.ClientSession() as session:
-            flake_edit_lock = asyncio.Lock()
-            tasks = [
-                asyncio.create_task(
-                    update_refs_task(
-                        inp,
-                        session,
-                        queue,
-                        dry_run=resolved.dry_run,
-                        flake_edit_lock=flake_edit_lock,
-                        config=config,
-                    ),
-                )
-                for inp in resolved.ref_inputs
-            ]
-            await asyncio.gather(*tasks)
+        await _run_ref_phase(
+            ref_inputs=plan.resolved.ref_inputs,
+            queue=queue,
+            dry_run=plan.resolved.dry_run,
+            config=config,
+        )
 
-    if resolved.do_sources and resolved.source_names:
-        if show_phase_headers:
+    if plan.resolved.do_sources and plan.resolved.source_names:
+        if plan.show_phase_headers:
             out.print("\nPhase 2: sources.json updates", style="dim")
-
-        pinned: dict[str, VersionInfo] = {}
-        if opts.pinned_versions:
-            from pathlib import Path
-
-            from lib.update.ci.resolve_versions import load_pinned_versions
-
-            pinned = load_pinned_versions(Path(opts.pinned_versions))
-            out.print(
-                f"Loaded {len(pinned)} pinned versions from {opts.pinned_versions}",
-                style="dim",
-            )
-
-        async with aiohttp.ClientSession() as session:
-            update_input_lock = asyncio.Lock()
-            tasks = [
-                asyncio.create_task(
-                    _update_source_task(
-                        name,
-                        sources,
-                        update_input=resolved.do_input_refresh and not resolved.dry_run,
-                        native_only=resolved.native_only,
-                        session=session,
-                        update_input_lock=update_input_lock,
-                        queue=queue,
-                        config=config,
-                        pinned_version=pinned.get(name),
-                    ),
-                )
-                for name in resolved.source_names
-            ]
-            await asyncio.gather(*tasks)
+        pinned = _load_pinned_versions(opts, out)
+        await _run_sources_phase(
+            context=_SourcesPhaseContext(
+                source_names=plan.resolved.source_names,
+                sources=plan.sources,
+                queue=queue,
+                update_input=(
+                    plan.resolved.do_input_refresh and not plan.resolved.dry_run
+                ),
+                native_only=plan.resolved.native_only,
+                config=config,
+                pinned=pinned,
+            ),
+        )
 
     await queue.put(None)
     _updated, error_count, details, source_updates = await consumer
-    summary.accumulate(details)
-    had_errors = error_count > 0
 
-    if resolved.do_sources and resolved.source_names:
-        if source_updates:
-            source_updates = _merge_source_updates(
-                sources.entries,
-                source_updates,
-                native_only=resolved.native_only,
-            )
-            sources.entries.update(source_updates)
-        if not resolved.dry_run and any(
-            details.get(name) == "updated" for name in resolved.source_names
-        ):
-            save_sources(sources)
+    summary = UpdateSummary()
+    summary.accumulate(details)
+    _persist_source_updates(
+        resolved=plan.resolved,
+        sources=plan.sources,
+        source_updates=source_updates,
+        details=details,
+    )
 
     return _emit_summary(
         summary,
-        had_errors=had_errors,
+        had_errors=error_count > 0,
         out=out,
-        dry_run=resolved.dry_run,
+        dry_run=plan.resolved.dry_run,
     )
+
+
+async def run_updates(opts: UpdateOptions) -> int:
+    """Core update workflow — accepts typed UpdateOptions, returns exit code."""
+    out = OutputOptions(json_output=opts.json, quiet=opts.quiet)
+    config = _resolve_runtime_config(opts)
+
+    preflight_result = _handle_preflight_requests(opts, out)
+    if preflight_result is not None:
+        return preflight_result
+
+    run_plan = _build_run_plan(opts, out)
+    if isinstance(run_plan, int):
+        return run_plan
+
+    return await _execute_run_plan(opts, out, config, run_plan)

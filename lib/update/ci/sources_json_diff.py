@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
+import dataclasses
 import difflib
 import importlib
 import io
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeGuard
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -31,6 +32,12 @@ class _MissingType:
 _MISSING = _MissingType()
 
 
+@dataclasses.dataclass(frozen=True)
+class _CommandResult:
+    returncode: int
+    stdout: str
+
+
 class _BufferWriter:
     def __init__(self) -> None:
         self._parts: list[str] = []
@@ -47,6 +54,35 @@ class _BufferWriter:
 
     def value(self) -> str:
         return "".join(self._parts)
+
+
+def _coerce_json_value(value: object, *, context: str) -> JsonValue:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, list):
+        return [_coerce_json_value(item, context=f"{context}[]") for item in value]
+    if isinstance(value, dict):
+        obj: dict[str, JsonValue] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                msg = f"Expected string key in {context}, got {type(key).__name__}"
+                raise TypeError(msg)
+            obj[key] = _coerce_json_value(item, context=f"{context}.{key}")
+        return obj
+    msg = f"Unsupported JSON value in {context}: {type(value).__name__}"
+    raise TypeError(msg)
+
+
+def _coerce_json_object(value: object, *, context: str) -> dict[str, JsonValue]:
+    coerced = _coerce_json_value(value, context=context)
+    if not isinstance(coerced, dict):
+        msg = f"Expected JSON object in {context}, got {type(coerced).__name__}"
+        raise TypeError(msg)
+    return coerced
+
+
+def _is_json_value(value: JsonValue | _MissingType) -> TypeGuard[JsonValue]:
+    return not isinstance(value, _MissingType)
 
 
 def _render_graphtage_diff(
@@ -77,7 +113,7 @@ def _render_graphtage_diff(
 
     writer = _BufferWriter()
     printer = printer_cls(
-        out_stream=cast("object", writer),
+        out_stream=writer,
         ansi_color=False,
         quiet=True,
         options={"join_lists": True, "join_dict_items": True},
@@ -94,16 +130,28 @@ def _render_jd_diff(_old_path: Path, _new_path: Path) -> str:
     if jd_binary is None:
         return ""
 
-    result = subprocess.run(  # noqa: S603
-        [jd_binary, str(_old_path), str(_new_path)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = _run_command([jd_binary, str(_old_path), str(_new_path)])
     # jd exits 0=identical, 1=different, 2+=error
     if result.returncode > 1 or not result.stdout:
         return ""
     return result.stdout.strip()
+
+
+async def _run_command_async(args: list[str]) -> _CommandResult:
+    process = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_data, _stderr_data = await process.communicate()
+    return _CommandResult(
+        returncode=int(process.returncode or 0),
+        stdout=(stdout_data or b"").decode(),
+    )
+
+
+def _run_command(args: list[str]) -> _CommandResult:
+    return asyncio.run(_run_command_async(args))
 
 
 def _json_value(value: JsonValue) -> str:
@@ -180,10 +228,10 @@ def _render_structural_hunks(old_data: JsonValue, new_data: JsonValue) -> str:
     lines: list[str] = []
     for path, old_value, new_value in _collect_leaf_changes(old_data, new_data):
         lines.append(f"@ {json.dumps(path)}")
-        if old_value is not _MISSING:
-            lines.append(f"- {_json_value(cast('JsonValue', old_value))}")
-        if new_value is not _MISSING:
-            lines.append(f"+ {_json_value(cast('JsonValue', new_value))}")
+        if _is_json_value(old_value):
+            lines.append(f"- {_json_value(old_value)}")
+        if _is_json_value(new_value):
+            lines.append(f"+ {_json_value(new_value)}")
     return "\n".join(lines).strip()
 
 
@@ -193,21 +241,18 @@ def _render_summary_diff(
     lines: list[str] = []
     for path, old_value, new_value in _collect_leaf_changes(old_data, new_data):
         path_str = _format_path(path)
-        if old_value is _MISSING:
-            lines.append(
-                f"added {path_str}: {_format_value(cast('JsonValue', new_value))}"
-            )
+        if _is_json_value(new_value) and not _is_json_value(old_value):
+            lines.append(f"added {path_str}: {_format_value(new_value)}")
             continue
-        if new_value is _MISSING:
-            lines.append(
-                f"removed {path_str}: {_format_value(cast('JsonValue', old_value))}"
-            )
+        if _is_json_value(old_value) and not _is_json_value(new_value):
+            lines.append(f"removed {path_str}: {_format_value(old_value)}")
             continue
-        lines.append(
-            "changed "
-            f"{path_str}: {_format_value(cast('JsonValue', old_value))} -> "
-            f"{_format_value(cast('JsonValue', new_value))}",
-        )
+        if _is_json_value(old_value) and _is_json_value(new_value):
+            lines.append(
+                "changed "
+                f"{path_str}: {_format_value(old_value)} -> "
+                f"{_format_value(new_value)}",
+            )
 
     return "\n".join(lines).strip()
 
@@ -234,10 +279,7 @@ def _render_plain_diff(
 def _read_json(path: Path) -> dict[str, JsonValue]:
     with path.open(encoding="utf-8") as handle:
         loaded = json.load(handle)
-    if not isinstance(loaded, dict):
-        msg = f"Expected JSON object in {path}"
-        raise TypeError(msg)
-    return cast("dict[str, JsonValue]", loaded)
+    return _coerce_json_object(loaded, context=str(path))
 
 
 def _render_selected_format(

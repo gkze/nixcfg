@@ -6,32 +6,49 @@ Provides :func:`nix_build` for full builds with JSON result parsing and
 
 import json
 import re
+from dataclasses import dataclass
+from typing import cast
 
 from pydantic import TypeAdapter
 
 from lib.nix.models.build_result import BuildResult
 
-from .base import HashMismatchError, NixCommandError, run_nix
+from .base import HashMismatchError, NixCommandError, _resolve_timeout_alias, run_nix
 
 _BUILD_RESULT_LIST = TypeAdapter(list[BuildResult])
 
 _RE_DRV_PATH = re.compile(r"(/nix/store/[a-z0-9]{32}-[^\s]+\.drv)\b")
 
 
-def _build_command_args(  # noqa: PLR0913
+@dataclass(frozen=True)
+class _BuildCommandOptions:
+    impure: bool = False
+    no_link: bool = True
+    json_output: bool = True
+    extra_args: list[str] | None = None
+
+
+def _build_command_args(
     *,
     expr: str | None,
     installable: str | None,
-    impure: bool,
-    no_link: bool,
-    json_output: bool,
-    extra_args: list[str] | None,
+    options: _BuildCommandOptions | None = None,
 ) -> list[str]:
     if (expr is None and installable is None) or (
         expr is not None and installable is not None
     ):
         msg = "Provide exactly one of expr or installable"
         raise ValueError(msg)
+
+    effective_options = options or _BuildCommandOptions()
+
+    impure = effective_options.impure
+    no_link = effective_options.no_link
+    json_output = effective_options.json_output
+    extra_args_obj = effective_options.extra_args
+    extra_cli_args: list[str] = []
+    if isinstance(extra_args_obj, list):
+        extra_cli_args.extend(item for item in extra_args_obj if isinstance(item, str))
 
     args: list[str] = ["nix", "build"]
     if json_output:
@@ -46,21 +63,17 @@ def _build_command_args(  # noqa: PLR0913
     elif installable is not None:
         args.append(installable)
 
-    if extra_args:
-        args.extend(extra_args)
+    args.extend(extra_cli_args)
 
     return args
 
 
-async def nix_build(  # noqa: PLR0913
+async def nix_build(
     expr: str | None = None,
     installable: str | None = None,
     *,
-    impure: bool = False,
-    no_link: bool = True,
-    json_output: bool = True,
-    extra_args: list[str] | None = None,
-    timeout: float = 2400.0,  # noqa: ASYNC109
+    command_timeout: float = 2400.0,
+    **kwargs: object,
 ) -> list[BuildResult]:
     """Run ``nix build`` and return parsed build results.
 
@@ -72,17 +85,11 @@ async def nix_build(  # noqa: PLR0913
     installable:
         A flake reference or store path to build (positional argument).
         Mutually exclusive with *expr*.
-    impure:
-        Pass ``--impure`` to allow access to mutable paths.
-    no_link:
-        Pass ``--no-link`` to skip creating a ``./result`` symlink.
-    json_output:
-        Pass ``--json`` and parse the structured output. When ``False``
-        the build still runs but an empty list is returned.
-    extra_args:
-        Additional CLI flags forwarded verbatim to ``nix build``.
-    timeout:
+    command_timeout:
         Maximum wall-clock seconds before the process is killed.
+    **kwargs:
+        Supports ``impure=...``, ``no_link=...``, ``json_output=...``,
+        ``extra_args=...`` and legacy ``timeout=...`` alias.
 
     Returns
     -------
@@ -97,16 +104,51 @@ async def nix_build(  # noqa: PLR0913
         The build failed for any other reason.
 
     """
+    remaining_kwargs = dict(kwargs)
+
+    impure_obj = remaining_kwargs.pop("impure", False)
+    if not isinstance(impure_obj, bool):
+        msg = "impure must be a boolean"
+        raise TypeError(msg)
+
+    no_link_obj = remaining_kwargs.pop("no_link", True)
+    if not isinstance(no_link_obj, bool):
+        msg = "no_link must be a boolean"
+        raise TypeError(msg)
+
+    json_output_obj = remaining_kwargs.pop("json_output", True)
+    if not isinstance(json_output_obj, bool):
+        msg = "json_output must be a boolean"
+        raise TypeError(msg)
+
+    extra_args_obj = remaining_kwargs.pop("extra_args", None)
+    if extra_args_obj is not None and (
+        not isinstance(extra_args_obj, list)
+        or not all(isinstance(item, str) for item in extra_args_obj)
+    ):
+        msg = "extra_args must be a list of strings"
+        raise TypeError(msg)
+    validated_extra_args = cast("list[str] | None", extra_args_obj)
+
+    build_options = _BuildCommandOptions(
+        impure=impure_obj,
+        no_link=no_link_obj,
+        json_output=json_output_obj,
+        extra_args=validated_extra_args,
+    )
+
     args = _build_command_args(
         expr=expr,
         installable=installable,
-        impure=impure,
-        no_link=no_link,
-        json_output=json_output,
-        extra_args=extra_args,
+        options=build_options,
     )
 
-    result = await run_nix(args, check=False, timeout=timeout)
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=remaining_kwargs,
+    )
+
+    result = await run_nix(args, check=False, timeout=timeout_seconds)
 
     if result.returncode != 0:
         hash_err = HashMismatchError.from_stderr(result.stderr, result)
@@ -114,7 +156,7 @@ async def nix_build(  # noqa: PLR0913
             raise hash_err
         raise NixCommandError(result)
 
-    if not json_output:
+    if not build_options.json_output:
         return []
 
     parsed = json.loads(result.stdout)
@@ -125,7 +167,8 @@ async def nix_build_dry_run(
     installable: str,
     *,
     impure: bool = True,
-    timeout: float = 300.0,  # noqa: ASYNC109
+    command_timeout: float = 300.0,
+    **kwargs: object,
 ) -> set[str]:
     """Run ``nix build --dry-run`` and return derivations that would be built.
 
@@ -136,8 +179,10 @@ async def nix_build_dry_run(
     impure:
         Pass ``--impure`` to allow access to environment variables and mutable
         paths. Defaults to ``True`` since CI detection relies on ``getEnv``.
-    timeout:
+    command_timeout:
         Maximum wall-clock seconds before the process is killed.
+    **kwargs:
+        Supports legacy ``timeout=...`` alias.
 
     Returns
     -------
@@ -153,7 +198,11 @@ async def nix_build_dry_run(
     args = ["nix", "build", installable, "--dry-run"]
     if impure:
         args.append("--impure")
-    result = await run_nix(args, check=True, timeout=timeout)
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
+    result = await run_nix(args, check=True, timeout=timeout_seconds)
 
     combined = result.stdout + result.stderr
     drvs: set[str] = set()

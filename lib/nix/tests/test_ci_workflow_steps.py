@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING
 
+from lib.nix.tests._assertions import check
 from lib.update.ci import workflow_steps
 
 if TYPE_CHECKING:
@@ -94,13 +95,13 @@ def test_generate_pr_body_includes_sources_section(
         "main",
     ])
 
-    assert exit_code == 0  # noqa: S101
+    check(exit_code == 0)
     rendered = output_file.read_text(encoding="utf-8")
-    assert "No flake.lock input changes detected." in rendered  # noqa: S101
-    assert "### Per-package sources.json changes" in rendered  # noqa: S101
-    assert '-  "version": "1.0.0"' in rendered  # noqa: S101
-    assert '+  "version": "2.0.0"' in rendered  # noqa: S101
-    assert (  # noqa: S101
+    check("No flake.lock input changes detected." in rendered)
+    check("### Per-package sources.json changes" in rendered)
+    check('-  "version": "1.0.0"' in rendered)
+    check('+  "version": "2.0.0"' in rendered)
+    check(
         "https://github.com/acme/nixcfg/blob/update_flake_lock_action/packages/demo/sources.json"
         in rendered
     )

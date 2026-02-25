@@ -1,9 +1,11 @@
 """Tests for low-level Deno lock resolution helpers."""
 
+import pytest
+
 from lib.update import deno_lock
 
-URL_TO_CACHE_PATH = deno_lock._url_to_cache_path  # noqa: SLF001
-PARSE_NPM_PKG_KEY = deno_lock._parse_npm_pkg_key  # noqa: SLF001
+URL_TO_CACHE_PATH = object.__getattribute__(deno_lock, "_url_to_cache_path")
+PARSE_NPM_PKG_KEY = object.__getattribute__(deno_lock, "_parse_npm_pkg_key")
 
 
 def test_url_to_cache_path_is_stable_for_https_urls() -> None:
@@ -22,17 +24,8 @@ def test_url_to_cache_path_is_stable_for_https_urls() -> None:
 
 def test_url_to_cache_path_rejects_non_https_urls() -> None:
     """Non-HTTPS URLs are unsupported for cache path resolution."""
-    expected_prefix = "Expected https URL"
-    try:
+    with pytest.raises(ValueError, match="Expected https URL"):
         URL_TO_CACHE_PATH("file:///tmp/example")
-    except ValueError as exc:
-        message = str(exc)
-        if expected_prefix not in message:
-            msg = f"unexpected ValueError message: {message!r}"
-            raise AssertionError(msg) from exc
-    else:  # pragma: no cover - defensive
-        msg = "expected ValueError for non-HTTPS URL"
-        raise AssertionError(msg)
 
 
 def test_parse_npm_pkg_key_handles_scoped_and_peer_qualified_packages() -> None:

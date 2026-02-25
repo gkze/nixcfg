@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import subprocess
 import sys
 import tempfile
@@ -13,9 +14,58 @@ from typing import TYPE_CHECKING
 from lib.update.ci.flake_lock_diff import run_diff as run_flake_lock_diff
 from lib.update.ci.sources_json_diff import NoChangesMessage
 from lib.update.ci.sources_json_diff import run_diff as run_sources_diff
+from lib.update.cli import UpdateOptions, run_updates
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+
+@dataclasses.dataclass(frozen=True)
+class PRBodyOptions:
+    """Inputs used to render compare and workflow links in PR body output."""
+
+    workflow_url: str
+    server_url: str
+    repository: str
+    base_ref: str
+    compare_head: str = "update_flake_lock_action"
+
+
+async def _run_async(
+    args: list[str],
+    *,
+    check: bool,
+    capture_output: bool,
+    stdout: int | None,
+    stderr: int | None,
+) -> subprocess.CompletedProcess[str]:
+    process_stdout = stdout
+    process_stderr = stderr
+    if capture_output:
+        process_stdout = asyncio.subprocess.PIPE
+        process_stderr = asyncio.subprocess.PIPE
+
+    process = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=process_stdout,
+        stderr=process_stderr,
+    )
+    stdout_data, stderr_data = await process.communicate()
+    returncode = int(process.returncode or 0)
+    result = subprocess.CompletedProcess(
+        args=args,
+        returncode=returncode,
+        stdout=(stdout_data or b"").decode(),
+        stderr=(stderr_data or b"").decode(),
+    )
+    if check and result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+    return result
 
 
 def _run(
@@ -26,13 +76,14 @@ def _run(
     stdout: int | None = None,
     stderr: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603
-        args,
-        check=check,
-        capture_output=capture_output,
-        text=True,
-        stdout=stdout,
-        stderr=stderr,
+    return asyncio.run(
+        _run_async(
+            args,
+            check=check,
+            capture_output=capture_output,
+            stdout=stdout,
+            stderr=stderr,
+        )
     )
 
 
@@ -107,8 +158,6 @@ def _cmd_smoke_check_update_app(_: argparse.Namespace) -> int:
 
 
 def _cmd_list_update_targets(_: argparse.Namespace) -> int:
-    from lib.update.cli import UpdateOptions, run_updates
-
     return asyncio.run(run_updates(UpdateOptions(list_targets=True)))
 
 
@@ -119,14 +168,10 @@ def _git_show(pathspec: str) -> str:
     return result.stdout
 
 
-def generate_pr_body(  # noqa: PLR0913
+def generate_pr_body(
     *,
     output: str | Path,
-    workflow_url: str,
-    server_url: str,
-    repository: str,
-    base_ref: str,
-    compare_head: str = "update_flake_lock_action",
+    options: PRBodyOptions,
 ) -> int:
     """Generate pull-request body markdown for update runs.
 
@@ -142,9 +187,12 @@ def generate_pr_body(  # noqa: PLR0913
         old_lock_path.write_text(_git_show("HEAD:flake.lock"), encoding="utf-8")
 
         flake_diff = run_flake_lock_diff(old_lock_path, Path("flake.lock"))
-        compare_url = f"{server_url}/{repository}/compare/{base_ref}...{compare_head}"
+        compare_url = (
+            f"{options.server_url}/{options.repository}/compare/"
+            f"{options.base_ref}...{options.compare_head}"
+        )
         body_lines = [
-            f"**[Workflow run]({workflow_url})**",
+            f"**[Workflow run]({options.workflow_url})**",
             "",
             f"**[Compare]({compare_url})**",
             "",
@@ -210,7 +258,10 @@ def generate_pr_body(  # noqa: PLR0913
                 body_lines.extend(["", "### Per-package sources.json changes"])
                 rendered_sources_diffs = True
 
-            file_diff_url = f"{server_url}/{repository}/blob/{compare_head}/{file_path}"
+            file_diff_url = (
+                f"{options.server_url}/{options.repository}/blob/"
+                f"{options.compare_head}/{file_path}"
+            )
             body_lines.extend([
                 "",
                 "<details>",
@@ -229,11 +280,13 @@ def generate_pr_body(  # noqa: PLR0913
 def _cmd_generate_pr_body(args: argparse.Namespace) -> int:
     return generate_pr_body(
         output=args.output,
-        workflow_url=args.workflow_url,
-        server_url=args.server_url,
-        repository=args.repository,
-        base_ref=args.base_ref,
-        compare_head=args.compare_head,
+        options=PRBodyOptions(
+            workflow_url=args.workflow_url,
+            server_url=args.server_url,
+            repository=args.repository,
+            base_ref=args.base_ref,
+            compare_head=args.compare_head,
+        ),
     )
 
 

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
-import subprocess
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,9 +16,20 @@ from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.let import LetExpression
 from nix_manipulator.parser import parse
 
+from lib.nix.commands.base import run_nix
 from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update.io import atomic_write_text
 from lib.update.paths import REPO_ROOT, package_dir_for, package_file_map
+
+
+def _run_nix_eval(expr: str) -> tuple[int, str, str]:
+    result = asyncio.run(
+        run_nix(
+            ["nix", "eval", "--impure", "--json", "--expr", expr],
+            check=False,
+        ),
+    )
+    return result.returncode, result.stdout, result.stderr
 
 
 def _source_file_map() -> dict[str, Path]:
@@ -72,21 +83,15 @@ def nix_source_names() -> set[str]:
         value=parse("builtins.attrNames flake.outputs.lib.sources").expr,
     )
     expr = expression.rebuild()
-    nix_executable = shutil.which("nix")
-    if nix_executable is None:
+    if shutil.which("nix") is None:
         msg = "nix executable not found in PATH"
         raise RuntimeError(msg)
-    result = subprocess.run(  # noqa: S603
-        [nix_executable, "eval", "--impure", "--json", "--expr", expr],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if result.returncode != 0:
-        msg = result.stderr.strip() or "nix eval failed"
+    returncode, stdout_text, stderr_text = _run_nix_eval(expr)
+    if returncode != 0:
+        msg = stderr_text.strip() or "nix eval failed"
         msg = f"Failed to evaluate nix source names: {msg}"
         raise RuntimeError(msg)
-    payload = json.loads(result.stdout)
+    payload = json.loads(stdout_text)
     if not isinstance(payload, list) or not all(isinstance(x, str) for x in payload):
         msg = f"Unexpected nix source name payload: {payload!r}"
         raise RuntimeError(msg)

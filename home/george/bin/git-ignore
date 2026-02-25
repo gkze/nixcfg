@@ -8,14 +8,16 @@ With one argument, print the corresponding `.gitignore` contents.
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import sys
 from typing import Final
-from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.parse import urlparse
 
 GITIGNORE_API: Final[str] = "https://api.github.com/repos/github/gitignore/contents"
 HTTP_NOT_FOUND: Final[int] = 404
+HTTP_BAD_REQUEST: Final[int] = 400
+REQUEST_TIMEOUT_SECONDS: Final[float] = 15.0
 
 
 class GitignoreNotFoundError(Exception):
@@ -27,26 +29,98 @@ class GitignoreNotFoundError(Exception):
         super().__init__(language)
 
 
+class GitignoreRequestError(RuntimeError):
+    """Raise when GitHub API requests fail."""
+
+
+def _as_object_dict(value: object, *, context: str) -> dict[str, object]:
+    """Return *value* as a string-keyed object mapping."""
+    if not isinstance(value, dict):
+        msg = f"error: invalid {context} payload"
+        raise GitignoreRequestError(msg)
+    mapping: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            msg = f"error: invalid {context} payload"
+            raise GitignoreRequestError(msg)
+        mapping[key] = item
+    return mapping
+
+
+def _load_json(url: str) -> object:
+    """Load JSON from URL with timeout and normalized network errors."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        msg = f"error: invalid GitHub API URL: {url}"
+        raise GitignoreRequestError(msg)
+
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+
+    conn = http.client.HTTPSConnection(parsed.netloc, timeout=REQUEST_TIMEOUT_SECONDS)
+    try:
+        conn.request("GET", path, headers={"User-Agent": "nixcfg-git-ignore/1.0"})
+        response = conn.getresponse()
+        body = response.read()
+    except OSError as exc:
+        msg = f"error: failed to fetch {url}: {exc}"
+        raise GitignoreRequestError(msg) from exc
+    finally:
+        conn.close()
+
+    if response.status == HTTP_NOT_FOUND:
+        msg = f"error: template URL not found: {url}"
+        raise GitignoreRequestError(msg)
+    if response.status >= HTTP_BAD_REQUEST:
+        msg = f"error: failed to fetch {url}: HTTP {response.status}"
+        raise GitignoreRequestError(msg)
+    try:
+        return json.loads(body.decode())
+    except json.JSONDecodeError as exc:
+        msg = f"error: invalid JSON from {url}: {exc}"
+        raise GitignoreRequestError(msg) from exc
+
+
 def list_gitignore_languages() -> list[str]:
     """Return template names available in github/gitignore."""
-    with urlopen(GITIGNORE_API) as response:
-        blobs = json.load(response)
+    blobs = _load_json(GITIGNORE_API)
+    if not isinstance(blobs, list):
+        msg = "error: invalid template index payload"
+        raise GitignoreRequestError(msg)
 
-    return [blob["path"].removesuffix(".gitignore") for blob in blobs]
+    names: list[str] = []
+    for blob in blobs:
+        blob_obj = _as_object_dict(blob, context="template index entry")
+        path = blob_obj.get("path")
+        if isinstance(path, str) and path.endswith(".gitignore"):
+            names.append(path.removesuffix(".gitignore"))
+    return names
 
 
 def get_gitignore(language: str) -> str:
     """Return the `.gitignore` template for `language`."""
-    url = f"{GITIGNORE_API}/{language.capitalize()}.gitignore"
-    try:
-        with urlopen(url) as response:  # noqa: S310
-            blob = json.load(response)
-    except HTTPError as exc:
-        if exc.code == HTTP_NOT_FOUND:
-            raise GitignoreNotFoundError(language) from exc
-        raise
+    match = next(
+        (
+            name
+            for name in list_gitignore_languages()
+            if name.casefold() == language.casefold()
+        ),
+        None,
+    )
+    if match is None:
+        raise GitignoreNotFoundError(language)
 
-    return base64.b64decode(blob["content"]).decode()
+    url = f"{GITIGNORE_API}/{match}.gitignore"
+    blob = _load_json(url)
+
+    blob_obj = _as_object_dict(blob, context=f"template payload for {match}")
+    content = blob_obj.get("content")
+    if not isinstance(content, str):
+        msg = f"error: invalid template payload for {match}"
+        raise GitignoreRequestError(msg)
+
+    return base64.b64decode(content).decode()
 
 
 def main(argv: list[str]) -> int:
@@ -56,14 +130,22 @@ def main(argv: list[str]) -> int:
         return 2
 
     if len(argv) == 0:
-        for language in list_gitignore_languages():
-            sys.stdout.write(f"{language}\n")
-        return 0
+        try:
+            for language in list_gitignore_languages():
+                sys.stdout.write(f"{language}\n")
+        except GitignoreRequestError as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 1
+        else:
+            return 0
 
     try:
         template = get_gitignore(argv[0])
     except GitignoreNotFoundError:
         sys.stderr.write(f"error: unknown template: {argv[0]}\n")
+        return 1
+    except GitignoreRequestError as exc:
+        sys.stderr.write(f"{exc}\n")
         return 1
 
     sys.stdout.write(template)

@@ -6,11 +6,14 @@ implementation (which is covered elsewhere).
 
 from __future__ import annotations
 
+import argparse
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from typer.testing import CliRunner
 
 import nixcfg
+from lib.nix.tests._assertions import check
+from lib.update import ci
 
 if TYPE_CHECKING:
     from collections.abc import MutableMapping
@@ -47,14 +50,23 @@ def test_nixcfg_update_parses_native_only(monkeypatch: _MonkeyPatchLike) -> None
     runner = CliRunner()
     result = runner.invoke(nixcfg.app, ["update", "--native-only"])
 
-    assert result.exit_code == 0  # noqa: S101
-    assert called["opts"].native_only is True  # noqa: S101
+    check(result.exit_code == 0)
+    check(called["opts"].native_only is True)
+
+
+def test_nixcfg_update_help_includes_forwarded_options() -> None:
+    """Ensure `nixcfg update --help` shows argparse-defined options."""
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["update", "--help"])
+
+    check(result.exit_code == 0)
+    check("--native-only" in result.output)
+    check("--pinned-versions" in result.output)
+    check("--no-sources" in result.output)
 
 
 def test_nixcfg_ci_registers_sources_json_diff(monkeypatch: _MonkeyPatchLike) -> None:
     """Ensure `nixcfg ci sources-json-diff` exists as a callable command."""
-    from lib.update import ci
-
     called: list[list[str]] = []
 
     def _fake(args: list[str]) -> int:
@@ -70,8 +82,32 @@ def test_nixcfg_ci_registers_sources_json_diff(monkeypatch: _MonkeyPatchLike) ->
     runner = CliRunner()
     result = runner.invoke(nixcfg.app, ["ci", "sources-json-diff"])
 
-    assert result.exit_code == 0  # noqa: S101
-    assert called == [[]]  # noqa: S101
+    check(result.exit_code == 0)
+    check(called == [[]])
+
+
+def test_nixcfg_ci_subcommand_help_is_forwarded(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Ensure `nixcfg ci <cmd> --help` is handled by the command parser."""
+
+    def _fake(args: list[str]) -> int:
+        parser = argparse.ArgumentParser(prog="nixcfg ci sources-json-diff")
+        parser.add_argument("--example-opt", action="store_true", help="example")
+        parser.parse_args(args)
+        return 0
+
+    monkeypatch.setitem(
+        ci.CI_COMMANDS,
+        "sources-json-diff",
+        ci.CICommand(func=_fake, help="test"),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["ci", "sources-json-diff", "--help"])
+
+    check(result.exit_code == 0)
+    check("--example-opt" in result.output)
 
 
 def test_nixcfg_main_uses_stable_prog_name(monkeypatch: _MonkeyPatchLike) -> None:
@@ -85,4 +121,4 @@ def test_nixcfg_main_uses_stable_prog_name(monkeypatch: _MonkeyPatchLike) -> Non
 
     nixcfg.main()
 
-    assert called["prog_name"] == "nixcfg"  # noqa: S101
+    check(called["prog_name"] == "nixcfg")

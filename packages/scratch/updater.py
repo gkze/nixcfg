@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
@@ -20,6 +20,7 @@ from lib.update.events import (
     EventStream,
     UpdateEvent,
     capture_stream_value,
+    expect_str,
 )
 from lib.update.flake import get_flake_input_node, get_flake_input_version, nixpkgs_expr
 from lib.update.nix import compute_fixed_output_hash
@@ -109,7 +110,7 @@ class ScratchUpdater(HashEntryUpdater):
             error="Missing npmDepsHash output",
         ):
             if isinstance(item, CapturedValue):
-                npm_hash = cast("str", item.captured)
+                npm_hash = expect_str(item.captured)
             else:
                 yield item
         if npm_hash is None:
@@ -126,29 +127,28 @@ class ScratchUpdater(HashEntryUpdater):
             error="Missing cargoHash output",
         ):
             if isinstance(item, CapturedValue):
-                cargo_hash = cast("str", item.captured)
+                cargo_hash = expect_str(item.captured)
             else:
                 yield item
         if cargo_hash is None:
             msg = "Missing cargoHash output"
             raise RuntimeError(msg)
 
-        yield UpdateEvent.value(
-            self.name,
-            cast(
-                "SourceHashes",
-                [
-                    HashEntry.create("npmDepsHash", npm_hash),
-                    HashEntry.create("cargoHash", cargo_hash),
-                ],
-            ),
-        )
+        entries: list[HashEntry] = [
+            HashEntry.create("npmDepsHash", npm_hash),
+            HashEntry.create("cargoHash", cargo_hash),
+        ]
+        yield UpdateEvent.value(self.name, entries)
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build source entry including resolved version and commit."""
+        commit = info.metadata.get("commit")
+        if commit is not None and not isinstance(commit, str):
+            msg = "Expected string commit metadata for scratch"
+            raise TypeError(msg)
         return SourceEntry(
             version=info.version,
             hashes=HashCollection.from_value(hashes),
             input=self.input_name,
-            commit=info.metadata.get("commit"),
+            commit=commit,
         )

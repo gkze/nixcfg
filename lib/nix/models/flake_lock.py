@@ -1,10 +1,15 @@
 """Hand-written model for Nix flake.lock format (no official schema exists)."""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 # ---------------------------------------------------------------------------
 # Source reference models
@@ -137,13 +142,16 @@ class FlakeLock(BaseModel):
     @classmethod
     def from_file(cls, path: Path) -> FlakeLock:
         """Read and parse a ``flake.lock`` JSON file."""
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-        return cls.model_validate(data)
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            msg = "flake.lock top-level value must be a JSON object"
+            raise TypeError(msg)
+        return cls.from_dict(raw)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> FlakeLock:
+    def from_dict(cls, data: Mapping[str, object]) -> FlakeLock:
         """Parse from an already-loaded JSON dictionary."""
-        return cls.model_validate(data)
+        return cls.model_validate(dict(data))
 
     # -- properties ---------------------------------------------------------
 

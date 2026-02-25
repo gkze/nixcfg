@@ -238,6 +238,7 @@ in
                 ruff_format.command = ruffCmd;
                 ruff_organize_imports.command = ruffCmd;
                 jsonnetfmt.command = lib.getExe' pkgs.jsonnet "jsonnetfmt";
+                taplo.command = lib.getExe pkgs.taplo;
               };
             formatters_by_ft = {
               jsonnet = [ "jsonnetfmt" ];
@@ -251,6 +252,7 @@ in
                 "ruff_format"
                 "ruff_organize_imports"
               ];
+              toml = [ "taplo" ];
               typescript = [ "prettier" ];
               typescriptreact = [ "prettier" ];
             };
@@ -308,7 +310,6 @@ in
             biome.enable = true;
             cssls.enable = true;
             dockerls.enable = true;
-            # Testing Taplo
             # efm.enable = true;
             gopls.enable = true;
             html.enable = true;
@@ -351,6 +352,7 @@ in
             taplo = {
               enable = true;
               settings.formatting = {
+                indent_string = "  ";
                 reorder_keys = true;
                 reorder_arrays = true;
               };

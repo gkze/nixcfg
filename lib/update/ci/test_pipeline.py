@@ -16,6 +16,7 @@ artifact directories, then merges them back — exactly as CI does.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import shutil
 import sys
@@ -23,7 +24,11 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
 from lib.nix.models.sources import SourceEntry
+from lib.update import cli as update_cli
+from lib.update.ci import merge_sources, resolve_versions
 from lib.update.paths import package_file_map
 
 if TYPE_CHECKING:
@@ -42,9 +47,7 @@ def _log(msg: str) -> None:
 
 def _phase_resolve(pinned_path: Path) -> bool:
     _log("Phase 1: Resolving upstream versions...")
-    from lib.update.ci.resolve_versions import main as resolve_main
-
-    rc = resolve_main(["--output", str(pinned_path)])
+    rc = resolve_versions.main(["--output", str(pinned_path)])
     if rc != 0:
         _log(f"FAIL: resolve-versions exited {rc}")
         return False
@@ -63,17 +66,15 @@ def _phase_resolve(pinned_path: Path) -> bool:
 
 def _phase_compute(
     pinned_path: Path,
-    *,
     source: str | None = None,
 ) -> bool:
     _log("Phase 2: Computing hashes (all platforms)...")
-    from lib.update.cli import UpdateOptions, run_updates
-
-    opts = UpdateOptions(
+    opts = update_cli.UpdateOptions(
         pinned_versions=str(pinned_path),
         source=source,
     )
-    rc = run_updates(opts)
+    result = update_cli.run_updates(opts)
+    rc = asyncio.run(result) if asyncio.iscoroutine(result) else int(result)
     if rc != 0:
         _log(f"FAIL: update exited {rc}")
         return False
@@ -113,9 +114,7 @@ def _phase_merge(work_dir: Path) -> bool:
     roots = [str(d) for d in platform_dirs.values()]
     _log(f"  Created {len(roots)} platform artifact dirs")
 
-    from lib.update.ci.merge_sources import main as merge_main
-
-    rc = merge_main(roots)
+    rc = merge_sources.main(roots)
     if rc != 0:
         _log(f"FAIL: merge-sources exited {rc}")
         return False
@@ -135,7 +134,7 @@ def _phase_validate() -> bool:
             with path.open() as f:
                 data = json.load(f)
             SourceEntry.model_validate(data)
-        except Exception as exc:  # noqa: BLE001
+        except (OSError, json.JSONDecodeError, ValidationError) as exc:
             _log(f"  INVALID: {name} ({path}): {exc}")
             errors += 1
 
@@ -179,7 +178,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the local CI pipeline simulation."""
     args = _parse_args(argv)
-    work_dir = Path(tempfile.mkdtemp(prefix="nixcfg-ci-test-"))
+    work_dir = Path(tempfile.mkdtemp("nixcfg-ci-test-"))
     pinned_path = work_dir / "pinned-versions.json"
 
     _log(f"Work directory: {work_dir}")
@@ -194,7 +193,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0 if ok else 1
 
     # Phase 2: Compute hashes
-    ok = _phase_compute(pinned_path, source=args.source)
+    ok = _phase_compute(pinned_path, args.source)
     phases.append(("compute-hashes", ok))
     if not ok:
         _print_summary(phases, work_dir, keep=args.keep_artifacts)
