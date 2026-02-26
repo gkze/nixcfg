@@ -4,28 +4,32 @@
 
 Unified Nix flake for macOS hosts, Home Manager user configuration, and reusable module building blocks.
 
+This repository is still tailored to George's machines, user profile, and workflows today.
+Ongoing work is focused on separating those personal defaults into reusable framework
+primitives and a standalone library of modules.
+
 ## Current state
 
-- Primary focus is `nix-darwin` plus Home Manager.
-- Active Darwin hosts: `argus` (work profile enabled) and `rocinante` (personal profile).
-- Active Home Manager output: `homeConfigurations.george`.
-- Exported systems: `aarch64-darwin`, `aarch64-linux`, `x86_64-linux`.
-- NixOS modules are exported, but there are currently no `nixosConfigurations` defined.
+- Primary focus is [`nix-darwin`](https://github.com/LnL7/nix-darwin) plus [Home Manager](https://github.com/nix-community/home-manager).
+- Active Darwin hosts: [`argus`](darwin/argus.nix) (work profile enabled) and [`rocinante`](darwin/rocinante.nix) (personal profile).
+- Active Home Manager output: [`homeConfigurations.george`](flake.nix#L296).
+- Exported systems: [`aarch64-darwin`](flake.nix#L272), [`aarch64-linux`](flake.nix#L273), [`x86_64-linux`](flake.nix#L274).
+- NixOS modules are exported, but there are currently no [`nixosConfigurations`](flake.nix) defined.
 
 ## Repository layout
 
-- `darwin/`: host entrypoints.
-- `home/`: user configuration (`home/george`).
-- `modules/`: reusable modules (`common`, `darwin`, `nixos`, `home`).
-- `packages/`: custom package outputs (`axiom-cli`, `beads-mcp`, `conductor`, `droid`, `gogcli`, `homebrew-zsh-completion`, `linear-cli`, `nix-manipulator`, `scratch`, `sculptor`, `sublime-kdl`, `toad`).
-- `overlays/`: package overrides and source pinning.
-- `lib/`: Python libraries for update tooling and Nix model/schema helpers.
-- `nixcfg.py`: Typer CLI exposed through `nix run .#nixcfg -- ...`.
+- [`darwin/`](darwin/): host entrypoints.
+- [`home/`](home/): user configuration ([`home/george`](home/george/)).
+- [`modules/`](modules/): reusable modules ([`common`](modules/common.nix), [`darwin`](modules/darwin/), [`nixos`](modules/nixos/), [`home`](modules/home/)).
+- [`packages/`](packages/): custom package outputs ([`axiom-cli`](packages/axiom-cli/), [`beads-mcp`](packages/beads-mcp/), [`conductor`](packages/conductor/), [`droid`](packages/droid/), [`gogcli`](packages/gogcli/), [`homebrew-zsh-completion`](packages/homebrew-zsh-completion/), [`linear-cli`](packages/linear-cli/), [`nix-manipulator`](packages/nix-manipulator/), [`scratch`](packages/scratch/), [`sculptor`](packages/sculptor/), [`sublime-kdl`](packages/sublime-kdl.nix), [`toad`](packages/toad/)).
+- [`overlays/`](overlays/): package overrides and source pinning.
+- [`lib/`](lib/): Python libraries for update tooling and Nix model/schema helpers.
+- [`nixcfg.py`](nixcfg.py): Typer CLI exposed through [`nix run .#nixcfg -- ...`](nixcfg.py).
 
 ## Install and apply
 
 1. Install Nix (recommended: [Determinate Nix Installer](https://github.com/DeterminateSystems/nix-installer)).
-1. Clone this repository to `~/.config/nixcfg`.
+1. Clone this repository to [`~/.config/nixcfg`](.).
 1. Apply the Darwin configuration:
 
 ```bash
@@ -68,12 +72,12 @@ nix run .#nixcfg -- ci --help
 nix run .#nixcfg -- schema --help
 ```
 
-GitHub Actions workflow `.github/workflows/update.yml` runs every 6 hours and:
+GitHub Actions workflow [`.github/workflows/update.yml`](.github/workflows/update.yml) runs every 6 hours and:
 
-- updates `flake.lock`
+- updates [`flake.lock`](flake.lock)
 - resolves upstream versions once
-- computes per-platform `sources.json` hashes
-- builds Darwin outputs (`argus`, `rocinante`)
+- computes per-platform [`sources.json`](packages/toad/sources.json) hashes
+- builds Darwin outputs ([`argus`](darwin/argus.nix), [`rocinante`](darwin/rocinante.nix))
 - opens a signed PR with update details
 
 ## Reuse as a framework
@@ -82,26 +86,26 @@ This flake can be consumed by another repository as a module framework.
 
 - Exported module sets:
 
-  - `darwinModules` (`nixcfgCommon`, `nixcfgBase`, `nixcfgProfiles`, `nixcfgHomebrew`)
-  - `nixosModules` (`nixcfgCommon`, `nixcfgBase`, `nixcfgProfiles`)
-  - `homeModules` (`nixcfgBase`, `nixcfgGit`, `nixcfgProfiles`, `nixcfgPackages`, `nixcfgOpencode`, `nixcfgTheme`, `nixcfgFonts`, `nixcfgStylix`, `nixcfgZsh`, `nixcfgDarwin`, `nixcfgLinux`, `nixcfgLanguageBun`, `nixcfgLanguageGo`, `nixcfgLanguagePython`, `nixcfgLanguageRust`)
+  - [`darwinModules`](flake.nix#L305) ([`nixcfgCommon`](modules/common.nix), [`nixcfgBase`](modules/darwin/base.nix), [`nixcfgProfiles`](modules/darwin/profiles.nix), [`nixcfgHomebrew`](modules/darwin/homebrew.nix))
+  - [`nixosModules`](flake.nix#L299) ([`nixcfgCommon`](modules/common.nix), [`nixcfgBase`](modules/nixos/base.nix), [`nixcfgProfiles`](modules/nixos/profiles.nix))
+  - [`homeModules`](flake.nix#L312) ([`nixcfgBase`](modules/home/base.nix), [`nixcfgGit`](modules/home/git.nix), [`nixcfgProfiles`](modules/home/profiles.nix), [`nixcfgPackages`](modules/home/packages.nix), [`nixcfgOpencode`](modules/home/opencode.nix), [`nixcfgTheme`](modules/home/theme.nix), [`nixcfgFonts`](modules/home/fonts.nix), [`nixcfgStylix`](modules/home/stylix.nix), [`nixcfgZsh`](modules/home/zsh.nix), [`nixcfgDarwin`](modules/home/darwin.nix), [`nixcfgLinux`](modules/home/linux.nix), [`nixcfgLanguageBun`](modules/home/languages/bun.nix), [`nixcfgLanguageGo`](modules/home/languages/go.nix), [`nixcfgLanguagePython`](modules/home/languages/python.nix), [`nixcfgLanguageRust`](modules/home/languages/rust.nix))
 
-- Exported constructors in `lib`:
+- Exported constructors in [`lib`](lib.nix):
 
-  - `mkSystem`, `mkDarwinHost`, `mkHome`, `mkHomeModules`
+  - [`mkSystem`](lib.nix#L338), [`mkDarwinHost`](lib.nix#L451), [`mkHome`](lib.nix#L310), [`mkHomeModules`](lib.nix#L282)
 
 - Downstream-oriented controls:
 
-  - `mkHome` supports `extraSpecialArgs` for downstream-only module arguments
-  - `mkSystem` supports `extraSpecialArgs`, `homeManagerExtraSpecialArgs`, `homeModuleArgsByUser`, and tolerates `users = [ ]` (it sets `primaryUser = null`)
-  - `mkDarwinHost` forwards `extraSpecialArgs`, `homeManagerExtraSpecialArgs`, `homeModuleArgsByUser`, supports `includeDefaultUserModule = false`, `homeModulesByUser`, and custom `system`
+  - [`mkHome`](lib.nix#L310) supports [`extraSpecialArgs`](lib.nix#L315) for downstream-only module arguments
+  - [`mkSystem`](lib.nix#L338) supports [`extraSpecialArgs`](lib.nix#L344), [`homeManagerExtraSpecialArgs`](lib.nix#L345), [`homeModuleArgsByUser`](lib.nix#L342), and tolerates [`users = [ ]`](lib.nix#L348) (it sets [`primaryUser = null`](lib.nix#L379))
+  - [`mkDarwinHost`](lib.nix#L451) forwards [`extraSpecialArgs`](lib.nix#L461), [`homeManagerExtraSpecialArgs`](lib.nix#L462), [`homeModuleArgsByUser`](lib.nix#L459), supports [`includeDefaultUserModule = false`](lib.nix#L460), [`homeModulesByUser`](lib.nix#L458), and custom [`system`](lib.nix#L454)
 
 - Policy knobs intended to be overridden in downstream repos:
 
-  - `nixcfg.common.hostname`
-  - `nixcfg.common.nix.substituters`
-  - `nixcfg.common.nix.trustedPublicKeys`
-  - `nixcfg.darwin.homebrew.{user,taps,mutableTaps,enableRosetta}`
+  - [`nixcfg.common.hostname`](modules/common.nix)
+  - [`nixcfg.common.nix.substituters`](modules/common.nix)
+  - [`nixcfg.common.nix.trustedPublicKeys`](modules/common.nix)
+  - [`nixcfg.darwin.homebrew.{user,taps,mutableTaps,enableRosetta}`](modules/darwin/homebrew.nix)
 
 Example downstream pattern:
 
