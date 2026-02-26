@@ -1,0 +1,9 @@
+line_ending: lf
+exclude:
+  - .pre-commit-config.yaml
+formatter:
+  type: basic
+  indent: 2
+  include_document_start: true
+  trim_trailing_whitespace: true
+  eof_newline: true

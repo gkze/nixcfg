@@ -11,7 +11,6 @@ pattern: "^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$"
 examples:
   - "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
   - "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ=="
-
 "$defs":
   algorithm:
     type: string

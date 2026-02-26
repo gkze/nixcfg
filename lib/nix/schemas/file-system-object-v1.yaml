@@ -12,18 +12,14 @@ properties:
   type:
     type: string
     enum: ["regular", "symlink", "directory"]
-
 # Enforce conditional structure based on `type`
 anyOf:
   - $ref: "#/$defs/regular"
     required: ["type", "contents"]
-
   - $ref: "#/$defs/directory"
     required: ["type", "entries"]
-
   - $ref: "#/$defs/symlink"
     required: ["type", "target"]
-
 "$defs":
   regular:
     title: Regular File
@@ -41,7 +37,6 @@ anyOf:
         description: Whether the file is executable.
         default: false
     additionalProperties: false
-
   directory:
     title: Directory
     description: |
@@ -57,7 +52,6 @@ anyOf:
         additionalProperties:
           $ref: "#"
     additionalProperties: false
-
   symlink:
     title: Symbolic Link
     description: |

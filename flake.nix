@@ -387,7 +387,13 @@
                   package = pkgs.mdformat;
                 };
                 # YAML
-                yamlfmt.enable = true;
+                yamlfmt = {
+                  enable = true;
+                  args = [
+                    "-conf"
+                    ".yamlfmt"
+                  ];
+                };
                 # TOML
                 taplo = {
                   enable = true;
@@ -481,6 +487,10 @@
                     taplo.options = [
                       "--config"
                       ".taplo.toml"
+                    ];
+                    yamlfmt.options = [
+                      "-conf"
+                      ".yamlfmt"
                     ];
                     "markdown-table-formatter" = {
                       command = lib.getExe' (pkgs.python3.withPackages (

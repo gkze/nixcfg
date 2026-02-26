@@ -23,7 +23,6 @@ description: |
   > This data type is thus safely used in both of these contexts.
 
   -->
-
 type: object
 properties:
   method:

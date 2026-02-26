@@ -7,31 +7,24 @@ Work:
     Exa: exa.ai
     OpenAI: platform.openai.com
     OpenRouter: openrouter.ai
-
   AI Tooling:
     Browserbase: browserbase.com
     E2B: e2b.dev
-
   Auth:
     Clerk: dashboard.clerk.com
-
   CRM & Marketing:
     HubSpot: hubspot.com
     NewsData: newsdata.io
-
   Data & Backend:
     Convex: dashboard.convex.dev
     Supabase: supabase.com
-
   Finance & HR:
     Branch: app.link.com
     Ramp: app.ramp.com
     Rippling: app.rippling.com
-
   Email:
     Resend: resend.com
     SendGrid: sendgrid.com
-
   Infrastructure:
     AWS: signin.aws.amazon.com
     Fly.io: fly.io
@@ -40,7 +33,6 @@ Work:
     Meter: dashboard.meter.com
     Render: dashboard.render.com
     Vercel: vercel.com
-
   News:
     DevHunt: devhunt.org
     Hacker News: news.ycombinator.com
@@ -49,7 +41,6 @@ Work:
     Reddit: reddit.com
     Terminal Trove: terminaltrove.com
     X: "//x.com"
-
   Observability & Analytics:
     Axiom: app.axiom.co
     Datadog: us5.datadoghq.com
@@ -57,7 +48,6 @@ Work:
     PostHog: posthog.com
     Sentry: sentry.io
     Statsig: console.statsig.com
-
   Productivity:
     Dropbox: dropbox.com
     Linear: linear.app
