@@ -348,7 +348,7 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
 def test_update_source_task_sets_native_only_for_deno_updater(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Set Deno updater native-only flag and skip flake-input refresh branch."""
+    """Set Deno updater native-only flag without invoking a real nix process."""
     created: list[DenoDepsHashUpdater] = []
 
     class _DenoUpdater(DenoDepsHashUpdater):
@@ -375,8 +375,20 @@ def test_update_source_task_sets_native_only_for_deno_updater(
         _ = (source, queue)
         await task()
 
+    called = {"count": 0, "input_name": "", "source": ""}
+
+    async def _update_input(
+        _input_name: str, *, source: str
+    ) -> AsyncIterator[UpdateEvent]:
+        called["count"] += 1
+        called["input_name"] = _input_name
+        called["source"] = source
+        if False:
+            yield UpdateEvent.status("demo", "unused")
+
     monkeypatch.setattr("lib.update.cli.UPDATERS", {"demo": _DenoUpdater})
     monkeypatch.setattr("lib.update.cli.run_queue_task", _run_queue_task)
+    monkeypatch.setattr("lib.update.cli.update_flake_input", _update_input)
 
     async def _run_case() -> None:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
@@ -397,6 +409,9 @@ def test_update_source_task_sets_native_only_for_deno_updater(
     _run(_run_case())
     check(len(created) == 1)
     check(created[0].native_only is True)
+    check(called["count"] == 1)
+    check(called["input_name"] == "demo")
+    check(called["source"] == "demo")
 
 
 def test_update_source_task_skips_input_update_when_disabled(
