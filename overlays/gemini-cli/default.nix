@@ -48,11 +48,19 @@
           sed -i '/enableAutoUpdate: {/,/}/ ${disableDefault}' ${schema}
           sed -i '/enableAutoUpdateNotification: {/,/}/ ${disableDefault}' \
             ${schema}
+
+          # Build devtools first so CLI typecheck can resolve its declarations
+          substituteInPlace scripts/build.js \
+            --replace-fail "npm run build --workspaces" \
+                           "npm run build --workspace=@google/gemini-cli-devtools && npm run build --workspaces"
         '';
       # Remove files that reference python to keep it out of the closure
       postInstall = (oldAttrs.postInstall or "") + ''
         rm -rf $out/share/gemini-cli/node_modules/keytar/build
         rm -f $out/share/gemini-cli/node_modules/@google/gemini-cli-sdk
+        rm -f $out/share/gemini-cli/node_modules/@google/gemini-cli-devtools
+        cp -r packages/devtools \
+          $out/share/gemini-cli/node_modules/@google/gemini-cli-devtools
       '';
     });
 }

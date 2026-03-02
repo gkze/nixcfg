@@ -94,7 +94,6 @@ in
       default = [
         "@franlol/opencode-md-table-formatter"
         "@mohak34/opencode-notifier@latest"
-        "opencode-beads"
       ];
       description = "OpenCode plugins to install.";
     };

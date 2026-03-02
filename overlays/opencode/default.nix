@@ -27,6 +27,17 @@
           jq --arg bunVersion "'"$bunVersion"'" ".packageManager = (\"bun@\" + \$bunVersion)" "$1" | sponge "$1"
         fi
       ' _ {} \;
+
+      # Some package sources omit .github, but build scripts read this.
+      # Prefer the authoritative team list from the flake input when present.
+      if [ ! -f .github/TEAM_MEMBERS ]; then
+        mkdir -p .github
+        if [ -f ${inputs.opencode}/.github/TEAM_MEMBERS ]; then
+          cp ${inputs.opencode}/.github/TEAM_MEMBERS .github/TEAM_MEMBERS
+        else
+          touch .github/TEAM_MEMBERS
+        fi
+      fi
     '';
     # @opentui/core is hoisted to root node_modules/ but the build script
     # resolves it from packages/opencode/node_modules/. Symlink it so

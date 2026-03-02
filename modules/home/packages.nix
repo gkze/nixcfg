@@ -151,8 +151,6 @@ in
             amp-cli
             ast-grep
             axiom-cli
-            beads
-            beads-mcp
             biome
             curator
             droid

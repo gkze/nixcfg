@@ -60,6 +60,33 @@ preview = true
 # Require explicit preview rule codes to avoid accidental prefix selection.
 explicit-preview-rules = true
 
+[tool.ruff.lint.per-file-ignores]
+# Keep high-signal linting in tests while allowing pragmatic test patterns.
+"lib/tests/**/*.py" = [
+  "ANN001",
+  "ANN202",
+  "ARG001",
+  "ARG005",
+  "ASYNC109",
+  "EM101",
+  "FLY002",
+  "PERF401",
+  "PLC0415",
+  "PLR2004",
+  "PLW0108",
+  "PT012",
+  "PYI034",
+  "RUF015",
+  "RUF043",
+  "S108",
+  "SLF001",
+  "TC001",
+  "TC002",
+  "TC003",
+  "TRY003",
+  "TRY004",
+]
+
 [tool.ruff.lint.isort]
 # Classify these imports as first-party for stable import ordering.
 known-first-party = ["lib", "nixcfg"]
@@ -124,6 +151,14 @@ include = ["lib/**/_generated.py"]
 # Ignore a generated-code pattern that is valid at runtime but noisy for static typing.
 invalid-type-form = "ignore"
 
+[[tool.ty.overrides]]
+# Ignore type-checking diagnostics in test modules.
+include = ["lib/tests/**/*.py"]
+
+[tool.ty.overrides.rules]
+# Prefer runtime-focused tests over full static typing constraints.
+all = "ignore"
+
 [tool.ty.terminal]
 # Return non-zero when Ty emits warnings.
 error-on-warning = true
@@ -143,17 +178,45 @@ xfail_strict = true
 [tool.coverage.run]
 # Measure branch coverage in addition to line coverage.
 branch = true
-# Measure only the primary package tree for coverage.
-source = ["lib/nix"]
+# Measure both core and update package trees for coverage.
+source = ["lib/nix", "lib/update"]
 
 [tool.coverage.report]
 # Require at least this total coverage percentage.
-fail_under = 95
+fail_under = 100
 # Exclude test modules from coverage totals.
-omit = ["lib/nix/tests/*"]
+omit = ["lib/tests/*"]
 # Show exact missing lines in text coverage reports.
 show_missing = true
 
+[tool.mutmut]
+# Mutate runtime modules while excluding tests and generated artifacts.
+paths_to_mutate = ["lib/nix/commands", "lib/nix/models", "lib/nix/schemas"]
+# Copy repository paths needed by pytest when running inside `mutants/`.
+also_copy = [
+  "darwin",
+  "home",
+  "lib",
+  "modules",
+  "overlays",
+  "packages",
+  "flake.lock",
+  "nixcfg.py",
+]
+# Focus mutation work on lines hit by coverage.
+mutate_only_covered_lines = true
+# Point test discovery to the in-repo pytest tree.
+tests_dir = ["lib/tests"]
+# Skip generated model code from mutation testing.
+do_not_mutate = ["lib/nix/models/_generated.py"]
+
 [dependency-groups]
 # Install these tools only for local development and quality checks.
-dev = ["coverage>=7.13.4", "pytest>=9.0.2", "ruff>=0.15.2", "ty>=0.0.18"]
+dev = [
+  "cosmic-ray>=8.3.18",
+  "coverage>=7.13.4",
+  "mutmut>=3.5.0",
+  "pytest>=9.0.2",
+  "ruff>=0.15.2",
+  "ty>=0.0.18",
+]

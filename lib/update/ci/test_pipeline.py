@@ -4,7 +4,7 @@ Runs the same phases as ``.github/workflows/update.yml`` on the local
 machine, leveraging the nix-rosetta-builder for Linux cross-builds.
 
 Phases executed:
-  1. Resolve upstream versions  (``resolve-versions``)
+  1. Resolve upstream versions  (``pipeline versions``)
   2. Compute hashes             (``update --pinned-versions``)
   3. Validate merged output     (sources.json round-trip check)
 
@@ -21,7 +21,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
 from pydantic import ValidationError
@@ -29,18 +29,15 @@ from pydantic import ValidationError
 from lib.nix.models.sources import SourceEntry
 from lib.update import cli as update_cli
 from lib.update.ci import merge_sources, resolve_versions
-from lib.update.ci._cli import make_typer_app, run_main
-from lib.update.paths import package_file_map
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from lib.update.ci._cli import make_main, make_typer_app
+from lib.update.paths import SOURCES_FILE_NAME, package_file_map
 
 # Platforms matching the CI matrix.
 CI_PLATFORMS = ("aarch64-darwin", "x86_64-linux", "aarch64-linux")
 
 
 def _log(msg: str) -> None:
-    sys.stderr.write(f"[test-pipeline] {msg}\n")
+    sys.stderr.write(f"[pipeline-test] {msg}\n")
 
 
 # ── Phase 1: Resolve versions ────────────────────────────────────────
@@ -50,7 +47,7 @@ def _phase_resolve(pinned_path: Path) -> bool:
     _log("Phase 1: Resolving upstream versions...")
     rc = resolve_versions.main(["--output", str(pinned_path)])
     if rc != 0:
-        _log(f"FAIL: resolve-versions exited {rc}")
+        _log(f"FAIL: pipeline versions exited {rc}")
         return False
 
     with pinned_path.open() as f:
@@ -95,7 +92,7 @@ def _split_sources_by_platform(work_dir: Path) -> dict[str, Path]:
     platform — but for local testing the content is identical and the
     merge logic still validates correctness.
     """
-    source_files = package_file_map("sources.json")
+    source_files = package_file_map(SOURCES_FILE_NAME)
     platform_dirs: dict[str, Path] = {}
     for plat in CI_PLATFORMS:
         pdir = work_dir / f"sources-{plat}"
@@ -117,7 +114,7 @@ def _phase_merge(work_dir: Path) -> bool:
 
     rc = merge_sources.main(roots)
     if rc != 0:
-        _log(f"FAIL: merge-sources exited {rc}")
+        _log(f"FAIL: pipeline sources exited {rc}")
         return False
     _log("  Merge OK")
     return True
@@ -128,7 +125,7 @@ def _phase_merge(work_dir: Path) -> bool:
 
 def _phase_validate() -> bool:
     _log("Phase 4: Validating sources.json files...")
-    source_files = package_file_map("sources.json")
+    source_files = package_file_map(SOURCES_FILE_NAME)
     errors = 0
     for name, path in sorted(source_files.items()):
         try:
@@ -167,7 +164,7 @@ def run(
 
     # Phase 1: Resolve versions
     ok = _phase_resolve(pinned_path)
-    phases.append(("resolve-versions", ok))
+    phases.append(("pipeline versions", ok))
     if not ok or resolve_only:
         _print_summary(phases, work_dir, keep=keep_artifacts)
         return 0 if ok else 1
@@ -182,7 +179,7 @@ def run(
     # Phase 3: Split & merge (optional)
     if full:
         ok = _phase_merge(work_dir)
-        phases.append(("merge-sources", ok))
+        phases.append(("pipeline sources", ok))
         if not ok:
             _print_summary(phases, work_dir, keep=keep_artifacts)
             return 1
@@ -207,46 +204,48 @@ def cli(
     full: Annotated[
         bool,
         typer.Option(
+            "-f",
             "--full",
             help="Also run the split-and-merge phase (tests merge logic).",
-        ),
-    ] = False,
-    source: Annotated[
-        str | None,
-        typer.Option(
-            "--source",
-            help="Only compute hashes for a single source (faster iteration).",
-        ),
-    ] = None,
-    resolve_only: Annotated[
-        bool,
-        typer.Option(
-            "--resolve-only",
-            help="Only run the version resolution phase (fastest smoke test).",
         ),
     ] = False,
     keep_artifacts: Annotated[
         bool,
         typer.Option(
+            "-k",
             "--keep-artifacts",
             help="Keep the temp directory with intermediate artifacts.",
         ),
     ] = False,
+    resolve_only: Annotated[
+        bool,
+        typer.Option(
+            "-r",
+            "--resolve-only",
+            help="Only run the version resolution phase (fastest smoke test).",
+        ),
+    ] = False,
+    source: Annotated[
+        str | None,
+        typer.Option(
+            "-s",
+            "--source",
+            help="Only compute hashes for a single source (faster iteration).",
+        ),
+    ] = None,
 ) -> None:
     """Run the local CI pipeline simulation."""
     raise typer.Exit(
         code=run(
             full=full,
-            source=source,
-            resolve_only=resolve_only,
             keep_artifacts=keep_artifacts,
+            resolve_only=resolve_only,
+            source=source,
         )
     )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the local CI pipeline simulation."""
-    return run_main(app, argv=argv, prog_name="test-pipeline")
+main = make_main(app, prog_name="pipeline test")
 
 
 def _print_summary(

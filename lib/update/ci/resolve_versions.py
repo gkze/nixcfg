@@ -12,22 +12,18 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import aiohttp
 import typer
 from pydantic import BaseModel
 
 from lib.update import io as update_io
-from lib.update.ci._cli import make_typer_app, run_main
+from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.config import resolve_active_config
 from lib.update.sources import load_all_sources
 from lib.update.updaters import UPDATERS
 from lib.update.updaters.base import VersionInfo
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
 
 type _JsonSafe = (
     str | int | float | bool | None | dict[str, _JsonSafe] | list[_JsonSafe]
@@ -173,6 +169,7 @@ def cli(
     strict: Annotated[
         bool,
         typer.Option(
+            "-s",
             "--strict",
             help="Fail if any updater fails to resolve.",
         ),
@@ -182,9 +179,7 @@ def cli(
     raise typer.Exit(code=run(output=output, strict=strict))
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI entrypoint."""
-    return run_main(app, argv=argv, prog_name="resolve-versions")
+main = make_main(app, prog_name="pipeline versions")
 
 
 if __name__ == "__main__":

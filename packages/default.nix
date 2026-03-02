@@ -9,6 +9,12 @@
 let
   darwinOnly = [
     "conductor"
+    "nix-manipulator"
+  ];
+  helperEntries = [
+    "go-cli-wrapper"
+    "openchamber-bun"
+    "registry"
   ];
   sculptorSystems = [
     "aarch64-darwin"
@@ -18,6 +24,7 @@ let
   isDarwin = builtins.match ".*-darwin" system != null;
   unsupported =
     (if isDarwin then [ ] else darwinOnly)
-    ++ (if builtins.elem system sculptorSystems then [ ] else [ "sculptor" ]);
+    ++ (if builtins.elem system sculptorSystems then [ ] else [ "sculptor" ])
+    ++ helperEntries;
 in
 removeAttrs all unsupported

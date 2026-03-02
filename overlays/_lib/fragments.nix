@@ -1,5 +1,6 @@
 { fragArgs, overlayDir }:
 let
+  stripNixSuffix = name: builtins.substring 0 ((builtins.stringLength name) - 4) name;
   entries = builtins.readDir overlayDir;
   entryNames = builtins.attrNames entries;
   fragDirs = builtins.filter (
@@ -7,7 +8,10 @@ let
   ) entryNames;
   fragFiles = builtins.filter (
     name:
-    entries.${name} == "regular" && builtins.match ".*\\.nix" name != null && name != "default.nix"
+    entries.${name} == "regular"
+    && builtins.match ".*\\.nix" name != null
+    && name != "default.nix"
+    && !(builtins.elem (stripNixSuffix name) fragDirs)
   ) entryNames;
   dirPairs = builtins.map (name: {
     inherit name;

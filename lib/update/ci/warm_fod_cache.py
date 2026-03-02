@@ -10,7 +10,7 @@ layout, Deno's SQLite cache, HTTP metadata, timestamps).
 
 The explicit ``cachix push`` is necessary because the Cachix daemon's
 automatic store-path detection may miss FODs built inside nested ``nix
-build`` invocations (e.g. ``nix run .#nixcfg -- ci warm-fod-cache``
+build`` invocations (e.g. ``nix run .#nixcfg -- ci cache fod``
 spawns its own ``nix build --impure``).
 
 Only the FOD is built because the full package may need resources not
@@ -35,10 +35,10 @@ import typer
 from lib.nix.commands import base as nix_base
 from lib.nix.commands.build import nix_build
 from lib.update import sources as update_sources
-from lib.update.ci._cli import make_typer_app, run_main
+from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.ci._time import format_duration
 from lib.update.nix import _build_overlay_expr, normalize_nix_platform
-from lib.update.paths import package_file_map
+from lib.update.paths import SOURCES_FILE_NAME, package_file_map
 
 if TYPE_CHECKING:
     from lib.nix.models.sources import HashEntry, SourceEntry
@@ -87,7 +87,7 @@ def _platform_fod_entries(entry: SourceEntry, system: str) -> list[HashEntry]:
 def _find_fod_targets(system: str) -> list[FodTarget]:
     """Discover FOD sub-derivations that need building for *system*."""
     targets: list[FodTarget] = []
-    for name, path in sorted(package_file_map("sources.json").items()):
+    for name, path in sorted(package_file_map(SOURCES_FILE_NAME).items()):
         try:
             entry = update_sources.load_source_entry(path)
         except Exception:
@@ -325,28 +325,31 @@ app = make_typer_app(
 @app.callback(invoke_without_command=True)
 def cli(
     *,
-    system: Annotated[
-        str | None,
-        typer.Option(
-            "--system",
-            help="Nix system identifier (default: auto-detect).",
-        ),
-    ] = None,
-    dry_run: Annotated[
-        bool,
-        typer.Option(
-            "--dry-run",
-            help="List targets that would be built without building.",
-        ),
-    ] = False,
     cachix_cache: Annotated[
         str | None,
         typer.Option(
+            "-c",
             "--cachix-cache",
             help=(
                 "Cachix cache name for explicit pushes after build. "
                 "Falls back to $CACHIX_NAME if not set."
             ),
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "-n",
+            "--dry-run",
+            help="List targets that would be built without building.",
+        ),
+    ] = False,
+    system: Annotated[
+        str | None,
+        typer.Option(
+            "-s",
+            "--system",
+            help="Nix system identifier (default: auto-detect).",
         ),
     ] = None,
     verbose: Annotated[
@@ -357,17 +360,15 @@ def cli(
     """Run FOD cache warming for the selected system."""
     raise typer.Exit(
         code=run(
-            system=system,
-            dry_run=dry_run,
             cachix_cache=cachix_cache,
+            dry_run=dry_run,
+            system=system,
             verbose=verbose,
         )
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Run the CLI entrypoint."""
-    return run_main(app, argv=argv, prog_name="warm-fod-cache")
+main = make_main(app, prog_name="cache fod")
 
 
 if __name__ == "__main__":

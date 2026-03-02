@@ -1,7 +1,8 @@
 {
+  "drvHash": "pl31c81hxjaarj1dz9wv87d8i7qxzyir",
   "hashes": [
     {
-      "hash": "sha256-Nkd5Q2ugRqsTqaFbCSniC3Obl++uEjVUmoa8MVT5++8=",
+      "hash": "sha256-iRlwCSGigRi/ilfXi8rI68vlfkeec3vB5nZWPmTLnK8=",
       "hashType": "npmDepsHash"
     }
   ],

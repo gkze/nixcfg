@@ -62,7 +62,7 @@
     };
     crane.url = "github:ipetkov/crane";
     opencode = {
-      url = "github:anomalyco/opencode";
+      url = "github:gkze/opencode?ref=feat/added_UI_themes";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     pyproject-build-systems = {
@@ -111,15 +111,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.27.0";
+      url = "github:max-sixty/worktrunk/v0.28.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
       url = "github:axiomhq/cli/v0.14.8";
-      flake = false;
-    };
-    beads = {
-      url = "github:steveyegge/beads/v0.56.1";
       flake = false;
     };
     catppuccin-bat = {
@@ -127,19 +123,19 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.105.0";
+      url = "github:openai/codex/rust-v0.106.0";
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.3.4";
+      url = "github:gkze/curator/v0.3.7";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crush = {
-      url = "github:charmbracelet/crush/v0.45.1";
+      url = "github:charmbracelet/crush/v0.46.1";
       flake = false;
     };
     gemini-cli = {
-      url = "github:google-gemini/gemini-cli/v0.30.0";
+      url = "github:google-gemini/gemini-cli/v0.31.0";
       flake = false;
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
@@ -200,7 +196,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad/v0.6.3";
+      url = "github:batrachianai/toad/v0.6.5";
       flake = false;
     };
     treesitter-textobjects = {
@@ -234,31 +230,15 @@
     flakelight ./. (
       { lib, ... }:
       let
-        # ─── Lint file patterns ───────────────────────────────────────────
-        # Defined once, referenced in both devShell (git-hooks, regex)
-        # and formatter (treefmt-nix, globs).
-        lintFiles = {
-          ruff = {
-            regex = "(\\.(py|pyi)$|home/george/bin/git-ignore)";
-            globs = [
-              "*.py"
-              "*.pyi"
-              "home/george/bin/git-ignore"
-            ];
-          };
-          toml = {
-            regex = "\\.toml$";
-            globs = [ "*.toml" ];
-          };
-          shell = {
-            regex = "(\\.envrc|misc/zsh-plugins/.*\\.zsh)";
-            globs = [
-              ".envrc"
-              "misc/zsh-plugins/*.zsh"
-            ];
-            excludeRegex = [ "misc/zsh-plugins/go\\.plugin\\.zsh" ];
-            excludeGlobs = [ "misc/zsh-plugins/go.plugin.zsh" ];
-          };
+        exports = import ./lib/exports.nix { src = ./.; };
+        lintFiles = import ./lib/lint-files.nix;
+        mkDevShell = import ./lib/dev-shell.nix {
+          src = ./.;
+          gitHooks = git-hooks;
+          inherit
+            lib
+            lintFiles
+            ;
         };
       in
       {
@@ -296,36 +276,11 @@
         homeConfigurations.george = import ./home/george { outputs = self; };
 
         # Public module API for consuming this repo as a framework.
-        nixosModules = {
-          nixcfgCommon = ./modules/common.nix;
-          nixcfgBase = ./modules/nixos/base.nix;
-          nixcfgProfiles = ./modules/nixos/profiles.nix;
-        };
-
-        darwinModules = {
-          nixcfgCommon = ./modules/common.nix;
-          nixcfgBase = ./modules/darwin/base.nix;
-          nixcfgProfiles = ./modules/darwin/profiles.nix;
-          nixcfgHomebrew = ./modules/darwin/homebrew.nix;
-        };
-
-        homeModules = {
-          nixcfgBase = ./modules/home/base.nix;
-          nixcfgGit = ./modules/home/git.nix;
-          nixcfgProfiles = ./modules/home/profiles.nix;
-          nixcfgPackages = ./modules/home/packages.nix;
-          nixcfgOpencode = ./modules/home/opencode.nix;
-          nixcfgTheme = ./modules/home/theme.nix;
-          nixcfgFonts = ./modules/home/fonts.nix;
-          nixcfgStylix = ./modules/home/stylix.nix;
-          nixcfgZsh = ./modules/home/zsh.nix;
-          nixcfgDarwin = ./modules/home/darwin.nix;
-          nixcfgLinux = ./modules/home/linux.nix;
-          nixcfgLanguageBun = ./modules/home/languages/bun.nix;
-          nixcfgLanguageGo = ./modules/home/languages/go.nix;
-          nixcfgLanguagePython = ./modules/home/languages/python.nix;
-          nixcfgLanguageRust = ./modules/home/languages/rust.nix;
-        };
+        inherit (exports)
+          darwinModules
+          homeModules
+          nixosModules
+          ;
 
         withOverlays = [
           devshell.overlays.default
@@ -338,100 +293,7 @@
           self.overlays.default
         ];
 
-        devShell =
-          pkgs:
-          let
-            pre-commit-check = git-hooks.lib.${pkgs.system}.run {
-              src = ./.;
-              package = pkgs.prek;
-              hooks = {
-                # Nix
-                nixfmt.enable = true;
-                deadnix.enable = true;
-                statix.enable = true;
-                # Python
-                ruff = {
-                  enable = true;
-                  files = lintFiles.ruff.regex;
-                  entry = "${lib.getExe pkgs.ruff} check --config pyproject.toml .";
-                  pass_filenames = false;
-                  always_run = true;
-                };
-                ruff-format = {
-                  enable = true;
-                  files = lintFiles.ruff.regex;
-                };
-                ty = {
-                  enable = true;
-                  files = lintFiles.ruff.regex;
-                  package = pkgs.ty;
-                  entry = "${lib.getExe pkgs.ty} check .";
-                  pass_filenames = false;
-                  always_run = true;
-                };
-                # Shell
-                shellcheck = {
-                  enable = true;
-                  files = lintFiles.shell.regex;
-                  excludes = lintFiles.shell.excludeRegex;
-                };
-                shfmt = {
-                  enable = true;
-                  files = lintFiles.shell.regex;
-                  excludes = lintFiles.shell.excludeRegex;
-                  settings.simplify = false; # let .editorconfig control style
-                };
-                # Markdown
-                mdformat = {
-                  enable = true;
-                  package = pkgs.mdformat;
-                };
-                # YAML
-                yamlfmt = {
-                  enable = true;
-                  args = [
-                    "-conf"
-                    ".yamlfmt"
-                  ];
-                };
-                # TOML
-                taplo = {
-                  enable = true;
-                  files = lintFiles.toml.regex;
-                  entry = "${lib.getExe pkgs.taplo} format --config .taplo.toml";
-                };
-                # General
-                check-merge-conflicts.enable = true;
-                end-of-file-fixer.enable = true;
-                trim-trailing-whitespace.enable = true;
-              };
-            };
-          in
-          pkgs.devshell.mkShell {
-            name = "nixcfg";
-
-            packages =
-              with pkgs;
-              [
-                flake-edit
-                nh
-                nil
-                nix-init
-                nix-manipulator
-                nixos-generators
-                nurl
-                prek
-                sops
-                taplo
-                yamlfmt
-              ]
-              ++ lib.optional pkgs.stdenv.isLinux dconf2nix
-              ++ pre-commit-check.enabledPackages;
-
-            devshell.startup = {
-              pre-commit.text = pre-commit-check.shellHook;
-            };
-          };
+        devShell = mkDevShell;
 
         formatter =
           pkgs:
@@ -482,6 +344,11 @@
                       "--config"
                       "pyproject.toml"
                     ];
+                    shfmt.options = [
+                      "-i"
+                      "2"
+                      "-s"
+                    ];
                     # treefmt/taplo normally auto-discovers `.taplo.toml`, but
                     # this keeps `nix fmt` stable from subdirectories.
                     taplo.options = [
@@ -525,13 +392,17 @@
 
         checks.python =
           { lib, pkgs, ... }:
+          let
+            nixcfgScript = if builtins.hasAttr "nixcfg-script" pkgs then pkgs."nixcfg-script" else null;
+            tyPythonFlag = if nixcfgScript != null then " --python ${nixcfgScript}/bin/python" else "";
+          in
           pkgs.runCommand "check-python" { } ''
             export HOME="$TMPDIR"
             export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
             cp -a ${./.} src
             cd src
             ${lib.getExe pkgs.ruff} check --config pyproject.toml .
-            ${lib.getExe pkgs.ty} check .
+            ${lib.getExe pkgs.ty} check${tyPythonFlag} .
             touch $out
           '';
       }

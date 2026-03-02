@@ -60,8 +60,8 @@ def _build_command_args(
 
     if expr is not None:
         args.extend(["--expr", expr])
-    elif installable is not None:
-        args.append(installable)
+    else:
+        args.append(cast("str", installable))
 
     args.extend(extra_cli_args)
 

@@ -23,8 +23,37 @@ def _resolve_repo_root() -> Path:
 
 REPO_ROOT = _resolve_repo_root()
 
-# Directories containing per-package sources.json and updater.py files.
+# Top-level directories containing package and overlay metadata files.
 PACKAGE_DIRS = ("packages", "overlays")
+
+SOURCES_FILE_NAME = "sources.json"
+
+
+def package_file_git_pathspecs(filename: str) -> tuple[str, ...]:
+    """Return git pathspecs for directory and flat per-package files."""
+    return tuple(
+        pathspec
+        for directory in PACKAGE_DIRS
+        for pathspec in (
+            f":(glob){directory}/**/{filename}",
+            f":(glob){directory}/*.{filename}",
+        )
+    )
+
+
+SOURCES_GIT_PATHSPECS = package_file_git_pathspecs(SOURCES_FILE_NAME)
+
+
+def is_package_file_path(relative_path: str, filename: str) -> bool:
+    """Return whether a relative path matches per-package file layouts."""
+    if not any(relative_path.startswith(f"{directory}/") for directory in PACKAGE_DIRS):
+        return False
+    return relative_path.endswith((f"/{filename}", f".{filename}"))
+
+
+def is_sources_file_path(relative_path: str) -> bool:
+    """Return whether a relative path points at a per-package sources file."""
+    return is_package_file_path(relative_path, SOURCES_FILE_NAME)
 
 
 def get_repo_file(filename: str) -> Path:
@@ -38,24 +67,52 @@ def _package_file_map_cached(filename: str) -> tuple[tuple[str, Path], ...]:
     return tuple(sorted(_package_file_map(REPO_ROOT, filename).items()))
 
 
+def _flat_package_file_name(name: str, filename: str) -> str | None:
+    """Return package name for ``<name>.<filename>`` files, if matched."""
+    suffix = f".{filename}"
+    if not name.endswith(suffix):
+        return None
+    package_name = name[: -len(suffix)]
+    if not package_name:
+        return None
+    return package_name
+
+
 def _package_file_map(root: Path, filename: str) -> dict[str, Path]:
-    """Return ``{name: path}`` for package subdirs containing ``filename``."""
+    """Return ``{name: path}`` for per-package sidecar files.
+
+    Supports two layouts under ``packages/`` and ``overlays/``:
+    1. Directory-based: ``<name>/<filename>``
+    2. Flat file: ``<name>.<filename>``
+    """
     result: dict[str, Path] = {}
     duplicates: dict[str, list[Path]] = {}
+
+    def _record(name: str, path: Path) -> None:
+        if name in result:
+            duplicates.setdefault(name, [result[name]]).append(path)
+            return
+        result[name] = path
+
     for d in PACKAGE_DIRS:
         pkg_root = root / d
         if not pkg_root.is_dir():
             continue
         for child in sorted(pkg_root.iterdir()):
-            candidate = child / filename
-            if not child.is_dir() or not candidate.exists():
+            if child.is_dir():
+                candidate = child / filename
+                if not candidate.exists():
+                    continue
+                _record(child.name, candidate)
                 continue
-            if child.name in result:
-                duplicates.setdefault(child.name, [result[child.name]]).append(
-                    candidate,
-                )
+
+            if not child.is_file():
                 continue
-            result[child.name] = candidate
+
+            if (flat_name := _flat_package_file_name(child.name, filename)) is None:
+                continue
+
+            _record(flat_name, child)
 
     if duplicates:
         lines = [f"Duplicate per-package {filename} entries detected:"]
@@ -68,12 +125,12 @@ def _package_file_map(root: Path, filename: str) -> dict[str, Path]:
 
 
 def package_file_map_in(root: Path, filename: str) -> dict[str, Path]:
-    """Return ``{name: path}`` for package subdirs under an arbitrary root."""
+    """Return ``{name: path}`` for package files under an arbitrary root."""
     return _package_file_map(root.resolve(), filename)
 
 
 def package_file_map(filename: str) -> dict[str, Path]:
-    """Return ``{name: path}`` for package subdirs containing ``filename``."""
+    """Return ``{name: path}`` for per-package files named ``filename``."""
     return dict(_package_file_map_cached(filename))
 
 
@@ -82,26 +139,43 @@ def package_file_for(name: str, filename: str) -> Path | None:
     return package_file_map(filename).get(name)
 
 
-def package_dir_for(name: str) -> Path | None:
-    """Return the unique package directory for ``name`` or ``None``."""
-    matches: list[Path] = []
-    for d in PACKAGE_DIRS:
-        candidate = REPO_ROOT / d / name
-        if candidate.is_dir():
-            matches.append(candidate)
+def package_dirs_for_in(root: Path, name: str) -> list[Path]:
+    """Return matching package directories for ``name`` under ``root``."""
+    resolved_root = root.resolve()
+    return [
+        candidate
+        for d in PACKAGE_DIRS
+        if (candidate := resolved_root / d / name).is_dir()
+    ]
+
+
+def _unique_package_dir_for(root: Path, name: str) -> Path | None:
+    """Return a unique matching package directory or raise on duplicates."""
+    resolved_root = root.resolve()
+    matches = package_dirs_for_in(resolved_root, name)
 
     if not matches:
         return None
     if len(matches) > 1:
-        paths = ", ".join(str(path.relative_to(REPO_ROOT)) for path in matches)
+        paths = ", ".join(str(path.relative_to(resolved_root)) for path in matches)
         msg = f"Duplicate package directories for '{name}': {paths}"
         raise RuntimeError(msg)
     return matches[0]
 
 
+def package_dir_for_in(root: Path, name: str) -> Path | None:
+    """Return the unique package directory for ``name`` under ``root``."""
+    return _unique_package_dir_for(root, name)
+
+
+def package_dir_for(name: str) -> Path | None:
+    """Return the unique package directory for ``name`` or ``None``."""
+    return _unique_package_dir_for(REPO_ROOT, name)
+
+
 def sources_file_for(name: str) -> Path | None:
     """Return the ``sources.json`` path for a named package, or ``None``."""
-    return package_file_for(name, "sources.json")
+    return package_file_for(name, SOURCES_FILE_NAME)
 
 
 FLAKE_LOCK_FILE = get_repo_file("flake.lock")

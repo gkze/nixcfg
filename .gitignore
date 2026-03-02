@@ -25,12 +25,19 @@ result
 .pytest_cache
 .coverage
 .coverage.*
+.coverage-data.json
 .coverage_html/
 coverage.xml
 htmlcov/
+mutants/
+.cosmic-ray.sqlite
 .venv
 __pycache__
 *.egg-info/
 
 # Per-package update lock artifacts
 **/sources.json.lock
+
+# Dolt artifacts
+.dolt/
+*.db

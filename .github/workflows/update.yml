@@ -40,7 +40,7 @@ jobs:
           path: ~/.cache/nix
           key: nix-cache-${{ runner.os }}-${{ hashFiles('flake.lock') }}
           restore-keys: nix-cache-${{ runner.os }}-
-      - run: nix run .#nixcfg -- ci nix-flake-update
+      - run: nix run .#nixcfg -- ci workflow nix-flake-update
       - uses: actions/upload-artifact@v6
         with:
           name: flake-lock
@@ -68,7 +68,7 @@ jobs:
       - name: Resolve upstream versions
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: nix run .#nixcfg -- ci resolve-versions --output pinned-versions.json
+        run: nix run .#nixcfg -- ci pipeline versions --output pinned-versions.json
       - uses: actions/upload-artifact@v6
         with:
           name: pinned-versions
@@ -110,7 +110,7 @@ jobs:
           path: .
       - name: Free disk space
         if: runner.os == 'macOS'
-        run: nix run .#nixcfg -- ci free-disk-space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
       - name: Compute hashes for ${{ matrix.platform }}
         # Run update with pinned versions to ensure all platforms use the
         # same upstream version (resolved in the resolve-versions job).
@@ -122,7 +122,7 @@ jobs:
         # Build packages with platform-specific FOD hashes so the Cachix
         # daemon pushes them.  Downstream jobs get a cache hit instead of
         # rebuilding the FOD (which is non-deterministic across runners).
-        run: nix run .#nixcfg -- ci warm-fod-cache
+        run: nix run .#nixcfg -- ci cache fod
       - uses: actions/upload-artifact@v6
         with:
           name: sources-${{ matrix.platform }}
@@ -155,7 +155,7 @@ jobs:
           path: sources-aarch64-linux
       - name: Merge per-package sources files
         run: |
-          nix run .#nixcfg -- ci merge-sources \
+          nix run .#nixcfg -- ci pipeline sources \
             sources-aarch64-darwin \
             sources-x86_64-linux \
             sources-aarch64-linux
@@ -167,7 +167,49 @@ jobs:
             packages/**/sources.json
             overlays/**/sources.json
 
-  # Phase 5: Build shared Darwin derivations to populate cache
+  # Phase 5: Build the slowest Darwin derivations in parallel
+  darwin-shared-heavy:
+    needs: merge-hashes
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include:
+          - name: zed-editor
+            target: .#darwinConfigurations.argus.pkgs.zed-editor-nightly
+          - name: opencode
+            target: .#darwinConfigurations.argus.pkgs.opencode
+          - name: opencode-desktop
+            target: .#darwinConfigurations.argus.pkgs.opencode-desktop
+          - name: codex
+            target: .#darwinConfigurations.argus.pkgs.codex
+          - name: scratch
+            target: .#darwinConfigurations.argus.pkgs.scratch
+          - name: czkawka
+            target: .#darwinConfigurations.argus.pkgs.czkawka
+          - name: gemini-cli
+            target: .#darwinConfigurations.argus.pkgs.gemini-cli
+          - name: element-desktop
+            target: .#darwinConfigurations.argus.pkgs.element-desktop
+    steps:
+      - *checkout
+      - *setup_nix
+      - *cachix
+      - uses: actions/download-artifact@v7
+        with:
+          name: merged-sources
+          path: .
+      - *cache_nix_arch
+      - name: Free disk space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - run: nix run .#nixcfg -- ci workflow install-darwin-tools
+      - name: Pre-fetch flake inputs
+        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - name: Build heavy target (${{ matrix.name }})
+        run: nix build --impure ${{ matrix.target }}
+
+  # Phase 6: Build shared Darwin derivations to populate cache
   darwin-shared:
     needs: merge-hashes
     runs-on: macos-15
@@ -182,28 +224,24 @@ jobs:
           path: .
       - *cache_nix_arch
       - name: Free disk space
-        run: nix run .#nixcfg -- ci free-disk-space
-      - run: nix run .#nixcfg -- ci install-darwin-tools
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - run: nix run .#nixcfg -- ci workflow install-darwin-tools
       - name: Pre-fetch flake inputs
-        run: nix run .#nixcfg -- ci prefetch-flake-inputs
+        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
       - name: Build shared Darwin closure
         run: |
-          nix run .#nixcfg -- ci build-shared-closure \
+          nix run .#nixcfg -- ci cache closure \
+            --mode intersection \
             .#darwinConfigurations.argus.system \
             .#darwinConfigurations.rocinante.system
 
-  # Phase 6: Build Darwin configurations
-  darwin:
+  # Phase 7: Build Darwin configurations per host
+  darwin-argus:
     needs:
       - merge-hashes
+      - darwin-shared-heavy
       - darwin-shared
     runs-on: macos-15
-    strategy:
-      fail-fast: false
-      matrix:
-        host:
-          - argus
-          - rocinante
     steps:
       - *checkout
       - *setup_nix
@@ -211,13 +249,32 @@ jobs:
       - *download_merged_sources
       - *cache_nix_arch
       - name: Free disk space
-        run: nix run .#nixcfg -- ci free-disk-space
-      - run: nix run .#nixcfg -- ci install-darwin-tools
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - run: nix run .#nixcfg -- ci workflow install-darwin-tools
       - name: Pre-fetch flake inputs
-        run: nix run .#nixcfg -- ci prefetch-flake-inputs
-      - run: nix run .#nixcfg -- ci build-darwin-config "${{ matrix.host }}"
+        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - run: nix run .#nixcfg -- ci workflow build-darwin-config argus
 
-  # Phase 7: Placeholder for future NixOS configuration builds
+  darwin-rocinante:
+    needs:
+      - merge-hashes
+      - darwin-shared-heavy
+      - darwin-shared
+    runs-on: macos-15
+    steps:
+      - *checkout
+      - *setup_nix
+      - *cachix
+      - *download_merged_sources
+      - *cache_nix_arch
+      - name: Free disk space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - run: nix run .#nixcfg -- ci workflow install-darwin-tools
+      - name: Pre-fetch flake inputs
+        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - run: nix run .#nixcfg -- ci workflow build-darwin-config rocinante
+
+  # Phase 8: Placeholder for future NixOS configuration builds
   linux:
     needs: merge-hashes
     runs-on: ubuntu-24.04
@@ -228,20 +285,24 @@ jobs:
       - *download_merged_sources
       - *cache_nix_arch
       - name: Smoke-check update app evaluation
-        run: nix run .#nixcfg -- ci smoke-check-update-app
-      - run: nix run .#nixcfg -- ci list-update-targets
+        run: nix run .#nixcfg -- ci workflow smoke-check-update-app
+      - run: nix run .#nixcfg -- ci workflow list-update-targets
 
-  # Phase 8: Create PR with updates
+  # Phase 9: Create PR with updates
   create-pr:
     needs:
       - merge-hashes
+      - darwin-shared-heavy
       - darwin-shared
-      - darwin
+      - darwin-argus
+      - darwin-rocinante
       - linux
     if: >-
       needs.merge-hashes.result == 'success' &&
+      needs.darwin-shared-heavy.result == 'success' &&
       needs.darwin-shared.result == 'success' &&
-      needs.darwin.result == 'success' &&
+      needs.darwin-argus.result == 'success' &&
+      needs.darwin-rocinante.result == 'success' &&
       needs.linux.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
@@ -255,7 +316,7 @@ jobs:
       - *download_merged_sources
       - name: Generate PR body
         run: |
-          nix run .#nixcfg -- ci generate-pr-body \
+          nix run .#nixcfg -- ci workflow generate-pr-body \
             --output /tmp/pr-body.md \
             --workflow-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --server-url "${{ github.server_url }}" \

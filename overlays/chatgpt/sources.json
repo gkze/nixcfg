@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-NZ8yYlniiniKV3Crs0r/HcyI3sdVkBfJ7de9x0PV9T0=",
-    "x86_64-darwin": "sha256-NZ8yYlniiniKV3Crs0r/HcyI3sdVkBfJ7de9x0PV9T0="
+    "aarch64-darwin": "sha256-6V3H0sA9dlLa/FygZrOO9FqjSVsVgkdH1ZAYLdbET9U=",
+    "x86_64-darwin": "sha256-6V3H0sA9dlLa/FygZrOO9FqjSVsVgkdH1ZAYLdbET9U="
   },
   "urls": {
-    "aarch64-darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.041_1771039076.dmg",
-    "x86_64-darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.041_1771039076.dmg"
+    "aarch64-darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.048_1771630681.dmg",
+    "x86_64-darwin": "https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_1.2026.048_1771630681.dmg"
   },
-  "version": "1.2026.041"
+  "version": "1.2026.048"
 }

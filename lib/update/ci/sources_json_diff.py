@@ -16,7 +16,11 @@ from typing import TYPE_CHECKING, Annotated, TypeGuard
 import typer
 from deepdiff import DeepDiff
 
-from lib.update.ci._cli import make_typer_app, run_main
+from lib.update.ci._cli import (
+    make_dual_typer_apps,
+    make_main,
+    register_dual_entrypoint,
+)
 from lib.update.ci._subprocess import run_command
 
 if TYPE_CHECKING:
@@ -416,20 +420,14 @@ def run(
     return 0
 
 
-app = make_typer_app(
+_DUAL_APPS = make_dual_typer_apps(
     help_text="Generate a diff for source entry JSON changes.",
     no_args_is_help=False,
 )
+app = _DUAL_APPS.app
 
 
-_standalone_app = make_typer_app(
-    help_text="Generate a diff for source entry JSON changes.",
-    no_args_is_help=False,
-)
-
-
-@_standalone_app.command()
-@app.callback(invoke_without_command=True)
+@register_dual_entrypoint(_DUAL_APPS)
 def cli(
     old_sources: Annotated[
         pathlib.Path,
@@ -442,7 +440,7 @@ def cli(
     *,
     output_format: Annotated[
         str,
-        typer.Option("--format", help="Diff output format."),
+        typer.Option("-f", "--format", help="Diff output format."),
     ] = "auto",
 ) -> None:
     """Compare source entry JSON files and print a diff."""
@@ -455,9 +453,7 @@ def cli(
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Run the CLI entrypoint."""
-    return run_main(_standalone_app, argv=argv, prog_name="sources-json-diff")
+main = make_main(_DUAL_APPS.standalone_app, prog_name="diff sources")
 
 
 if __name__ == "__main__":

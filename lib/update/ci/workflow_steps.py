@@ -4,24 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import importlib
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
 
-from lib.update.ci._cli import make_typer_app, run_main
+from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.ci._subprocess import run_command as _run
 from lib.update.ci.flake_lock_diff import run_diff as run_flake_lock_diff
 from lib.update.ci.sources_json_diff import NoChangesMessage
 from lib.update.ci.sources_json_diff import run_diff as run_sources_diff
-from lib.update.cli import UpdateOptions, run_updates
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from lib.update.paths import (
+    PACKAGE_DIRS,
+    SOURCES_FILE_NAME,
+    SOURCES_GIT_PATHSPECS,
+    is_sources_file_path,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -114,7 +117,10 @@ def _cmd_smoke_check_update_app() -> int:
 
 
 def _cmd_list_update_targets() -> int:
-    return asyncio.run(run_updates(UpdateOptions(list_targets=True)))
+    update_cli = importlib.import_module("lib.update.cli")
+    return asyncio.run(
+        update_cli.run_updates(update_cli.UpdateOptions(list_targets=True))
+    )
 
 
 def _git_show(pathspec: str) -> str:
@@ -122,6 +128,23 @@ def _git_show(pathspec: str) -> str:
     if result.returncode != 0:
         return "{}\n"
     return result.stdout
+
+
+def _source_diff_pathspecs() -> tuple[str, ...]:
+    """Return pathspecs to diff sources files, including flat layout when present."""
+    if any(
+        child.is_file() and child.name.endswith(f".{SOURCES_FILE_NAME}")
+        for directory in PACKAGE_DIRS
+        if (root := Path(directory)).is_dir()
+        for child in root.iterdir()
+    ):
+        return SOURCES_GIT_PATHSPECS
+
+    return tuple(
+        pathspec
+        for pathspec in SOURCES_GIT_PATHSPECS
+        if pathspec.endswith(f"/{SOURCES_FILE_NAME}")
+    )
 
 
 def generate_pr_body(
@@ -164,8 +187,7 @@ def generate_pr_body(
                 "--name-only",
                 "HEAD",
                 "--",
-                ":(glob)packages/**/sources.json",
-                ":(glob)overlays/**/sources.json",
+                *_source_diff_pathspecs(),
             ],
             capture_output=True,
         )
@@ -180,14 +202,9 @@ def generate_pr_body(
             capture_output=True,
         )
         untracked_sources = [
-            line.strip()
+            path
             for line in untracked_result.stdout.splitlines()
-            if line.strip()
-            and line.strip().endswith("/sources.json")
-            and (
-                line.strip().startswith("packages/")
-                or line.strip().startswith("overlays/")
-            )
+            if (path := line.strip()) and is_sources_file_path(path)
         ]
         source_files = sorted({*source_files, *untracked_sources})
 
@@ -258,19 +275,49 @@ app = make_typer_app(
     no_args_is_help=True,
 )
 
+workflow_darwin_app = make_typer_app(
+    help_text="Darwin workflow steps.",
+    no_args_is_help=True,
+)
+workflow_flake_app = make_typer_app(
+    help_text="Flake-related workflow steps.",
+    no_args_is_help=True,
+)
+workflow_pr_body_app = make_typer_app(
+    help_text="Pull request body generation workflow step.",
+    no_args_is_help=False,
+)
+workflow_update_app = make_typer_app(
+    help_text="Update app smoke-check workflow step.",
+    no_args_is_help=False,
+)
+workflow_update_targets_app = make_typer_app(
+    help_text="Update target listing workflow step.",
+    no_args_is_help=False,
+)
 
-@app.command("nix-flake-update")
-def command_nix_flake_update() -> None:
-    """Run `nix flake update`."""
-    raise typer.Exit(code=_cmd_nix_flake_update())
+app.add_typer(workflow_darwin_app, name="darwin")
+app.add_typer(workflow_flake_app, name="flake")
+app.add_typer(workflow_pr_body_app, name="pr-body")
+app.add_typer(workflow_update_app, name="update-app")
+app.add_typer(workflow_update_targets_app, name="update-targets")
 
 
-@app.command("free-disk-space")
+@workflow_darwin_app.command("build")
+def command_build_darwin_config(
+    host: str = typer.Argument(..., help="Darwin host from matrix, e.g. argus."),
+) -> None:
+    """Build one darwin configuration by host name."""
+    raise typer.Exit(code=_cmd_build_darwin_config(host=host))
+
+
+@workflow_darwin_app.command("free")
 def command_free_disk_space(
     *,
     force_local: Annotated[
         bool,
         typer.Option(
+            "-f",
             "--force-local",
             help="Allow destructive cleanup when not running in CI.",
         ),
@@ -280,65 +327,51 @@ def command_free_disk_space(
     raise typer.Exit(code=_cmd_free_disk_space(force_local=force_local))
 
 
-@app.command("install-darwin-tools")
+@workflow_darwin_app.command("install")
 def command_install_darwin_tools() -> None:
     """Install macOS-specific tools for CI."""
     raise typer.Exit(code=_cmd_install_darwin_tools())
 
 
-@app.command("prefetch-flake-inputs")
+@workflow_flake_app.command("prefetch")
 def command_prefetch_flake_inputs() -> None:
     """Pre-fetch flake inputs for CI jobs."""
     raise typer.Exit(code=_cmd_prefetch_flake_inputs())
 
 
-@app.command("build-darwin-config")
-def command_build_darwin_config(
-    host: str = typer.Argument(..., help="Darwin host from matrix, e.g. argus."),
-) -> None:
-    """Build one darwin configuration by host name."""
-    raise typer.Exit(code=_cmd_build_darwin_config(host=host))
+@workflow_flake_app.command("update")
+def command_nix_flake_update() -> None:
+    """Run `nix flake update`."""
+    raise typer.Exit(code=_cmd_nix_flake_update())
 
 
-@app.command("smoke-check-update-app")
-def command_smoke_check_update_app() -> None:
-    """Smoke-check that the update app evaluates."""
-    raise typer.Exit(code=_cmd_smoke_check_update_app())
-
-
-@app.command("list-update-targets")
-def command_list_update_targets() -> None:
-    """List update targets discovered by the update app."""
-    raise typer.Exit(code=_cmd_list_update_targets())
-
-
-@app.command("generate-pr-body")
+@workflow_pr_body_app.callback(invoke_without_command=True)
 def command_generate_pr_body(
     *,
-    output: Annotated[
-        Path,
-        typer.Option("--output", help="Path to write PR body."),
-    ],
-    workflow_url: Annotated[
-        str,
-        typer.Option("--workflow-url", help="Workflow run URL."),
-    ],
-    server_url: Annotated[
-        str,
-        typer.Option("--server-url", help="GitHub server URL."),
-    ],
-    repository: Annotated[
-        str,
-        typer.Option("--repository", help="owner/repo."),
-    ],
     base_ref: Annotated[
         str,
-        typer.Option("--base-ref", help="Base branch for compare."),
+        typer.Option("-b", "--base-ref", help="Base branch for compare."),
     ],
     compare_head: Annotated[
         str,
-        typer.Option("--compare-head", help="Head branch used in compare links."),
+        typer.Option("-c", "--compare-head", help="Head branch used in compare links."),
     ] = "update_flake_lock_action",
+    output: Annotated[
+        Path,
+        typer.Option("-o", "--output", help="Path to write PR body."),
+    ],
+    repository: Annotated[
+        str,
+        typer.Option("-r", "--repository", help="owner/repo."),
+    ],
+    server_url: Annotated[
+        str,
+        typer.Option("-s", "--server-url", help="GitHub server URL."),
+    ],
+    workflow_url: Annotated[
+        str,
+        typer.Option("-w", "--workflow-url", help="Workflow run URL."),
+    ],
 ) -> None:
     """Generate pull request body markdown for update runs."""
     raise typer.Exit(
@@ -353,9 +386,114 @@ def command_generate_pr_body(
     )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run CI helper steps that replace shell snippets in workflow files."""
-    return run_main(app, argv=argv, prog_name="workflow-steps")
+@workflow_update_app.callback(invoke_without_command=True)
+def command_smoke_check_update_app() -> None:
+    """Smoke-check that the update app evaluates."""
+    raise typer.Exit(code=_cmd_smoke_check_update_app())
+
+
+@workflow_update_targets_app.callback(invoke_without_command=True)
+def command_list_update_targets() -> None:
+    """List update targets discovered by the update app."""
+    raise typer.Exit(code=_cmd_list_update_targets())
+
+
+@app.command("build-darwin-config")
+def command_build_darwin_config_legacy(
+    host: str = typer.Argument(..., help="Darwin host from matrix, e.g. argus."),
+) -> None:
+    """Alias for `darwin build`."""
+    raise typer.Exit(code=_cmd_build_darwin_config(host=host))
+
+
+@app.command("free-disk-space")
+def command_free_disk_space_legacy(
+    *,
+    force_local: Annotated[
+        bool,
+        typer.Option(
+            "-f",
+            "--force-local",
+            help="Allow destructive cleanup when not running in CI.",
+        ),
+    ] = False,
+) -> None:
+    """Alias for `darwin free`."""
+    raise typer.Exit(code=_cmd_free_disk_space(force_local=force_local))
+
+
+@app.command("install-darwin-tools")
+def command_install_darwin_tools_legacy() -> None:
+    """Alias for `darwin install`."""
+    raise typer.Exit(code=_cmd_install_darwin_tools())
+
+
+@app.command("prefetch-flake-inputs")
+def command_prefetch_flake_inputs_legacy() -> None:
+    """Alias for `flake prefetch`."""
+    raise typer.Exit(code=_cmd_prefetch_flake_inputs())
+
+
+@app.command("nix-flake-update")
+def command_nix_flake_update_legacy() -> None:
+    """Alias for `flake update`."""
+    raise typer.Exit(code=_cmd_nix_flake_update())
+
+
+@app.command("generate-pr-body")
+def command_generate_pr_body_legacy(
+    *,
+    base_ref: Annotated[
+        str,
+        typer.Option("-b", "--base-ref", help="Base branch for compare."),
+    ],
+    compare_head: Annotated[
+        str,
+        typer.Option("-c", "--compare-head", help="Head branch used in compare links."),
+    ] = "update_flake_lock_action",
+    output: Annotated[
+        Path,
+        typer.Option("-o", "--output", help="Path to write PR body."),
+    ],
+    repository: Annotated[
+        str,
+        typer.Option("-r", "--repository", help="owner/repo."),
+    ],
+    server_url: Annotated[
+        str,
+        typer.Option("-s", "--server-url", help="GitHub server URL."),
+    ],
+    workflow_url: Annotated[
+        str,
+        typer.Option("-w", "--workflow-url", help="Workflow run URL."),
+    ],
+) -> None:
+    """Alias for `pr-body`."""
+    raise typer.Exit(
+        code=_cmd_generate_pr_body(
+            output=output,
+            workflow_url=workflow_url,
+            server_url=server_url,
+            repository=repository,
+            base_ref=base_ref,
+            compare_head=compare_head,
+        )
+    )
+
+
+@app.command("smoke-check-update-app")
+def command_smoke_check_update_app_legacy() -> None:
+    """Alias for `update-app`."""
+    raise typer.Exit(code=_cmd_smoke_check_update_app())
+
+
+@app.command("list-update-targets")
+def command_list_update_targets_legacy() -> None:
+    """Alias for `update-targets`."""
+    raise typer.Exit(code=_cmd_list_update_targets())
+
+
+main = make_main(app, prog_name="workflow-steps")
 
 
 if __name__ == "__main__":

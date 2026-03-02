@@ -21,7 +21,7 @@ primitives and a standalone library of modules.
 - [`darwin/`](darwin/): host entrypoints.
 - [`home/`](home/): user configuration ([`home/george`](home/george/)).
 - [`modules/`](modules/): reusable modules ([`common`](modules/common.nix), [`darwin`](modules/darwin/), [`nixos`](modules/nixos/), [`home`](modules/home/)).
-- [`packages/`](packages/): custom package outputs ([`axiom-cli`](packages/axiom-cli/), [`beads-mcp`](packages/beads-mcp/), [`conductor`](packages/conductor/), [`droid`](packages/droid/), [`gogcli`](packages/gogcli/), [`homebrew-zsh-completion`](packages/homebrew-zsh-completion/), [`linear-cli`](packages/linear-cli/), [`nix-manipulator`](packages/nix-manipulator/), [`scratch`](packages/scratch/), [`sculptor`](packages/sculptor/), [`sublime-kdl`](packages/sublime-kdl.nix), [`toad`](packages/toad/)).
+- [`packages/`](packages/): custom package outputs ([`axiom-cli`](packages/axiom-cli/), [`conductor`](packages/conductor/), [`droid`](packages/droid/), [`gogcli`](packages/gogcli/), [`homebrew-zsh-completion`](packages/homebrew-zsh-completion/), [`linear-cli`](packages/linear-cli/), [`nix-manipulator`](packages/nix-manipulator/), [`scratch`](packages/scratch/), [`sculptor`](packages/sculptor/), [`sublime-kdl`](packages/sublime-kdl.nix), [`toad`](packages/toad/)).
 - [`overlays/`](overlays/): package overrides and source pinning.
 - [`lib/`](lib/): Python libraries for update tooling and Nix model/schema helpers.
 - [`nixcfg.py`](nixcfg.py): Typer CLI exposed through [`nix run .#nixcfg -- ...`](nixcfg.py).
@@ -59,6 +59,19 @@ nix flake check
 
 # Python test suite
 uv run pytest
+
+# Mutation testing (full run)
+uv run mutmut run --max-children 4
+
+# Mutation testing (targeted rerun by mutant glob)
+uv run mutmut run "lib.nix.commands.*"
+uv run mutmut results
+uv run mutmut browse
+
+# Mutation testing with cosmic-ray (safer fallback on Python 3.14)
+uv run cosmic-ray init cosmic-ray.toml .cosmic-ray.sqlite
+uv run cosmic-ray exec cosmic-ray.toml .cosmic-ray.sqlite
+uv run cr-report .cosmic-ray.sqlite
 ```
 
 ## Update automation

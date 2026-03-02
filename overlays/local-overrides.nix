@@ -160,6 +160,20 @@
                       hatch-vcs = [ ];
                     };
                 });
+                qprompt = pprev.qprompt.overrideAttrs (old: {
+                  nativeBuildInputs =
+                    (old.nativeBuildInputs or [ ])
+                    ++ pfinal.resolveBuildSystem {
+                      setuptools = [ ];
+                    };
+                });
+                yattag = pprev.yattag.overrideAttrs (old: {
+                  nativeBuildInputs =
+                    (old.nativeBuildInputs or [ ])
+                    ++ pfinal.resolveBuildSystem {
+                      setuptools = [ ];
+                    };
+                });
               })
             ]
           );

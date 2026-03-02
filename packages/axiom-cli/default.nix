@@ -5,7 +5,7 @@
   ...
 }:
 let
-  mkGoCli = import ../../lib/go_cli_package.nix {
+  mkGoCli = import ../../lib/go-cli-package.nix {
     inherit
       mkGoCliPackage
       inputs

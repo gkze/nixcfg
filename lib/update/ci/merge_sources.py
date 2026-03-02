@@ -8,8 +8,16 @@ import typer
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.update import io as update_io
-from lib.update.ci._cli import make_typer_app, run_main
-from lib.update.paths import package_file_map_in
+from lib.update.ci._cli import (
+    make_dual_typer_apps,
+    make_main,
+    register_dual_entrypoint,
+)
+from lib.update.paths import (
+    SOURCES_FILE_NAME,
+    package_dir_for_in,
+    package_file_map_in,
+)
 
 DEFAULT_OUTPUT_ROOT = Path()
 
@@ -208,7 +216,7 @@ def _collect_merged_entries(
             missing_roots.append(root_arg)
             continue
 
-        source_files = package_file_map_in(root, "sources.json")
+        source_files = package_file_map_in(root, SOURCES_FILE_NAME)
         if not source_files:
             empty_roots.append(root_arg)
             continue
@@ -248,32 +256,16 @@ def _validate_input_roots(missing_roots: list[str], empty_roots: list[str]) -> N
 
 
 def _write_merged_entries(output_root: Path, merged: dict[str, SourceEntry]) -> None:
-    def _package_dir_for_in(root: Path, name: str) -> Path | None:
-        matches: list[Path] = []
-        for d in ("packages", "overlays"):
-            candidate = root / d / name
-            if candidate.is_dir():
-                matches.append(candidate)
-
-        if not matches:
-            return None
-        if len(matches) > 1:
-            paths = ", ".join(str(path.relative_to(root)) for path in matches)
-            msg = f"Duplicate package directories for {name!r} under {root}: {paths}"
-            raise RuntimeError(msg)
-        return matches[0]
-
-    output_paths = package_file_map_in(output_root, "sources.json")
+    output_paths = package_file_map_in(output_root, SOURCES_FILE_NAME)
     missing_output_paths: list[str] = []
     for name, entry in merged.items():
         path = output_paths.get(name)
         if path is None:
-            pkg_dir = _package_dir_for_in(output_root, name)
-            if pkg_dir is not None:
-                path = pkg_dir / "sources.json"
-            else:
+            package_dir = package_dir_for_in(output_root, name)
+            if package_dir is None:
                 missing_output_paths.append(name)
                 continue
+            path = package_dir / SOURCES_FILE_NAME
         _save_entry(path, entry)
 
     if not missing_output_paths:
@@ -300,20 +292,14 @@ def run(*, roots: list[str], output_root: Path) -> int:
     return 0
 
 
-app = make_typer_app(
+_DUAL_APPS = make_dual_typer_apps(
     help_text="Merge per-package sources.json files from platform artifacts.",
     no_args_is_help=False,
 )
+app = _DUAL_APPS.app
 
 
-_standalone_app = make_typer_app(
-    help_text="Merge per-package sources.json files from platform artifacts.",
-    no_args_is_help=False,
-)
-
-
-@_standalone_app.command()
-@app.callback(invoke_without_command=True)
+@register_dual_entrypoint(_DUAL_APPS)
 def cli(
     roots: Annotated[
         list[str],
@@ -330,6 +316,7 @@ def cli(
     output_root: Annotated[
         Path,
         typer.Option(
+            "-o",
             "--output-root",
             help="Repository root to write merged files into.",
         ),
@@ -339,9 +326,7 @@ def cli(
     raise typer.Exit(code=run(roots=roots, output_root=output_root))
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Run the CLI entrypoint."""
-    return run_main(_standalone_app, argv=argv, prog_name="merge-sources")
+main = make_main(_DUAL_APPS.standalone_app, prog_name="pipeline sources")
 
 
 if __name__ == "__main__":
