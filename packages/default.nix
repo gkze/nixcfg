@@ -9,7 +9,6 @@
 let
   darwinOnly = [
     "conductor"
-    "nix-manipulator"
   ];
   helperEntries = [
     "go-cli-wrapper"

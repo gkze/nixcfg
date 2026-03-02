@@ -27,7 +27,6 @@ let
 
   darwinOnly = [
     "conductor"
-    "nix-manipulator"
   ];
 
   sculptorSystems = [
@@ -37,7 +36,6 @@ let
 
   packageSystemConstraints = {
     conductor = system: builtins.match ".*-darwin" system != null;
-    nix-manipulator = system: builtins.match ".*-darwin" system != null;
     sculptor = system: builtins.elem system sculptorSystems;
   };
 
