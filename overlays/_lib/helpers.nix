@@ -188,6 +188,25 @@
     }:
     let
       manifest = builtins.fromJSON (builtins.readFile denoDepsSrc);
+      denortSource = slib.sourceHashEntryForPlatform pname "sha256" system;
+      denortUrl =
+        denortSource.url or (throw "mkDenoApplication: missing denort url for ${pname}:${system}");
+      denortReleasePath = builtins.match ".*/release/([^/]+)/([^/?]+)(\\?.*)?$" denortUrl;
+      denortVersionPath =
+        if denortReleasePath == null then
+          throw "mkDenoApplication: denort url must include /release/<version>/<file>: ${denortUrl}"
+        else
+          builtins.elemAt denortReleasePath 0;
+      denortFileName =
+        if denortReleasePath == null then
+          throw "mkDenoApplication: denort url must include filename: ${denortUrl}"
+        else
+          builtins.elemAt denortReleasePath 1;
+      denortZip = prev.fetchurl {
+        name = denortFileName;
+        url = denortUrl;
+        inherit (denortSource) hash;
+      };
 
       # Fetch all JSR source files individually (including meta.json files).
       jsrFiles = builtins.concatMap (
@@ -261,6 +280,9 @@
         dontUnpack = true;
         buildPhase = ''
           mkdir -p $out
+
+          mkdir -p "$out/dl/release/${denortVersionPath}"
+          cp ${denortZip} "$out/dl/release/${denortVersionPath}/${denortFileName}"
 
           # --- JSR source files ---
           while IFS=$'\t' read -r store_path cache_path media_type url; do
