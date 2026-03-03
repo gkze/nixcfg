@@ -1,5 +1,4 @@
 {
-  "drvHash": "pl31c81hxjaarj1dz9wv87d8i7qxzyir",
   "hashes": [
     {
       "hash": "sha256-iRlwCSGigRi/ilfXi8rI68vlfkeec3vB5nZWPmTLnK8=",
@@ -7,5 +6,5 @@
     }
   ],
   "input": "gemini-cli",
-  "version": "v0.30.0"
+  "version": "v0.31.0"
 }
