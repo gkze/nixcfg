@@ -16,6 +16,7 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.nix import get_current_nix_platform
+from lib.update.paths import get_repo_file
 from lib.update.updaters.base import (
     DenoManifestUpdater,
     VersionInfo,
@@ -37,20 +38,33 @@ class LinearCliUpdater(DenoManifestUpdater):
         "x86_64-linux": "x86_64-unknown-linux-gnu",
     }
 
+    @staticmethod
+    def _deno_version_expr(platform: str) -> str:
+        repo_path = get_repo_file(".")
+        flake_url = f"git+file://{repo_path}?dirty=1"
+        return (
+            "let "
+            f'flake = builtins.getFlake "{flake_url}"; '
+            f'in flake.legacyPackages."{platform}".deno.version'
+        )
+
     async def _resolve_deno_version(self) -> str:
         platform = get_current_nix_platform()
         result = await run_nix(
             [
                 "nix",
                 "eval",
+                "--impure",
                 "--raw",
-                f".#legacyPackages.{platform}.deno.version",
+                "--expr",
+                self._deno_version_expr(platform),
             ],
             check=False,
         )
         version = result.stdout.strip()
         if result.returncode != 0 or not version:
-            msg = result.stderr.strip() or "nix eval failed"
+            details = result.stderr.strip() or result.stdout.strip()
+            msg = details or "nix eval failed"
             msg = f"Failed to evaluate deno.version for {self.name}: {msg}"
             raise RuntimeError(msg)
         return version
