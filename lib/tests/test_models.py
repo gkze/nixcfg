@@ -570,6 +570,7 @@ class TestSourcesFile:
         merged_entry = base_entry.merge(incoming_entry)
         check(merged_entry.version == "2.0.0")
         check(merged_entry.input == "incoming-input")
+        check(merged_entry.to_dict()["drvHash"] == "drv-incoming")
         check(
             merged_entry.urls
             == {

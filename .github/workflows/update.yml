@@ -167,9 +167,36 @@ jobs:
             packages/**/sources.json
             overlays/**/sources.json
 
-  # Phase 5: Build the slowest Darwin derivations in parallel
-  darwin-shared-heavy:
+  # Phase 5: Quality gates
+  quality-gates:
     needs: merge-hashes
+    runs-on: ubuntu-24.04
+    steps:
+      - *checkout
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - *download_merged_sources
+      - name: Check Nix formatting
+        run: nix fmt -- --check
+      - name: Run Nix flake checks
+        run: nix flake check
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v7
+      - name: Install Python dependencies
+        run: uv sync --frozen --group dev
+      - name: Run pytest with coverage
+        run: |-
+          uv run coverage run -m pytest
+          uv run coverage report
+
+  # Phase 6: Build the slowest Darwin derivations in parallel
+  darwin-shared-heavy:
+    needs:
+      - merge-hashes
+      - quality-gates
     runs-on: macos-15
     name: ${{ matrix.package }}
     strategy:
@@ -210,9 +237,11 @@ jobs:
       - name: Build heavy target (${{ matrix.package }})
         run: nix build --impure ${{ matrix.target }}
 
-  # Phase 6: Build shared Darwin derivations to populate cache
+  # Phase 7: Build shared Darwin derivations to populate cache
   darwin-shared:
-    needs: merge-hashes
+    needs:
+      - merge-hashes
+      - quality-gates
     runs-on: macos-15
     steps:
       - *checkout
@@ -244,10 +273,11 @@ jobs:
             .#darwinConfigurations.argus.system \
             .#darwinConfigurations.rocinante.system
 
-  # Phase 7: Build Darwin configurations per host
+  # Phase 8: Build Darwin configurations per host
   darwin-argus:
     needs:
       - merge-hashes
+      - quality-gates
       - darwin-shared-heavy
       - darwin-shared
     runs-on: macos-15
@@ -267,6 +297,7 @@ jobs:
   darwin-rocinante:
     needs:
       - merge-hashes
+      - quality-gates
       - darwin-shared-heavy
       - darwin-shared
     runs-on: macos-15
@@ -283,9 +314,11 @@ jobs:
         run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
       - run: nix run .#nixcfg -- ci workflow build-darwin-config rocinante
 
-  # Phase 8: Placeholder for future NixOS configuration builds
+  # Phase 9: Placeholder for future NixOS configuration builds
   linux:
-    needs: merge-hashes
+    needs:
+      - merge-hashes
+      - quality-gates
     runs-on: ubuntu-24.04
     steps:
       - *checkout
@@ -297,10 +330,11 @@ jobs:
         run: nix run .#nixcfg -- ci workflow smoke-check-update-app
       - run: nix run .#nixcfg -- ci workflow list-update-targets
 
-  # Phase 9: Create PR with updates
+  # Phase 10: Create PR with updates
   create-pr:
     needs:
       - merge-hashes
+      - quality-gates
       - darwin-shared-heavy
       - darwin-shared
       - darwin-argus
@@ -308,6 +342,7 @@ jobs:
       - linux
     if: >-
       needs.merge-hashes.result == 'success' &&
+      needs.quality-gates.result == 'success' &&
       needs.darwin-shared-heavy.result == 'success' &&
       needs.darwin-shared.result == 'success' &&
       needs.darwin-argus.result == 'success' &&
