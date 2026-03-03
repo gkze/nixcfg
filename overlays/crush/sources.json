@@ -1,5 +1,4 @@
 {
-  "drvHash": "xbbc95bx0sd27xdjqh1j55g97m7zd8jn",
   "hashes": [
     {
       "hash": "sha256-QNfuP8F0np4B+hzUvgrwqaZ5S6qdZf0iuM2uHlfElyU=",
@@ -7,5 +6,5 @@
     }
   ],
   "input": "crush",
-  "version": "v0.45.1"
+  "version": "v0.46.1"
 }
