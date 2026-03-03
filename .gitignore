@@ -5,6 +5,9 @@ result
 # Nix direnv integration
 .direnv
 
+# Local editor/LSP support from Nix-provided JS packages
+/node_modules/
+
 # Needed for formatting .vscode/settings.json
 !.vscode/
 

@@ -370,6 +370,7 @@ def _supported_kwargs(
 async def _async_main(
     *,
     flake_refs: list[str],
+    exclude_refs: list[str] | None = None,
     dry_run: bool = False,
     mode: Literal["union", "intersection"] = DEFAULT_DERIVATION_SET_MODE,
     verbosity: int = 0,
@@ -391,6 +392,31 @@ async def _async_main(
         flake_refs,
         **supported_collect_kwargs,
     )
+    normalized_exclude_refs = [ref for ref in (exclude_refs or []) if ref]
+    if normalized_exclude_refs:
+        exclude_kwargs: _CollectKwargs = {
+            "mode": "union",
+            "nix_verbosity": nix_verbosity,
+        }
+        supported_exclude_kwargs = cast(
+            "_CollectKwargs",
+            _supported_kwargs(
+                _collect_derivations,
+                cast("dict[str, object]", exclude_kwargs),
+            ),
+        )
+        excluded_drvs = await _collect_derivations(
+            normalized_exclude_refs,
+            **supported_exclude_kwargs,
+        )
+        before_exclusion = len(all_drvs)
+        all_drvs -= excluded_drvs
+        removed = before_exclusion - len(all_drvs)
+        log.info(
+            "Excluded %d derivation(s) from %d exclude ref(s)",
+            removed,
+            len(normalized_exclude_refs),
+        )
     log.info("Collected %d derivation(s) using %s mode", len(all_drvs), mode)
     profiler = BuildProfiler() if profile_output is not None else None
 
@@ -428,6 +454,7 @@ async def _async_main(
 def run(
     *,
     flake_refs: list[str],
+    exclude_refs: list[str] | None = None,
     dry_run: bool = False,
     mode: Literal["union", "intersection"] = DEFAULT_DERIVATION_SET_MODE,
     profile_output: str | Path | None = None,
@@ -444,6 +471,7 @@ def run(
     return asyncio.run(
         _async_main(
             flake_refs=flake_refs,
+            exclude_refs=exclude_refs,
             dry_run=dry_run,
             mode=mode,
             verbosity=verbosity,
@@ -465,6 +493,14 @@ def cli(
         list[str],
         typer.Argument(help="Flake references to build."),
     ],
+    exclude_refs: Annotated[
+        list[str] | None,
+        typer.Option(
+            "-x",
+            "--exclude-ref",
+            help=("Exclude derivations reachable from this flake ref. Repeatable."),
+        ),
+    ] = None,
     *,
     dry_run: Annotated[
         bool,
@@ -500,6 +536,7 @@ def cli(
     raise typer.Exit(
         code=run(
             flake_refs=flake_refs,
+            exclude_refs=exclude_refs,
             dry_run=dry_run,
             mode=mode,
             profile_output=profile_output,

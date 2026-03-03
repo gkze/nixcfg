@@ -66,7 +66,10 @@ in
 
     ignores = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ ".direnv" ];
+      default = [
+        ".DS_Store"
+        ".direnv"
+      ];
       description = "Global git ignore entries.";
     };
 

@@ -8,6 +8,40 @@ on:
 permissions:
   contents: read
 jobs:
+  commitlint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - name: Lint commit messages
+        run: |-
+          case "${{ github.event_name }}" in
+            pull_request)
+              FROM="${{ github.event.pull_request.base.sha }}"
+              TO="${{ github.event.pull_request.head.sha }}"
+              ;;
+            push)
+              FROM="${{ github.event.before }}"
+              TO="${{ github.sha }}"
+              ;;
+            *)
+              FROM=""
+              TO="${{ github.sha }}"
+              ;;
+          esac
+
+          if [ -n "$FROM" ] && [ "$FROM" != "0000000000000000000000000000000000000000" ]; then
+            nix run --inputs-from . nixpkgs#commitlint -- \
+              --from "$FROM" \
+              --to "$TO" \
+              --verbose
+          else
+            nix run --inputs-from . nixpkgs#commitlint -- \
+              --last \
+              --verbose
+          fi
   pytest:
     runs-on: ubuntu-24.04
     steps:

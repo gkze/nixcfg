@@ -445,6 +445,45 @@ def test_build_derivations_uses_profiler_and_async_main_profile_block(
     check(called.get("logged") is True)
 
 
+def test_async_main_excludes_derivations_from_exclude_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Subtract derivations reachable from excluded flake refs."""
+    captured: dict[str, object] = {}
+
+    async def _collect(refs: list[str], **kwargs: object) -> set[str]:
+        if refs == [".#base"]:
+            return {
+                "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv",
+                "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv",
+            }
+        if refs == [".#heavy-a", ".#heavy-b"]:
+            check(kwargs.get("mode") == "union")
+            return {
+                "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv",
+                "/nix/store/cccccccccccccccccccccccccccccccc-c.drv",
+            }
+        msg = f"unexpected refs: {refs}"
+        raise AssertionError(msg)
+
+    async def _build(drvs: set[str], **_kwargs: object) -> bool:
+        captured["drvs"] = drvs
+        return True
+
+    monkeypatch.setattr(bsc, "_collect_derivations", _collect)
+    monkeypatch.setattr(bsc, "_build_derivations", _build)
+
+    rc = asyncio.run(
+        object.__getattribute__(bsc, "_async_main")(
+            flake_refs=[".#base"],
+            exclude_refs=[".#heavy-a", ".#heavy-b"],
+        )
+    )
+
+    check(rc == 0)
+    check(captured.get("drvs") == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"})
+
+
 def test_build_derivations_profiler_path_invokes_realise_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

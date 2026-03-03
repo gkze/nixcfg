@@ -171,26 +171,27 @@ jobs:
   darwin-shared-heavy:
     needs: merge-hashes
     runs-on: macos-15
+    name: ${{ matrix.package }}
     strategy:
       fail-fast: false
       max-parallel: 8
       matrix:
         include:
-          - name: zed-editor
+          - package: zed-editor-nightly
             target: .#darwinConfigurations.argus.pkgs.zed-editor-nightly
-          - name: opencode
+          - package: opencode
             target: .#darwinConfigurations.argus.pkgs.opencode
-          - name: opencode-desktop
+          - package: opencode-desktop
             target: .#darwinConfigurations.argus.pkgs.opencode-desktop
-          - name: codex
+          - package: codex
             target: .#darwinConfigurations.argus.pkgs.codex
-          - name: scratch
+          - package: scratch
             target: .#darwinConfigurations.argus.pkgs.scratch
-          - name: czkawka
+          - package: czkawka
             target: .#darwinConfigurations.argus.pkgs.czkawka
-          - name: gemini-cli
+          - package: gemini-cli
             target: .#darwinConfigurations.argus.pkgs.gemini-cli
-          - name: element-desktop
+          - package: element-desktop
             target: .#darwinConfigurations.argus.pkgs.element-desktop
     steps:
       - *checkout
@@ -206,7 +207,7 @@ jobs:
       - run: nix run .#nixcfg -- ci workflow install-darwin-tools
       - name: Pre-fetch flake inputs
         run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
-      - name: Build heavy target (${{ matrix.name }})
+      - name: Build heavy target (${{ matrix.package }})
         run: nix build --impure ${{ matrix.target }}
 
   # Phase 6: Build shared Darwin derivations to populate cache
@@ -232,6 +233,14 @@ jobs:
         run: |
           nix run .#nixcfg -- ci cache closure \
             --mode intersection \
+            --exclude-ref .#darwinConfigurations.argus.pkgs.zed-editor-nightly \
+            --exclude-ref .#darwinConfigurations.argus.pkgs.opencode \
+            --exclude-ref .#darwinConfigurations.argus.pkgs.opencode-desktop \
+            --exclude-ref .#darwinConfigurations.argus.pkgs.codex \
+            --exclude-ref .#darwinConfigurations.argus.pkgs.scratch \
+            --exclude-ref .#darwinConfigurations.argus.pkgs.czkawka \
+            --exclude-ref .#darwinConfigurations.argus.pkgs.gemini-cli \
+            --exclude-ref .#darwinConfigurations.argus.pkgs.element-desktop \
             .#darwinConfigurations.argus.system \
             .#darwinConfigurations.rocinante.system
 

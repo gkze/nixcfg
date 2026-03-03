@@ -51,6 +51,15 @@ let
         ];
       };
 
+      commitlint = {
+        enable = true;
+        package = pkgs.commitlint;
+        entry = "${lib.getExe pkgs.commitlint} --edit";
+        pass_filenames = true;
+        always_run = true;
+        stages = [ "commit-msg" ];
+      };
+
       shellcheck = {
         enable = true;
         files = lintFiles.shell.regex;
@@ -120,4 +129,9 @@ pkgs.devshell.mkShell {
     ++ pre-commit-check.enabledPackages;
 
   devshell.startup.pre-commit.text = pre-commit-check.shellHook;
+  devshell.startup.commitlint-node-modules.text = ''
+    mkdir -p node_modules
+    ln -sfn "${pkgs.commitlint}/lib/node_modules/@commitlint/root/node_modules/@commitlint" node_modules/@commitlint
+    ln -sfn "${pkgs.nodePackages.typescript}/lib/node_modules/typescript" node_modules/typescript
+  '';
 }
