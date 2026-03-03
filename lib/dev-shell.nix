@@ -46,7 +46,7 @@ let
         pass_filenames = false;
         always_run = true;
         stages = [
-          "pre-push"
+          "pre-commit"
           "manual"
         ];
       };
@@ -95,6 +95,19 @@ let
         ];
       };
 
+      yamllint = {
+        enable = true;
+        args = [
+          "-c"
+          ".yamllint"
+        ];
+      };
+
+      actionlint = {
+        enable = true;
+        files = "^\\.github/workflows/.*\\.ya?ml$";
+      };
+
       taplo = {
         enable = true;
         files = lintFiles.toml.regex;
@@ -103,7 +116,13 @@ let
 
       check-merge-conflicts.enable = true;
       end-of-file-fixer.enable = true;
-      trim-trailing-whitespace.enable = true;
+      trim-trailing-whitespace = {
+        enable = true;
+        stages = [
+          "pre-commit"
+          "manual"
+        ];
+      };
     };
   };
 in

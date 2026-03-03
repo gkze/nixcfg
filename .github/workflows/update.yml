@@ -176,7 +176,10 @@ jobs:
       - *setup_nix
       - *cachix
       - *cache_nix
-      - *download_merged_sources
+      - uses: actions/download-artifact@v7
+        with:
+          name: merged-sources
+          path: .
       - name: Check Nix formatting
         run: nix fmt -- --check
       - name: Run Nix flake checks
