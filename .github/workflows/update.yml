@@ -181,7 +181,7 @@ jobs:
           name: merged-sources
           path: .
       - name: Check Nix formatting
-        run: nix fmt -- --check
+        run: nix fmt -- --ci
       - name: Run Nix flake checks
         run: nix flake check
       - uses: actions/setup-python@v6
