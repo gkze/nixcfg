@@ -208,7 +208,7 @@ async def compute_fixed_output_hash(
 ) -> EventStream:
     """Compute an SRI hash by extracting nix fixed-output mismatch output."""
     config = resolve_active_config(config)
-    expr = compact_nix_expr(expr)
+    expr = _build_nix_expr(expr)
     semaphore = _get_nix_build_semaphore(config)
     async with semaphore:
         result_drain = ValueDrain()
