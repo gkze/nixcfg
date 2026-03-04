@@ -59,7 +59,7 @@ rustPlatform.buildRustPackage {
 
   cargoRoot = tauriDir;
   buildAndTestSubdir = tauriDir;
-  tauriBuildFlags = lib.optionals stdenv.hostPlatform.isDarwin [ "--no-sign" ];
+  tauriBuildFlags = [ "--no-sign" ];
 
   nativeBuildInputs = [
     tauriHook
