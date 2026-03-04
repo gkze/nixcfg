@@ -52,7 +52,14 @@ rustPlatform.buildRustPackage {
   '';
 
   postFixup = lib.optionalString stdenv.hostPlatform.isLinux ''
-    mv $out/bin/OpenCode $out/bin/opencode-desktop
-    sed -i 's|^Exec=OpenCode$|Exec=opencode-desktop|' $out/share/applications/OpenCode.desktop
+    if [ -e "$out/bin/OpenCode" ]; then
+      mv "$out/bin/OpenCode" "$out/bin/opencode-desktop"
+    fi
+
+    for desktopFile in "$out"/share/applications/*.desktop; do
+      if [ -e "$desktopFile" ]; then
+        sed -i 's|^Exec=OpenCode$|Exec=opencode-desktop|' "$desktopFile"
+      fi
+    done
   '';
 }
