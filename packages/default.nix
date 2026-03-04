@@ -15,9 +15,12 @@ let
     "go-cli-wrapper"
     "openchamber-bun"
     "registry"
-    "superset"
   ];
   sculptorSystems = [
+    "aarch64-darwin"
+    "x86_64-linux"
+  ];
+  supersetSystems = [
     "aarch64-darwin"
     "x86_64-linux"
   ];
@@ -26,6 +29,7 @@ let
   unsupported =
     (if isDarwin then [ ] else darwinOnly)
     ++ (if builtins.elem system sculptorSystems then [ ] else [ "sculptor" ])
+    ++ (if builtins.elem system supersetSystems then [ ] else [ "superset" ])
     ++ helperEntries;
 in
 removeAttrs all unsupported

@@ -3,6 +3,7 @@
   final,
   prev,
   slib,
+  sources,
   system,
   ...
 }:
@@ -53,10 +54,21 @@
   mdformat = prev.mdformat.override {
     python3 = prev.python3.override {
       packageOverrides = _: pyPrev: {
-        mdformat = pyPrev.mdformat.overridePythonAttrs (_: {
-          version = slib.getFlakeVersion "mdformat";
-          src = inputs.mdformat;
-        });
+        mdformat = pyPrev.mdformat.overridePythonAttrs (
+          _:
+          let
+            inherit (sources.mdformat) version;
+          in
+          {
+            inherit version;
+            src = prev.fetchFromGitHub {
+              owner = "hukkin";
+              repo = "mdformat";
+              tag = version;
+              hash = slib.sourceHash "mdformat" "srcHash";
+            };
+          }
+        );
       };
     };
   };
@@ -112,7 +124,12 @@
       });
 
       nvim-treesitter-textobjects = vprev.nvim-treesitter-textobjects.overrideAttrs {
-        src = inputs.treesitter-textobjects;
+        src = prev.fetchFromGitHub {
+          owner = "gkze";
+          repo = "nvim-treesitter-textobjects";
+          inherit (sources.treesitter-textobjects) rev;
+          hash = slib.sourceHash "treesitter-textobjects" "srcHash";
+        };
       };
 
       vim-bundle-mako = prev.vimUtils.buildVimPlugin {

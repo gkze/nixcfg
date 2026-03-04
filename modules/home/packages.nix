@@ -154,6 +154,7 @@ in
             biome
             curator
             droid
+            ffmpeg
             gmailctl
             gogcli
             graphviz
@@ -167,6 +168,7 @@ in
             taplo
             toad
             worktrunk
+            yt-dlp
           ])
 
           (lib.optionals cfg.guiApps.enable (

@@ -272,23 +272,6 @@
         "type": "github"
       }
     },
-    "crush": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1772223235,
-        "narHash": "sha256-H2pz3CbxTXeY3yJwZCYLRrPVJuR1gMpPao7wknVFyxA=",
-        "owner": "charmbracelet",
-        "repo": "crush",
-        "rev": "61953d44287171d98780559d14c34e2c21d94c6d",
-        "type": "github"
-      },
-      "original": {
-        "owner": "charmbracelet",
-        "ref": "v0.46.1",
-        "repo": "crush",
-        "type": "github"
-      }
-    },
     "curator": {
       "inputs": {
         "crane": "crane_2",
@@ -826,23 +809,6 @@
         "type": "github"
       }
     },
-    "gemini-cli": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1772233593,
-        "narHash": "sha256-huPd4W7Jf4/dZshWElicYpcHhktE83wPs/z5jVYwynM=",
-        "owner": "google-gemini",
-        "repo": "gemini-cli",
-        "rev": "def96d666bc8f09aa2f9dd4dfe7908914e520af3",
-        "type": "github"
-      },
-      "original": {
-        "owner": "google-gemini",
-        "ref": "v0.31.0",
-        "repo": "gemini-cli",
-        "type": "github"
-      }
-    },
     "git-hooks": {
       "inputs": {
         "flake-compat": "flake-compat_2",
@@ -1073,22 +1039,6 @@
         "type": "github"
       }
     },
-    "ladybird": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1772492799,
-        "narHash": "sha256-4rmPX17iEA0YyyFYxR10dCDb6jgMwEAz9qKCRE/FPDk=",
-        "owner": "LadybirdBrowser",
-        "repo": "ladybird",
-        "rev": "2d4a976616b5273cfe403e1ae233d290d0627f79",
-        "type": "github"
-      },
-      "original": {
-        "owner": "LadybirdBrowser",
-        "repo": "ladybird",
-        "type": "github"
-      }
-    },
     "linear-cli": {
       "flake": false,
       "locked": {
@@ -1184,23 +1134,6 @@
       "original": {
         "owner": "macfuse",
         "repo": "library",
-        "type": "github"
-      }
-    },
-    "mdformat": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1760616048,
-        "narHash": "sha256-fo4xO4Y89qPAggEjwuf6dnTyu1JzhZVdJyUqGNpti7g=",
-        "owner": "hukkin",
-        "repo": "mdformat",
-        "rev": "82912cdaea4fb830f751504486a7879c70526547",
-        "type": "github"
-      },
-      "original": {
-        "owner": "hukkin",
-        "ref": "1.0.0",
-        "repo": "mdformat",
         "type": "github"
       }
     },
@@ -1728,26 +1661,22 @@
         "catppuccin-delta": "catppuccin-delta",
         "codex": "codex",
         "crane": "crane",
-        "crush": "crush",
         "curator": "curator",
         "devshell": "devshell_2",
         "flake-edit": "flake-edit",
         "flakelight": "flakelight_2",
         "flakelight-darwin": "flakelight-darwin",
-        "gemini-cli": "gemini-cli",
         "git-hooks": "git-hooks_2",
         "gitui-key-config": "gitui-key-config",
         "gogcli": "gogcli",
         "home-manager": "home-manager",
         "homebrew-cask": "homebrew-cask",
         "homebrew-core": "homebrew-core",
-        "ladybird": "ladybird",
         "linear-cli": "linear-cli",
         "linearis": "linearis",
         "lumen": "lumen",
         "mac-app-util": "mac-app-util",
         "macfuse": "macfuse",
-        "mdformat": "mdformat",
         "mdq": "mdq",
         "mountpoint-s3": "mountpoint-s3",
         "neovim-nightly-overlay": "neovim-nightly-overlay",
@@ -1768,12 +1697,11 @@
         "sops-nix": "sops-nix",
         "stylix": "stylix",
         "sublime-kdl": "sublime-kdl",
+        "superset": "superset",
         "toad": "toad",
         "treefmt-nix": "treefmt-nix_7",
-        "treesitter-textobjects": "treesitter-textobjects",
         "treewalker-nvim": "treewalker-nvim",
         "uv2nix": "uv2nix_2",
-        "vim-bundle-mako": "vim-bundle-mako",
         "worktrunk": "worktrunk",
         "zed": "zed"
       }
@@ -1984,6 +1912,23 @@
         "owner": "eugenesvk",
         "ref": "2.0.5",
         "repo": "sublime-kdl",
+        "type": "github"
+      }
+    },
+    "superset": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1772588568,
+        "narHash": "sha256-c7/ftq7FNBAIKMc5o0yx8Sg2bipWtHjZMhGPi58t3FU=",
+        "owner": "superset-sh",
+        "repo": "superset",
+        "rev": "885d8615c5d5f734f55f8a5a2f6e34a33b0b90a8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "superset-sh",
+        "ref": "main",
+        "repo": "superset",
         "type": "github"
       }
     },
@@ -2330,23 +2275,6 @@
         "type": "github"
       }
     },
-    "treesitter-textobjects": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1769621853,
-        "narHash": "sha256-nCo9nyNmOIwimuBwtiudofKKpddu6aeLZA4Tm78AUZo=",
-        "owner": "gkze",
-        "repo": "nvim-treesitter-textobjects",
-        "rev": "e155c5a9bd47cbdf12b1cbafc143716d79b477ad",
-        "type": "github"
-      },
-      "original": {
-        "owner": "gkze",
-        "ref": "feat/nix-expand-textobjects",
-        "repo": "nvim-treesitter-textobjects",
-        "type": "github"
-      }
-    },
     "treewalker-nvim": {
       "flake": false,
       "locked": {
@@ -2408,22 +2336,6 @@
       "original": {
         "owner": "pyproject-nix",
         "repo": "uv2nix",
-        "type": "github"
-      }
-    },
-    "vim-bundle-mako": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1649201414,
-        "narHash": "sha256-q5PgPAKjyjLUuKvK6S1m8huQ1G7SoFvq9bmQmlMoS1g=",
-        "owner": "sophacles",
-        "repo": "vim-bundle-mako",
-        "rev": "09d2a93b1a853972ccfca44495d597c717789232",
-        "type": "github"
-      },
-      "original": {
-        "owner": "sophacles",
-        "repo": "vim-bundle-mako",
         "type": "github"
       }
     },

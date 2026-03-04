@@ -1,23 +1,28 @@
 {
-  inputs,
-  outputs,
+  sources,
+  slib,
   prev,
   ...
 }:
 let
-  slib = outputs.lib;
   buildGoModule = prev.buildGoModule.override { go = prev.go_1_26; };
   crushWithGo126 = prev.crush.override { inherit buildGoModule; };
+  inherit (sources.crush) version;
+  src = prev.fetchFromGitHub {
+    owner = "charmbracelet";
+    repo = "crush";
+    tag = "v${version}";
+    hash = slib.sourceHash "crush" "srcHash";
+  };
 in
 {
   crush = crushWithGo126.overrideAttrs (_: {
-    version = slib.getFlakeVersion "crush";
-    src = inputs.crush;
+    inherit version src;
     vendorHash = slib.sourceHash "crush" "vendorHash";
     doCheck = false;
     ldflags = [
       "-s"
-      "-X=github.com/charmbracelet/crush/internal/version.Version=${slib.getFlakeVersion "crush"}"
+      "-X=github.com/charmbracelet/crush/internal/version.Version=${version}"
     ];
   });
 }

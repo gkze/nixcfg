@@ -1,5 +1,5 @@
 {
-  inputs,
+  sources,
   slib,
   prev,
   ...
@@ -7,16 +7,26 @@
 {
   gemini-cli =
     let
-      version = slib.getFlakeVersion "gemini-cli";
+      inherit (sources.gemini-cli) version;
+      src = prev.fetchFromGitHub {
+        owner = "google-gemini";
+        repo = "gemini-cli";
+        tag = "v${version}";
+        hash = slib.sourceHash "gemini-cli" "srcHash";
+      };
       npmDepsHash = slib.sourceHash "gemini-cli" "npmDepsHash";
       npmDeps = prev.fetchNpmDeps {
-        src = inputs.gemini-cli;
+        inherit src;
         hash = npmDepsHash;
       };
     in
     prev.gemini-cli.overrideAttrs (oldAttrs: {
-      inherit version npmDepsHash npmDeps;
-      src = inputs.gemini-cli;
+      inherit
+        version
+        src
+        npmDepsHash
+        npmDeps
+        ;
       disallowedReferences = [
         npmDeps
         prev.nodejs_22.python

@@ -42,8 +42,9 @@ in
       substituters = mkOption {
         type = types.listOf types.str;
         default = [
-          "https://gkze.cachix.org"
-          "https://zed.cachix.org"
+          # Temporarily disabled due intermittent Cachix issues.
+          # "https://gkze.cachix.org"
+          # "https://zed.cachix.org"
           # "https://cache.garnix.io"
           "https://cache.nixos.org"
         ];
@@ -53,8 +54,9 @@ in
       trustedPublicKeys = mkOption {
         type = types.listOf types.str;
         default = [
-          "gkze.cachix.org-1:vO2wq3fAFvRL1TA7R02JnU/R5iKGhoHMLGYbnzPRJjI="
-          "zed.cachix.org-1:/pHQ6dpMsAZk2DiP4WCL0p9YDNKWj2Q5FL20bNmw1cU="
+          # Temporarily disabled due intermittent Cachix issues.
+          # "gkze.cachix.org-1:vO2wq3fAFvRL1TA7R02JnU/R5iKGhoHMLGYbnzPRJjI="
+          # "zed.cachix.org-1:/pHQ6dpMsAZk2DiP4WCL0p9YDNKWj2Q5FL20bNmw1cU="
           # "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
           "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
         ];

@@ -1,10 +1,13 @@
 {
   "hashes": [
     {
+      "hash": "sha256-H2pz3CbxTXeY3yJwZCYLRrPVJuR1gMpPao7wknVFyxA=",
+      "hashType": "srcHash"
+    },
+    {
       "hash": "sha256-QNfuP8F0np4B+hzUvgrwqaZ5S6qdZf0iuM2uHlfElyU=",
       "hashType": "vendorHash"
     }
   ],
-  "input": "crush",
-  "version": "v0.46.1"
+  "version": "0.46.1"
 }

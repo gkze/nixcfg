@@ -130,14 +130,6 @@
       url = "github:gkze/curator/v0.3.7";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    crush = {
-      url = "github:charmbracelet/crush/v0.46.1";
-      flake = false;
-    };
-    gemini-cli = {
-      url = "github:google-gemini/gemini-cli/v0.31.0";
-      flake = false;
-    };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
     gogcli = {
       url = "github:steipete/gogcli/v0.11.0";
@@ -159,10 +151,6 @@
       url = "github:homebrew/homebrew-core";
       flake = false;
     };
-    ladybird = {
-      url = "github:LadybirdBrowser/ladybird";
-      flake = false;
-    };
     linear-cli = {
       url = "github:schpet/linear-cli/v1.10.0";
       flake = false;
@@ -173,10 +161,6 @@
     };
     macfuse = {
       url = "github:macfuse/library";
-      flake = false;
-    };
-    mdformat = {
-      url = "github:hukkin/mdformat/1.0.0";
       flake = false;
     };
     mdq = {
@@ -195,6 +179,10 @@
       url = "github:eugenesvk/sublime-kdl/2.0.5";
       flake = false;
     };
+    superset = {
+      url = "github:superset-sh/superset/main";
+      flake = false;
+    };
     nix-manipulator = {
       url = "github:hoh/nix-manipulator/0.1.3";
       flake = false;
@@ -203,16 +191,8 @@
       url = "github:batrachianai/toad/v0.6.5";
       flake = false;
     };
-    treesitter-textobjects = {
-      url = "github:gkze/nvim-treesitter-textobjects/feat/nix-expand-textobjects";
-      flake = false;
-    };
     treewalker-nvim = {
       url = "github:aaronik/treewalker.nvim";
-      flake = false;
-    };
-    vim-bundle-mako = {
-      url = "github:sophacles/vim-bundle-mako";
       flake = false;
     };
     zed = {

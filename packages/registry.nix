@@ -10,7 +10,7 @@ let
     "registry.nix"
   ];
 
-  disabledPackages = [ "superset" ];
+  disabledPackages = [ ];
 
   discoveredPackages = discovery.discoverDefaultNixEntries {
     root = pkgDir;
@@ -35,10 +35,16 @@ let
     "x86_64-linux"
   ];
 
+  supersetSystems = [
+    "aarch64-darwin"
+    "x86_64-linux"
+  ];
+
   packageSystemConstraints = {
     codex-desktop = system: builtins.match ".*-darwin" system != null;
     conductor = system: builtins.match ".*-darwin" system != null;
     sculptor = system: builtins.elem system sculptorSystems;
+    superset = system: builtins.elem system supersetSystems;
   };
 
   unsupportedForSystem =
