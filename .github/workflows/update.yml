@@ -41,10 +41,16 @@ jobs:
           key: nix-cache-${{ runner.os }}-${{ hashFiles('flake.lock') }}
           restore-keys: nix-cache-${{ runner.os }}-
       - run: nix run .#nixcfg -- ci workflow nix-flake-update
+      - name: Regenerate superset bun2nix lock
+        run: |
+          nix build .#superset.passthru.updateScript
+          ./result
       - uses: actions/upload-artifact@v6
         with:
           name: flake-lock
-          path: flake.lock
+          path: |
+            flake.lock
+            packages/superset/bun.nix
 
   # Phase 2: Resolve upstream versions once (eliminates cross-platform race)
   resolve-versions:
@@ -164,6 +170,7 @@ jobs:
           name: merged-sources
           path: |
             flake.lock
+            packages/superset/bun.nix
             packages/**/sources.json
             overlays/**/sources.json
 
