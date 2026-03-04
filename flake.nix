@@ -135,10 +135,6 @@
       url = "github:steipete/gogcli/v0.11.0";
       flake = false;
     };
-    goose-v8 = {
-      url = "github:jh-block/rusty_v8/dbb64c20b9062b358b101e4592abb3ca8f646c2b";
-      flake = false;
-    };
     gitui-key-config = {
       url = "github:extrawurst/gitui/8876c1d0f616d55a0c0957683781fd32af815ae3";
       flake = false;

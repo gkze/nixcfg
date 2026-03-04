@@ -157,7 +157,6 @@ in
             ffmpeg
             gmailctl
             gogcli
-            goose-cli
             graphviz
             grex
             httpie
