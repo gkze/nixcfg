@@ -167,6 +167,10 @@
       url = "github:schpet/linear-cli/v1.10.0";
       flake = false;
     };
+    linearis = {
+      url = "github:czottmann/linearis/main";
+      flake = false;
+    };
     macfuse = {
       url = "github:macfuse/library";
       flake = false;
@@ -227,6 +231,34 @@
       treefmt-nix,
       ...
     }@inputs:
+    let
+      systems = [
+        "aarch64-darwin"
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
+
+      nixpkgsConfig = {
+        allowUnfree = true;
+        # Allow Google Chrome regardless of insecure status - we pin the
+        # version ourselves via overlays/google-chrome/sources.json and the
+        # update pipeline, so nixpkgs marking a release as insecure should
+        # not block builds. Using a pname predicate avoids the brittle
+        # version-string coupling that permittedInsecurePackages requires.
+        allowInsecurePredicate = pkg: (pkg.pname or "") == "google-chrome";
+      };
+
+      overlayList = [
+        devshell.overlays.default
+        inputs.bun2nix.overlays.default
+        inputs.curator.overlays.default
+        inputs.lumen.overlays.default
+        inputs.neovim-nightly-overlay.overlays.default
+        inputs.red.overlays.default
+        inputs.rust-overlay.overlays.default
+        self.overlays.default
+      ];
+    in
     flakelight ./. (
       { lib, ... }:
       let
@@ -248,26 +280,20 @@
 
         nixDirAliases.homeConfigurations = [ "home" ];
 
-        systems = lib.mkForce [
-          "aarch64-darwin"
-          "aarch64-linux"
-          "x86_64-linux"
-        ];
+        systems = lib.mkForce systems;
 
-        nixpkgs.config = {
-          allowUnfree = true;
-          # Allow Google Chrome regardless of insecure status — we pin the
-          # version ourselves via overlays/google-chrome/sources.json and the
-          # update pipeline, so nixpkgs marking a release as insecure should
-          # not block builds.  Using a pname predicate avoids the brittle
-          # version-string coupling that permittedInsecurePackages requires.
-          allowInsecurePredicate = pkg: (pkg.pname or "") == "google-chrome";
-        };
+        nixpkgs.config = nixpkgsConfig;
 
         apps.nixcfg =
-          { nixcfg-script, ... }:
+          pkgs:
+          let
+            nixcfgPkg = pkgs.callPackage ./packages/nixcfg.nix {
+              inherit (self) inputs;
+              outputs = self;
+            };
+          in
           {
-            program = "${nixcfg-script}/bin/nixcfg";
+            program = "${nixcfgPkg}/bin/nixcfg";
             meta.description = "Unified CLI for nixcfg project tasks.";
           };
 
@@ -282,16 +308,9 @@
           nixosModules
           ;
 
-        withOverlays = [
-          devshell.overlays.default
-          inputs.bun2nix.overlays.default
-          inputs.curator.overlays.default
-          inputs.lumen.overlays.default
-          inputs.neovim-nightly-overlay.overlays.default
-          inputs.red.overlays.default
-          inputs.rust-overlay.overlays.default
-          self.overlays.default
-        ];
+        withOverlays = overlayList;
+
+        legacyPackages = pkgs: pkgs;
 
         devShell = mkDevShell;
 
@@ -391,9 +410,16 @@
         );
 
         checks.python =
-          { lib, pkgs, ... }:
+          {
+            lib,
+            pkgs,
+            ...
+          }:
           let
-            nixcfgScript = if builtins.hasAttr "nixcfg-script" pkgs then pkgs."nixcfg-script" else null;
+            nixcfgScript = pkgs.callPackage ./packages/nixcfg.nix {
+              inherit (self) inputs;
+              outputs = self;
+            };
             tyPythonFlag = if nixcfgScript != null then " --python ${nixcfgScript}/bin/python" else "";
           in
           pkgs.runCommand "check-python" { } ''
@@ -405,6 +431,7 @@
             ${lib.getExe pkgs.ty} check${tyPythonFlag} .
             touch $out
           '';
+
       }
     );
 }

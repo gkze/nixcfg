@@ -41,7 +41,7 @@ class LinearCliUpdater(DenoManifestUpdater):
     @staticmethod
     def _deno_version_expr(platform: str) -> str:
         repo_path = get_repo_file(".")
-        flake_url = f"git+file://{repo_path}?dirty=1"
+        flake_url = f"path:{repo_path}"
         return (
             "let "
             f'flake = builtins.getFlake "{flake_url}"; '

@@ -56,3 +56,12 @@ jobs:
         run: |-
           uv run coverage run -m pytest
           uv run coverage report
+  superset:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - name: Build Superset package
+        run: nix build .#superset
+      - name: Report Superset closure size
+        run: nix path-info -S .#superset

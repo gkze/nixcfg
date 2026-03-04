@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-9YUd1WBIM4pJlCc6A41us1/Z3mXUPpSIicJ9DI5cShg=",
+    "x86_64-darwin": "sha256-9YUd1WBIM4pJlCc6A41us1/Z3mXUPpSIicJ9DI5cShg="
+  },
+  "urls": {
+    "aarch64-darwin": "https://persistent.oaistatic.com/codex-app-prod/Codex.dmg",
+    "x86_64-darwin": "https://persistent.oaistatic.com/codex-app-prod/Codex.dmg"
+  },
+  "version": "26.228.1430"
+}

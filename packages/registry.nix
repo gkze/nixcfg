@@ -10,7 +10,7 @@ let
     "registry.nix"
   ];
 
-  disabledPackages = [ ];
+  disabledPackages = [ "superset" ];
 
   discoveredPackages = discovery.discoverDefaultNixEntries {
     root = pkgDir;
@@ -26,6 +26,7 @@ let
   );
 
   darwinOnly = [
+    "codex-desktop"
     "conductor"
   ];
 
@@ -35,6 +36,7 @@ let
   ];
 
   packageSystemConstraints = {
+    codex-desktop = system: builtins.match ".*-darwin" system != null;
     conductor = system: builtins.match ".*-darwin" system != null;
     sculptor = system: builtins.elem system sculptorSystems;
   };

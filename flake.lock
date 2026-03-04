@@ -1106,6 +1106,23 @@
         "type": "github"
       }
     },
+    "linearis": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1765478077,
+        "narHash": "sha256-8Sz1RQJKbimPsGKUpHvqbkXnxxoUHppl4EA2+BjzryM=",
+        "owner": "czottmann",
+        "repo": "linearis",
+        "rev": "3b3ccd18299cfd70c427482aacadf0a65b43e4c4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "czottmann",
+        "ref": "main",
+        "repo": "linearis",
+        "type": "github"
+      }
+    },
     "lumen": {
       "inputs": {
         "fenix": "fenix",
@@ -1726,6 +1743,7 @@
         "homebrew-core": "homebrew-core",
         "ladybird": "ladybird",
         "linear-cli": "linear-cli",
+        "linearis": "linearis",
         "lumen": "lumen",
         "mac-app-util": "mac-app-util",
         "macfuse": "macfuse",

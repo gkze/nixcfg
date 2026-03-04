@@ -1,0 +1,10 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-PUXLphH82leQLHj5+BIxezKSpRiK/S9WevzK0duwo28=",
+      "hashType": "npmDepsHash"
+    }
+  ],
+  "input": "linearis",
+  "version": "main"
+}

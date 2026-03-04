@@ -6,7 +6,7 @@
 }:
 pkgs:
 let
-  nixcfgScript = if builtins.hasAttr "nixcfg-script" pkgs then pkgs."nixcfg-script" else null;
+  nixcfgScript = if builtins.hasAttr "nixcfg" pkgs then pkgs.nixcfg else null;
 
   tyPythonFlag = if nixcfgScript != null then " --python ${nixcfgScript}/bin/python" else "";
 

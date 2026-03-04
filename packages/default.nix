@@ -8,12 +8,14 @@
 { system, flakelight, ... }:
 let
   darwinOnly = [
+    "codex-desktop"
     "conductor"
   ];
   helperEntries = [
     "go-cli-wrapper"
     "openchamber-bun"
     "registry"
+    "superset"
   ];
   sculptorSystems = [
     "aarch64-darwin"
