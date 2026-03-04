@@ -27,7 +27,7 @@ async def nix_prefetch_url(
     url: str,
     *,
     hash_type: str = "sha256",
-    command_timeout: float = 300.0,
+    command_timeout: float = 1200.0,
     **kwargs: object,
 ) -> str:
     """Download a URL and return its SRI hash."""
