@@ -184,10 +184,6 @@ jobs:
         run: nix fmt -- --ci
       - name: Run Nix flake checks
         run: nix flake check
-      - name: Build Superset package
-        run: nix build .#superset
-      - name: Report Superset closure size
-        run: nix path-info -S .#superset
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
