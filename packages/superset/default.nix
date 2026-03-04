@@ -7,7 +7,7 @@
   bun,
   bun2nix,
   electron,
-  writeShellScript,
+  writeShellScriptBin,
   makeWrapper,
   ...
 }:
@@ -194,7 +194,7 @@ stdenv.mkDerivation {
     runHook postInstallCheck
   '';
 
-  passthru.updateScript = writeShellScript "update-superset-bun-lock" ''
+  passthru.updateScript = writeShellScriptBin "update-superset-bun-lock" ''
     set -euo pipefail
 
     if [ ! -f flake.nix ] || [ ! -d packages/superset ]; then
@@ -211,7 +211,7 @@ stdenv.mkDerivation {
 
     (
       cd "$tmpdir"
-      nix run "${inputs.bun2nix}" -- \
+      nix run "${inputs.bun2nix}#bun2nix" -- \
         --lock-file bun.lock \
         --copy-prefix ./ \
         --output-file "$repo_root/packages/superset/bun.nix"
