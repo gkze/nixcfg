@@ -71,6 +71,9 @@ jobs:
       - name: Regenerate superset bun2nix lock
         if: steps.superset-changed.outputs.changed == 'true'
         run: nix run .#superset.passthru.updateScript
+      - name: Format regenerated superset bun.nix
+        if: steps.superset-changed.outputs.changed == 'true'
+        run: nix fmt -- packages/superset/bun.nix
       - uses: actions/upload-artifact@v6
         with:
           name: flake-lock
