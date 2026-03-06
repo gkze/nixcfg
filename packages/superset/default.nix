@@ -24,6 +24,29 @@ let
     url = info.urls."x86_64-linux";
     hash = info.hashes."x86_64-linux";
   };
+  updateScript = writeShellScriptBin "update-superset-bun-lock" ''
+    set -euo pipefail
+
+    if [ ! -f flake.nix ] || [ ! -d packages/superset ]; then
+      echo "run this script from the nixcfg repository root" >&2
+      exit 1
+    fi
+
+    repo_root="$(pwd)"
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' EXIT
+
+    cp -R ${upstreamSrc}/. "$tmpdir"
+    chmod -R u+w "$tmpdir"
+
+    (
+      cd "$tmpdir"
+      nix run "${inputs.bun2nix}#bun2nix" -- \
+        --lock-file bun.lock \
+        --copy-prefix ./ \
+        --output-file "$repo_root/packages/superset/bun.nix"
+    )
+  '';
   srcWithBun = stdenvNoCC.mkDerivation {
     pname = "superset-src-with-bun";
     inherit version;
@@ -86,6 +109,8 @@ if stdenv.hostPlatform.isLinux then
         fi
         ln -sf "$out/bin/${pname}" "$out/bin/superset"
       '';
+
+    passthru.updateScript = updateScript;
 
     meta = with lib; {
       description = "Desktop client for the Superset agent platform";
@@ -236,29 +261,7 @@ else
       runHook postInstallCheck
     '';
 
-    passthru.updateScript = writeShellScriptBin "update-superset-bun-lock" ''
-      set -euo pipefail
-
-      if [ ! -f flake.nix ] || [ ! -d packages/superset ]; then
-        echo "run this script from the nixcfg repository root" >&2
-        exit 1
-      fi
-
-      repo_root="$(pwd)"
-      tmpdir="$(mktemp -d)"
-      trap 'rm -rf "$tmpdir"' EXIT
-
-      cp -R ${upstreamSrc}/. "$tmpdir"
-      chmod -R u+w "$tmpdir"
-
-      (
-        cd "$tmpdir"
-        nix run "${inputs.bun2nix}#bun2nix" -- \
-          --lock-file bun.lock \
-          --copy-prefix ./ \
-          --output-file "$repo_root/packages/superset/bun.nix"
-      )
-    '';
+    passthru.updateScript = updateScript;
 
     meta = with lib; {
       description = "Desktop client for the Superset agent platform";
