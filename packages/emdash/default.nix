@@ -40,10 +40,12 @@ let
   electronVersion = "30.5.1";
   electronTargets = {
     aarch64-darwin = "darwin-arm64";
+    aarch64-linux = "linux-arm64";
     x86_64-linux = "linux-x64";
   };
   electronZipHashes = {
     aarch64-darwin = "sha256-0xJUTqKYRM8yi0S5294S9P3O2Qy0Qt/KbfNsCY27bno=";
+    aarch64-linux = "sha256-6zFHDA181uI+fODYnMk6I1bJ2si8yZfjNTU7iqmVr6A=";
     x86_64-linux = "sha256-7EcHeD056GAF9CiZ4wrlnlDdXZx/KFMe1JTrQ/I2FAM=";
   };
   supportedSystems = builtins.attrNames electronTargets;

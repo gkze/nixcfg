@@ -26,6 +26,7 @@ let
   ];
   emdashSystems = [
     "aarch64-darwin"
+    "aarch64-linux"
     "x86_64-linux"
   ];
   all = flakelight.importDir ./.;
