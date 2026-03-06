@@ -13,11 +13,13 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 import aiohttp
 import typer
-from rich.columns import Columns
 from rich.console import Console
+from rich.table import Table
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
 
 from lib.cli import HELP_CONTEXT_SETTINGS
 from lib.nix.models.sources import SourceEntry, SourcesFile
@@ -30,7 +32,12 @@ from lib.update.config import (
 )
 from lib.update.constants import ALL_TOOLS, NIX_BUILD_FAILURE_TAIL_LINES, REQUIRED_TOOLS
 from lib.update.events import UpdateEvent
-from lib.update.flake import update_flake_input
+from lib.update.flake import (
+    get_flake_input_version,
+    load_flake_lock,
+    update_flake_input,
+)
+from lib.update.paths import package_file_map
 from lib.update.process import run_queue_task
 from lib.update.refs import (
     FlakeInputRef,
@@ -66,6 +73,7 @@ class UpdateOptions:
     check: bool = False
     validate: bool = False
     schema: bool = False
+    sort_by: Literal["name", "type", "source", "ref", "rev"] = "name"
     json: bool = False
     verbose: bool = False
     quiet: bool = False
@@ -501,21 +509,180 @@ def _handle_schema_request(opts: UpdateOptions) -> int | None:
     return 0
 
 
+@dataclass(frozen=True)
+class _ListRow:
+    name: str
+    item_type: str
+    source: str
+    ref: str | None
+    rev: str | None
+
+
+def _row_sort_value(row: _ListRow, sort_by: str) -> str:
+    if sort_by == "type":
+        return row.item_type
+    if sort_by == "source":
+        return row.source
+    if sort_by == "ref":
+        return row.ref or ""
+    if sort_by == "rev":
+        return row.rev or ""
+    return row.name
+
+
+def _resolve_root_input_node(
+    lock: FlakeLock,
+    input_name: str,
+) -> tuple[FlakeLockNode | None, str | None]:
+    root_inputs = lock.root_node.inputs or {}
+    target = root_inputs.get(input_name)
+    follows = "/".join(target) if isinstance(target, list) else None
+    if target is None:
+        return None, follows
+    if isinstance(target, str):
+        return lock.nodes.get(target), follows
+    resolved = lock._resolve_target_node_name(input_name)  # noqa: SLF001
+    if resolved is None:
+        return None, follows
+    return lock.nodes.get(resolved), follows
+
+
+def _flake_source_string(node: FlakeLockNode | None, follows: str | None) -> str:
+    original = node.original if node is not None else None
+    locked = node.locked if node is not None else None
+
+    source_type = (
+        original.type
+        if original is not None and original.type
+        else locked.type
+        if locked is not None
+        else None
+    )
+    owner = (
+        original.owner
+        if original is not None and original.owner
+        else locked.owner
+        if locked is not None
+        else None
+    )
+    repo = (
+        original.repo
+        if original is not None and original.repo
+        else locked.repo
+        if locked is not None
+        else None
+    )
+    url = (
+        original.url
+        if original is not None and original.url
+        else locked.url
+        if locked is not None
+        else None
+    )
+    path = (
+        original.path
+        if original is not None and original.path
+        else locked.path
+        if locked is not None
+        else None
+    )
+
+    source = "<unknown>"
+    if source_type in {"github", "gitlab"} and owner and repo:
+        source = f"{source_type}:{owner}/{repo}"
+    elif source_type and url:
+        source = f"{source_type}:{url}"
+    elif source_type and path:
+        source = f"{source_type}:{path}"
+    elif url:
+        source = url
+    elif path:
+        source = path
+    elif follows:
+        source = f"follows:{follows}"
+    elif source_type:
+        source = source_type
+    return source
+
+
+def _collect_flake_inputs_for_list() -> list[_ListRow]:
+    lock = load_flake_lock()
+    root_inputs = lock.root_node.inputs or {}
+    items: list[_ListRow] = []
+
+    for input_name in sorted(root_inputs):
+        node, follows = _resolve_root_input_node(lock, input_name)
+        source = _flake_source_string(node, follows)
+
+        original = node.original if node is not None else None
+        locked = node.locked if node is not None else None
+        selector = getattr(original, "rev", None) if original is not None else None
+        ref = original.ref if original is not None else None
+        if ref is None and isinstance(selector, str):
+            ref = selector
+        if ref is None and node is not None:
+            inferred = get_flake_input_version(node)
+            if inferred != "unknown":
+                ref = inferred
+        rev = locked.rev if locked is not None else None
+
+        items.append(
+            _ListRow(
+                name=input_name,
+                item_type="flake",
+                source=source,
+                ref=ref,
+                rev=rev,
+            ),
+        )
+
+    return items
+
+
+def _collect_source_entries_for_list() -> list[_ListRow]:
+    sources = load_all_sources()
+    path_map = package_file_map("sources.json")
+    items: list[_ListRow] = []
+
+    for name in sorted(path_map):
+        entry = sources.entries.get(name)
+        source = "<none>"
+        if entry is not None and entry.urls:
+            urls = sorted(set(entry.urls.values()))
+            source = urls[0] if len(urls) == 1 else f"{urls[0]} (+{len(urls) - 1} more)"
+        ref = entry.version if entry is not None else None
+        rev = entry.commit if entry is not None else None
+        items.append(
+            _ListRow(
+                name=name,
+                item_type="sources.json",
+                source=source,
+                ref=ref,
+                rev=rev,
+            ),
+        )
+
+    return items
+
+
 def _handle_list_targets_request(opts: UpdateOptions) -> int | None:
     if not opts.list_targets:
         return None
 
+    rows = [*_collect_flake_inputs_for_list(), *_collect_source_entries_for_list()]
+    rows.sort(key=lambda row: (_row_sort_value(row, opts.sort_by), row.name))
+
     if opts.json:
         payload = {
-            "sources": sorted(UPDATERS.keys()),
-            "inputs": [
+            "rows": [
                 {
-                    "name": inp.name,
-                    "owner": inp.owner,
-                    "repo": inp.repo,
-                    "ref": inp.ref,
+                    "name": row.name,
+                    "type": row.item_type,
+                    "source": row.source,
+                    "ref": row.ref,
+                    "rev": row.rev,
                 }
-                for inp in get_flake_inputs_with_refs()
+                for row in rows
             ],
         }
         sys.stdout.write(f"{json.dumps(payload)}\n")
@@ -523,14 +690,22 @@ def _handle_list_targets_request(opts: UpdateOptions) -> int | None:
 
     no_color = not sys.stdout.isatty()
     console = Console(no_color=no_color, highlight=not no_color)
-    console.print("[bold]Available sources (sources.json):[/bold]")
-    console.print(Columns(sorted(UPDATERS.keys()), padding=(0, 2)))
-    console.print()
-    ref_inputs = get_flake_inputs_with_refs()
-    if ref_inputs:
-        console.print("[bold]Flake inputs with version refs:[/bold]")
-        for inp in ref_inputs:
-            console.print(f"  {inp.name}: {inp.owner}/{inp.repo} @ {inp.ref}")
+
+    table = Table(title="nixcfg update targets", show_lines=False)
+    table.add_column("name", style="cyan")
+    table.add_column("type", style="magenta")
+    table.add_column("source", style="green")
+    table.add_column("ref")
+    table.add_column("rev")
+    for row in rows:
+        table.add_row(
+            row.name,
+            row.item_type,
+            row.source,
+            row.ref or "<none>",
+            row.rev or "<none>",
+        )
+    console.print(table)
     return 0
 
 
@@ -560,6 +735,17 @@ def _handle_validate_request(opts: UpdateOptions, out: OutputOptions) -> int | N
             out.print_error(f":x: Validation failed: {exc}")
         return 1
     return 0
+
+
+def _validate_list_sort_option(opts: UpdateOptions, out: OutputOptions) -> int | None:
+    if opts.list_targets or opts.sort_by == "name":
+        return None
+    message = "--sort/-o is only valid with --list/-l"
+    if opts.json:
+        sys.stdout.write(f"{json.dumps({'success': False, 'error': message})}\n")
+    else:
+        out.print_error(f"Error: {message}")
+    return 1
 
 
 def _resolve_tty_settings(
@@ -694,6 +880,10 @@ class _RunPlan:
 
 
 def _handle_preflight_requests(opts: UpdateOptions, out: OutputOptions) -> int | None:
+    sort_validation = _validate_list_sort_option(opts, out)
+    if sort_validation is not None:
+        return sort_validation
+
     schema_result = _handle_schema_request(opts)
     if schema_result is not None:
         return schema_result
@@ -838,7 +1028,7 @@ async def run_updates(opts: UpdateOptions) -> int:
     return await _execute_run_plan(opts, out, config, run_plan)
 
 
-def run_update_command(
+def run_update_command(  # noqa: PLR0913
     source: str | None = None,
     *,
     check: bool = False,
@@ -859,6 +1049,7 @@ def run_update_command(
     retries: int | None = None,
     retry_backoff: float | None = None,
     schema: bool = False,
+    sort_by: Literal["name", "type", "source", "ref", "rev"] = "name",
     subprocess_timeout: int | None = None,
     tty: Literal["auto", "force", "off", "full"] = "auto",
     user_agent: str | None = None,
@@ -897,7 +1088,7 @@ app = typer.Typer(
 
 
 @app.callback(invoke_without_command=True)
-def cli(
+def cli(  # noqa: PLR0913
     source: Annotated[
         str | None,
         typer.Argument(help="Source or flake input to update (default: all)."),
@@ -995,6 +1186,14 @@ def cli(
         bool,
         typer.Option("--schema", "-s", help="Output JSON schema for sources.json."),
     ] = False,
+    sort_by: Annotated[
+        Literal["name", "type", "source", "ref", "rev"],
+        typer.Option(
+            "--sort",
+            "-o",
+            help="Sort --list rows by column: name, type, source, ref, or rev.",
+        ),
+    ] = "name",
     subprocess_timeout: Annotated[
         int | None,
         typer.Option(

@@ -7,15 +7,23 @@
   bun,
   bun2nix,
   electron,
+  appimageTools,
+  fetchurl,
   writeShellScriptBin,
   makeWrapper,
   ...
 }:
 let
   slib = outputs.lib;
+  info = slib.sources.superset;
   version = slib.getFlakeVersion "superset";
   pname = "superset-desktop";
   upstreamSrc = inputs.superset;
+  linuxAppImage = fetchurl {
+    name = "superset-${info.version}-x86_64.AppImage";
+    url = info.urls."x86_64-linux";
+    hash = info.hashes."x86_64-linux";
+  };
   srcWithBun = stdenvNoCC.mkDerivation {
     pname = "superset-src-with-bun";
     inherit version;
@@ -58,174 +66,208 @@ let
     else
       [ ];
 in
-stdenv.mkDerivation {
-  inherit pname version;
+if stdenv.hostPlatform.isLinux then
+  appimageTools.wrapType2 {
+    inherit pname;
+    inherit (info) version;
+    src = linuxAppImage;
 
-  src = srcWithBun;
+    extraInstallCommands =
+      let
+        appimageContents = appimageTools.extractType2 {
+          inherit pname;
+          inherit (info) version;
+          src = linuxAppImage;
+        };
+      in
+      ''
+        if [ -d "${appimageContents}/usr/share" ]; then
+          cp -r "${appimageContents}/usr/share" "$out/"
+        fi
+        ln -sf "$out/bin/${pname}" "$out/bin/superset"
+      '';
 
-  nativeBuildInputs = [
-    bun
-    bun2nix.hook
-    makeWrapper
-  ];
+    meta = with lib; {
+      description = "Desktop client for the Superset agent platform";
+      homepage = "https://github.com/superset-sh/superset";
+      license = licenses.asl20;
+      platforms = [ "x86_64-linux" ];
+      sourceProvenance = with sourceTypes; [ binaryNativeCode ];
+      mainProgram = "superset";
+    };
+  }
+else
+  stdenv.mkDerivation {
+    inherit pname version;
 
-  strictDeps = true;
+    src = srcWithBun;
 
-  bunDeps = bun2nix.fetchBunDeps {
-    bunNix = "${srcWithBun}/bun.nix";
-  };
+    nativeBuildInputs = [
+      bun
+      bun2nix.hook
+      makeWrapper
+    ];
 
-  bunInstallFlags = lib.optionals (stdenv.hostPlatform.system == "x86_64-darwin") [
-    "--linker=isolated"
-    "--backend=symlink"
-    "--cpu=*"
-  ];
+    strictDeps = true;
 
-  postPatch = ''
-    substituteInPlace package.json \
-      --replace-fail '"postinstall": "./scripts/postinstall.sh"' '"postinstall": ""'
-  '';
+    bunDeps = bun2nix.fetchBunDeps {
+      bunNix = "${srcWithBun}/bun.nix";
+    };
 
-  buildPhase = ''
-    runHook preBuild
+    bunInstallFlags = [
+      "--frozen-lockfile"
+    ]
+    ++ lib.optionals (stdenv.hostPlatform.system == "x86_64-darwin") [
+      "--linker=isolated"
+      "--backend=symlink"
+      "--cpu=*"
+    ];
 
-    export HOME="$TMPDIR"
-    export SKIP_ENV_VALIDATION=1
-    export NEXT_PUBLIC_OUTLIT_KEY="nix-build"
+    postPatch = ''
+      substituteInPlace package.json \
+        --replace-fail '"postinstall": "./scripts/postinstall.sh"' '"postinstall": ""'
+    '';
 
-    bun run --cwd apps/desktop copy:native-modules
-    bun run --cwd apps/desktop compile:app
-    bun run --cwd apps/desktop validate:native-runtime
+    buildPhase = ''
+      runHook preBuild
 
-    runHook postBuild
-  '';
+      export HOME="$TMPDIR"
+      export SKIP_ENV_VALIDATION=1
+      export NEXT_PUBLIC_OUTLIT_KEY="nix-build"
 
-  installPhase = ''
-    runHook preInstall
+      bun run --cwd apps/desktop copy:native-modules
+      bun run --cwd apps/desktop compile:app
+      bun run --cwd apps/desktop validate:native-runtime
 
-    mkdir -p ${desktopDir}
-    cp -r apps/desktop/dist ${desktopDir}/dist
-    mkdir -p ${desktopDir}/src
-    cp -r apps/desktop/src/resources ${desktopDir}/src/resources
-    cp apps/desktop/package.json ${desktopDir}/package.json
+      runHook postBuild
+    '';
 
-    runtimeModuleManifest="$TMPDIR/superset-runtime-modules.txt"
-    bun --eval '
-      import { existsSync, readFileSync } from "node:fs";
-      import { join } from "node:path";
+    installPhase = ''
+      runHook preInstall
 
-      const nodeModulesDir = process.argv[1];
-      const queue = process.argv.slice(2);
-      const seen = new Set();
+      mkdir -p ${desktopDir}
+      cp -r apps/desktop/dist ${desktopDir}/dist
+      mkdir -p ${desktopDir}/src
+      cp -r apps/desktop/src/resources ${desktopDir}/src/resources
+      cp apps/desktop/package.json ${desktopDir}/package.json
 
-      while (queue.length > 0) {
-        const mod = queue.pop();
-        if (!mod || seen.has(mod)) continue;
+      runtimeModuleManifest="$TMPDIR/superset-runtime-modules.txt"
+      bun --eval '
+        import { existsSync, readFileSync } from "node:fs";
+        import { join } from "node:path";
 
-        const pkgJsonPath = join(nodeModulesDir, mod, "package.json");
-        if (!existsSync(pkgJsonPath)) continue;
+        const nodeModulesDir = process.argv[1];
+        const queue = process.argv.slice(2);
+        const seen = new Set();
 
-        seen.add(mod);
-        const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+        while (queue.length > 0) {
+          const mod = queue.pop();
+          if (!mod || seen.has(mod)) continue;
 
-        for (const dep of Object.keys(pkg.dependencies ?? {})) {
-          if (!seen.has(dep)) queue.push(dep);
+          const pkgJsonPath = join(nodeModulesDir, mod, "package.json");
+          if (!existsSync(pkgJsonPath)) continue;
+
+          seen.add(mod);
+          const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+
+          for (const dep of Object.keys(pkg.dependencies ?? {})) {
+            if (!seen.has(dep)) queue.push(dep);
+          }
+          for (const dep of Object.keys(pkg.optionalDependencies ?? {})) {
+            if (!seen.has(dep)) queue.push(dep);
+          }
         }
-        for (const dep of Object.keys(pkg.optionalDependencies ?? {})) {
-          if (!seen.has(dep)) queue.push(dep);
+
+        for (const mod of [...seen].sort()) {
+          console.log(mod);
         }
-      }
+      ' "apps/desktop/node_modules" ${lib.escapeShellArgs externalRuntimeModules} > "$runtimeModuleManifest"
 
-      for (const mod of [...seen].sort()) {
-        console.log(mod);
-      }
-    ' "apps/desktop/node_modules" ${lib.escapeShellArgs externalRuntimeModules} > "$runtimeModuleManifest"
+      mkdir -p ${desktopDir}/node_modules
+      while IFS= read -r mod; do
+        if [ -e "apps/desktop/node_modules/$mod" ]; then
+          mkdir -p "${desktopDir}/node_modules/$(dirname "$mod")"
+          cp -R -L "apps/desktop/node_modules/$mod" "${desktopDir}/node_modules/$mod"
+        fi
+      done < "$runtimeModuleManifest"
 
-    mkdir -p ${desktopDir}/node_modules
-    while IFS= read -r mod; do
-      if [ -e "apps/desktop/node_modules/$mod" ]; then
-        mkdir -p "${desktopDir}/node_modules/$(dirname "$mod")"
-        cp -R -L "apps/desktop/node_modules/$mod" "${desktopDir}/node_modules/$mod"
-      fi
-    done < "$runtimeModuleManifest"
+      mkdir -p "$out/bin"
+      makeWrapper ${electron}/bin/electron "$out/bin/superset" \
+        --add-flags ${desktopDir}
 
-    mkdir -p "$out/bin"
-    makeWrapper ${electron}/bin/electron "$out/bin/superset" \
-      --add-flags ${desktopDir}
+      runHook postInstall
+    '';
 
-    runHook postInstall
-  '';
+    doInstallCheck = true;
+    installCheckPhase = ''
+      runHook preInstallCheck
 
-  doInstallCheck = true;
-  installCheckPhase = ''
-    runHook preInstallCheck
+      requiredRuntimePaths="
+        ${desktopDir}/dist/main/index.js
+        ${desktopDir}/dist/preload/index.js
+        ${desktopDir}/package.json
+        ${desktopDir}/node_modules/better-sqlite3/package.json
+        ${desktopDir}/node_modules/node-pty/package.json
+        ${desktopDir}/node_modules/@ast-grep/napi/package.json
+        ${desktopDir}/node_modules/libsql/package.json
+        ${desktopDir}/node_modules/@neon-rs/load/package.json
+        ${desktopDir}/node_modules/detect-libc/package.json
+      "
 
-    requiredRuntimePaths="
-      ${desktopDir}/dist/main/index.js
-      ${desktopDir}/dist/preload/index.js
-      ${desktopDir}/package.json
-      ${desktopDir}/node_modules/better-sqlite3/package.json
-      ${desktopDir}/node_modules/node-pty/package.json
-      ${desktopDir}/node_modules/@ast-grep/napi/package.json
-      ${desktopDir}/node_modules/libsql/package.json
-      ${desktopDir}/node_modules/@neon-rs/load/package.json
-      ${desktopDir}/node_modules/detect-libc/package.json
-    "
+      for path in $requiredRuntimePaths; do
+        if [ ! -e "$path" ]; then
+          echo "missing required runtime path: $path" >&2
+          exit 1
+        fi
+      done
 
-    for path in $requiredRuntimePaths; do
-      if [ ! -e "$path" ]; then
-        echo "missing required runtime path: $path" >&2
+      libsql_platform_found=0
+      for mod in ${lib.concatStringsSep " " platformLibsqlCandidates}; do
+        if [ -e "${desktopDir}/node_modules/$mod/package.json" ]; then
+          libsql_platform_found=1
+        fi
+      done
+
+      if [ "$libsql_platform_found" -ne 1 ]; then
+        echo "missing platform-specific @libsql runtime package in ${desktopDir}/node_modules" >&2
         exit 1
       fi
-    done
 
-    libsql_platform_found=0
-    for mod in ${lib.concatStringsSep " " platformLibsqlCandidates}; do
-      if [ -e "${desktopDir}/node_modules/$mod/package.json" ]; then
-        libsql_platform_found=1
+      runHook postInstallCheck
+    '';
+
+    passthru.updateScript = writeShellScriptBin "update-superset-bun-lock" ''
+      set -euo pipefail
+
+      if [ ! -f flake.nix ] || [ ! -d packages/superset ]; then
+        echo "run this script from the nixcfg repository root" >&2
+        exit 1
       fi
-    done
 
-    if [ "$libsql_platform_found" -ne 1 ]; then
-      echo "missing platform-specific @libsql runtime package in ${desktopDir}/node_modules" >&2
-      exit 1
-    fi
+      repo_root="$(pwd)"
+      tmpdir="$(mktemp -d)"
+      trap 'rm -rf "$tmpdir"' EXIT
 
-    runHook postInstallCheck
-  '';
+      cp -R ${upstreamSrc}/. "$tmpdir"
+      chmod -R u+w "$tmpdir"
 
-  passthru.updateScript = writeShellScriptBin "update-superset-bun-lock" ''
-    set -euo pipefail
+      (
+        cd "$tmpdir"
+        nix run "${inputs.bun2nix}#bun2nix" -- \
+          --lock-file bun.lock \
+          --copy-prefix ./ \
+          --output-file "$repo_root/packages/superset/bun.nix"
+      )
+    '';
 
-    if [ ! -f flake.nix ] || [ ! -d packages/superset ]; then
-      echo "run this script from the nixcfg repository root" >&2
-      exit 1
-    fi
-
-    repo_root="$(pwd)"
-    tmpdir="$(mktemp -d)"
-    trap 'rm -rf "$tmpdir"' EXIT
-
-    cp -R ${upstreamSrc}/. "$tmpdir"
-    chmod -R u+w "$tmpdir"
-
-    (
-      cd "$tmpdir"
-      nix run "${inputs.bun2nix}#bun2nix" -- \
-        --lock-file bun.lock \
-        --copy-prefix ./ \
-        --output-file "$repo_root/packages/superset/bun.nix"
-    )
-  '';
-
-  meta = with lib; {
-    description = "Desktop client for the Superset agent platform";
-    homepage = "https://github.com/superset-sh/superset";
-    license = licenses.asl20;
-    platforms = [
-      "aarch64-darwin"
-      "x86_64-linux"
-    ];
-    mainProgram = "superset";
-  };
-}
+    meta = with lib; {
+      description = "Desktop client for the Superset agent platform";
+      homepage = "https://github.com/superset-sh/superset";
+      license = licenses.asl20;
+      platforms = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
+      mainProgram = "superset";
+    };
+  }

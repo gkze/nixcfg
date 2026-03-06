@@ -12,11 +12,11 @@
   # which isn't available in nixpkgs yet (nixpkgs#485589)
   # TODO: Remove this override once nixpkgs PR #486275 is merged
   element-desktop = prev.element-desktop.overrideAttrs (_: rec {
-    version = "1.12.8";
+    inherit (sources.element-desktop) version;
     src = prev.fetchFromGitHub {
       owner = "element-hq";
       repo = "element-desktop";
-      rev = "v1.12.8";
+      rev = "v${version}";
       hash = slib.sourceHash "element-desktop" "srcHash";
     };
     offlineCache = prev.fetchYarnDeps {

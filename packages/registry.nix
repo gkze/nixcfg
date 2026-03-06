@@ -40,9 +40,15 @@ let
     "x86_64-linux"
   ];
 
+  emdashSystems = [
+    "aarch64-darwin"
+    "x86_64-linux"
+  ];
+
   packageSystemConstraints = {
     codex-desktop = system: builtins.match ".*-darwin" system != null;
     conductor = system: builtins.match ".*-darwin" system != null;
+    emdash = system: builtins.elem system emdashSystems;
     sculptor = system: builtins.elem system sculptorSystems;
     superset = system: builtins.elem system supersetSystems;
   };

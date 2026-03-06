@@ -34,6 +34,10 @@
       url = "github:numtide/devshell";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    emdash = {
+      url = "github:generalaction/emdash/v0.4.24";
+      flake = false;
+    };
     flake-edit = {
       url = "github:a-kenji/flake-edit";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -193,6 +197,10 @@
     };
     treewalker-nvim = {
       url = "github:aaronik/treewalker.nvim";
+      flake = false;
+    };
+    vim-bundle-mako = {
+      url = "github:sophacles/vim-bundle-mako";
       flake = false;
     };
     zed = {

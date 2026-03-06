@@ -95,6 +95,30 @@ def test_select_and_record_matching_git_dep() -> None:
     check(unmatched == {})
 
 
+def test_select_matching_requires_hyphenated_prefix() -> None:
+    """Avoid fuzzy prefix matches that are not crate-name prefixes."""
+    unmatched = {"dep": _dep("dep", match_name="dep")}
+    check(
+        _select_matching_git_dep(
+            unmatched,
+            dep_key="other",
+            crate_name="depot",
+        )
+        is None
+    )
+
+
+def test_select_matching_prefers_exact_crate_name() -> None:
+    """Select exact crate-name matches when dep key is different."""
+    unmatched = {"dep-1.2.3": _dep("dep-1.2.3", match_name="dep")}
+    selected = _select_matching_git_dep(
+        unmatched,
+        dep_key="other",
+        crate_name="dep",
+    )
+    check(selected is unmatched["dep-1.2.3"])
+
+
 def test_parse_cargo_lock_git_sources_success_and_error() -> None:
     """Resolve all configured git deps from lockfile content."""
     lock_content = "\n".join([
@@ -321,7 +345,7 @@ def test_compute_import_cargo_lock_output_hashes_gather_type_errors(
         )
 
     async def _fake_gather_bad_value(_streams: object) -> AsyncIterator[object]:
-        yield GatheredValues(values={"crate-1.0.0": 1})
+        yield GatheredValues(values={"crate-1.0.0": ["not", "a", "hash"]})
 
     monkeypatch.setattr(
         "lib.update.nix_cargo.gather_event_streams", _fake_gather_bad_value
@@ -335,3 +359,47 @@ def test_compute_import_cargo_lock_output_hashes_gather_type_errors(
                 git_deps=deps,
             )
         )
+
+
+def test_compute_import_cargo_hashes_uses_provided_lockfile_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skip lockfile fetch when content is provided by caller."""
+    lock_content = "\n".join([
+        "[[package]]",
+        'name = "crate-core"',
+        'version = "1.2.3"',
+        'source = "git+https://github.com/a/b?branch=main#deadbeef"',
+    ])
+
+    def _unexpected_node(_name: str) -> object:
+        msg = "get_flake_input_node should not be called"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr("lib.update.nix_cargo.get_flake_input_node", _unexpected_node)
+
+    async def _prefetch(
+        source: str,
+        url: str,
+        rev: str,
+        *,
+        config: object,
+    ) -> AsyncIterator[UpdateEvent]:
+        _ = (url, rev, config)
+        yield UpdateEvent.value(source, "sha256-provided-lock")
+
+    monkeypatch.setattr("lib.update.nix_cargo._prefetch_git_hash", _prefetch)
+
+    deps = [_dep("crate-core-1.2.3", match_name="crate-core-1.2.3")]
+    events = _collect(
+        compute_import_cargo_lock_output_hashes(
+            "demo",
+            "input",
+            lockfile_path="Cargo.lock",
+            git_deps=deps,
+            lockfile_content=lock_content,
+        )
+    )
+    final = events[-1]
+    check(final.kind == UpdateEventKind.VALUE)
+    check(final.payload == {"crate-core-1.2.3": "sha256-provided-lock"})

@@ -96,13 +96,27 @@ def test_run_updates_list_json_outputs_sources_and_inputs(
 ) -> None:
     """Emit machine-readable payload for list mode in json mode."""
     monkeypatch.setattr(
-        "lib.update.cli.UPDATERS",
-        {"zeta": object, "alpha": object},
+        "lib.update.cli._collect_flake_inputs_for_list",
+        lambda: [
+            SimpleNamespace(
+                name="tool",
+                item_type="flake",
+                source="github:owner/repo",
+                ref="v1.2.3",
+                rev="abc123",
+            ),
+        ],
     )
     monkeypatch.setattr(
-        "lib.update.cli.get_flake_inputs_with_refs",
+        "lib.update.cli._collect_source_entries_for_list",
         lambda: [
-            SimpleNamespace(name="tool", owner="owner", repo="repo", ref="v1.2.3"),
+            SimpleNamespace(
+                name="alpha",
+                item_type="sources.json",
+                source="https://example.com/alpha.tar.gz",
+                ref="1.0.0",
+                rev=None,
+            )
         ],
     )
 
@@ -114,13 +128,20 @@ def test_run_updates_list_json_outputs_sources_and_inputs(
     check(
         payload
         == {
-            "sources": ["alpha", "zeta"],
-            "inputs": [
+            "rows": [
+                {
+                    "name": "alpha",
+                    "type": "sources.json",
+                    "source": "https://example.com/alpha.tar.gz",
+                    "ref": "1.0.0",
+                    "rev": None,
+                },
                 {
                     "name": "tool",
-                    "owner": "owner",
-                    "repo": "repo",
+                    "type": "flake",
+                    "source": "github:owner/repo",
                     "ref": "v1.2.3",
+                    "rev": "abc123",
                 },
             ],
         }

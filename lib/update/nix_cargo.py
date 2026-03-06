@@ -54,8 +54,11 @@ def _select_matching_git_dep(
     direct = unmatched.get(dep_key)
     if direct is not None:
         return direct
+    exact_matches = [dep for dep in unmatched.values() if crate_name == dep.match_name]
+    if len(exact_matches) == 1:
+        return exact_matches[0]
     prefix_matches = [
-        dep for dep in unmatched.values() if crate_name.startswith(dep.match_name)
+        dep for dep in unmatched.values() if crate_name.startswith(f"{dep.match_name}-")
     ]
     if len(prefix_matches) == 1:
         return prefix_matches[0]
@@ -95,9 +98,9 @@ def _parse_cargo_lock_git_sources(
 ) -> dict[str, tuple[str, str]]:
     """Parse a Cargo.lock and return ``{git_dep_name: (url, rev)}`` for each dep.
 
-    Multiple crates may share the same git URL; we deduplicate by matching each
-    ``CargoLockGitDep`` to the first ``[[package]]`` whose ``name`` starts with
-    the dep's ``match_name``.
+    Matching priority for each package entry is:
+    1) exact ``name-version`` key, 2) exact ``match_name``,
+    3) ``match_name`` as a hyphenated crate-name prefix.
     """
     result: dict[str, tuple[str, str]] = {}
     unmatched = {dep.git_dep: dep for dep in git_deps}
@@ -192,6 +195,7 @@ async def compute_import_cargo_lock_output_hashes(
     *,
     lockfile_path: str,
     git_deps: list[CargoLockGitDep],
+    lockfile_content: str | None = None,
     config: UpdateConfig | None = None,
 ) -> EventStream:
     """Compute ``importCargoLock`` output hashes via ``builtins.fetchGit``.
@@ -202,33 +206,34 @@ async def compute_import_cargo_lock_output_hashes(
     """
     config = resolve_active_config(config)
 
-    yield UpdateEvent.status(source, "Fetching upstream Cargo.lock...")
-    node = get_flake_input_node(input_name)
-    locked = node.locked
-    if locked is None:
-        msg = f"Flake input '{input_name}' has no locked info"
-        raise RuntimeError(msg)
-    owner = locked.owner
-    repo = locked.repo
-    rev = locked.rev
-    if not all([owner, repo, rev]):
-        msg = f"Flake input '{input_name}' missing owner/repo/rev in locked info"
-        raise RuntimeError(
-            msg,
-        )
+    if lockfile_content is None:
+        yield UpdateEvent.status(source, "Fetching upstream Cargo.lock...")
+        node = get_flake_input_node(input_name)
+        locked = node.locked
+        if locked is None:
+            msg = f"Flake input '{input_name}' has no locked info"
+            raise RuntimeError(msg)
+        owner = locked.owner
+        repo = locked.repo
+        rev = locked.rev
+        if not all([owner, repo, rev]):
+            msg = f"Flake input '{input_name}' missing owner/repo/rev in locked info"
+            raise RuntimeError(
+                msg,
+            )
 
-    lockfile_url = (
-        f"https://raw.githubusercontent.com/{owner}/{repo}/{rev}/{lockfile_path}"
-    )
-    async with aiohttp.ClientSession() as session:
-        payload = await fetch_url(
-            session,
-            lockfile_url,
-            request_timeout=config.default_timeout,
-            config=config,
-            user_agent=config.default_user_agent,
+        lockfile_url = (
+            f"https://raw.githubusercontent.com/{owner}/{repo}/{rev}/{lockfile_path}"
         )
-    lockfile_content = payload.decode(errors="replace")
+        async with aiohttp.ClientSession() as session:
+            payload = await fetch_url(
+                session,
+                lockfile_url,
+                request_timeout=config.default_timeout,
+                config=config,
+                user_agent=config.default_user_agent,
+            )
+        lockfile_content = payload.decode(errors="replace")
 
     git_sources = _parse_cargo_lock_git_sources(lockfile_content, git_deps)
 

@@ -1,0 +1,10 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-on9N6tKc8e8F1vAtbbLwk50eLr/GcArVnUQOuesXzkk=",
+      "hashType": "npmDepsHash"
+    }
+  ],
+  "input": "emdash",
+  "version": "v0.4.24"
+}

@@ -24,12 +24,17 @@ let
     "aarch64-darwin"
     "x86_64-linux"
   ];
+  emdashSystems = [
+    "aarch64-darwin"
+    "x86_64-linux"
+  ];
   all = flakelight.importDir ./.;
   isDarwin = builtins.match ".*-darwin" system != null;
   unsupported =
     (if isDarwin then [ ] else darwinOnly)
     ++ (if builtins.elem system sculptorSystems then [ ] else [ "sculptor" ])
     ++ (if builtins.elem system supersetSystems then [ ] else [ "superset" ])
+    ++ (if builtins.elem system emdashSystems then [ ] else [ "emdash" ])
     ++ helperEntries;
 in
 removeAttrs all unsupported

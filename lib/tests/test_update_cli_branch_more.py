@@ -150,19 +150,39 @@ def test_list_and_validate_non_json_paths(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Exercise non-JSON list/validate printing branches and early returns."""
-    monkeypatch.setattr("lib.update.cli.UPDATERS", {"a": object})
     monkeypatch.setattr(
-        "lib.update.cli.get_flake_inputs_with_refs",
+        "lib.update.cli._collect_flake_inputs_for_list",
         lambda: [
-            FlakeInputRef(
-                name="inp", owner="o", repo="r", ref="v1", input_type="github"
+            SimpleNamespace(
+                name="inp",
+                item_type="flake",
+                source="github:o/r",
+                ref="v1",
+                rev="deadbeef",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "lib.update.cli._collect_source_entries_for_list",
+        lambda: [
+            SimpleNamespace(
+                name="a",
+                item_type="sources.json",
+                source="https://example.com/a.tar.gz",
+                ref="1.0.0",
+                rev=None,
             )
         ],
     )
     check(
         _handle_list_targets_request(UpdateOptions(list_targets=True, json=False)) == 0
     )
-    check("Available sources" in capsys.readouterr().out)
+    rendered = capsys.readouterr().out
+    check("nixcfg update targets" in rendered)
+    check("name" in rendered)
+    check("type" in rendered)
+    check("ref" in rendered)
+    check("rev" in rendered)
 
     out = OutputOptions(json_output=False, quiet=False)
     check(_handle_validate_request(UpdateOptions(validate=False), out) is None)
@@ -217,13 +237,25 @@ def test_build_item_meta_without_sources_and_list_targets_without_refs(
     check(order == ["src"])
 
     monkeypatch.setattr("lib.update.cli.UPDATERS", {"src": object})
-    monkeypatch.setattr("lib.update.cli.get_flake_inputs_with_refs", list)
+    monkeypatch.setattr("lib.update.cli._collect_flake_inputs_for_list", list)
+    monkeypatch.setattr(
+        "lib.update.cli._collect_source_entries_for_list",
+        lambda: [
+            SimpleNamespace(
+                name="src",
+                item_type="sources.json",
+                source="https://example.com/src.tgz",
+                ref="1.0.0",
+                rev=None,
+            )
+        ],
+    )
     check(
         _handle_list_targets_request(UpdateOptions(list_targets=True, json=False)) == 0
     )
     rendered = capsys.readouterr().out
-    check("Available sources" in rendered)
-    check("Flake inputs with version refs" not in rendered)
+    check("nixcfg update targets" in rendered)
+    check("sources.json" in rendered)
 
 
 def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -> None:
