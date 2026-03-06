@@ -242,8 +242,18 @@
         inputs.curator.overlays.default
         inputs.lumen.overlays.default
         inputs.neovim-nightly-overlay.overlays.default
-        inputs.red.overlays.default
         inputs.rust-overlay.overlays.default
+        (
+          final: prev:
+          let
+            hostSystemEval = builtins.tryEval prev.stdenv.hostPlatform.system;
+            hostSystem =
+              if hostSystemEval.success then hostSystemEval.value else prev.system or (final.system or null);
+          in
+          prev.lib.optionalAttrs (hostSystem != null && builtins.hasAttr hostSystem inputs.red.packages) {
+            red-reddit-cli = inputs.red.packages.${hostSystem}.default;
+          }
+        )
         self.overlays.default
       ];
       baseOutputs = flakelight ./. (
