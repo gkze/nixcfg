@@ -13,6 +13,7 @@ from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import check, expect_instance, expect_not_none
 from lib.update.config import resolve_config
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
+from lib.update.updaters import UPDATERS
 from lib.update.updaters.base import (
     ChecksumProvidedUpdater,
     DenoDepsHashUpdater,
@@ -566,6 +567,13 @@ def test_factory_helpers_return_expected_subclasses() -> None:
     check(uv_lock_hash_updater("x").hash_type == "uvLockHash")
     check(deno_deps_updater("x").__name__.endswith("Updater"))
     check(deno_manifest_updater("x").__name__.endswith("Updater"))
+
+
+def test_emdash_uses_platform_specific_npm_hashes() -> None:
+    """Ensure emdash tracks npmDepsHash per platform in CI."""
+    updater = UPDATERS["emdash"]
+    check(getattr(updater, "hash_type", None) == "npmDepsHash")
+    check(getattr(updater, "platform_specific", False) is True)
 
 
 async def _collect_events(stream: EventStream) -> list[UpdateEvent]:

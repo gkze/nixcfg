@@ -35,7 +35,11 @@ let
   src = inputs.emdash;
   nodejs = nodejs_22;
   pnpm = pnpm_10.override { inherit nodejs; };
-  npmDepsHash = slib.sourceHash pname "npmDepsHash";
+  npmDepsHash =
+    let
+      perPlatformHash = builtins.tryEval (slib.sourceHashForPlatform pname "npmDepsHash" system);
+    in
+    if perPlatformHash.success then perPlatformHash.value else slib.sourceHash pname "npmDepsHash";
 
   electronVersion = "30.5.1";
   electronTargets = {
