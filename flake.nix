@@ -246,180 +246,193 @@
         inputs.rust-overlay.overlays.default
         self.overlays.default
       ];
-    in
-    flakelight ./. (
-      { lib, ... }:
-      let
-        exports = import ./lib/exports.nix { src = ./.; };
-        lintFiles = import ./lib/lint-files.nix;
-        mkDevShell = import ./lib/dev-shell.nix {
-          src = ./.;
-          gitHooks = git-hooks;
-          inherit
-            lib
-            lintFiles
-            ;
-        };
-      in
-      {
-        inherit inputs;
-
-        nixDir = ./.;
-
-        nixDirAliases.homeConfigurations = [ "home" ];
-
-        systems = lib.mkForce systems;
-
-        nixpkgs.config = nixpkgsConfig;
-
-        apps.nixcfg =
-          pkgs:
-          let
-            nixcfgPkg = pkgs.callPackage ./packages/nixcfg.nix {
-              inherit (self) inputs;
-              outputs = self;
-            };
-          in
-          {
-            program = "${nixcfgPkg}/bin/nixcfg";
-            meta.description = "Unified CLI for nixcfg project tasks.";
-          };
-
-        imports = [ flakelight-darwin.flakelightModules.default ];
-
-        homeConfigurations.george = import ./home/george { outputs = self; };
-
-        # Public module API for consuming this repo as a framework.
-        inherit (exports)
-          darwinModules
-          homeModules
-          nixosModules
-          ;
-
-        withOverlays = overlayList;
-
-        legacyPackages = pkgs: pkgs;
-
-        devShell = mkDevShell;
-
-        formatter =
-          pkgs:
-          with treefmt-nix.lib;
-          let
+      baseOutputs = flakelight ./. (
+        { lib, ... }:
+        let
+          exports = import ./lib/exports.nix { src = ./.; };
+          lintFiles = import ./lib/lint-files.nix;
+          mkDevShell = import ./lib/dev-shell.nix {
+            src = ./.;
+            gitHooks = git-hooks;
             inherit
-              (evalModule pkgs {
-                projectRootFile = "flake.nix";
-                programs = {
-                  nixfmt.enable = true;
-                  deadnix.enable = true;
-                  statix.enable = true;
-                  ruff-check = {
-                    enable = true;
-                    includes = lintFiles.ruff.globs;
-                  };
-                  ruff-format = {
-                    enable = true;
-                    includes = lintFiles.ruff.globs;
-                  };
-                  shellcheck = {
-                    enable = true;
-                    includes = lintFiles.shell.globs;
-                    excludes = lintFiles.shell.excludeGlobs;
-                  };
-                  shfmt = {
-                    enable = true;
-                    includes = lintFiles.shell.globs;
-                    excludes = lintFiles.shell.excludeGlobs;
-                  };
-                  yamlfmt.enable = true;
-                  taplo = {
-                    enable = true;
-                    includes = lintFiles.toml.globs;
-                  };
-                };
-                # treefmt/ruff normally auto-discovers `pyproject.toml`, but being
-                # explicit keeps `nix fmt` aligned with uv-managed Ruff config,
-                # even when invoked from subdirectories.
-                settings = {
-                  formatter = {
-                    ruff-check.options = [
-                      "--config"
-                      "pyproject.toml"
-                      "--fix-only"
-                    ];
-                    ruff-format.options = [
-                      "--config"
-                      "pyproject.toml"
-                    ];
-                    shfmt.options = [
-                      "-i"
-                      "2"
-                      "-s"
-                    ];
-                    # treefmt/taplo normally auto-discovers `.taplo.toml`, but
-                    # this keeps `nix fmt` stable from subdirectories.
-                    taplo.options = [
-                      "--config"
-                      ".taplo.toml"
-                    ];
-                    yamlfmt.options = [
-                      "-conf"
-                      ".yamlfmt"
-                    ];
-                    "markdown-table-formatter" = {
-                      command = lib.getExe' (pkgs.python3.withPackages (
-                        ps: with ps; [
-                          mdformat
-                          mdformat-tables
-                        ]
-                      )) "mdformat";
-                      includes = [ "*.md" ];
+              lib
+              lintFiles
+              ;
+          };
+        in
+        {
+          inherit inputs;
+
+          nixDir = ./.;
+
+          nixDirAliases.homeConfigurations = [ "home" ];
+
+          systems = lib.mkForce systems;
+
+          nixpkgs.config = nixpkgsConfig;
+
+          apps.nixcfg =
+            pkgs:
+            let
+              nixcfgPkg = pkgs.callPackage ./packages/nixcfg.nix {
+                inherit (self) inputs;
+                outputs = self;
+              };
+            in
+            {
+              program = "${nixcfgPkg}/bin/nixcfg";
+              meta.description = "Unified CLI for nixcfg project tasks.";
+            };
+
+          imports = [ flakelight-darwin.flakelightModules.default ];
+
+          homeConfigurations.george = import ./home/george { outputs = self; };
+
+          # Public module API for consuming this repo as a framework.
+          inherit (exports)
+            darwinModules
+            homeModules
+            nixosModules
+            ;
+
+          withOverlays = overlayList;
+
+          legacyPackages = pkgs: pkgs;
+
+          devShell = mkDevShell;
+
+          formatter =
+            pkgs:
+            with treefmt-nix.lib;
+            let
+              inherit
+                (evalModule pkgs {
+                  projectRootFile = "flake.nix";
+                  programs = {
+                    nixfmt.enable = true;
+                    deadnix.enable = true;
+                    statix.enable = true;
+                    ruff-check = {
+                      enable = true;
+                      includes = lintFiles.ruff.globs;
+                    };
+                    ruff-format = {
+                      enable = true;
+                      includes = lintFiles.ruff.globs;
+                    };
+                    shellcheck = {
+                      enable = true;
+                      includes = lintFiles.shell.globs;
+                      excludes = lintFiles.shell.excludeGlobs;
+                    };
+                    shfmt = {
+                      enable = true;
+                      includes = lintFiles.shell.globs;
+                      excludes = lintFiles.shell.excludeGlobs;
+                    };
+                    yamlfmt.enable = true;
+                    taplo = {
+                      enable = true;
+                      includes = lintFiles.toml.globs;
                     };
                   };
-                };
-              })
+                  # treefmt/ruff normally auto-discovers `pyproject.toml`, but being
+                  # explicit keeps `nix fmt` aligned with uv-managed Ruff config,
+                  # even when invoked from subdirectories.
+                  settings = {
+                    formatter = {
+                      ruff-check.options = [
+                        "--config"
+                        "pyproject.toml"
+                        "--fix-only"
+                      ];
+                      ruff-format.options = [
+                        "--config"
+                        "pyproject.toml"
+                      ];
+                      shfmt.options = [
+                        "-i"
+                        "2"
+                        "-s"
+                      ];
+                      # treefmt/taplo normally auto-discovers `.taplo.toml`, but
+                      # this keeps `nix fmt` stable from subdirectories.
+                      taplo.options = [
+                        "--config"
+                        ".taplo.toml"
+                      ];
+                      yamlfmt.options = [
+                        "-conf"
+                        ".yamlfmt"
+                      ];
+                      "markdown-table-formatter" = {
+                        command = lib.getExe' (pkgs.python3.withPackages (
+                          ps: with ps; [
+                            mdformat
+                            mdformat-tables
+                          ]
+                        )) "mdformat";
+                        includes = [ "*.md" ];
+                      };
+                    };
+                  };
+                })
+                config
+                ;
+            in
+            mkWrapper pkgs (
               config
-              ;
-          in
-          mkWrapper pkgs (
-            config
-            // {
-              build.wrapper = pkgs.writeShellScriptBin "treefmt-nix" ''
-                exec ${lib.getExe config.build.wrapper} --no-cache "$@"
-              '';
-            }
+              // {
+                build.wrapper = pkgs.writeShellScriptBin "treefmt-nix" ''
+                  exec ${lib.getExe config.build.wrapper} --no-cache "$@"
+                '';
+              }
+            );
+
+          checks.formatting = lib.mkForce (
+            { lib, outputs', ... }:
+            ''
+              ${lib.getExe outputs'.formatter} .
+            ''
           );
 
-        checks.formatting = lib.mkForce (
-          { lib, outputs', ... }:
-          ''
-            ${lib.getExe outputs'.formatter} .
-          ''
-        );
+          checks.python =
+            {
+              lib,
+              pkgs,
+              ...
+            }:
+            let
+              nixcfgScript = pkgs.callPackage ./packages/nixcfg.nix {
+                inherit (self) inputs;
+                outputs = self;
+              };
+              tyPythonFlag = if nixcfgScript != null then " --python ${nixcfgScript}/bin/python" else "";
+            in
+            pkgs.runCommand "check-python" { } ''
+              export HOME="$TMPDIR"
+              export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
+              cp -a ${./.} src
+              cd src
+              ${lib.getExe pkgs.ruff} check --config pyproject.toml .
+              ${lib.getExe pkgs.ty} check${tyPythonFlag} .
+              touch $out
+            '';
 
-        checks.python =
-          {
-            lib,
-            pkgs,
-            ...
-          }:
-          let
-            nixcfgScript = pkgs.callPackage ./packages/nixcfg.nix {
-              inherit (self) inputs;
-              outputs = self;
-            };
-            tyPythonFlag = if nixcfgScript != null then " --python ${nixcfgScript}/bin/python" else "";
-          in
-          pkgs.runCommand "check-python" { } ''
-            export HOME="$TMPDIR"
-            export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
-            cp -a ${./.} src
-            cd src
-            ${lib.getExe pkgs.ruff} check --config pyproject.toml .
-            ${lib.getExe pkgs.ty} check${tyPythonFlag} .
-            touch $out
-          '';
+        }
+      );
 
-      }
-    );
+      overlayDefault =
+        final: prev:
+        let
+          resolvedSystem = prev.system or (final.system or "x86_64-linux");
+        in
+        baseOutputs.overlays.default final (prev // { system = resolvedSystem; });
+    in
+    baseOutputs
+    // {
+      overlays = baseOutputs.overlays // {
+        default = overlayDefault;
+      };
+    };
 }

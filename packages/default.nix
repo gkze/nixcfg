@@ -5,7 +5,11 @@
 # When `packages/default.nix` exists, flakelight imports it directly instead
 # of auto-importing the directory contents.  flakelight.importDir excludes
 # default.nix, so there is no recursion.
-{ system, flakelight, ... }:
+{
+  system ? null,
+  flakelight,
+  ...
+}:
 let
   darwinOnly = [
     "codex-desktop"
@@ -30,12 +34,15 @@ let
     "x86_64-linux"
   ];
   all = flakelight.importDir ./.;
-  isDarwin = builtins.match ".*-darwin" system != null;
+  systemEval = builtins.tryEval system;
+  resolvedSystem =
+    if systemEval.success && systemEval.value != null then systemEval.value else "x86_64-linux";
+  isDarwin = builtins.match ".*-darwin" resolvedSystem != null;
   unsupported =
     (if isDarwin then [ ] else darwinOnly)
-    ++ (if builtins.elem system sculptorSystems then [ ] else [ "sculptor" ])
-    ++ (if builtins.elem system supersetSystems then [ ] else [ "superset" ])
-    ++ (if builtins.elem system emdashSystems then [ ] else [ "emdash" ])
+    ++ (if builtins.elem resolvedSystem sculptorSystems then [ ] else [ "sculptor" ])
+    ++ (if builtins.elem resolvedSystem supersetSystems then [ ] else [ "superset" ])
+    ++ (if builtins.elem resolvedSystem emdashSystems then [ ] else [ "emdash" ])
     ++ helperEntries;
 in
 removeAttrs all unsupported
