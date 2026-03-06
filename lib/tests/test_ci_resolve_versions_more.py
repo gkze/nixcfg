@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from lib.nix.models.flake_lock import FlakeLockNode
 from lib.tests._assertions import check
 from lib.update.ci import resolve_versions as rv
 from lib.update.updaters.base import VersionInfo
@@ -61,6 +62,61 @@ def test_deserialize_validates_required_fields() -> None:
         check("invalid 'metadata'" in str(exc))
     else:
         raise AssertionError("expected TypeError for invalid metadata")
+
+
+def test_deserialize_rehydrates_flake_lock_node() -> None:
+    """Rebuild flake lock node metadata into a typed model."""
+    deserialize = object.__getattribute__(rv, "_deserialize_version_info")
+
+    info = deserialize({
+        "version": "1.2.3",
+        "metadata": {
+            "node": {
+                "locked": {
+                    "type": "github",
+                    "owner": "sst",
+                    "repo": "opencode",
+                    "rev": "abc123",
+                    "narHash": "sha256-test-hash",
+                }
+            }
+        },
+    })
+
+    node_obj = info.metadata.get("node")
+    check(isinstance(node_obj, FlakeLockNode))
+    if not isinstance(node_obj, FlakeLockNode):
+        raise AssertionError("expected FlakeLockNode metadata")
+    check(node_obj.locked is not None)
+    if node_obj.locked is None:
+        raise AssertionError("expected locked flake metadata")
+    check(node_obj.locked.owner == "sst")
+    check(node_obj.locked.repo == "opencode")
+    check(node_obj.locked.rev == "abc123")
+
+
+def test_deserialize_rejects_invalid_node_metadata() -> None:
+    """Reject pinned node payloads that fail flake lock validation."""
+    deserialize = object.__getattribute__(rv, "_deserialize_version_info")
+
+    try:
+        deserialize({
+            "version": "1.2.3",
+            "metadata": {
+                "node": {
+                    "locked": {
+                        "type": "github",
+                        "owner": "sst",
+                        "repo": "opencode",
+                        # narHash is required
+                    }
+                }
+            },
+        })
+    except TypeError as exc:
+        check("invalid node metadata" in str(exc))
+    else:
+        raise AssertionError("expected TypeError for invalid node metadata")
 
 
 def test_load_pinned_versions_validates_top_level_shape(tmp_path: Path) -> None:

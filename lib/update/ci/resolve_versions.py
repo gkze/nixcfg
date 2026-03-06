@@ -16,8 +16,9 @@ from typing import Annotated
 
 import aiohttp
 import typer
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
+from lib.nix.models.flake_lock import FlakeLockNode
 from lib.update import io as update_io
 from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.config import resolve_active_config
@@ -61,6 +62,24 @@ def _serialize_version_info(info: VersionInfo) -> _JsonObject:
     }
 
 
+def _hydrate_metadata(metadata_payload: dict[str, object]) -> dict[str, object]:
+    """Restore typed metadata fields from JSON payloads.
+
+    The pinned-versions manifest is JSON-only, so ``VersionInfo.metadata`` values
+    like ``FlakeLockNode`` instances are serialized as dictionaries. Updaters
+    expect ``metadata["node"]`` to be a ``FlakeLockNode`` when present.
+    """
+    hydrated: dict[str, object] = dict(metadata_payload)
+    node_payload = hydrated.get("node")
+    if isinstance(node_payload, dict):
+        try:
+            hydrated["node"] = FlakeLockNode.model_validate(node_payload)
+        except ValidationError as exc:
+            msg = f"Pinned version entry has invalid node metadata: {node_payload!r}"
+            raise TypeError(msg) from exc
+    return hydrated
+
+
 def _deserialize_version_info(data: _JsonObject) -> VersionInfo:
     """Deserialize a VersionInfo from a JSON dict."""
     version_payload = data.get("version")
@@ -73,7 +92,7 @@ def _deserialize_version_info(data: _JsonObject) -> VersionInfo:
         raise TypeError(msg)
     return VersionInfo(
         version=version_payload,
-        metadata=dict(metadata_payload),
+        metadata=_hydrate_metadata(dict(metadata_payload)),
     )
 
 
