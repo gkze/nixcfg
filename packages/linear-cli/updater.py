@@ -45,7 +45,7 @@ class LinearCliUpdater(DenoManifestUpdater):
         return (
             "let "
             f'flake = builtins.getFlake "{flake_url}"; '
-            f'in flake.legacyPackages."{platform}".deno.version'
+            f'in flake.interactivePkgs."{platform}".deno.version'
         )
 
     async def _resolve_deno_version(self) -> str:

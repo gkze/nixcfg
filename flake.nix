@@ -439,8 +439,10 @@
         in
         baseOutputs.overlays.default final (prev // { system = resolvedSystem; });
     in
-    baseOutputs
+    (builtins.removeAttrs baseOutputs [ "legacyPackages" ])
     // {
+      interactivePkgs = baseOutputs.legacyPackages;
+
       overlays = baseOutputs.overlays // {
         default = overlayDefault;
       };
