@@ -6,11 +6,16 @@
 }:
 let
   buildGoModule = prev.buildGoModule.override { go = prev.go_1_26; };
+  crushOverrideArgs =
+    if prev.crush ? override && prev.crush.override ? __functionArgs then
+      prev.crush.override.__functionArgs
+    else
+      { };
   crushBase =
-    let
-      maybeCrushWithGo126 = builtins.tryEval (prev.crush.override { inherit buildGoModule; });
-    in
-    if maybeCrushWithGo126.success then maybeCrushWithGo126.value else prev.crush;
+    if crushOverrideArgs ? buildGoModule then
+      prev.crush.override { inherit buildGoModule; }
+    else
+      prev.crush;
   inherit (sources.crush) version;
   src = prev.fetchFromGitHub {
     owner = "charmbracelet";
