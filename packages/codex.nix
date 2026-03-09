@@ -14,6 +14,7 @@
   go,
   perl,
   libclang,
+  libcap,
   openssl,
   apple-sdk_15,
   ripgrep,
@@ -99,6 +100,7 @@ let
       libclang
       openssl
     ]
+    ++ lib.optionals stdenv.hostPlatform.isLinux [ libcap ]
     ++ lib.optionals stdenv.hostPlatform.isDarwin [ apple-sdk_15 ];
 
     LIBCLANG_PATH = "${lib.getLib libclang}/lib";
