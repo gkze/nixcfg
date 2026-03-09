@@ -1,0 +1,11 @@
+{
+  "drvHash": "9ilk2kwwgzkghrgcbx1nwrc95w9b3y9h",
+  "hashes": [
+    {
+      "hash": "sha256-UtbHrrBQleMb0KMyuX+7ELJJos3la7ZPtYv9Ri+kBTw=",
+      "hashType": "srcHash"
+    }
+  ],
+  "input": "goose-v8",
+  "version": "dbb64c20b9062b358b101e4592abb3ca8f646c2b"
+}
