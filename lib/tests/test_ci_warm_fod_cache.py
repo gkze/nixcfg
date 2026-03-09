@@ -292,6 +292,7 @@ def test_build_one_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
     monkeypatch.setattr(wfc, "_detect_system", lambda: "x86_64-linux")
+    monkeypatch.delenv("CACHIX_NAME", raising=False)
     monkeypatch.setattr(wfc, "_find_fod_targets", lambda _system: [])
     check(
         asyncio.run(
