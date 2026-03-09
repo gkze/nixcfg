@@ -219,7 +219,7 @@ jobs:
       - name: Check Nix formatting
         run: nix fmt -- --ci
       - name: Run Nix flake checks
-        run: nix flake check
+        run: nix flake check --max-jobs 1 --cores 2 --print-build-logs
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
