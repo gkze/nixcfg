@@ -266,8 +266,9 @@ class EventConsumer:
     def _handle_error(self, event: UpdateEvent, item: ItemState) -> None:
         self.errors += 1
         self._set_detail(event.source, "error")
-        message = event.message or "Unknown error"
-        message_lines = message.splitlines()
+        full_message = event.message or "Unknown error"
+        message_lines = full_message.splitlines()
+        message = full_message
         if message_lines:
             message = message_lines[0]
         error_op: OperationState | None = None
@@ -283,7 +284,8 @@ class EventConsumer:
             if len(message_lines) > 1:
                 error_op.detail_lines.extend(message_lines[1:])
         if not error_op or not self.renderer.is_tty:
-            self.renderer.log_error(event.source, message)
+            log_message = full_message if not self.renderer.is_tty else message
+            self.renderer.log_error(event.source, log_message)
 
     def _dispatch(self, event: UpdateEvent, item: ItemState) -> bool:
         """Dispatch an event to its kind handler."""

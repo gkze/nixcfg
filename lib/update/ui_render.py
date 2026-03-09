@@ -211,7 +211,11 @@ class Renderer:
         if self.is_tty:
             self._append_detail_line(source, message)
         elif not self.quiet:
-            sys.stderr.write(f"[{source}] ERROR: {message}\n")
+            lines = message.splitlines() or [message]
+            first_line = lines[0]
+            sys.stderr.write(f"[{source}] ERROR: {first_line}\n")
+            for line in lines[1:]:
+                sys.stderr.write(f"[{source}]       {line}\n")
 
     def request_render(self) -> None:
         """Mark the live panel as needing refresh."""

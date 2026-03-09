@@ -489,12 +489,15 @@ def test_renderer_non_tty_output_and_quiet(capsys: pytest.CaptureFixture[str]) -
     verbose_renderer.log_line("demo", "line")
     verbose_renderer.log("demo", "info")
     verbose_renderer.log_error("demo", "boom")
+    verbose_renderer.log_error("demo", "multi\ndetail")
     verbose_renderer.render()
 
     captured = capsys.readouterr()
     check("[demo] line" in captured.out)
     check("[demo] info" in captured.out)
     check("[demo] ERROR: boom" in captured.err)
+    check("[demo] ERROR: multi" in captured.err)
+    check("[demo]       detail" in captured.err)
 
     quiet_renderer = Renderer(
         {"demo": item},
