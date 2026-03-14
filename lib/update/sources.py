@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -99,7 +99,7 @@ def nix_source_names() -> set[str]:
     if not isinstance(payload, list) or not all(isinstance(x, str) for x in payload):
         msg = f"Unexpected nix source name payload: {payload!r}"
         raise RuntimeError(msg)
-    return set(payload)
+    return set(cast("list[str]", payload))
 
 
 def validate_source_discovery_consistency() -> None:

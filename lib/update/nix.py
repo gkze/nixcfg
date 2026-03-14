@@ -580,6 +580,7 @@ async def compute_drv_fingerprint(
         drv_path = next(iter(data["derivations"]))
     else:
         drv_path = next(iter(data))
+    drv_path = str(drv_path)
 
     # The .drv key is "<hash>-<name>.drv" (Nix 2.20+) or the full
     # "/nix/store/<hash>-<name>.drv" (older).  Strip the store prefix if
