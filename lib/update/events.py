@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import TypedDict, TypeGuard
 
 from lib.nix.models.sources import HashEntry, HashMapping, SourceEntry, SourceHashes
+from lib.update.artifacts import GeneratedArtifact
 
 
 def is_nix_build_command(args: list[str] | None) -> bool:
@@ -23,6 +24,7 @@ class UpdateEventKind(StrEnum):
     COMMAND_END = "command_end"
     VALUE = "value"
     RESULT = "result"
+    ARTIFACT = "artifact"
     ERROR = "error"
 
 
@@ -33,8 +35,15 @@ class RefUpdatePayload(TypedDict):
     latest: str
 
 
+class StatusPayload(TypedDict):
+    """Optional typed status metadata for UI/event consumers."""
+
+    operation: str
+
+
 type CommandArgs = list[str]
 type PlatformHash = tuple[str, str]
+type ArtifactUpdates = list[GeneratedArtifact]
 
 
 @dataclass(frozen=True)
@@ -50,8 +59,10 @@ class CommandResult:
 
 
 type UpdateEventPayload = (
-    CommandArgs
+    ArtifactUpdates
+    | CommandArgs
     | CommandResult
+    | StatusPayload
     | SourceEntry
     | SourceHashes
     | PlatformHash
@@ -114,6 +125,20 @@ def expect_source_entry(payload: object) -> SourceEntry:
     raise TypeError(msg)
 
 
+def expect_artifact_updates(payload: object) -> ArtifactUpdates:
+    """Return payload as ``list[GeneratedArtifact]`` or raise ``TypeError``."""
+    if isinstance(payload, list):
+        artifacts: list[GeneratedArtifact] = []
+        for item in payload:
+            if not isinstance(item, GeneratedArtifact):
+                break
+            artifacts.append(item)
+        else:
+            return artifacts
+    msg = f"Expected GeneratedArtifact list payload, got {type(payload).__name__}"
+    raise TypeError(msg)
+
+
 @dataclass(frozen=True)
 class UpdateEvent:
     """Single event emitted during update processing."""
@@ -125,9 +150,21 @@ class UpdateEvent:
     payload: UpdateEventPayload | None = None
 
     @classmethod
-    def status(cls, source: str, message: str) -> UpdateEvent:
+    def status(
+        cls,
+        source: str,
+        message: str,
+        *,
+        operation: str | None = None,
+    ) -> UpdateEvent:
         """Create a status event."""
-        return cls(source=source, kind=UpdateEventKind.STATUS, message=message)
+        payload = None if operation is None else {"operation": operation}
+        return cls(
+            source=source,
+            kind=UpdateEventKind.STATUS,
+            message=message,
+            payload=payload,
+        )
 
     @classmethod
     def error(cls, source: str, message: str) -> UpdateEvent:
@@ -142,6 +179,18 @@ class UpdateEvent:
     ) -> UpdateEvent:
         """Create a result event."""
         return cls(source=source, kind=UpdateEventKind.RESULT, payload=payload)
+
+    @classmethod
+    def artifact(
+        cls,
+        source: str,
+        payload: GeneratedArtifact | ArtifactUpdates,
+    ) -> UpdateEvent:
+        """Create an artifact event."""
+        artifacts = (
+            [payload] if isinstance(payload, GeneratedArtifact) else list(payload)
+        )
+        return cls(source=source, kind=UpdateEventKind.ARTIFACT, payload=artifacts)
 
     @classmethod
     def value(cls, source: str, payload: UpdateEventPayload) -> UpdateEvent:

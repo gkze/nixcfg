@@ -2,7 +2,13 @@
 
 from typing import TYPE_CHECKING
 
-from .base import CommandResult, _resolve_timeout_alias, run_nix, stream_nix
+from .base import (
+    CommandResult,
+    NixCommandError,
+    _resolve_timeout_alias,
+    run_nix,
+    stream_nix,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -62,6 +68,48 @@ async def nix_store_realise(
     )
 
 
+async def nix_store_query_deriver(
+    path: str,
+    *,
+    command_timeout: float = 30.0,
+    **kwargs: object,
+) -> str | None:
+    """Return the derivation that produced a store path, if known.
+
+    Parameters
+    ----------
+    path:
+        A Nix store path or realised profile symlink target.
+    command_timeout:
+        Maximum wall-clock seconds before the process is killed.
+    **kwargs:
+        Supports legacy ``timeout=...`` alias.
+
+    Returns
+    -------
+    str | None
+        The producing ``.drv`` path, or ``None`` when Nix reports an
+        unknown deriver.
+
+    """
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
+    result = await run_nix(
+        ["nix-store", "--query", "--deriver", path],
+        check=False,
+        timeout=timeout_seconds,
+    )
+    if result.returncode != 0:
+        raise NixCommandError(result)
+
+    deriver = result.stdout.strip()
+    if not deriver or deriver == "unknown-deriver":
+        return None
+    return deriver
+
+
 async def nix_store_query_references(
     path: str,
     *,
@@ -86,6 +134,36 @@ async def nix_store_query_references(
     )
     result = await run_nix(
         ["nix-store", "--query", "--references", path],
+        check=True,
+        timeout=timeout_seconds,
+    )
+    return [line for line in result.stdout.splitlines() if line]
+
+
+async def nix_store_query_requisites(
+    path: str,
+    *,
+    command_timeout: float = 30.0,
+    **kwargs: object,
+) -> list[str]:
+    """Return the full build-time requisites of a store path.
+
+    Parameters
+    ----------
+    path:
+        A Nix store path, typically a ``.drv`` when tracing build provenance.
+    command_timeout:
+        Maximum wall-clock seconds before the process is killed.
+    **kwargs:
+        Supports legacy ``timeout=...`` alias.
+
+    """
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
+    result = await run_nix(
+        ["nix-store", "--query", "--requisites", path],
         check=True,
         timeout=timeout_seconds,
     )

@@ -10,6 +10,7 @@ import pytest
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import check
 from lib.update import constants
+from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import (
     DEFAULT_CONFIG,
     UpdateConfig,
@@ -27,6 +28,7 @@ from lib.update.events import (
     ValueDrain,
     capture_stream_value,
     drain_value_events,
+    expect_artifact_updates,
     expect_command_result,
     expect_hash_mapping,
     expect_source_entry,
@@ -166,9 +168,26 @@ def test_update_event_expect_helpers_and_type_guards() -> None:
     with pytest.raises(TypeError, match="Expected SourceEntry payload"):
         expect_source_entry("bad")
 
+    artifact = GeneratedArtifact.text("demo.txt", "content\n")
+    check(expect_artifact_updates([artifact]) == [artifact])
+    with pytest.raises(TypeError, match="Expected GeneratedArtifact list payload"):
+        expect_artifact_updates([artifact, "bad"])
+    with pytest.raises(TypeError, match="Expected GeneratedArtifact list payload"):
+        expect_artifact_updates("bad")
+
     check(is_nix_build_command(["nix", "build", "foo"]) is True)
     check(is_nix_build_command(["nix", "eval"]) is False)
     check(is_nix_build_command(None) is False)
+
+    plain_status = UpdateEvent.status("demo", "working")
+    check(plain_status.payload is None)
+
+    typed_status = UpdateEvent.status(
+        "demo",
+        "working",
+        operation="compute_hash",
+    )
+    check(typed_status.payload == {"operation": "compute_hash"})
 
 
 def _collect_async[T](stream: AsyncIterator[T]) -> list[T]:

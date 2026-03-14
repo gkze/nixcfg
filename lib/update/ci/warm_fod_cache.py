@@ -37,7 +37,7 @@ from lib.nix.commands.build import nix_build
 from lib.update import sources as update_sources
 from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.ci._time import format_duration
-from lib.update.nix import _build_overlay_expr, normalize_nix_platform
+from lib.update.nix import _build_overlay_attr_expr, normalize_nix_platform
 from lib.update.paths import SOURCES_FILE_NAME, package_file_map
 
 if TYPE_CHECKING:
@@ -110,11 +110,7 @@ def _find_fod_targets(system: str) -> list[FodTarget]:
 
 def _build_fod_expr(package: str, fod_attr: str, *, system: str | None = None) -> str:
     """Build a Nix expression that evaluates to a package's FOD sub-derivation."""
-    base_expr = _build_overlay_expr(package, system=system)
-    # _build_overlay_expr returns: let ... in applied."<package>"
-    # We append the FOD attribute path: let ... in (applied."<package>").passthru.denoDeps
-    # Wrap in parens to ensure the attribute access binds to the full let expression.
-    return f"({base_expr}){fod_attr}"
+    return _build_overlay_attr_expr(package, fod_attr, system=system)
 
 
 async def _resolve_output_paths(expr: str) -> list[str]:

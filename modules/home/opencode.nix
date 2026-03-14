@@ -18,7 +18,7 @@ let
 
     options = {
       enable = mkEnableOption "MCP server" // {
-        default = true;
+        default = false;
       };
 
       type = mkOption {

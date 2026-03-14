@@ -6,13 +6,14 @@ import asyncio
 import contextlib
 import time
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update.events import (
     CommandResult,
     UpdateEvent,
     UpdateEventKind,
+    expect_artifact_updates,
     is_nix_build_command,
 )
 from lib.update.ui_render import Renderer
@@ -29,6 +30,11 @@ from lib.update.ui_state import (
     operation_for_command,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from lib.update.artifacts import GeneratedArtifact
+
 
 @dataclass(frozen=True)
 class ConsumeEventsOptions:
@@ -44,9 +50,21 @@ class ConsumeEventsOptions:
     quiet: bool = False
 
 
+@dataclass(frozen=True)
+class ConsumeEventsResult:
+    """Aggregate update state collected while consuming queued events."""
+
+    updated: bool
+    errors: int
+    details: dict[str, SummaryStatus]
+    source_updates: dict[str, SourceEntry]
+    artifact_updates: dict[str, tuple[GeneratedArtifact, ...]]
+
+
 class EventConsumer:
     """Process queued update events and collect summarized results."""
 
+    _ARTIFACT_LOG_PREVIEW_LIMIT: ClassVar[int] = 3
     _DETAIL_PRIORITY: ClassVar[dict[SummaryStatus, int]] = {
         "no_change": 0,
         "updated": 1,
@@ -79,6 +97,7 @@ class EventConsumer:
         self.errors = 0
         self.update_details: dict[str, SummaryStatus] = {}
         self.source_updates: dict[str, SourceEntry] = {}
+        self.artifact_updates: dict[str, dict[Path, GeneratedArtifact]] = {}
 
         self.renderer = Renderer(
             self.items,
@@ -101,15 +120,22 @@ class EventConsumer:
             self.updated = True
 
     @property
-    def result(
-        self,
-    ) -> tuple[bool, int, dict[str, SummaryStatus], dict[str, SourceEntry]]:
-        """Return the aggregate consumer result tuple."""
-        return self.updated, self.errors, self.update_details, self.source_updates
+    def result(self) -> ConsumeEventsResult:
+        """Return the aggregate consumer result object."""
+        return ConsumeEventsResult(
+            updated=self.updated,
+            errors=self.errors,
+            details=dict(self.update_details),
+            source_updates=dict(self.source_updates),
+            artifact_updates={
+                source: tuple(artifact for _, artifact in sorted(artifacts.items()))
+                for source, artifacts in self.artifact_updates.items()
+            },
+        )
 
     def _handle_status(self, event: UpdateEvent, item: ItemState) -> None:
         if event.message:
-            apply_status(item, event.message)
+            apply_status(item, event.message, event.payload)
             if is_terminal_status(event.message):
                 if not self.renderer.is_tty:
                     self.renderer.log(event.source, event.message)
@@ -263,6 +289,49 @@ class EventConsumer:
         else:
             self.renderer.log(event.source, "Updated")
 
+    def _artifact_changed(self, artifact: GeneratedArtifact) -> bool:
+        """Return whether *artifact* differs from the current or staged content."""
+        path = artifact.resolved_path()
+        staged = None
+        for artifacts in self.artifact_updates.values():
+            staged = artifacts.get(path)
+            if staged is not None:
+                break
+        if staged is not None:
+            return staged.content != artifact.content
+        return artifact.has_changed()
+
+    def _store_artifact(self, source: str, artifact: GeneratedArtifact) -> None:
+        """Store the latest artifact update for *source* keyed by path."""
+        path = artifact.resolved_path()
+        self.artifact_updates.setdefault(source, {})[path] = artifact
+
+    def _handle_artifact(self, event: UpdateEvent, item: ItemState) -> None:
+        """Record generated artifact updates and log changed paths."""
+        _ = item
+        artifacts = expect_artifact_updates(event.payload)
+        changed_paths: list[str] = []
+        for artifact in artifacts:
+            if not self._artifact_changed(artifact):
+                continue
+            changed_paths.append(str(artifact.repo_relative_path()))
+            self._set_detail(event.source, "updated")
+            self._store_artifact(event.source, artifact)
+
+        if not changed_paths:
+            return
+        if len(changed_paths) == 1:
+            self.renderer.log(event.source, f"Updated artifact: {changed_paths[0]}")
+            return
+        preview_limit = self._ARTIFACT_LOG_PREVIEW_LIMIT
+        preview = ", ".join(changed_paths[:preview_limit])
+        if len(changed_paths) > preview_limit:
+            preview += ", ..."
+        self.renderer.log(
+            event.source,
+            f"Updated {len(changed_paths)} artifacts: {preview}",
+        )
+
     def _handle_error(self, event: UpdateEvent, item: ItemState) -> None:
         self.errors += 1
         self._set_detail(event.source, "error")
@@ -301,13 +370,13 @@ class EventConsumer:
         elif kind is UpdateEventKind.RESULT:
             if self._handle_result(event, item):
                 return True
+        elif kind is UpdateEventKind.ARTIFACT:
+            self._handle_artifact(event, item)
         elif kind is UpdateEventKind.ERROR:
             self._handle_error(event, item)
         return False
 
-    async def run(
-        self,
-    ) -> tuple[bool, int, dict[str, SummaryStatus], dict[str, SourceEntry]]:
+    async def run(self) -> ConsumeEventsResult:
         """Consume events until sentinel and return aggregate results."""
         renderer = self.renderer
 
@@ -347,7 +416,7 @@ async def consume_events(
     sources: SourcesFile,
     *,
     options: ConsumeEventsOptions,
-) -> tuple[bool, int, dict[str, SummaryStatus], dict[str, SourceEntry]]:
+) -> ConsumeEventsResult:
     """Consume queued update events and return aggregate UI/update state."""
     consumer = EventConsumer(
         queue,
@@ -358,4 +427,9 @@ async def consume_events(
     return await consumer.run()
 
 
-__all__ = ["ConsumeEventsOptions", "EventConsumer", "consume_events"]
+__all__ = [
+    "ConsumeEventsOptions",
+    "ConsumeEventsResult",
+    "EventConsumer",
+    "consume_events",
+]

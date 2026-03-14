@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, ClassVar, cast
 
 import pytest
@@ -13,6 +14,7 @@ from rich.text import Text
 
 import lib.update.ui_consumer as ui_consumer_module
 import lib.update.ui_render as ui_render_module
+import lib.update.ui_state as ui_state_module
 from lib.nix.models.sources import (
     HashCollection,
     HashEntry,
@@ -21,6 +23,7 @@ from lib.nix.models.sources import (
     SourcesFile,
 )
 from lib.tests._assertions import check, expect_instance
+from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
 from lib.update.ui_consumer import ConsumeEventsOptions, EventConsumer, consume_events
 from lib.update.ui_render import Renderer
@@ -29,7 +32,6 @@ from lib.update.ui_state import (
     ItemState,
     OperationKind,
     OperationState,
-    SummaryStatus,
     apply_status,
     command_args_from_payload,
     hash_diff_lines,
@@ -175,6 +177,30 @@ def test_operation_for_status_unknown_message_returns_none() -> None:
     check(operation_for_status("completely unrelated status") is None)
 
 
+def test_operation_for_status_prefers_typed_payload() -> None:
+    """Use typed status payloads before message heuristics."""
+    check(
+        operation_for_status(
+            "custom status",
+            {"operation": OperationKind.REFRESH_LOCK.value},
+        )
+        == OperationKind.REFRESH_LOCK
+    )
+
+
+def test_operation_for_status_invalid_typed_payload_falls_back_or_none() -> None:
+    """Ignore malformed typed payloads and fall back to message parsing."""
+    check(
+        operation_for_status("Update available: 1 -> 2", [])
+        == OperationKind.CHECK_VERSION
+    )
+    check(
+        operation_for_status("Update available: 1 -> 2", {"operation": 1})
+        == OperationKind.CHECK_VERSION
+    )
+    check(operation_for_status("custom status", {"operation": "not-real"}) is None)
+
+
 def test_apply_status_rules_and_status_priority() -> None:
     """Run this test case."""
     item = _item()
@@ -220,6 +246,14 @@ def test_apply_status_ignores_unknown_or_missing_operations() -> None:
 
     apply_status(item, "unrelated status")
     check(check_op.status == "pending")
+
+
+def test_set_operation_status_keeps_message_when_none() -> None:
+    """Leave the existing message untouched when no new message is provided."""
+    operation = OperationState(kind=OperationKind.CHECK_VERSION, label="Checking")
+    operation.message = "existing"
+    ui_state_module._set_operation_status(operation, "running", message=None)
+    check(operation.message == "existing")
 
 
 def test_hash_diff_lines_covers_mapping_changes() -> None:
@@ -756,11 +790,12 @@ def test_event_consumer_detail_priority_and_status_handlers(
     non_tty_renderer = _renderer(consumer_non_tty)
     check(("demo", "Updated: 1.0 -> 1.1") in non_tty_renderer.logs)
 
-    updated, errors, details, source_updates = consumer.result
-    check(updated)
-    check(errors == 0)
-    check(details["demo"] == "updated")
-    check(source_updates == {})
+    result = consumer.result
+    check(result.updated)
+    check(result.errors == 0)
+    check(result.details["demo"] == "updated")
+    check(result.source_updates == {})
+    check(result.artifact_updates == {})
 
 
 def test_event_consumer_command_start_line_and_end_paths(
@@ -1053,6 +1088,100 @@ def test_event_consumer_source_result_paths(monkeypatch: pytest.MonkeyPatch) -> 
     check(("demo", "Updated") in generic_renderer.logs)
 
 
+def test_event_consumer_artifact_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Track changed, staged, and batched generated artifact updates."""
+    monkeypatch.setattr(
+        GeneratedArtifact,
+        "resolved_path",
+        lambda self, *, repo_root=tmp_path: tmp_path / Path(self.path).name,
+    )
+    monkeypatch.setattr(
+        GeneratedArtifact,
+        "repo_relative_path",
+        lambda self, *, repo_root=tmp_path: Path(self.path).name,
+    )
+
+    artifact_path = tmp_path / "demo.txt"
+    artifact_path.write_text("old\n", encoding="utf-8")
+
+    consumer, _queue = _consumer(monkeypatch, is_tty=True)
+    item = consumer.items["demo"]
+    changed = GeneratedArtifact.text("demo.txt", "new\n")
+    object.__getattribute__(consumer, "_handle_artifact")(
+        UpdateEvent.artifact("demo", changed),
+        item,
+    )
+
+    result = consumer.result
+    check(result.updated)
+    check(result.details["demo"] == "updated")
+    check(result.artifact_updates["demo"] == (changed,))
+    renderer = _renderer(consumer)
+    check(("demo", f"Updated artifact: {artifact_path.name}") in renderer.logs)
+
+    staged_same = GeneratedArtifact.text("demo.txt", "new\n")
+    staged_changed = GeneratedArtifact.text("demo.txt", "newer\n")
+    check(not object.__getattribute__(consumer, "_artifact_changed")(staged_same))
+    check(object.__getattribute__(consumer, "_artifact_changed")(staged_changed))
+
+    consumer_same, _queue = _consumer(monkeypatch, is_tty=True)
+    item_same = consumer_same.items["demo"]
+    same = GeneratedArtifact.text("demo.txt", "old\n")
+    object.__getattribute__(consumer_same, "_handle_artifact")(
+        UpdateEvent.artifact("demo", same),
+        item_same,
+    )
+    same_result = consumer_same.result
+    check(not same_result.updated)
+    check(same_result.details == {})
+    check(same_result.artifact_updates == {})
+    same_renderer = _renderer(consumer_same)
+    check(("demo", f"Updated artifact: {artifact_path.name}") not in same_renderer.logs)
+
+    consumer_pair, _queue = _consumer(monkeypatch, is_tty=True)
+    item_pair = consumer_pair.items["demo"]
+    pair_artifacts = [
+        GeneratedArtifact.text(f"pair-{index}.txt", f"new-{index}\n")
+        for index in range(2)
+    ]
+    for index in range(2):
+        (tmp_path / f"pair-{index}.txt").write_text("old\n", encoding="utf-8")
+
+    object.__getattribute__(consumer_pair, "_handle_artifact")(
+        UpdateEvent.artifact("demo", pair_artifacts),
+        item_pair,
+    )
+    pair_renderer = _renderer(consumer_pair)
+    check(("demo", "Updated 2 artifacts: pair-0.txt, pair-1.txt") in pair_renderer.logs)
+
+    consumer_many, _queue = _consumer(monkeypatch, is_tty=True)
+    item_many = consumer_many.items["demo"]
+    many_artifacts = [
+        GeneratedArtifact.text(f"artifact-{index}.txt", f"new-{index}\n")
+        for index in range(4)
+    ]
+    for index in range(4):
+        (tmp_path / f"artifact-{index}.txt").write_text("old\n", encoding="utf-8")
+
+    check(
+        not object.__getattribute__(consumer_many, "_dispatch")(
+            UpdateEvent.artifact("demo", many_artifacts),
+            item_many,
+        )
+    )
+    many_renderer = _renderer(consumer_many)
+    check(
+        (
+            "demo",
+            "Updated 4 artifacts: artifact-0.txt, artifact-1.txt, artifact-2.txt, ...",
+        )
+        in many_renderer.logs
+    )
+
+
 def test_event_consumer_result_none_and_other_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1186,12 +1315,7 @@ def test_event_consumer_run_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
     consumer, queue = _consumer(monkeypatch, is_tty=False)
 
-    async def _run() -> tuple[
-        bool,
-        int,
-        dict[str, SummaryStatus],
-        dict[str, SourceEntry],
-    ]:
+    async def _run() -> ui_consumer_module.ConsumeEventsResult:
         await queue.put(UpdateEvent.status("demo", "Checking demo (current: 1.0)"))
         await queue.put(UpdateEvent.status("missing", "ignored"))
         await queue.put(
@@ -1200,11 +1324,12 @@ def test_event_consumer_run_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:
         await queue.put(None)
         return await consumer.run()
 
-    updated, errors, details, source_updates = asyncio.run(_run())
-    check(not updated)
-    check(errors == 0)
-    check(details == {})
-    check(source_updates == {})
+    result = asyncio.run(_run())
+    check(not result.updated)
+    check(result.errors == 0)
+    check(result.details == {})
+    check(result.source_updates == {})
+    check(result.artifact_updates == {})
     renderer = _renderer(consumer)
     check(renderer.request_calls >= TWO)
     check(len(renderer.render_due_calls) >= TWO)
@@ -1227,29 +1352,23 @@ def test_event_consumer_run_tty_ticker_and_wrapper(
 
     monkeypatch.setattr(ui_consumer_module.asyncio, "sleep", _patched_sleep)
 
-    async def _run_consumer() -> tuple[
-        bool,
-        int,
-        dict[str, SummaryStatus],
-        dict[str, SourceEntry],
-    ]:
+    async def _run_consumer() -> ui_consumer_module.ConsumeEventsResult:
         run_task = asyncio.create_task(consumer.run())
         await queue.put(UpdateEvent.status("demo", "Checking demo (current: 1.0)"))
         await original_sleep(0)
         await queue.put(None)
         return await run_task
 
-    _updated, _errors, _details, _source_updates = asyncio.run(_run_consumer())
+    result = asyncio.run(_run_consumer())
+    check(not result.updated)
+    check(result.errors == 0)
+    check(result.source_updates == {})
+    check(result.artifact_updates == {})
     check(sleep_calls >= 1)
     renderer = _renderer(consumer)
     check(renderer.finalized)
 
-    async def _run_wrapper() -> tuple[
-        bool,
-        int,
-        dict[str, SummaryStatus],
-        dict[str, SourceEntry],
-    ]:
+    async def _run_wrapper() -> ui_consumer_module.ConsumeEventsResult:
         wrapped_queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
         await wrapped_queue.put(None)
         return await consume_events(
@@ -1267,7 +1386,11 @@ def test_event_consumer_run_tty_ticker_and_wrapper(
         )
 
     result = asyncio.run(_run_wrapper())
-    check(result == (False, 0, {}, {}))
+    check(not result.updated)
+    check(result.errors == 0)
+    check(result.details == {})
+    check(result.source_updates == {})
+    check(result.artifact_updates == {})
 
 
 def test_event_consumer_run_skip_render_and_result_map_guard(

@@ -23,6 +23,10 @@ from lib.update.cli import (
     _execute_run_plan,
     _handle_list_targets_request,
     _handle_validate_request,
+    _InventoryHandles,
+    _InventoryRefTarget,
+    _InventorySourceTarget,
+    _InventoryTarget,
     _is_tty,
     _persist_source_updates,
     _run_ref_phase,
@@ -151,38 +155,62 @@ def test_list_and_validate_non_json_paths(
 ) -> None:
     """Exercise non-JSON list/validate printing branches and early returns."""
     monkeypatch.setattr(
-        "lib.update.cli._collect_flake_inputs_for_list",
+        "lib.update.cli._build_update_inventory",
         lambda: [
-            SimpleNamespace(
+            _InventoryTarget(
                 name="inp",
-                item_type="flake",
-                source="github:o/r",
-                ref="v1",
-                rev="deadbeef",
-            )
-        ],
-    )
-    monkeypatch.setattr(
-        "lib.update.cli._collect_source_entries_for_list",
-        lambda: [
-            SimpleNamespace(
+                handles=_InventoryHandles(
+                    ref_update=True,
+                    input_refresh=False,
+                    source_update=False,
+                    artifact_write=False,
+                ),
+                classification="refOnly",
+                backing_input="inp",
+                ref_target=_InventoryRefTarget(
+                    input_name="inp",
+                    source_type="github",
+                    owner="o",
+                    repo="r",
+                    selector="v1",
+                    locked_rev="deadbeef",
+                ),
+                source_target=None,
+                generated_artifacts=(),
+            ),
+            _InventoryTarget(
                 name="a",
-                item_type="sources.json",
-                source="https://example.com/a.tar.gz",
-                ref="1.0.0",
-                rev=None,
-            )
+                handles=_InventoryHandles(
+                    ref_update=False,
+                    input_refresh=False,
+                    source_update=True,
+                    artifact_write=False,
+                ),
+                classification="sourceOnly",
+                backing_input=None,
+                ref_target=None,
+                source_target=_InventorySourceTarget(
+                    path="packages/a/sources.json",
+                    version="1.0.0",
+                    commit=None,
+                    hash_kinds=("sha256",),
+                    updater_kind="download",
+                    updater_class="AUpdater",
+                ),
+                generated_artifacts=(),
+            ),
         ],
     )
     check(
         _handle_list_targets_request(UpdateOptions(list_targets=True, json=False)) == 0
     )
     rendered = capsys.readouterr().out
-    check("nixcfg update targets" in rendered)
+    check("nixcfg update inventory" in rendered)
     check("name" in rendered)
-    check("type" in rendered)
-    check("ref" in rendered)
-    check("rev" in rendered)
+    check("class" in rendered)
+    check("touches" in rendered)
+    check("selector" in rendered)
+    check("writes" in rendered)
 
     out = OutputOptions(json_output=False, quiet=False)
     check(_handle_validate_request(UpdateOptions(validate=False), out) is None)
@@ -232,21 +260,34 @@ def test_build_item_meta_without_sources_and_list_targets_without_refs(
         ],
         source_names=["src"],
     )
+    monkeypatch.setattr("lib.update.cli.UPDATERS", {})
     meta, order = _build_item_meta(resolved, None)
-    check(meta["src"].origin.endswith("sources.json)"))
+    check(meta["src"].origin.endswith("flake.nix + sources.json)"))
     check(order == ["src"])
 
-    monkeypatch.setattr("lib.update.cli.UPDATERS", {"src": object})
-    monkeypatch.setattr("lib.update.cli._collect_flake_inputs_for_list", list)
     monkeypatch.setattr(
-        "lib.update.cli._collect_source_entries_for_list",
+        "lib.update.cli._build_update_inventory",
         lambda: [
-            SimpleNamespace(
+            _InventoryTarget(
                 name="src",
-                item_type="sources.json",
-                source="https://example.com/src.tgz",
-                ref="1.0.0",
-                rev=None,
+                handles=_InventoryHandles(
+                    ref_update=False,
+                    input_refresh=False,
+                    source_update=True,
+                    artifact_write=False,
+                ),
+                classification="sourceOnly",
+                backing_input=None,
+                ref_target=None,
+                source_target=_InventorySourceTarget(
+                    path="packages/src/sources.json",
+                    version="1.0.0",
+                    commit=None,
+                    hash_kinds=("sha256",),
+                    updater_kind="download",
+                    updater_class="SrcUpdater",
+                ),
+                generated_artifacts=(),
             )
         ],
     )
@@ -254,8 +295,8 @@ def test_build_item_meta_without_sources_and_list_targets_without_refs(
         _handle_list_targets_request(UpdateOptions(list_targets=True, json=False)) == 0
     )
     rendered = capsys.readouterr().out
-    check("nixcfg update targets" in rendered)
-    check("sources.json" in rendered)
+    check("nixcfg update inventory" in rendered)
+    check("source" in rendered)
 
 
 def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -605,11 +646,17 @@ def test_execute_run_plan_branches_and_run_update_command_source_ref_check(
         _sources: SourcesFile,
         *,
         options: object,
-    ) -> tuple[bool, int, dict[str, str], dict[str, SourceEntry]]:
+    ) -> SimpleNamespace:
         _ = options
         while await queue.get() is not None:
             pass
-        return (False, 0, {"src": "no_change"}, {})
+        return SimpleNamespace(
+            updated=False,
+            errors=0,
+            details={"src": "no_change"},
+            source_updates={},
+            artifact_updates={},
+        )
 
     async def _run_ref_phase(**_kwargs: object) -> None:
         phase_calls.append("refs")
@@ -622,7 +669,7 @@ def test_execute_run_plan_branches_and_run_update_command_source_ref_check(
     monkeypatch.setattr("lib.update.cli._run_ref_phase", _run_ref_phase)
     monkeypatch.setattr("lib.update.cli._run_sources_phase", _run_sources_phase)
     monkeypatch.setattr(
-        "lib.update.cli._persist_source_updates", lambda **_kwargs: None
+        "lib.update.cli._persist_materialized_updates", lambda **_kwargs: None
     )
 
     cfg = resolve_config()

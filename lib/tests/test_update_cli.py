@@ -12,6 +12,10 @@ from lib.update.cli import (
     UpdateOptions,
     UpdateSummary,
     _emit_summary,
+    _InventoryHandles,
+    _InventoryRefTarget,
+    _InventorySourceTarget,
+    _InventoryTarget,
     _merge_source_updates,
     run_updates,
 )
@@ -94,29 +98,52 @@ def test_run_updates_list_json_outputs_sources_and_inputs(
     monkeypatch: _MonkeyPatchLike,
     capsys: _CaptureLike,
 ) -> None:
-    """Emit machine-readable payload for list mode in json mode."""
+    """Emit machine-readable inventory payload for list mode."""
     monkeypatch.setattr(
-        "lib.update.cli._collect_flake_inputs_for_list",
+        "lib.update.cli._build_update_inventory",
         lambda: [
-            SimpleNamespace(
+            _InventoryTarget(
                 name="tool",
-                item_type="flake",
-                source="github:owner/repo",
-                ref="v1.2.3",
-                rev="abc123",
+                handles=_InventoryHandles(
+                    ref_update=True,
+                    input_refresh=False,
+                    source_update=False,
+                    artifact_write=False,
+                ),
+                classification="refOnly",
+                backing_input="tool",
+                ref_target=_InventoryRefTarget(
+                    input_name="tool",
+                    source_type="github",
+                    owner="owner",
+                    repo="repo",
+                    selector="v1.2.3",
+                    locked_rev="abc123",
+                ),
+                source_target=None,
+                generated_artifacts=(),
             ),
-        ],
-    )
-    monkeypatch.setattr(
-        "lib.update.cli._collect_source_entries_for_list",
-        lambda: [
-            SimpleNamespace(
+            _InventoryTarget(
                 name="alpha",
-                item_type="sources.json",
-                source="https://example.com/alpha.tar.gz",
-                ref="1.0.0",
-                rev=None,
-            )
+                handles=_InventoryHandles(
+                    ref_update=False,
+                    input_refresh=False,
+                    source_update=True,
+                    artifact_write=False,
+                ),
+                classification="sourceOnly",
+                backing_input=None,
+                ref_target=None,
+                source_target=_InventorySourceTarget(
+                    path="packages/alpha/sources.json",
+                    version="1.0.0",
+                    commit=None,
+                    hash_kinds=("sha256",),
+                    updater_kind="download",
+                    updater_class="AlphaUpdater",
+                ),
+                generated_artifacts=(),
+            ),
         ],
     )
 
@@ -125,26 +152,59 @@ def test_run_updates_list_json_outputs_sources_and_inputs(
 
     check(exit_code == 0)
     payload = json.loads(capsys.readouterr().out)
+    check(payload["schemaVersion"] == 1)
+    check(payload["kind"] == "nixcfg-update-inventory")
+    check(payload["summary"]["totalTargets"] == 2)
+    check(payload["summary"]["counts"]["refOnly"] == 1)
+    check(payload["summary"]["counts"]["sourceOnly"] == 1)
+    check(payload["summary"]["counts"]["refAndSource"] == 0)
+    check(payload["summary"]["counts"]["unclassified"] == 0)
     check(
-        payload
-        == {
-            "rows": [
-                {
-                    "name": "alpha",
-                    "type": "sources.json",
-                    "source": "https://example.com/alpha.tar.gz",
-                    "ref": "1.0.0",
-                    "rev": None,
+        payload["targets"]
+        == [
+            {
+                "name": "alpha",
+                "handles": {
+                    "refUpdate": False,
+                    "inputRefresh": False,
+                    "sourceUpdate": True,
+                    "artifactWrite": False,
                 },
-                {
-                    "name": "tool",
-                    "type": "flake",
-                    "source": "github:owner/repo",
-                    "ref": "v1.2.3",
-                    "rev": "abc123",
+                "classification": "sourceOnly",
+                "backingInput": None,
+                "refTarget": None,
+                "sourceTarget": {
+                    "path": "packages/alpha/sources.json",
+                    "version": "1.0.0",
+                    "commit": None,
+                    "hashKinds": ["sha256"],
+                    "updaterKind": "download",
+                    "updaterClass": "AlphaUpdater",
                 },
-            ],
-        }
+                "generatedArtifacts": [],
+            },
+            {
+                "name": "tool",
+                "handles": {
+                    "refUpdate": True,
+                    "inputRefresh": False,
+                    "sourceUpdate": False,
+                    "artifactWrite": False,
+                },
+                "classification": "refOnly",
+                "backingInput": "tool",
+                "refTarget": {
+                    "input": "tool",
+                    "sourceType": "github",
+                    "owner": "owner",
+                    "repo": "repo",
+                    "selector": "v1.2.3",
+                    "lockedRev": "abc123",
+                },
+                "sourceTarget": None,
+                "generatedArtifacts": [],
+            },
+        ]
     )
 
 

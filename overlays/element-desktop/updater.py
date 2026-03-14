@@ -15,7 +15,12 @@ from lib.update.events import (
     UpdateEvent,
     capture_stream_value,
 )
-from lib.update.nix import compute_fixed_output_hash
+from lib.update.nix import (
+    _build_fetch_from_github_call,
+    _build_fetch_from_github_expr,
+    _build_fetch_yarn_deps_expr,
+    compute_fixed_output_hash,
+)
 from lib.update.updaters.base import HashEntryUpdater, VersionInfo, package_dir_for
 
 
@@ -45,30 +50,21 @@ class ElementDesktopUpdater(HashEntryUpdater):
 
     @staticmethod
     def _src_expr(version: str) -> str:
-        return (
-            "pkgs.fetchFromGitHub {"
-            ' owner = "element-hq";'
-            ' repo = "element-desktop";'
-            f' rev = "v{version}";'
-            " hash = pkgs.lib.fakeHash;"
-            " }"
+        return _build_fetch_from_github_expr(
+            "element-hq",
+            "element-desktop",
+            rev=f"v{version}",
         )
 
     @staticmethod
     def _offline_expr(version: str, src_hash: str) -> str:
-        return (
-            "let"
-            " src = pkgs.fetchFromGitHub {"
-            ' owner = "element-hq";'
-            ' repo = "element-desktop";'
-            f' rev = "v{version}";'
-            f' hash = "{src_hash}";'
-            " };"
-            " in pkgs.fetchYarnDeps {"
-            ' yarnLock = src + "/yarn.lock";'
-            " hash = pkgs.lib.fakeHash;"
-            " }"
+        src_expr = _build_fetch_from_github_call(
+            "element-hq",
+            "element-desktop",
+            rev=f"v{version}",
+            hash_value=src_hash,
         )
+        return _build_fetch_yarn_deps_expr(src_expr)
 
     async def fetch_hashes(
         self,

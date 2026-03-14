@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.operator import Operator
+from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
-from nix_manipulator.parser import parse
 
 if TYPE_CHECKING:
     import aiohttp
@@ -22,9 +24,13 @@ from lib.update.events import (
     capture_stream_value,
     expect_str,
 )
-from lib.update.flake import get_flake_input_node, get_flake_input_version, nixpkgs_expr
+from lib.update.flake import (
+    get_flake_input_node,
+    get_flake_input_version,
+    nixpkgs_expression,
+)
 from lib.update.nix import compute_fixed_output_hash
-from lib.update.nix_expr import compact_nix_expr
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import HashEntryUpdater, VersionInfo
 
@@ -44,11 +50,11 @@ class ScratchUpdater(HashEntryUpdater):
                 Binding(
                     name="flake",
                     value=FunctionCall(
-                        name="builtins.getFlake",
-                        argument=parse(f'"{repo_url}"').expr,
+                        name=identifier_attr_path("builtins", "getFlake"),
+                        argument=StringPrimitive(value=repo_url),
                     ),
                 ),
-                Binding(name="pkgs", value=parse(nixpkgs_expr()).expr),
+                Binding(name="pkgs", value=nixpkgs_expression()),
             ],
             value=body_expr,
         )
@@ -57,12 +63,12 @@ class ScratchUpdater(HashEntryUpdater):
     @staticmethod
     def _expr_for_npm_deps() -> str:
         fetch_npm_deps_expr = FunctionCall(
-            name="pkgs.fetchNpmDeps",
+            name=identifier_attr_path("pkgs", "fetchNpmDeps"),
             argument=AttributeSet.from_dict(
                 {
                     "name": "scratch-npm-deps",
-                    "src": parse("flake.inputs.scratch").expr,
-                    "hash": parse("pkgs.lib.fakeHash").expr,
+                    "src": identifier_attr_path("flake", "inputs", "scratch"),
+                    "hash": identifier_attr_path("pkgs", "lib", "fakeHash"),
                 },
             ),
         )
@@ -71,11 +77,15 @@ class ScratchUpdater(HashEntryUpdater):
     @staticmethod
     def _expr_for_cargo_vendor() -> str:
         cargo_vendor_expr = FunctionCall(
-            name="pkgs.rustPlatform.fetchCargoVendor",
+            name=identifier_attr_path("pkgs", "rustPlatform", "fetchCargoVendor"),
             argument=AttributeSet.from_dict(
                 {
-                    "src": parse('flake.inputs.scratch + "/src-tauri"').expr,
-                    "hash": parse("pkgs.lib.fakeHash").expr,
+                    "src": BinaryExpression(
+                        left=identifier_attr_path("flake", "inputs", "scratch"),
+                        operator=Operator(name="+"),
+                        right=StringPrimitive(value="/src-tauri"),
+                    ),
+                    "hash": identifier_attr_path("pkgs", "lib", "fakeHash"),
                 },
             ),
         )

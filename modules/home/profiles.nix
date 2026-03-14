@@ -127,6 +127,8 @@ in
       default = with pkgs; [
         _1password-cli
         google-cloud-sdk
+        linear-cli
+        linearis
       ];
       description = "Packages installed when the work profile is enabled.";
     };
@@ -155,7 +157,7 @@ in
 
     xdg.configFile."opencode/work.json".text = builtins.toJSON {
       "$schema" = "https://opencode.ai/config.json";
-      mcp = cfg.opencodeMcp;
+      mcp = lib.mapAttrs (_: server: server // { enabled = server.enabled or false; }) cfg.opencodeMcp;
     };
 
     programs = {

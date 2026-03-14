@@ -105,6 +105,7 @@ in
       dotDir = "${config.xdg.configHome}/zsh";
       enableVteIntegration = true;
       history = {
+        append = true;
         expireDuplicatesFirst = true;
         extended = true;
         ignoreAllDups = true;

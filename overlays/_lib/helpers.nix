@@ -7,7 +7,7 @@
   sources,
   ...
 }:
-{
+rec {
   craneLib = inputs.crane.mkLib final;
 
   mkGoCliPackage =
@@ -18,7 +18,7 @@
       cmdName ? pname,
       version ? null,
       meta ? { },
-      go ? prev.go,
+      go ? (prev.go_latest or prev.go),
       ...
     }@args:
     let
@@ -57,6 +57,12 @@
         "go"
       ])
     );
+
+  mkGoCli = import ../../lib/go-cli-package.nix {
+    inherit inputs;
+    inherit (prev) lib;
+    inherit mkGoCliPackage;
+  };
 
   mkUv2nixPackage =
     {

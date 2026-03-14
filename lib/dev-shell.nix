@@ -14,9 +14,19 @@ let
     inherit src;
     package = pkgs.prek;
     hooks = {
-      nixfmt.enable = true;
-      deadnix.enable = true;
-      statix.enable = true;
+      nixfmt = {
+        enable = true;
+        excludes = lintFiles.nix.excludeRegex;
+      };
+      deadnix = {
+        enable = true;
+        excludes = lintFiles.nix.excludeRegex;
+      };
+      statix = {
+        enable = true;
+        excludes = lintFiles.nix.excludeRegex;
+        pass_filenames = true;
+      };
 
       ruff = {
         enable = true;
@@ -141,6 +151,7 @@ pkgs.devshell.mkShell {
       prek
       sops
       taplo
+      uv
       yamlfmt
     ]
     ++ lib.optional (pkgs ? nix-manipulator) nix-manipulator

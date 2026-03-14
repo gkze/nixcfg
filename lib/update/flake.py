@@ -1,12 +1,15 @@
 """flake.lock lookup helpers and flake input update streaming."""
 
+from __future__ import annotations
+
 import functools
 import shlex
+from typing import TYPE_CHECKING
 
 from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.set import AttributeSet
-from nix_manipulator.parser import parse
 
 from lib.nix.commands.flake import nix_flake_lock_update
 from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
@@ -16,14 +19,22 @@ from lib.update.events import (
     UpdateEvent,
     UpdateEventKind,
 )
-from lib.update.nix_expr import compact_nix_expr
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import FLAKE_LOCK_FILE
+
+if TYPE_CHECKING:
+    from nix_manipulator.expressions.expression import NixExpression
 
 
 @functools.cache
 def load_flake_lock() -> FlakeLock:
     """Load and cache the flake.lock as a validated :class:`FlakeLock` model."""
     return FlakeLock.from_file(FLAKE_LOCK_FILE)
+
+
+def invalidate_flake_lock() -> None:
+    """Clear the cached flake.lock model after on-disk updates."""
+    load_flake_lock.cache_clear()
 
 
 def get_flake_input_node(input_name: str) -> FlakeLockNode:
@@ -59,7 +70,7 @@ def get_flake_input_version(node: FlakeLockNode) -> str:
     return "unknown"
 
 
-def flake_fetch_expr(node: FlakeLockNode) -> str:
+def flake_fetch_expression(node: FlakeLockNode) -> NixExpression:
     """Build a ``builtins.fetchTree`` expression from a locked flake node."""
     locked = node.locked
     if locked is None:
@@ -72,8 +83,8 @@ def flake_fetch_expr(node: FlakeLockNode) -> str:
         msg = f"Incomplete locked ref for {locked.type}: missing owner/repo/rev"
         raise ValueError(msg)
 
-    fetch_tree = FunctionCall(
-        name="builtins.fetchTree",
+    return FunctionCall(
+        name=identifier_attr_path("builtins", "fetchTree"),
         argument=AttributeSet.from_dict(
             {
                 "type": locked.type,
@@ -84,25 +95,33 @@ def flake_fetch_expr(node: FlakeLockNode) -> str:
             },
         ),
     )
-    return fetch_tree.rebuild()
+
+
+def flake_fetch_expr(node: FlakeLockNode) -> str:
+    """Build a ``builtins.fetchTree`` expression from a locked flake node."""
+    return flake_fetch_expression(node).rebuild()
+
+
+def nixpkgs_expression() -> NixExpression:
+    """Build a nixpkgs import expression from the pinned flake input."""
+    node_name = get_root_input_name("nixpkgs")
+    node = get_flake_input_node(node_name)
+    fetch_tree = flake_fetch_expression(node)
+    import_fetch_tree = FunctionCall(
+        name=Identifier(name="import"),
+        argument=Parenthesis(value=fetch_tree),
+    )
+    return FunctionCall(
+        name=import_fetch_tree,
+        argument=AttributeSet.from_dict(
+            {"system": identifier_attr_path("builtins", "currentSystem")},
+        ),
+    )
 
 
 def nixpkgs_expr() -> str:
     """Build a nixpkgs import expression from the pinned flake input."""
-    node_name = get_root_input_name("nixpkgs")
-    node = get_flake_input_node(node_name)
-    fetch_tree = parse(flake_fetch_expr(node)).expr
-    import_fetch_tree = FunctionCall(
-        name="import",
-        argument=Parenthesis(value=fetch_tree),
-    )
-    import_nixpkgs = FunctionCall(
-        name=import_fetch_tree.rebuild(),
-        argument=AttributeSet.from_dict(
-            {"system": parse("builtins.currentSystem").expr},
-        ),
-    )
-    return compact_nix_expr(import_nixpkgs.rebuild())
+    return compact_nix_expr(nixpkgs_expression().rebuild())
 
 
 async def update_flake_input(input_name: str, *, source: str) -> EventStream:
@@ -115,6 +134,7 @@ async def update_flake_input(input_name: str, *, source: str) -> EventStream:
         payload=args,
     )
     await nix_flake_lock_update(input_name)
+    invalidate_flake_lock()
     yield UpdateEvent(
         source=source,
         kind=UpdateEventKind.COMMAND_END,

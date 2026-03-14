@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import aiohttp
 import pytest
@@ -18,6 +18,9 @@ from lib.update.flake import (
     get_flake_input_node,
     get_flake_input_version,
     get_root_input_name,
+    invalidate_flake_lock,
+    load_flake_lock,
+    nixpkgs_expr,
     update_flake_input,
 )
 from lib.update.refs import (
@@ -93,6 +96,16 @@ def test_flake_helpers_and_fetch_expr_error_paths(
     )
     check(version_from_ref == "v2.0.0")
 
+    version_from_original_rev = get_flake_input_version(
+        cast(
+            "FlakeLockNode",
+            SimpleNamespace(
+                original=SimpleNamespace(ref=None, rev="cafebabe"), locked=None
+            ),
+        )
+    )
+    check(version_from_original_rev == "cafebabe")
+
     version_from_rev = get_flake_input_version(
         FlakeLockNode(
             original=OriginalRef(
@@ -144,18 +157,46 @@ def test_flake_helpers_and_fetch_expr_error_paths(
 def test_update_flake_input_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     """Emit command lifecycle events around flake lock update."""
     calls: list[str] = []
+    invalidated: list[bool] = []
 
     async def _fake_update(input_name: str) -> None:
         calls.append(input_name)
 
     monkeypatch.setattr("lib.update.flake.nix_flake_lock_update", _fake_update)
+    monkeypatch.setattr(
+        "lib.update.flake.invalidate_flake_lock", lambda: invalidated.append(True)
+    )
     events = _run_async(update_flake_input("demo", source="demo-source"))
-    check(isinstance(events, list))
-    event_list = events
+    event_list = cast("list[UpdateEvent]", events)
     check(len(event_list) == 2)
     check(event_list[0].kind == UpdateEventKind.COMMAND_START)
     check(event_list[1].kind == UpdateEventKind.COMMAND_END)
     check(calls == ["demo"])
+    check(invalidated == [True])
+
+
+def test_load_flake_lock_cache_can_be_invalidated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Return fresh lock data after explicit cache invalidation."""
+    invalidate_flake_lock()
+    lock_a = SimpleNamespace(nodes={"demo": "a"})
+    lock_b = SimpleNamespace(nodes={"demo": "b"})
+    locks = [lock_a, lock_b]
+
+    monkeypatch.setattr(
+        "lib.update.flake.FlakeLock.from_file", lambda _path: locks.pop(0)
+    )
+
+    first = load_flake_lock()
+    second = load_flake_lock()
+    check(first is second)
+    check(first.nodes["demo"] == "a")
+
+    invalidate_flake_lock()
+    third = load_flake_lock()
+    check(third.nodes["demo"] == "b")
+    invalidate_flake_lock()
 
 
 def test_refs_version_parsing_and_selection_helpers() -> None:
@@ -254,6 +295,25 @@ def test_get_flake_inputs_with_refs_empty_root_inputs(
     model = SimpleNamespace(root_node=SimpleNamespace(inputs=None), nodes={})
     monkeypatch.setattr("lib.update.refs.load_flake_lock", lambda: model)
     check(get_flake_inputs_with_refs() == [])
+
+
+def test_get_root_input_name_without_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Return the requested name when the root node exposes no inputs."""
+    model = SimpleNamespace(root_node=SimpleNamespace(inputs=None), nodes={})
+    monkeypatch.setattr("lib.update.flake.load_flake_lock", lambda: model)
+    check(get_root_input_name("nixpkgs") == "nixpkgs")
+
+
+def test_nixpkgs_expr_compacts_rebuilt_expression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Build the nixpkgs expression through the compaction helper."""
+    monkeypatch.setattr(
+        "lib.update.flake.nixpkgs_expression",
+        lambda: SimpleNamespace(rebuild=lambda: "raw-expr"),
+    )
+    monkeypatch.setattr("lib.update.flake.compact_nix_expr", lambda expr: f"<{expr}>")
+    check(nixpkgs_expr() == "<raw-expr>")
 
 
 def test_fetch_first_matching_tag_falls_back_to_tags(

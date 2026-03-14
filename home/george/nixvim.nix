@@ -387,15 +387,23 @@ in
         };
         lualine = {
           enable = true;
-          settings.options = {
-            component_separators = {
-              left = "";
-              right = "";
+          settings = {
+            options = {
+              component_separators = {
+                left = "";
+                right = "";
+              };
+              section_separators = {
+                left = "";
+                right = "";
+              };
             };
-            section_separators = {
-              left = "";
-              right = "";
-            };
+            # Avoid lualine's branch component, which creates a fs_event watcher
+            # on .git/HEAD and appears to contribute to uv_loop_close hangs.
+            sections.lualine_b = [
+              "diff"
+              "diagnostics"
+            ];
           };
         };
         navbuddy = {

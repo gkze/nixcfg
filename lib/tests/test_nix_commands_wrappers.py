@@ -289,7 +289,7 @@ def test_flake_wrappers_require_json_object(monkeypatch: pytest.MonkeyPatch) -> 
         asyncio.run(flake_mod.nix_flake_show("."))
 
 
-def test_hash_path_info_store_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hash_and_path_info_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
 
     async def _run_nix(args: list[str], **_kwargs: object) -> CommandResult:
@@ -300,13 +300,6 @@ def test_hash_path_info_store_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
         if args[:1] == ["nix-prefetch-url"]:
             return CommandResult(
                 args=args, returncode=0, stdout="log\nabc\n", stderr=""
-            )
-        if args[:3] == ["nix-store", "--query", "--references"]:
-            return CommandResult(
-                args=args,
-                returncode=0,
-                stdout="/nix/store/a\n\n/nix/store/b\n",
-                stderr="",
             )
         return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
@@ -351,6 +344,34 @@ def test_hash_path_info_store_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
     check(infos_no_closure)
     check("--closure-size" not in seen_path_info_args[1])
 
+
+def test_store_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this test case."""
+
+    async def _run_nix(args: list[str], **_kwargs: object) -> CommandResult:
+        if args[:3] == ["nix-store", "--query", "--deriver"]:
+            return CommandResult(
+                args=args,
+                returncode=0,
+                stdout="/nix/store/demo.drv\n",
+                stderr="",
+            )
+        if args[:3] == ["nix-store", "--query", "--references"]:
+            return CommandResult(
+                args=args,
+                returncode=0,
+                stdout="/nix/store/a\n\n/nix/store/b\n",
+                stderr="",
+            )
+        if args[:3] == ["nix-store", "--query", "--requisites"]:
+            return CommandResult(
+                args=args,
+                returncode=0,
+                stdout="/nix/store/src-a\n\n/nix/store/src-b\n",
+                stderr="",
+            )
+        return CommandResult(args=args, returncode=0, stdout="", stderr="")
+
     monkeypatch.setattr(store_mod, "run_nix", _run_nix)
 
     async def _stream_nix(_args: list[str], **kwargs: object) -> object:
@@ -371,5 +392,41 @@ def test_hash_path_info_store_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     check(isinstance(direct, CommandResult))
 
+    deriver = asyncio.run(store_mod.nix_store_query_deriver("/nix/store/pkg"))
+    check(deriver == "/nix/store/demo.drv")
+
     refs = asyncio.run(store_mod.nix_store_query_references("/nix/store/pkg"))
     check(refs == ["/nix/store/a", "/nix/store/b"])
+
+    requisites = asyncio.run(store_mod.nix_store_query_requisites("/nix/store/pkg.drv"))
+    check(requisites == ["/nix/store/src-a", "/nix/store/src-b"])
+
+
+def test_store_deriver_wrapper_handles_unknown_and_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Return None for unknown derivers and raise on command failure."""
+
+    async def _unknown(args: list[str], **_kwargs: object) -> CommandResult:
+        return CommandResult(
+            args=args,
+            returncode=0,
+            stdout="unknown-deriver\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(store_mod, "run_nix", _unknown)
+    check(asyncio.run(store_mod.nix_store_query_deriver("/nix/store/pkg")) is None)
+
+    async def _blank(args: list[str], **_kwargs: object) -> CommandResult:
+        return CommandResult(args=args, returncode=0, stdout="\n", stderr="")
+
+    monkeypatch.setattr(store_mod, "run_nix", _blank)
+    check(asyncio.run(store_mod.nix_store_query_deriver("/nix/store/pkg")) is None)
+
+    async def _bad(args: list[str], **_kwargs: object) -> CommandResult:
+        return CommandResult(args=args, returncode=1, stdout="", stderr="boom")
+
+    monkeypatch.setattr(store_mod, "run_nix", _bad)
+    with pytest.raises(NixCommandError):
+        asyncio.run(store_mod.nix_store_query_deriver("/nix/store/pkg"))

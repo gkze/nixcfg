@@ -35,7 +35,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v0.4.24";
+      url = "github:generalaction/emdash/v0.4.32";
       flake = false;
     };
     flake-edit = {
@@ -94,7 +94,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     scratch = {
-      url = "github:erictli/scratch/v0.7.1";
+      url = "github:erictli/scratch/v0.8.0";
       flake = false;
     };
     stylix = {
@@ -111,15 +111,15 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     lumen = {
-      url = "github:jnsahaj/lumen/v2.20.0";
+      url = "github:jnsahaj/lumen/v2.21.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.28.1";
+      url = "github:max-sixty/worktrunk/v0.29.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
-      url = "github:axiomhq/cli/v0.14.8";
+      url = "github:axiomhq/cli/v0.15.0";
       flake = false;
     };
     catppuccin-bat = {
@@ -127,16 +127,16 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.106.0";
+      url = "github:openai/codex/rust-v0.114.0";
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.3.7";
+      url = "github:gkze/curator/v0.5.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
     gogcli = {
-      url = "github:steipete/gogcli/v0.11.0";
+      url = "github:steipete/gogcli/v0.12.0";
       flake = false;
     };
     goose-v8 = {
@@ -160,7 +160,7 @@
       flake = false;
     };
     linear-cli = {
-      url = "github:schpet/linear-cli/v1.10.0";
+      url = "github:schpet/linear-cli/v1.11.1";
       flake = false;
     };
     linearis = {
@@ -196,7 +196,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad/v0.6.5";
+      url = "github:batrachianai/toad/v0.6.12";
       flake = false;
     };
     treewalker-nvim = {
@@ -354,6 +354,7 @@
                   # explicit keeps `nix fmt` aligned with uv-managed Ruff config,
                   # even when invoked from subdirectories.
                   settings = {
+                    excludes = lintFiles.nix.excludeGlobs;
                     formatter = {
                       ruff-check.options = [
                         "--config"

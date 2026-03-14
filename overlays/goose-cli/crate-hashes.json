@@ -1,0 +1,4 @@
+{
+  "git+https://github.com/jh-block/llama-cpp-rs.git?branch=goose-patches#llama-cpp-2@0.1.136": "1hdlh80dvjrng55z1ip4rihzypcrcda74lcy29s46skxrimz901k",
+  "git+https://github.com/jh-block/llama-cpp-rs.git?branch=goose-patches#llama-cpp-sys-2@0.1.136": "1hdlh80dvjrng55z1ip4rihzypcrcda74lcy29s46skxrimz901k"
+}

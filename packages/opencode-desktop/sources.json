@@ -1,5 +1,5 @@
 {
-  "commit": "5bdf1c4b96545619e3b062b47912f845de7ca1b8",
+  "commit": "80c0788af37816e02e0c82c6b073f9c931815573",
   "hashes": [
     {
       "gitDep": "specta-2.0.0-rc.22",
@@ -17,5 +17,6 @@
       "hashType": "tauriSpectaOutputHash"
     }
   ],
-  "input": "opencode"
+  "input": "opencode",
+  "version": "feat/added_UI_themes"
 }

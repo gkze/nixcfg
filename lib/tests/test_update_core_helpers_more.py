@@ -57,6 +57,37 @@ def test_atomic_write_text_cleans_up_temp_file_on_replace_failure(
     monkeypatch.setattr(Path, "replace", original_replace)
 
 
+def test_atomic_write_bytes_supports_mkdir_and_replace_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Create parent directories and remove temp file when replace fails."""
+    target = tmp_path / "nested" / "payload.bin"
+    update_io.atomic_write_bytes(target, b"ok", mkdir=True)
+    check(target.read_bytes() == b"ok")
+
+    original_replace = Path.replace
+
+    def _boom(self: Path, target_path: Path) -> Path:
+        msg = "replace failed"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(Path, "replace", _boom)
+
+    with pytest.raises(RuntimeError, match="replace failed"):
+        update_io.atomic_write_bytes(target, b"new")
+
+    leftovers = [
+        child
+        for child in target.parent.iterdir()
+        if child.name.startswith(f".{target.name}.") and child.name.endswith(".tmp")
+    ]
+    check(leftovers == [])
+    check(target.read_bytes() == b"ok")
+
+    monkeypatch.setattr(Path, "replace", original_replace)
+
+
 def test_flake_helpers_cover_root_without_inputs_and_original_rev(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

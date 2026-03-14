@@ -67,8 +67,8 @@
       # Remove files that reference python to keep it out of the closure
       postInstall = (oldAttrs.postInstall or "") + ''
         rm -rf $out/share/gemini-cli/node_modules/keytar/build
-        rm -f $out/share/gemini-cli/node_modules/@google/gemini-cli-sdk
-        rm -f $out/share/gemini-cli/node_modules/@google/gemini-cli-devtools
+        rm -rf $out/share/gemini-cli/node_modules/@google/gemini-cli-sdk
+        rm -rf $out/share/gemini-cli/node_modules/@google/gemini-cli-devtools
         cp -r packages/devtools \
           $out/share/gemini-cli/node_modules/@google/gemini-cli-devtools
       '';

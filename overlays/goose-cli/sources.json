@@ -1,13 +1,9 @@
 {
   "hashes": [
     {
-      "hash": "sha256-2qsRLeBXAJzaOEVarU5LGQp9iooPsYq/+vrMx5Mr2Gw=",
+      "hash": "sha256-Og0mlt9coM8eOXM9GCQBz41nP42GO+J3J+xSW7YE6cw=",
       "hashType": "srcHash"
-    },
-    {
-      "hash": "sha256-XHjOne43aCu6CkLaAF12TOcmP4TxSACu8Juxio3Td4k=",
-      "hashType": "cargoHash"
     }
   ],
-  "version": "1.26.1"
+  "version": "1.27.2"
 }

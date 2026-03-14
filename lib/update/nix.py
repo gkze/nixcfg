@@ -8,8 +8,19 @@ import json
 import platform
 from typing import TYPE_CHECKING
 
+from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.expression import NixExpression
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.operator import Operator
+from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
+from nix_manipulator.expressions.select import Select
+from nix_manipulator.expressions.set import AttributeSet
 from nix_manipulator.parser import parse
 
 from lib.nix.commands.base import CommandResult as LibnixResult
@@ -26,7 +37,7 @@ from lib.update.events import (
     expect_command_result,
     require_value,
 )
-from lib.update.flake import nixpkgs_expr
+from lib.update.flake import nixpkgs_expression
 from lib.update.nix_expr import compact_nix_expr
 from lib.update.paths import get_repo_file
 from lib.update.process import (
@@ -75,6 +86,158 @@ _HASH_MISMATCH_INDICATORS = (
 )
 
 _PLATFORM_HASH_PAYLOAD_SIZE = 2
+
+
+def _quote_attr(name: str) -> str:
+    return StringPrimitive(value=name).rebuild()
+
+
+def _select_attrs(expression: NixExpression, *attributes: str) -> NixExpression:
+    selected = expression
+    for attribute in attributes:
+        selected = Select(expression=selected, attribute=attribute)
+    return selected
+
+
+def _nix_string_or_expr(value: str | NixExpression) -> NixExpression:
+    if isinstance(value, NixExpression):
+        return value
+    return StringPrimitive(value=value)
+
+
+def _fake_hash_expr() -> NixExpression:
+    return _select_attrs(Identifier(name="pkgs"), "lib", "fakeHash")
+
+
+def _build_get_flake_expr(flake_url: str) -> FunctionCall:
+    return FunctionCall(
+        name=_select_attrs(Identifier(name="builtins"), "getFlake"),
+        argument=StringPrimitive(value=flake_url),
+    )
+
+
+def _build_fetch_from_github_call(
+    owner: str,
+    repo: str,
+    *,
+    rev: str | None = None,
+    tag: str | None = None,
+    hash_value: str | NixExpression | None = None,
+    post_fetch: str | None = None,
+) -> FunctionCall:
+    if (rev is None) == (tag is None):
+        msg = "Expected exactly one of rev or tag for fetchFromGitHub"
+        raise ValueError(msg)
+
+    bindings: list[Binding | Inherit] = [
+        Binding(name="owner", value=owner),
+        Binding(name="repo", value=repo),
+        Binding(
+            name="hash",
+            value=_fake_hash_expr()
+            if hash_value is None
+            else _nix_string_or_expr(hash_value),
+        ),
+    ]
+    if rev is not None:
+        bindings.append(Binding(name="rev", value=rev))
+    if tag is not None:
+        bindings.append(Binding(name="tag", value=tag))
+    if post_fetch is not None:
+        bindings.append(Binding(name="postFetch", value=post_fetch))
+    return FunctionCall(
+        name=_select_attrs(Identifier(name="pkgs"), "fetchFromGitHub"),
+        argument=AttributeSet(values=bindings),
+    )
+
+
+def _build_fetch_from_github_expr(
+    owner: str,
+    repo: str,
+    *,
+    rev: str | None = None,
+    tag: str | None = None,
+    hash_value: str | NixExpression | None = None,
+    post_fetch: str | None = None,
+) -> str:
+    return compact_nix_expr(
+        _build_fetch_from_github_call(
+            owner,
+            repo,
+            rev=rev,
+            tag=tag,
+            hash_value=hash_value,
+            post_fetch=post_fetch,
+        ).rebuild(),
+    )
+
+
+def _build_fetch_yarn_deps_expr(
+    src_expr: NixExpression,
+    *,
+    yarn_lock_suffix: str = "/yarn.lock",
+    hash_value: str | NixExpression | None = None,
+) -> str:
+    expression = LetExpression(
+        local_variables=[Binding(name="src", value=src_expr)],
+        value=FunctionCall(
+            name=_select_attrs(Identifier(name="pkgs"), "fetchYarnDeps"),
+            argument=AttributeSet(
+                values=[
+                    Binding(
+                        name="yarnLock",
+                        value=BinaryExpression(
+                            left=Identifier(name="src"),
+                            operator=Operator(name="+"),
+                            right=StringPrimitive(value=yarn_lock_suffix),
+                        ),
+                    ),
+                    Binding(
+                        name="hash",
+                        value=_fake_hash_expr()
+                        if hash_value is None
+                        else _nix_string_or_expr(hash_value),
+                    ),
+                ]
+            ),
+        ),
+    )
+    return compact_nix_expr(expression.rebuild())
+
+
+def _build_flake_attr_expr(
+    flake_url: str,
+    *attributes: str,
+    quoted_indices: tuple[int, ...] = (),
+) -> str:
+    quoted = set(quoted_indices)
+    value: NixExpression = Identifier(name="flake")
+    for index, attribute in enumerate(attributes):
+        value = Select(
+            expression=value,
+            attribute=_quote_attr(attribute) if index in quoted else attribute,
+        )
+    expression = LetExpression(
+        local_variables=[Binding(name="flake", value=_build_get_flake_expr(flake_url))],
+        value=value,
+    )
+    return compact_nix_expr(expression.rebuild())
+
+
+def _build_overlay_attr_expr(
+    source: str,
+    attr_path: str,
+    *,
+    system: str | None = None,
+) -> str:
+    expression: NixExpression = Parenthesis(
+        value=_build_overlay_expression(source, system=system),
+    )
+    for attribute in attr_path.removeprefix(".").split("."):
+        if not attribute:
+            continue
+        expression = Select(expression=expression, attribute=attribute)
+    return compact_nix_expr(expression.rebuild())
 
 
 def _extract_nix_hash(output: str, *, config: UpdateConfig | None = None) -> str:
@@ -240,15 +403,17 @@ async def compute_fixed_output_hash(
             yield event
 
 
-def _build_nix_expr(body: str) -> str:
+def _build_nix_expr(body: str | NixExpression) -> str:
     expression = LetExpression(
-        local_variables=[Binding(name="pkgs", value=parse(nixpkgs_expr()).expr)],
-        value=parse(body).expr,
+        local_variables=[Binding(name="pkgs", value=nixpkgs_expression())],
+        value=parse(body).expr if isinstance(body, str) else body,
     )
     return compact_nix_expr(expression.rebuild())
 
 
-def _build_overlay_expr(source: str, *, system: str | None = None) -> str:
+def _build_overlay_expression(
+    source: str, *, system: str | None = None
+) -> NixExpression:
     """Build a Nix expression that evaluates an overlay package.
 
     Uses a manual fixed-point (``lib.fix``) to apply the flake overlay on top
@@ -263,22 +428,75 @@ def _build_overlay_expr(source: str, *, system: str | None = None) -> str:
     parameter correctly resolves to ``pkgs // overlay final pkgs`` without
     hitting the aliases.nix ``with self`` trap.
     """
-    system_nix = "builtins.currentSystem" if system is None else f'"{system}"'
     flake_url = f"git+file://{get_repo_file('.')}?dirty=1"
-    # Build the expression as a raw Nix string — the nix-manipulator AST
-    # does not have a node type for `lib.fix (self: ...)` lambdas, so a
-    # raw template is cleaner and easier to audit than splicing AST nodes.
-    return (
-        "let"
-        f'  flake = builtins.getFlake "{flake_url}";'
-        f"  system = {system_nix};"
-        "  pkgs = import flake.inputs.nixpkgs {"
-        "    inherit system;"
-        "    config = { allowUnfree = true; allowInsecurePredicate = _: true; };"
-        "  };"
-        "  applied = pkgs.lib.fix (self: pkgs // flake.overlays.default self pkgs);"
-        f'in applied."{source}"'
+    system_expr: NixExpression = (
+        _select_attrs(Identifier(name="builtins"), "currentSystem")
+        if system is None
+        else StringPrimitive(value=system)
     )
+    import_nixpkgs = FunctionCall(
+        name=Identifier(name="import"),
+        argument=_select_attrs(Identifier(name="flake"), "inputs", "nixpkgs"),
+    )
+    config_expr = AttributeSet(
+        values=[
+            Binding(name="allowUnfree", value=Primitive(value=True)),
+            Binding(
+                name="allowInsecurePredicate",
+                value=FunctionDefinition(
+                    argument_set=Identifier(name="_"),
+                    output=Primitive(value=True),
+                ),
+            ),
+        ],
+    )
+    overlay_fn = _select_attrs(Identifier(name="flake"), "overlays", "default")
+    overlay_applied = FunctionCall(
+        name=FunctionCall(name=overlay_fn, argument=Identifier(name="self")),
+        argument=Identifier(name="pkgs"),
+    )
+    return LetExpression(
+        local_variables=[
+            Binding(name="flake", value=_build_get_flake_expr(flake_url)),
+            Binding(name="system", value=system_expr),
+            Binding(
+                name="pkgs",
+                value=FunctionCall(
+                    name=import_nixpkgs,
+                    argument=AttributeSet(
+                        values=[
+                            Inherit(names=[Identifier(name="system")]),
+                            Binding(name="config", value=config_expr),
+                        ],
+                    ),
+                ),
+            ),
+            Binding(
+                name="applied",
+                value=FunctionCall(
+                    name=_select_attrs(Identifier(name="pkgs"), "lib", "fix"),
+                    argument=Parenthesis(
+                        value=FunctionDefinition(
+                            argument_set=Identifier(name="self"),
+                            output=BinaryExpression(
+                                operator=Operator(name="//"),
+                                left=Identifier(name="pkgs"),
+                                right=overlay_applied,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ],
+        value=Select(
+            expression=Identifier(name="applied"),
+            attribute=_quote_attr(source),
+        ),
+    )
+
+
+def _build_overlay_expr(source: str, *, system: str | None = None) -> str:
+    return compact_nix_expr(_build_overlay_expression(source, system=system).rebuild())
 
 
 async def compute_overlay_hash(
@@ -375,7 +593,12 @@ async def compute_drv_fingerprint(
 
 
 __all__ = [
+    "_build_fetch_from_github_call",
+    "_build_fetch_from_github_expr",
+    "_build_fetch_yarn_deps_expr",
+    "_build_flake_attr_expr",
     "_build_nix_expr",
+    "_build_overlay_attr_expr",
     "_build_overlay_expr",
     "_emit_sri_hash_from_build_result",
     "_run_fixed_output_build",

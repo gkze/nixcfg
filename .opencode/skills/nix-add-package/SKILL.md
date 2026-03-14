@@ -235,17 +235,22 @@ Create `packages/my-tool/updater.py` or `overlays/my-tool/updater.py`:
 ```python
 # Generic (preferred) — specify any hash type directly:
 from lib.update.updaters.base import flake_input_hash_updater
-flake_input_hash_updater("my-tool", "vendorHash")       # Go
-flake_input_hash_updater("my-tool", "cargoHash")        # Cargo
-flake_input_hash_updater("my-tool", "npmDepsHash")      # npm
-flake_input_hash_updater("my-tool", "uvLockHash")       # uv (Python)
-flake_input_hash_updater("my-tool", "nodeModulesHash",  # Bun (platform-specific)
-                         platform_specific=True)
+
+flake_input_hash_updater("my-tool", "vendorHash")  # Go
+flake_input_hash_updater("my-tool", "cargoHash")  # Cargo
+flake_input_hash_updater("my-tool", "npmDepsHash")  # npm
+flake_input_hash_updater("my-tool", "uvLockHash")  # uv (Python)
+flake_input_hash_updater(
+    "my-tool",
+    "nodeModulesHash",  # Bun (platform-specific)
+    platform_specific=True,
+)
 # With a different flake input name:
 flake_input_hash_updater("my-tool", "vendorHash", input_name="my-flake-input")
 
 # Convenience aliases (thin wrappers, also available):
 from lib.update.updaters.base import go_vendor_updater
+
 go_vendor_updater("my-tool")
 ```
 

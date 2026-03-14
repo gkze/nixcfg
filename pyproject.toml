@@ -16,6 +16,7 @@ requires-python = ">=3.14"
 # Install runtime libraries required by nixcfg commands.
 dependencies = [
   "aiohttp>=3.13.3",
+  "defusedxml>=0.7.1",
   "deepdiff>=8.6.1",
   "filelock>=3.24.3",
   "httpx-retries>=0.4.6",

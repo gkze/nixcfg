@@ -7,7 +7,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 if TYPE_CHECKING:
     from rich.spinner import Spinner
@@ -41,7 +41,7 @@ class OperationKind(StrEnum):
 
 
 OperationStatus = Literal["pending", "running", "no_change", "success", "error"]
-type StatusMatcher = Callable[[str], object]
+type StatusMatcher = Callable[[str], Any]
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,7 @@ class StatusRule:
 
     matcher: StatusMatcher
     status: OperationStatus
-    formatter: Callable[[object], str] | None = None
+    formatter: Callable[[Any], str] | None = None
     clear_message: bool = False
 
 
@@ -154,27 +154,29 @@ _CHECK_VERSION_STATUS_RULES: tuple[StatusRule, ...] = (
     StatusRule(
         _STATUS_UPDATE_AVAILABLE.match,
         "success",
-        lambda m: f"{m.group(1)} -> {m.group(2)}",
+        lambda m: (
+            f"{cast('re.Match[str]', m).group(1)} -> {cast('re.Match[str]', m).group(2)}"
+        ),
     ),
     StatusRule(
         _STATUS_UP_TO_DATE_VERSION.match,
         "no_change",
-        lambda m: f"{m.group(1)} (up to date)",
+        lambda m: f"{cast('re.Match[str]', m).group(1)} (up to date)",
     ),
     StatusRule(
         _STATUS_UP_TO_DATE_REF.match,
         "no_change",
-        lambda m: f"{m.group(1)} (up to date)",
+        lambda m: f"{cast('re.Match[str]', m).group(1)} (up to date)",
     ),
     StatusRule(
         _STATUS_LATEST_VERSION.match,
         "running",
-        lambda m: m.group(1),
+        lambda m: cast("re.Match[str]", m).group(1),
     ),
     StatusRule(
         _STATUS_CHECKING.match,
         "running",
-        lambda m: f"current {m.group(1)}",
+        lambda m: f"current {cast('re.Match[str]', m).group(1)}",
     ),
 )
 
@@ -182,7 +184,9 @@ _UPDATE_REF_STATUS_RULES: tuple[StatusRule, ...] = (
     StatusRule(
         _STATUS_UPDATE_REF.match,
         "running",
-        lambda m: f"{m.group(1)} -> {m.group(2)}",
+        lambda m: (
+            f"{cast('re.Match[str]', m).group(1)} -> {cast('re.Match[str]', m).group(2)}"
+        ),
     ),
 )
 
@@ -190,7 +194,7 @@ _REFRESH_LOCK_STATUS_RULES: tuple[StatusRule, ...] = (
     StatusRule(
         _STATUS_UPDATE_INPUT.match,
         "running",
-        lambda m: m.group(1),
+        lambda m: cast("re.Match[str]", m).group(1),
     ),
 )
 
@@ -204,7 +208,7 @@ _COMPUTE_HASH_STATUS_RULES: tuple[StatusRule, ...] = (
     StatusRule(
         _STATUS_COMPUTING_HASH.match,
         "running",
-        lambda m: m.group(1),
+        lambda m: cast("re.Match[str]", m).group(1),
     ),
 )
 
@@ -250,8 +254,27 @@ def command_args_from_payload(payload: object) -> CommandArgs | None:
     return None
 
 
-def operation_for_status(message: str) -> OperationKind | None:
+def _operation_from_status_payload(payload: object) -> OperationKind | None:
+    if not isinstance(payload, dict):
+        return None
+    operation = cast("dict[str, object]", payload).get("operation")
+    if not isinstance(operation, str):
+        return None
+    try:
+        return OperationKind(operation)
+    except ValueError:
+        return None
+
+
+def operation_for_status(
+    message: str,
+    payload: object | None = None,
+) -> OperationKind | None:
     """Map a status message to its UI operation group."""
+    if payload is not None:
+        operation = _operation_from_status_payload(payload)
+        if operation is not None:
+            return operation
     lowered = message.lower()
     if lowered.startswith(
         (
@@ -334,9 +357,9 @@ def _apply_status_rules(
     _set_operation_status(operation, default_status, message=default_message)
 
 
-def apply_status(item: ItemState, message: str) -> None:
+def apply_status(item: ItemState, message: str, payload: object | None = None) -> None:
     """Apply a status message update to the matching operation state."""
-    kind = operation_for_status(message)
+    kind = operation_for_status(message, payload)
     if kind is None:
         return
     operation = item.operations.get(kind)

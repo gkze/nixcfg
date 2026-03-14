@@ -1,141 +1,109 @@
 {
-  craneLib,
+  pkgs,
   inputs,
   outputs,
   lib,
-  stdenv,
-  clang,
-  cmake,
-  gitMinimal,
   installShellFiles,
   makeBinaryWrapper,
-  pkg-config,
-  ninja,
-  go,
-  perl,
-  libclang,
-  libcap,
-  openssl,
-  apple-sdk_15,
+  symlinkJoin,
+  runCommand,
   ripgrep,
-  gnused,
-  gnugrep,
+  python3,
   ...
 }:
 let
   slib = outputs.lib;
   version = slib.getFlakeVersion "codex";
   src = "${inputs.codex}/codex-rs";
-  cargoLock = "${inputs.codex}/codex-rs/Cargo.lock";
+  pythonForSourcePrep = python3.withPackages (ps: [ ps.tomlkit ]);
 
-  cargoVendorDir = craneLib.vendorCargoDeps {
-    inherit cargoLock;
-    overrideVendorGitCheckout =
-      ps: drv:
-      if (lib.any (p: p.name == "crossterm") ps) then
-        drv.overrideAttrs (old: {
-          postUnpack = (old.postUnpack or "") + ''
-            mkdir -p $sourceRoot/examples/interactive-demo
-            touch $sourceRoot/examples/interactive-demo/README.md
-          '';
-        })
-      else if (lib.any (p: p.name == "runfiles") ps) then
-        drv.overrideAttrs (old: {
-          postUnpack = (old.postUnpack or "") + ''
-            find $sourceRoot -name Cargo.toml -print0 | while IFS= read -r -d "" toml; do
-              dir=$(dirname "$toml")
+  patchedSrc =
+    runCommand "codex-${version}-src"
+      {
+        nativeBuildInputs = [ pythonForSourcePrep ];
+      }
+      ''
+        cp -r ${src} "$out"
+        chmod -R u+w "$out"
+        cp ${src}/node-version.txt "$out/node-version.txt"
+        cp ${src}/node-version.txt "$out/core/node-version.txt"
+        substituteInPlace "$out/core/src/tools/js_repl/mod.rs" \
+          --replace-fail '../../../../node-version.txt' '../../../node-version.txt'
 
-              while IFS= read -r line; do
-                val=$(echo "$line" | ${gnused}/bin/sed -n 's/^.*readme\s*=\s*"\(.*\)".*/\1/p')
-                if [ -n "$val" ] && [ ! -f "$dir/$val" ]; then
-                  ${gnused}/bin/sed -i "\\|$line|d" "$toml"
-                fi
-              done < <(${gnugrep}/bin/grep -i '^\s*\(package\.\)\?readme\s*=' "$toml" || true)
+        ${pythonForSourcePrep}/bin/python3 - <<'PY'
+        import os
+        from pathlib import Path
+        import tomlkit
 
-              while IFS= read -r line; do
-                val=$(echo "$line" | ${gnused}/bin/sed -n 's/^.*license-file\s*=\s*"\(.*\)".*/\1/p')
-                if [ -n "$val" ] && [ ! -f "$dir/$val" ]; then
-                  ${gnused}/bin/sed -i "\\|$line|d" "$toml"
-                fi
-              done < <(${gnugrep}/bin/grep -i '^\s*\(package\.\)\?license-file\s*=' "$toml" || true)
+        lock_file = Path(os.environ["out"]) / "Cargo.lock"
+        lock_doc = tomlkit.parse(lock_file.read_text())
 
-              if ! grep -q '^\[workspace\]' "$toml" 2>/dev/null; then
-                case "$toml" in
-                  */testdata/*)
-                    printf '\n[workspace]\n' >> "$toml"
-                    ;;
-                esac
-              fi
-            done
-          '';
-        })
-      else
-        drv;
+        for package in lock_doc.get("package", []):
+            if package.get("version") == "0.0.0" and "source" not in package:
+                package["version"] = "${version}"
+
+        lock_file.write_text(tomlkit.dumps(lock_doc))
+        PY
+      '';
+
+  cargoNix = import ./codex/Cargo.nix {
+    inherit pkgs;
+    rootSrc = patchedSrc;
   };
 
-  commonArgs = {
-    inherit
-      src
-      version
-      cargoLock
-      cargoVendorDir
-      ;
-    pname = "codex";
-    strictDeps = true;
-    cargoExtraArgs = "--offline";
-
-    nativeBuildInputs = [
-      clang
-      cmake
-      gitMinimal
-      installShellFiles
-      makeBinaryWrapper
-      pkg-config
-      ninja
-      go
-      perl
-    ];
-
-    buildInputs = [
-      libclang
-      openssl
-    ]
-    ++ lib.optionals stdenv.hostPlatform.isLinux [ libcap ]
-    ++ lib.optionals stdenv.hostPlatform.isDarwin [ apple-sdk_15 ];
-
-    LIBCLANG_PATH = "${lib.getLib libclang}/lib";
-    NIX_CFLAGS_COMPILE = toString (
-      lib.optionals stdenv.cc.isClang [
-        "-Wno-error=character-conversion"
-      ]
-    );
+  crosstermOverride = attrs: {
+    postUnpack = (attrs.postUnpack or "") + ''
+      mkdir -p "$sourceRoot/examples/interactive-demo"
+      touch "$sourceRoot/examples/interactive-demo/README.md"
+    '';
   };
 
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+  rmcpOverride = attrs: {
+    CARGO_CRATE_NAME = attrs.crateName or "rmcp";
+    CARGO_PKG_VERSION = attrs.version or "0.15.0";
+  };
+
+  runfilesOverride = attrs: {
+    src = "${attrs.src}/rust/runfiles";
+  };
+
+  crateOverrides = pkgs.defaultCrateOverrides // {
+    crossterm = crosstermOverride;
+    rmcp = rmcpOverride;
+    runfiles = runfilesOverride;
+  };
+
+  codexDrv = cargoNix.workspaceMembers.codex-cli.build.override {
+    inherit crateOverrides;
+    runTests = false;
+  };
 in
-craneLib.buildPackage (
-  commonArgs
-  // {
-    inherit cargoArtifacts;
-    doCheck = false;
+symlinkJoin {
+  name = "codex-${version}";
+  paths = [ codexDrv ];
+  nativeBuildInputs = [
+    installShellFiles
+    makeBinaryWrapper
+  ];
 
-    postInstall = ''
-      installShellCompletion --cmd codex \
-        --bash <($out/bin/codex completion bash) \
-        --fish <($out/bin/codex completion fish) \
-        --zsh <($out/bin/codex completion zsh)
-    '';
+  postBuild = ''
+    installShellCompletion --cmd codex \
+      --bash <($out/bin/codex completion bash) \
+      --fish <($out/bin/codex completion fish) \
+      --zsh <($out/bin/codex completion zsh)
 
-    postFixup = ''
-      wrapProgram $out/bin/codex --prefix PATH : ${lib.makeBinPath [ ripgrep ]}
-    '';
+    wrapProgram "$out/bin/codex" --prefix PATH : ${lib.makeBinPath [ ripgrep ]}
+  '';
 
-    meta = {
-      description = "Lightweight coding agent that runs in your terminal";
-      homepage = "https://github.com/openai/codex";
-      license = lib.licenses.asl20;
-      mainProgram = "codex";
-      platforms = lib.platforms.unix;
-    };
-  }
-)
+  passthru = {
+    inherit cargoNix crateOverrides patchedSrc;
+  };
+
+  meta = {
+    description = "Lightweight coding agent that runs in your terminal";
+    homepage = "https://github.com/openai/codex";
+    license = lib.licenses.asl20;
+    mainProgram = "codex";
+    platforms = lib.platforms.unix;
+  };
+}

@@ -157,7 +157,7 @@ in
             ffmpeg
             gmailctl
             gogcli
-            # goose-cli
+            goose-cli
             graphviz
             grex
             httpie
@@ -177,6 +177,7 @@ in
               code-cursor
               czkawka
               dbeaver-bin
+              emdash
               jetbrains.datagrip
               hoppscotch
               config.fonts.monospace.package
@@ -187,11 +188,13 @@ in
               slack
               spacedrive
               spotify
+              superset
             ]
             ++ lib.optionals stdenv.isLinux [ wl-clipboard ]
             ++ lib.optionals stdenv.isDarwin [
               appcleaner
               chatgpt
+              codex-desktop
               conductor
               container
               cyberduck

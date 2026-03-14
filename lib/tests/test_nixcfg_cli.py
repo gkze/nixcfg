@@ -6,7 +6,7 @@ implementation (which is covered elsewhere).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 import click
 from typer.main import get_command
@@ -39,6 +39,131 @@ def test_nixcfg_update_parses_native_only(monkeypatch: _MonkeyPatchLike) -> None
 
     check(result.exit_code == 0)
     check(called["opts"].native_only is True)
+
+
+def test_nixcfg_recover_snapshot_parses_flags(monkeypatch: _MonkeyPatchLike) -> None:
+    """Ensure recover snapshot forwards its argument and flags."""
+    called: dict[str, object] = {}
+
+    def _fake_run(
+        generation: str = "/run/current-system",
+        *,
+        json_output: bool = False,
+    ) -> int:
+        called.update(generation=generation, json_output=json_output)
+        return 0
+
+    monkeypatch.setattr("lib.recover.cli.run_snapshot_recovery", _fake_run)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        nixcfg.app, ["recover", "snapshot", "/run/current-system", "-j"]
+    )
+
+    check(result.exit_code == 0)
+    check(called == {"generation": "/run/current-system", "json_output": True})
+
+
+def test_nixcfg_recover_files_parses_flags(monkeypatch: _MonkeyPatchLike) -> None:
+    """Ensure recover files forwards selectors and flags."""
+    called: dict[str, object] = {}
+
+    def _fake_run(
+        generation: str = "/run/current-system",
+        *,
+        apply: bool = False,
+        globs: tuple[str, ...] = (),
+        json_output: bool = False,
+        paths: tuple[str, ...] = (),
+        stage: bool = False,
+        sync: bool = False,
+    ) -> int:
+        called.update(
+            generation=generation,
+            apply=apply,
+            globs=globs,
+            json_output=json_output,
+            paths=paths,
+            stage=stage,
+            sync=sync,
+        )
+        return 0
+
+    monkeypatch.setattr("lib.recover.cli.run_file_recovery", _fake_run)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        nixcfg.app,
+        [
+            "recover",
+            "files",
+            "/run/current-system",
+            "-a",
+            "-g",
+            "-s",
+            "-j",
+            "-p",
+            "flake.lock",
+            "-G",
+            "docs/*.md",
+        ],
+    )
+
+    check(result.exit_code == 0)
+    check(
+        called
+        == {
+            "generation": "/run/current-system",
+            "apply": True,
+            "globs": ("docs/*.md",),
+            "json_output": True,
+            "paths": ("flake.lock",),
+            "stage": True,
+            "sync": True,
+        }
+    )
+
+
+def test_nixcfg_recover_hashes_parses_flags(monkeypatch: _MonkeyPatchLike) -> None:
+    """Ensure recover hashes forwards its argument and flags."""
+    called: dict[str, object] = {}
+
+    def _fake_run(
+        generation: str = "/run/current-system",
+        *,
+        apply: bool = False,
+        json_output: bool = False,
+        stage: bool = False,
+        sync: bool = False,
+    ) -> int:
+        called.update(
+            generation=generation,
+            apply=apply,
+            json_output=json_output,
+            stage=stage,
+            sync=sync,
+        )
+        return 0
+
+    monkeypatch.setattr("lib.recover.cli.run_hash_recovery", _fake_run)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        nixcfg.app,
+        ["recover", "hashes", "/run/current-system", "-a", "-g", "-s", "-j"],
+    )
+
+    check(result.exit_code == 0)
+    check(
+        called
+        == {
+            "generation": "/run/current-system",
+            "apply": True,
+            "json_output": True,
+            "stage": True,
+            "sync": True,
+        }
+    )
 
 
 def test_nixcfg_update_help_includes_typer_options() -> None:
@@ -110,6 +235,50 @@ def test_nixcfg_ci_cache_generations_help_exposes_profile_options() -> None:
     check("--profile-output" in result.output)
 
 
+def test_nixcfg_recover_snapshot_help_exposes_recovery_options() -> None:
+    """Ensure mounted snapshot recovery command is registered with its flags."""
+    runner = CliRunner()
+    result = runner.invoke(
+        nixcfg.app,
+        ["recover", "snapshot", "--help"],
+    )
+
+    check(result.exit_code == 0)
+    check("--json" in result.output)
+
+
+def test_nixcfg_recover_files_help_exposes_recovery_options() -> None:
+    """Ensure mounted file recovery command is registered with its flags."""
+    runner = CliRunner()
+    result = runner.invoke(
+        nixcfg.app,
+        ["recover", "files", "--help"],
+    )
+
+    check(result.exit_code == 0)
+    check("--apply" in result.output)
+    check("--path" in result.output)
+    check("--glob" in result.output)
+    check("--stage" in result.output)
+    check("--sync" in result.output)
+    check("--json" in result.output)
+
+
+def test_nixcfg_recover_hashes_help_exposes_recovery_options() -> None:
+    """Ensure mounted hash recovery command is registered with its flags."""
+    runner = CliRunner()
+    result = runner.invoke(
+        nixcfg.app,
+        ["recover", "hashes", "--help"],
+    )
+
+    check(result.exit_code == 0)
+    check("--apply" in result.output)
+    check("--stage" in result.output)
+    check("--sync" in result.output)
+    check("--json" in result.output)
+
+
 def test_nixcfg_tree_shows_declared_command_descriptions() -> None:
     """Ensure `nixcfg tree` includes declared command help descriptions."""
     runner = CliRunner()
@@ -120,6 +289,21 @@ def test_nixcfg_tree_shows_declared_command_descriptions() -> None:
     check("pr-body - Pull request body generation workflow step." in result.output)
     check(
         "update - Update source versions/hashes and flake input refs." in result.output
+    )
+
+
+def test_nixcfg_tree_colors_empty_groups_like_leaf_commands() -> None:
+    """Color callable groups without visible children like leaf commands."""
+    root = cast("click.Group", get_command(nixcfg.app))
+    ci = cast("click.Group", root.commands["ci"])
+    cache = cast("click.Group", ci.commands["cache"])
+    closure = cache.commands["closure"]
+
+    check(
+        nixcfg._command_label("cache", cache).startswith("[bold cyan]cache[/bold cyan]")
+    )
+    check(
+        nixcfg._command_label("closure", closure).startswith("[green]closure[/green]")
     )
 
 

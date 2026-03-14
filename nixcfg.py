@@ -16,6 +16,7 @@ from lib.cli import HELP_CONTEXT_SETTINGS
 from lib.nix.schemas._codegen import main as codegen_main
 from lib.nix.schemas._fetch import check as schema_check
 from lib.nix.schemas._fetch import fetch as fetch_schemas
+from lib.recover.cli import app as recover_app
 from lib.update.ci import app as update_ci_app
 from lib.update.cli import app as update_app
 
@@ -31,6 +32,7 @@ app = typer.Typer(
 )
 
 app.add_typer(update_ci_app, name="ci")
+app.add_typer(recover_app, name="recover")
 
 
 schema_app = typer.Typer(
@@ -49,9 +51,16 @@ def _command_description(command: click.Command) -> str:
     return " ".join((description or "").split())
 
 
+def _has_visible_subcommands(command: click.Command) -> bool:
+    """Return whether a command group exposes any non-hidden child commands."""
+    if not isinstance(command, click.Group):
+        return False
+    return any(not subcommand.hidden for subcommand in command.commands.values())
+
+
 def _command_label(name: str, command: click.Command) -> str:
     """Return a styled label for one command in the tree output."""
-    style = "bold cyan" if isinstance(command, click.Group) else "green"
+    style = "bold cyan" if _has_visible_subcommands(command) else "green"
     description = _command_description(command)
     if description:
         return f"[{style}]{name}[/{style}] [dim]- {description}[/dim]"

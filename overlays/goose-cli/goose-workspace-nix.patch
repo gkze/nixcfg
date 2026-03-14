@@ -1,0 +1,27 @@
+diff --git a/crates/goose-cli/src/commands/web.rs b/crates/goose-cli/src/commands/web.rs
+index 752b760..c31dca9 100644
+--- a/crates/goose-cli/src/commands/web.rs
++++ b/crates/goose-cli/src/commands/web.rs
+@@ -315,10 +315,10 @@ async fn serve_static(axum::extract::Path(path): axum::extract::Path<String>) ->
+         "img/logo_dark.png" => (
+             [("content-type", "image/png")],
+-            include_bytes!("../../../../documentation/static/img/logo_dark.png").to_vec(),
++            include_bytes!("../../static/img/logo_dark.png").to_vec(),
+         )
+             .into_response(),
+         "img/logo_light.png" => (
+             [("content-type", "image/png")],
+-            include_bytes!("../../../../documentation/static/img/logo_light.png").to_vec(),
++            include_bytes!("../../static/img/logo_light.png").to_vec(),
+         )
+             .into_response(),
+diff --git a/vendor/v8/Cargo.toml b/vendor/v8/Cargo.toml
+index 1c7b48c..e7b0b17 100644
+--- a/vendor/v8/Cargo.toml
++++ b/vendor/v8/Cargo.toml
+@@ -10,4 +10,4 @@ v8_enable_sandbox = ["v8-goose/v8_enable_sandbox"]
+ v8_enable_v8_checks = ["v8-goose/v8_enable_v8_checks"]
+
+ [dependencies]
+-v8-goose = { version = "145.0.2" }
++v8-goose = { path = "../v8-goose-src" }

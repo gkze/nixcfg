@@ -1,0 +1,99 @@
+diff --git a/src/bytes/serde.rs b/src/bytes/serde.rs
+--- a/src/bytes/serde.rs
++++ b/src/bytes/serde.rs
+@@ -1,10 +1,78 @@
++use serde::de::{SeqAccess, Visitor};
+ use serde::{Deserialize, Serialize};
+
+ use super::HipByt;
+ use crate::alloc::borrow::Cow;
++use crate::alloc::fmt;
+ use crate::alloc::vec::Vec;
+ use crate::Backend;
+
++struct BytesVisitor;
++
++impl<'de> Visitor<'de> for BytesVisitor {
++    type Value = Vec<u8>;
++
++    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
++        formatter.write_str("a byte buffer")
++    }
++
++    fn visit_borrowed_bytes<E>(self, value: &'de [u8]) -> Result<Self::Value, E> {
++        Ok(value.to_vec())
++    }
++
++    fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E> {
++        Ok(value.to_vec())
++    }
++
++    fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E> {
++        Ok(value)
++    }
++
++    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
++    where
++        A: SeqAccess<'de>,
++    {
++        let mut bytes = seq.size_hint().map_or_else(Vec::new, Vec::with_capacity);
++        while let Some(byte) = seq.next_element()? {
++            bytes.push(byte);
++        }
++        Ok(bytes)
++    }
++}
++
++struct BorrowedBytesVisitor;
++
++impl<'de> Visitor<'de> for BorrowedBytesVisitor {
++    type Value = Cow<'de, [u8]>;
++
++    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
++        formatter.write_str("a borrowed or owned byte buffer")
++    }
++
++    fn visit_borrowed_bytes<E>(self, value: &'de [u8]) -> Result<Self::Value, E> {
++        Ok(Cow::Borrowed(value))
++    }
++
++    fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E> {
++        Ok(Cow::Owned(value.to_vec()))
++    }
++
++    fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E> {
++        Ok(Cow::Owned(value))
++    }
++
++    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
++    where
++        A: SeqAccess<'de>,
++    {
++        let mut bytes = seq.size_hint().map_or_else(Vec::new, Vec::with_capacity);
++        while let Some(byte) = seq.next_element()? {
++            bytes.push(byte);
++        }
++        Ok(Cow::Owned(bytes))
++    }
++}
++
+ impl<B> Serialize for HipByt<'_, B>
+ where
+     B: Backend,
+@@ -25,7 +93,7 @@ where
+     where
+         D: serde::Deserializer<'de>,
+     {
+-        let v: Vec<u8> = serde_bytes::deserialize(deserializer)?;
++        let v = deserializer.deserialize_byte_buf(BytesVisitor)?;
+         Ok(Self::from(v))
+     }
+ }
+@@ -62,7 +130,7 @@ where
+     D: serde::Deserializer<'de>,
+     B: Backend,
+ {
+-    let cow: Cow<'de, [u8]> = serde_bytes::Deserialize::deserialize(deserializer)?;
++    let cow = deserializer.deserialize_bytes(BorrowedBytesVisitor)?;
+     Ok(HipByt::from(cow))
+ }

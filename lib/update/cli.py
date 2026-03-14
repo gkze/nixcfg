@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 from lib.cli import HELP_CONTEXT_SETTINGS
 from lib.nix.models.sources import SourceEntry, SourcesFile
+from lib.update.artifacts import GeneratedArtifact, save_generated_artifacts
 from lib.update.ci.resolve_versions import load_pinned_versions
 from lib.update.config import (
     UpdateConfig,
@@ -37,7 +38,12 @@ from lib.update.flake import (
     load_flake_lock,
     update_flake_input,
 )
-from lib.update.paths import package_file_map
+from lib.update.paths import (
+    REPO_ROOT,
+    package_dir_for,
+    package_file_map,
+    sources_file_for,
+)
 from lib.update.process import run_queue_task
 from lib.update.refs import (
     FlakeInputRef,
@@ -58,7 +64,17 @@ from lib.update.ui import (
     consume_events,
 )
 from lib.update.updaters import UPDATERS
-from lib.update.updaters.base import DenoDepsHashUpdater, VersionInfo
+from lib.update.updaters.base import (
+    ChecksumProvidedUpdater,
+    DenoManifestUpdater,
+    DownloadHashUpdater,
+    FlakeInputHashUpdater,
+    FlakeInputMixin,
+    HashEntryUpdater,
+    Updater,
+    VersionInfo,
+)
+from lib.update.updaters.platform_api import PlatformAPIUpdater
 
 
 @dataclass(frozen=True)
@@ -73,7 +89,19 @@ class UpdateOptions:
     check: bool = False
     validate: bool = False
     schema: bool = False
-    sort_by: Literal["name", "type", "source", "ref", "rev"] = "name"
+    sort_by: Literal[
+        "name",
+        "type",
+        "classification",
+        "source",
+        "input",
+        "ref",
+        "version",
+        "rev",
+        "commit",
+        "touches",
+        "writes",
+    ] = "name"
     json: bool = False
     verbose: bool = False
     quiet: bool = False
@@ -339,33 +367,31 @@ def _build_item_meta(
         {inp.name for inp in resolved.ref_inputs} if resolved.do_refs else set()
     )
     source_names = set(resolved.source_names) if resolved.do_sources else set()
-    sources_with_input: set[str] = set()
-    if sources is not None:
-        sources_with_input = {
-            name for name, entry in sources.entries.items() if entry.input
-        }
-    sources_with_input &= source_names
 
     item_meta: dict[str, ItemMeta] = {}
     for name in flake_names | source_names:
         in_flake = name in flake_names
-        has_source_input = name in sources_with_input
-        if in_flake and has_source_input:
+        in_sources = name in source_names
+        entry = None if sources is None else sources.entries.get(name)
+        updater_cls = UPDATERS.get(name)
+        has_input_refresh = (
+            _source_backing_input_name(name, updater_cls, entry) is not None
+        )
+
+        if in_flake and in_sources:
             origin = _ORIGIN_BOTH
-            op_order = (
-                OperationKind.CHECK_VERSION,
-                OperationKind.UPDATE_REF,
-                OperationKind.REFRESH_LOCK,
-                OperationKind.COMPUTE_HASH,
-            )
-        elif name in source_names and has_source_input:
+            op_order = [OperationKind.CHECK_VERSION, OperationKind.UPDATE_REF]
+            if has_input_refresh:
+                op_order.append(OperationKind.REFRESH_LOCK)
+            op_order.append(OperationKind.COMPUTE_HASH)
+        elif in_sources and has_input_refresh:
             origin = _ORIGIN_SOURCES_ONLY
             op_order = (
                 OperationKind.CHECK_VERSION,
                 OperationKind.REFRESH_LOCK,
                 OperationKind.COMPUTE_HASH,
             )
-        elif name in source_names:
+        elif in_sources:
             origin = _ORIGIN_SOURCES_ONLY
             op_order = (
                 OperationKind.CHECK_VERSION,
@@ -378,7 +404,11 @@ def _build_item_meta(
                 OperationKind.UPDATE_REF,
                 OperationKind.REFRESH_LOCK,
             )
-        item_meta[name] = ItemMeta(name=name, origin=origin, op_order=op_order)
+        item_meta[name] = ItemMeta(
+            name=name,
+            origin=origin,
+            op_order=tuple(op_order),
+        )
 
     order = sorted(item_meta, key=lambda name: f"{item_meta[name].origin} {name}")
     return item_meta, order
@@ -463,7 +493,7 @@ async def _update_source_task(
         resolved_config = resolve_active_config(context.config)
         current = context.sources.entries.get(name)
         updater = UPDATERS[name](config=resolved_config)
-        if isinstance(updater, DenoDepsHashUpdater):
+        if isinstance(updater, FlakeInputHashUpdater):
             updater.native_only = context.native_only
         input_name = getattr(updater, "input_name", None)
         put = context.queue.put
@@ -471,7 +501,11 @@ async def _update_source_task(
         await put(UpdateEvent.status(name, "Starting update"))
         if context.update_input and input_name:
             await put(
-                UpdateEvent.status(name, f"Updating flake input '{input_name}'..."),
+                UpdateEvent.status(
+                    name,
+                    f"Updating flake input '{input_name}'...",
+                    operation="refresh_lock",
+                ),
             )
             async with context.update_input_lock:
                 async for event in update_flake_input(input_name, source=name):
@@ -507,6 +541,146 @@ def _handle_schema_request(opts: UpdateOptions) -> int | None:
         return None
     sys.stdout.write(f"{json.dumps(SourcesFile.json_schema())}\n")
     return 0
+
+
+@dataclass(frozen=True)
+class _InventoryHandles:
+    ref_update: bool
+    input_refresh: bool
+    source_update: bool
+    artifact_write: bool
+
+    def to_dict(self) -> dict[str, bool]:
+        return {
+            "refUpdate": self.ref_update,
+            "inputRefresh": self.input_refresh,
+            "sourceUpdate": self.source_update,
+            "artifactWrite": self.artifact_write,
+        }
+
+    def touch_labels(self) -> tuple[str, ...]:
+        labels: list[str] = []
+        if self.ref_update:
+            labels.append("ref")
+        if self.input_refresh:
+            labels.append("lock")
+        if self.source_update:
+            labels.append("sources")
+        if self.artifact_write:
+            labels.append("art")
+        return tuple(labels)
+
+
+@dataclass(frozen=True)
+class _InventoryRefTarget:
+    input_name: str
+    source_type: str
+    owner: str
+    repo: str
+    selector: str
+    locked_rev: str | None
+
+    def source_locator(self) -> str:
+        return f"{self.source_type}:{self.owner}/{self.repo}"
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "input": self.input_name,
+            "sourceType": self.source_type,
+            "owner": self.owner,
+            "repo": self.repo,
+            "selector": self.selector,
+            "lockedRev": self.locked_rev,
+        }
+
+
+@dataclass(frozen=True)
+class _InventorySourceTarget:
+    path: str | None
+    version: str | None
+    commit: str | None
+    hash_kinds: tuple[str, ...]
+    updater_kind: str
+    updater_class: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "version": self.version,
+            "commit": self.commit,
+            "hashKinds": list(self.hash_kinds),
+            "updaterKind": self.updater_kind,
+            "updaterClass": self.updater_class,
+        }
+
+
+@dataclass(frozen=True)
+class _InventoryTarget:
+    name: str
+    handles: _InventoryHandles
+    classification: str
+    backing_input: str | None
+    ref_target: _InventoryRefTarget | None
+    source_target: _InventorySourceTarget | None
+    generated_artifacts: tuple[str, ...]
+
+    def selector_value(self) -> str | None:
+        if self.ref_target is not None:
+            return self.ref_target.selector
+        if self.source_target is not None:
+            return self.source_target.version
+        return None
+
+    def revision_value(self) -> str | None:
+        if self.ref_target is not None and self.ref_target.locked_rev is not None:
+            return self.ref_target.locked_rev
+        if self.source_target is not None:
+            return self.source_target.commit
+        return None
+
+    def source_value(self) -> str:
+        if self.backing_input:
+            return self.backing_input
+        if self.ref_target is not None:
+            return self.ref_target.source_locator()
+        if self.source_target is not None and self.source_target.path is not None:
+            return self.source_target.path
+        return ""
+
+    def write_labels(self) -> tuple[str, ...]:
+        labels: list[str] = []
+        if self.handles.ref_update:
+            labels.append("flake.lock")
+        if self.source_target is not None:
+            source_path = self.source_target.path
+            labels.append(Path(source_path).name if source_path else "sources.json")
+        labels.extend(Path(path).name for path in self.generated_artifacts)
+        return tuple(dict.fromkeys(labels))
+
+    def classification_label(self) -> str:
+        labels = {
+            "refOnly": "ref",
+            "sourceOnly": "source",
+            "sourceWithInputRefresh": "source+input",
+            "refAndSourceWithInputRefresh": "ref+source+input",
+            "refAndSource": "ref+source",
+        }
+        return labels.get(self.classification, self.classification)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "handles": self.handles.to_dict(),
+            "classification": self.classification,
+            "backingInput": self.backing_input,
+            "refTarget": (
+                None if self.ref_target is None else self.ref_target.to_dict()
+            ),
+            "sourceTarget": (
+                None if self.source_target is None else self.source_target.to_dict()
+            ),
+            "generatedArtifacts": list(self.generated_artifacts),
+        }
 
 
 @dataclass(frozen=True)
@@ -605,6 +779,181 @@ def _flake_source_string(node: FlakeLockNode | None, follows: str | None) -> str
     return source
 
 
+def _repo_relative_path(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _source_backing_input_name(
+    name: str,
+    updater_cls: type[Updater] | None,
+    entry: SourceEntry | None = None,
+) -> str | None:
+    if updater_cls is not None:
+        input_name = getattr(updater_cls, "input_name", None)
+        if isinstance(input_name, str) and input_name:
+            return input_name
+        if issubclass(updater_cls, FlakeInputMixin):
+            return name
+    if entry is not None and entry.input:
+        return entry.input
+    return None
+
+
+def _source_hash_kinds(entry: SourceEntry | None) -> tuple[str, ...]:
+    if entry is None:
+        return ()
+    hashes = entry.hashes
+    if hashes.entries:
+        return tuple(sorted({hash_entry.hash_type for hash_entry in hashes.entries}))
+    if hashes.mapping:
+        return ("sha256",)
+    return ()
+
+
+def _classify_updater_kind(updater_cls: type[Updater]) -> str:
+    if issubclass(updater_cls, DenoManifestUpdater):
+        return "deno-manifest"
+    if issubclass(updater_cls, FlakeInputHashUpdater):
+        return "flake-input-hash"
+    if issubclass(updater_cls, PlatformAPIUpdater):
+        return "platform-api"
+    if issubclass(updater_cls, ChecksumProvidedUpdater):
+        return "checksum-api"
+    if issubclass(updater_cls, DownloadHashUpdater):
+        return "download"
+    if issubclass(updater_cls, HashEntryUpdater):
+        return "custom-hash"
+    return "custom-hash"
+
+
+def _generated_artifact_paths(name: str, updater_cls: type[Updater]) -> tuple[str, ...]:
+    if not issubclass(updater_cls, DenoManifestUpdater):
+        return ()
+    pkg_dir = package_dir_for(name)
+    manifest_name = getattr(updater_cls, "manifest_file", "deno-deps.json")
+    if pkg_dir is None:
+        return ()
+    path = _repo_relative_path(pkg_dir / manifest_name)
+    return () if path is None else (path,)
+
+
+def _inventory_classification(handles: _InventoryHandles) -> str:
+    if handles.ref_update and handles.source_update and handles.input_refresh:
+        return "refAndSourceWithInputRefresh"
+    if handles.source_update and handles.input_refresh:
+        return "sourceWithInputRefresh"
+    if handles.ref_update and handles.source_update:
+        return "refAndSource"
+    if handles.source_update:
+        return "sourceOnly"
+    if handles.ref_update:
+        return "refOnly"
+    return "unclassified"
+
+
+def _build_inventory_summary(
+    targets: list[_InventoryTarget],
+) -> dict[str, object]:
+    counts: dict[str, int] = {
+        "refOnly": 0,
+        "sourceOnly": 0,
+        "sourceWithInputRefresh": 0,
+        "refAndSource": 0,
+        "refAndSourceWithInputRefresh": 0,
+        "unclassified": 0,
+    }
+    for target in targets:
+        counts[target.classification] = counts.get(target.classification, 0) + 1
+    return {"totalTargets": len(targets), "counts": counts}
+
+
+def _build_update_inventory() -> list[_InventoryTarget]:
+    sources = load_all_sources()
+    path_map = package_file_map("sources.json")
+    ref_inputs = {item.name: item for item in get_flake_inputs_with_refs()}
+    lock = load_flake_lock()
+
+    targets: list[_InventoryTarget] = []
+    all_names = sorted(set(UPDATERS) | set(ref_inputs))
+    for name in all_names:
+        updater_cls = UPDATERS.get(name)
+        entry = sources.entries.get(name)
+        ref_input = ref_inputs.get(name)
+        source_backing_input = _source_backing_input_name(name, updater_cls, entry)
+        backing_input = source_backing_input or (
+            ref_input.name if ref_input is not None else None
+        )
+        generated_artifacts = (
+            () if updater_cls is None else _generated_artifact_paths(name, updater_cls)
+        )
+        handles = _InventoryHandles(
+            ref_update=name in ref_inputs,
+            input_refresh=source_backing_input is not None and updater_cls is not None,
+            source_update=updater_cls is not None,
+            artifact_write=bool(generated_artifacts),
+        )
+        classification = _inventory_classification(handles)
+
+        ref_target: _InventoryRefTarget | None = None
+        if ref_input is not None:
+            node, _follows = _resolve_root_input_node(lock, name)
+            locked = node.locked if node is not None else None
+            ref_target = _InventoryRefTarget(
+                input_name=ref_input.name,
+                source_type=ref_input.input_type,
+                owner=ref_input.owner,
+                repo=ref_input.repo,
+                selector=ref_input.ref,
+                locked_rev=locked.rev if locked is not None else None,
+            )
+
+        source_target: _InventorySourceTarget | None = None
+        if updater_cls is not None:
+            source_target = _InventorySourceTarget(
+                path=_repo_relative_path(path_map.get(name) or sources_file_for(name)),
+                version=entry.version if entry is not None else None,
+                commit=entry.commit if entry is not None else None,
+                hash_kinds=_source_hash_kinds(entry),
+                updater_kind=_classify_updater_kind(updater_cls),
+                updater_class=updater_cls.__name__,
+            )
+
+        targets.append(
+            _InventoryTarget(
+                name=name,
+                handles=handles,
+                classification=classification,
+                backing_input=backing_input,
+                ref_target=ref_target,
+                source_target=source_target,
+                generated_artifacts=generated_artifacts,
+            )
+        )
+
+    return targets
+
+
+def _inventory_sort_value(target: _InventoryTarget, sort_by: str) -> str:
+    if sort_by in {"type", "classification"}:
+        return target.classification
+    if sort_by in {"source", "input"}:
+        return target.source_value()
+    if sort_by in {"ref", "version"}:
+        return target.selector_value() or ""
+    if sort_by in {"rev", "commit"}:
+        return target.revision_value() or ""
+    if sort_by == "touches":
+        return ",".join(target.handles.touch_labels())
+    if sort_by == "writes":
+        return ",".join(target.write_labels())
+    return target.name
+
+
 def _collect_flake_inputs_for_list() -> list[_ListRow]:
     lock = load_flake_lock()
     root_inputs = lock.root_node.inputs or {}
@@ -669,21 +1018,17 @@ def _handle_list_targets_request(opts: UpdateOptions) -> int | None:
     if not opts.list_targets:
         return None
 
-    rows = [*_collect_flake_inputs_for_list(), *_collect_source_entries_for_list()]
-    rows.sort(key=lambda row: (_row_sort_value(row, opts.sort_by), row.name))
+    targets = _build_update_inventory()
+    targets.sort(
+        key=lambda target: (_inventory_sort_value(target, opts.sort_by), target.name)
+    )
 
     if opts.json:
         payload = {
-            "rows": [
-                {
-                    "name": row.name,
-                    "type": row.item_type,
-                    "source": row.source,
-                    "ref": row.ref,
-                    "rev": row.rev,
-                }
-                for row in rows
-            ],
+            "schemaVersion": 1,
+            "kind": "nixcfg-update-inventory",
+            "summary": _build_inventory_summary(targets),
+            "targets": [target.to_dict() for target in targets],
         }
         sys.stdout.write(f"{json.dumps(payload)}\n")
         return 0
@@ -691,19 +1036,21 @@ def _handle_list_targets_request(opts: UpdateOptions) -> int | None:
     no_color = not sys.stdout.isatty()
     console = Console(no_color=no_color, highlight=not no_color)
 
-    table = Table(title="nixcfg update targets", show_lines=False)
+    table = Table(title="nixcfg update inventory", show_lines=False)
     table.add_column("name", style="cyan")
-    table.add_column("type", style="magenta")
-    table.add_column("source", style="green")
-    table.add_column("ref")
-    table.add_column("rev")
-    for row in rows:
+    table.add_column("class", style="magenta")
+    table.add_column("touches", style="green")
+    table.add_column("input")
+    table.add_column("selector")
+    table.add_column("writes")
+    for target in targets:
         table.add_row(
-            row.name,
-            row.item_type,
-            row.source,
-            row.ref or "<none>",
-            row.rev or "<none>",
+            target.name,
+            target.classification_label(),
+            ", ".join(target.handles.touch_labels()) or "<none>",
+            target.backing_input or "<none>",
+            target.selector_value() or "<none>",
+            ", ".join(target.write_labels()) or "<none>",
         )
     console.print(table)
     return 0
@@ -845,6 +1192,38 @@ async def _run_sources_phase(
         await asyncio.gather(*tasks)
 
 
+def _flatten_artifact_updates(
+    artifact_updates: dict[str, tuple[GeneratedArtifact, ...]],
+) -> list[GeneratedArtifact]:
+    """Flatten per-source generated artifact updates into one list."""
+    return [
+        artifact
+        for source in sorted(artifact_updates)
+        for artifact in artifact_updates[source]
+    ]
+
+
+def _persist_generated_artifacts(
+    *,
+    resolved: ResolvedTargets,
+    artifact_updates: dict[str, tuple[GeneratedArtifact, ...]],
+    details: dict[str, SummaryStatus],
+) -> None:
+    """Persist generated artifacts emitted by source updaters."""
+    if not (resolved.do_sources and resolved.source_names):
+        return
+    if resolved.dry_run or not artifact_updates:
+        return
+    successful_updates = {
+        source: artifacts
+        for source, artifacts in artifact_updates.items()
+        if details.get(source) == "updated"
+    }
+    if not successful_updates:
+        return
+    save_generated_artifacts(_flatten_artifact_updates(successful_updates))
+
+
 def _persist_source_updates(
     *,
     resolved: ResolvedTargets,
@@ -863,10 +1242,34 @@ def _persist_source_updates(
         )
         sources.entries.update(merged_updates)
 
-    if not resolved.dry_run and any(
-        details.get(name) == "updated" for name in resolved.source_names
+    if (
+        not resolved.dry_run
+        and source_updates
+        and any(details.get(name) == "updated" for name in resolved.source_names)
     ):
         save_sources(sources)
+
+
+def _persist_materialized_updates(
+    *,
+    resolved: ResolvedTargets,
+    sources: SourcesFile,
+    source_updates: dict[str, SourceEntry],
+    artifact_updates: dict[str, tuple[GeneratedArtifact, ...]],
+    details: dict[str, SummaryStatus],
+) -> None:
+    """Persist generated artifacts first, then update per-package sources."""
+    _persist_generated_artifacts(
+        resolved=resolved,
+        artifact_updates=artifact_updates,
+        details=details,
+    )
+    _persist_source_updates(
+        resolved=resolved,
+        sources=sources,
+        source_updates=source_updates,
+        details=details,
+    )
 
 
 @dataclass(frozen=True)
@@ -993,20 +1396,21 @@ async def _execute_run_plan(
         )
 
     await queue.put(None)
-    _updated, error_count, details, source_updates = await consumer
+    consume_result = await consumer
 
     summary = UpdateSummary()
-    summary.accumulate(details)
-    _persist_source_updates(
+    summary.accumulate(consume_result.details)
+    _persist_materialized_updates(
         resolved=plan.resolved,
         sources=plan.sources,
-        source_updates=source_updates,
-        details=details,
+        source_updates=consume_result.source_updates,
+        artifact_updates=consume_result.artifact_updates,
+        details=consume_result.details,
     )
 
     return _emit_summary(
         summary,
-        had_errors=error_count > 0,
+        had_errors=consume_result.errors > 0,
         out=out,
         dry_run=plan.resolved.dry_run,
     )
@@ -1049,7 +1453,19 @@ def run_update_command(  # noqa: PLR0913
     retries: int | None = None,
     retry_backoff: float | None = None,
     schema: bool = False,
-    sort_by: Literal["name", "type", "source", "ref", "rev"] = "name",
+    sort_by: Literal[
+        "name",
+        "type",
+        "classification",
+        "source",
+        "input",
+        "ref",
+        "version",
+        "rev",
+        "commit",
+        "touches",
+        "writes",
+    ] = "name",
     subprocess_timeout: int | None = None,
     tty: Literal["auto", "force", "off", "full"] = "auto",
     user_agent: str | None = None,
@@ -1120,7 +1536,7 @@ def cli(  # noqa: PLR0913
     ] = False,
     list_targets: Annotated[
         bool,
-        typer.Option("--list", "-l", help="List available sources and inputs."),
+        typer.Option("--list", "-l", help="List update inventory."),
     ] = False,
     log_tail_lines: Annotated[
         int | None,
@@ -1187,11 +1603,26 @@ def cli(  # noqa: PLR0913
         typer.Option("--schema", "-s", help="Output JSON schema for sources.json."),
     ] = False,
     sort_by: Annotated[
-        Literal["name", "type", "source", "ref", "rev"],
+        Literal[
+            "name",
+            "type",
+            "classification",
+            "source",
+            "input",
+            "ref",
+            "version",
+            "rev",
+            "commit",
+            "touches",
+            "writes",
+        ],
         typer.Option(
             "--sort",
             "-o",
-            help="Sort --list rows by column: name, type, source, ref, or rev.",
+            help=(
+                "Sort --list inventory by field: name, type/classification, "
+                "source/input, ref/version, rev/commit, touches, or writes."
+            ),
         ),
     ] = "name",
     subprocess_timeout: Annotated[

@@ -1,10 +1,10 @@
 {
   "hashes": [
     {
-      "hash": "sha256-H4/bMkY3tUixb+jppRbwXQfvBAYCBZQC+Rj05ZyQoFw=",
+      "hash": "sha256-A/uYUrezu09WuuqpnkokBG/sd4w2L7dIVXtOYDA5DTg=",
       "hashType": "uvLockHash"
     }
   ],
   "input": "toad",
-  "version": "v0.6.5"
+  "version": "v0.6.12"
 }

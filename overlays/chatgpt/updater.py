@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, ClassVar
 
+from defusedxml import ElementTree
+
 if TYPE_CHECKING:
+    from xml.etree.ElementTree import Element
+
     import aiohttp
 
 from lib.update.net import fetch_url
 from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
 
-_ITEM_RE = re.compile(r"<item\b.*?</item>", re.DOTALL | re.IGNORECASE)
-_SHORT_VERSION_RE = re.compile(
-    r"<sparkle:shortVersionString>\s*([^<]+?)\s*</sparkle:shortVersionString>",
-    re.IGNORECASE,
-)
-_ENCLOSURE_RE = re.compile(r"<enclosure\b[^>]*>", re.IGNORECASE)
-_ENCLOSURE_URL_RE = re.compile(r"\burl\s*=\s*(['\"])([^'\"]+)\1", re.IGNORECASE)
+_SPARKLE_NS = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
 
 
 class ChatGPTUpdater(DownloadHashUpdater):
@@ -34,31 +31,39 @@ class ChatGPTUpdater(DownloadHashUpdater):
         "x86_64-darwin": "darwin",
     }
 
-    def _extract_item(self, xml_data: str) -> str:
-        match = _ITEM_RE.search(xml_data)
-        if match is None:
+    def _parse_appcast(self, xml_data: str) -> Element:
+        try:
+            return ElementTree.fromstring(xml_data)
+        except ElementTree.ParseError as exc:
+            snippet = xml_data[:200].replace("\n", " ").strip()
+            msg = f"Invalid appcast XML from {self.APPCAST_URL}; snippet: {snippet}"
+            raise RuntimeError(msg) from exc
+
+    def _extract_item(self, root: Element) -> Element:
+        item = root.find("./channel/item")
+        if item is None:
             msg = "No items found in appcast"
             raise RuntimeError(msg)
-        return match.group(0)
+        return item
 
-    def _extract_version(self, item_xml: str) -> str:
-        match = _SHORT_VERSION_RE.search(item_xml)
-        if match is None:
+    def _extract_version(self, item: Element) -> str:
+        version = item.findtext("sparkle:shortVersionString", namespaces=_SPARKLE_NS)
+        if version is None or not version.strip():
             msg = "No version found in appcast"
             raise RuntimeError(msg)
-        return match.group(1).strip()
+        return version.strip()
 
-    def _extract_download_url(self, item_xml: str) -> str:
-        enclosure_match = _ENCLOSURE_RE.search(item_xml)
-        if enclosure_match is None:
+    def _extract_download_url(self, item: Element) -> str:
+        enclosure = item.find("enclosure")
+        if enclosure is None:
             msg = "No enclosure found in appcast"
             raise RuntimeError(msg)
 
-        url_match = _ENCLOSURE_URL_RE.search(enclosure_match.group(0))
-        if url_match is None:
+        url = enclosure.get("url")
+        if url is None or not url.strip():
             msg = "No URL found in enclosure"
             raise RuntimeError(msg)
-        return url_match.group(2).strip()
+        return url.strip()
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch latest appcast entry and return version + download URL."""
@@ -70,13 +75,10 @@ class ChatGPTUpdater(DownloadHashUpdater):
             config=self.config,
         )
         xml_data = xml_payload.decode()
-        if "<rss" not in xml_data or "</rss>" not in xml_data:
-            snippet = xml_data[:200].replace("\n", " ").strip()
-            msg = f"Invalid appcast XML from {self.APPCAST_URL}; snippet: {snippet}"
-            raise RuntimeError(msg)
-        item_xml = self._extract_item(xml_data)
-        version = self._extract_version(item_xml)
-        url = self._extract_download_url(item_xml)
+        root = self._parse_appcast(xml_data)
+        item = self._extract_item(root)
+        version = self._extract_version(item)
+        url = self._extract_download_url(item)
         return VersionInfo(version=version, metadata={"url": url})
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str:

@@ -225,6 +225,11 @@
       enable = true;
       generateCaches = true;
     };
+    mergiraf = {
+      enable = true;
+      enableGitIntegration = true;
+      enableJujutsuIntegration = true;
+    };
     ssh = {
       enable = true;
       enableDefaultConfig = false;
@@ -264,10 +269,10 @@
       enable = true;
       settings = {
         misc.disable = [
-          # "brew_cask"
+          "brew_cask"
           "brew_formula"
-          "home_manager"
-          # "cursor"
+          # "home_manager"
+          "cursor"
         ];
         git.repos = [ (slib.srcDirBase system) ];
         misc = {
@@ -292,14 +297,18 @@
       enableZshIntegration = false;
       settings = {
         keybinds.normal = {
+          "bind \"Alt b\"".TogglePaneFrames = { };
           "bind \"Alt s\"".Clear = { };
           "bind \"Alt L\"".GoToNextTab = { };
           "bind \"Alt H\"".GoToPreviousTab = { };
         };
+        default_layout = "compact";
+        pane_frames = false;
         session_serialization = false;
         show_startup_tips = false;
         simplified_ui = true;
         scroll_buffer_size = 1000000;
+        ui.pane_frames.hide_session_name = true;
       };
     };
     zed-editor = {
@@ -396,7 +405,6 @@
     jq.enable = true;
     jujutsu.enable = true;
     less.enable = true;
-    mergiraf.enable = true;
     neovide.enable = true;
     nh = {
       enable = true;

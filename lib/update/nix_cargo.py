@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
-from nix_manipulator.parser import parse
 
 from lib.nix.models.hash import is_sri
 from lib.update.config import UpdateConfig, resolve_active_config
@@ -27,6 +28,7 @@ from lib.update.events import (
 )
 from lib.update.flake import get_flake_input_node
 from lib.update.net import fetch_url
+from lib.update.nix_expr import identifier_attr_path
 from lib.update.process import RunCommandOptions, run_command
 
 if TYPE_CHECKING:
@@ -153,7 +155,7 @@ async def _prefetch_git_hash(
     """Fetch a git repo and yield its SRI narHash via ``builtins.fetchGit``."""
     config = resolve_active_config(config)
     fetch_git = FunctionCall(
-        name="builtins.fetchGit",
+        name=identifier_attr_path("builtins", "fetchGit"),
         argument=AttributeSet.from_dict(
             {
                 "url": url,
@@ -162,7 +164,9 @@ async def _prefetch_git_hash(
             },
         ),
     )
-    expr = parse(f"({fetch_git.rebuild()}).narHash").expr.rebuild()
+    expr = Select(
+        expression=Parenthesis(value=fetch_git), attribute="narHash"
+    ).rebuild()
     args = ["nix", "eval", "--json", "--expr", expr]
     result_drain = ValueDrain[CommandResult]()
     async for event in drain_value_events(
@@ -207,7 +211,11 @@ async def compute_import_cargo_lock_output_hashes(
     config = resolve_active_config(config)
 
     if lockfile_content is None:
-        yield UpdateEvent.status(source, "Fetching upstream Cargo.lock...")
+        yield UpdateEvent.status(
+            source,
+            "Fetching upstream Cargo.lock...",
+            operation="compute_hash",
+        )
         node = get_flake_input_node(input_name)
         locked = node.locked
         if locked is None:

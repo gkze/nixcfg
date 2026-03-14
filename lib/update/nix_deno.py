@@ -168,7 +168,11 @@ async def _process_platform_hash(
     *,
     context: _PlatformHashContext,
 ) -> EventStream:
-    yield UpdateEvent.status(context.source, f"Computing hash for {platform_name}...")
+    yield UpdateEvent.status(
+        context.source,
+        f"Computing hash for {platform_name}...",
+        operation="compute_hash",
+    )
 
     temp_entries = _build_deno_hash_entries(
         platforms=context.platforms,
@@ -208,11 +212,13 @@ async def _process_platform_hash(
             yield UpdateEvent.status(
                 context.source,
                 f"Build failed for {platform_name}, preserving existing hash",
+                operation="compute_hash",
             )
             return
         yield UpdateEvent.status(
             context.source,
             f"Build failed for {platform_name}, no existing hash to preserve",
+            operation="compute_hash",
         )
 
 
@@ -276,6 +282,7 @@ async def compute_deno_deps_hash(
             source,
             f"Warning: {len(failed_platforms)} platform(s) failed, "
             f"preserved existing hashes: {', '.join(failed_platforms)}",
+            operation="compute_hash",
         )
 
     final_hashes = {**existing_hashes, **platform_hashes}

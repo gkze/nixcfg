@@ -8,6 +8,11 @@
     ];
   };
 
+  nix = {
+    excludeRegex = [ "(^|.*/)Cargo\\.nix$" ];
+    excludeGlobs = [ "**/Cargo.nix" ];
+  };
+
   toml = {
     regex = "\\.toml$";
     globs = [ "*.toml" ];

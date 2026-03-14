@@ -50,6 +50,15 @@
         old.checkPhase;
   });
 
+  # ast-grep: skip Darwin-only invalid filename test
+  ast-grep = prev.ast-grep.overrideAttrs (old: {
+    checkFlags =
+      (old.checkFlags or [ ])
+      ++ prev.lib.optionals prev.stdenv.hostPlatform.isDarwin [
+        "--skip=test_scan_invalid_rule_id"
+      ];
+  });
+
   # mdformat: Update to 1.0.0 for markdown-it-py 4.x compatibility
   mdformat = prev.mdformat.override {
     python3 = prev.python3.override {

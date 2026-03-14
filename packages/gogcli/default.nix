@@ -1,18 +1,7 @@
 {
-  mkGoCliPackage,
-  inputs,
-  lib,
+  mkGoCli,
   ...
 }:
-let
-  mkGoCli = import ../../lib/go-cli-package.nix {
-    inherit
-      mkGoCliPackage
-      inputs
-      lib
-      ;
-  };
-in
 mkGoCli {
   pname = "gogcli";
   inputName = "gogcli";

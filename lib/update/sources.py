@@ -14,11 +14,12 @@ from filelock import FileLock
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.let import LetExpression
-from nix_manipulator.parser import parse
+from nix_manipulator.expressions.primitive import StringPrimitive
 
 from lib.nix.commands.base import run_nix
 from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update.io import atomic_write_text
+from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT, package_dir_for, package_file_map
 
 
@@ -75,12 +76,15 @@ def nix_source_names() -> set[str]:
             Binding(
                 name="flake",
                 value=FunctionCall(
-                    name="builtins.getFlake",
-                    argument=parse(f'"{flake_url}"').expr,
+                    name=identifier_attr_path("builtins", "getFlake"),
+                    argument=StringPrimitive(value=flake_url),
                 ),
             ),
         ],
-        value=parse("builtins.attrNames flake.outputs.lib.sources").expr,
+        value=FunctionCall(
+            name=identifier_attr_path("builtins", "attrNames"),
+            argument=identifier_attr_path("flake", "outputs", "lib", "sources"),
+        ),
     )
     expr = expression.rebuild()
     if shutil.which("nix") is None:

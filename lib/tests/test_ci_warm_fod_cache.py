@@ -97,13 +97,15 @@ def test_build_fod_expr(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
     monkeypatch.setattr(
         wfc,
-        "_build_overlay_expr",
-        lambda package, system=None: f"applied.{package}.{system}",
+        "_build_overlay_attr_expr",
+        lambda package, attr_path, *, system=None: (
+            f"overlay-attr:{package}:{attr_path}:{system}"
+        ),
     )
     expr = object.__getattribute__(wfc, "_build_fod_expr")(
         "demo", ".node_modules", system="x86_64-linux"
     )
-    check(expr == "(applied.demo.x86_64-linux).node_modules")
+    check(expr == "overlay-attr:demo:.node_modules:x86_64-linux")
 
 
 def test_resolve_output_paths(monkeypatch: pytest.MonkeyPatch) -> None:

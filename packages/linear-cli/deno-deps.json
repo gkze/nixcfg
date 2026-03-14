@@ -10,7 +10,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/babc0e90043bd314994269da9a45f1e4ecded291270aecb9584ba8ecfdd72796",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "98c542bd9d1f3f7d28736760ea2bd90fdb77c7a402fce7a1f4ea8c20c4e2181e",
           "url": "https://jsr.io/@cliffy/ansi/1.0.0-rc.8/README.md"
         },
@@ -40,7 +40,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/85eaad2eceab4daca952db778f807b8f21957e444b68edee1966941422d3e252",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "2f8f78d351565a144249cbff97a34d8166d55e00757742ca3e92dbae1defd000",
           "url": "https://jsr.io/@cliffy/ansi/1.0.0-rc.8/assets/img/demo.gif"
         },
@@ -113,7 +113,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/a55c5477715a4d26fb808fb929066a31bbe24fa9c7ad9144dd8161e3e6ce479c",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "2cdb1d3013b425b1a93e9ae696b66ffcccd2a5ac17f666b5ba44b89900b402f1",
           "url": "https://jsr.io/@cliffy/command/1.0.0-rc.7/README.md"
         },
@@ -149,25 +149,25 @@
         },
         {
           "cache_path": "remote/https/jsr.io/31ba6be5716c09ca858213f6b59d252f26d442885abea6852141561f83916529",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "00222761d1f2a0fa913602c3da28d0cc8d8369c179444a389a4939cfee3cc03b",
           "url": "https://jsr.io/@cliffy/command/1.0.0-rc.7/assets/img/demo.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/cc05e3033bee75d99838f8272a4f01e113e39ca2c3702233f63adfbe50b2695a",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "4566cc466f7425a90f2b4a773232dbbc2fcd161d36079e14c26e43e92167a5a3",
           "url": "https://jsr.io/@cliffy/command/1.0.0-rc.7/assets/img/examples.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/a631144e0c15ffd233336a4abedc9bab013ab0bef9db0dba7f03cde8eda5c69a",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "7c78df01ee4a70671efd135719196db7320995a75360d3d07a246a7c1e8965cc",
           "url": "https://jsr.io/@cliffy/command/1.0.0-rc.7/assets/img/help.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/82c84a3b38874865a8a6fae63fb8a8a52a915b75dd268910e550f8bb125d5bbb",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "d6f51ae8f0eed933492b9c9ba187d5234a082f7f6c5a0d8c7f33f41cfd7ed63d",
           "url": "https://jsr.io/@cliffy/command/1.0.0-rc.7/assets/img/usage.gif"
         },
@@ -798,7 +798,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/ebb6aebe779d6d909bb79e03bf18261ff38a3b47b1d1fc8538daa6d7441a8059",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "2cdb1d3013b425b1a93e9ae696b66ffcccd2a5ac17f666b5ba44b89900b402f1",
           "url": "https://jsr.io/@cliffy/command/1.0.0-rc.8/README.md"
         },
@@ -834,25 +834,25 @@
         },
         {
           "cache_path": "remote/https/jsr.io/3edf30dd1fb7246e650c580c122b7953da49c20510a92f1cb172f7977cbd718c",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "00222761d1f2a0fa913602c3da28d0cc8d8369c179444a389a4939cfee3cc03b",
           "url": "https://jsr.io/@cliffy/command/1.0.0-rc.8/assets/img/demo.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/7d2ebe27be1c5607a1bd5216bde85152645d87f69dfeb4722e5a448ef616f85b",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "4566cc466f7425a90f2b4a773232dbbc2fcd161d36079e14c26e43e92167a5a3",
           "url": "https://jsr.io/@cliffy/command/1.0.0-rc.8/assets/img/examples.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/dd2ae47e4b390db8b586b762bcd4ca3a33bfa400d3923c88fa639c5c6a3eaf8b",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "7c78df01ee4a70671efd135719196db7320995a75360d3d07a246a7c1e8965cc",
           "url": "https://jsr.io/@cliffy/command/1.0.0-rc.8/assets/img/help.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/9d9a8b73b0e864d997d74392b20bb82e266ec9fc6b2fa899883fd06c570b9c19",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "d6f51ae8f0eed933492b9c9ba187d5234a082f7f6c5a0d8c7f33f41cfd7ed63d",
           "url": "https://jsr.io/@cliffy/command/1.0.0-rc.8/assets/img/usage.gif"
         },
@@ -1483,7 +1483,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/ab0343f511794720c0b222cc34bc00f3e22b4baac8b297b287086372aa2c7ba7",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "da31d61bd3b96df7dcd2f1744e895e2ca2d72648ad5c903d1cf7ba618eda07a8",
           "url": "https://jsr.io/@cliffy/flags/1.0.0-rc.7/README.md"
         },
@@ -1724,7 +1724,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/495eba301ff95462e172810f1222c702c26672e59fed2bbad118390b7a77076e",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "da31d61bd3b96df7dcd2f1744e895e2ca2d72648ad5c903d1cf7ba618eda07a8",
           "url": "https://jsr.io/@cliffy/flags/1.0.0-rc.8/README.md"
         },
@@ -1965,7 +1965,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/a27e45c84ad559d085c7cfbc648edc41af8cbe6989928eaa5bf909673019b6ed",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "abb29835a32dc6ef68f6fe1d17b6bb5188a5226e92203e4dac708d7a7f84750b",
           "url": "https://jsr.io/@cliffy/internal/1.0.0-rc.7/README.md"
         },
@@ -2152,7 +2152,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/a0251fb1717284c2cfdfc5326bbb32c0cb4ff2e3b32c441e5686d39a5a86ca72",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "abb29835a32dc6ef68f6fe1d17b6bb5188a5226e92203e4dac708d7a7f84750b",
           "url": "https://jsr.io/@cliffy/internal/1.0.0-rc.8/README.md"
         },
@@ -2339,7 +2339,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/6815e5e1fb5b13eea9367704aa19b0c95e97c5399ce593e14e5d4274307d1cdd",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "a70575ae1a9beb0c1da31ce43cbabf8e564425c2e4382c61b1822a2a318ab043",
           "url": "https://jsr.io/@cliffy/keycode/1.0.0-rc.8/README.md"
         },
@@ -2400,7 +2400,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/899ddd6fa404f5b220ef60e2bbb468c620200063dc35702394b9d47899033329",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "774af13941bc280b264c7cbd5dc37225f83b0f922de9acf3344f594178ca55e1",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/README.md"
         },
@@ -2442,73 +2442,73 @@
         },
         {
           "cache_path": "remote/https/jsr.io/f36fe6b336801a5dbb1a228cec8b1fb17e1de13103dcb57af972eaf61ccd1d46",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "580c58815e6b00423c869acc0b3a282223690b963fddf3e4c66383e1ae6d66a7",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/assets/img/checkbox.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/965196f2ea45fcb36ed0427cf13c23f7da45e60c8bdcc619db826faa86bb698a",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "0bcd2ae7e308c51a7f0b3d2cb819ec507be6d5bd211bb731f77ee9cbc63d94e8",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/assets/img/confirm.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/89e597a67cb0d6abea92205df8d28c114df757959e1f5b0c71db64a253879e37",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "aa546fab91544f43521fa33f4fa45d4edfd7ac0468e4bc9a5fad24e7f7916c58",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/assets/img/input.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/62b90cbbba148ef06f93067348ed5e7e7f1c42741ef73da5630d54cf9ef5a84e",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "b4a9c01001350fe7f1d2ce8e1e4d6bad0f2821a010001af10a592fe22a14786d",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/assets/img/list.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/76aace82564995d12c5e85eb0fac1eb157cf69b4575be0bd82e6a93dd8a7de49",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "4ce649ea391691eeb54a2e1cf6f83d5e4b54f25758f3b685be9293b037ffc6ec",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/assets/img/number.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/bf8313b8513343ddba1245fdab407f38bfaec33cc74ac3d0b8ec72bdd6e26619",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "092227c7a67f0d57c72d3b3a9beb6661dda2a12965f4ea95b6a6a5fc1eb8b0ab",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/assets/img/prompt_demo.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/fe0fd6edb242f1c0fc63235a592ef1af986b1e538c196d5f3c717dbaa7f627df",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "50420d13d9e7c88cfcb67beb9a6215674b0c1fd3eefe87a51a79faee78310b28",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/assets/img/secret.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/4118a2a213fa3a65c1d5d86dd7c8da970277cac790103727f6a413fcddbed00c",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "7c3ee07a7dbb28dcc37eb7fff6e0f0cc1749875a16eec014492d08df08db4d21",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/assets/img/select.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/556501c1f78ee92763437798be4a94b77a7d484dac3ae503b0955fb897d1729e",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "98341964bdc0daacd4be27bd569ef4bb123152e7b6a086dc67652bf15b59756c",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/assets/img/suggestions.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/d2e8d1db9a4696a880819b5c0afc295e9734db40fe32412e2032c8ae849b028b",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "70a84c35ad0f0c4be783325d5b356d4f48942da19e9511d391e67a9c237da0c9",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/assets/img/suggestions_list.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/55f2ffdde8a6d7eb9feb01573844e591501eb1b677851199adb343cafd277a18",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "bf61e9e3a770ece97c6ab40419dc803282931bbb6b4ceeffbbe05adc34e1fdae",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/assets/img/suggestions_list_prompt.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/5d1fc6e7036383cf60029368c12533036968c2767a019e1c5c60b4a5411633af",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "661865b69ab7d9d8c86df8726b7d768779cca257ce3c7a5f217c6de51babef0b",
           "url": "https://jsr.io/@cliffy/prompt/1.0.0-rc.8/assets/img/toggle.gif"
         },
@@ -2911,7 +2911,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/68c3eb7c1fe41bc1e254fa5475ce100b6abfb3de50b98616faa994730e323a05",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "0dcd8d2b87f4d3c0a2403d9bddfbb87dc19f455d1228baa9f11e24723a633b8b",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.7/README.md"
         },
@@ -2929,43 +2929,43 @@
         },
         {
           "cache_path": "remote/https/jsr.io/01fbc736dd43eee40e75f37d2c04aa2a11e0f9d26f938709c3b7e23299d6283d",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "d8ac53b6657920595f2c92a28d2a1a24bd59c2b776fd8344fd078ca7d09ffe28",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.7/assets/img/basic_usage.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/37f77e953c99a517652a736fb86e3e1bdf2ef50f5a905150b25df4ab52755263",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "78de2e09f6b0c0e61c172c9c2bbfbe1ebded61703d53ceb33f1092f014be0772",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.7/assets/img/colspan_and_rowspan.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/4267ee01aff23605285f8a702dd091e8ee2459da226ed0b172743c80756b438c",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "4dc1c991e5fdadbf4e439716a1669114d3ba0847c3a0c38cb5463390337013c1",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.7/assets/img/header_and_body.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/e8f445ff12f4c2b9557953f7d69b6123a88afa174dd8fe26254d7e1c38f354f1",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "82463ffa430e57f6104859de41cc93015dfd51f5bdc9a786ad7d7cb7aafa5c77",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.7/assets/img/random_table.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/1ee18c9cdb782d45819c74bf444d5917312fc7a69e220602dfd73977eefe4e1b",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "3a254e5695dd335b7b56c877a4a67426185a9be4bd5e8b70a0007e1844fff138",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.7/assets/img/rows_and_cells.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/827bbc64334fabd1cf2f0126571636ee93b3c35595833e987dbeddc8588474a3",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "6cd5094e5131084b6af828c1407fc449469b053388c653d9bf6ef22681956962",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.7/assets/img/table_options.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/b6696f0637882c102ce2b1792f54f5617735f532ff9dbd1361a1b53bbfdc8bed",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "f2af7505b69c720d51ecf8af9169c65b4cf6723d90436c4c1e85401136a2cf8c",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.7/assets/img/using_as_array.gif"
         },
@@ -3110,7 +3110,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/c1aa409e1e3f26e417a29bb10d3ca8264b0c5ac84a0a99c30e1b8e29f3f5260b",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "0dcd8d2b87f4d3c0a2403d9bddfbb87dc19f455d1228baa9f11e24723a633b8b",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.8/README.md"
         },
@@ -3128,43 +3128,43 @@
         },
         {
           "cache_path": "remote/https/jsr.io/32e9ede7361475506006d9ec13f2975c766a29a3ff7265081ec9dcbd61bc1875",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "d8ac53b6657920595f2c92a28d2a1a24bd59c2b776fd8344fd078ca7d09ffe28",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.8/assets/img/basic_usage.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/fcd986b6d93abb200f5ae4d566588086f759543bcc5c93d7b2e66fffad68f825",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "78de2e09f6b0c0e61c172c9c2bbfbe1ebded61703d53ceb33f1092f014be0772",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.8/assets/img/colspan_and_rowspan.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/9a872d24de846e70435c0328f7476c3dd6ea75634cb4460cb59ed7f029e2614e",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "4dc1c991e5fdadbf4e439716a1669114d3ba0847c3a0c38cb5463390337013c1",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.8/assets/img/header_and_body.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/41543e45549ebf083809124dd7a0d5daeceed179f56ee532f9a824ca5db8ba8d",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "82463ffa430e57f6104859de41cc93015dfd51f5bdc9a786ad7d7cb7aafa5c77",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.8/assets/img/random_table.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/d593bca4f817005f95f63cfec3c00b984dbac284f6297fe2e1f08137db6164be",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "3a254e5695dd335b7b56c877a4a67426185a9be4bd5e8b70a0007e1844fff138",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.8/assets/img/rows_and_cells.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/62dbbaf2f99640f36a270e18a0f26a758ce63bf3025d6115f175292f1b07fbcd",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "6cd5094e5131084b6af828c1407fc449469b053388c653d9bf6ef22681956962",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.8/assets/img/table_options.gif"
         },
         {
           "cache_path": "remote/https/jsr.io/88b044c37aaf965fc5d3e93f10c21a9fbeca3ae0411c0660feec87012310b27a",
-          "media_type": "text/plain",
+          "media_type": "image/gif",
           "sha256": "f2af7505b69c720d51ecf8af9169c65b4cf6723d90436c4c1e85401136a2cf8c",
           "url": "https://jsr.io/@cliffy/table/1.0.0-rc.8/assets/img/using_as_array.gif"
         },
@@ -3309,7 +3309,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/7d3ab952b5af4b7a9581f7e248df9cd86f7ab4e3198a980fbf6224cabad09b78",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "0e7aeacf7a80b3f06641b72f9877e4543f70a874c0e54db722ab7f331b284392",
           "url": "https://jsr.io/@cliffy/testing/1.0.0-rc.8/README.md"
         },
@@ -3376,7 +3376,7 @@
       "files": [
         {
           "cache_path": "remote/https/jsr.io/833401bc35149913741d224e14dd30d2d8fc8b26936b4c31fbbc6226946b19ea",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "5f02c12641cb749817901ba5a484efc0e9a638e1a1d369f65f047654b465e8d8",
           "url": "https://jsr.io/@littletof/charmd/0.1.2/README.md"
         },
@@ -3400,7 +3400,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/e52be964f8e3953c1df416e6e2d485a9552810b6d486b776ecb538ea79b35a84",
-          "media_type": "text/plain",
+          "media_type": "image/png",
           "sha256": "f1c3a87e181209d9bda3048c397fbbc9926572edfc8a0004f95a86d0ec8339a9",
           "url": "https://jsr.io/@littletof/charmd/0.1.2/docs/showcase.png"
         },
@@ -3473,13 +3473,13 @@
       "files": [
         {
           "cache_path": "remote/https/jsr.io/d43364f821b817484fd0fc64da3896f7a1420d8c9257426405875cae3a50564c",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "f79e472bd07744150aa770bbb5def47c578cded8866580478c7d10249117315e",
           "url": "https://jsr.io/@opensrc/deno-open/1.0.0/README.md"
         },
         {
           "cache_path": "remote/https/jsr.io/07613e5fe9b83a7345b289923b53ed58ab1f49d0f425909b06a87461e94c4174",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "685525d25a681348b7399c5ddfcfed7320fa7278470178a6f290c088e459c0b4",
           "url": "https://jsr.io/@opensrc/deno-open/1.0.0/benchmarks/README.md"
         },
@@ -5201,7 +5201,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/423758abd23bb09fcc8e2818df84ab6e62799bb159d4b92d40bbc5adb1539dfb",
-          "media_type": "text/plain",
+          "media_type": "application/rls-services+xml",
           "sha256": "03594cd06ca89858b696d611b40a2cb8a398f61477ed957d55ae2733a9688838",
           "url": "https://jsr.io/@std/cli/1.0.12/testdata/unicode_width_crate/src/lib.rs"
         },
@@ -5376,7 +5376,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/b413b56898e2d50bbe511ee2cf09b4261248fb1ce20c167ae49eebc2c2dc192d",
-          "media_type": "text/plain",
+          "media_type": "application/rls-services+xml",
           "sha256": "03594cd06ca89858b696d611b40a2cb8a398f61477ed957d55ae2733a9688838",
           "url": "https://jsr.io/@std/cli/1.0.24/testdata/unicode_width_crate/src/lib.rs"
         },
@@ -7701,7 +7701,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/fa0a468feb4cbe5587890be38f24b11de5e3b1ed973329aa03ea2408584faf4b",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "e5eab086c9b5a9f4de0c615567c166a6c880faed46818ba247d33a8235b8fb58",
           "url": "https://jsr.io/@std/fmt/1.0.8/README.md"
         },
@@ -8043,7 +8043,7 @@
           "url": "https://jsr.io/@std/fs/1.0.13/testdata/expand_wildcard.js"
         },
         {
-          "cache_path": "remote/https/jsr.io/ce1f38a625d0f42d20f73d08335dbb5d0b1af23aaecac6541f3e1c54852875d7",
+          "cache_path": "remote/https/jsr.io/80077c360638996b82b8606447e63ef58985c0985feaf219bed039841d872073",
           "media_type": "text/plain",
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "url": "https://jsr.io/@std/fs/1.0.13/testdata/glob/a[b]c/foo"
@@ -8086,13 +8086,13 @@
         },
         {
           "cache_path": "remote/https/jsr.io/78fdd035230217a6389975d8d4ed430df08faa7a03208ee65cf22b9753ea36c0",
-          "media_type": "text/plain",
+          "media_type": "application/rls-services+xml",
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "url": "https://jsr.io/@std/fs/1.0.13/testdata/walk/ext/y.rs"
         },
         {
           "cache_path": "remote/https/jsr.io/8d43699b8edcfc338cb3505cf94a0fb8874fc0f5b1046ec5ed159f180588f393",
-          "media_type": "text/plain",
+          "media_type": "text/x-python",
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "url": "https://jsr.io/@std/fs/1.0.13/testdata/walk/ext/z.py"
         },
@@ -12091,7 +12091,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/63e6019863e77390f5582b52c8e2a3e54fc8cd75d28e9596ac6352c04be77e9a",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "426e259529cb3fa6c3ff38642e274904d45d68d0dabc5397b96fb1426bcb9669",
           "url": "https://jsr.io/@std/testing/1.0.0/README.md"
         },
@@ -12224,7 +12224,7 @@
         },
         {
           "cache_path": "remote/https/jsr.io/acff5d5aa085b3042578e25412638c8f34c03df5f51eb57733ffde72ed3fe851",
-          "media_type": "text/plain",
+          "media_type": "text/markdown",
           "sha256": "426e259529cb3fa6c3ff38642e274904d45d68d0dabc5397b96fb1426bcb9669",
           "url": "https://jsr.io/@std/testing/1.0.16/README.md"
         },

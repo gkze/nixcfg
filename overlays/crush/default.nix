@@ -5,7 +5,7 @@
   ...
 }:
 let
-  buildGoModule = prev.buildGoModule.override { go = prev.go_1_26; };
+  buildGoModule = prev.buildGoModule.override { go = prev.go_latest or prev.go; };
   crushOverrideArgs =
     if prev.crush ? override && prev.crush.override ? __functionArgs then
       prev.crush.override.__functionArgs

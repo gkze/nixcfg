@@ -1,8 +1,13 @@
-"""Updater for goose-cli source and cargo hashes."""
+"""Updater for goose-cli source hashes.
+
+This updater intentionally only touches the upstream Goose source hash in
+sources.json. crate2nix artifacts (Cargo.nix, crate-hashes, path normalization,
+V8 lock patching, and crate overrides) are maintained separately; see
+overlays/goose-cli/README.md.
+"""
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 from lib.nix.models.sources import HashEntry, SourceHashes
@@ -15,8 +20,7 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.net import fetch_github_api
-from lib.update.nix import compute_fixed_output_hash
-from lib.update.paths import get_repo_file
+from lib.update.nix import _build_fetch_from_github_expr, compute_fixed_output_hash
 from lib.update.updaters.base import Updater, VersionInfo
 
 if TYPE_CHECKING:
@@ -24,7 +28,7 @@ if TYPE_CHECKING:
 
 
 class GooseCliUpdater(Updater):
-    """Resolve latest goose release and compute source/cargo hashes."""
+    """Resolve the latest Goose release and compute its source hash."""
 
     name = "goose-cli"
     GITHUB_OWNER = "block"
@@ -49,49 +53,18 @@ class GooseCliUpdater(Updater):
 
     @staticmethod
     def _src_expr(version: str) -> str:
-        return (
-            "pkgs.fetchFromGitHub { "
-            'owner = "block"; '
-            'repo = "goose"; '
-            f'tag = "v{version}"; '
-            "hash = pkgs.lib.fakeHash; "
-            "}"
+        return _build_fetch_from_github_expr(
+            "block",
+            "goose",
+            tag=f"v{version}",
         )
-
-    @staticmethod
-    def _overlay_expr(source: str) -> str:
-        flake_url = f"git+file://{get_repo_file('.')}?dirty=1"
-        return (
-            "let"
-            f'  flake = builtins.getFlake "{flake_url}";'
-            "  system = builtins.currentSystem;"
-            "  pkgs = import flake.inputs.nixpkgs {"
-            "    inherit system;"
-            "    config = { allowUnfree = true; allowInsecurePredicate = _: true; };"
-            "  };"
-            "  applied = pkgs.lib.fix (self: pkgs // flake.overlays.default self pkgs);"
-            f'in applied."{source}"'
-        )
-
-    @staticmethod
-    def _override_env(version: str, src_hash: str, fake_hash: str) -> dict[str, str]:
-        payload = {
-            "goose-cli": {
-                "version": version,
-                "hashes": [
-                    {"hashType": "srcHash", "hash": src_hash},
-                    {"hashType": "cargoHash", "hash": fake_hash},
-                ],
-            },
-        }
-        return {"UPDATE_SOURCE_OVERRIDES_JSON": json.dumps(payload)}
 
     async def fetch_hashes(
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
     ) -> EventStream:
-        """Compute source and cargo vendor fixed-output hashes."""
+        """Compute the fixed-output source hash for Goose."""
         _ = session
 
         src_hash_drain = ValueDrain[str]()
@@ -107,22 +80,5 @@ class GooseCliUpdater(Updater):
             yield event
         src_hash = require_value(src_hash_drain, "Missing srcHash output")
 
-        cargo_hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            compute_fixed_output_hash(
-                self.name,
-                self._overlay_expr(self.name),
-                env=self._override_env(info.version, src_hash, self.config.fake_hash),
-                config=self.config,
-            ),
-            cargo_hash_drain,
-            parse=expect_str,
-        ):
-            yield event
-        cargo_hash = require_value(cargo_hash_drain, "Missing cargoHash output")
-
-        hashes: SourceHashes = [
-            HashEntry.create("srcHash", src_hash),
-            HashEntry.create("cargoHash", cargo_hash),
-        ]
+        hashes: SourceHashes = [HashEntry.create("srcHash", src_hash)]
         yield UpdateEvent.value(self.name, hashes)

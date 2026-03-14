@@ -22,6 +22,7 @@ from lib.update.updaters.base import (
     _compute_url_hashes,
     _convert_nix_hash_to_sri,
     _ensure_str_mapping,
+    _updater_sourcefile,
 )
 
 if TYPE_CHECKING:
@@ -123,6 +124,36 @@ def test_helper_aliases_and_type_guard_errors(monkeypatch: pytest.MonkeyPatch) -
         _ = _ensure_str_mapping("bad")
     with pytest.raises(TypeError, match="Expected platform/hash string mapping"):
         _ = _ensure_str_mapping({"ok": 1})
+
+
+def test_updater_sourcefile_falls_back_to_module_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use module __file__ when inspect.getsourcefile is unavailable."""
+
+    class _FallbackUpdater(Updater):
+        name = "fallback-sourcefile"
+
+        async def fetch_latest(self, session: object) -> VersionInfo:
+            _ = session
+            return VersionInfo(version="1", metadata={})
+
+        async def fetch_hashes(
+            self, info: VersionInfo, session: object
+        ) -> AsyncIterator[UpdateEvent]:
+            _ = (info, session)
+            if False:
+                yield UpdateEvent.status(self.name, "never")
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.inspect.getsourcefile",
+        lambda _cls: (_ for _ in ()).throw(TypeError("no sourcefile")),
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.inspect.getmodule",
+        lambda _cls: type("_Module", (), {"__file__": "/tmp/fallback.py"})(),
+    )
+    check(_updater_sourcefile(_FallbackUpdater) == "/tmp/fallback.py")
 
 
 def test_unbound_abstract_methods_raise() -> None:

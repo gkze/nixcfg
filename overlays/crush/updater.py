@@ -15,8 +15,11 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.net import fetch_github_api
-from lib.update.nix import compute_fixed_output_hash
-from lib.update.paths import get_repo_file
+from lib.update.nix import (
+    _build_fetch_from_github_expr,
+    _build_overlay_expr,
+    compute_fixed_output_hash,
+)
 from lib.update.updaters.base import Updater, VersionInfo
 
 if TYPE_CHECKING:
@@ -49,28 +52,10 @@ class CrushUpdater(Updater):
 
     @staticmethod
     def _src_expr(version: str) -> str:
-        return (
-            "pkgs.fetchFromGitHub { "
-            'owner = "charmbracelet"; '
-            'repo = "crush"; '
-            f'tag = "v{version}"; '
-            "hash = pkgs.lib.fakeHash; "
-            "}"
-        )
-
-    @staticmethod
-    def _overlay_expr(source: str) -> str:
-        flake_url = f"git+file://{get_repo_file('.')}?dirty=1"
-        return (
-            "let"
-            f'  flake = builtins.getFlake "{flake_url}";'
-            "  system = builtins.currentSystem;"
-            "  pkgs = import flake.inputs.nixpkgs {"
-            "    inherit system;"
-            "    config = { allowUnfree = true; allowInsecurePredicate = _: true; };"
-            "  };"
-            "  applied = pkgs.lib.fix (self: pkgs // flake.overlays.default self pkgs);"
-            f'in applied."{source}"'
+        return _build_fetch_from_github_expr(
+            "charmbracelet",
+            "crush",
+            tag=f"v{version}",
         )
 
     @staticmethod
@@ -111,7 +96,7 @@ class CrushUpdater(Updater):
         async for event in drain_value_events(
             compute_fixed_output_hash(
                 self.name,
-                self._overlay_expr(self.name),
+                _build_overlay_expr(self.name),
                 env=self._override_env(info.version, src_hash, self.config.fake_hash),
                 config=self.config,
             ),

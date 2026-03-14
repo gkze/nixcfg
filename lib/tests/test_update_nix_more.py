@@ -84,6 +84,30 @@ def test_extract_nix_hash_success_and_error_paths(
         _extract_nix_hash("plain stderr")
 
 
+def test_extract_nix_hash_parses_representative_nix_outputs() -> None:
+    """Parse representative fixed-output and legacy Nix mismatch formats."""
+    fod_output = (
+        "error: hash mismatch in fixed-output derivation "
+        "'/nix/store/demo-source.drv':\n"
+        "  specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
+        "     got:    sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=\n"
+    )
+    check(
+        _extract_nix_hash(fod_output)
+        == "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
+    )
+
+    nar_output = (
+        "error: hash mismatch importing path '/nix/store/abc-foo';\n"
+        "  specified: 0c5b8vw40d1178xlpddw65q9gf1h2186jcc3p4swinwggbllv8mk\n"
+        "  got:       1d6b9xw51a1289ymqaax76ra2gi2i3297kdd4q5sxjaxhicnmwal\n"
+    )
+    check(
+        _extract_nix_hash(nar_output)
+        == "1d6b9xw51a1289ymqaax76ra2gi2i3297kdd4q5sxjaxhicnmwal"
+    )
+
+
 def test_emit_sri_hash_from_build_result_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """Emit SRI directly or convert legacy hash formats."""
     result = CommandResult(args=["nix"], returncode=1, stdout="", stderr="")

@@ -21,7 +21,7 @@ in
           "cleanshot"
           "freelens"
           "pants"
-          "tailscale"
+          "tailscale-app"
           "warp@preview"
         ];
         description = "Homebrew casks installed when the Darwin work profile is enabled.";
@@ -30,7 +30,7 @@ in
       masApps = mkOption {
         type = types.attrsOf types.int;
         default = {
-          # "iA Writer" = 775737590; # TODO: re-enable after purchasing/signing into App Store
+          "iA Writer" = 775737590;
           "Microsoft Excel" = 462058435;
           "Microsoft OneNote" = 784801555;
           "Microsoft Outlook" = 985367838;

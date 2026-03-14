@@ -17,7 +17,12 @@ from .eval import nix_eval_json, nix_eval_raw, nix_eval_typed
 from .flake import nix_flake_lock_update, nix_flake_metadata, nix_flake_show
 from .hash import nix_hash_convert, nix_prefetch_url
 from .path_info import nix_path_info
-from .store import nix_store_query_references, nix_store_realise
+from .store import (
+    nix_store_query_deriver,
+    nix_store_query_references,
+    nix_store_query_requisites,
+    nix_store_realise,
+)
 
 __all__ = [
     "CommandResult",
@@ -39,7 +44,9 @@ __all__ = [
     "nix_hash_convert",
     "nix_path_info",
     "nix_prefetch_url",
+    "nix_store_query_deriver",
     "nix_store_query_references",
+    "nix_store_query_requisites",
     "nix_store_realise",
     "run_nix",
     "run_nix_json",

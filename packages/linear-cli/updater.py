@@ -15,7 +15,7 @@ from lib.update.events import (
     expect_source_hashes,
     require_value,
 )
-from lib.update.nix import get_current_nix_platform
+from lib.update.nix import _build_flake_attr_expr, get_current_nix_platform
 from lib.update.paths import get_repo_file
 from lib.update.updaters.base import (
     DenoManifestUpdater,
@@ -31,6 +31,11 @@ class LinearCliUpdater(DenoManifestUpdater):
     """Update deno-deps manifest plus denort runtime hashes per platform."""
 
     name = "linear-cli"
+    required_tools: ClassVar[tuple[str, ...]] = (
+        *DenoManifestUpdater.required_tools,
+        "nix",
+        "nix-prefetch-url",
+    )
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "aarch64-apple-darwin",
         "aarch64-linux": "aarch64-unknown-linux-gnu",
@@ -40,12 +45,13 @@ class LinearCliUpdater(DenoManifestUpdater):
 
     @staticmethod
     def _deno_version_expr(platform: str) -> str:
-        repo_path = get_repo_file(".")
-        flake_url = f"path:{repo_path}"
-        return (
-            "let "
-            f'flake = builtins.getFlake "{flake_url}"; '
-            f'in flake.interactivePkgs."{platform}".deno.version'
+        return _build_flake_attr_expr(
+            f"path:{get_repo_file('.')}",
+            "interactivePkgs",
+            platform,
+            "deno",
+            "version",
+            quoted_indices=(1,),
         )
 
     async def _resolve_deno_version(self) -> str:

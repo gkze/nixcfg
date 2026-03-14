@@ -298,7 +298,11 @@ async def update_flake_ref(
     *,
     source: str,
 ) -> EventStream:
-    yield UpdateEvent.status(source, f"Updating ref: {input_ref.ref} -> {new_ref}")
+    yield UpdateEvent.status(
+        source,
+        f"Updating ref: {input_ref.ref} -> {new_ref}",
+        operation="update_ref",
+    )
 
     if input_ref.input_type == "github":
         new_url = f"github:{input_ref.owner}/{input_ref.repo}/{new_ref}"
@@ -369,6 +373,7 @@ async def update_refs_task(
             UpdateEvent.status(
                 source,
                 f"Checking {input_ref.owner}/{input_ref.repo} (current: {input_ref.ref})",
+                operation="check_version",
             ),
         )
         result = await check_flake_ref_update(
@@ -383,7 +388,11 @@ async def update_refs_task(
 
         if result.latest_ref == result.current_ref:
             await put(
-                UpdateEvent.status(source, f"Up to date (ref: {result.current_ref})"),
+                UpdateEvent.status(
+                    source,
+                    f"Up to date (ref: {result.current_ref})",
+                    operation="check_version",
+                ),
             )
             await put(UpdateEvent.result(source))
             return
@@ -401,6 +410,7 @@ async def update_refs_task(
                 UpdateEvent.status(
                     source,
                     f"Update available: {result.current_ref} -> {result.latest_ref}",
+                    operation="check_version",
                 ),
             )
             await put(UpdateEvent.result(source, update_payload))

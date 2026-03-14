@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.set import AttributeSet
-from nix_manipulator.parser import parse
 
 if TYPE_CHECKING:
     import aiohttp
+    from nix_manipulator.expressions.expression import NixExpression
 
 from lib.nix.models.sources import HashEntry, SourceHashes
 from lib.update.events import (
@@ -20,7 +20,7 @@ from lib.update.events import (
 )
 from lib.update.net import fetch_github_api
 from lib.update.nix import _build_nix_expr, compute_fixed_output_hash
-from lib.update.nix_expr import compact_nix_expr
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.updaters.base import Updater, VersionInfo
 
 
@@ -54,11 +54,13 @@ class SentryCliUpdater(Updater):
         version: str,
         hash_value: str | None = None,
     ) -> FunctionCall:
-        hash_expr = (
-            parse("pkgs.lib.fakeHash").expr if hash_value is None else hash_value
+        hash_expr: str | NixExpression = (
+            identifier_attr_path("pkgs", "lib", "fakeHash")
+            if hash_value is None
+            else hash_value
         )
         return FunctionCall(
-            name="pkgs.fetchFromGitHub",
+            name=identifier_attr_path("pkgs", "fetchFromGitHub"),
             argument=AttributeSet.from_dict(
                 {
                     "owner": self.GITHUB_OWNER,
@@ -77,11 +79,11 @@ class SentryCliUpdater(Updater):
 
     def _cargo_nix_expr(self, version: str, src_hash: str) -> str:
         cargo_vendor_expr = FunctionCall(
-            name="pkgs.rustPlatform.fetchCargoVendor",
+            name=identifier_attr_path("pkgs", "rustPlatform", "fetchCargoVendor"),
             argument=AttributeSet.from_dict(
                 {
                     "src": self._src_nix_expression(version, src_hash),
-                    "hash": parse("pkgs.lib.fakeHash").expr,
+                    "hash": identifier_attr_path("pkgs", "lib", "fakeHash"),
                 },
             ),
         )

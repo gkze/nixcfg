@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import tempfile
 from abc import ABC, abstractmethod
 from contextlib import suppress
@@ -27,6 +28,7 @@ from lib.nix.models.sources import (
 from lib.update import deno_lock
 from lib.update import paths as update_paths
 from lib.update import process as update_process
+from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.events import (
     EventStream,
@@ -66,6 +68,24 @@ def _convert_nix_hash_to_sri(source_name: str, nix_hash: str) -> EventStream:
 package_dir_for: Callable[[str], Path | None] = _package_dir_for
 compute_url_hashes: Callable[[str, Iterable[str]], EventStream] = _compute_url_hashes
 convert_nix_hash_to_sri: Callable[[str, str], EventStream] = _convert_nix_hash_to_sri
+
+
+def _updater_sourcefile(cls: type[Updater]) -> str | None:
+    try:
+        return inspect.getsourcefile(cls)
+    except OSError, TypeError:
+        module = inspect.getmodule(cls)
+        module_file = getattr(module, "__file__", None)
+        return module_file if isinstance(module_file, str) else None
+
+
+def _is_test_updater_class(cls: type[Updater]) -> bool:
+    module_name = getattr(cls, "__module__", "")
+    if module_name.startswith("lib.tests."):
+        return True
+
+    sourcefile = _updater_sourcefile(cls)
+    return sourcefile is not None and "/lib/tests/" in sourcefile
 
 
 @dataclass
@@ -117,17 +137,39 @@ class Updater(ABC):
     name: str
     config: UpdateConfig
     required_tools: ClassVar[tuple[str, ...]] = ("nix",)
+    materialize_when_current: ClassVar[bool] = False
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Register concrete updater subclasses in :data:`UPDATERS`."""
         super().__init_subclass__(**kwargs)
         name = getattr(cls, "name", None)
         if name is not None and not getattr(cls, "__abstractmethods__", None):
+            existing = UPDATERS.get(name)
+            if existing is not None and existing is not cls:
+                if _is_test_updater_class(existing) or _is_test_updater_class(cls):
+                    UPDATERS[name] = cls
+                    return
+                existing_path = _updater_sourcefile(existing)
+                new_path = _updater_sourcefile(cls)
+                if (
+                    existing_path is not None
+                    and new_path is not None
+                    and existing_path != new_path
+                ):
+                    msg = (
+                        f"Duplicate updater registration for {name!r}: "
+                        f"{existing.__module__}.{existing.__qualname__} and "
+                        f"{cls.__module__}.{cls.__qualname__}"
+                    )
+                    raise RuntimeError(msg)
             UPDATERS[name] = cls
 
     def __init__(self, *, config: UpdateConfig | None = None) -> None:
         """Create an updater bound to active config values."""
         self.config = resolve_active_config(config)
+        # Stash the current entry while ``update_stream`` runs so updaters can
+        # preserve platform hashes when non-native builders are unavailable.
+        self._current_entry: SourceEntry | None = None
 
     @abstractmethod
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
@@ -197,28 +239,54 @@ class Updater(ABC):
             yield UpdateEvent.status(
                 self.name,
                 f"Using pinned version: {pinned_version.version}",
+                operation="check_version",
             )
             info = pinned_version
         else:
             yield UpdateEvent.status(
-                self.name, f"Fetching latest {self.name} version..."
+                self.name,
+                f"Fetching latest {self.name} version...",
+                operation="check_version",
             )
             info = await self.fetch_latest(session)
 
-        yield UpdateEvent.status(self.name, f"Latest version: {info.version}")
-        if await self._is_latest(current, info):
-            yield UpdateEvent.status(self.name, f"Up to date (version: {info.version})")
+        yield UpdateEvent.status(
+            self.name,
+            f"Latest version: {info.version}",
+            operation="check_version",
+        )
+        is_latest = await self._is_latest(current, info)
+        if is_latest and not self.materialize_when_current:
+            yield UpdateEvent.status(
+                self.name,
+                f"Up to date (version: {info.version})",
+                operation="check_version",
+            )
             yield UpdateEvent.result(self.name)
             return
+        if is_latest and self.materialize_when_current:
+            yield UpdateEvent.status(
+                self.name,
+                "Version up to date; refreshing generated artifacts...",
+                operation="compute_hash",
+            )
 
-        yield UpdateEvent.status(self.name, "Fetching hashes for all platforms...")
+        yield UpdateEvent.status(
+            self.name,
+            "Fetching hashes for all platforms...",
+            operation="compute_hash",
+        )
         hashes_drain = ValueDrain[SourceHashes]()
-        async for event in drain_value_events(
-            self.fetch_hashes(info, session),
-            hashes_drain,
-            parse=expect_source_hashes,
-        ):
-            yield event
+        self._current_entry = current
+        try:
+            async for event in drain_value_events(
+                self.fetch_hashes(info, session),
+                hashes_drain,
+                parse=expect_source_hashes,
+            ):
+                yield event
+        finally:
+            self._current_entry = None
         hashes = require_value(hashes_drain, "Missing hash output")
         result = self.build_result(info, hashes)
 
@@ -232,7 +300,16 @@ class Updater(ABC):
         result = require_value(result_drain, "Missing finalized result")
 
         if current is not None and result == current:
-            yield UpdateEvent.status(self.name, "Up to date")
+            unchanged_message = (
+                "Source metadata unchanged"
+                if self.materialize_when_current
+                else "Up to date"
+            )
+            yield UpdateEvent.status(
+                self.name,
+                unchanged_message,
+                operation="compute_hash",
+            )
             yield UpdateEvent.result(self.name)
             return
         yield UpdateEvent.result(self.name, result)
@@ -433,6 +510,7 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
 
     hash_type: HashType
     platform_specific: bool = False
+    native_only: bool = False
     _cached_fingerprint: str | None = None
     required_tools: ClassVar[tuple[str, ...]] = ("nix",)
 
@@ -472,7 +550,11 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
 
     async def _finalize_result(self, result: SourceEntry) -> EventStream:
         """Attach a derivation fingerprint to the result entry."""
-        yield UpdateEvent.status(self.name, "Computing derivation fingerprint...")
+        yield UpdateEvent.status(
+            self.name,
+            "Computing derivation fingerprint...",
+            operation="compute_hash",
+        )
         try:
             # Reuse cached fingerprint from _is_latest when available.
             drv_hash = getattr(self, "_cached_fingerprint", None)
@@ -483,8 +565,48 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
             yield UpdateEvent.status(
                 self.name,
                 f"Warning: derivation fingerprint unavailable ({exc})",
+                operation="compute_hash",
             )
         yield UpdateEvent.value(self.name, result)
+
+    def _platform_targets(self, current_platform: str) -> tuple[str, ...]:
+        """Return platform targets for platform-specific hash computation."""
+        if self.native_only:
+            return (current_platform,)
+
+        targets = [current_platform]
+        for platform in self.config.deno_deps_platforms:
+            if platform not in targets:
+                targets.append(platform)
+        return tuple(targets)
+
+    def _existing_platform_hashes(self) -> dict[str, str]:
+        """Return existing platform hashes for ``self.hash_type`` when present."""
+        entry = self._current_entry
+        if entry is None:
+            return {}
+
+        hashes = entry.hashes
+        if hashes.entries:
+            return {
+                hash_entry.platform: hash_entry.hash
+                for hash_entry in hashes.entries
+                if hash_entry.platform is not None
+                and hash_entry.hash_type == self.hash_type
+            }
+        if hashes.mapping:
+            return dict(hashes.mapping)
+        return {}
+
+    def _compute_hash_for_system(
+        self,
+        info: VersionInfo,
+        *,
+        system: str | None,
+    ) -> EventStream:
+        """Compute the FOD hash for ``system`` (or host when ``None``)."""
+        _ = info
+        return compute_overlay_hash(self.name, system=system, config=self.config)
 
     def _compute_hash(self, info: VersionInfo) -> EventStream:
         """Return an event stream that yields the computed hash value.
@@ -494,9 +616,8 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
         When ``platform_specific`` is ``True``, the build is pinned to the
         current Nix platform.
         """
-        _ = info
         system = get_current_nix_platform() if self.platform_specific else None
-        return compute_overlay_hash(self.name, system=system, config=self.config)
+        return self._compute_hash_for_system(info, system=system)
 
     async def fetch_hashes(
         self,
@@ -506,18 +627,56 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
         """Compute FOD hashes for the package overlay build."""
         _ = session
         if self.platform_specific:
-            # Platform-specific: emit a HashEntry tagged with the current platform.
+            current_platform = get_current_nix_platform()
             error = f"Missing {self.hash_type} output"
-            hash_drain = ValueDrain[str]()
-            async for event in drain_value_events(
-                self._compute_hash(info),
-                hash_drain,
-                parse=expect_str,
-            ):
-                yield event
-            hash_value = require_value(hash_drain, error)
-            platform = get_current_nix_platform()
-            entries = [HashEntry.create(self.hash_type, hash_value, platform=platform)]
+            platform_hashes: dict[str, str] = {}
+            existing_hashes = self._existing_platform_hashes()
+            failed_platforms: list[str] = []
+
+            for platform in self._platform_targets(current_platform):
+                hash_drain = ValueDrain[str]()
+                try:
+                    async for event in drain_value_events(
+                        self._compute_hash_for_system(info, system=platform),
+                        hash_drain,
+                        parse=expect_str,
+                    ):
+                        yield event
+                except RuntimeError:
+                    if platform == current_platform:
+                        raise
+                    failed_platforms.append(platform)
+                    existing = existing_hashes.get(platform)
+                    if existing is None:
+                        yield UpdateEvent.status(
+                            self.name,
+                            f"Build failed for {platform}, no existing hash to preserve",
+                            operation="compute_hash",
+                        )
+                        continue
+                    platform_hashes[platform] = existing
+                    yield UpdateEvent.status(
+                        self.name,
+                        f"Build failed for {platform}, preserving existing hash",
+                        operation="compute_hash",
+                    )
+                    continue
+
+                hash_value = require_value(hash_drain, error)
+                platform_hashes[platform] = hash_value
+
+            if failed_platforms:
+                yield UpdateEvent.status(
+                    self.name,
+                    f"Warning: {len(failed_platforms)} platform(s) failed, "
+                    f"preserved existing hashes: {', '.join(failed_platforms)}",
+                    operation="compute_hash",
+                )
+
+            entries = [
+                HashEntry.create(self.hash_type, hash_val, platform=platform)
+                for platform, hash_val in sorted(platform_hashes.items())
+            ]
             yield UpdateEvent.value(self.name, entries)
         else:
             async for event in self._emit_single_hash_entry(
@@ -592,13 +751,14 @@ class DenoManifestUpdater(FlakeInputMixin, Updater):
     each dependency individually via ``fetchurl``.
 
     No hash entries are stored in ``sources.json`` — only the version and
-    flake input name.  The manifest file itself is committed alongside the
-    package definition.
+    flake input name.  The manifest file itself is emitted as a generated
+    artifact and persisted by the update CLI alongside ``sources.json``.
     """
 
     lock_file: str = "deno.lock"
     manifest_file: str = "deno-deps.json"
     required_tools: ClassVar[tuple[str, ...]] = ()
+    materialize_when_current: ClassVar[bool] = True
 
     def __init__(self, *, config: UpdateConfig | None = None) -> None:
         """Create an updater bound to active config values."""
@@ -610,7 +770,7 @@ class DenoManifestUpdater(FlakeInputMixin, Updater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
     ) -> EventStream:
-        """Resolve ``deno.lock`` and write ``deno-deps.json``."""
+        """Resolve ``deno.lock`` and emit ``deno-deps.json`` as an artifact."""
         node_obj = info.metadata.get("node")
         if node_obj is None:
             node = get_flake_input_node(self._input)
@@ -631,7 +791,9 @@ class DenoManifestUpdater(FlakeInputMixin, Updater):
             f"{locked.owner}/{locked.repo}/{locked.rev}/{self.lock_file}"
         )
         yield UpdateEvent.status(
-            self.name, f"Fetching {self.lock_file} from {locked.owner}/{locked.repo}..."
+            self.name,
+            f"Fetching {self.lock_file} from {locked.owner}/{locked.repo}...",
+            operation="compute_hash",
         )
         lock_bytes = await fetch_url(
             session,
@@ -646,26 +808,34 @@ class DenoManifestUpdater(FlakeInputMixin, Updater):
             tmp_name = tmp.name
 
         try:
-            yield UpdateEvent.status(self.name, "Resolving Deno dependencies...")
+            yield UpdateEvent.status(
+                self.name,
+                "Resolving Deno dependencies...",
+                operation="compute_hash",
+            )
             manifest = await deno_lock.resolve_deno_deps(Path(tmp_name))
         finally:
             with suppress(OSError):
                 await asyncio.to_thread(Path(tmp_name).unlink, missing_ok=True)
 
-        # Write the manifest to the package directory.
+        # Emit the manifest as a generated artifact for the CLI to persist.
         pkg_dir = package_dir_for(self.name)
         if pkg_dir is None:
             msg = f"Package directory not found for {self.name}"
             raise RuntimeError(msg)
         manifest_path = pkg_dir / self.manifest_file
-        manifest.save(manifest_path)
+        yield UpdateEvent.artifact(
+            self.name,
+            GeneratedArtifact.json(manifest_path, manifest.to_dict()),
+        )
 
         total_files = sum(len(p.files) for p in manifest.jsr_packages)
         yield UpdateEvent.status(
             self.name,
-            f"Wrote {manifest_path.name}: "
+            f"Prepared {manifest_path.name}: "
             f"{len(manifest.jsr_packages)} JSR ({total_files} files) + "
             f"{len(manifest.npm_packages)} npm packages",
+            operation="compute_hash",
         )
 
         # No hash entries — mkDenoApplication uses the manifest directly.

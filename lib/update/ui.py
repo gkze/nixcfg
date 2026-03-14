@@ -6,7 +6,12 @@ This module is a compatibility facade over focused UI modules:
 - ``ui_consumer`` for queued event processing
 """
 
-from lib.update.ui_consumer import ConsumeEventsOptions, EventConsumer, consume_events
+from lib.update.ui_consumer import (
+    ConsumeEventsOptions,
+    ConsumeEventsResult,
+    EventConsumer,
+    consume_events,
+)
 from lib.update.ui_render import Renderer
 from lib.update.ui_state import (
     ItemMeta,
@@ -18,6 +23,7 @@ from lib.update.ui_state import (
 
 __all__ = [
     "ConsumeEventsOptions",
+    "ConsumeEventsResult",
     "EventConsumer",
     "ItemMeta",
     "ItemState",

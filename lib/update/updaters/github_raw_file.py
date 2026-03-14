@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -32,7 +33,15 @@ def github_raw_file_updater(
     path: str,
 ) -> type[GitHubRawFileUpdater]:
     """Create a ``GitHubRawFileUpdater`` subclass with fixed repo/path settings."""
-    attrs = {"name": name, "owner": owner, "repo": repo, "path": path}
+    caller_frames = inspect.stack(context=0)
+    caller_module = caller_frames[1].frame.f_globals.get("__name__", __name__)
+    attrs = {
+        "__module__": caller_module,
+        "name": name,
+        "owner": owner,
+        "repo": repo,
+        "path": path,
+    }
     return type(f"{name}Updater", (GitHubRawFileUpdater,), attrs)
 
 

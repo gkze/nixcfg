@@ -16,12 +16,9 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, TypeGuard
+from typing import Any, Protocol, TypeGuard
 
 import yaml
-
-if TYPE_CHECKING:
-    from referencing import Resource
 
 SCHEMAS_DIR = Path(__file__).resolve().parent
 MODELS_DIR = SCHEMAS_DIR.parent / "models"
@@ -125,7 +122,7 @@ def _build_registry() -> object:
     referencing = importlib.import_module("referencing")
     referencing_jsonschema = importlib.import_module("referencing.jsonschema")
 
-    resources: list[tuple[str, Resource[object]]] = []
+    resources: list[tuple[str, Any]] = []
 
     for yaml_file in sorted(SCHEMAS_DIR.glob("*.yaml")):
         schema = _load_yaml(yaml_file.stem)
