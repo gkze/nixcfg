@@ -50,6 +50,15 @@ let
     inherit pkgs;
     rootSrc = patchedSrc;
   };
+  cargoNixVersion = cargoNix.internal.crates."codex-cli".version;
+  cargoNixVersionCheck =
+    if cargoNixVersion == version then
+      true
+    else
+      throw ''
+        packages/codex/Cargo.nix has codex-cli version ${cargoNixVersion},
+        expected ${version}; regenerate Cargo.nix
+      '';
 
   crosstermOverride = attrs: {
     postUnpack = (attrs.postUnpack or "") + ''
@@ -77,10 +86,34 @@ let
     inherit crateOverrides;
     runTests = false;
   };
+  codexDrvChecked = codexDrv.overrideAttrs (old: {
+    doInstallCheck = true;
+    installCheckPhase = (old.installCheckPhase or "") + ''
+      runHook preInstallCheck
+
+      export HOME="$TMPDIR/home"
+      export XDG_CACHE_HOME="$TMPDIR/xdg-cache"
+      export XDG_CONFIG_HOME="$TMPDIR/xdg-config"
+      export XDG_DATA_HOME="$TMPDIR/xdg-data"
+      export XDG_STATE_HOME="$TMPDIR/xdg-state"
+      mkdir -p \
+        "$HOME" \
+        "$XDG_CACHE_HOME" \
+        "$XDG_CONFIG_HOME" \
+        "$XDG_DATA_HOME" \
+        "$XDG_STATE_HOME"
+
+      $out/bin/codex --version
+      $out/bin/codex --help >/dev/null
+
+      runHook postInstallCheck
+    '';
+  });
 in
+assert cargoNixVersionCheck;
 symlinkJoin {
   name = "codex-${version}";
-  paths = [ codexDrv ];
+  paths = [ codexDrvChecked ];
   nativeBuildInputs = [
     installShellFiles
     makeBinaryWrapper
@@ -97,6 +130,7 @@ symlinkJoin {
 
   passthru = {
     inherit cargoNix crateOverrides patchedSrc;
+    codexDrv = codexDrvChecked;
   };
 
   meta = {

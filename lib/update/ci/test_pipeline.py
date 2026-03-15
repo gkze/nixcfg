@@ -28,7 +28,7 @@ from pydantic import ValidationError
 
 from lib.nix.models.sources import SourceEntry
 from lib.update import cli as update_cli
-from lib.update.ci import merge_sources, resolve_versions
+from lib.update.ci import crate2nix, merge_sources, resolve_versions
 from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.paths import SOURCES_FILE_NAME, package_file_map
 
@@ -144,6 +144,16 @@ def _phase_validate() -> bool:
     return True
 
 
+def _phase_crate2nix() -> bool:
+    _log("Phase 5: Validating checked-in crate2nix artifacts...")
+    rc = crate2nix.main([])
+    if rc != 0:
+        _log(f"FAIL: pipeline crate2nix exited {rc}")
+        return False
+    _log("  crate2nix freshness OK")
+    return True
+
+
 # ── Entrypoint ────────────────────────────────────────────────────────
 
 
@@ -187,6 +197,13 @@ def run(
     # Phase 4: Validate
     ok = _phase_validate()
     phases.append(("validate", ok))
+    if not ok:
+        _print_summary(phases, work_dir, keep=keep_artifacts)
+        return 1
+
+    # Phase 5: Validate checked-in crate2nix artifacts
+    ok = _phase_crate2nix()
+    phases.append(("crate2nix", ok))
 
     _print_summary(phases, work_dir, keep=keep_artifacts)
     return 0 if ok else 1

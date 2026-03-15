@@ -1,0 +1,348 @@
+"""Tests for the crate2nix CI helper command."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from lib.tests._assertions import check
+from lib.update.ci import crate2nix
+
+
+def test_normalize_json_text_sorts_keys_and_adds_newline() -> None:
+    """Canonical JSON rendering should be stable for crate-hashes.json."""
+    rendered = crate2nix._normalize_json_text('{"b":1,"a":2}')
+    check(rendered == '{\n  "a": 2,\n  "b": 1\n}\n')
+
+
+def test_resolve_targets_returns_runnable_targets(monkeypatch) -> None:
+    """Default target selection should return supported packages."""
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
+
+    runnable, skipped = crate2nix._resolve_targets(())
+
+    check([target.name for target in runnable] == ["codex", "goose-cli"])
+    check(skipped == [])
+
+
+def test_run_writes_refreshed_files(monkeypatch, tmp_path: Path) -> None:
+    """Write mode should persist refreshed Cargo.nix and crate-hashes.json."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable=".#demo.passthru.patchedSrc",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+    )
+    demo_dir = tmp_path / "demo"
+    demo_dir.mkdir()
+    (demo_dir / "Cargo.nix").write_text("old cargo\n", encoding="utf-8")
+    (demo_dir / "crate-hashes.json").write_text('{"old": 1}\n', encoding="utf-8")
+
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
+    monkeypatch.setattr(
+        crate2nix,
+        "_refresh_target",
+        lambda _target: crate2nix.RefreshResult(
+            cargo_nix="new cargo\n",
+            crate_hashes='{"new": 2}\n',
+        ),
+    )
+
+    rc = crate2nix.run(packages=("demo",), write=True)
+
+    check(rc == 0)
+    check((demo_dir / "Cargo.nix").read_text(encoding="utf-8") == "new cargo\n")
+    check(
+        (demo_dir / "crate-hashes.json").read_text(encoding="utf-8") == '{"new": 2}\n'
+    )
+
+
+def test_run_fails_when_drift_is_detected(monkeypatch, tmp_path: Path) -> None:
+    """Check mode should fail when refreshed artifacts differ."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable=".#demo.passthru.patchedSrc",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+    )
+    demo_dir = tmp_path / "demo"
+    demo_dir.mkdir()
+    (demo_dir / "Cargo.nix").write_text("old cargo\n", encoding="utf-8")
+    (demo_dir / "crate-hashes.json").write_text('{"old": 1}\n', encoding="utf-8")
+
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
+    monkeypatch.setattr(
+        crate2nix,
+        "_refresh_target",
+        lambda _target: crate2nix.RefreshResult(
+            cargo_nix="new cargo\n",
+            crate_hashes='{"new": 2}\n',
+        ),
+    )
+
+    rc = crate2nix.run(packages=("demo",), write=False)
+
+    check(rc == 1)
+    check((demo_dir / "Cargo.nix").read_text(encoding="utf-8") == "old cargo\n")
+
+
+def test_current_platform_normalizes_known_systems(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Map platform.system() values to crate2nix platform names."""
+    monkeypatch.setattr(crate2nix.platform, "system", lambda: "Darwin")
+    check(crate2nix._current_platform() == "darwin")
+    monkeypatch.setattr(crate2nix.platform, "system", lambda: "Linux")
+    check(crate2nix._current_platform() == "linux")
+    monkeypatch.setattr(crate2nix.platform, "system", lambda: "Plan9")
+    check(crate2nix._current_platform() == "plan9")
+
+
+def test_load_normalizer_handles_success_and_type_errors(tmp_path: Path) -> None:
+    """Load normalizer modules and validate their callable contract."""
+    good = tmp_path / "good.py"
+    good.write_text(
+        "def normalize(text):\n    return text + '! ', 1, True\n",
+        encoding="utf-8",
+    )
+    normalize = crate2nix._load_normalizer(good)
+    check(normalize("demo") == ("demo! ", 1, True))
+
+    missing = tmp_path / "missing.py"
+    missing.write_text("VALUE = 1\n", encoding="utf-8")
+    with pytest.raises(TypeError, match="does not expose normalize"):
+        crate2nix._load_normalizer(missing)
+
+    invalid = tmp_path / "invalid.py"
+    invalid.write_text(
+        "def normalize(text):\n    return text\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(TypeError, match="returned an invalid result"):
+        crate2nix._load_normalizer(invalid)("demo")
+
+
+def test_load_normalizer_rejects_missing_spec(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail clearly when importlib cannot build a module spec."""
+    monkeypatch.setattr(
+        crate2nix.importlib.util, "spec_from_file_location", lambda *_a, **_k: None
+    )
+    with pytest.raises(RuntimeError, match="Could not load normalizer"):
+        crate2nix._load_normalizer(Path("missing.py"))
+
+
+def test_run_helper_and_build_patched_src_error_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Surface subprocess failures and empty nix build output."""
+
+    def _success(
+        _args: list[str], *, cwd: Path, text: bool, capture_output: bool, check: bool
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, text, capture_output, check
+        return subprocess.CompletedProcess(["cmd"], 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(crate2nix.subprocess, "run", _success)
+    check(crate2nix._run(["cmd"]).stdout == "ok\n")
+
+    def _failure(
+        _args: list[str], *, cwd: Path, text: bool, capture_output: bool, check: bool
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, text, capture_output, check
+        return subprocess.CompletedProcess(["cmd"], 1, stdout="", stderr="boom")
+
+    monkeypatch.setattr(crate2nix.subprocess, "run", _failure)
+    with pytest.raises(RuntimeError, match="boom"):
+        crate2nix._run(["cmd"])
+
+    monkeypatch.setattr(
+        crate2nix,
+        "_run",
+        lambda _args, cwd=crate2nix.REPO_ROOT: subprocess.CompletedProcess(
+            ["nix"], 0, stdout="/tmp/demo\n", stderr=""
+        ),
+    )
+    check(
+        crate2nix._build_patched_src(
+            crate2nix.Crate2NixTarget(
+                name="demo",
+                patched_src_installable=".#demo",
+                cargo_nix=Path("Cargo.nix"),
+                crate_hashes=Path("crate-hashes.json"),
+                normalizer_path=Path("normalize.py"),
+                supported_platforms=("linux",),
+            )
+        )
+        == Path("/tmp/demo")
+    )
+
+    monkeypatch.setattr(
+        crate2nix,
+        "_run",
+        lambda _args, cwd=crate2nix.REPO_ROOT: subprocess.CompletedProcess(
+            ["nix"], 0, stdout="\n", stderr=""
+        ),
+    )
+    with pytest.raises(RuntimeError, match="No patchedSrc output path returned"):
+        crate2nix._build_patched_src(
+            crate2nix.Crate2NixTarget(
+                name="demo",
+                patched_src_installable=".#demo",
+                cargo_nix=Path("Cargo.nix"),
+                crate_hashes=Path("crate-hashes.json"),
+                normalizer_path=Path("normalize.py"),
+                supported_platforms=("linux",),
+            )
+        )
+
+
+def test_refresh_target_materializes_normalized_outputs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Refresh should run crate2nix generation and normalize both outputs."""
+    patched_src = tmp_path / "patched-src"
+    patched_src.mkdir()
+    (patched_src / "Cargo.toml").write_text(
+        "[package]\nname = 'demo'\n", encoding="utf-8"
+    )
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable=".#demo",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+    )
+    monkeypatch.setattr(crate2nix, "_build_patched_src", lambda _target: patched_src)
+    monkeypatch.setattr(
+        crate2nix,
+        "_load_normalizer",
+        lambda _path: lambda text: (text.replace("raw", "normalized"), 2, True),
+    )
+
+    def _run(args: list[str], *, cwd: Path = crate2nix.REPO_ROOT):
+        generated_cargo = Path(args[args.index("-o") + 1])
+        generated_hashes = Path(args[args.index("-h") + 1])
+        generated_cargo.write_text("raw cargo\n", encoding="utf-8")
+        generated_hashes.write_text('{"b": 1, "a": 2}\n', encoding="utf-8")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+    refreshed = crate2nix._refresh_target(target)
+    check(refreshed.cargo_nix == "normalized cargo\n")
+    check(refreshed.crate_hashes == '{\n  "a": 2,\n  "b": 1\n}\n')
+
+
+def test_resolve_targets_and_run_cover_remaining_control_flow(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Exercise unsupported, empty, failure, and success run branches."""
+    check(crate2nix.run(packages=("missing",), write=False) == 1)
+    check("Error: Unknown crate2nix target" in capsys.readouterr().err)
+
+    with pytest.raises(RuntimeError, match="Unknown crate2nix target"):
+        crate2nix._resolve_targets(("missing",))
+
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable=".#demo",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+    )
+    demo_dir = tmp_path / "demo"
+    demo_dir.mkdir()
+    (demo_dir / "Cargo.nix").write_text("same\n", encoding="utf-8")
+    (demo_dir / "crate-hashes.json").write_text('{\n  "a": 1\n}\n', encoding="utf-8")
+
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
+
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "darwin")
+    check(crate2nix.run(packages=("demo",), write=False) == 1)
+    check("unsupported on this platform" in capsys.readouterr().err)
+
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "darwin")
+    monkeypatch.setattr(crate2nix, "TARGETS", {})
+    check(crate2nix.run() == 0)
+    check("No crate2nix targets are runnable" in capsys.readouterr().err)
+
+    monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
+    monkeypatch.setattr(
+        crate2nix,
+        "_refresh_target",
+        lambda _target: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    check(crate2nix.run() == 1)
+    check("Skipping unsupported crate2nix targets" not in capsys.readouterr().err)
+
+    skipped_target = crate2nix.Crate2NixTarget(
+        name="zed",
+        patched_src_installable=".#zed",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("darwin",),
+    )
+    monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target, "zed": skipped_target})
+    monkeypatch.setattr(
+        crate2nix,
+        "_refresh_target",
+        lambda _target: crate2nix.RefreshResult(
+            cargo_nix="same\n",
+            crate_hashes='{\n  "a": 1\n}\n',
+        ),
+    )
+    check(crate2nix.run() == 0)
+    check(
+        "Skipping unsupported crate2nix targets on this platform: zed"
+        in capsys.readouterr().err
+    )
+
+    monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
+    monkeypatch.setattr(
+        crate2nix,
+        "_refresh_target",
+        lambda _target: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    check(crate2nix.run() == 1)
+    check("FAIL demo: boom" in capsys.readouterr().err)
+
+    monkeypatch.setattr(
+        crate2nix,
+        "_refresh_target",
+        lambda _target: crate2nix.RefreshResult(
+            cargo_nix="same\n",
+            crate_hashes='{\n  "a": 1\n}\n',
+        ),
+    )
+    check(crate2nix.run() == 0)
+    check(
+        "All checked-in crate2nix artifacts are up to date." in capsys.readouterr().err
+    )
+
+
+def test_cli_callback_exits_with_run_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Typer callback should forward arguments into run()."""
+    called: dict[str, object] = {}
+
+    def _fake_run(*, packages: tuple[str, ...] = (), write: bool = False) -> int:
+        called["packages"] = packages
+        called["write"] = write
+        return 7
+
+    monkeypatch.setattr(crate2nix, "run", _fake_run)
+    check(crate2nix.main(["--package", "demo", "--write"]) == 7)
+    check(called == {"packages": ("demo",), "write": True})

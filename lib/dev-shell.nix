@@ -25,7 +25,9 @@ let
       statix = {
         enable = true;
         excludes = lintFiles.nix.excludeRegex;
-        pass_filenames = true;
+        entry = "${lib.getExe pkgs.statix} check --format errfmt .";
+        pass_filenames = false;
+        always_run = true;
       };
 
       ruff = {

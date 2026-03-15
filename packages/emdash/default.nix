@@ -142,6 +142,7 @@ stdenv.mkDerivation {
     ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
     npm_config_build_from_source = "true";
     npm_config_manage_package_manager_versions = "false";
+    npm_config_node_linker = "hoisted";
   };
 
   postPatch = ''
@@ -153,47 +154,170 @@ stdenv.mkDerivation {
   '';
 
   buildPhase = ''
-    runHook preBuild
+        runHook preBuild
 
-    export HOME="$TMPDIR/emdash-home"
-    mkdir -p "$HOME"
-    pnpm config set manage-package-manager-versions false
+        export HOME="$TMPDIR/emdash-home"
+        mkdir -p "$HOME"
+        pnpm config set manage-package-manager-versions false
 
-    # Pre-seed Electron headers to keep native rebuilds offline/reproducible.
-    electron_gyp_dir="$HOME/.electron-gyp/${electronVersion}"
-    mkdir -p "$electron_gyp_dir"
-    tar -xzf ${electronHeadersTarball} --strip-components=1 -C "$electron_gyp_dir"
+        # Pre-seed Electron headers to keep native rebuilds offline/reproducible.
+        electron_gyp_dir="$HOME/.electron-gyp/${electronVersion}"
+        mkdir -p "$electron_gyp_dir"
+        tar -xzf ${electronHeadersTarball} --strip-components=1 -C "$electron_gyp_dir"
 
-    export npm_config_runtime=electron
-    export npm_config_target=${electronVersion}
-    export npm_config_nodedir="$electron_gyp_dir"
+        export npm_config_runtime=electron
+        export npm_config_target=${electronVersion}
+        export npm_config_nodedir="$electron_gyp_dir"
 
-    # Work around keytar's bundled node-addon-api constant-expression issue
-    # with the Apple toolchain in this build environment.
-    if [ -f node_modules/node-addon-api/napi.h ]; then
-      perl -0pi -e 's/static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>\(-1\);/static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>(0);/g' \
-        node_modules/node-addon-api/napi.h
-    fi
-    if [ -f node_modules/keytar/node_modules/node-addon-api/napi.h ]; then
-      perl -0pi -e 's/static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>\(-1\);/static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>(0);/g' \
-        node_modules/keytar/node_modules/node-addon-api/napi.h
-    fi
+        # Work around keytar's bundled node-addon-api constant-expression issue
+        # with the Apple toolchain in this build environment.
+        if [ -f node_modules/node-addon-api/napi.h ]; then
+          perl -0pi -e 's/static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>\(-1\);/static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>(0);/g' \
+            node_modules/node-addon-api/napi.h
+        fi
+        if [ -f node_modules/keytar/node_modules/node-addon-api/napi.h ]; then
+          perl -0pi -e 's/static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>\(-1\);/static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>(0);/g' \
+            node_modules/keytar/node_modules/node-addon-api/napi.h
+        fi
 
-    # pnpmConfigHook installs dependencies without relying on upstream postinstall
-    # scripts, so rebuild native Electron modules explicitly for runtime.
-    pnpm exec electron-rebuild -f -v ${electronVersion} --only=sqlite3,keytar
+        # pnpmConfigHook installs dependencies without relying on upstream postinstall
+        # scripts, so rebuild native Electron modules explicitly for runtime.
+        pnpm exec electron-rebuild -f -v ${electronVersion} --only=sqlite3,keytar
 
-    pnpm run build
+        pnpm run build
 
-    extra_electron_builder_flags=()
-    ${lib.optionalString stdenv.hostPlatform.isDarwin "extra_electron_builder_flags+=(-c.mac.identity=null)"}
+        python -c 'from pathlib import Path; Path("dist/main/main/ms-shim.cjs").write_text("""var s = 1000;
+    var m = s * 60;
+    var h = m * 60;
+    var d = h * 24;
+    var w = d * 7;
+    var y = d * 365.25;
 
-    pnpm exec electron-builder --${if stdenv.hostPlatform.isDarwin then "mac" else "linux"} --dir \
-      -c.electronDist=${electronDistDir} \
-      -c.electronVersion=${electronVersion} \
-      "''${extra_electron_builder_flags[@]}"
+    module.exports = function (val, options) {
+      options = options || {};
+      var type = typeof val;
+      if (type === "string" && val.length > 0) {
+        return parse(val);
+      }
+      if (type === "number" && isFinite(val)) {
+        return options.long ? fmtLong(val) : fmtShort(val);
+      }
 
-    runHook postBuild
+      throw new Error(
+        "val is not a non-empty string or a valid number. val=" +
+          JSON.stringify(val)
+      );
+    };
+
+    function parse(str) {
+      str = String(str);
+      if (str.length > 100) {
+        return;
+      }
+
+      var match = /^(-?(?:\\d+)?\\.?\\d+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?$/i.exec(
+        str
+      );
+      if (!match) {
+        return;
+      }
+
+      var n = parseFloat(match[1]);
+      var unit = (match[2] || "ms").toLowerCase();
+      switch (unit) {
+        case "years":
+        case "year":
+        case "yrs":
+        case "yr":
+        case "y":
+          return n * y;
+        case "weeks":
+        case "week":
+        case "w":
+          return n * w;
+        case "days":
+        case "day":
+        case "d":
+          return n * d;
+        case "hours":
+        case "hour":
+        case "hrs":
+        case "hr":
+        case "h":
+          return n * h;
+        case "minutes":
+        case "minute":
+        case "mins":
+        case "min":
+        case "m":
+          return n * m;
+        case "seconds":
+        case "second":
+        case "secs":
+        case "sec":
+        case "s":
+          return n * s;
+        case "milliseconds":
+        case "millisecond":
+        case "msecs":
+        case "msec":
+        case "ms":
+          return n;
+      }
+    }
+
+    function fmtShort(ms) {
+      var msAbs = Math.abs(ms);
+      if (msAbs >= d) {
+        return Math.round(ms / d) + "d";
+      }
+      if (msAbs >= h) {
+        return Math.round(ms / h) + "h";
+      }
+      if (msAbs >= m) {
+        return Math.round(ms / m) + "m";
+      }
+      if (msAbs >= s) {
+        return Math.round(ms / s) + "s";
+      }
+      return ms + "ms";
+    }
+
+    function fmtLong(ms) {
+      var msAbs = Math.abs(ms);
+      if (msAbs >= d) {
+        return plural(ms, msAbs, d, "day");
+      }
+      if (msAbs >= h) {
+        return plural(ms, msAbs, h, "hour");
+      }
+      if (msAbs >= m) {
+        return plural(ms, msAbs, m, "minute");
+      }
+      if (msAbs >= s) {
+        return plural(ms, msAbs, s, "second");
+      }
+      return ms + " ms";
+    }
+
+    function plural(ms, msAbs, n, name) {
+      var isPlural = msAbs >= n * 1.5;
+      return Math.round(ms / n) + " " + name + (isPlural ? "s" : "");
+    }
+    """)'
+
+        substituteInPlace node_modules/debug/src/common.js \
+          --replace-fail "require('ms')" "require('../../../dist/main/main/ms-shim.cjs')"
+
+        extra_electron_builder_flags=()
+        ${lib.optionalString stdenv.hostPlatform.isDarwin "extra_electron_builder_flags+=(-c.mac.identity=null)"}
+
+        pnpm exec electron-builder --${if stdenv.hostPlatform.isDarwin then "mac" else "linux"} --dir \
+          -c.electronDist=${electronDistDir} \
+          -c.electronVersion=${electronVersion} \
+          "''${extra_electron_builder_flags[@]}"
+
+        runHook postBuild
   '';
 
   installPhase =

@@ -223,6 +223,19 @@ def test_nixcfg_ci_subcommand_help_includes_resolve_options() -> None:
     check("--output" in result.output)
 
 
+def test_nixcfg_ci_subcommand_help_includes_crate2nix_options() -> None:
+    """Ensure mounted crate2nix CI app is registered with its flags."""
+    runner = CliRunner()
+    result = runner.invoke(
+        nixcfg.app,
+        ["ci", "pipeline", "crate2nix", "--help"],
+    )
+
+    check(result.exit_code == 0)
+    check("--package" in result.output)
+    check("--write" in result.output)
+
+
 def test_nixcfg_ci_cache_generations_help_exposes_profile_options() -> None:
     """Ensure mounted generation profiling command is registered."""
     runner = CliRunner()

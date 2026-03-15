@@ -189,6 +189,7 @@ def test_main_flow_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     # final validate success/failure
     monkeypatch.setattr(pipeline, "_phase_merge", lambda _work: True)
     monkeypatch.setattr(pipeline, "_phase_validate", lambda: True)
+    monkeypatch.setattr(pipeline, "_phase_crate2nix", lambda: True)
     check(pipeline.main(["--full"]) == 0)
     monkeypatch.setattr(pipeline, "_phase_validate", lambda: False)
     check(pipeline.main(["--full"]) == 1)
@@ -206,6 +207,7 @@ def test_run_and_print_summary_remaining_branch_paths(
     monkeypatch.setattr(pipeline, "_phase_resolve", lambda _pinned: True)
     monkeypatch.setattr(pipeline, "_phase_compute", lambda _pinned, _source=None: True)
     monkeypatch.setattr(pipeline, "_phase_validate", lambda: True)
+    monkeypatch.setattr(pipeline, "_phase_crate2nix", lambda: True)
     monkeypatch.setattr(pipeline, "_print_summary", lambda *_a, **_k: None)
     check(
         pipeline.run(full=False, resolve_only=False, source=None, keep_artifacts=False)
@@ -217,3 +219,19 @@ def test_run_and_print_summary_remaining_branch_paths(
     missing = tmp_path / "missing-work"
     real_print_summary([("a", True)], missing, keep=False)
     check(any("All phases passed" in line for line in logs))
+
+
+def test_phase_crate2nix_logs_success_and_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Log phase results based on the crate2nix command exit code."""
+    logs: list[str] = []
+    monkeypatch.setattr(pipeline, "_log", logs.append)
+    monkeypatch.setattr(pipeline.crate2nix, "main", lambda _args: 0)
+    check(pipeline._phase_crate2nix() is True)
+    check(any("crate2nix freshness OK" in line for line in logs))
+
+    logs.clear()
+    monkeypatch.setattr(pipeline.crate2nix, "main", lambda _args: 9)
+    check(pipeline._phase_crate2nix() is False)
+    check(any("pipeline crate2nix exited 9" in line for line in logs))

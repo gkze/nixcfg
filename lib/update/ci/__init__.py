@@ -7,6 +7,7 @@ import typer
 from lib.cli import HELP_CONTEXT_SETTINGS
 from lib.update.ci._cli import make_main
 from lib.update.ci.build_shared_closure import app as build_shared_closure_app
+from lib.update.ci.crate2nix import app as crate2nix_app
 from lib.update.ci.dedup_cargo_lock import app as dedup_cargo_lock_app
 from lib.update.ci.flake_lock_diff import app as flake_lock_diff_app
 from lib.update.ci.merge_sources import app as merge_sources_app
@@ -53,6 +54,7 @@ diff_app.add_typer(flake_lock_diff_app, name="flake")
 diff_app.add_typer(sources_json_diff_app, name="sources")
 
 pipeline_app.add_typer(dedup_cargo_lock_app, name="cargo-lock")
+pipeline_app.add_typer(crate2nix_app, name="crate2nix")
 pipeline_app.add_typer(merge_sources_app, name="sources")
 pipeline_app.add_typer(test_pipeline_app, name="test")
 pipeline_app.add_typer(resolve_versions_app, name="versions")
