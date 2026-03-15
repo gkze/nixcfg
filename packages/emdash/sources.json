@@ -1,10 +1,19 @@
 {
-  "drvHash": "q769ax0zh41pc39cxmizjbd2h6w5r78i",
   "hashes": [
     {
       "hash": "sha256-cgBc4BkhAY7jHZTzrNwU31b3WsIcgoe4vmP2O3lFEaA=",
       "hashType": "npmDepsHash",
       "platform": "aarch64-darwin"
+    },
+    {
+      "hash": "sha256-LIeDLqrs4BFsVoVK1wUe3QGjNDeYMb4frh4CEhPE8V0=",
+      "hashType": "npmDepsHash",
+      "platform": "x86_64-linux"
+    },
+    {
+      "hash": "sha256-LIeDLqrs4BFsVoVK1wUe3QGjNDeYMb4frh4CEhPE8V0=",
+      "hashType": "npmDepsHash",
+      "platform": "aarch64-linux"
     }
   ],
   "input": "emdash",
