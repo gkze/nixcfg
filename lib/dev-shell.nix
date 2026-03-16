@@ -2,61 +2,64 @@
   src ? ../.,
   lib,
   gitHooks,
-  lintFiles ? import ./lint-files.nix,
 }:
 pkgs:
 let
-  nixcfgScript = if builtins.hasAttr "nixcfg" pkgs then pkgs.nixcfg else null;
-
-  tyPythonFlag = if nixcfgScript != null then " --python ${nixcfgScript}/bin/python" else "";
+  qualityPriority = 10;
+  pythonQualityCheck = pkgs.writeShellScript "quality-python" ''
+    set -euo pipefail
+    ${lib.getExe pkgs.uv} run ruff check --config pyproject.toml .
+    ${lib.getExe pkgs.uv} run ty check .
+  '';
+  pytestQualityCheck = pkgs.writeShellScript "quality-pytest" ''
+    set -euo pipefail
+    ${lib.getExe pkgs.uv} run coverage run -m pytest
+    ${lib.getExe pkgs.uv} run coverage report
+  '';
+  yamllintQualityCheck = pkgs.writeShellScript "quality-yamllint" ''
+    set -euo pipefail
+    ${lib.getExe pkgs.git} ls-files -z -- '*.yml' '*.yaml' \
+      | ${lib.getExe' pkgs.findutils "xargs"} -0 -r ${lib.getExe pkgs.yamllint} -c .yamllint
+  '';
 
   pre-commit-check = gitHooks.lib.${pkgs.system}.run {
     inherit src;
     package = pkgs.prek;
     hooks = {
-      nixfmt = {
+      quality-format = {
         enable = true;
-        excludes = lintFiles.nix.excludeRegex;
-      };
-      deadnix = {
-        enable = true;
-        excludes = lintFiles.nix.excludeRegex;
-      };
-      statix = {
-        enable = true;
-        excludes = lintFiles.nix.excludeRegex;
-        entry = "${lib.getExe pkgs.statix} check --format errfmt .";
+        name = "quality-format";
+        entry = "${lib.getExe pkgs.nix} fmt -- --ci";
         pass_filenames = false;
         always_run = true;
+        priority = qualityPriority;
       };
 
-      ruff = {
+      quality-editorconfig = {
         enable = true;
-        files = lintFiles.ruff.regex;
-        entry = "${lib.getExe pkgs.ruff} check --config pyproject.toml .";
+        name = "quality-editorconfig";
+        entry = lib.getExe pkgs."editorconfig-checker";
         pass_filenames = false;
         always_run = true;
+        priority = qualityPriority;
       };
 
-      ruff-format = {
+      quality-python = {
         enable = true;
-        files = lintFiles.ruff.regex;
-      };
-
-      ty = {
-        enable = true;
-        files = lintFiles.ruff.regex;
-        package = pkgs.ty;
-        entry = "${lib.getExe pkgs.ty} check${tyPythonFlag} .";
+        name = "quality-python";
+        entry = "${pythonQualityCheck}";
         pass_filenames = false;
         always_run = true;
+        priority = qualityPriority;
       };
 
-      pytest-coverage = {
+      quality-pytest = {
         enable = true;
-        entry = "${lib.getExe pkgs.uv} run ${lib.getExe pkgs.bash} -c 'coverage run -m pytest && coverage report'";
+        name = "quality-pytest";
+        entry = "${pytestQualityCheck}";
         pass_filenames = false;
         always_run = true;
+        priority = qualityPriority;
         stages = [
           "pre-commit"
           "manual"
@@ -65,71 +68,42 @@ let
 
       commitlint = {
         enable = true;
-        package = pkgs.commitlint;
         entry = "${lib.getExe pkgs.commitlint} --edit";
         pass_filenames = true;
         always_run = true;
+        priority = qualityPriority;
         stages = [ "commit-msg" ];
       };
 
-      shellcheck = {
+      quality-actionlint = {
         enable = true;
-        files = lintFiles.shell.regex;
-        excludes = lintFiles.shell.excludeRegex;
+        name = "quality-actionlint";
+        entry = "${lib.getExe pkgs.actionlint}";
+        pass_filenames = false;
+        always_run = true;
+        priority = qualityPriority;
       };
 
-      shfmt = {
+      quality-yamllint = {
         enable = true;
-        files = lintFiles.shell.regex;
-        excludes = lintFiles.shell.excludeRegex;
-        args = [
-          "-i"
-          "2"
-          "-s"
-        ];
+        name = "quality-yamllint";
+        entry = "${yamllintQualityCheck}";
+        pass_filenames = false;
+        always_run = true;
+        priority = qualityPriority;
       };
 
-      mdformat = {
+      check-merge-conflicts = {
         enable = true;
-        package = pkgs.python3.withPackages (
-          ps: with ps; [
-            mdformat
-            mdformat-tables
-          ]
-        );
+        priority = 0;
       };
-
-      yamlfmt = {
+      end-of-file-fixer = {
         enable = true;
-        args = [
-          "-conf"
-          ".yamlfmt"
-        ];
+        priority = 1;
       };
-
-      yamllint = {
-        enable = true;
-        args = [
-          "-c"
-          ".yamllint"
-        ];
-      };
-
-      actionlint = {
-        enable = true;
-        files = "^\\.github/workflows/.*\\.ya?ml$";
-      };
-
-      taplo = {
-        enable = true;
-        files = lintFiles.toml.regex;
-        entry = "${lib.getExe pkgs.taplo} format --config .taplo.toml";
-      };
-
-      check-merge-conflicts.enable = true;
-      end-of-file-fixer.enable = true;
       trim-trailing-whitespace = {
         enable = true;
+        priority = 2;
         stages = [
           "pre-commit"
           "manual"

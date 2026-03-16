@@ -181,6 +181,7 @@ in
               jetbrains.datagrip
               hoppscotch
               config.fonts.monospace.package
+              mux
               opencode-desktop
               postman
               red-reddit-cli

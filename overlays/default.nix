@@ -32,7 +32,11 @@
         inherit (prev) flake-edit;
         google-chrome = final.mkSourceOverride "google-chrome" prev.google-chrome;
         worktrunk = inputs.worktrunk.packages.${system}.default;
-        zed-editor-nightly = inputs.zed.packages.${system}.default;
+        zed-editor-nightly =
+          if prev.stdenv.hostPlatform.isDarwin then
+            final.callPackage ../packages/zed-editor-nightly { }
+          else
+            inputs.zed.packages.${system}.default;
         jetbrains = prev.jetbrains // {
           datagrip = final.mkSourceOverride "datagrip" prev.jetbrains.datagrip;
         };

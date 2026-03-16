@@ -57,6 +57,13 @@ uv sync
 nix fmt
 nix flake check
 
+# Pre-commit hooks
+prek run -a
+
+# Individual quality checks
+uv run coverage run -m pytest
+uv run coverage report
+
 # Python test suite
 uv run pytest
 

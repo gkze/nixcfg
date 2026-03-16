@@ -1,0 +1,10 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-RMPfaE3oWHOhvH9j+anxfJOJK/cBFISBWhj0E2WOatI=",
+      "hashType": "nodeModulesHash"
+    }
+  ],
+  "input": "mux",
+  "version": "v0.21.0"
+}

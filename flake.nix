@@ -175,6 +175,10 @@
       url = "github:yshavit/mdq";
       flake = false;
     };
+    mux = {
+      url = "github:coder/mux/v0.21.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     mountpoint-s3 = {
       url = "github:awslabs/mountpoint-s3";
       flake = false;
@@ -268,10 +272,7 @@
           mkDevShell = import ./lib/dev-shell.nix {
             src = ./.;
             gitHooks = git-hooks;
-            inherit
-              lib
-              lintFiles
-              ;
+            inherit lib;
           };
         in
         {

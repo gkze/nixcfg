@@ -258,6 +258,7 @@
         {
           add_newline = false;
           aws.disabled = true;
+          gcloud.disabled = true;
           gcloud.format = "[$symbol$account(@$domain)(\($region\))]($style) ";
           line_break.disabled = true;
           nix_shell.format = "[$symbol$state( \($name\))]($style) ";

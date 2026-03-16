@@ -140,8 +140,10 @@ class _FakeProc:
 def test_ci_run_command_async_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """Capture output and raise CalledProcessError on failed commands."""
 
-    async def _create_process(*args: str, stdout: object, stderr: object) -> _FakeProc:
-        _ = (args, stdout, stderr)
+    async def _create_process(
+        *args: str, cwd: str | None, stdout: object, stderr: object
+    ) -> _FakeProc:
+        _ = (args, cwd, stdout, stderr)
         return _FakeProc(returncode=0, stdout=b"ok", stderr=b"")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _create_process)
@@ -152,9 +154,9 @@ def test_ci_run_command_async_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     check(result.stdout == "ok")
 
     async def _create_process_fail(
-        *args: str, stdout: object, stderr: object
+        *args: str, cwd: str | None, stdout: object, stderr: object
     ) -> _FakeProc:
-        _ = (args, stdout, stderr)
+        _ = (args, cwd, stdout, stderr)
         return _FakeProc(returncode=2, stdout=b"", stderr=b"boom")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _create_process_fail)

@@ -14,6 +14,7 @@ let
   darwinOnly = [
     "codex-desktop"
     "conductor"
+    "zed-editor-nightly"
   ];
   helperEntries = [
     "go-cli-wrapper"

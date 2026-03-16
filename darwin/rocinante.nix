@@ -1,7 +1,4 @@
-{
-  outputs,
-  ...
-}:
+{ outputs, ... }:
 let
   inherit (outputs) lib;
 in

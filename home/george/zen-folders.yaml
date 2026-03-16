@@ -17,6 +17,7 @@ Work:
     NewsData: newsdata.io
   Data & Backend:
     Convex: dashboard.convex.dev
+    PlanetScale: app.planetscale.com
     Supabase: supabase.com
   Finance & HR:
     Branch: app.link.com
@@ -32,6 +33,7 @@ Work:
     Hatchet: cloud.onhatchet.run
     Meter: dashboard.meter.com
     Render: dashboard.render.com
+    Temporal: cloud.temporal.io
     Vercel: vercel.com
   News:
     DevHunt: devhunt.org

@@ -203,8 +203,8 @@ jobs:
             packages/**/sources.json
             overlays/**/sources.json
 
-  # Phase 5: Quality gates
-  quality-gates:
+  # Phase 5: Refresh checked-in crate2nix artifacts on native platforms
+  crate2nix-linux:
     needs: merge-hashes
     runs-on: ubuntu-24.04
     steps:
@@ -215,6 +215,93 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           name: merged-sources
+          path: .
+      - name: Refresh Linux crate2nix artifacts
+        run: nix run .#nixcfg -- ci pipeline crate2nix --write
+      - uses: actions/upload-artifact@v6
+        with:
+          name: crate2nix-linux
+          if-no-files-found: error
+          path: |
+            packages/codex/Cargo.nix
+            packages/codex/crate-hashes.json
+            overlays/goose-cli/Cargo.nix
+            overlays/goose-cli/crate-hashes.json
+
+  crate2nix-darwin:
+    needs: merge-hashes
+    runs-on: macos-15
+    steps:
+      - *checkout
+      - *setup_nix
+      - *cachix
+      - uses: actions/download-artifact@v7
+        with:
+          name: merged-sources
+          path: .
+      - *cache_nix_arch
+      - name: Free disk space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - run: nix run .#nixcfg -- ci workflow install-darwin-tools
+      - name: Pre-fetch flake inputs
+        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - name: Refresh Darwin crate2nix artifacts
+        run: nix run .#nixcfg -- ci pipeline crate2nix --write --package zed-editor-nightly
+      - uses: actions/upload-artifact@v6
+        with:
+          name: crate2nix-darwin
+          if-no-files-found: error
+          path: |
+            packages/zed-editor-nightly/Cargo.nix
+            packages/zed-editor-nightly/crate-hashes.json
+
+  merge-generated:
+    needs:
+      - merge-hashes
+      - crate2nix-linux
+      - crate2nix-darwin
+    runs-on: ubuntu-24.04
+    steps:
+      - *checkout
+      - uses: actions/download-artifact@v7
+        with:
+          name: merged-sources
+          path: .
+      - uses: actions/download-artifact@v7
+        with:
+          name: crate2nix-linux
+          path: .
+      - uses: actions/download-artifact@v7
+        with:
+          name: crate2nix-darwin
+          path: .
+      - uses: actions/upload-artifact@v6
+        with:
+          name: merged-generated
+          path: |
+            flake.lock
+            packages/superset/bun.nix
+            packages/**/sources.json
+            overlays/**/sources.json
+            packages/codex/Cargo.nix
+            packages/codex/crate-hashes.json
+            overlays/goose-cli/Cargo.nix
+            overlays/goose-cli/crate-hashes.json
+            packages/zed-editor-nightly/Cargo.nix
+            packages/zed-editor-nightly/crate-hashes.json
+
+  # Phase 6: Quality gates
+  quality-gates:
+    needs: merge-generated
+    runs-on: ubuntu-24.04
+    steps:
+      - *checkout
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - uses: actions/download-artifact@v7
+        with:
+          name: merged-generated
           path: .
       - name: Check Nix formatting
         run: nix fmt -- --ci
@@ -228,15 +315,17 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - name: Install Python dependencies
         run: uv sync --frozen --group dev
+      - name: Verify crate2nix artifacts are fresh
+        run: nix run .#nixcfg -- ci pipeline crate2nix
       - name: Run pytest with coverage
         run: |-
           uv run coverage run -m pytest
           uv run coverage report
 
-  # Phase 6: Build the slowest Darwin derivations in parallel
+  # Phase 7: Build the slowest Darwin derivations in parallel
   darwin-shared-heavy:
     needs:
-      - merge-hashes
+      - merge-generated
       - quality-gates
     runs-on: macos-15
     name: ${{ matrix.package }}
@@ -247,6 +336,10 @@ jobs:
         include:
           - package: zed-editor-nightly
             target: .#darwinConfigurations.argus.pkgs.zed-editor-nightly
+          - package: goose-cli
+            target: .#darwinConfigurations.argus.pkgs.goose-cli
+          - package: superset
+            target: .#darwinConfigurations.argus.pkgs.superset
           - package: opencode
             target: .#darwinConfigurations.argus.pkgs.opencode
           - package: opencode-desktop
@@ -267,7 +360,7 @@ jobs:
       - *cachix
       - uses: actions/download-artifact@v7
         with:
-          name: merged-sources
+          name: merged-generated
           path: .
       - *cache_nix_arch
       - name: Free disk space
@@ -278,10 +371,10 @@ jobs:
       - name: Build heavy target (${{ matrix.package }})
         run: nix build --impure ${{ matrix.target }}
 
-  # Phase 7: Build shared Darwin derivations to populate cache
+  # Phase 8: Build shared Darwin derivations to populate cache
   darwin-shared:
     needs:
-      - merge-hashes
+      - merge-generated
       - quality-gates
     runs-on: macos-15
     steps:
@@ -291,7 +384,7 @@ jobs:
       - &download_merged_sources
         uses: actions/download-artifact@v7
         with:
-          name: merged-sources
+          name: merged-generated
           path: .
       - *cache_nix_arch
       - name: Free disk space
@@ -304,6 +397,8 @@ jobs:
           nix run .#nixcfg -- ci cache closure \
             --mode intersection \
             --exclude-ref .#darwinConfigurations.argus.pkgs.zed-editor-nightly \
+            --exclude-ref .#darwinConfigurations.argus.pkgs.goose-cli \
+            --exclude-ref .#darwinConfigurations.argus.pkgs.superset \
             --exclude-ref .#darwinConfigurations.argus.pkgs.opencode \
             --exclude-ref .#darwinConfigurations.argus.pkgs.opencode-desktop \
             --exclude-ref .#darwinConfigurations.argus.pkgs.codex \
@@ -314,10 +409,10 @@ jobs:
             .#darwinConfigurations.argus.system \
             .#darwinConfigurations.rocinante.system
 
-  # Phase 8: Build Darwin configurations per host
+  # Phase 9: Build Darwin configurations per host
   darwin-argus:
     needs:
-      - merge-hashes
+      - merge-generated
       - quality-gates
       - darwin-shared-heavy
       - darwin-shared
@@ -337,7 +432,7 @@ jobs:
 
   darwin-rocinante:
     needs:
-      - merge-hashes
+      - merge-generated
       - quality-gates
       - darwin-shared-heavy
       - darwin-shared
@@ -355,10 +450,10 @@ jobs:
         run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
       - run: nix run .#nixcfg -- ci workflow build-darwin-config rocinante
 
-  # Phase 9: Placeholder for future NixOS configuration builds
+  # Phase 10: Placeholder for future NixOS configuration builds
   linux:
     needs:
-      - merge-hashes
+      - merge-generated
       - quality-gates
     runs-on: ubuntu-24.04
     steps:
@@ -371,10 +466,10 @@ jobs:
         run: nix run .#nixcfg -- ci workflow smoke-check-update-app
       - run: nix run .#nixcfg -- ci workflow list-update-targets
 
-  # Phase 10: Create PR with updates
+  # Phase 11: Create PR with updates
   create-pr:
     needs:
-      - merge-hashes
+      - merge-generated
       - quality-gates
       - darwin-shared-heavy
       - darwin-shared
@@ -382,7 +477,7 @@ jobs:
       - darwin-rocinante
       - linux
     if: >-
-      needs.merge-hashes.result == 'success' &&
+      needs.merge-generated.result == 'success' &&
       needs.quality-gates.result == 'success' &&
       needs.darwin-shared-heavy.result == 'success' &&
       needs.darwin-shared.result == 'success' &&
@@ -414,6 +509,6 @@ jobs:
           sign-commits: true
           branch: update_flake_lock_action
           delete-branch: true
-          title: "nix: Update flake.lock and sources"
-          commit-message: "nix: Update flake.lock and sources"
+          title: "nix: Update flake.lock, sources, and crate2nix"
+          commit-message: "nix: Update flake.lock, sources, and crate2nix"
           body-path: /tmp/pr-body.md

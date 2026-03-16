@@ -5,14 +5,14 @@ let
     --- a/src/libstore/optimise-store.cc
     +++ b/src/libstore/optimise-store.cc
     @@ -110,7 +110,7 @@
-           See https://github.com/NixOS/nix/issues/1443 and
-           https://github.com/NixOS/nix/pull/2230 for more discussion. */
+          See https://github.com/NixOS/nix/issues/1443 and
+          https://github.com/NixOS/nix/pull/2230 for more discussion. */
 
     -    if (std::regex_search(path.string(), std::regex("\\.app/Contents/.+$"))) {
     +    if (std::regex_search(path.string(), std::regex("\\.app/.+$"))) {
-             debug("%s is not allowed to be linked in macOS", PathFmt(path));
-             return;
-         }
+            debug("%s is not allowed to be linked in macOS", PathFmt(path));
+            return;
+        }
   '';
 in
 {

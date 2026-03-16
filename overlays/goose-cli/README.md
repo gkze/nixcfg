@@ -77,6 +77,10 @@ workspace churn does not invalidate the expensive V8 source input.
   - links in a separate `chromiumToolchainBundle` derivation that constructs
     the `third_party/rust-toolchain` and
     `third_party/llvm-build/Release+Asserts` layout expected by Chromium/V8
+- `v8NativeDrv`
+  - runs the actual GN/Ninja native V8 build in its own derivation
+  - stores `librusty_v8.a` plus the generated `gn_out/project.json` metadata
+  - gives Nix a stable cache boundary around the truly expensive part
 - `patchedSrc`
   - prepares the Goose workspace and then copies in `patchedV8Src` under
     `vendor/v8-goose-src`
@@ -116,17 +120,11 @@ These are intentionally centralized in `crateOverrides` inside `default.nix`.
     `buildRustCrate` does not currently export
 - `v8GooseOverride`
   - points the `v8-goose` crate directly at `patchedV8Src`
-  - keeps the heavy V8 source build keyed only by V8 inputs instead of the full
-    Goose workspace tree
-  - turns on `V8_FROM_SOURCE`
-  - provides GN/Ninja/CMake/Xcode tooling and Darwin GN args
-  - sets up `LIBCLANG_PATH`
-  - points V8 at the reconstructed fake Chromium clang bundle under
-    `third_party/llvm-build/Release+Asserts`
-  - keeps the build on Apple ld64 rather than lld and leaves the current V8
-    arm64 trampoline linker warnings non-fatal
-  - suppresses noisy cc-wrapper target-triple warnings on macOS while still
-    using the wrapped clang binaries we know how to provision reproducibly
+  - points the crate at prebuilt native outputs from `v8NativeDrv`
+  - sets `RUSTY_V8_ARCHIVE` to the checked native archive in the Nix store
+  - sets `RUSTY_V8_PREBUILT_GN_OUT` so the build script regenerates bindings
+    without rerunning GN/Ninja
+  - avoids rerunning GN/Ninja during ordinary Goose crate rebuilds
 
 ## Why `Cargo.nix` is checked in
 
@@ -139,6 +137,14 @@ Checking in `Cargo.nix` avoids that failure mode and keeps the actual package
 build free of crate2nix-at-build-time complexity.
 
 ## Regenerating `Cargo.nix`
+
+Fast path:
+
+```bash
+nix run .#nixcfg -- ci pipeline crate2nix --write --package goose-cli
+```
+
+Manual flow:
 
 When the Goose version or lockfile changes enough that the Rust dependency graph
 must be regenerated, use this flow from the repo root.
@@ -194,6 +200,7 @@ When touching this package, verify these questions explicitly:
 At minimum:
 
 ```bash
+nix run .#nixcfg -- ci pipeline crate2nix --package goose-cli
 nix build --impure -L -vv --show-trace .#goose-cli --no-link
 ```
 

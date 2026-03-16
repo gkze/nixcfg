@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 async def run_command_async(
@@ -11,6 +15,7 @@ async def run_command_async(
     *,
     check: bool = True,
     capture_output: bool = False,
+    cwd: str | Path | None = None,
     stdout: int | None = None,
     stderr: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -23,6 +28,7 @@ async def run_command_async(
 
     process = await asyncio.create_subprocess_exec(
         *args,
+        cwd=None if cwd is None else str(cwd),
         stdout=process_stdout,
         stderr=process_stderr,
     )
@@ -48,6 +54,7 @@ def run_command(
     *,
     check: bool = True,
     capture_output: bool = False,
+    cwd: str | Path | None = None,
     stdout: int | None = None,
     stderr: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -57,6 +64,7 @@ def run_command(
             args,
             check=check,
             capture_output=capture_output,
+            cwd=cwd,
             stdout=stdout,
             stderr=stderr,
         )

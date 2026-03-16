@@ -62,7 +62,7 @@
           # Build devtools first so CLI typecheck can resolve its declarations
           substituteInPlace scripts/build.js \
             --replace-fail "npm run build --workspaces" \
-                           "npm run build --workspace=@google/gemini-cli-devtools && npm run build --workspaces"
+            "npm run build --workspace=@google/gemini-cli-devtools && npm run build --workspaces"
         '';
       # Remove files that reference python to keep it out of the closure
       postInstall = (oldAttrs.postInstall or "") + ''

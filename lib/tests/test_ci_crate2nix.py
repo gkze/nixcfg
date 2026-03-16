@@ -17,14 +17,14 @@ def test_normalize_json_text_sorts_keys_and_adds_newline() -> None:
     check(rendered == '{\n  "a": 2,\n  "b": 1\n}\n')
 
 
-def test_resolve_targets_returns_runnable_targets(monkeypatch) -> None:
-    """Default target selection should return supported packages."""
+def test_resolve_targets_skips_unsupported_platforms(monkeypatch) -> None:
+    """Default target selection should skip platform-specific packages."""
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
 
     runnable, skipped = crate2nix._resolve_targets(())
 
     check([target.name for target in runnable] == ["codex", "goose-cli"])
-    check(skipped == [])
+    check(skipped == ["zed-editor-nightly"])
 
 
 def test_run_writes_refreshed_files(monkeypatch, tmp_path: Path) -> None:

@@ -67,6 +67,16 @@ TARGETS = {
         normalizer_path=Path("overlays/goose-cli/normalize_cargo_nix.py"),
         supported_platforms=("linux", "darwin"),
     ),
+    "zed-editor-nightly": Crate2NixTarget(
+        name="zed-editor-nightly",
+        patched_src_installable=(
+            ".#darwinConfigurations.argus.pkgs.zed-editor-nightly.passthru.patchedSrc"
+        ),
+        cargo_nix=Path("packages/zed-editor-nightly/Cargo.nix"),
+        crate_hashes=Path("packages/zed-editor-nightly/crate-hashes.json"),
+        normalizer_path=Path("packages/zed-editor-nightly/normalize_cargo_nix.py"),
+        supported_platforms=("darwin",),
+    ),
 }
 
 
