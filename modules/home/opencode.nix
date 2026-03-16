@@ -1,7 +1,6 @@
 { config, lib, ... }:
 let
   inherit (lib)
-    filterAttrs
     mapAttrs
     mapAttrsToList
     mkEnableOption
@@ -53,6 +52,7 @@ let
   mkServerConfig =
     server:
     {
+      enabled = server.enable;
       inherit (server) type;
     }
     // optionalAttrs (server.command != [ ]) { inherit (server) command; }
@@ -86,7 +86,7 @@ in
           ];
         };
       };
-      description = "Base MCP server definitions shared across all OpenCode contexts.";
+      description = "Base MCP server definitions written to the global OpenCode config; servers default to disabled and can be enabled on demand.";
     };
 
     plugins = mkOption {
@@ -121,7 +121,7 @@ in
         theme = config.theme.slug;
         plugin = cfg.plugins;
         tui.scroll_acceleration.enabled = true;
-        mcp = mapAttrs (_: mkServerConfig) (filterAttrs (_: server: server.enable) cfg.mcpServers);
+        mcp = mapAttrs (_: mkServerConfig) cfg.mcpServers;
       };
     };
   };
