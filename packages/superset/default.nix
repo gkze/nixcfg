@@ -146,6 +146,29 @@ else
       export CSC_IDENTITY_AUTO_DISCOVERY=false
 
       bun run --cwd apps/desktop copy:native-modules
+
+      python3 - <<'PY'
+      from pathlib import Path
+
+      old = '"<!@(node -p \\\"require(\'node-addon-api\').include\\\")"'
+      new = '"../../node-addon-api"'
+      patched = []
+
+      for path in Path("apps/desktop/node_modules").rglob("binding.gyp"):
+          text = path.read_text()
+          if old not in text:
+              continue
+          path.write_text(text.replace(old, new))
+          patched.append(path)
+
+      if patched:
+          print("patched node-addon-api include paths in:")
+          for path in patched:
+              print(f"  {path}")
+      else:
+          print("no binding.gyp files needed node-addon-api include patching")
+      PY
+
       bun run --cwd apps/desktop generate:icons
       bun run --cwd apps/desktop compile:app
       bun run --cwd apps/desktop validate:native-runtime
