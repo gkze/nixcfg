@@ -23,6 +23,38 @@ let
     (fromTOML (readFile "${inputs.opencode}/packages/desktop/src-tauri/Cargo.toml")).package.version;
   desktopPackageVersion =
     (fromJSON (readFile "${inputs.opencode}/packages/desktop/package.json")).version;
+  tauriConfig = fromJSON (readFile "${inputs.opencode}/packages/desktop/src-tauri/tauri.conf.json");
+  appName = tauriConfig.productName;
+  appBinaryName = tauriConfig.mainBinaryName or "OpenCode";
+  appIdentifier = tauriConfig.identifier;
+  appIcon =
+    let
+      iconCandidates = builtins.filter (icon: lib.hasSuffix ".icns" icon) (
+        tauriConfig.bundle.icon or [ ]
+      );
+    in
+    if iconCandidates == [ ] then
+      throw "packages/opencode-desktop/default.nix expected an .icns bundle icon"
+    else
+      builtins.head iconCandidates;
+  appIconFileName = builtins.baseNameOf appIcon;
+  appUrlSchemes = tauriConfig.plugins."deep-link".desktop.schemes or [ ];
+  appUrlTypesPlist = lib.optionalString (appUrlSchemes != [ ]) ''
+        <key>CFBundleURLTypes</key>
+        <array>
+          <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+    ${
+      lib.concatMapStrings (scheme: "          <string>${scheme}</string>\n") appUrlSchemes
+    }        </array>
+            <key>CFBundleURLName</key>
+            <string>${appIdentifier} ${builtins.head appUrlSchemes}</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+          </dict>
+        </array>
+  '';
 
   patchedSrc = runCommand "${pname}-${version}-src" { } ''
     cp -r ${upstreamDesktop.src} "$out"
@@ -98,6 +130,61 @@ let
       "tauri.prod.conf.json"
       "--no-sign"
     ];
+
+    # cargo-tauri's install hook is bypassed under crate2nix because the
+    # generated derivation provides its own installPhase. Recreate the macOS
+    # app bundle from the crate2nix-built binary so Home Manager still sees an
+    # .app under $out/Applications.
+    postInstall = lib.optionalString stdenv.hostPlatform.isDarwin ''
+            appBundle="$out/Applications/${appName}.app"
+            appContents="$appBundle/Contents"
+            appMacOS="$appContents/MacOS"
+            appResources="$appContents/Resources"
+
+            install -d "$appMacOS" "$appResources"
+            install -Dm755 "$out/bin/opencode-desktop" "$appMacOS/${appBinaryName}"
+            install -Dm755 ${opencode}/bin/opencode "$appMacOS/opencode-cli"
+            install -Dm644 \
+              "${patchedSrc}/packages/desktop/src-tauri/${appIcon}" \
+              "$appResources/${appIconFileName}"
+
+            cat > "$appContents/Info.plist" <<EOF
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+        <key>CFBundleDevelopmentRegion</key>
+        <string>English</string>
+        <key>CFBundleDisplayName</key>
+        <string>${appName}</string>
+        <key>CFBundleExecutable</key>
+        <string>${appBinaryName}</string>
+        <key>CFBundleIconFile</key>
+        <string>${appIconFileName}</string>
+        <key>CFBundleIdentifier</key>
+        <string>${appIdentifier}</string>
+        <key>CFBundleInfoDictionaryVersion</key>
+        <string>6.0</string>
+        <key>CFBundleName</key>
+        <string>${appName}</string>
+        <key>CFBundlePackageType</key>
+        <string>APPL</string>
+        <key>CFBundleShortVersionString</key>
+        <string>${desktopPackageVersion}</string>
+        <key>CFBundleVersion</key>
+        <string>${desktopPackageVersion}</string>
+        <key>CSResourcesFileMapped</key>
+        <true/>
+        <key>LSMinimumSystemVersion</key>
+        <string>10.13</string>
+      ${appUrlTypesPlist}  <key>LSRequiresCarbon</key>
+        <true/>
+        <key>NSHighResolutionCapable</key>
+        <true/>
+      </dict>
+      </plist>
+      EOF
+    '';
 
     postFixup = lib.optionalString stdenv.hostPlatform.isLinux ''
       if [ -e "$out/bin/OpenCode" ]; then
