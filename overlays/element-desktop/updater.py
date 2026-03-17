@@ -21,9 +21,17 @@ from lib.update.nix import (
     _build_fetch_yarn_deps_expr,
     compute_fixed_output_hash,
 )
-from lib.update.updaters.base import HashEntryUpdater, VersionInfo, package_dir_for
+from lib.update.updaters.base import (
+    HashEntryUpdater,
+    UpdateContext,
+    VersionInfo,
+    package_dir_for,
+    register_updater,
+)
+from lib.update.updaters.metadata import NO_METADATA
 
 
+@register_updater
 class ElementDesktopUpdater(HashEntryUpdater):
     """Refresh hashes for the currently pinned element-desktop release."""
 
@@ -41,11 +49,15 @@ class ElementDesktopUpdater(HashEntryUpdater):
         if not isinstance(version, str) or not version:
             msg = "element-desktop sources.json is missing a pinned version"
             raise RuntimeError(msg)
-        return VersionInfo(version=version, metadata={})
+        return VersionInfo(version=version, metadata=NO_METADATA)
 
-    async def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:
+    async def _is_latest(
+        self,
+        context: UpdateContext | SourceEntry | None,
+        info: VersionInfo,
+    ) -> bool:
         """Recompute hashes for pinned versions before equality checks."""
-        _ = (current, info)
+        _ = (context, info)
         return False
 
     @staticmethod
@@ -70,9 +82,11 @@ class ElementDesktopUpdater(HashEntryUpdater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Compute srcHash first, then sha256 for fetchYarnDeps offline cache."""
-        _ = session
+        _ = (session, context)
 
         src_hash: str | None = None
         async for item in capture_stream_value(

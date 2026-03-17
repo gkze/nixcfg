@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import re
+import tomllib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import aiohttp
 
-    from lib.update.config import UpdateConfig
-
-from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import (
     HashCollection,
     HashEntry,
@@ -19,22 +16,19 @@ from lib.nix.models.sources import (
     SourceHashes,
 )
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
-from lib.update.flake import get_flake_input_node
 from lib.update.net import fetch_url
 from lib.update.nix_cargo import compute_import_cargo_lock_output_hashes
 from lib.update.updaters.base import (
     CargoLockGitDep,
-    FlakeInputMixin,
-    HashEntryUpdater,
+    FlakeInputUpdater,
+    UpdateContext,
     VersionInfo,
+    register_updater,
 )
 
-_NAME_RE = re.compile(r'^name = "(?P<name>[^"]+)"$')
-_VERSION_RE = re.compile(r'^version = "(?P<version>[^"]+)"$')
-_GIT_SOURCE_RE = re.compile(r'^source = "git\+[^#]+#[0-9a-f]+"$')
 
-
-class OpencodeDesktopUpdater(FlakeInputMixin, HashEntryUpdater):
+@register_updater
+class OpencodeDesktopUpdater(FlakeInputUpdater):
     """Resolve Cargo git deps from upstream lockfile and refresh output hashes."""
 
     name = "opencode-desktop"
@@ -47,34 +41,26 @@ class OpencodeDesktopUpdater(FlakeInputMixin, HashEntryUpdater):
         ("tauri-specta", "tauriSpectaOutputHash"),
     )
 
-    def __init__(self, *, config: UpdateConfig | None = None) -> None:
-        """Initialize updater and default ``input_name`` when omitted."""
-        super().__init__(config=config)
-        self._init_input_name()
-
     @classmethod
     def _resolve_git_dep_keys(cls, lockfile_content: str) -> dict[str, str]:
+        payload = tomllib.loads(lockfile_content)
+        packages = payload.get("package")
+        if not isinstance(packages, list):
+            msg = "Cargo.lock is missing a top-level package array"
+            raise TypeError(msg)
+
         keys_by_match: dict[str, str] = {}
-        current_name: str | None = None
-        current_version: str | None = None
-
-        for raw_line in lockfile_content.splitlines():
-            line = raw_line.strip()
-            name_match = _NAME_RE.match(line)
-            if name_match is not None:
-                current_name = name_match.group("name")
-                current_version = None
+        for package in packages:
+            if not isinstance(package, dict):
                 continue
-
-            version_match = _VERSION_RE.match(line)
-            if version_match is not None:
-                current_version = version_match.group("version")
+            current_name = package.get("name")
+            current_version = package.get("version")
+            source = package.get("source")
+            if not isinstance(current_name, str) or not isinstance(
+                current_version, str
+            ):
                 continue
-
-            if current_name is None or current_version is None:
-                continue
-
-            if _GIT_SOURCE_RE.match(line) is None:
+            if not isinstance(source, str) or not source.startswith("git+"):
                 continue
 
             dep_key = f"{current_name}-{current_version}"
@@ -107,15 +93,7 @@ class OpencodeDesktopUpdater(FlakeInputMixin, HashEntryUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
     ) -> str:
-        node_obj = info.metadata.get("node")
-        if node_obj is None:
-            node = get_flake_input_node(self._input)
-        elif isinstance(node_obj, FlakeLockNode):
-            node = node_obj
-        else:
-            msg = f"Expected flake lock node in metadata, got {type(node_obj)}"
-            raise TypeError(msg)
-
+        node = self._resolve_flake_node(info)
         locked = node.locked
         owner = locked.owner if locked is not None else None
         repo = locked.repo if locked is not None else None
@@ -138,8 +116,11 @@ class OpencodeDesktopUpdater(FlakeInputMixin, HashEntryUpdater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Compute importCargoLock output hashes for specta/tauri git deps."""
+        _ = context
         lockfile_content = await self._fetch_lockfile_content(info, session)
         keys_by_match = self._resolve_git_dep_keys(lockfile_content)
 
@@ -192,16 +173,9 @@ class OpencodeDesktopUpdater(FlakeInputMixin, HashEntryUpdater):
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build a source entry including the current input commit."""
-        node_obj = info.metadata.get("node")
-        if node_obj is not None and not isinstance(node_obj, FlakeLockNode):
-            msg = f"Expected flake lock node in metadata, got {type(node_obj)}"
-            raise TypeError(msg)
-        commit = None
-        if isinstance(node_obj, FlakeLockNode) and node_obj.locked is not None:
-            commit = node_obj.locked.rev
         return SourceEntry(
             version=info.version,
             hashes=HashCollection.from_value(hashes),
             input=self._input,
-            commit=commit,
+            commit=info.commit,
         )

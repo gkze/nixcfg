@@ -19,14 +19,17 @@ from lib.update.nix import _build_flake_attr_expr, get_current_nix_platform
 from lib.update.paths import get_repo_file
 from lib.update.updaters.base import (
     DenoManifestUpdater,
+    UpdateContext,
     VersionInfo,
     compute_url_hashes,
+    register_updater,
 )
 
 if TYPE_CHECKING:
     import aiohttp
 
 
+@register_updater
 class LinearCliUpdater(DenoManifestUpdater):
     """Update deno-deps manifest plus denort runtime hashes per platform."""
 
@@ -79,9 +82,14 @@ class LinearCliUpdater(DenoManifestUpdater):
     def _denort_url(target: str, deno_version: str) -> str:
         return f"https://dl.deno.land/release/v{deno_version}/denort-{target}.zip"
 
-    async def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:
-        if not await super()._is_latest(current, info):
+    async def _is_latest(
+        self,
+        context: UpdateContext | SourceEntry | None,
+        info: VersionInfo,
+    ) -> bool:
+        if not await super()._is_latest(context, info):
             return False
+        current = context.current if isinstance(context, UpdateContext) else context
         if current is None or current.hashes.entries is None:
             return False
         deno_version = await self._resolve_deno_version()
@@ -100,11 +108,13 @@ class LinearCliUpdater(DenoManifestUpdater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Resolve manifest plus per-platform denort fixed-output hashes."""
         manifest_drain = ValueDrain()
         async for event in drain_value_events(
-            super().fetch_hashes(info, session),
+            super().fetch_hashes(info, session, context=context),
             manifest_drain,
             parse=expect_source_hashes,
         ):

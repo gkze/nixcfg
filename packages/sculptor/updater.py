@@ -10,9 +10,11 @@ if TYPE_CHECKING:
     import aiohttp
 
 from lib.update.net import fetch_headers
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
+from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters.metadata import NO_METADATA
 
 
+@register_updater
 class SculptorUpdater(DownloadHashUpdater):
     """Resolve Sculptor version metadata from object-store headers."""
 
@@ -45,4 +47,4 @@ class SculptorUpdater(DownloadHashUpdater):
             version = dt.strftime("%Y-%m-%d")
         except TypeError, ValueError:
             version = last_modified[:10]
-        return VersionInfo(version=version, metadata={})
+        return VersionInfo(version=version, metadata=NO_METADATA)

@@ -12,11 +12,13 @@ if TYPE_CHECKING:
     import aiohttp
 
 from lib.update.net import fetch_url
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
+from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters.metadata import DownloadUrlMetadata
 
 _SPARKLE_NS = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
 
 
+@register_updater
 class ChatGPTUpdater(DownloadHashUpdater):
     """Resolve latest ChatGPT appcast version and artifact URL."""
 
@@ -79,13 +81,13 @@ class ChatGPTUpdater(DownloadHashUpdater):
         item = self._extract_item(root)
         version = self._extract_version(item)
         url = self._extract_download_url(item)
-        return VersionInfo(version=version, metadata={"url": url})
+        return VersionInfo(version=version, metadata=DownloadUrlMetadata(url=url))
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         """Return the appcast-provided download URL for Darwin builds."""
         _ = platform
-        url = info.metadata.get("url")
-        if isinstance(url, str):
-            return url
-        msg = f"Missing ChatGPT download URL in metadata: {url!r}"
+        metadata = info.metadata
+        if isinstance(metadata, DownloadUrlMetadata):
+            return metadata.url
+        msg = f"Missing ChatGPT download URL in metadata: {metadata!r}"
         raise RuntimeError(msg)

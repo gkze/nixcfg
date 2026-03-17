@@ -19,37 +19,21 @@ from lib.update.events import (
     expect_str,
     require_value,
 )
-from lib.update.net import fetch_github_api
 from lib.update.nix import _build_fetch_from_github_expr, compute_fixed_output_hash
-from lib.update.updaters.base import Updater, VersionInfo
+from lib.update.updaters.base import UpdateContext, VersionInfo, register_updater
+from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 if TYPE_CHECKING:
     import aiohttp
 
 
-class GooseCliUpdater(Updater):
+@register_updater
+class GooseCliUpdater(GitHubReleaseUpdater):
     """Resolve the latest Goose release and compute its source hash."""
 
     name = "goose-cli"
     GITHUB_OWNER = "block"
     GITHUB_REPO = "goose"
-
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Return latest upstream release version metadata."""
-        payload = await fetch_github_api(
-            session,
-            f"repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/releases/latest",
-            config=self.config,
-        )
-        if not isinstance(payload, dict):
-            msg = f"Unexpected release payload type: {type(payload).__name__}"
-            raise TypeError(msg)
-        tag_name = payload.get("tag_name")
-        if not isinstance(tag_name, str) or not tag_name:
-            msg = f"Missing tag_name in release payload: {payload!r}"
-            raise RuntimeError(msg)
-        version = tag_name.removeprefix("v")
-        return VersionInfo(version=version, metadata={"tag": tag_name})
 
     @staticmethod
     def _src_expr(version: str) -> str:
@@ -63,9 +47,11 @@ class GooseCliUpdater(Updater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | object | None = None,
     ) -> EventStream:
         """Compute the fixed-output source hash for Goose."""
-        _ = session
+        _ = (session, context)
 
         src_hash_drain = ValueDrain[str]()
         async for event in drain_value_events(

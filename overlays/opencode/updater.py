@@ -2,4 +2,4 @@
 
 from lib.update.updaters.base import bun_node_modules_updater
 
-bun_node_modules_updater("opencode")
+OpencodeUpdater = bun_node_modules_updater("opencode")

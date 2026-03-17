@@ -1,9 +1,8 @@
 """Updater registry with automatic per-package discovery.
 
-Scans ``packages/*/updater.py`` and ``overlays/*/updater.py`` for
-updater modules. Importing each module
-triggers ``Updater.__init_subclass__`` which registers the concrete
-class into :data:`UPDATERS`.
+Scans ``packages/*/updater.py`` and ``overlays/*/updater.py`` for updater
+modules. Importing each module runs explicit ``register_updater(...)`` calls
+or factory helpers, which populate :data:`UPDATERS`.
 """
 
 import importlib.util
@@ -17,7 +16,9 @@ from lib.update.updaters.base import (
     DenoDepsHashUpdater,
     DownloadHashUpdater,
     FlakeInputHashUpdater,
+    FlakeInputUpdater,
     HashEntryUpdater,
+    UpdateContext,
     Updater,
     VersionInfo,
     bun_node_modules_updater,
@@ -26,13 +27,18 @@ from lib.update.updaters.base import (
     flake_input_hash_updater,
     go_vendor_updater,
     npm_deps_updater,
+    register_updater,
     uv_lock_hash_updater,
 )
 from lib.update.updaters.github_raw_file import (
     GitHubRawFileUpdater,
     github_raw_file_updater,
 )
-from lib.update.updaters.platform_api import PlatformAPIUpdater
+from lib.update.updaters.github_release import GitHubReleaseUpdater
+from lib.update.updaters.platform_api import (
+    DownloadingPlatformAPIUpdater,
+    PlatformAPIUpdater,
+)
 
 
 def _discover_updaters() -> None:
@@ -59,10 +65,14 @@ __all__ = [
     "ChecksumProvidedUpdater",
     "DenoDepsHashUpdater",
     "DownloadHashUpdater",
+    "DownloadingPlatformAPIUpdater",
     "FlakeInputHashUpdater",
+    "FlakeInputUpdater",
     "GitHubRawFileUpdater",
+    "GitHubReleaseUpdater",
     "HashEntryUpdater",
     "PlatformAPIUpdater",
+    "UpdateContext",
     "Updater",
     "VersionInfo",
     "bun_node_modules_updater",
@@ -72,5 +82,6 @@ __all__ = [
     "github_raw_file_updater",
     "go_vendor_updater",
     "npm_deps_updater",
+    "register_updater",
     "uv_lock_hash_updater",
 ]

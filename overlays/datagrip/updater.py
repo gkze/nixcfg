@@ -10,9 +10,15 @@ if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry, SourceHashes
 
 from lib.update.net import fetch_json
-from lib.update.updaters.base import ChecksumProvidedUpdater, VersionInfo
+from lib.update.updaters.base import (
+    ChecksumProvidedUpdater,
+    VersionInfo,
+    register_updater,
+)
+from lib.update.updaters.metadata import ReleasePayloadMetadata
 
 
+@register_updater
 class DataGripUpdater(ChecksumProvidedUpdater):
     """Resolve latest DataGrip release and published checksums."""
 
@@ -28,8 +34,9 @@ class DataGripUpdater(ChecksumProvidedUpdater):
 
     @staticmethod
     def _release_payload(info: VersionInfo) -> dict[str, object]:
-        release = info.metadata.get("release")
-        if isinstance(release, dict):
+        metadata = info.metadata
+        if isinstance(metadata, ReleasePayloadMetadata):
+            release = metadata.release
             normalized: dict[str, object] = {}
             for key, value in release.items():
                 if not isinstance(key, str):
@@ -37,7 +44,7 @@ class DataGripUpdater(ChecksumProvidedUpdater):
                     raise TypeError(msg)
                 normalized[key] = value
             return normalized
-        msg = f"Missing or invalid DataGrip release metadata: {release!r}"
+        msg = f"Missing or invalid DataGrip release metadata: {metadata!r}"
         raise RuntimeError(msg)
 
     @staticmethod
@@ -101,7 +108,9 @@ class DataGripUpdater(ChecksumProvidedUpdater):
         if not isinstance(version, str) or not version:
             msg = f"Missing DataGrip version in release payload: {release}"
             raise RuntimeError(msg)
-        return VersionInfo(version=version, metadata={"release": release})
+        return VersionInfo(
+            version=version, metadata=ReleasePayloadMetadata(release=release)
+        )
 
     async def fetch_checksums(
         self,

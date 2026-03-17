@@ -11,9 +11,15 @@ if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry, SourceHashes
 
 from lib.update.net import fetch_url
-from lib.update.updaters.base import ChecksumProvidedUpdater, VersionInfo
+from lib.update.updaters.base import (
+    ChecksumProvidedUpdater,
+    VersionInfo,
+    register_updater,
+)
+from lib.update.updaters.metadata import NO_METADATA
 
 
+@register_updater
 class DroidUpdater(ChecksumProvidedUpdater):
     """Resolve Droid version and per-platform checksums from release assets."""
 
@@ -46,7 +52,7 @@ class DroidUpdater(ChecksumProvidedUpdater):
         if not match:
             msg = "Could not parse version from Factory CLI install script"
             raise RuntimeError(msg)
-        return VersionInfo(version=match.group(1), metadata={})
+        return VersionInfo(version=match.group(1), metadata=NO_METADATA)
 
     async def fetch_checksums(
         self,

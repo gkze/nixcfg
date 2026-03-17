@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     import aiohttp
 
 from lib.update.net import fetch_github_api
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
+from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters.metadata import AssetURLsMetadata
 
 
+@register_updater
 class SupersetUpdater(DownloadHashUpdater):
     """Track Superset Desktop AppImage URL and hash for Linux."""
 
@@ -86,12 +88,15 @@ class SupersetUpdater(DownloadHashUpdater):
                 raise RuntimeError(msg)
             asset_urls[platform] = download_url
 
-        return VersionInfo(version=version, metadata={"asset_urls": asset_urls})
+        return VersionInfo(version=version, metadata=AssetURLsMetadata(asset_urls))
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         """Construct the per-platform Superset AppImage download URL."""
-        asset_urls = cast("dict[str, object] | None", info.metadata.get("asset_urls"))
-        if isinstance(asset_urls, dict):
+        metadata = info.metadata
+        asset_urls = (
+            metadata.asset_urls if isinstance(metadata, AssetURLsMetadata) else None
+        )
+        if asset_urls is not None:
             candidate = asset_urls.get(platform)
             if isinstance(candidate, str) and candidate:
                 return candidate

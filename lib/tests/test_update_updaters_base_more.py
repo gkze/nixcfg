@@ -32,6 +32,7 @@ from lib.update.updaters.base import (
     flake_input_hash_updater,
     go_vendor_updater,
     npm_deps_updater,
+    register_updater,
     uv_lock_hash_updater,
 )
 
@@ -55,9 +56,15 @@ class _DummyUpdater(Updater):
         _ = session
         return VersionInfo(version=self.latest, metadata={})
 
-    async def fetch_hashes(self, info: VersionInfo, session: object) -> EventStream:
+    async def fetch_hashes(
+        self,
+        info: VersionInfo,
+        session: object,
+        *,
+        context: object | None = None,
+    ) -> EventStream:
         """Run this test case."""
-        _ = (info, session)
+        _ = (info, session, context)
         payload: dict[str, str] = {"x86_64-linux": HASH_A}
         yield UpdateEvent.value(self.name, payload)
 
@@ -66,8 +73,14 @@ class _DummyArtifactUpdater(_DummyUpdater):
     name = "dummy-artifact"
     materialize_when_current = True
 
-    async def fetch_hashes(self, info: VersionInfo, session: object) -> EventStream:
-        _ = (info, session)
+    async def fetch_hashes(
+        self,
+        info: VersionInfo,
+        session: object,
+        *,
+        context: object | None = None,
+    ) -> EventStream:
+        _ = (info, session, context)
         yield UpdateEvent.artifact(
             self.name,
             GeneratedArtifact.text("artifacts/dummy.txt", "updated\n"),
@@ -116,9 +129,15 @@ class _DummyHashEntry(HashEntryUpdater):
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
-    async def fetch_hashes(self, info: VersionInfo, session: object) -> EventStream:
+    async def fetch_hashes(
+        self,
+        info: VersionInfo,
+        session: object,
+        *,
+        context: object | None = None,
+    ) -> EventStream:
         """Run this test case."""
-        _ = (info, session)
+        _ = (info, session, context)
         entry = HashEntry.create("sha256", HASH_A)
         payload: list[HashEntry] = [entry]
         yield UpdateEvent.value(self.name, payload)
@@ -220,10 +239,11 @@ def test_updater_registration_rejects_duplicate_names_from_different_files(
     duplicate_name = "duplicate-updater-test"
     UPDATERS.pop(duplicate_name, None)
     monkeypatch.setattr(
-        "lib.update.updaters.base.inspect.getsourcefile",
+        "lib.update.updaters.registry.inspect.getsourcefile",
         lambda cls: f"/tmp/{cls.__module__}.py",
     )
 
+    @register_updater
     class _FirstDuplicateUpdater(Updater):
         __module__ = "dup_one"
         name = "duplicate-updater-test"
@@ -232,12 +252,19 @@ def test_updater_registration_rejects_duplicate_names_from_different_files(
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
-        async def fetch_hashes(self, info: VersionInfo, session: object) -> EventStream:
-            _ = (info, session)
+        async def fetch_hashes(
+            self,
+            info: VersionInfo,
+            session: object,
+            *,
+            context: object | None = None,
+        ) -> EventStream:
+            _ = (info, session, context)
             yield UpdateEvent.value(self.name, {"x86_64-linux": HASH_A})
 
     with pytest.raises(RuntimeError, match="Duplicate updater registration"):
 
+        @register_updater
         class _SecondDuplicateUpdater(Updater):
             __module__ = "dup_two"
             name = "duplicate-updater-test"
@@ -247,9 +274,13 @@ def test_updater_registration_rejects_duplicate_names_from_different_files(
                 return VersionInfo(version="1.0.0", metadata={})
 
             async def fetch_hashes(
-                self, info: VersionInfo, session: object
+                self,
+                info: VersionInfo,
+                session: object,
+                *,
+                context: object | None = None,
             ) -> EventStream:
-                _ = (info, session)
+                _ = (info, session, context)
                 yield UpdateEvent.value(self.name, {"x86_64-linux": HASH_A})
 
     UPDATERS.pop(duplicate_name, None)
@@ -342,7 +373,7 @@ def test_updater_materializes_artifacts_when_current() -> None:
                 async for event in updater.update_stream(
                     SourceEntry(
                         version="1.0.0",
-                        hashes={"x86_64-linux": HASH_A},
+                        hashes=HashCollection(mapping={"x86_64-linux": HASH_A}),
                     ),
                     session,
                 )

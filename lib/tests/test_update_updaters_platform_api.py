@@ -10,6 +10,7 @@ import pytest
 
 from lib.tests._assertions import check, expect_instance
 from lib.update.updaters.base import VersionInfo
+from lib.update.updaters.metadata import PlatformAPIMetadata
 from lib.update.updaters.platform_api import PlatformAPIUpdater
 
 if TYPE_CHECKING:
@@ -275,3 +276,20 @@ def test_fetch_latest_payload_shape_and_optional_commit_key(
     latest = _run_with_session(no_commit.fetch_latest)
     info = expect_instance(latest, VersionInfo)
     check("commit" not in info.metadata)
+
+
+def test_metadata_helper_accepts_typed_metadata_and_rejects_invalid_payload() -> None:
+    """Round-trip typed platform metadata and reject unsupported payload types."""
+    updater = _DummyPlatformUpdater()
+    metadata = PlatformAPIMetadata(
+        platform_info={
+            "x86_64-linux": {"sha256hash": "x"},
+            "aarch64-linux": {"sha256hash": "y"},
+        },
+        equality_fields={"build": "2026-03-01"},
+    )
+    info = VersionInfo(version="1", metadata=metadata)
+    check(updater._metadata(info) is metadata)
+
+    with pytest.raises(TypeError, match="Expected platform_info mapping"):
+        updater._metadata(VersionInfo(version="1", metadata=object()))

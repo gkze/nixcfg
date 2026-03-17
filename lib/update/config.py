@@ -35,6 +35,11 @@ class UpdateConfig:
     max_nix_builds: int  # concurrent nix build processes
     deno_deps_platforms: tuple[str, ...]
 
+    @property
+    def hash_build_platforms(self) -> tuple[str, ...]:
+        """Generalized alias for per-platform hash build targets."""
+        return self.deno_deps_platforms
+
 
 class UpdateSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="UPDATE_", extra="ignore")
@@ -96,6 +101,7 @@ class _ResolveConfigOverrides(TypedDict, total=False):
     retry_backoff: float | None
     fake_hash: str | None
     max_nix_builds: int | None
+    hash_build_platforms: str | tuple[str, ...] | None
     deno_platforms: str | None
     deno_deps_platforms: str | tuple[str, ...] | None
 
@@ -125,7 +131,10 @@ def resolve_config(**overrides: Unpack[_ResolveConfigOverrides]) -> UpdateConfig
     settings_data = DEFAULT_SETTINGS.model_dump()
 
     normalized_overrides: dict[str, object] = dict(overrides)
+    hash_build_platforms = normalized_overrides.pop("hash_build_platforms", None)
     deno_platforms = normalized_overrides.pop("deno_platforms", None)
+    if hash_build_platforms is not None:
+        normalized_overrides["deno_deps_platforms"] = hash_build_platforms
     if deno_platforms is not None:
         normalized_overrides["deno_deps_platforms"] = deno_platforms
 

@@ -12,19 +12,19 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import aiohttp
 import typer
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
-from lib.nix.models.flake_lock import FlakeLockNode
 from lib.update import io as update_io
 from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.config import resolve_active_config
 from lib.update.sources import load_all_sources
 from lib.update.updaters import UPDATERS
 from lib.update.updaters.base import VersionInfo
+from lib.update.updaters.metadata import deserialize_metadata, serialize_metadata
 
 type _JsonSafe = (
     str | int | float | bool | None | dict[str, _JsonSafe] | list[_JsonSafe]
@@ -58,26 +58,8 @@ def _serialize_version_info(info: VersionInfo) -> _JsonObject:
     """Serialize a VersionInfo to a JSON-safe dict."""
     return {
         "version": info.version,
-        "metadata": _make_json_safe(info.metadata),
+        "metadata": _make_json_safe(serialize_metadata(info.metadata)),
     }
-
-
-def _hydrate_metadata(metadata_payload: dict[str, object]) -> dict[str, object]:
-    """Restore typed metadata fields from JSON payloads.
-
-    The pinned-versions manifest is JSON-only, so ``VersionInfo.metadata`` values
-    like ``FlakeLockNode`` instances are serialized as dictionaries. Updaters
-    expect ``metadata["node"]`` to be a ``FlakeLockNode`` when present.
-    """
-    hydrated: dict[str, object] = dict(metadata_payload)
-    node_payload = hydrated.get("node")
-    if isinstance(node_payload, dict):
-        try:
-            hydrated["node"] = FlakeLockNode.model_validate(node_payload)
-        except ValidationError as exc:
-            msg = f"Pinned version entry has invalid node metadata: {node_payload!r}"
-            raise TypeError(msg) from exc
-    return hydrated
 
 
 def _deserialize_version_info(data: _JsonObject) -> VersionInfo:
@@ -92,7 +74,7 @@ def _deserialize_version_info(data: _JsonObject) -> VersionInfo:
         raise TypeError(msg)
     return VersionInfo(
         version=version_payload,
-        metadata=_hydrate_metadata(dict(metadata_payload)),
+        metadata=deserialize_metadata(dict(metadata_payload)),
     )
 
 
@@ -119,29 +101,37 @@ async def _resolve_all() -> tuple[dict[str, _JsonObject], list[str]]:
     config = resolve_active_config(None)
     results: dict[str, _JsonObject] = {}
     failures: list[str] = []
+    fatal_error: BaseException | None = None
 
     async with aiohttp.ClientSession() as session:
-        tasks: dict[str, asyncio.Task[VersionInfo]] = {}
-        for name, updater_cls in UPDATERS.items():
+
+        async def _resolve_one(name: str, updater_cls: type[Any]) -> None:
+            nonlocal fatal_error
             try:
                 updater = updater_cls(config=config)
             except TypeError as exc:
                 if "config" not in str(exc):
-                    raise
+                    fatal_error = exc
+                    return
                 updater = updater_cls()
-            tasks[name] = asyncio.create_task(updater.fetch_latest(session))
-
-        outcomes = await asyncio.gather(*tasks.values(), return_exceptions=True)
-        for name, outcome in zip(tasks, outcomes, strict=True):
-            if isinstance(outcome, BaseException):
-                sys.stderr.write(f"Warning: failed to resolve {name}: {outcome}\n")
+            try:
+                outcome = await updater.fetch_latest(session)
+            except Exception as exc:  # noqa: BLE001
+                sys.stderr.write(f"Warning: failed to resolve {name}: {exc}\n")
                 failures.append(name)
-                continue
+                return
             if not isinstance(outcome, VersionInfo):
                 msg = f"unexpected version payload for {name}: {type(outcome)}"
-                raise TypeError(msg)
+                fatal_error = TypeError(msg)
+                return
             results[name] = _serialize_version_info(outcome)
 
+        async with asyncio.TaskGroup() as group:
+            for name, updater_cls in UPDATERS.items():
+                group.create_task(_resolve_one(name, updater_cls))
+
+    if fatal_error is not None:
+        raise fatal_error
     return results, failures
 
 

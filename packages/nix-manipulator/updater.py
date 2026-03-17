@@ -2,4 +2,4 @@
 
 from lib.update.updaters.base import uv_lock_hash_updater
 
-uv_lock_hash_updater("nix-manipulator")
+NixManipulatorUpdater = uv_lock_hash_updater("nix-manipulator")

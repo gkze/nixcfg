@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -12,12 +12,20 @@ if TYPE_CHECKING:
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
 
+from lib.update import process as update_process
+from lib.update.events import (
+    ValueDrain,
+    drain_value_events,
+    expect_hash_mapping,
+    require_value,
+)
 from lib.update.net import fetch_json
 from lib.update.updaters.base import (
     ChecksumProvidedUpdater,
     VersionInfo,
     _verify_platform_versions,
 )
+from lib.update.updaters.metadata import PlatformAPIMetadata
 
 _OBJECT_MAP_ADAPTER = TypeAdapter(dict[str, object])
 _PLATFORM_INFO_ADAPTER = TypeAdapter(dict[str, dict[str, object]])
@@ -55,6 +63,41 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
             values[platform] = value
         return values
 
+    def _metadata(self, info: VersionInfo) -> PlatformAPIMetadata:
+        metadata = info.metadata
+        if isinstance(metadata, PlatformAPIMetadata):
+            return metadata
+        if isinstance(metadata, dict):
+            metadata_map = cast("dict[str, object]", metadata)
+            platform_info_obj = metadata_map.get("platform_info")
+            if not isinstance(platform_info_obj, dict):
+                msg = f"Expected platform_info mapping in {self.name} metadata"
+                raise TypeError(msg)
+            try:
+                platform_info = _PLATFORM_INFO_ADAPTER.validate_python(
+                    platform_info_obj,
+                    strict=True,
+                )
+            except ValidationError as exc:
+                msg = f"Malformed platform payload for {self.name}"
+                raise TypeError(msg) from exc
+            equality_fields = {
+                key: value
+                for key, value in metadata_map.items()
+                if isinstance(key, str)
+                and key not in {"commit", "platform_info"}
+                and isinstance(value, str)
+            }
+            commit_payload = metadata_map.get("commit")
+            commit = commit_payload if isinstance(commit_payload, str) else None
+            return PlatformAPIMetadata(
+                platform_info=platform_info,
+                equality_fields=equality_fields,
+                commit=commit,
+            )
+        msg = f"Expected platform_info mapping in {self.name} metadata"
+        raise TypeError(msg)
+
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch platform metadata and verify versions match across platforms."""
 
@@ -85,21 +128,27 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
             field=self.VERSION_KEY,
         )
         version = _verify_platform_versions(versions, self.name)
-        metadata: dict[str, object] = {
-            "platform_info": platform_info,
-        }
+        equality_fields: dict[str, str] = {}
         for key in self.EXTRA_EQUALITY_KEYS:
             values = self._require_platform_str_field(platform_info, field=key)
-            metadata[key] = _verify_platform_versions(values, f"{self.name} {key}")
+            equality_fields[key] = _verify_platform_versions(
+                values, f"{self.name} {key}"
+            )
+        commit: str | None = None
         if self.COMMIT_METADATA_KEY:
             commits = self._require_platform_str_field(
                 platform_info,
                 field=self.COMMIT_METADATA_KEY,
             )
-            metadata["commit"] = _verify_platform_versions(
-                commits, f"{self.name} commit"
-            )
-        return VersionInfo(version=version, metadata=metadata)
+            commit = _verify_platform_versions(commits, f"{self.name} commit")
+        return VersionInfo(
+            version=version,
+            metadata=PlatformAPIMetadata(
+                platform_info=platform_info,
+                equality_fields=equality_fields,
+                commit=commit,
+            ),
+        )
 
     async def fetch_checksums(
         self,
@@ -112,18 +161,8 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
         if not checksum_key:
             msg = "No CHECKSUM_KEY defined"
             raise NotImplementedError(msg)
-        platform_info_obj = info.metadata.get("platform_info")
-        if not isinstance(platform_info_obj, dict):
-            msg = f"Expected platform_info mapping in {self.name} metadata"
-            raise TypeError(msg)
-        try:
-            platform_info = _PLATFORM_INFO_ADAPTER.validate_python(
-                platform_info_obj,
-                strict=True,
-            )
-        except ValidationError as exc:
-            msg = f"Malformed platform payload for {self.name}"
-            raise TypeError(msg) from exc
+        metadata = self._metadata(info)
+        platform_info = metadata.platform_info
         checksums: dict[str, str] = {}
         for platform in self.PLATFORMS:
             if platform not in platform_info:
@@ -146,6 +185,34 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
             nix_plat: self._download_url(api_plat, info)
             for nix_plat, api_plat in self.PLATFORMS.items()
         }
-        commit_payload = info.metadata.get("commit")
-        commit = commit_payload if isinstance(commit_payload, str) else None
+        metadata = self._metadata(info)
+        commit = metadata.commit
         return self._build_result_with_urls(info, hashes, urls, commit=commit)
+
+
+class DownloadingPlatformAPIUpdater(PlatformAPIUpdater):
+    """Platform API updater that computes hashes from download URLs."""
+
+    async def fetch_checksums(
+        self,
+        info: VersionInfo,
+        session: aiohttp.ClientSession,
+    ) -> dict[str, str]:
+        """Download artifacts and derive per-platform hashes."""
+        _ = session
+        urls = {
+            nix_plat: self._download_url(api_plat, info)
+            for nix_plat, api_plat in self.PLATFORMS.items()
+        }
+        hashes_drain = ValueDrain[dict[str, str]]()
+        async for _event in drain_value_events(
+            update_process.compute_url_hashes(self.name, urls.values()),
+            hashes_drain,
+            parse=expect_hash_mapping,
+        ):
+            pass
+        hashes_by_url = require_value(hashes_drain, "Missing hash output")
+        return {plat: hashes_by_url[url] for plat, url in urls.items()}
+
+
+__all__ = ["DownloadingPlatformAPIUpdater", "PlatformAPIUpdater"]

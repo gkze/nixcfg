@@ -263,6 +263,11 @@ class GatheredValues[K]:
     values: dict[K, UpdateEventPayload]
 
 
+@dataclass(frozen=True)
+class _GatherDone:
+    pass
+
+
 async def gather_event_streams[K](
     streams: dict[K, EventStream],
 ) -> AsyncGenerator[UpdateEvent | GatheredValues[K]]:
@@ -280,35 +285,45 @@ async def gather_event_streams[K](
             else:
                 yield item  # forward UpdateEvent to caller
     """
-    queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+    done = _GatherDone()
+    queue: asyncio.Queue[UpdateEvent | Exception | _GatherDone] = asyncio.Queue()
     results: dict[K, UpdateEventPayload] = {}
 
+    def _required_payload(event: UpdateEvent) -> UpdateEventPayload:
+        payload = event.payload
+        if payload is None:
+            msg = f"Value event from {event.source!r} is missing payload"
+            raise RuntimeError(msg)
+        return payload
+
     async def _run(key: K, stream: EventStream) -> None:
-        async for event in stream:
-            if event.kind == UpdateEventKind.VALUE:
-                payload = event.payload
-                if payload is None:
-                    msg = f"Value event from {event.source!r} is missing payload"
-                    raise RuntimeError(msg)
-                results[key] = payload
-            else:
-                await queue.put(event)
+        try:
+            async for event in stream:
+                if event.kind == UpdateEventKind.VALUE:
+                    results[key] = _required_payload(event)
+                else:
+                    await queue.put(event)
+        except Exception as exc:  # noqa: BLE001
+            await queue.put(exc)
+        finally:
+            await queue.put(done)
 
-    async def _wait(tasks: list[asyncio.Task[None]]) -> None:
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        await queue.put(None)  # sentinel
-        for result in results:
-            if isinstance(result, BaseException):
-                raise result
+    error: Exception | None = None
+    remaining = len(streams)
+    async with asyncio.TaskGroup() as group:
+        for key, stream in streams.items():
+            group.create_task(_run(key, stream))
 
-    tasks = [asyncio.create_task(_run(k, s)) for k, s in streams.items()]
-    waiter = asyncio.create_task(_wait(tasks))
+        while remaining > 0:
+            item = await queue.get()
+            if item == done:
+                remaining -= 1
+                continue
+            if isinstance(item, Exception):
+                error = item
+                continue
+            yield item
 
-    while True:
-        event = await queue.get()
-        if event is None:
-            break
-        yield event
-
-    await waiter
+    if error is not None:
+        raise error
     yield GatheredValues(results)

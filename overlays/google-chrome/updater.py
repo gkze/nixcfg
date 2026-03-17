@@ -8,9 +8,11 @@ if TYPE_CHECKING:
     import aiohttp
 
 from lib.update.net import fetch_json
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
+from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters.metadata import NO_METADATA
 
 
+@register_updater
 class GoogleChromeUpdater(DownloadHashUpdater):
     """Resolve latest Google Chrome version and download hashes."""
 
@@ -42,4 +44,4 @@ class GoogleChromeUpdater(DownloadHashUpdater):
         if not isinstance(version, str) or not version:
             msg = f"Missing version in chromiumdash response: {data[0]}"
             raise RuntimeError(msg)
-        return VersionInfo(version=version, metadata={})
+        return VersionInfo(version=version, metadata=NO_METADATA)

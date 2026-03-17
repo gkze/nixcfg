@@ -237,7 +237,7 @@ async def compute_deno_deps_hash(
     """
     config = resolve_active_config(config)
     current_platform = get_current_nix_platform()
-    platforms = config.deno_deps_platforms
+    platforms = getattr(config, "hash_build_platforms", config.deno_deps_platforms)
     if current_platform not in platforms:
         msg = (
             f"Current platform {current_platform} not in supported platforms: "

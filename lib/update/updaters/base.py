@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -51,6 +51,8 @@ from lib.update.nix import (
     get_current_nix_platform,
 )
 from lib.update.nix_deno import compute_deno_deps_hash
+from lib.update.updaters.metadata import FlakeInputMetadata, VersionInfo
+from lib.update.updaters.registry import UPDATERS, register_updater
 
 
 def _package_dir_for(name: str) -> Path | None:
@@ -77,23 +79,6 @@ def _updater_sourcefile(cls: type[Updater]) -> str | None:
         module = inspect.getmodule(cls)
         module_file = getattr(module, "__file__", None)
         return module_file if isinstance(module_file, str) else None
-
-
-def _is_test_updater_class(cls: type[Updater]) -> bool:
-    module_name = getattr(cls, "__module__", "")
-    if module_name.startswith("lib.tests."):
-        return True
-
-    sourcefile = _updater_sourcefile(cls)
-    return sourcefile is not None and "/lib/tests/" in sourcefile
-
-
-@dataclass
-class VersionInfo:
-    """Latest upstream version metadata fetched by an updater."""
-
-    version: str
-    metadata: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -128,7 +113,56 @@ def _ensure_str_mapping(values: object) -> dict[str, str]:
     return result
 
 
-UPDATERS: dict[str, type[Updater]] = {}
+@dataclass(slots=True)
+class UpdateContext:
+    """Explicit per-run state shared across updater phases."""
+
+    current: SourceEntry | None
+    drv_fingerprint: str | None = None
+
+
+def _coerce_context(context: UpdateContext | SourceEntry | None) -> UpdateContext:
+    if isinstance(context, UpdateContext):
+        return context
+    return UpdateContext(current=context)
+
+
+def _call_with_optional_context[T](
+    func: Callable[..., T],
+    *args: object,
+    context: UpdateContext,
+    **kwargs: object,
+) -> T:
+    try:
+        return func(*args, context=context, **kwargs)
+    except TypeError as exc:
+        if "context" not in str(exc):
+            raise
+        try:
+            return func(*args, **kwargs)
+        except TypeError as inner_exc:
+            if "info" not in str(inner_exc):
+                raise
+            trimmed = dict(kwargs)
+            trimmed.pop("info", None)
+            return func(*args, **trimmed)
+
+
+async def _emit_single_hash_entry(
+    source_name: str,
+    events: EventStream,
+    *,
+    error: str,
+    hash_type: HashType,
+) -> EventStream:
+    hash_drain = ValueDrain[str]()
+    async for event in drain_value_events(events, hash_drain, parse=expect_str):
+        yield event
+    hash_value = require_value(hash_drain, error)
+    yield UpdateEvent.value(
+        source_name,
+        [HashEntry.create(hash_type, hash_value)],
+    )
 
 
 class Updater(ABC):
@@ -139,37 +173,9 @@ class Updater(ABC):
     required_tools: ClassVar[tuple[str, ...]] = ("nix",)
     materialize_when_current: ClassVar[bool] = False
 
-    def __init_subclass__(cls, **kwargs: object) -> None:
-        """Register concrete updater subclasses in :data:`UPDATERS`."""
-        super().__init_subclass__(**kwargs)
-        name = getattr(cls, "name", None)
-        if name is not None and not getattr(cls, "__abstractmethods__", None):
-            existing = UPDATERS.get(name)
-            if existing is not None and existing is not cls:
-                if _is_test_updater_class(existing) or _is_test_updater_class(cls):
-                    UPDATERS[name] = cls
-                    return
-                existing_path = _updater_sourcefile(existing)
-                new_path = _updater_sourcefile(cls)
-                if (
-                    existing_path is not None
-                    and new_path is not None
-                    and existing_path != new_path
-                ):
-                    msg = (
-                        f"Duplicate updater registration for {name!r}: "
-                        f"{existing.__module__}.{existing.__qualname__} and "
-                        f"{cls.__module__}.{cls.__qualname__}"
-                    )
-                    raise RuntimeError(msg)
-            UPDATERS[name] = cls
-
     def __init__(self, *, config: UpdateConfig | None = None) -> None:
         """Create an updater bound to active config values."""
         self.config = resolve_active_config(config)
-        # Stash the current entry while ``update_stream`` runs so updaters can
-        # preserve platform hashes when non-native builders are unavailable.
-        self._current_entry: SourceEntry | None = None
 
     @abstractmethod
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
@@ -181,6 +187,8 @@ class Updater(ABC):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Compute source hashes for the fetched version."""
         raise NotImplementedError
@@ -207,17 +215,29 @@ class Updater(ABC):
             commit=commit,
         )
 
-    async def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:
+    async def _is_latest(
+        self,
+        context: UpdateContext | SourceEntry | None,
+        info: VersionInfo,
+    ) -> bool:
+        context = _coerce_context(context)
+        current = context.current
         if current is None:
             return False
         if current.version != info.version:
             return False
-        upstream_commit = info.metadata.get("commit")
+        upstream_commit = info.commit
         if isinstance(upstream_commit, str) and current.commit:
             return current.commit == upstream_commit
         return True
 
-    async def _finalize_result(self, result: SourceEntry) -> EventStream:
+    async def _finalize_result(
+        self,
+        result: SourceEntry,
+        *,
+        info: VersionInfo | None = None,
+        context: UpdateContext | SourceEntry | None = None,
+    ) -> EventStream:
         """Attach additional metadata to *result* before the equality check.
 
         Subclasses can override this to attach additional metadata (e.g. a
@@ -225,6 +245,7 @@ class Updater(ABC):
         **must** yield the (possibly updated) result as a
         :class:`UpdateEvent.value` event so the caller can retrieve it.
         """
+        _ = (info, context)
         yield UpdateEvent.value(self.name, result)
 
     async def update_stream(
@@ -235,6 +256,7 @@ class Updater(ABC):
         pinned_version: VersionInfo | None = None,
     ) -> EventStream:
         """Run fetch/check/hash/update flow and emit update events."""
+        context = UpdateContext(current=current)
         if pinned_version is not None:
             yield UpdateEvent.status(
                 self.name,
@@ -255,7 +277,7 @@ class Updater(ABC):
             f"Latest version: {info.version}",
             operation="check_version",
         )
-        is_latest = await self._is_latest(current, info)
+        is_latest = await self._is_latest(context, info)
         if is_latest and not self.materialize_when_current:
             yield UpdateEvent.status(
                 self.name,
@@ -277,29 +299,35 @@ class Updater(ABC):
             operation="compute_hash",
         )
         hashes_drain = ValueDrain[SourceHashes]()
-        self._current_entry = current
-        try:
-            async for event in drain_value_events(
-                self.fetch_hashes(info, session),
-                hashes_drain,
-                parse=expect_source_hashes,
-            ):
-                yield event
-        finally:
-            self._current_entry = None
+        async for event in drain_value_events(
+            _call_with_optional_context(
+                self.fetch_hashes,
+                info,
+                session,
+                context=context,
+            ),
+            hashes_drain,
+            parse=expect_source_hashes,
+        ):
+            yield event
         hashes = require_value(hashes_drain, "Missing hash output")
         result = self.build_result(info, hashes)
 
         result_drain = ValueDrain[SourceEntry]()
         async for event in drain_value_events(
-            self._finalize_result(result),
+            _call_with_optional_context(
+                self._finalize_result,
+                result,
+                info=info,
+                context=context,
+            ),
             result_drain,
             parse=expect_source_entry,
         ):
             yield event
         result = require_value(result_drain, "Missing finalized result")
 
-        if current is not None and result == current:
+        if context.current is not None and result == context.current:
             unchanged_message = (
                 "Source metadata unchanged"
                 if self.materialize_when_current
@@ -333,8 +361,11 @@ class ChecksumProvidedUpdater(Updater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Convert fetched hex checksums to SRI hashes."""
+        _ = _coerce_context(context)
         checksums = await self.fetch_checksums(info, session)
         streams = {
             platform: convert_nix_hash_to_sri(self.name, hex_hash)
@@ -408,9 +439,11 @@ class DownloadHashUpdater(Updater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Compute platform hashes from prefetched artifact URLs."""
-        _ = session
+        _ = (session, _coerce_context(context))
         platform_urls = self._platform_urls(info)
         hashes_drain = ValueDrain[HashMapping]()
         async for event in drain_value_events(
@@ -449,32 +482,23 @@ class HashEntryUpdater(Updater):
         error: str,
         hash_type: HashType,
     ) -> EventStream:
-        hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(events, hash_drain, parse=expect_str):
-            yield event
-        hash_value = require_value(hash_drain, error)
-        entry = HashEntry.create(hash_type, hash_value)
-        entries: list[HashEntry] = [entry]
-        yield UpdateEvent.value(
+        async for event in _emit_single_hash_entry(
             self.name,
-            entries,
-        )
+            events,
+            error=error,
+            hash_type=hash_type,
+        ):
+            yield event
 
 
-class FlakeInputMixin:
-    """Shared logic for updaters backed by a flake input.
-
-    Provides ``input_name`` defaulting (to ``self.name``), the ``_input``
-    accessor property, and a ``fetch_latest`` implementation that reads
-    the flake lock.  Used by :class:`FlakeInputHashUpdater` and
-    :class:`DenoManifestUpdater`.
-    """
+class FlakeInputUpdater(Updater):
+    """Base updater for sources backed by a flake.lock input."""
 
     input_name: str | None = None
-    name: str
 
-    def _init_input_name(self) -> None:
-        """Default ``input_name`` to ``self.name`` when unset."""
+    def __init__(self, *, config: UpdateConfig | None = None) -> None:
+        """Initialize a flake-input-backed updater."""
+        super().__init__(config=config)
         if self.input_name is None:
             self.input_name = self.name
 
@@ -485,15 +509,37 @@ class FlakeInputMixin:
             raise RuntimeError(msg)
         return self.input_name
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    def _resolve_flake_node(self, info: VersionInfo) -> FlakeLockNode:
+        metadata = info.metadata
+        if isinstance(metadata, FlakeInputMetadata):
+            return metadata.node
+        if isinstance(metadata, dict):
+            metadata_map = cast("dict[str, object]", metadata)
+            node = metadata_map.get("node")
+            if node is None:
+                return get_flake_input_node(self._input)
+            if isinstance(node, FlakeLockNode):
+                return node
+            msg = f"Expected flake lock node in metadata, got {type(node)}"
+            raise TypeError(msg)
+        return get_flake_input_node(self._input)
+
+    async def fetch_latest(
+        self,
+        session: aiohttp.ClientSession,
+    ) -> VersionInfo:
         """Resolve the latest version from the flake lock node."""
         _ = session
         node = get_flake_input_node(self._input)
         version = get_flake_input_version(node)
-        return VersionInfo(version=version, metadata={"node": node})
+        commit = node.locked.rev if node.locked is not None else None
+        return VersionInfo(
+            version=version,
+            metadata=FlakeInputMetadata(node=node, commit=commit),
+        )
 
 
-class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
+class FlakeInputHashUpdater(FlakeInputUpdater):
     """Base updater for hash-only sources backed by flake inputs.
 
     Uses derivation fingerprinting for maximally precise staleness detection.
@@ -511,15 +557,25 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
     hash_type: HashType
     platform_specific: bool = False
     native_only: bool = False
-    _cached_fingerprint: str | None = None
     required_tools: ClassVar[tuple[str, ...]] = ("nix",)
 
-    def __init__(self, *, config: UpdateConfig | None = None) -> None:
-        """Initialize and default ``input_name`` to the package name."""
-        super().__init__(config=config)
-        self._init_input_name()
+    def build_result(
+        self,
+        info: VersionInfo,
+        hashes: SourceHashes,
+    ) -> SourceEntry:
+        """Build a source entry tied to this updater's flake input."""
+        return SourceEntry(
+            version=info.version,
+            hashes=HashCollection.from_value(hashes),
+            input=self._input,
+        )
 
-    async def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:
+    async def _is_latest(
+        self,
+        context: UpdateContext | SourceEntry | None,
+        info: VersionInfo,
+    ) -> bool:
         """Check staleness via derivation fingerprint comparison.
 
         The source version must match first.  Even when derivation inputs are
@@ -531,6 +587,8 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
         when the fingerprint matches exactly — meaning no build input in the
         entire transitive closure has changed.
         """
+        context = _coerce_context(context)
+        current = context.current
         if current is None:
             return False
         if current.version != info.version:
@@ -544,20 +602,26 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
         except RuntimeError:
             # If fingerprint computation fails, conservatively recompute.
             return False
-        # Cache the fingerprint so _finalize_result can reuse it.
-        self._cached_fingerprint = new_fingerprint
+        context.drv_fingerprint = new_fingerprint
         return current.drv_hash == new_fingerprint
 
-    async def _finalize_result(self, result: SourceEntry) -> EventStream:
+    async def _finalize_result(
+        self,
+        result: SourceEntry,
+        *,
+        info: VersionInfo | None = None,
+        context: UpdateContext | SourceEntry | None = None,
+    ) -> EventStream:
         """Attach a derivation fingerprint to the result entry."""
+        _ = info
+        context = _coerce_context(context)
         yield UpdateEvent.status(
             self.name,
             "Computing derivation fingerprint...",
             operation="compute_hash",
         )
         try:
-            # Reuse cached fingerprint from _is_latest when available.
-            drv_hash = getattr(self, "_cached_fingerprint", None)
+            drv_hash = context.drv_fingerprint
             if drv_hash is None:
                 drv_hash = await compute_drv_fingerprint(self.name, config=self.config)
             result = result.model_copy(update={"drv_hash": drv_hash})
@@ -575,14 +639,22 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
             return (current_platform,)
 
         targets = [current_platform]
-        for platform in self.config.deno_deps_platforms:
+        for platform in self.config.hash_build_platforms:
             if platform not in targets:
                 targets.append(platform)
         return tuple(targets)
 
-    def _existing_platform_hashes(self) -> dict[str, str]:
+    def _existing_platform_hashes(
+        self,
+        context: UpdateContext | SourceEntry | None = None,
+    ) -> dict[str, str]:
         """Return existing platform hashes for ``self.hash_type`` when present."""
-        entry = self._current_entry
+        context = _coerce_context(context)
+        entry = context.current
+        if entry is None:
+            legacy_entry = getattr(self, "_current_entry", None)
+            if isinstance(legacy_entry, SourceEntry):
+                entry = legacy_entry
         if entry is None:
             return {}
 
@@ -623,14 +695,17 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Compute FOD hashes for the package overlay build."""
+        context = _coerce_context(context)
         _ = session
         if self.platform_specific:
             current_platform = get_current_nix_platform()
             error = f"Missing {self.hash_type} output"
             platform_hashes: dict[str, str] = {}
-            existing_hashes = self._existing_platform_hashes()
+            existing_hashes = self._existing_platform_hashes(context)
             failed_platforms: list[str] = []
 
             for platform in self._platform_targets(current_platform):
@@ -679,7 +754,8 @@ class FlakeInputHashUpdater(FlakeInputMixin, HashEntryUpdater):
             ]
             yield UpdateEvent.value(self.name, entries)
         else:
-            async for event in self._emit_single_hash_entry(
+            async for event in _emit_single_hash_entry(
+                self.name,
                 self._compute_hash(info),
                 error=f"Missing {self.hash_type} output",
                 hash_type=self.hash_type,
@@ -712,9 +788,11 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Compute a single FOD hash entry for the Deno deps overlay."""
-        _ = session
+        _ = (session, _coerce_context(context))
 
         def _expect_platform_hashes(payload: object) -> HashMapping:
             if isinstance(payload, dict):
@@ -742,7 +820,7 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
         yield UpdateEvent.value(self.name, entries)
 
 
-class DenoManifestUpdater(FlakeInputMixin, Updater):
+class DenoManifestUpdater(FlakeInputUpdater):
     """Updater for Deno packages built with ``mkDenoApplication``.
 
     Instead of computing FOD hashes, this updater resolves the ``deno.lock``
@@ -760,25 +838,16 @@ class DenoManifestUpdater(FlakeInputMixin, Updater):
     required_tools: ClassVar[tuple[str, ...]] = ()
     materialize_when_current: ClassVar[bool] = True
 
-    def __init__(self, *, config: UpdateConfig | None = None) -> None:
-        """Create an updater bound to active config values."""
-        super().__init__(config=config)
-        self._init_input_name()
-
     async def fetch_hashes(
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Resolve ``deno.lock`` and emit ``deno-deps.json`` as an artifact."""
-        node_obj = info.metadata.get("node")
-        if node_obj is None:
-            node = get_flake_input_node(self._input)
-        elif isinstance(node_obj, FlakeLockNode):
-            node = node_obj
-        else:
-            msg = f"Expected flake lock node in metadata, got {type(node_obj)}"
-            raise TypeError(msg)
+        _ = _coerce_context(context)
+        node = self._resolve_flake_node(info)
 
         # Download deno.lock from the GitHub source.
         locked = node.locked
@@ -843,117 +912,18 @@ class DenoManifestUpdater(FlakeInputMixin, Updater):
         yield UpdateEvent.value(self.name, empty_entries)
 
 
-def flake_input_hash_updater(
-    name: str,
-    hash_type: HashType,
-    *,
-    input_name: str | None = None,
-    platform_specific: bool = False,
-) -> type[FlakeInputHashUpdater]:
-    """Create a :class:`FlakeInputHashUpdater` subclass for *name*.
+FlakeInputMixin = FlakeInputUpdater
 
-    This is the **only** factory needed for simple overlay-based hash
-    updaters.  Adding a new hash type requires only a single call to this
-    function in the per-package ``updater.py`` — no infrastructure changes.
-
-    Parameters
-    ----------
-    name:
-        Package name (must match the overlay/package attribute).
-    hash_type:
-        The hash key in ``sources.json`` (e.g. ``"vendorHash"``).
-    input_name:
-        Flake input name if different from *name*.
-    platform_specific:
-        When ``True``, the hash is built for the current Nix platform
-        and the resulting ``HashEntry`` is tagged with a platform key
-        (used by Bun node_modules and similar platform-specific FODs).
-
-    """
-    attrs: dict[str, object] = {
-        "name": name,
-        "input_name": input_name,
-        "hash_type": hash_type,
-        "platform_specific": platform_specific,
-    }
-    return type(f"{name}Updater", (FlakeInputHashUpdater,), attrs)
-
-
-# ── Convenience aliases (thin wrappers around flake_input_hash_updater) ──
-
-
-def go_vendor_updater(
-    name: str, *, input_name: str | None = None, **_kw: object
-) -> type[FlakeInputHashUpdater]:
-    """Shorthand: ``flake_input_hash_updater(name, "vendorHash", ...)``."""
-    return flake_input_hash_updater(name, "vendorHash", input_name=input_name)
-
-
-def cargo_vendor_updater(
-    name: str, *, input_name: str | None = None, **_kw: object
-) -> type[FlakeInputHashUpdater]:
-    """Shorthand: ``flake_input_hash_updater(name, "cargoHash", ...)``."""
-    return flake_input_hash_updater(name, "cargoHash", input_name=input_name)
-
-
-def npm_deps_updater(
-    name: str, *, input_name: str | None = None
-) -> type[FlakeInputHashUpdater]:
-    """Shorthand: ``flake_input_hash_updater(name, "npmDepsHash", ...)``."""
-    return flake_input_hash_updater(name, "npmDepsHash", input_name=input_name)
-
-
-def bun_node_modules_updater(
-    name: str, *, input_name: str | None = None
-) -> type[FlakeInputHashUpdater]:
-    """Shorthand for ``flake_input_hash_updater(name, "nodeModulesHash", ...)``."""
-    return flake_input_hash_updater(
-        name, "nodeModulesHash", input_name=input_name, platform_specific=True
-    )
-
-
-def uv_lock_hash_updater(
-    name: str, *, input_name: str | None = None
-) -> type[FlakeInputHashUpdater]:
-    """Shorthand: ``flake_input_hash_updater(name, "uvLockHash", ...)``."""
-    return flake_input_hash_updater(name, "uvLockHash", input_name=input_name)
-
-
-def deno_deps_updater(
-    name: str,
-    *,
-    input_name: str | None = None,
-) -> type[DenoDepsHashUpdater]:
-    """Create a :class:`DenoDepsHashUpdater` subclass for ``name``.
-
-    .. deprecated::
-        Use :func:`deno_manifest_updater` for ``mkDenoApplication`` packages.
-    """
-    attrs: dict[str, object] = {"name": name, "input_name": input_name}
-    return type(f"{name}Updater", (DenoDepsHashUpdater,), attrs)
-
-
-def deno_manifest_updater(
-    name: str,
-    *,
-    input_name: str | None = None,
-    lock_file: str = "deno.lock",
-    manifest_file: str = "deno-deps.json",
-) -> type[DenoManifestUpdater]:
-    """Create a :class:`DenoManifestUpdater` subclass for *name*.
-
-    Use this for packages built with ``mkDenoApplication``.  The updater
-    resolves ``deno.lock`` from the flake input source and writes
-    ``deno-deps.json`` — no FOD hashes are involved.
-    """
-    attrs: dict[str, object] = {
-        "name": name,
-        "input_name": input_name,
-        "lock_file": lock_file,
-        "manifest_file": manifest_file,
-    }
-    return type(f"{name}Updater", (DenoManifestUpdater,), attrs)
-
+from lib.update.updaters.factories import (  # noqa: E402
+    bun_node_modules_updater,
+    cargo_vendor_updater,
+    deno_deps_updater,
+    deno_manifest_updater,
+    flake_input_hash_updater,
+    go_vendor_updater,
+    npm_deps_updater,
+    uv_lock_hash_updater,
+)
 
 __all__ = [
     "UPDATERS",
@@ -963,8 +933,11 @@ __all__ = [
     "DenoManifestUpdater",
     "DownloadHashUpdater",
     "FlakeInputHashUpdater",
+    "FlakeInputMixin",
+    "FlakeInputUpdater",
     "HashEntryUpdater",
     "UpdateConfig",
+    "UpdateContext",
     "Updater",
     "VersionInfo",
     "_verify_platform_versions",
@@ -975,5 +948,6 @@ __all__ = [
     "flake_input_hash_updater",
     "go_vendor_updater",
     "npm_deps_updater",
+    "register_updater",
     "uv_lock_hash_updater",
 ]

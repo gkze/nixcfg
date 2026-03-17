@@ -12,6 +12,7 @@ from lib.tests._assertions import check
 from lib.update.events import CapturedValue, UpdateEvent, UpdateEventKind
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.github_raw_file import (
+    GitHubRawFileMetadata,
     GitHubRawFileUpdater,
     github_raw_file_updater,
 )
@@ -94,7 +95,8 @@ def test_fetch_latest_uses_default_branch_and_latest_commit(
 
     info = asyncio.run(_run())
     check(info.version == "deadbeef")
-    check(info.metadata == {"rev": "deadbeef", "branch": "main"})
+    check(info.metadata["rev"] == "deadbeef")
+    check(info.metadata["branch"] == "main")
 
 
 def test_fetch_hashes_emits_entries_and_validates_metadata(
@@ -149,3 +151,44 @@ def test_fetch_hashes_emits_entries_and_validates_metadata(
     payload = events[-1].payload
     check(isinstance(payload, list))
     check(payload[0].hash == "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+
+
+def test_fetch_hashes_accepts_typed_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Accept pre-typed metadata without dict coercion."""
+    updater = github_raw_file_updater(
+        "typed-demo",
+        owner="owner",
+        repo="repo",
+        path="path/to/file.txt",
+    )()
+
+    async def _capture(
+        _stream: object,
+        *,
+        error: str,
+    ) -> AsyncIterator[UpdateEvent | CapturedValue[object]]:
+        _ = error
+        url = "https://raw.githubusercontent.com/owner/repo/deadbeef/path/to/file.txt"
+        yield CapturedValue({
+            url: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        })
+
+    monkeypatch.setattr(
+        "lib.update.updaters.github_raw_file.capture_stream_value",
+        _capture,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.github_raw_file.compute_url_hashes",
+        lambda *_args, **_kwargs: iter(()),
+    )
+
+    events = _collect(
+        updater.fetch_hashes(
+            VersionInfo(
+                version="deadbeef",
+                metadata=GitHubRawFileMetadata(rev="deadbeef", branch="main"),
+            ),
+            session=object(),  # type: ignore[arg-type]
+        )
+    )
+    check(events[-1].kind == UpdateEventKind.VALUE)

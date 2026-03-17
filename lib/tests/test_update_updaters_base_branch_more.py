@@ -17,13 +17,16 @@ from lib.update.updaters.base import (
     DenoDepsHashUpdater,
     DownloadHashUpdater,
     FlakeInputHashUpdater,
+    UpdateContext,
     Updater,
     VersionInfo,
+    _call_with_optional_context,
     _compute_url_hashes,
     _convert_nix_hash_to_sri,
     _ensure_str_mapping,
     _updater_sourcefile,
 )
+from lib.update.updaters.metadata import FlakeInputMetadata
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -399,3 +402,76 @@ def test_manifest_updater_accepts_flake_node_metadata_and_checks_lock() -> None:
 
     with pytest.raises(RuntimeError, match="incomplete lock"):
         _run(_run_events())
+
+
+def test_optional_context_and_flake_helper_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cover optional-context fallbacks and typed flake metadata branches."""
+    context = UpdateContext(current=None)
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise TypeError("boom")
+
+    with pytest.raises(TypeError, match="boom"):
+        _call_with_optional_context(_boom, context=context)
+
+    def _only_args(*_args: object) -> None:
+        return None
+
+    with pytest.raises(TypeError, match="extra"):
+        _call_with_optional_context(_only_args, context=context, extra=True)
+
+    updater = _DefaultFlake()
+    typed_node = FlakeLockNode(locked=None)
+    check(
+        updater._resolve_flake_node(
+            VersionInfo(version="1", metadata=FlakeInputMetadata(node=typed_node))
+        )
+        is typed_node
+    )
+
+    fallback_node = FlakeLockNode(locked=None)
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_flake_input_node",
+        lambda _name: fallback_node,
+    )
+    check(
+        updater._resolve_flake_node(VersionInfo(version="1", metadata=object()))
+        is fallback_node
+    )
+
+    built = updater.build_result(
+        VersionInfo(version="1", metadata={}),
+        {"x86_64-linux": HASH_A},
+    )
+    check(built.input == "default-flake")
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_drv_fingerprint",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected")),
+    )
+    finalized = _run(
+        _collect(
+            updater._finalize_result(
+                SourceEntry.model_validate({"version": "1", "hashes": {}}),
+                context=UpdateContext(current=None, drv_fingerprint="drv"),
+            )
+        )
+    )
+    payload = finalized[-1].payload
+    check(isinstance(payload, SourceEntry))
+    if not isinstance(payload, SourceEntry):
+        raise AssertionError("expected SourceEntry payload")
+    check(payload.drv_hash == "drv")
+    check(
+        updater._existing_platform_hashes(
+            SourceEntry.model_validate({
+                "hashes": {"x86_64-linux": HASH_A},
+            })
+        )
+        == {"x86_64-linux": HASH_A}
+    )
+    check(updater._existing_platform_hashes() == {})
+    object.__setattr__(updater, "_current_entry", "bad")
+    check(updater._existing_platform_hashes() == {})

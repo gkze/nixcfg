@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     import aiohttp
 
-from lib.nix.models.sources import HashEntry
+from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.update.events import (
     CapturedValue,
     EventStream,
@@ -22,7 +22,9 @@ from lib.update.net import (
     github_raw_url,
 )
 from lib.update.process import compute_url_hashes
-from lib.update.updaters.base import HashEntryUpdater, VersionInfo
+from lib.update.updaters.base import HashEntryUpdater, UpdateContext, VersionInfo
+from lib.update.updaters.metadata import GitHubRawFileMetadata
+from lib.update.updaters.registry import register_updater
 
 
 def github_raw_file_updater(
@@ -42,7 +44,7 @@ def github_raw_file_updater(
         "repo": repo,
         "path": path,
     }
-    return type(f"{name}Updater", (GitHubRawFileUpdater,), attrs)
+    return register_updater(type(f"{name}Updater", (GitHubRawFileUpdater,), attrs))
 
 
 class GitHubRawFileUpdater(HashEntryUpdater):
@@ -67,20 +69,30 @@ class GitHubRawFileUpdater(HashEntryUpdater):
             branch=branch,
             config=self.config,
         )
-        return VersionInfo(version=rev, metadata={"rev": rev, "branch": branch})
+        return VersionInfo(
+            version=rev, metadata=GitHubRawFileMetadata(rev=rev, branch=branch)
+        )
 
     async def fetch_hashes(
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Compute a sha256 hash entry for the resolved raw file URL."""
-        _ = session
-        rev = info.metadata.get("rev")
-        if not isinstance(rev, str):
+        _ = (session, context)
+        metadata = info.metadata
+        if isinstance(metadata, dict):
+            metadata_map = cast("dict[str, object]", metadata)
+            metadata = GitHubRawFileMetadata(
+                rev=str(metadata_map.get("rev", "")),
+                branch=str(metadata_map.get("branch", "")),
+            )
+        if not isinstance(metadata, GitHubRawFileMetadata) or not metadata.rev:
             msg = f"Expected string revision metadata for {self.name}"
             raise TypeError(msg)
-        url = github_raw_url(self.owner, self.repo, rev, self.path)
+        url = github_raw_url(self.owner, self.repo, metadata.rev, self.path)
         async for item in capture_stream_value(
             compute_url_hashes(self.name, [url]),
             error="Missing hash output",

@@ -313,8 +313,7 @@ def test_sentry_cli_updater_paths(
     """Run this test case."""
     updater = sentry_cli_module.SentryCliUpdater()
     monkeypatch.setattr(
-        sentry_cli_module,
-        "fetch_github_api",
+        "lib.update.updaters.github_release.fetch_github_api",
         lambda *_a, **_k: asyncio.sleep(0, result={"tag_name": "v2.0.0"}),
     )
     latest = _run(updater.fetch_latest(object()))
@@ -436,12 +435,12 @@ def test_scratch_updater_paths(
     updater = scratch_module.ScratchUpdater()
 
     monkeypatch.setattr(
-        scratch_module,
-        "get_flake_input_node",
+        "lib.update.updaters.base.get_flake_input_node",
         lambda _name: SimpleNamespace(locked=SimpleNamespace(rev="f" * 40)),
     )
     monkeypatch.setattr(
-        scratch_module, "get_flake_input_version", lambda _node: "9.9.9"
+        "lib.update.updaters.base.get_flake_input_version",
+        lambda _node: "9.9.9",
     )
     latest = _run(updater.fetch_latest(object()))
     check(latest.version == "9.9.9")

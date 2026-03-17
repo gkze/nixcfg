@@ -67,6 +67,10 @@ def test_guess_media_type_and_npm_helpers() -> None:
     check(deno_lock._guess_media_type("mod.ts") == "text/typescript")
     check(deno_lock._guess_media_type("mod.jsx") == "text/javascript")
     check(deno_lock._guess_media_type("data.unknown") == "text/plain")
+    check(
+        deno_lock._url_to_cache_path("https://example.com/mod.ts?target=esnext")
+        == deno_lock._url_to_cache_path("https://example.com/mod.ts?target=esnext")
+    )
 
     check(deno_lock._parse_npm_pkg_key("left-pad@1.0.0") == ("left-pad", "1.0.0"))
     check(

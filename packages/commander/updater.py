@@ -9,7 +9,8 @@ if TYPE_CHECKING:
     import aiohttp
 
 from lib.update.net import fetch_url
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
+from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters.metadata import NO_METADATA
 
 _MARKDOWN_CHANGELOG_VERSION_RE = re.compile(
     r"^##\s+([0-9]+(?:\.[0-9]+)+)\s+-\s+", re.MULTILINE
@@ -28,6 +29,7 @@ def _extract_latest_version(content: str) -> str | None:
     return None
 
 
+@register_updater
 class CommanderUpdater(DownloadHashUpdater):
     """Resolve Commander version from the public changelog."""
 
@@ -52,4 +54,4 @@ class CommanderUpdater(DownloadHashUpdater):
         if version is None:
             msg = "Could not parse latest Commander version from changelog"
             raise RuntimeError(msg)
-        return VersionInfo(version=version, metadata={})
+        return VersionInfo(version=version, metadata=NO_METADATA)

@@ -13,12 +13,12 @@ import hashlib
 import json
 import logging
 import mimetypes
+import urllib.parse
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING
 
 import aiohttp
 from pydantic import TypeAdapter, ValidationError
-from yarl import URL
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -154,13 +154,15 @@ def _url_to_cache_path(url: str) -> str:
     Deno stores cached files at ``remote/{scheme}/{host}/{sha256_of_path}``.
     The hash is computed over the *raw* URL path + query (fragment ignored).
     """
-    parsed = URL(url)
-    if parsed.scheme != "https" or parsed.host is None:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or not parsed.hostname:
         msg = f"Expected https URL: {url}"
         raise ValueError(msg)
-    path_qs = parsed.raw_path_qs or "/"
+    path_qs = parsed.path or "/"
+    if parsed.query:
+        path_qs = f"{path_qs}?{parsed.query}"
     path_hash = hashlib.sha256(path_qs.encode()).hexdigest()
-    return f"remote/https/{parsed.host}/{path_hash}"
+    return f"remote/https/{parsed.hostname}/{path_hash}"
 
 
 def _guess_media_type(path: str) -> str:

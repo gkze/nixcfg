@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from lib.update.updaters.base import register_updater
 from lib.update.updaters.platform_api import PlatformAPIUpdater
 
 if TYPE_CHECKING:
@@ -16,6 +17,7 @@ VSCODE_PLATFORMS = {
 }
 
 
+@register_updater
 class VSCodeInsidersUpdater(PlatformAPIUpdater):
     """Updater for upstream VS Code Insiders builds."""
 

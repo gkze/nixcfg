@@ -18,36 +18,22 @@ from lib.update.events import (
     UpdateEvent,
     capture_stream_value,
 )
-from lib.update.net import fetch_github_api
 from lib.update.nix import _build_nix_expr, compute_fixed_output_hash
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
-from lib.update.updaters.base import Updater, VersionInfo
+from lib.update.updaters.base import UpdateContext, VersionInfo, register_updater
+from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 
-class SentryCliUpdater(Updater):
+@register_updater
+class SentryCliUpdater(GitHubReleaseUpdater):
     """Compute src/cargo hashes for the latest sentry-cli GitHub release."""
 
     name = "sentry-cli"
 
     GITHUB_OWNER = "getsentry"
     GITHUB_REPO = "sentry-cli"
+    TAG_PREFIX = ""
     XCARCHIVE_FILTER = "find $out -name '*.xcarchive' -type d -exec rm -rf {} +"
-
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Fetch latest release tag from GitHub."""
-        payload = await fetch_github_api(
-            session,
-            f"repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/releases/latest",
-            config=self.config,
-        )
-        if not isinstance(payload, dict):
-            msg = f"Unexpected release payload type: {type(payload).__name__}"
-            raise TypeError(msg)
-        tag_name = payload.get("tag_name")
-        if not isinstance(tag_name, str) or not tag_name:
-            msg = f"Missing tag_name in release payload: {payload!r}"
-            raise RuntimeError(msg)
-        return VersionInfo(version=tag_name, metadata={})
 
     def _src_nix_expression(
         self,
@@ -93,9 +79,11 @@ class SentryCliUpdater(Updater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | object | None = None,
     ) -> EventStream:
         """Compute ``srcHash`` and ``cargoHash`` via fixed-output builds."""
-        _ = session
+        _ = (session, context)
         src_hash: str | None = None
         async for item in capture_stream_value(
             compute_fixed_output_hash(

@@ -2,4 +2,4 @@
 
 from lib.update.updaters.base import flake_input_hash_updater
 
-flake_input_hash_updater("goose-v8", "srcHash")
+GooseV8Updater = flake_input_hash_updater("goose-v8", "srcHash")

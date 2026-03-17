@@ -69,7 +69,7 @@ from lib.update.updaters.base import (
     DenoManifestUpdater,
     DownloadHashUpdater,
     FlakeInputHashUpdater,
-    FlakeInputMixin,
+    FlakeInputUpdater,
     HashEntryUpdater,
     Updater,
     VersionInfo,
@@ -797,7 +797,7 @@ def _source_backing_input_name(
         input_name = getattr(updater_cls, "input_name", None)
         if isinstance(input_name, str) and input_name:
             return input_name
-        if issubclass(updater_cls, FlakeInputMixin):
+        if issubclass(updater_cls, FlakeInputUpdater):
             return name
     if entry is not None and entry.input:
         return entry.input
@@ -1148,22 +1148,20 @@ async def _run_ref_phase(
 ) -> None:
     async with aiohttp.ClientSession() as session:
         flake_edit_lock = asyncio.Lock()
-        tasks = [
-            asyncio.create_task(
-                update_refs_task(
-                    inp,
-                    session,
-                    queue,
-                    options=RefTaskOptions(
-                        dry_run=dry_run,
-                        flake_edit_lock=flake_edit_lock,
-                        config=config,
+        async with asyncio.TaskGroup() as group:
+            for inp in ref_inputs:
+                group.create_task(
+                    update_refs_task(
+                        inp,
+                        session,
+                        queue,
+                        options=RefTaskOptions(
+                            dry_run=dry_run,
+                            flake_edit_lock=flake_edit_lock,
+                            config=config,
+                        ),
                     ),
-                ),
-            )
-            for inp in ref_inputs
-        ]
-        await asyncio.gather(*tasks)
+                )
 
 
 async def _run_sources_phase(
@@ -1171,25 +1169,23 @@ async def _run_sources_phase(
 ) -> None:
     async with aiohttp.ClientSession() as session:
         update_input_lock = asyncio.Lock()
-        tasks = [
-            asyncio.create_task(
-                _update_source_task(
-                    name,
-                    context=_SourceTaskContext(
-                        sources=context.sources,
-                        update_input=context.update_input,
-                        native_only=context.native_only,
-                        session=session,
-                        update_input_lock=update_input_lock,
-                        queue=context.queue,
-                        config=context.config,
-                        pinned_version=context.pinned.get(name),
-                    ),
-                ),
-            )
-            for name in context.source_names
-        ]
-        await asyncio.gather(*tasks)
+        async with asyncio.TaskGroup() as group:
+            for name in context.source_names:
+                group.create_task(
+                    _update_source_task(
+                        name,
+                        context=_SourceTaskContext(
+                            sources=context.sources,
+                            update_input=context.update_input,
+                            native_only=context.native_only,
+                            session=session,
+                            update_input_lock=update_input_lock,
+                            queue=context.queue,
+                            config=context.config,
+                            pinned_version=context.pinned.get(name),
+                        ),
+                    )
+                )
 
 
 def _flatten_artifact_updates(

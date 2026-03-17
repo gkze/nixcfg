@@ -2,4 +2,4 @@
 
 from lib.update.updaters.base import npm_deps_updater
 
-npm_deps_updater("linearis")
+LinearisUpdater = npm_deps_updater("linearis")

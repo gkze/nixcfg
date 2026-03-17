@@ -14,9 +14,11 @@ if TYPE_CHECKING:
     import aiohttp
 
 from lib.update.net import fetch_headers
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
+from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters.metadata import NO_METADATA
 
 
+@register_updater
 class CodexDesktopUpdater(DownloadHashUpdater):
     """Track the Codex DMG and derive a stable artifact revision."""
 
@@ -66,4 +68,4 @@ class CodexDesktopUpdater(DownloadHashUpdater):
         )
 
         version = self._version_from_headers(headers)
-        return VersionInfo(version=version, metadata={})
+        return VersionInfo(version=version, metadata=NO_METADATA)

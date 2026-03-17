@@ -10,9 +10,11 @@ if TYPE_CHECKING:
     import aiohttp
 
 from lib.update.net import fetch_headers
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
+from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters.metadata import NO_METADATA
 
 
+@register_updater
 class ConductorUpdater(DownloadHashUpdater):
     """Resolve latest Conductor version from artifact headers."""
 
@@ -40,4 +42,4 @@ class ConductorUpdater(DownloadHashUpdater):
         if not match:
             err = "Could not parse version from Content-Disposition filename"
             raise RuntimeError(err)
-        return VersionInfo(version=match.group(1), metadata={})
+        return VersionInfo(version=match.group(1), metadata=NO_METADATA)

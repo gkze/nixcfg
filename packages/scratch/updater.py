@@ -24,18 +24,20 @@ from lib.update.events import (
     capture_stream_value,
     expect_str,
 )
-from lib.update.flake import (
-    get_flake_input_node,
-    get_flake_input_version,
-    nixpkgs_expression,
-)
+from lib.update.flake import nixpkgs_expression
 from lib.update.nix import compute_fixed_output_hash
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters.base import HashEntryUpdater, VersionInfo
+from lib.update.updaters.base import (
+    FlakeInputUpdater,
+    UpdateContext,
+    VersionInfo,
+    register_updater,
+)
 
 
-class ScratchUpdater(HashEntryUpdater):
+@register_updater
+class ScratchUpdater(FlakeInputUpdater):
     """Compute npm and cargo hashes for the scratch flake input."""
 
     name = "scratch"
@@ -91,24 +93,15 @@ class ScratchUpdater(HashEntryUpdater):
         )
         return ScratchUpdater._wrap_expr_with_flake_and_pkgs(cargo_vendor_expr)
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Read current locked version/revision for scratch from flake.lock."""
-        _ = session
-        node = get_flake_input_node("scratch")
-        version = get_flake_input_version(node)
-        locked_rev = node.locked.rev if node.locked else None
-        return VersionInfo(
-            version=version, metadata={"node": node, "commit": locked_rev}
-        )
-
     async def fetch_hashes(
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Compute npmDepsHash and cargoHash from the package derivation."""
-        _ = info
-        _ = session
+        _ = (info, session, context)
 
         npm_hash: str | None = None
         async for item in capture_stream_value(
@@ -152,13 +145,9 @@ class ScratchUpdater(HashEntryUpdater):
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build source entry including resolved version and commit."""
-        commit = info.metadata.get("commit")
-        if commit is not None and not isinstance(commit, str):
-            msg = "Expected string commit metadata for scratch"
-            raise TypeError(msg)
         return SourceEntry(
             version=info.version,
             hashes=HashCollection.from_value(hashes),
             input=self.input_name,
-            commit=commit,
+            commit=info.commit,
         )

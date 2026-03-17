@@ -84,6 +84,13 @@ def test_resolve_config_normalizes_aliases_and_bounds() -> None:
     check(cfg.deno_deps_platforms == ("x86_64-linux", "aarch64-darwin"))
 
 
+def test_resolve_config_accepts_hash_build_platform_alias() -> None:
+    """Allow the generalized hash platform alias to override Deno targets."""
+    cfg = resolve_config(hash_build_platforms=("aarch64-linux",))
+    check(cfg.deno_deps_platforms == ("aarch64-linux",))
+    check(cfg.hash_build_platforms == ("aarch64-linux",))
+
+
 def test_resolve_active_config_and_default_config_reference() -> None:
     """Prefer explicit config and otherwise return the global default."""
     custom = UpdateConfig(
