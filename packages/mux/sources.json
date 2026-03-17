@@ -2,7 +2,18 @@
   "hashes": [
     {
       "hash": "sha256-RMPfaE3oWHOhvH9j+anxfJOJK/cBFISBWhj0E2WOatI=",
-      "hashType": "nodeModulesHash"
+      "hashType": "nodeModulesHash",
+      "platform": "aarch64-darwin"
+    },
+    {
+      "hash": "sha256-lggDVE3AuGf6cIuQLMfprRrTgkBP+1QL3JN45SXoxDo=",
+      "hashType": "nodeModulesHash",
+      "platform": "aarch64-linux"
+    },
+    {
+      "hash": "sha256-WmCCFDmcFuJFyAX2pyT7vNV7xbfm19W96/3ycj4jm2A=",
+      "hashType": "nodeModulesHash",
+      "platform": "x86_64-linux"
     }
   ],
   "input": "mux",

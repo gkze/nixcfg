@@ -31,6 +31,7 @@ _LOCAL_PATH_PREFIXES = (
     "cli",
     "cloud-requirements",
     "cloud-tasks",
+    "cloud-tasks-client",
     "codex-api",
     "codex-backend-openapi-models",
     "codex-client",

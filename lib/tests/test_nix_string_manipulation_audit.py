@@ -15,7 +15,7 @@ _FORBIDDEN_NIX_TEMPLATE_FRAGMENTS = (
     'builtins.getFlake "',
     "lib.fix (self:",
     "import flake.inputs.nixpkgs {",
-    "in flake.interactivePkgs.",
+    "in flake.pkgs.",
 )
 
 

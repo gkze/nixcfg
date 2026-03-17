@@ -87,6 +87,7 @@ rec {
 
     normalized, rewrites, added_root_src = _normalize_with_fallback(
         sample,
+        local_path_prefixes=("crates",),
         fallback_patterns=(pattern,),
         rewrite_nixpkgs_config=True,
     )

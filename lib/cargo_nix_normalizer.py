@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import fields, is_dataclass
-from typing import TYPE_CHECKING
 
 from nix_manipulator import parse
 from nix_manipulator.expressions.expression import NixExpression
@@ -11,9 +11,6 @@ from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import StringPrimitive
-
-if TYPE_CHECKING:
-    import re
 
 _SKIP_TRAVERSAL_FIELDS = {
     "after",
@@ -26,6 +23,10 @@ _SKIP_TRAVERSAL_FIELDS = {
 
 _ROOTSRC_MARKER = "rootSrc ? ./."
 _ROOTSRC_INSERTION_MARKER = "    else {}\n}:"
+_STORE_PATH_PATTERN = re.compile(r"(?:^|.*/)nix/store/[^/]+/(?P<suffix>.+)")
+_FALLBACK_STORE_PATH_PATTERN = re.compile(
+    r'(?P<needle>"?(?:\.\./)+nix/store/[^/]+/(?P<suffix>[^";]+)"?)'
+)
 
 
 def _preserve_file_preamble(original: str, rebuilt: str) -> str:
@@ -69,6 +70,13 @@ def _rewrite_root_src_paths(
     rewrites = 0
 
     def source_suffix(path: str) -> str | None:
+        store_match = _STORE_PATH_PATTERN.match(path)
+        if store_match is not None:
+            store_suffix = store_match.group("suffix")
+            for prefix in local_path_prefixes:
+                if store_suffix == prefix or store_suffix.startswith(f"{prefix}/"):
+                    return store_suffix
+
         for prefix in local_path_prefixes:
             exact = f"./{prefix}"
             normalized = f"./{prefix}/"
@@ -138,6 +146,7 @@ def _root_src_string_text(suffix: str) -> str:
 def _normalize_with_fallback(
     text: str,
     *,
+    local_path_prefixes: tuple[str, ...],
     fallback_patterns: tuple[re.Pattern[str], ...],
     rewrite_nixpkgs_config: bool,
 ) -> tuple[str, int, bool]:
@@ -158,12 +167,21 @@ def _normalize_with_fallback(
 
     def rewrite_src_binding(match: re.Match[str]) -> str:
         nonlocal path_rewrites
-        path_rewrites += 1
         suffix = match.groupdict().get("suffix", match.group(1))
         needle = match.groupdict().get("needle", match.group(1))
+        if local_path_prefixes and not any(
+            suffix == prefix or suffix.startswith(f"{prefix}/")
+            for prefix in local_path_prefixes
+        ):
+            return match.group(0)
+        path_rewrites += 1
         return match.group(0).replace(needle, _root_src_string_text(suffix), 1)
 
-    for pattern in fallback_patterns:
+    patterns = list(fallback_patterns)
+    if local_path_prefixes:
+        patterns.append(_FALLBACK_STORE_PATH_PATTERN)
+
+    for pattern in patterns:
         text = pattern.sub(rewrite_src_binding, text)
 
     return text, path_rewrites, added_root_src
@@ -195,6 +213,7 @@ def normalize(
 
     return _normalize_with_fallback(
         text,
+        local_path_prefixes=local_path_prefixes,
         fallback_patterns=fallback_patterns,
         rewrite_nixpkgs_config=rewrite_nixpkgs_config,
     )

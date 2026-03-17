@@ -246,7 +246,10 @@ jobs:
       - name: Pre-fetch flake inputs
         run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
       - name: Refresh Darwin crate2nix artifacts
-        run: nix run .#nixcfg -- ci pipeline crate2nix --write --package zed-editor-nightly
+        run: >-
+          nix run .#nixcfg -- ci pipeline crate2nix --write
+          --package zed-editor-nightly
+          --package opencode-desktop
       - uses: actions/upload-artifact@v6
         with:
           name: crate2nix-darwin
@@ -254,6 +257,8 @@ jobs:
           path: |
             packages/zed-editor-nightly/Cargo.nix
             packages/zed-editor-nightly/crate-hashes.json
+            packages/opencode-desktop/Cargo.nix
+            packages/opencode-desktop/crate-hashes.json
 
   merge-generated:
     needs:

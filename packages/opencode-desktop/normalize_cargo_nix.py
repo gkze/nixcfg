@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Normalize generated crate2nix output for the checked-in Zed Cargo.nix."""
+"""Normalize generated crate2nix output for opencode-desktop."""
 
 from __future__ import annotations
 
@@ -23,19 +23,20 @@ _STORE_SOURCE_PATTERN = re.compile(
 
 
 def normalize(text: str) -> tuple[str, int, bool]:
-    """Return normalized Zed Cargo.nix text plus replacement counts."""
+    """Return normalized Cargo.nix text plus replacement counts."""
     return normalize_cargo_nix(
         text,
+        local_path_prefixes=("packages/desktop/src-tauri",),
         fallback_patterns=(_STORE_SOURCE_PATTERN,),
         rewrite_nixpkgs_config=True,
     )
 
 
 def main() -> int:
-    """Normalize a Zed Cargo.nix file in place and report what changed."""
+    """Normalize a Cargo.nix file in place and report what changed."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "path", nargs="?", default="packages/zed-editor-nightly/Cargo.nix"
+        "path", nargs="?", default="packages/opencode-desktop/Cargo.nix"
     )
     args = parser.parse_args()
 

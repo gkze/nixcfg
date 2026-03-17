@@ -70,6 +70,21 @@ def superset_module() -> ModuleType:
     return _load_module("packages/superset/updater.py", "superset_updater_test")
 
 
+@pytest.fixture(scope="module")
+def mux_module() -> ModuleType:
+    """Load the mux updater module."""
+    return _load_module("packages/mux/updater.py", "mux_updater_test")
+
+
+def test_mux_uses_platform_specific_node_modules_hashes(
+    mux_module: ModuleType,
+) -> None:
+    """Mux node_modules hashes should be tracked separately per platform."""
+    updater_cls = mux_module.MuxUpdater
+    check(updater_cls.platform_specific is True)
+    check(updater_cls.hash_type == "nodeModulesHash")
+
+
 def test_codex_desktop_version_header_priority(
     codex_desktop_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

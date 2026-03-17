@@ -53,7 +53,7 @@ let
 
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = outputs.lib.sourceHash pname "nodeModulesHash";
+    outputHash = outputs.lib.sourceHashForPlatform pname "nodeModulesHash" stdenv.hostPlatform.system;
   };
 in
 stdenv.mkDerivation {

@@ -1,5 +1,5 @@
-"""Updater for mux's Bun offline cache hash."""
+"""Updater for mux's platform-specific Bun offline cache hashes."""
 
-from lib.update.updaters.base import flake_input_hash_updater
+from lib.update.updaters.base import bun_node_modules_updater
 
-flake_input_hash_updater("mux", "nodeModulesHash")
+MuxUpdater = bun_node_modules_updater("mux")

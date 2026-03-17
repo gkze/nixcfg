@@ -14,7 +14,7 @@ import platform
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Protocol, cast
 
@@ -40,6 +40,7 @@ class Crate2NixTarget:
     crate_hashes: Path
     normalizer_path: Path
     supported_platforms: tuple[str, ...]
+    cargo_manifest_relpath: Path = field(default_factory=lambda: Path("Cargo.toml"))
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,33 @@ class RefreshResult:
 
     cargo_nix: str
     crate_hashes: str
+
+
+def _stabilize_generated_command_comment(
+    target: Crate2NixTarget,
+    refreshed: str,
+) -> str:
+    """Replace crate2nix's dynamic command comment with a stable one."""
+    refreshed_lines = refreshed.splitlines()
+    command_comment_index = next(
+        (
+            index
+            for index, line in enumerate(refreshed_lines)
+            if line.startswith('#   "generate"')
+        ),
+        None,
+    )
+    if command_comment_index is None:
+        return refreshed
+    refreshed_lines[command_comment_index] = (
+        f'#   "generate" "-f" "{target.cargo_manifest_relpath.as_posix()}" '
+        f'"-o" "{target.cargo_nix.as_posix()}" '
+        f'"-h" "{target.crate_hashes.as_posix()}" '
+        '"--default-features"'
+    )
+    trailing_newline = refreshed.endswith("\n")
+    rebuilt = "\n".join(refreshed_lines)
+    return rebuilt + ("\n" if trailing_newline else "")
 
 
 TARGETS = {
@@ -76,6 +104,17 @@ TARGETS = {
         crate_hashes=Path("packages/zed-editor-nightly/crate-hashes.json"),
         normalizer_path=Path("packages/zed-editor-nightly/normalize_cargo_nix.py"),
         supported_platforms=("darwin",),
+    ),
+    "opencode-desktop": Crate2NixTarget(
+        name="opencode-desktop",
+        patched_src_installable=(
+            ".#darwinConfigurations.argus.pkgs.opencode-desktop.passthru.patchedSrc"
+        ),
+        cargo_nix=Path("packages/opencode-desktop/Cargo.nix"),
+        crate_hashes=Path("packages/opencode-desktop/crate-hashes.json"),
+        normalizer_path=Path("packages/opencode-desktop/normalize_cargo_nix.py"),
+        supported_platforms=("darwin",),
+        cargo_manifest_relpath=Path("packages/desktop/src-tauri/Cargo.toml"),
     ),
 }
 
@@ -168,7 +207,7 @@ def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
             "--",
             "generate",
             "-f",
-            str(patched_src / "Cargo.toml"),
+            str(patched_src / target.cargo_manifest_relpath),
             "-o",
             str(generated_cargo),
             "-h",
@@ -179,6 +218,7 @@ def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
         cargo_text, _rewrites, _added_root_src = normalize(
             generated_cargo.read_text(encoding="utf-8")
         )
+        cargo_text = _stabilize_generated_command_comment(target, cargo_text)
         hash_text = _normalize_json_text(generated_hashes.read_text(encoding="utf-8"))
         return RefreshResult(cargo_nix=cargo_text, crate_hashes=hash_text)
 

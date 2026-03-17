@@ -47,7 +47,7 @@ class LinearCliUpdater(DenoManifestUpdater):
     def _deno_version_expr(platform: str) -> str:
         return _build_flake_attr_expr(
             f"path:{get_repo_file('.')}",
-            "interactivePkgs",
+            "pkgs",
             platform,
             "deno",
             "version",

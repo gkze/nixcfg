@@ -1,0 +1,15 @@
+{
+  "git+https://github.com/specta-rs/specta?rev=591a5f3ddc78348abf4cbb541d599d65306d92b9#2.0.0-rc.22": "15682v65na2lkvzhak1hrmp8d8h38ybxyjfrhjrv4b64fl18xk32",
+  "git+https://github.com/specta-rs/specta?rev=591a5f3ddc78348abf4cbb541d599d65306d92b9#specta-macros@2.0.0-rc.18": "15682v65na2lkvzhak1hrmp8d8h38ybxyjfrhjrv4b64fl18xk32",
+  "git+https://github.com/specta-rs/specta?rev=591a5f3ddc78348abf4cbb541d599d65306d92b9#specta-serde@0.0.9": "15682v65na2lkvzhak1hrmp8d8h38ybxyjfrhjrv4b64fl18xk32",
+  "git+https://github.com/specta-rs/specta?rev=591a5f3ddc78348abf4cbb541d599d65306d92b9#specta-typescript@0.0.9": "15682v65na2lkvzhak1hrmp8d8h38ybxyjfrhjrv4b64fl18xk32",
+  "git+https://github.com/specta-rs/tauri-specta?rev=6720b2848eff9a3e40af54c48d65f6d56b640c0b#2.0.0-rc.21": "194dj3l4453w8m3ybv915gw8znkj53rwj68armxbhmk73pw4jrcz",
+  "git+https://github.com/specta-rs/tauri-specta?rev=6720b2848eff9a3e40af54c48d65f6d56b640c0b#tauri-specta-macros@2.0.0-rc.16": "194dj3l4453w8m3ybv915gw8znkj53rwj68armxbhmk73pw4jrcz",
+  "git+https://github.com/tauri-apps/tauri?rev=4d5d78daf636feaac20c5bc48a6071491c4291ee#2.9.5": "1hr7mzc74m6a6p513bkgnlg64v97hqhr0524kmpr1x9qw3zl9zkn",
+  "git+https://github.com/tauri-apps/tauri?rev=4d5d78daf636feaac20c5bc48a6071491c4291ee#tauri-build@2.5.3": "1hr7mzc74m6a6p513bkgnlg64v97hqhr0524kmpr1x9qw3zl9zkn",
+  "git+https://github.com/tauri-apps/tauri?rev=4d5d78daf636feaac20c5bc48a6071491c4291ee#tauri-codegen@2.5.2": "1hr7mzc74m6a6p513bkgnlg64v97hqhr0524kmpr1x9qw3zl9zkn",
+  "git+https://github.com/tauri-apps/tauri?rev=4d5d78daf636feaac20c5bc48a6071491c4291ee#tauri-macros@2.5.2": "1hr7mzc74m6a6p513bkgnlg64v97hqhr0524kmpr1x9qw3zl9zkn",
+  "git+https://github.com/tauri-apps/tauri?rev=4d5d78daf636feaac20c5bc48a6071491c4291ee#tauri-runtime-wry@2.9.3": "1hr7mzc74m6a6p513bkgnlg64v97hqhr0524kmpr1x9qw3zl9zkn",
+  "git+https://github.com/tauri-apps/tauri?rev=4d5d78daf636feaac20c5bc48a6071491c4291ee#tauri-runtime@2.9.2": "1hr7mzc74m6a6p513bkgnlg64v97hqhr0524kmpr1x9qw3zl9zkn",
+  "git+https://github.com/tauri-apps/tauri?rev=4d5d78daf636feaac20c5bc48a6071491c4291ee#tauri-utils@2.8.1": "1hr7mzc74m6a6p513bkgnlg64v97hqhr0524kmpr1x9qw3zl9zkn"
+}

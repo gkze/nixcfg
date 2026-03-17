@@ -33,11 +33,14 @@ jobs:
           esac
 
           if [ -n "$FROM" ] && [ "$FROM" != "0000000000000000000000000000000000000000" ]; then
-            nix develop --command commitlint \
+            nix run --inputs-from . nixpkgs#commitlint -- \
               --from "$FROM" \
-              --to "$TO"
+              --to "$TO" \
+              --verbose
           else
-            nix develop --command commitlint --last --verbose
+            nix run --inputs-from . nixpkgs#commitlint -- \
+              --last \
+              --verbose
           fi
   quality:
     strategy:
@@ -47,7 +50,7 @@ jobs:
           - name: format
             command: nix fmt -- --ci
           - name: editorconfig
-            command: editorconfig-checker
+            command: nix run --inputs-from . nixpkgs#editorconfig-checker
           - name: python
             command: uv run ruff check --config pyproject.toml . && uv run ty check .
           - name: pytest
@@ -55,7 +58,7 @@ jobs:
           - name: crate2nix
             command: uv run python -m lib.update.ci.crate2nix
           - name: actionlint
-            command: actionlint
+            command: nix run --inputs-from . nixpkgs#actionlint
           - name: yamllint
             command: |
               mapfile -d '' -t files < <(git ls-files -z -- '*.yml' '*.yaml')

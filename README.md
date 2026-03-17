@@ -39,8 +39,8 @@ nh darwin switch --no-nom .
 Useful build-only checks:
 
 ```bash
-nix build .#darwinConfigurations.argus.system
-nix build .#darwinConfigurations.rocinante.system
+nix build .#checks.aarch64-darwin.darwin-argus
+nix build .#checks.aarch64-darwin.darwin-rocinante
 nix build .#homeConfigurations.george.activationPackage
 ```
 

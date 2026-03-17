@@ -447,6 +447,7 @@
     in
     (builtins.removeAttrs baseOutputs [ "legacyPackages" ])
     // {
+      pkgs = baseOutputs.legacyPackages;
       interactivePkgs = baseOutputs.legacyPackages;
 
       overlays = baseOutputs.overlays // {

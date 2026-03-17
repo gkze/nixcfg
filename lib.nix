@@ -39,6 +39,7 @@ let
       [ value ];
   userMetaPath = u: maybePath "${src}/home/${u}/meta.nix";
   modulesPath = "${src}/modules";
+  crate2nixTauri = import ./lib/crate2nix-tauri.nix { inherit lib; };
 
   scanSourcesIn =
     dir:
@@ -62,6 +63,12 @@ let
     if raw == "" then { } else fromJSON raw;
 in
 rec {
+  inherit (crate2nixTauri)
+    mkCrate2nixTauriEnvOverride
+    mkCrate2nixTauriOverrides
+    mkCrate2nixTauriUtilsOverride
+    tauriPluginEnvCrateNames
+    ;
   inherit modulesPath;
   flakeLock = (fromJSON (readFile ./flake.lock)).nodes;
   # UPDATE_SOURCE_OVERRIDES_JSON allows update tooling to override selected

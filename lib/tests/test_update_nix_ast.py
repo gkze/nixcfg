@@ -109,7 +109,7 @@ def test_build_flake_attr_expr_quotes_dynamic_segments() -> None:
     """Quoted attribute selections should remain parseable for hyphenated keys."""
     expr = _build_flake_attr_expr(
         "path:/tmp/repo",
-        "interactivePkgs",
+        "pkgs",
         "x86_64-linux",
         "deno",
         "version",
@@ -117,7 +117,7 @@ def test_build_flake_attr_expr_quotes_dynamic_segments() -> None:
     )
 
     parse(expr)
-    check('flake.interactivePkgs."x86_64-linux".deno.version' in expr)
+    check('flake.pkgs."x86_64-linux".deno.version' in expr)
 
 
 def test_build_fetch_yarn_deps_expr_is_parseable() -> None:
