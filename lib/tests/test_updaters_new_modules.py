@@ -41,6 +41,12 @@ async def _collect(stream: EventStream) -> list[UpdateEvent]:
 
 
 @pytest.fixture(scope="module")
+def commander_module() -> ModuleType:
+    """Load the commander updater module."""
+    return _load_module("packages/commander/updater.py", "commander_updater_test")
+
+
+@pytest.fixture(scope="module")
 def codex_desktop_module() -> ModuleType:
     """Load the codex-desktop updater module."""
     return _load_module(
@@ -83,6 +89,39 @@ def test_mux_uses_platform_specific_node_modules_hashes(
     updater_cls = mux_module.MuxUpdater
     check(updater_cls.platform_specific is True)
     check(updater_cls.hash_type == "nodeModulesHash")
+
+
+def test_commander_fetches_latest_version_from_changelog(
+    commander_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Parse the latest version from the changelog heading."""
+    updater = commander_module.CommanderUpdater()
+    monkeypatch.setattr(
+        commander_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(
+            0,
+            result=b"# Changelog\n\n## 0.7.875 - 2026-03-16\n\n- Fix stuff\n",
+        ),
+    )
+    latest = _run(updater.fetch_latest(object()))
+    check(latest.version == "0.7.875")
+
+
+def test_commander_rejects_changelog_without_release_heading(
+    commander_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail when the changelog page lacks a release heading."""
+    updater = commander_module.CommanderUpdater()
+    monkeypatch.setattr(
+        commander_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=b"# Changelog\n\nNo releases yet\n"),
+    )
+    with pytest.raises(RuntimeError, match="Could not parse latest Commander version"):
+        _run(updater.fetch_latest(object()))
 
 
 def test_codex_desktop_version_header_priority(

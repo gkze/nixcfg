@@ -62,6 +62,16 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
     check(targets[0].package == "demo")
     check(targets[0].fod_attr == ".node_modules")
 
+    monkeypatch.setattr(
+        wfc,
+        "package_file_map",
+        lambda _name: {"mux": Path("path")},
+    )
+    targets = object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
+    check(len(targets) == 1)
+    check(targets[0].package == "mux")
+    check(targets[0].fod_attr == ".offlineCache")
+
     bad_entry = SourceEntry(
         version="1",
         hashes=HashCollection(

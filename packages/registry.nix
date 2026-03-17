@@ -26,6 +26,7 @@ let
   );
 
   darwinOnly = [
+    "commander"
     "codex-desktop"
     "conductor"
   ];
@@ -47,6 +48,7 @@ let
   ];
 
   packageSystemConstraints = {
+    commander = system: builtins.match ".*-darwin" system != null;
     codex-desktop = system: builtins.match ".*-darwin" system != null;
     conductor = system: builtins.match ".*-darwin" system != null;
     emdash = system: builtins.elem system emdashSystems;

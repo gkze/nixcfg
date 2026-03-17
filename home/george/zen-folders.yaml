@@ -3,10 +3,14 @@ Work:
   AI / LLM:
     Anthropic: platform.claude.com
     Cursor: cursor.com/dashboard
-    ElevenLabs: elevenlabs.io
     Exa: exa.ai
     OpenAI: platform.openai.com
     OpenRouter: openrouter.ai
+  Voice AI:
+    Cartesia: play.cartesia.ai/dashboard
+    Deepgram: console.deepgram.com/project/0bae0bb4-0800-481e-a23a-796a283fe168
+    ElevenLabs: elevenlabs.io/app/home
+    Inworld: platform.inworld.ai/v2/workspaces/default-gqjfmzgft0udjm4nixzfma
   AI Tooling:
     Browserbase: browserbase.com
     E2B: e2b.dev

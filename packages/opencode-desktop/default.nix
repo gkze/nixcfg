@@ -73,6 +73,13 @@ let
   cargoNix = import ./Cargo.nix {
     inherit pkgs;
     rootSrc = patchedSrc;
+    # cargo tauri build enables tauri/custom-protocol for production bundles.
+    # Keep that feature here so crate2nix embeds the packaged frontend instead
+    # of producing a dev-style desktop binary that can open to a blank window.
+    rootFeatures = [
+      "default"
+      "tauri/custom-protocol"
+    ];
   };
   cargoNixVersion = cargoNix.internal.crates."opencode-desktop".version;
   cargoNixVersionCheck =
@@ -123,6 +130,15 @@ let
       install -Dm755 \
         ${opencode}/bin/opencode \
         "$srcTauriRoot/sidecars/opencode-cli-${stdenv.hostPlatform.rust.rustcTarget}"
+    '';
+
+    # crate2nix bypasses cargo-tauri's beforeBuildCommand hook, so build the
+    # desktop frontend explicitly before compiling the Rust binary.
+    preBuild = ''
+      repoRoot="$(realpath ../../..)"
+      export HOME="$TMPDIR"
+
+      (cd "$repoRoot/packages/desktop" && bun run build)
     '';
 
     tauriBuildFlags = [

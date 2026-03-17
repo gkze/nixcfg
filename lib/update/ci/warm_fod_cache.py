@@ -48,11 +48,20 @@ log = logging.getLogger(__name__)
 # Generous timeout — FODs may download large dependency trees.
 BUILD_TIMEOUT = 3600.0
 
-# Map from hash type to the Nix attribute suffix that evaluates to the
-# FOD sub-derivation.  Each entry uses dot-separated path components
-# appended to the package expression.
+# Default map from hash type to the Nix attribute suffix that evaluates to the
+# FOD sub-derivation. Each entry uses dot-separated path components appended to
+# the package expression.
 _HASH_TYPE_TO_FOD_ATTR: dict[str, str] = {
     "nodeModulesHash": ".node_modules",
+}
+
+# Package-specific FOD attribute overrides.
+#
+# Most Bun-based packages expose the fixed-output dependency derivation at
+# ``.node_modules``. ``mux`` is an exception: it tracks the same
+# ``nodeModulesHash`` value but exposes it as ``.offlineCache``.
+_PACKAGE_HASH_TYPE_TO_FOD_ATTR: dict[tuple[str, str], str] = {
+    ("mux", "nodeModulesHash"): ".offlineCache",
 }
 
 
@@ -84,6 +93,14 @@ def _platform_fod_entries(entry: SourceEntry, system: str) -> list[HashEntry]:
     ]
 
 
+def _resolve_fod_attr(package: str, hash_type: str) -> str | None:
+    """Resolve the FOD sub-derivation attribute path for a package/hash type."""
+    return _PACKAGE_HASH_TYPE_TO_FOD_ATTR.get(
+        (package, hash_type),
+        _HASH_TYPE_TO_FOD_ATTR.get(hash_type),
+    )
+
+
 def _find_fod_targets(system: str) -> list[FodTarget]:
     """Discover FOD sub-derivations that need building for *system*."""
     targets: list[FodTarget] = []
@@ -94,7 +111,7 @@ def _find_fod_targets(system: str) -> list[FodTarget]:
             log.warning("Skipping %s: failed to load sources.json", name, exc_info=True)
             continue
         for h in _platform_fod_entries(entry, system):
-            fod_attr = _HASH_TYPE_TO_FOD_ATTR.get(h.hash_type)
+            fod_attr = _resolve_fod_attr(name, h.hash_type)
             if fod_attr is None:
                 log.warning(
                     "No FOD attribute mapping for hash type %s in %s — skipping",

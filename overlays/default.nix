@@ -29,6 +29,7 @@
       tinyOverlays = {
         chatgpt = final.mkSourceOverride "chatgpt" prev.chatgpt;
         code-cursor = final.mkSourceOverride "code-cursor" prev.code-cursor;
+        commander = final.callPackage ../packages/commander { };
         inherit (prev) flake-edit;
         google-chrome = final.mkSourceOverride "google-chrome" prev.google-chrome;
         worktrunk = inputs.worktrunk.packages.${system}.default;

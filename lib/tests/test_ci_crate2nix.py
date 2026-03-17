@@ -17,6 +17,13 @@ def test_normalize_json_text_sorts_keys_and_adds_newline() -> None:
     check(rendered == '{\n  "a": 2,\n  "b": 1\n}\n')
 
 
+def test_normalize_trailing_newline_collapses_extra_newlines() -> None:
+    """Generated artifacts should always end with exactly one newline."""
+    check(crate2nix._normalize_trailing_newline("demo") == "demo\n")
+    check(crate2nix._normalize_trailing_newline("demo\n") == "demo\n")
+    check(crate2nix._normalize_trailing_newline("demo\n\n") == "demo\n")
+
+
 def test_stabilize_generated_command_comment_rewrites_dynamic_paths() -> None:
     """Generated command comments should use stable repo-relative output paths."""
     target = crate2nix.Crate2NixTarget(
@@ -304,7 +311,7 @@ def test_refresh_target_materializes_normalized_outputs(
     monkeypatch.setattr(
         crate2nix,
         "_load_normalizer",
-        lambda _path: lambda text: (text.replace("raw", "normalized"), 2, True),
+        lambda _path: lambda text: (text.replace("raw", "normalized") + "\n", 2, True),
     )
 
     def _run(args: list[str], *, cwd: Path = crate2nix.REPO_ROOT):

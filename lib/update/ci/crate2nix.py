@@ -133,6 +133,10 @@ def _normalize_json_text(text: str) -> str:
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
+def _normalize_trailing_newline(text: str) -> str:
+    return text.rstrip("\n") + "\n"
+
+
 def _load_normalizer(path: Path) -> _Normalizer:
     module_path = (REPO_ROOT / path).resolve()
     spec = importlib.util.spec_from_file_location(
@@ -219,7 +223,9 @@ def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
             generated_cargo.read_text(encoding="utf-8")
         )
         cargo_text = _stabilize_generated_command_comment(target, cargo_text)
+        cargo_text = _normalize_trailing_newline(cargo_text)
         hash_text = _normalize_json_text(generated_hashes.read_text(encoding="utf-8"))
+        hash_text = _normalize_trailing_newline(hash_text)
         return RefreshResult(cargo_nix=cargo_text, crate_hashes=hash_text)
 
 

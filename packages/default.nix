@@ -12,6 +12,7 @@
 }:
 let
   darwinOnly = [
+    "commander"
     "codex-desktop"
     "conductor"
     "zed-editor-nightly"

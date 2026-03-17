@@ -195,6 +195,7 @@ in
             ++ lib.optionals stdenv.isDarwin [
               appcleaner
               chatgpt
+              commander
               codex-desktop
               conductor
               container
