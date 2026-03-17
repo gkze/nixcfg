@@ -11,7 +11,21 @@ if TYPE_CHECKING:
 from lib.update.net import fetch_url
 from lib.update.updaters.base import DownloadHashUpdater, VersionInfo
 
-_CHANGELOG_VERSION_RE = re.compile(r"^##\s+([0-9]+(?:\.[0-9]+)+)\s+-\s+", re.MULTILINE)
+_MARKDOWN_CHANGELOG_VERSION_RE = re.compile(
+    r"^##\s+([0-9]+(?:\.[0-9]+)+)\s+-\s+", re.MULTILINE
+)
+_HTML_CHANGELOG_VERSION_RE = re.compile(
+    r"<h2\b[^>]*>\s*([0-9]+(?:\.[0-9]+)+)\s+-\s+[^<]+</h2>",
+    re.IGNORECASE,
+)
+
+
+def _extract_latest_version(content: str) -> str | None:
+    for pattern in (_MARKDOWN_CHANGELOG_VERSION_RE, _HTML_CHANGELOG_VERSION_RE):
+        match = pattern.search(content)
+        if match is not None:
+            return match.group(1)
+    return None
 
 
 class CommanderUpdater(DownloadHashUpdater):
@@ -34,8 +48,8 @@ class CommanderUpdater(DownloadHashUpdater):
             user_agent=self.config.default_user_agent,
         )
         content = payload.decode(errors="replace")
-        match = _CHANGELOG_VERSION_RE.search(content)
-        if match is None:
+        version = _extract_latest_version(content)
+        if version is None:
             msg = "Could not parse latest Commander version from changelog"
             raise RuntimeError(msg)
-        return VersionInfo(version=match.group(1), metadata={})
+        return VersionInfo(version=version, metadata={})

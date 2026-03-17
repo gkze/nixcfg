@@ -95,7 +95,7 @@ def test_commander_fetches_latest_version_from_changelog(
     commander_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Parse the latest version from the changelog heading."""
+    """Parse the latest version from a markdown changelog heading."""
     updater = commander_module.CommanderUpdater()
     monkeypatch.setattr(
         commander_module,
@@ -103,6 +103,28 @@ def test_commander_fetches_latest_version_from_changelog(
         lambda *_a, **_k: asyncio.sleep(
             0,
             result=b"# Changelog\n\n## 0.7.875 - 2026-03-16\n\n- Fix stuff\n",
+        ),
+    )
+    latest = _run(updater.fetch_latest(object()))
+    check(latest.version == "0.7.875")
+
+
+def test_commander_fetches_latest_version_from_html_changelog(
+    commander_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Parse the latest version from the live HTML changelog heading."""
+    updater = commander_module.CommanderUpdater()
+    monkeypatch.setattr(
+        commander_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(
+            0,
+            result=(
+                b"<!DOCTYPE html><html><body><h1>Changelog</h1>"
+                b"<h2>0.7.875 - 2026-03-16</h2>"
+                b"<h3>Fix</h3></body></html>"
+            ),
         ),
     )
     latest = _run(updater.fetch_latest(object()))
