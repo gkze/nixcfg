@@ -109,11 +109,13 @@ let
       runHook postInstallCheck
     '';
   });
+  guardedCodexDrv =
+    assert cargoNixVersionCheck;
+    codexDrvChecked;
 in
-assert cargoNixVersionCheck;
 symlinkJoin {
   name = "codex-${version}";
-  paths = [ codexDrvChecked ];
+  paths = [ guardedCodexDrv ];
   nativeBuildInputs = [
     installShellFiles
     makeBinaryWrapper
@@ -130,7 +132,7 @@ symlinkJoin {
 
   passthru = {
     inherit cargoNix crateOverrides patchedSrc;
-    codexDrv = codexDrvChecked;
+    codexDrv = guardedCodexDrv;
   };
 
   meta = {

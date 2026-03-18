@@ -520,15 +520,17 @@ let
       runHook postInstallCheck
     '';
   });
+  guardedZedDrv =
+    assert cargoNixVersionCheck;
+    zedDrvChecked;
 in
-assert cargoNixVersionCheck;
 symlinkJoin {
   name = "${pname}-${version}";
-  paths = [ zedDrvChecked ];
+  paths = [ guardedZedDrv ];
 
   passthru = {
     inherit cargoNix crateOverrides patchedSrc;
-    zedDrv = zedDrvChecked;
+    zedDrv = guardedZedDrv;
   };
 
   meta = {

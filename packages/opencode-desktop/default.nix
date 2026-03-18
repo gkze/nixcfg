@@ -225,15 +225,17 @@ let
     inherit crateOverrides;
     runTests = false;
   };
+  guardedOpencodeDesktopDrv =
+    assert cargoNixVersionCheck;
+    assert desktopPackageVersionCheck;
+    opencodeDesktopDrv;
 in
-assert cargoNixVersionCheck;
-assert desktopPackageVersionCheck;
-opencodeDesktopDrv.overrideAttrs (old: {
+guardedOpencodeDesktopDrv.overrideAttrs (old: {
   __intentionallyOverridingVersion = true;
   inherit pname version;
   inherit (upstreamDesktop) meta;
   passthru = (old.passthru or { }) // {
     inherit cargoNix crateOverrides patchedSrc;
-    inherit opencodeDesktopDrv;
+    opencodeDesktopDrv = guardedOpencodeDesktopDrv;
   };
 })

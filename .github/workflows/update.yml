@@ -153,11 +153,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           UPDATE_SUBPROCESS_TIMEOUT: "14400"
         run: nix run .#nixcfg -- update --native-only --pinned-versions pinned-versions.json
-      - name: Warm FOD cache for ${{ matrix.platform }}
-        # Build packages with platform-specific FOD hashes so the Cachix
-        # daemon pushes them.  Downstream jobs get a cache hit instead of
-        # rebuilding the FOD (which is non-deterministic across runners).
-        run: nix run .#nixcfg -- ci cache fod
       - uses: actions/upload-artifact@v6
         with:
           name: sources-${{ matrix.platform }}
@@ -203,7 +198,7 @@ jobs:
             packages/**/sources.json
             overlays/**/sources.json
 
-  # Phase 5: Refresh checked-in crate2nix artifacts on native platforms
+  # Phase 5: Refresh checked-in generated artifacts on native platforms
   crate2nix-linux:
     needs: merge-hashes
     runs-on: ubuntu-24.04
@@ -294,8 +289,43 @@ jobs:
             overlays/goose-cli/crate-hashes.json
             packages/zed-editor-nightly/Cargo.nix
             packages/zed-editor-nightly/crate-hashes.json
+            packages/opencode-desktop/Cargo.nix
+            packages/opencode-desktop/crate-hashes.json
 
-  # Phase 6: Quality gates
+  # Phase 6: Warm FOD cache from the fully materialized update tree
+  warm-fod-cache:
+    needs: merge-generated
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: aarch64-darwin
+          - runner: ubuntu-24.04
+            platform: x86_64-linux
+          - runner: ubuntu-24.04-arm
+            platform: aarch64-linux
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - *checkout
+      - *setup_nix
+      - *cachix
+      - uses: actions/download-artifact@v7
+        with:
+          name: merged-generated
+          path: .
+      - *cache_nix_arch
+      - name: Free disk space
+        if: runner.os == 'macOS'
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - name: Warm FOD cache for ${{ matrix.platform }}
+        # Build packages with platform-specific FOD hashes only after all
+        # checked-in generated artifacts have been materialized. Downstream
+        # jobs then evaluate one consistent tree instead of mixing fresh
+        # sources.json updates with stale Cargo.nix state.
+        run: nix run .#nixcfg -- ci cache fod
+
+  # Phase 7: Quality gates
   quality-gates:
     needs: merge-generated
     runs-on: ubuntu-24.04
@@ -327,10 +357,11 @@ jobs:
           uv run coverage run -m pytest
           uv run coverage report
 
-  # Phase 7: Build the slowest Darwin derivations in parallel
+  # Phase 8: Build the slowest Darwin derivations in parallel
   darwin-shared-heavy:
     needs:
       - merge-generated
+      - warm-fod-cache
       - quality-gates
     runs-on: macos-15
     name: ${{ matrix.package }}
@@ -376,10 +407,11 @@ jobs:
       - name: Build heavy target (${{ matrix.package }})
         run: nix build --impure ${{ matrix.target }}
 
-  # Phase 8: Build shared Darwin derivations to populate cache
+  # Phase 9: Build shared Darwin derivations to populate cache
   darwin-shared:
     needs:
       - merge-generated
+      - warm-fod-cache
       - quality-gates
     runs-on: macos-15
     steps:
@@ -414,7 +446,7 @@ jobs:
             .#darwinConfigurations.argus.system \
             .#darwinConfigurations.rocinante.system
 
-  # Phase 9: Build Darwin configurations per host
+  # Phase 10: Build Darwin configurations per host
   darwin-argus:
     needs:
       - merge-generated
@@ -455,10 +487,11 @@ jobs:
         run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
       - run: nix run .#nixcfg -- ci workflow build-darwin-config rocinante
 
-  # Phase 10: Placeholder for future NixOS configuration builds
+  # Phase 11: Placeholder for future NixOS configuration builds
   linux:
     needs:
       - merge-generated
+      - warm-fod-cache
       - quality-gates
     runs-on: ubuntu-24.04
     steps:
@@ -471,7 +504,7 @@ jobs:
         run: nix run .#nixcfg -- ci workflow smoke-check-update-app
       - run: nix run .#nixcfg -- ci workflow list-update-targets
 
-  # Phase 11: Create PR with updates
+  # Phase 12: Create PR with updates
   create-pr:
     needs:
       - merge-generated

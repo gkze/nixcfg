@@ -411,53 +411,54 @@ let
     ];
   };
 in
-assert cargoNixVersionCheck;
 {
-  goose-cli = prev.symlinkJoin {
-    name = "goose-cli-${version}";
-    paths = [ workspaceBins ];
-    nativeBuildInputs = [ prev.installShellFiles ];
+  goose-cli =
+    assert cargoNixVersionCheck;
+    prev.symlinkJoin {
+      name = "goose-cli-${version}";
+      paths = [ workspaceBins ];
+      nativeBuildInputs = [ prev.installShellFiles ];
 
-    postBuild = ''
-      rm -f $out/bin/generate_manpages $out/bin/generate_schema
+      postBuild = ''
+        rm -f $out/bin/generate_manpages $out/bin/generate_schema
 
-      export HOME="$TMPDIR/home"
-      export XDG_CACHE_HOME="$TMPDIR/xdg-cache"
-      export XDG_CONFIG_HOME="$TMPDIR/xdg-config"
-      export XDG_DATA_HOME="$TMPDIR/xdg-data"
-      export XDG_STATE_HOME="$TMPDIR/xdg-state"
-      mkdir -p \
-        "$HOME" \
-        "$XDG_CACHE_HOME" \
-        "$XDG_CONFIG_HOME" \
-        "$XDG_DATA_HOME" \
-        "$XDG_STATE_HOME"
+        export HOME="$TMPDIR/home"
+        export XDG_CACHE_HOME="$TMPDIR/xdg-cache"
+        export XDG_CONFIG_HOME="$TMPDIR/xdg-config"
+        export XDG_DATA_HOME="$TMPDIR/xdg-data"
+        export XDG_STATE_HOME="$TMPDIR/xdg-state"
+        mkdir -p \
+          "$HOME" \
+          "$XDG_CACHE_HOME" \
+          "$XDG_CONFIG_HOME" \
+          "$XDG_DATA_HOME" \
+          "$XDG_STATE_HOME"
 
-      installShellCompletion --cmd goose \
-        --bash <($out/bin/goose completion bash) \
-        --fish <($out/bin/goose completion fish) \
-        --zsh <($out/bin/goose completion zsh)
-    '';
+        installShellCompletion --cmd goose \
+          --bash <($out/bin/goose completion bash) \
+          --fish <($out/bin/goose completion fish) \
+          --zsh <($out/bin/goose completion zsh)
+      '';
 
-    passthru = {
-      inherit
-        cargoNix
-        crateOverrides
-        gooseServerDrv
-        patchedSrc
-        patchedV8Src
-        chromiumToolchainBundle
-        ;
-      gooseCliDrv = gooseCliDrvChecked;
-      inherit v8NativeDrv;
+      passthru = {
+        inherit
+          cargoNix
+          crateOverrides
+          gooseServerDrv
+          patchedSrc
+          patchedV8Src
+          chromiumToolchainBundle
+          ;
+        gooseCliDrv = gooseCliDrvChecked;
+        inherit v8NativeDrv;
+      };
+
+      meta = {
+        description = "Open-source, extensible AI agent that goes beyond code suggestions - install, execute, edit, and test with any LLM";
+        homepage = "https://github.com/block/goose";
+        license = prev.lib.licenses.asl20;
+        mainProgram = "goose";
+        platforms = prev.lib.platforms.linux ++ prev.lib.platforms.darwin;
+      };
     };
-
-    meta = {
-      description = "Open-source, extensible AI agent that goes beyond code suggestions - install, execute, edit, and test with any LLM";
-      homepage = "https://github.com/block/goose";
-      license = prev.lib.licenses.asl20;
-      mainProgram = "goose";
-      platforms = prev.lib.platforms.linux ++ prev.lib.platforms.darwin;
-    };
-  };
 }
