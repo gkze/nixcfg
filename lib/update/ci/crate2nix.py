@@ -81,7 +81,7 @@ def _stabilize_generated_command_comment(
 TARGETS = {
     "codex": Crate2NixTarget(
         name="codex",
-        patched_src_installable=".#codex.passthru.patchedSrc",
+        patched_src_installable="path:.#codex-crate2nix-src",
         cargo_nix=Path("packages/codex/Cargo.nix"),
         crate_hashes=Path("packages/codex/crate-hashes.json"),
         normalizer_path=Path("packages/codex/normalize_cargo_nix.py"),
@@ -89,7 +89,7 @@ TARGETS = {
     ),
     "goose-cli": Crate2NixTarget(
         name="goose-cli",
-        patched_src_installable=".#goose-cli.passthru.patchedSrc",
+        patched_src_installable="path:.#goose-cli-crate2nix-src",
         cargo_nix=Path("overlays/goose-cli/Cargo.nix"),
         crate_hashes=Path("overlays/goose-cli/crate-hashes.json"),
         normalizer_path=Path("overlays/goose-cli/normalize_cargo_nix.py"),
@@ -97,9 +97,7 @@ TARGETS = {
     ),
     "zed-editor-nightly": Crate2NixTarget(
         name="zed-editor-nightly",
-        patched_src_installable=(
-            ".#darwinConfigurations.argus.pkgs.zed-editor-nightly.passthru.patchedSrc"
-        ),
+        patched_src_installable="path:.#zed-editor-nightly-crate2nix-src",
         cargo_nix=Path("packages/zed-editor-nightly/Cargo.nix"),
         crate_hashes=Path("packages/zed-editor-nightly/crate-hashes.json"),
         normalizer_path=Path("packages/zed-editor-nightly/normalize_cargo_nix.py"),
@@ -107,9 +105,7 @@ TARGETS = {
     ),
     "opencode-desktop": Crate2NixTarget(
         name="opencode-desktop",
-        patched_src_installable=(
-            ".#darwinConfigurations.argus.pkgs.opencode-desktop.passthru.patchedSrc"
-        ),
+        patched_src_installable="path:.#opencode-desktop-crate2nix-src",
         cargo_nix=Path("packages/opencode-desktop/Cargo.nix"),
         crate_hashes=Path("packages/opencode-desktop/crate-hashes.json"),
         normalizer_path=Path("packages/opencode-desktop/normalize_cargo_nix.py"),

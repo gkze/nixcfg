@@ -6,6 +6,7 @@
   stdenv,
   lib,
   runCommand,
+  crate2nixSourceOnly ? false,
   ...
 }:
 let
@@ -230,12 +231,15 @@ let
     assert desktopPackageVersionCheck;
     opencodeDesktopDrv;
 in
-guardedOpencodeDesktopDrv.overrideAttrs (old: {
-  __intentionallyOverridingVersion = true;
-  inherit pname version;
-  inherit (upstreamDesktop) meta;
-  passthru = (old.passthru or { }) // {
-    inherit cargoNix crateOverrides patchedSrc;
-    opencodeDesktopDrv = guardedOpencodeDesktopDrv;
-  };
-})
+if crate2nixSourceOnly then
+  patchedSrc
+else
+  guardedOpencodeDesktopDrv.overrideAttrs (old: {
+    __intentionallyOverridingVersion = true;
+    inherit pname version;
+    inherit (upstreamDesktop) meta;
+    passthru = (old.passthru or { }) // {
+      inherit cargoNix crateOverrides patchedSrc;
+      opencodeDesktopDrv = guardedOpencodeDesktopDrv;
+    };
+  })

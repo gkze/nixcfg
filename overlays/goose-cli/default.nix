@@ -18,6 +18,8 @@ let
   v8HashEntry = builtins.head (
     builtins.filter (entry: entry.hashType == "srcHash") (v8Source.hashes or [ ])
   );
+  v8ManifestVersion =
+    (builtins.fromTOML (builtins.readFile "${rustyV8Src}/Cargo.toml")).package.version;
   clangResourceVersion = "22";
 
   rustyV8Src = prev.fetchgit {
@@ -207,6 +209,14 @@ let
         overlays/goose-cli/Cargo.nix has goose-cli version ${cargoNixGooseVersion},
         expected ${version}; regenerate Cargo.nix
       '';
+  cargoNixV8VersionCheck =
+    if cargoNixV8Version == v8ManifestVersion then
+      true
+    else
+      throw ''
+        overlays/goose-cli/Cargo.nix has v8-goose version ${cargoNixV8Version},
+        expected ${v8ManifestVersion}; regenerate Cargo.nix
+      '';
 
   # Hand-maintained source surgery. crate2nix handles the Rust dependency graph,
   # but Goose still needs a custom V8 source tree, lockfile rewrite, and a few
@@ -215,7 +225,6 @@ let
     prev.runCommand "goose-cli-${version}-src"
       {
         nativeBuildInputs = [
-          prev.patch
           prev.python3
         ];
       }
@@ -227,32 +236,89 @@ let
         cp -r ${patchedV8Src} $out/vendor/v8-goose-src
         chmod -R u+w $out/vendor/v8-goose-src
 
-        patch -d $out -p1 < ${./goose-workspace-nix.patch}
-
-        # Goose's embedded web UI reaches out to workspace-level documentation
-        # assets via include_bytes!(../../../../documentation/...). That path
-        # escapes crate2nix/buildRustCrate's per-crate source root, so vendor
-        # the two referenced logos into the crate-local static tree and point
-        # the source at those local copies.
-        mkdir -p $out/crates/goose-cli/static/img
-        cp $out/documentation/static/img/logo_dark.png \
-          $out/crates/goose-cli/static/img/logo_dark.png
-        cp $out/documentation/static/img/logo_light.png \
-          $out/crates/goose-cli/static/img/logo_light.png
-
         python - <<PY
+        import re
+        import shutil
         from pathlib import Path
         import tomllib
 
-        root = Path("$out")
-        v8_manifest = tomllib.loads((root / "vendor/v8-goose-src/Cargo.toml").read_text())
-        v8_version = v8_manifest["package"]["version"]
-        cargo_nix_version = ${builtins.toJSON cargoNixV8Version}
-        if cargo_nix_version != v8_version:
-            raise SystemExit(
-                "overlays/goose-cli/Cargo.nix has v8-goose version "
-                f"{cargo_nix_version}, expected {v8_version}; regenerate Cargo.nix"
+        def drop_top_level_sections(text: str, headers: set[str]) -> str:
+            prefixes = tuple(
+                header[:-1] + "."
+                for header in headers
+                if header.startswith("[")
+                and header.endswith("]")
+                and not header.startswith("[[")
             )
+
+            def should_remove(header: str) -> bool:
+                return header in headers or any(header.startswith(prefix) for prefix in prefixes)
+
+            lines = text.splitlines(keepends=True)
+            kept = []
+            removing = False
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    removing = should_remove(stripped)
+                    if removing:
+                        continue
+                if not removing:
+                    kept.append(line)
+            return "".join(kept)
+
+        root = Path("$out")
+        goose_cli_src = root / "crates/goose-cli/src"
+        logo_rewrites = {
+            "../../../../documentation/static/img/logo_dark.png": "../../static/img/logo_dark.png",
+            "../../../../documentation/static/img/logo_light.png": "../../static/img/logo_light.png",
+        }
+        rewrote_logo_paths = False
+        if goose_cli_src.exists():
+            for path in goose_cli_src.rglob("*.rs"):
+                text = path.read_text()
+                updated = text
+                for old, new in logo_rewrites.items():
+                    updated = updated.replace(old, new)
+                if updated != text:
+                    path.write_text(updated)
+                    rewrote_logo_paths = True
+
+        if rewrote_logo_paths:
+            static_img_dir = root / "crates/goose-cli/static/img"
+            static_img_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(root / "documentation/static/img/logo_dark.png", static_img_dir / "logo_dark.png")
+            shutil.copy2(root / "documentation/static/img/logo_light.png", static_img_dir / "logo_light.png")
+
+        v8_cargo_toml = root / "vendor/v8/Cargo.toml"
+        v8_cargo_text = v8_cargo_toml.read_text()
+        v8_cargo_text, replacements = re.subn(
+            r'^v8-goose\s*=\s*.*$',
+            'v8-goose = { path = "../v8-goose-src" }',
+            v8_cargo_text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if replacements != 1:
+            raise SystemExit("expected one v8-goose dependency line in vendor/v8/Cargo.toml")
+        v8_cargo_toml.write_text(v8_cargo_text)
+
+        v8_goose_cargo_toml = root / "vendor/v8-goose-src/Cargo.toml"
+        v8_goose_cargo_text = drop_top_level_sections(
+            v8_goose_cargo_toml.read_text(),
+            {
+                "[workspace]",
+                "[profile.dev]",
+                "[dev-dependencies]",
+                "[[example]]",
+                "[[test]]",
+                "[[bench]]",
+            },
+        )
+        v8_goose_cargo_toml.write_text(v8_goose_cargo_text)
+
+        v8_manifest = tomllib.loads(v8_goose_cargo_text)
+        v8_version = v8_manifest["package"]["version"]
         lock_file = root / "Cargo.lock"
         sections = lock_file.read_text().split("[[package]]\n")
         updated = False
@@ -412,8 +478,10 @@ let
   };
 in
 {
+  goose-cli-crate2nix-src = patchedSrc;
   goose-cli =
     assert cargoNixVersionCheck;
+    assert cargoNixV8VersionCheck;
     prev.symlinkJoin {
       name = "goose-cli-${version}";
       paths = [ workspaceBins ];

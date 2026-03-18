@@ -45,14 +45,14 @@ tree that preserves Cargo's expectations inside `buildRustCrate`.
 Fast path:
 
 ```bash
-nix run .#nixcfg -- ci pipeline crate2nix --write --package zed-editor-nightly
+nix run path:.#nixcfg -- ci pipeline crate2nix --write --package zed-editor-nightly
 ```
 
 Manual flow:
 
 ```bash
 nix build --impure --no-link --print-out-paths \
-  .#packages.aarch64-darwin.zed-editor-nightly.passthru.patchedSrc
+  path:.#zed-editor-nightly-crate2nix-src
 ```
 
 Save the printed path as `PATCHED_SRC`, then:
@@ -71,7 +71,7 @@ python packages/zed-editor-nightly/normalize_cargo_nix.py \
 ## Recommended validation
 
 ```bash
-nix run .#nixcfg -- ci pipeline crate2nix --package zed-editor-nightly
+nix run path:.#nixcfg -- ci pipeline crate2nix --package zed-editor-nightly
 nix build .#packages.aarch64-darwin.zed-editor-nightly --no-link
 ```
 

@@ -38969,32 +38969,6 @@ rec {
             packageId = "which 6.0.3";
           }
         ];
-        devDependencies = [
-          {
-            name = "bindgen";
-            packageId = "bindgen";
-          }
-          {
-            name = "fslock";
-            packageId = "fslock";
-          }
-          {
-            name = "gzip-header";
-            packageId = "gzip-header";
-          }
-          {
-            name = "home";
-            packageId = "home";
-          }
-          {
-            name = "miniz_oxide";
-            packageId = "miniz_oxide";
-          }
-          {
-            name = "which";
-            packageId = "which 6.0.3";
-          }
-        ];
         features = {
           "default" = [ "use_custom_libcxx" ];
           "v8_enable_sandbox" = [ "v8_enable_pointer_compression" ];

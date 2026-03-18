@@ -29,13 +29,13 @@ This package builds Codex with `crate2nix` from the upstream Rust workspace.
 ## Regenerating `Cargo.nix`
 
 ```bash
-nix run .#nixcfg -- ci pipeline crate2nix --write --package codex
+nix run path:.#nixcfg -- ci pipeline crate2nix --write --package codex
 ```
 
 For the lower-level manual flow:
 
 ```bash
-nix build --impure --no-link --print-out-paths .#codex.passthru.patchedSrc
+nix build --impure --no-link --print-out-paths path:.#codex-crate2nix-src
 crate2nix generate \
   -f "$PATCHED_SRC/Cargo.toml" \
   -o packages/codex/Cargo.nix \
@@ -47,7 +47,7 @@ python packages/codex/normalize_cargo_nix.py packages/codex/Cargo.nix
 ## Recommended validation
 
 ```bash
-nix run .#nixcfg -- ci pipeline crate2nix --package codex
+nix run path:.#nixcfg -- ci pipeline crate2nix --package codex
 nix build .#codex --no-link
 CODEX=$(nix path-info .#codex)/bin/codex
 "$CODEX" --version

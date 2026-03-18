@@ -25,6 +25,7 @@
   apple-sdk_15,
   darwinMinVersionHook,
   python3,
+  crate2nixSourceOnly ? false,
   ...
 }:
 let
@@ -524,21 +525,24 @@ let
     assert cargoNixVersionCheck;
     zedDrvChecked;
 in
-symlinkJoin {
-  name = "${pname}-${version}";
-  paths = [ guardedZedDrv ];
+if crate2nixSourceOnly then
+  patchedSrc
+else
+  symlinkJoin {
+    name = "${pname}-${version}";
+    paths = [ guardedZedDrv ];
 
-  passthru = {
-    inherit cargoNix crateOverrides patchedSrc;
-    zedDrv = guardedZedDrv;
-  };
+    passthru = {
+      inherit cargoNix crateOverrides patchedSrc;
+      zedDrv = guardedZedDrv;
+    };
 
-  meta = {
-    description = "High-performance, multiplayer code editor from the creators of Atom and Tree-sitter";
-    homepage = "https://zed.dev";
-    changelog = "https://zed.dev/releases/preview";
-    license = lib.licenses.gpl3Only;
-    mainProgram = "zed";
-    platforms = lib.platforms.darwin;
-  };
-}
+    meta = {
+      description = "High-performance, multiplayer code editor from the creators of Atom and Tree-sitter";
+      homepage = "https://zed.dev";
+      changelog = "https://zed.dev/releases/preview";
+      license = lib.licenses.gpl3Only;
+      mainProgram = "zed";
+      platforms = lib.platforms.darwin;
+    };
+  }

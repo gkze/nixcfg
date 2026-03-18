@@ -38,8 +38,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/nix
-          key: nix-cache-${{ runner.os }}-${{ hashFiles('flake.lock') }}
-          restore-keys: nix-cache-${{ runner.os }}-
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
+          restore-keys: |
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-
+            nix-cache-${{ runner.os }}-
       - name: Snapshot superset flake input
         run: |
           python3 - <<'PY'
@@ -98,8 +100,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/nix
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
-          restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
+          restore-keys: |
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-
+            nix-cache-${{ runner.os }}-
       - name: Resolve upstream versions
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -169,7 +173,6 @@ jobs:
       - *checkout
       - *setup_nix
       - *cachix
-      - *cache_nix
       - *download_flake_lock
       - uses: actions/download-artifact@v7
         with:
@@ -183,6 +186,7 @@ jobs:
         with:
           name: sources-aarch64-linux
           path: sources-aarch64-linux
+      - *cache_nix
       - name: Merge per-package sources files
         run: |
           nix run .#nixcfg -- ci pipeline sources \
@@ -206,11 +210,11 @@ jobs:
       - *checkout
       - *setup_nix
       - *cachix
-      - *cache_nix
       - uses: actions/download-artifact@v7
         with:
           name: merged-sources
           path: .
+      - *cache_nix
       - name: Refresh Linux crate2nix artifacts
         run: nix run .#nixcfg -- ci pipeline crate2nix --write
       - uses: actions/upload-artifact@v6
@@ -333,11 +337,11 @@ jobs:
       - *checkout
       - *setup_nix
       - *cachix
-      - *cache_nix
       - uses: actions/download-artifact@v7
         with:
           name: merged-generated
           path: .
+      - *cache_nix
       - name: Check Nix formatting
         run: nix fmt -- --ci
       - name: Run core Nix checks
@@ -530,8 +534,8 @@ jobs:
       - *checkout
       - *setup_nix
       - *cachix
-      - *cache_nix
       - *download_merged_sources
+      - *cache_nix
       - name: Generate PR body
         run: |
           nix run .#nixcfg -- ci workflow generate-pr-body \

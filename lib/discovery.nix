@@ -45,4 +45,38 @@
       names = dirNames ++ fileNames;
       pathFor = name: if builtins.elem name dirNames then root + "/${name}" else root + "/${name}.nix";
     };
+
+  discoverCompanionEntries =
+    {
+      root,
+      directories,
+      fileName,
+      nameFor ? (
+        dirName: "${dirName}-${builtins.substring 0 ((builtins.stringLength fileName) - 4) fileName}"
+      ),
+    }:
+    let
+      entryMap = builtins.listToAttrs (
+        builtins.concatMap (
+          dirName:
+          let
+            candidate = root + "/${dirName}/${fileName}";
+          in
+          if builtins.pathExists candidate then
+            [
+              {
+                name = nameFor dirName;
+                value = candidate;
+              }
+            ]
+          else
+            [ ]
+        ) directories
+      );
+    in
+    {
+      entries = entryMap;
+      names = builtins.attrNames entryMap;
+      pathFor = name: entryMap.${name};
+    };
 }

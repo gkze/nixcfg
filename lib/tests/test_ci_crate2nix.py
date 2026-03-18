@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -28,7 +30,7 @@ def test_stabilize_generated_command_comment_rewrites_dynamic_paths() -> None:
     """Generated command comments should use stable repo-relative output paths."""
     target = crate2nix.Crate2NixTarget(
         name="demo",
-        patched_src_installable=".#demo",
+        patched_src_installable="path:.#demo",
         cargo_nix=Path("demo/Cargo.nix"),
         crate_hashes=Path("demo/crate-hashes.json"),
         normalizer_path=Path("demo/normalize.py"),
@@ -54,7 +56,7 @@ def test_stabilize_generated_command_comment_preserves_nested_manifest_path() ->
     """Nested-manifest targets should keep their real manifest path in comments."""
     target = crate2nix.Crate2NixTarget(
         name="demo",
-        patched_src_installable=".#demo",
+        patched_src_installable="path:.#demo",
         cargo_nix=Path("demo/Cargo.nix"),
         crate_hashes=Path("demo/crate-hashes.json"),
         normalizer_path=Path("demo/normalize.py"),
@@ -82,7 +84,7 @@ def test_stabilize_generated_command_comment_leaves_unrelated_text_unchanged() -
     """Non-generated comments should pass through unchanged."""
     target = crate2nix.Crate2NixTarget(
         name="demo",
-        patched_src_installable=".#demo",
+        patched_src_installable="path:.#demo",
         cargo_nix=Path("demo/Cargo.nix"),
         crate_hashes=Path("demo/crate-hashes.json"),
         normalizer_path=Path("demo/normalize.py"),
@@ -110,11 +112,63 @@ def test_resolve_targets_skips_unsupported_platforms(monkeypatch) -> None:
     check(skipped == ["zed-editor-nightly", "opencode-desktop"])
 
 
+def test_targets_use_dedicated_source_installables() -> None:
+    """Built-in targets should avoid final-package passthru source paths."""
+    check(
+        {
+            name: target.patched_src_installable
+            for name, target in crate2nix.TARGETS.items()
+        }
+        == {
+            "codex": "path:.#codex-crate2nix-src",
+            "goose-cli": "path:.#goose-cli-crate2nix-src",
+            "zed-editor-nightly": "path:.#zed-editor-nightly-crate2nix-src",
+            "opencode-desktop": "path:.#opencode-desktop-crate2nix-src",
+        }
+    )
+
+
+def test_crate2nix_source_installables_are_exported_via_package_registry() -> None:
+    """Companion crate2nix source entries should be discoverable from packages."""
+    if shutil.which("nix") is None:
+        pytest.skip("nix command not available")
+
+    cmd = [
+        "nix",
+        "eval",
+        "--impure",
+        "--json",
+        "--expr",
+        "let registry = import "
+        + str(crate2nix.REPO_ROOT / "packages" / "registry.nix")
+        + " {}; in {"
+        + ' darwin = builtins.attrNames (registry.forSystem "aarch64-darwin");'
+        + ' linux = builtins.attrNames (registry.forSystem "x86_64-linux");'
+        + " }",
+    ]
+    result = subprocess.run(  # noqa: S603
+        cmd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    exported = json.loads(result.stdout)
+
+    check("codex-crate2nix-src" in exported["darwin"])
+    check("codex-crate2nix-src" in exported["linux"])
+    check("goose-cli-crate2nix-src" in exported["darwin"])
+    check("goose-cli-crate2nix-src" in exported["linux"])
+    check("opencode-desktop-crate2nix-src" in exported["darwin"])
+    check("opencode-desktop-crate2nix-src" not in exported["linux"])
+    check("zed-editor-nightly-crate2nix-src" in exported["darwin"])
+    check("zed-editor-nightly-crate2nix-src" not in exported["linux"])
+
+
 def test_run_writes_refreshed_files(monkeypatch, tmp_path: Path) -> None:
     """Write mode should persist refreshed Cargo.nix and crate-hashes.json."""
     target = crate2nix.Crate2NixTarget(
         name="demo",
-        patched_src_installable=".#demo.passthru.patchedSrc",
+        patched_src_installable="path:.#demo-crate2nix-src",
         cargo_nix=Path("demo/Cargo.nix"),
         crate_hashes=Path("demo/crate-hashes.json"),
         normalizer_path=Path("demo/normalize.py"),
@@ -150,7 +204,7 @@ def test_run_fails_when_drift_is_detected(monkeypatch, tmp_path: Path) -> None:
     """Check mode should fail when refreshed artifacts differ."""
     target = crate2nix.Crate2NixTarget(
         name="demo",
-        patched_src_installable=".#demo.passthru.patchedSrc",
+        patched_src_installable="path:.#demo-crate2nix-src",
         cargo_nix=Path("demo/Cargo.nix"),
         crate_hashes=Path("demo/crate-hashes.json"),
         normalizer_path=Path("demo/normalize.py"),
@@ -259,7 +313,7 @@ def test_run_helper_and_build_patched_src_error_paths(
         crate2nix._build_patched_src(
             crate2nix.Crate2NixTarget(
                 name="demo",
-                patched_src_installable=".#demo",
+                patched_src_installable="path:.#demo",
                 cargo_nix=Path("Cargo.nix"),
                 crate_hashes=Path("crate-hashes.json"),
                 normalizer_path=Path("normalize.py"),
@@ -280,7 +334,7 @@ def test_run_helper_and_build_patched_src_error_paths(
         crate2nix._build_patched_src(
             crate2nix.Crate2NixTarget(
                 name="demo",
-                patched_src_installable=".#demo",
+                patched_src_installable="path:.#demo",
                 cargo_nix=Path("Cargo.nix"),
                 crate_hashes=Path("crate-hashes.json"),
                 normalizer_path=Path("normalize.py"),
@@ -300,7 +354,7 @@ def test_refresh_target_materializes_normalized_outputs(
     )
     target = crate2nix.Crate2NixTarget(
         name="demo",
-        patched_src_installable=".#demo",
+        patched_src_installable="path:.#demo",
         cargo_nix=Path("demo/Cargo.nix"),
         crate_hashes=Path("demo/crate-hashes.json"),
         normalizer_path=Path("demo/normalize.py"),
@@ -354,7 +408,7 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
 
     target = crate2nix.Crate2NixTarget(
         name="demo",
-        patched_src_installable=".#demo",
+        patched_src_installable="path:.#demo",
         cargo_nix=Path("demo/Cargo.nix"),
         crate_hashes=Path("demo/crate-hashes.json"),
         normalizer_path=Path("demo/normalize.py"),
@@ -389,7 +443,7 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
 
     skipped_target = crate2nix.Crate2NixTarget(
         name="zed",
-        patched_src_installable=".#zed",
+        patched_src_installable="path:.#zed",
         cargo_nix=Path("demo/Cargo.nix"),
         crate_hashes=Path("demo/crate-hashes.json"),
         normalizer_path=Path("demo/normalize.py"),

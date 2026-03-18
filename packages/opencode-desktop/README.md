@@ -63,7 +63,7 @@ before adding package-local overrides.
 Prefer the shared CI helper from the repo root:
 
 ```bash
-nix run .#nixcfg -- ci pipeline crate2nix --write --package opencode-desktop
+nix run path:.#nixcfg -- ci pipeline crate2nix --write --package opencode-desktop
 ```
 
 That command regenerates `Cargo.nix`, refreshes `crate-hashes.json`, runs the
@@ -74,7 +74,7 @@ If you need to debug the raw generation steps manually:
 
 ```bash
 PATCHED_SRC=$(nix build --impure --no-link --print-out-paths \
-  .#packages.aarch64-darwin.opencode-desktop.passthru.patchedSrc)
+  path:.#opencode-desktop-crate2nix-src)
 
 crate2nix generate \
   -f "$PATCHED_SRC/packages/desktop/src-tauri/Cargo.toml" \

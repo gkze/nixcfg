@@ -9,6 +9,7 @@
   runCommand,
   ripgrep,
   python3,
+  crate2nixSourceOnly ? false,
   ...
 }:
 let
@@ -46,7 +47,7 @@ let
         PY
       '';
 
-  cargoNix = import ./codex/Cargo.nix {
+  cargoNix = import ./Cargo.nix {
     inherit pkgs;
     rootSrc = patchedSrc;
   };
@@ -113,33 +114,36 @@ let
     assert cargoNixVersionCheck;
     codexDrvChecked;
 in
-symlinkJoin {
-  name = "codex-${version}";
-  paths = [ guardedCodexDrv ];
-  nativeBuildInputs = [
-    installShellFiles
-    makeBinaryWrapper
-  ];
+if crate2nixSourceOnly then
+  patchedSrc
+else
+  symlinkJoin {
+    name = "codex-${version}";
+    paths = [ guardedCodexDrv ];
+    nativeBuildInputs = [
+      installShellFiles
+      makeBinaryWrapper
+    ];
 
-  postBuild = ''
-    installShellCompletion --cmd codex \
-      --bash <($out/bin/codex completion bash) \
-      --fish <($out/bin/codex completion fish) \
-      --zsh <($out/bin/codex completion zsh)
+    postBuild = ''
+      installShellCompletion --cmd codex \
+        --bash <($out/bin/codex completion bash) \
+        --fish <($out/bin/codex completion fish) \
+        --zsh <($out/bin/codex completion zsh)
 
-    wrapProgram "$out/bin/codex" --prefix PATH : ${lib.makeBinPath [ ripgrep ]}
-  '';
+      wrapProgram "$out/bin/codex" --prefix PATH : ${lib.makeBinPath [ ripgrep ]}
+    '';
 
-  passthru = {
-    inherit cargoNix crateOverrides patchedSrc;
-    codexDrv = guardedCodexDrv;
-  };
+    passthru = {
+      inherit cargoNix crateOverrides patchedSrc;
+      codexDrv = guardedCodexDrv;
+    };
 
-  meta = {
-    description = "Lightweight coding agent that runs in your terminal";
-    homepage = "https://github.com/openai/codex";
-    license = lib.licenses.asl20;
-    mainProgram = "codex";
-    platforms = lib.platforms.unix;
-  };
-}
+    meta = {
+      description = "Lightweight coding agent that runs in your terminal";
+      homepage = "https://github.com/openai/codex";
+      license = lib.licenses.asl20;
+      mainProgram = "codex";
+      platforms = lib.platforms.unix;
+    };
+  }

@@ -11,11 +11,14 @@
   ...
 }:
 let
+  discovery = import ../lib/discovery.nix;
   darwinOnly = [
     "commander"
     "codex-desktop"
     "conductor"
+    "opencode-desktop-crate2nix-src"
     "zed-editor-nightly"
+    "zed-editor-nightly-crate2nix-src"
   ];
   helperEntries = [
     "go-cli-wrapper"
@@ -35,7 +38,13 @@ let
     "aarch64-linux"
     "x86_64-linux"
   ];
-  all = flakelight.importDir ./.;
+  imported = flakelight.importDir ./.;
+  crate2nixSourceEntries = discovery.discoverCompanionEntries {
+    root = ./.;
+    directories = builtins.attrNames imported;
+    fileName = "crate2nix-src.nix";
+  };
+  all = imported // builtins.mapAttrs (_: import) crate2nixSourceEntries.entries;
   systemEval = builtins.tryEval system;
   resolvedSystem =
     if systemEval.success && systemEval.value != null then systemEval.value else "x86_64-linux";

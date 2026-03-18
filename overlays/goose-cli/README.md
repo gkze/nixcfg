@@ -19,8 +19,6 @@ per-crate Rust build graph, while still preserving Goose's custom V8 setup.
   - source surgery for Goose + V8
   - crate overrides and compatibility shims
   - final package assembly (`goose-cli` + `goose-server`)
-- `goose-workspace-nix.patch`
-  - stable Goose workspace path rewrites that can live as checked-in patches
 - `rusty-v8-nix.patch`
   - stable `rusty_v8` and Chromium build-file rewrites that can live as
     checked-in patches
@@ -84,19 +82,22 @@ workspace churn does not invalidate the expensive V8 source input.
 - `patchedSrc`
   - prepares the Goose workspace and then copies in `patchedV8Src` under
     `vendor/v8-goose-src`
-  - keeps Goose-only path rewrites, lockfile updates, and crate2nix inputs
+  - keeps Goose-only path rewrites, manifest edits, lockfile updates, and
+    crate2nix inputs
 
 `patchedSrc` still does the non-negotiable Goose-side surgery:
 
 - fetch Goose from the release tag in `sources.json`
 - fetch the Goose-specific `rusty_v8` fork from `overlays/goose-v8/sources.json`
 - inject that fork under `vendor/v8-goose-src`
-- copy the two web UI logo assets into `crates/goose-cli/static/img/`
-- apply `goose-workspace-nix.patch` so `crates/goose-cli/src/commands/web.rs`
-  reads those local logo files instead of walking out to
-  `documentation/static/img`
-- apply `goose-workspace-nix.patch` so `vendor/v8/Cargo.toml` uses the local
-  path dependency
+- rewrite any Goose source files that still reference
+  `documentation/static/img/logo_{dark,light}.png` so they read crate-local
+  copies instead, then stage those copied logo assets only when needed
+- rewrite `vendor/v8/Cargo.toml` so `v8-goose` uses the local path dependency
+- strip vendored `v8-goose-src` sections that only matter when working on
+  `rusty_v8` itself (`[workspace]`, `[profile.dev]`, dev dependencies,
+  examples/tests/benches) so Cargo sees a clean library dependency inside
+  Goose's workspace
 - rewrite the `v8-goose` entry in `Cargo.lock`
 
 ### Crate overrides
@@ -141,7 +142,7 @@ build free of crate2nix-at-build-time complexity.
 Fast path:
 
 ```bash
-nix run .#nixcfg -- ci pipeline crate2nix --write --package goose-cli
+    nix run path:.#nixcfg -- ci pipeline crate2nix --write --package goose-cli
 ```
 
 Manual flow:
@@ -159,7 +160,7 @@ must be regenerated, use this flow from the repo root.
 
    ```bash
    nix build --impure --no-link --print-out-paths \
-     .#goose-cli.passthru.patchedSrc
+     path:.#goose-cli-crate2nix-src
    ```
 
    Save the printed store path as `PATCHED_SRC`.
