@@ -154,6 +154,7 @@ def test_command_routing_for_new_and_legacy_aliases(
     monkeypatch.setattr(ws, "_cmd_smoke_check_update_app", lambda: 16)
     monkeypatch.setattr(ws, "_cmd_list_update_targets", lambda: 17)
     monkeypatch.setattr(ws, "_cmd_generate_pr_body", lambda **_kwargs: 18)
+    monkeypatch.setattr(ws, "_cmd_verify_artifacts", lambda *, workflow: 19)
 
     check(ws.main(["darwin", "build", "argus"]) == 11)
     check(ws.main(["darwin", "free", "--force-local"]) == 12)
@@ -186,6 +187,7 @@ def test_command_routing_for_new_and_legacy_aliases(
     check(ws.main(["nix-flake-update"]) == 15)
     check(ws.main(["smoke-check-update-app"]) == 16)
     check(ws.main(["list-update-targets"]) == 17)
+    check(ws.main(["verify-artifacts"]) == 19)
     check(
         ws.main([
             "generate-pr-body",
@@ -202,6 +204,38 @@ def test_command_routing_for_new_and_legacy_aliases(
         ])
         == 18
     )
+
+
+def test_cmd_verify_artifacts_reports_validation_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Render workflow artifact contract failures to stderr."""
+
+    def _fail(*, workflow_path: Path) -> None:
+        del workflow_path
+        msg = "artifact contract mismatch"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(ws, "validate_workflow_artifact_contracts", _fail)
+
+    check(ws._cmd_verify_artifacts(workflow=Path("workflow.yml")) == 1)
+    check("artifact contract mismatch" in capsys.readouterr().err)
+
+
+def test_cmd_verify_artifacts_reports_success(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Render successful workflow artifact validation to stdout."""
+
+    def _ok(*, workflow_path: Path) -> None:
+        del workflow_path
+
+    monkeypatch.setattr(ws, "validate_workflow_artifact_contracts", _ok)
+
+    check(ws._cmd_verify_artifacts(workflow=Path("workflow.yml")) == 0)
+    check("Verified workflow artifact contracts" in capsys.readouterr().out)
 
 
 def test_generate_pr_body_skips_no_change_package_diffs(

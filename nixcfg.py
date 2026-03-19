@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import pathlib  # noqa: TC003
 import sys
 from typing import Annotated
 
@@ -17,8 +18,14 @@ from lib.nix.schemas._codegen import main as codegen_main
 from lib.nix.schemas._fetch import check as schema_check
 from lib.nix.schemas._fetch import fetch as fetch_schemas
 from lib.recover.cli import app as recover_app
+from lib.schema_codegen import (
+    DEFAULT_CONFIG_PATH,
+    generate_schema_codegen_target,
+    list_schema_codegen_targets,
+)
 from lib.update.ci import app as update_ci_app
 from lib.update.cli import app as update_app
+from lib.update.paths import REPO_ROOT
 
 _is_tty = sys.stdout.isatty()
 
@@ -97,6 +104,70 @@ app.add_typer(update_app, name="update")
 def _schema_progress(message: str) -> None:
     """Render schema command progress updates to stderr."""
     typer.echo(message, err=True)
+
+
+def _display_schema_path(path: pathlib.Path) -> str:
+    """Return a readable display path for schema-related outputs."""
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+@schema_app.command(
+    name="targets",
+    help="List declarative schema codegen targets.",
+)
+def schema_targets(
+    *,
+    config: Annotated[
+        pathlib.Path,
+        typer.Option(
+            "-c",
+            "--config",
+            help="Path to the schema codegen config file.",
+        ),
+    ] = DEFAULT_CONFIG_PATH,
+) -> None:
+    """List available schema generation targets from the declarative config."""
+    try:
+        for target in list_schema_codegen_targets(config_path=config):
+            typer.echo(f"{target.name}\t{_display_schema_path(target.output)}")
+    except (FileNotFoundError, RuntimeError, TypeError, ValueError) as exc:
+        typer.echo(f"Schema target listing failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@schema_app.command(
+    name="generate",
+    help="Generate models for one declarative schema codegen target.",
+)
+def schema_generate(
+    target: Annotated[
+        str,
+        typer.Argument(help="Name of the configured generation target."),
+    ],
+    *,
+    config: Annotated[
+        pathlib.Path,
+        typer.Option(
+            "-c",
+            "--config",
+            help="Path to the schema codegen config file.",
+        ),
+    ] = DEFAULT_CONFIG_PATH,
+) -> None:
+    """Run the declarative schema codegen pipeline for one target."""
+    try:
+        output_path = generate_schema_codegen_target(
+            config_path=config,
+            progress=_schema_progress,
+            target_name=target,
+        )
+    except (FileNotFoundError, RuntimeError, TypeError, ValueError) as exc:
+        typer.echo(f"Schema generation failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"Generated {_display_schema_path(output_path)}")
 
 
 @schema_app.command(

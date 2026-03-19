@@ -6,6 +6,7 @@ implementation (which is covered elsewhere).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 import click
@@ -13,6 +14,7 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 import nixcfg
+from lib.schema_codegen.runner import SchemaTargetSummary
 from lib.tests._assertions import check
 
 if TYPE_CHECKING:
@@ -175,6 +177,53 @@ def test_nixcfg_update_help_includes_typer_options() -> None:
     check("--native-only" in result.output)
     check("--pinned-versions" in result.output)
     check("--no-sources" in result.output)
+
+
+def test_nixcfg_schema_targets_lists_configured_targets(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Ensure `nixcfg schema targets` renders target summaries."""
+    monkeypatch.setattr(
+        "nixcfg.list_schema_codegen_targets",
+        lambda *, config_path: (
+            SchemaTargetSummary(name="demo", output=config_path.parent / "demo.py"),
+        ),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["schema", "targets"])
+
+    check(result.exit_code == 0)
+    check("demo\tdemo.py" in result.output)
+
+
+def test_nixcfg_schema_generate_forwards_target_and_config(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Ensure `nixcfg schema generate` forwards target and config path."""
+    called: dict[str, object] = {}
+
+    def _fake_generate(
+        *, config_path: object, progress: object, target_name: str
+    ) -> Path:
+        called.update(
+            config_path=config_path, progress=progress, target_name=target_name
+        )
+        return Path("/tmp/generated.py")
+
+    monkeypatch.setattr("nixcfg.generate_schema_codegen_target", _fake_generate)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        nixcfg.app,
+        ["schema", "generate", "demo", "-c", "alt-config.yaml"],
+    )
+
+    check(result.exit_code == 0)
+    check(called["target_name"] == "demo")
+    check(called["progress"] is nixcfg._schema_progress)
+    check(called["config_path"] == Path("alt-config.yaml"))
+    check("Generated /tmp/generated.py" in result.output)
 
 
 def test_nixcfg_all_commands_support_short_help_alias() -> None:

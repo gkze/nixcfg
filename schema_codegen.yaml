@@ -1,0 +1,99 @@
+# Declarative JSON Schema -> Python model generation targets.
+---
+defaults:
+  generator:
+    input_file_type: jsonschema
+    output_model_type: pydantic_v2.BaseModel
+    target_python_version: "3.14"
+    use_annotated: true
+    use_union_operator: true
+    use_standard_collections: true
+    use_exact_imports: true
+    field_constraints: true
+    snake_case_field: true
+    capitalise_enum_members: true
+    use_schema_description: true
+    use_field_description: true
+    formatters:
+      - ruff-format
+      - ruff-check
+sources:
+  github-workflow-schema:
+    kind: url
+    uri: https://json.schemastore.org/github-workflow.json
+    format: json
+  nix-vendored-schemas:
+    kind: directory
+    path: lib/nix/schemas
+    include:
+      - "*.yaml"
+    format: yaml
+registry_profiles:
+  autodetect:
+    resource:
+      mode: from-contents
+    aliases:
+      - source-uri
+      - internal-id
+    registry:
+      crawl: true
+      retrieve:
+        kind: none
+  draft4-vendored:
+    resource:
+      mode: from-contents
+      default_specification: http://json-schema.org/draft-04/schema#
+    aliases:
+      - relative-path
+      - basename
+      - internal-id
+    registry:
+      crawl: true
+      retrieve:
+        kind: none
+targets:
+  github-actions:
+    sources:
+      - github-workflow-schema
+    registry_profile: autodetect
+    entrypoints:
+      - https://json.schemastore.org/github-workflow.json
+    prepare:
+      dereference: inline-refs
+      merge_ref_siblings: false
+      python_transforms:
+        - rewrite-constr-annotations
+        - normalize-pydantic-imports
+    generator:
+      output: lib/github_actions/models/_generated.py
+  nix-models:
+    sources:
+      - nix-vendored-schemas
+    registry_profile: draft4-vendored
+    entrypoints:
+      - ./hash-v1.yaml
+      - ./store-path-v1.yaml
+      - ./content-address-v1.yaml
+      - ./file-system-object-v1.yaml
+      - ./build-trace-entry-v2.yaml
+      - ./build-result-v1.yaml
+      - ./deriving-path-v1.yaml
+      - ./derivation-v4.yaml
+      - ./derivation-options-v1.yaml
+      - ./store-object-info-v2.yaml
+    prepare:
+      dereference: inline-refs
+      merge_ref_siblings: true
+      schema_transforms:
+        - inline-mergeable-allof
+        - const-null-to-type-null
+        - drop-description
+      python_transforms:
+        - rewrite-constr-annotations
+        - normalize-pydantic-imports
+    generator:
+      output: lib/nix/models/_generated.py
+      use_schema_description: false
+      use_field_description: false
+      use_one_literal_as_default: true
+      use_default_kwarg: true

@@ -19,6 +19,9 @@ from lib.update.ci._subprocess import run_command as _run
 from lib.update.ci.flake_lock_diff import run_diff as run_flake_lock_diff
 from lib.update.ci.sources_json_diff import NoChangesMessage
 from lib.update.ci.sources_json_diff import run_diff as run_sources_diff
+from lib.update.ci.workflow_artifact_contracts import (
+    validate_workflow_artifact_contracts,
+)
 from lib.update.paths import (
     PACKAGE_DIRS,
     SOURCES_FILE_NAME,
@@ -121,6 +124,16 @@ def _cmd_list_update_targets() -> int:
     return asyncio.run(
         update_cli.run_updates(update_cli.UpdateOptions(list_targets=True))
     )
+
+
+def _cmd_verify_artifacts(*, workflow: Path) -> int:
+    try:
+        validate_workflow_artifact_contracts(workflow_path=workflow)
+    except RuntimeError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+    sys.stdout.write(f"Verified workflow artifact contracts for {workflow}\n")
+    return 0
 
 
 def _git_show(pathspec: str) -> str:
@@ -396,6 +409,22 @@ def command_smoke_check_update_app() -> None:
 def command_list_update_targets() -> None:
     """List update targets discovered by the update app."""
     raise typer.Exit(code=_cmd_list_update_targets())
+
+
+@app.command("verify-artifacts")
+def command_verify_artifacts(
+    *,
+    workflow: Annotated[
+        Path,
+        typer.Option(
+            "-w",
+            "--workflow",
+            help="Workflow file to validate.",
+        ),
+    ] = Path(".github/workflows/update.yml"),
+) -> None:
+    """Validate artifact path contracts in one workflow file."""
+    raise typer.Exit(code=_cmd_verify_artifacts(workflow=workflow))
 
 
 @app.command("build-darwin-config")
