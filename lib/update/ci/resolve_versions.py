@@ -9,21 +9,23 @@ different CI runners see different upstream versions for the same package.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import sys
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import aiohttp
 import typer
 from pydantic import BaseModel
 
 from lib.update import io as update_io
+from lib.update import updaters as updater_module
 from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.config import resolve_active_config
 from lib.update.sources import load_all_sources
-from lib.update.updaters import UPDATERS
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import UPDATERS, ensure_updaters_loaded
+from lib.update.updaters.base import Updater, VersionInfo
 from lib.update.updaters.metadata import deserialize_metadata, serialize_metadata
 
 type _JsonSafe = (
@@ -32,6 +34,19 @@ type _JsonSafe = (
 type _JsonObject = dict[str, _JsonSafe]
 
 DEFAULT_PINNED_VERSIONS_PATH = Path("pinned-versions.json")
+
+
+def _get_updaters() -> dict[str, type[Any]]:
+    if UPDATERS is not updater_module.UPDATERS:
+        return UPDATERS
+    return UPDATERS or ensure_updaters_loaded()
+
+
+def _instantiate_updater(updater_cls: type[Any], *, config: object) -> Updater:
+    init_params = inspect.signature(updater_cls.__init__).parameters
+    if "config" in init_params:
+        return cast("Updater", updater_cls(config=config))
+    return cast("Updater", updater_cls())
 
 
 def _make_json_safe(obj: object) -> _JsonSafe:
@@ -108,12 +123,10 @@ async def _resolve_all() -> tuple[dict[str, _JsonObject], list[str]]:
         async def _resolve_one(name: str, updater_cls: type[Any]) -> None:
             nonlocal fatal_error
             try:
-                updater = updater_cls(config=config)
+                updater: Updater = _instantiate_updater(updater_cls, config=config)
             except TypeError as exc:
-                if "config" not in str(exc):
-                    fatal_error = exc
-                    return
-                updater = updater_cls()
+                fatal_error = exc
+                return
             try:
                 outcome = await updater.fetch_latest(session)
             except Exception as exc:  # noqa: BLE001
@@ -127,7 +140,7 @@ async def _resolve_all() -> tuple[dict[str, _JsonObject], list[str]]:
             results[name] = _serialize_version_info(outcome)
 
         async with asyncio.TaskGroup() as group:
-            for name, updater_cls in UPDATERS.items():
+            for name, updater_cls in _get_updaters().items():
                 group.create_task(_resolve_one(name, updater_cls))
 
     if fatal_error is not None:
@@ -137,8 +150,8 @@ async def _resolve_all() -> tuple[dict[str, _JsonObject], list[str]]:
 
 def run(*, output: Path, strict: bool = False) -> int:
     """Resolve versions and write a pinned-versions manifest."""
-    # Ensure updater modules are imported (triggers discovery).
     load_all_sources()
+    _get_updaters()
     results, failures = asyncio.run(_resolve_all())
 
     if strict and failures:

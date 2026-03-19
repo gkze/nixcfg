@@ -5,6 +5,7 @@ import logging
 import netrc
 import os
 import urllib.parse
+import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -436,6 +437,13 @@ async def fetch_github_api_paginated(
         if len(page_items) < per_page:
             return all_items
 
+    warnings.warn(
+        (
+            f"GitHub API list {api_path} may be truncated after {max_pages} "
+            "page(s); increase max_pages or add an item_limit"
+        ),
+        stacklevel=2,
+    )
     return all_items
 
 

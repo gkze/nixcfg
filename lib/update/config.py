@@ -87,8 +87,18 @@ def _settings_to_config(settings: UpdateSettings) -> UpdateConfig:
     )
 
 
-DEFAULT_SETTINGS = UpdateSettings()
-DEFAULT_CONFIG = _settings_to_config(DEFAULT_SETTINGS)
+def default_settings() -> UpdateSettings:
+    """Return settings resolved from the current environment."""
+    return UpdateSettings()
+
+
+def default_config() -> UpdateConfig:
+    """Return config resolved from the current environment."""
+    return _settings_to_config(default_settings())
+
+
+DEFAULT_SETTINGS = default_settings()
+DEFAULT_CONFIG = default_config()
 
 
 class _ResolveConfigOverrides(TypedDict, total=False):
@@ -108,7 +118,11 @@ class _ResolveConfigOverrides(TypedDict, total=False):
 
 def resolve_active_config(config: UpdateConfig | None) -> UpdateConfig:
     """Return *config* if provided, otherwise the default configuration."""
-    return config or DEFAULT_CONFIG
+    if config is not None:
+        return config
+    if default_settings().model_dump() == DEFAULT_SETTINGS.model_dump():
+        return DEFAULT_CONFIG
+    return default_config()
 
 
 def env_bool(name: str, *, default: bool = False) -> bool:
@@ -128,7 +142,7 @@ def env_bool(name: str, *, default: bool = False) -> bool:
 
 def resolve_config(**overrides: Unpack[_ResolveConfigOverrides]) -> UpdateConfig:
     """Build an UpdateConfig by merging explicit overrides onto env defaults."""
-    settings_data = DEFAULT_SETTINGS.model_dump()
+    settings_data = default_settings().model_dump()
 
     normalized_overrides: dict[str, object] = dict(overrides)
     hash_build_platforms = normalized_overrides.pop("hash_build_platforms", None)
@@ -149,7 +163,9 @@ def resolve_config(**overrides: Unpack[_ResolveConfigOverrides]) -> UpdateConfig
 __all__ = [
     "DEFAULT_CONFIG",
     "UpdateConfig",
+    "default_config",
     "default_max_nix_builds",
+    "default_settings",
     "env_bool",
     "resolve_active_config",
     "resolve_config",

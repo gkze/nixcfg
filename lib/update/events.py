@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TypedDict, TypeGuard
+from typing import NotRequired, TypedDict, TypeGuard, cast
 
 from lib.nix.models.sources import HashEntry, HashMapping, SourceEntry, SourceHashes
 from lib.update.artifacts import GeneratedArtifact
@@ -38,7 +38,9 @@ class RefUpdatePayload(TypedDict):
 class StatusPayload(TypedDict):
     """Optional typed status metadata for UI/event consumers."""
 
-    operation: str
+    operation: NotRequired[str]
+    status: NotRequired[str]
+    detail: NotRequired[object]
 
 
 type CommandArgs = list[str]
@@ -156,9 +158,20 @@ class UpdateEvent:
         message: str,
         *,
         operation: str | None = None,
+        status: str | None = None,
+        detail: object | None = None,
     ) -> UpdateEvent:
         """Create a status event."""
-        payload = None if operation is None else {"operation": operation}
+        payload: StatusPayload | None = None
+        if operation is not None or status is not None or detail is not None:
+            payload_dict: dict[str, object] = {}
+            if operation is not None:
+                payload_dict["operation"] = operation
+            if status is not None:
+                payload_dict["status"] = status
+            if detail is not None:
+                payload_dict["detail"] = detail
+            payload = cast("StatusPayload", payload_dict)
         return cls(
             source=source,
             kind=UpdateEventKind.STATUS,
@@ -308,7 +321,7 @@ async def gather_event_streams[K](
         finally:
             await queue.put(done)
 
-    error: Exception | None = None
+    errors: list[Exception] = []
     remaining = len(streams)
     async with asyncio.TaskGroup() as group:
         for key, stream in streams.items():
@@ -320,10 +333,16 @@ async def gather_event_streams[K](
                 remaining -= 1
                 continue
             if isinstance(item, Exception):
-                error = item
+                errors.append(item)
                 continue
-            yield item
+            yield cast("UpdateEvent", item)
 
-    if error is not None:
-        raise error
+    if errors:
+        if len(errors) == 1:
+            raise errors[0]
+        message = "; ".join(str(error) for error in errors)
+        aggregate = RuntimeError(f"Multiple event streams failed: {message}")
+        for error in errors:
+            aggregate.add_note(repr(error))
+        raise aggregate
     yield GatheredValues(results)

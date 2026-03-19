@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 from lib.tests._assertions import check
-from lib.update.updaters import _discover_updaters
+from lib.update.updaters import (
+    _DISCOVERY_STATE,
+    UPDATERS,
+    _discover_updaters,
+    ensure_updaters_loaded,
+)
 
 
 def test_discover_updaters_handles_existing_and_invalid_specs(
@@ -18,6 +23,7 @@ def test_discover_updaters_handles_existing_and_invalid_specs(
         "lib.update.updaters.package_file_map",
         lambda _name: {
             "exists": fake_file,
+            "stale": fake_file,
             "spec-none": fake_file,
             "loader-none": fake_file,
             "ok": fake_file,
@@ -26,7 +32,12 @@ def test_discover_updaters_handles_existing_and_invalid_specs(
 
     import sys
 
-    sys.modules["_updater_pkg.exists"] = object()
+    sys.modules["_updater_pkg.exists"] = ModuleType("_updater_pkg.exists")
+    sys.modules["_updater_pkg.stale"] = ModuleType("_updater_pkg.stale")
+    sys.modules.pop("_updater_pkg.spec-none", None)
+    sys.modules.pop("_updater_pkg.loader-none", None)
+    sys.modules.pop("_updater_pkg.ok", None)
+    monkeypatch.setitem(UPDATERS, "exists", object)
 
     created_modules: list[str] = []
     executed_modules: list[object] = []
@@ -58,5 +69,66 @@ def test_discover_updaters_handles_existing_and_invalid_specs(
 
     _discover_updaters()
 
-    check(len(created_modules) == 1)
-    check(len(executed_modules) == 1)
+    check(len(created_modules) == 2)
+    check(len(executed_modules) == 2)
+    check(sys.modules["_updater_pkg.stale"] is not None)
+
+
+def test_ensure_updaters_loaded_fast_path_skips_discovery(monkeypatch) -> None:
+    """Return the existing registry immediately when discovery already ran."""
+    complete = True
+    monkeypatch.setitem(_DISCOVERY_STATE, "complete", complete)
+    monkeypatch.setitem(UPDATERS, "demo", object)
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "lib.update.updaters._discover_updaters", lambda: calls.append("run")
+    )
+
+    check(ensure_updaters_loaded() is UPDATERS)
+    check(calls == [])
+
+
+def test_ensure_updaters_loaded_rediscovers_empty_registry(monkeypatch) -> None:
+    """Re-run discovery when the loaded flag is set but the registry is empty."""
+    original = dict(UPDATERS)
+    complete = True
+    monkeypatch.setitem(_DISCOVERY_STATE, "complete", complete)
+    UPDATERS.clear()
+
+    def _discover() -> None:
+        UPDATERS["demo"] = object
+
+    monkeypatch.setattr("lib.update.updaters._discover_updaters", _discover)
+
+    check(ensure_updaters_loaded() == {"demo": object})
+    UPDATERS.clear()
+    UPDATERS.update(original)
+
+
+def test_ensure_updaters_loaded_rechecks_state_inside_lock(monkeypatch) -> None:
+    """Avoid redundant discovery when the registry becomes ready before lock entry."""
+
+    class _Lock:
+        def __enter__(self) -> None:
+            _DISCOVERY_STATE["complete"] = True
+            UPDATERS["demo"] = object
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+    original = dict(UPDATERS)
+    complete = False
+    monkeypatch.setitem(_DISCOVERY_STATE, "complete", complete)
+    UPDATERS.clear()
+    monkeypatch.setattr("lib.update.updaters._DISCOVERY_LOCK", _Lock())
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "lib.update.updaters._discover_updaters", lambda: calls.append("run")
+    )
+
+    check(ensure_updaters_loaded() == {"demo": object})
+    check(calls == [])
+    UPDATERS.clear()
+    UPDATERS.update(original)

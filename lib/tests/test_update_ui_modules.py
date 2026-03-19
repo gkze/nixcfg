@@ -113,6 +113,7 @@ def test_ui_state_terminal_status_and_visibility() -> None:
     """Run this test case."""
     check(is_terminal_status("Updated: 1.0 -> 1.1"))
     check(is_terminal_status("Up to date"))
+    check(is_terminal_status("still running", {"status": "updated"}))
     check(not is_terminal_status("Checking demo (current: 1.0)"))
 
     operation = OperationState(kind=OperationKind.CHECK_VERSION, label="Checking")
@@ -201,6 +202,94 @@ def test_operation_for_status_invalid_typed_payload_falls_back_or_none() -> None
     check(operation_for_status("custom status", {"operation": "not-real"}) is None)
 
 
+@pytest.mark.parametrize(
+    ("payload", "expected_status", "expected_message"),
+    [
+        ({"status": "checking_current", "detail": "1.0"}, "running", "current 1.0"),
+        ({"status": "pinned_version", "detail": "2.0"}, "running", "2.0"),
+        ({"status": "latest_version", "detail": "3.0"}, "running", "3.0"),
+        (
+            {"status": "update_available", "detail": {"current": "1", "latest": "2"}},
+            "success",
+            "1 -> 2",
+        ),
+        (
+            {"status": "up_to_date", "detail": {"scope": "version", "value": "1.0"}},
+            "no_change",
+            "1.0 (up to date)",
+        ),
+        (
+            {"status": "up_to_date", "detail": {"scope": "hash"}},
+            "no_change",
+            None,
+        ),
+        (
+            {"status": "updating_ref", "detail": {"current": "a", "latest": "b"}},
+            "running",
+            "a -> b",
+        ),
+        ({"status": "refresh_lock", "detail": "demo"}, "running", "demo"),
+        ({"status": "fetching_hashes"}, "running", "all platforms"),
+        ({"status": "computing_hash", "detail": "linux"}, "running", "linux"),
+    ],
+)
+def test_apply_status_prefers_structured_status_payloads(
+    payload: dict[str, object],
+    expected_status: str,
+    expected_message: str | None,
+) -> None:
+    """Apply structured payloads without parsing message text."""
+    item = _item()
+    apply_status(
+        item,
+        "structured status",
+        {"operation": OperationKind.COMPUTE_HASH.value, **payload},
+    )
+    op = item.operations[OperationKind.COMPUTE_HASH]
+    check(op.status == expected_status)
+    check(op.message == expected_message)
+
+
+def test_apply_status_legacy_fallbacks_cover_remaining_message_patterns() -> None:
+    """Keep legacy message parsing behavior for unsupported payloads."""
+    item = _item()
+    apply_status(item, "Checking demo (current: 1.0)")
+    check(item.operations[OperationKind.CHECK_VERSION].message == "current 1.0")
+
+    apply_status(item, "Updating ref: old -> new")
+    check(item.operations[OperationKind.UPDATE_REF].message == "old -> new")
+
+    apply_status(item, "Updating flake input 'demo'...")
+    check(item.operations[OperationKind.REFRESH_LOCK].message == "demo")
+
+    apply_status(item, "Computing hash for linux...")
+    check(item.operations[OperationKind.COMPUTE_HASH].message == "linux")
+
+    apply_status(
+        item,
+        "custom hash note",
+        {"operation": OperationKind.COMPUTE_HASH.value},
+    )
+    check(item.operations[OperationKind.COMPUTE_HASH].message == "custom hash note")
+
+    apply_status(item, "Up to date (version: 2.0)")
+    check(item.operations[OperationKind.CHECK_VERSION].message == "2.0 (up to date)")
+
+    apply_status(item, "Up to date (ref: main)")
+    check(item.operations[OperationKind.CHECK_VERSION].message == "main (up to date)")
+
+    apply_status(item, "Computing hash for archive.")
+    check(item.operations[OperationKind.COMPUTE_HASH].message == "archive")
+
+    item2 = _item()
+    apply_status(
+        item2,
+        "no parser match",
+        {"operation": OperationKind.CHECK_VERSION.value},
+    )
+    check(item2.operations[OperationKind.CHECK_VERSION].status == "running")
+
+
 def test_apply_status_rules_and_status_priority() -> None:
     """Run this test case."""
     item = _item()
@@ -234,6 +323,31 @@ def test_apply_status_rules_and_status_priority() -> None:
     hash_op2 = item2.operations[OperationKind.COMPUTE_HASH]
     check(hash_op2.status == "running")
     check(hash_op2.message == "warning: cache miss")
+
+
+def test_payload_status_update_rejects_malformed_structured_details() -> None:
+    """Ignore structured payload variants that do not match the expected shape."""
+    check(
+        ui_state_module._payload_status_update({
+            "status": "update_available",
+            "detail": {"current": 1, "latest": "2"},
+        })
+        is None
+    )
+    check(
+        ui_state_module._payload_status_update({
+            "status": "up_to_date",
+            "detail": {"scope": "version", "value": 1},
+        })
+        is None
+    )
+    check(
+        ui_state_module._payload_status_update({
+            "status": "updating_ref",
+            "detail": {"current": "a", "latest": 2},
+        })
+        is None
+    )
 
 
 def test_apply_status_ignores_unknown_or_missing_operations() -> None:

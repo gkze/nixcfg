@@ -302,6 +302,8 @@ async def update_flake_ref(
         source,
         f"Updating ref: {input_ref.ref} -> {new_ref}",
         operation="update_ref",
+        status="updating_ref",
+        detail={"current": input_ref.ref, "latest": new_ref},
     )
 
     if input_ref.input_type == "github":
@@ -374,6 +376,8 @@ async def update_refs_task(
                 source,
                 f"Checking {input_ref.owner}/{input_ref.repo} (current: {input_ref.ref})",
                 operation="check_version",
+                status="checking_current",
+                detail=input_ref.ref,
             ),
         )
         result = await check_flake_ref_update(
@@ -392,6 +396,8 @@ async def update_refs_task(
                     source,
                     f"Up to date (ref: {result.current_ref})",
                     operation="check_version",
+                    status="up_to_date",
+                    detail={"scope": "ref", "value": result.current_ref},
                 ),
             )
             await put(UpdateEvent.result(source))
@@ -411,6 +417,8 @@ async def update_refs_task(
                     source,
                     f"Update available: {result.current_ref} -> {result.latest_ref}",
                     operation="check_version",
+                    status="update_available",
+                    detail={"current": result.current_ref, "latest": result.latest_ref},
                 ),
             )
             await put(UpdateEvent.result(source, update_payload))

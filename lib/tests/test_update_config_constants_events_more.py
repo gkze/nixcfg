@@ -109,6 +109,15 @@ def test_resolve_active_config_and_default_config_reference() -> None:
     check(resolve_active_config(None) is DEFAULT_CONFIG)
 
 
+def test_resolve_active_config_reloads_when_env_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recompute the default config when UPDATE_* env overrides change."""
+    monkeypatch.setenv("UPDATE_HTTP_TIMEOUT", "99")
+    check(resolve_active_config(None).default_timeout == 99)
+    monkeypatch.delenv("UPDATE_HTTP_TIMEOUT", raising=False)
+
+
 def test_resolve_timeout_alias_success_and_errors() -> None:
     """Handle timeout alias conversion and invalid argument combinations."""
     kwargs: dict[str, object] = {"timeout": 2}
@@ -277,3 +286,50 @@ def test_gather_event_streams_success_and_errors() -> None:
             yield UpdateEvent.status("never", "never")
 
         _collect_async(gather_event_streams({"x": _boom()}))
+
+    with pytest.raises(RuntimeError, match="Multiple event streams failed"):
+
+        async def _boom_one() -> AsyncIterator[UpdateEvent]:
+            msg = "first"
+            raise RuntimeError(msg)
+            yield UpdateEvent.status("never", "never")
+
+        async def _boom_two() -> AsyncIterator[UpdateEvent]:
+            msg = "second"
+            raise RuntimeError(msg)
+            yield UpdateEvent.status("never", "never")
+
+        _collect_async(gather_event_streams({"a": _boom_one(), "b": _boom_two()}))
+
+
+def test_update_event_status_includes_structured_fields() -> None:
+    """Preserve structured status metadata on status events."""
+    event = UpdateEvent.status(
+        "demo",
+        "working",
+        operation="compute_hash",
+        status="computing_hash",
+        detail="linux",
+    )
+    check(
+        event.payload
+        == {
+            "operation": "compute_hash",
+            "status": "computing_hash",
+            "detail": "linux",
+        }
+    )
+
+    status_only = UpdateEvent.status(
+        "demo",
+        "done",
+        status="updated",
+        detail={"version": "1.2.3"},
+    )
+    check(
+        status_only.payload
+        == {
+            "status": "updated",
+            "detail": {"version": "1.2.3"},
+        }
+    )

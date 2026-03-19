@@ -10,7 +10,11 @@ let
     "registry.nix"
   ];
 
-  disabledPackages = [ ];
+  helperEntries = [
+    "go-cli-wrapper"
+    "openchamber-bun"
+    "registry"
+  ];
 
   discoveredPackages = discovery.discoverDefaultNixEntries {
     root = pkgDir;
@@ -28,7 +32,7 @@ let
     builtins.map (name: {
       inherit name;
       value = discoveredPackages.pathFor name;
-    }) (builtins.filter (name: !(builtins.elem name disabledPackages)) discoveredPackages.names)
+    }) discoveredPackages.names
   );
 
   companionPackagePaths = builtins.listToAttrs (
@@ -72,6 +76,7 @@ let
     emdash = system: builtins.elem system emdashSystems;
     sculptor = system: builtins.elem system sculptorSystems;
     superset = system: builtins.elem system supersetSystems;
+    zed-editor-nightly = system: builtins.match ".*-darwin" system != null;
     zed-editor-nightly-crate2nix-src = system: builtins.match ".*-darwin" system != null;
   };
 
@@ -84,6 +89,7 @@ in
 {
   inherit
     darwinOnly
+    helperEntries
     packagePaths
     sculptorSystems
     ;

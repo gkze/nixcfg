@@ -9,22 +9,23 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated
 
 import aiohttp
 import typer
 from rich.console import Console
 from rich.table import Table
 
-if TYPE_CHECKING:
-    from collections.abc import Mapping
+from lib.update import updaters as updater_module
 
+if TYPE_CHECKING:
     from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
 
 from lib.cli import HELP_CONTEXT_SETTINGS
 from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update.artifacts import GeneratedArtifact, save_generated_artifacts
 from lib.update.ci.resolve_versions import load_pinned_versions
+from lib.update.cli_options import UpdateOptions, UpdateSortBy, UpdateTTYMode
 from lib.update.config import (
     UpdateConfig,
     env_bool,
@@ -39,7 +40,7 @@ from lib.update.flake import (
     update_flake_input,
 )
 from lib.update.paths import (
-    REPO_ROOT,
+    get_repo_root,
     package_dir_for,
     package_file_map,
     sources_file_for,
@@ -63,7 +64,7 @@ from lib.update.ui import (
     SummaryStatus,
     consume_events,
 )
-from lib.update.updaters import UPDATERS
+from lib.update.updaters import UPDATERS, ensure_updaters_loaded
 from lib.update.updaters.base import (
     ChecksumProvidedUpdater,
     DenoManifestUpdater,
@@ -77,61 +78,15 @@ from lib.update.updaters.base import (
 from lib.update.updaters.platform_api import PlatformAPIUpdater
 
 
-@dataclass(frozen=True)
-class UpdateOptions:
-    """Typed options for the update CLI — replaces argparse.Namespace."""
-
-    source: str | None = None
-    list_targets: bool = False
-    no_refs: bool = False
-    no_sources: bool = False
-    no_input: bool = False
-    check: bool = False
-    validate: bool = False
-    schema: bool = False
-    sort_by: Literal[
-        "name",
-        "type",
-        "classification",
-        "source",
-        "input",
-        "ref",
-        "version",
-        "rev",
-        "commit",
-        "touches",
-        "writes",
-    ] = "name"
-    json: bool = False
-    verbose: bool = False
-    quiet: bool = False
-    tty: Literal["auto", "force", "off", "full"] = "auto"
-    zellij_guard: bool | None = None
-    native_only: bool = False
-    # config overrides (None = use env/defaults)
-    http_timeout: int | None = None
-    subprocess_timeout: int | None = None
-    max_nix_builds: int | None = None
-    log_tail_lines: int | None = None
-    render_interval: float | None = None
-    user_agent: str | None = None
-    retries: int | None = None
-    retry_backoff: float | None = None
-    fake_hash: str | None = None
-    deno_platforms: str | None = None
-    pinned_versions: str | None = None
+def _get_updaters() -> dict[str, type[Updater]]:
+    if UPDATERS is not updater_module.UPDATERS:
+        return UPDATERS
+    return UPDATERS or ensure_updaters_loaded()
 
 
-def _build_update_options(values: Mapping[str, object]) -> UpdateOptions:
-    """Build :class:`UpdateOptions` from CLI call parameters."""
-    payload: dict[str, object] = {
-        field_name: values[field_name]
-        for field_name in UpdateOptions.__dataclass_fields__
-        if field_name in values
-    }
-    if "json_output" in values:
-        payload["json"] = values["json_output"]
-    return UpdateOptions(**cast("dict[str, Any]", payload))
+def _build_update_options(values: dict[str, object]) -> UpdateOptions:
+    """Compatibility wrapper for shared option construction."""
+    return UpdateOptions.from_mapping(values)
 
 
 def check_required_tools(
@@ -141,13 +96,14 @@ def check_required_tools(
     needs_sources: bool = True,
 ) -> list[str]:
     """Return names of required CLI tools that are missing from ``$PATH``."""
+    updaters = _get_updaters()
     tools: list[str]
     if not needs_sources:
         # refs-only (or explicit --no-sources) mode: don't require hash tooling.
         tools = [str(tool) for tool in REQUIRED_TOOLS]
     elif source:
-        if source in UPDATERS:
-            updater_cls = UPDATERS[source]
+        if source in updaters:
+            updater_cls = updaters[source]
             tools = [
                 str(tool) for tool in getattr(updater_cls, "required_tools", ALL_TOOLS)
             ]
@@ -312,7 +268,8 @@ class ResolvedTargets:
     @classmethod
     def from_options(cls, opts: UpdateOptions) -> ResolvedTargets:
         """Resolve target sets and operational flags from update options."""
-        all_source_names = set(UPDATERS.keys())
+        updaters = _get_updaters()
+        all_source_names = set(updaters.keys())
         all_ref_inputs = get_flake_inputs_with_refs()
         all_ref_names = {i.name for i in all_ref_inputs}
         all_known_names = all_source_names | all_ref_names
@@ -337,7 +294,7 @@ class ResolvedTargets:
             if opts.source in all_source_names
             else []
             if opts.source
-            else list(UPDATERS.keys())
+            else list(updaters.keys())
         )
         if not do_refs:
             ref_inputs = []
@@ -373,7 +330,7 @@ def _build_item_meta(
         in_flake = name in flake_names
         in_sources = name in source_names
         entry = None if sources is None else sources.entries.get(name)
-        updater_cls = UPDATERS.get(name)
+        updater_cls = _get_updaters().get(name)
         has_input_refresh = (
             _source_backing_input_name(name, updater_cls, entry) is not None
         )
@@ -492,7 +449,7 @@ async def _update_source_task(
     async def _run() -> None:
         resolved_config = resolve_active_config(context.config)
         current = context.sources.entries.get(name)
-        updater = UPDATERS[name](config=resolved_config)
+        updater = _get_updaters()[name](config=resolved_config)
         if isinstance(updater, FlakeInputHashUpdater):
             updater.native_only = context.native_only
         input_name = getattr(updater, "input_name", None)
@@ -505,6 +462,8 @@ async def _update_source_task(
                     name,
                     f"Updating flake input '{input_name}'...",
                     operation="refresh_lock",
+                    status="refresh_lock",
+                    detail=input_name,
                 ),
             )
             async with context.update_input_lock:
@@ -783,7 +742,7 @@ def _repo_relative_path(path: Path | None) -> str | None:
     if path is None:
         return None
     try:
-        return str(path.relative_to(REPO_ROOT))
+        return str(path.relative_to(get_repo_root()))
     except ValueError:
         return str(path)
 
@@ -877,11 +836,12 @@ def _build_update_inventory() -> list[_InventoryTarget]:
     path_map = package_file_map("sources.json")
     ref_inputs = {item.name: item for item in get_flake_inputs_with_refs()}
     lock = load_flake_lock()
+    updaters = _get_updaters()
 
     targets: list[_InventoryTarget] = []
-    all_names = sorted(set(UPDATERS) | set(ref_inputs))
+    all_names = sorted(set(updaters) | set(ref_inputs))
     for name in all_names:
-        updater_cls = UPDATERS.get(name)
+        updater_cls = updaters.get(name)
         entry = sources.entries.get(name)
         ref_input = ref_inputs.get(name)
         source_backing_input = _source_backing_input_name(name, updater_cls, entry)
@@ -1449,28 +1409,16 @@ def run_update_command(  # noqa: PLR0913
     retries: int | None = None,
     retry_backoff: float | None = None,
     schema: bool = False,
-    sort_by: Literal[
-        "name",
-        "type",
-        "classification",
-        "source",
-        "input",
-        "ref",
-        "version",
-        "rev",
-        "commit",
-        "touches",
-        "writes",
-    ] = "name",
+    sort_by: UpdateSortBy = "name",
     subprocess_timeout: int | None = None,
-    tty: Literal["auto", "force", "off", "full"] = "auto",
+    tty: UpdateTTYMode = "auto",
     user_agent: str | None = None,
     validate: bool = False,
     verbose: bool = False,
     zellij_guard: bool | None = None,
 ) -> int:
     """Run update workflow from typed CLI options."""
-    opts = _build_update_options(locals())
+    opts = UpdateOptions.from_mapping(locals())
 
     if not (opts.list_targets or opts.schema or opts.validate):
         needs_flake_edit = not opts.no_refs and not opts.native_only
@@ -1599,19 +1547,7 @@ def cli(  # noqa: PLR0913
         typer.Option("--schema", "-s", help="Output JSON schema for sources.json."),
     ] = False,
     sort_by: Annotated[
-        Literal[
-            "name",
-            "type",
-            "classification",
-            "source",
-            "input",
-            "ref",
-            "version",
-            "rev",
-            "commit",
-            "touches",
-            "writes",
-        ],
+        UpdateSortBy,
         typer.Option(
             "--sort",
             "-o",
@@ -1630,7 +1566,7 @@ def cli(  # noqa: PLR0913
         ),
     ] = None,
     tty: Annotated[
-        Literal["auto", "force", "off", "full"],
+        UpdateTTYMode,
         typer.Option("--tty", "-t", help="TTY rendering mode."),
     ] = "auto",
     user_agent: Annotated[

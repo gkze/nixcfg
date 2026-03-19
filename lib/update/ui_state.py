@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from rich.spinner import Spinner
@@ -18,8 +17,15 @@ if TYPE_CHECKING:
 SummaryStatus = Literal["updated", "error", "no_change"]
 
 
-def is_terminal_status(message: str) -> bool:
+def is_terminal_status(message: str, payload: object | None = None) -> bool:
     """Return whether a status line represents terminal completion."""
+    status_payload = _status_payload(payload)
+    if status_payload is not None and status_payload.get("status") in {
+        "no_change",
+        "update_available",
+        "updated",
+    }:
+        return True
     return message.startswith(
         (
             "Up to date",
@@ -42,16 +48,6 @@ class OperationKind(StrEnum):
 
 OperationStatus = Literal["pending", "running", "no_change", "success", "error"]
 type StatusMatcher = Callable[[str], Any]
-
-
-@dataclass(frozen=True)
-class StatusRule:
-    """Declarative matcher for a status transition."""
-
-    matcher: StatusMatcher
-    status: OperationStatus
-    formatter: Callable[[Any], str] | None = None
-    clear_message: bool = False
 
 
 _OPERATION_LABELS: dict[OperationKind, str] = {
@@ -124,15 +120,6 @@ class ItemState:
         )
 
 
-_STATUS_UPDATE_AVAILABLE = re.compile(r"Update available: (.+) -> (.+)")
-_STATUS_UP_TO_DATE_VERSION = re.compile(r"Up to date \(version: (.+)\)")
-_STATUS_UP_TO_DATE_REF = re.compile(r"Up to date \(ref: (.+)\)")
-_STATUS_LATEST_VERSION = re.compile(r"Latest version: (.+)")
-_STATUS_CHECKING = re.compile(r"Checking .*\(current: (.+)\)")
-_STATUS_UPDATE_REF = re.compile(r"Updating ref: (.+) -> (.+)")
-_STATUS_UPDATE_INPUT = re.compile(r"Updating flake input '([^']+)'\.*")
-_STATUS_COMPUTING_HASH = re.compile(r"Computing hash for (.+)\.")
-
 _OP_STATUS_PRIORITY = {
     "pending": 0,
     "running": 1,
@@ -142,106 +129,106 @@ _OP_STATUS_PRIORITY = {
 }
 
 
-def _msg_equals(expected: str) -> StatusMatcher:
-    return lambda message: message == expected
-
-
-def _msg_startswith(prefix: str) -> StatusMatcher:
-    return lambda message: message.startswith(prefix)
-
-
-_CHECK_VERSION_STATUS_RULES: tuple[StatusRule, ...] = (
-    StatusRule(
-        _STATUS_UPDATE_AVAILABLE.match,
-        "success",
-        lambda m: (
-            f"{cast('re.Match[str]', m).group(1)} -> {cast('re.Match[str]', m).group(2)}"
-        ),
-    ),
-    StatusRule(
-        _STATUS_UP_TO_DATE_VERSION.match,
-        "no_change",
-        lambda m: f"{cast('re.Match[str]', m).group(1)} (up to date)",
-    ),
-    StatusRule(
-        _STATUS_UP_TO_DATE_REF.match,
-        "no_change",
-        lambda m: f"{cast('re.Match[str]', m).group(1)} (up to date)",
-    ),
-    StatusRule(
-        _STATUS_LATEST_VERSION.match,
-        "running",
-        lambda m: cast("re.Match[str]", m).group(1),
-    ),
-    StatusRule(
-        _STATUS_CHECKING.match,
-        "running",
-        lambda m: f"current {cast('re.Match[str]', m).group(1)}",
-    ),
-)
-
-_UPDATE_REF_STATUS_RULES: tuple[StatusRule, ...] = (
-    StatusRule(
-        _STATUS_UPDATE_REF.match,
-        "running",
-        lambda m: (
-            f"{cast('re.Match[str]', m).group(1)} -> {cast('re.Match[str]', m).group(2)}"
-        ),
-    ),
-)
-
-_REFRESH_LOCK_STATUS_RULES: tuple[StatusRule, ...] = (
-    StatusRule(
-        _STATUS_UPDATE_INPUT.match,
-        "running",
-        lambda m: cast("re.Match[str]", m).group(1),
-    ),
-)
-
-_COMPUTE_HASH_STATUS_RULES: tuple[StatusRule, ...] = (
-    StatusRule(_msg_equals("Up to date"), "no_change", None, clear_message=True),
-    StatusRule(
-        _msg_startswith("Fetching hashes"),
-        "running",
-        lambda _m: "all platforms",
-    ),
-    StatusRule(
-        _STATUS_COMPUTING_HASH.match,
-        "running",
-        lambda m: cast("re.Match[str]", m).group(1),
-    ),
-)
-
-
 @dataclass(frozen=True)
-class _StatusPolicy:
-    rules: tuple[StatusRule, ...]
-    default_status: OperationStatus
-    pass_message: bool
+class StatusUpdate:
+    status: OperationStatus
+    message: str | None = None
+    clear_message: bool = False
 
 
-_STATUS_POLICIES: dict[OperationKind, _StatusPolicy] = {
-    OperationKind.CHECK_VERSION: _StatusPolicy(
-        _CHECK_VERSION_STATUS_RULES,
-        default_status="running",
-        pass_message=False,
-    ),
-    OperationKind.UPDATE_REF: _StatusPolicy(
-        _UPDATE_REF_STATUS_RULES,
-        default_status="running",
-        pass_message=False,
-    ),
-    OperationKind.REFRESH_LOCK: _StatusPolicy(
-        _REFRESH_LOCK_STATUS_RULES,
-        default_status="running",
-        pass_message=False,
-    ),
-    OperationKind.COMPUTE_HASH: _StatusPolicy(
-        _COMPUTE_HASH_STATUS_RULES,
-        default_status="running",
-        pass_message=True,
-    ),
-}
+def _status_payload(payload: object | None) -> dict[str, object] | None:
+    if not isinstance(payload, dict):
+        return None
+    return {key: value for key, value in payload.items() if isinstance(key, str)}
+
+
+def _detail_payload(detail: object) -> dict[str, object] | None:
+    return _status_payload(detail)
+
+
+def _payload_status_update(  # noqa: PLR0911
+    payload: object | None,
+) -> StatusUpdate | None:
+    status_payload = _status_payload(payload)
+    if status_payload is None:
+        return None
+    status_name = status_payload.get("status")
+    detail = status_payload.get("detail")
+    if status_name == "checking_current" and isinstance(detail, str):
+        return StatusUpdate("running", f"current {detail}")
+    if status_name == "pinned_version" and isinstance(detail, str):
+        return StatusUpdate("running", detail)
+    if status_name == "latest_version" and isinstance(detail, str):
+        return StatusUpdate("running", detail)
+    detail_payload = _detail_payload(detail)
+    if status_name == "update_available" and detail_payload is not None:
+        current = detail_payload.get("current")
+        latest = detail_payload.get("latest")
+        if isinstance(current, str) and isinstance(latest, str):
+            return StatusUpdate("success", f"{current} -> {latest}")
+    if status_name == "up_to_date" and detail_payload is not None:
+        value = detail_payload.get("value")
+        scope = detail_payload.get("scope")
+        if scope == "hash":
+            return StatusUpdate("no_change", clear_message=True)
+        if isinstance(value, str):
+            return StatusUpdate("no_change", f"{value} (up to date)")
+    if status_name == "updating_ref" and detail_payload is not None:
+        current = detail_payload.get("current")
+        latest = detail_payload.get("latest")
+        if isinstance(current, str) and isinstance(latest, str):
+            return StatusUpdate("running", f"{current} -> {latest}")
+    if status_name == "refresh_lock" and isinstance(detail, str):
+        return StatusUpdate("running", detail)
+    if status_name == "fetching_hashes":
+        return StatusUpdate("running", "all platforms")
+    if status_name == "computing_hash" and isinstance(detail, str):
+        return StatusUpdate("running", detail)
+    return None
+
+
+def _legacy_status_update(  # noqa: PLR0911
+    kind: OperationKind,
+    message: str,
+) -> StatusUpdate:
+    if kind == OperationKind.CHECK_VERSION:
+        if message.startswith("Latest version: "):
+            return StatusUpdate("running", message.removeprefix("Latest version: "))
+        if message.startswith("Update available: "):
+            return StatusUpdate("success", message.removeprefix("Update available: "))
+        if message.startswith("Up to date (version: ") and message.endswith(")"):
+            value = message.removeprefix("Up to date (version: ")[:-1]
+            return StatusUpdate("no_change", f"{value} (up to date)")
+        if message.startswith("Up to date (ref: ") and message.endswith(")"):
+            value = message.removeprefix("Up to date (ref: ")[:-1]
+            return StatusUpdate("no_change", f"{value} (up to date)")
+        if "(current: " in message and message.endswith(")"):
+            current = message.rsplit("(current: ", 1)[1][:-1]
+            return StatusUpdate("running", f"current {current}")
+    if kind == OperationKind.UPDATE_REF and message.startswith("Updating ref: "):
+        return StatusUpdate("running", message.removeprefix("Updating ref: "))
+    if kind == OperationKind.REFRESH_LOCK and message.startswith(
+        "Updating flake input '"
+    ):
+        return StatusUpdate(
+            "running",
+            message.removeprefix("Updating flake input '").split("'", 1)[0],
+        )
+    if kind == OperationKind.COMPUTE_HASH:
+        if message == "Up to date":
+            return StatusUpdate("no_change", clear_message=True)
+        if message.startswith("Fetching hashes"):
+            return StatusUpdate("running", "all platforms")
+        if message.startswith("Computing hash for ") and message.endswith("..."):
+            return StatusUpdate(
+                "running", message.removeprefix("Computing hash for ")[:-3]
+            )
+        if message.startswith("Computing hash for ") and message.endswith("."):
+            return StatusUpdate(
+                "running", message.removeprefix("Computing hash for ")[:-1]
+            )
+        return StatusUpdate("running", message)
+    return StatusUpdate("running")
 
 
 def command_args_from_payload(payload: object) -> CommandArgs | None:
@@ -255,9 +242,10 @@ def command_args_from_payload(payload: object) -> CommandArgs | None:
 
 
 def _operation_from_status_payload(payload: object) -> OperationKind | None:
-    if not isinstance(payload, dict):
+    status_payload = _status_payload(payload)
+    if status_payload is None:
         return None
-    operation = cast("dict[str, object]", payload).get("operation")
+    operation = status_payload.get("operation")
     if not isinstance(operation, str):
         return None
     try:
@@ -337,24 +325,14 @@ def _set_operation_status(
 
 def _apply_status_rules(
     operation: OperationState,
-    message: str,
-    rules: tuple[StatusRule, ...],
-    *,
-    default_status: OperationStatus = "running",
-    default_message: str | None = None,
+    update: StatusUpdate,
 ) -> None:
-    for rule in rules:
-        match = rule.matcher(message)
-        if match:
-            formatted = rule.formatter(match) if rule.formatter else None
-            _set_operation_status(
-                operation,
-                rule.status,
-                message=formatted,
-                clear_message=rule.clear_message,
-            )
-            return
-    _set_operation_status(operation, default_status, message=default_message)
+    _set_operation_status(
+        operation,
+        update.status,
+        message=update.message,
+        clear_message=update.clear_message,
+    )
 
 
 def apply_status(item: ItemState, message: str, payload: object | None = None) -> None:
@@ -366,14 +344,10 @@ def apply_status(item: ItemState, message: str, payload: object | None = None) -
     if operation is None:
         return
     item.last_operation = kind
-    policy = _STATUS_POLICIES[kind]
-    _apply_status_rules(
-        operation,
-        message,
-        policy.rules,
-        default_status=policy.default_status,
-        default_message=message if policy.pass_message else None,
-    )
+    update = _payload_status_update(payload)
+    if update is None:
+        update = _legacy_status_update(kind, message)
+    _apply_status_rules(operation, update)
 
 
 def _hash_label_map(entry: SourceEntry | None) -> dict[str, str]:
@@ -426,7 +400,6 @@ __all__ = [
     "OperationKind",
     "OperationState",
     "OperationStatus",
-    "StatusRule",
     "SummaryStatus",
     "apply_status",
     "command_args_from_payload",

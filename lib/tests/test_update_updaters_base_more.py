@@ -14,7 +14,7 @@ from lib.tests._assertions import check, expect_instance, expect_not_none
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import resolve_config
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
-from lib.update.updaters import UPDATERS
+from lib.update.updaters import UPDATERS, ensure_updaters_loaded
 from lib.update.updaters.base import (
     ChecksumProvidedUpdater,
     DenoDepsHashUpdater,
@@ -949,6 +949,7 @@ def test_factory_helpers_return_expected_subclasses() -> None:
 
 def test_emdash_uses_platform_specific_npm_hashes() -> None:
     """Ensure emdash tracks npmDepsHash per platform in CI."""
+    ensure_updaters_loaded()
     updater = UPDATERS["emdash"]
     check(getattr(updater, "hash_type", None) == "npmDepsHash")
     check(getattr(updater, "platform_specific", False) is True)

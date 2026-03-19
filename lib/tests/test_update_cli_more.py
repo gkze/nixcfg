@@ -33,6 +33,7 @@ from lib.update.cli import (
     _execute_run_plan,
     _flake_source_string,
     _generated_artifact_paths,
+    _get_updaters,
     _handle_list_targets_request,
     _handle_schema_request,
     _handle_validate_request,
@@ -1106,6 +1107,21 @@ def test_runtime_config_and_tty_settings(monkeypatch: pytest.MonkeyPatch) -> Non
     )
     check(tty_enabled is False)
     check(show_headers is True)
+
+
+def test_get_updaters_falls_back_to_lazy_loader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Load the registry explicitly when the local alias is empty."""
+    from lib.update import updaters as updater_module
+
+    updater_module.UPDATERS.clear()
+    monkeypatch.setattr("lib.update.cli.UPDATERS", updater_module.UPDATERS)
+    monkeypatch.setattr(
+        "lib.update.cli.ensure_updaters_loaded",
+        lambda: {"demo": cast("type[object]", object)},
+    )
+    check(_get_updaters() == {"demo": object})
 
 
 def test_sort_option_requires_list(capsys: pytest.CaptureFixture[str]) -> None:

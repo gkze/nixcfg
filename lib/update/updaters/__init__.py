@@ -7,6 +7,7 @@ or factory helpers, which populate :data:`UPDATERS`.
 
 import importlib.util
 import sys
+from threading import Lock
 
 from lib.update.paths import package_file_map
 from lib.update.updaters.base import (
@@ -40,6 +41,9 @@ from lib.update.updaters.platform_api import (
     PlatformAPIUpdater,
 )
 
+_DISCOVERY_LOCK = Lock()
+_DISCOVERY_STATE = {"complete": False}
+
 
 def _discover_updaters() -> None:
     """Import every per-package ``updater.py`` to trigger registration."""
@@ -47,7 +51,9 @@ def _discover_updaters() -> None:
         # Use a stable module name so re-imports are safe.
         mod_name = f"_updater_pkg.{name}"
         if mod_name in sys.modules:
-            continue
+            if name in UPDATERS:
+                continue
+            del sys.modules[mod_name]
         if (
             spec := importlib.util.spec_from_file_location(mod_name, updater_file)
         ) is None or spec.loader is None:
@@ -57,7 +63,16 @@ def _discover_updaters() -> None:
         spec.loader.exec_module(mod)
 
 
-_discover_updaters()
+def ensure_updaters_loaded() -> dict[str, type[Updater]]:
+    """Load package updater modules on first use and return the registry."""
+    if _DISCOVERY_STATE["complete"] and UPDATERS:
+        return UPDATERS
+    with _DISCOVERY_LOCK:
+        if not _DISCOVERY_STATE["complete"] or not UPDATERS:
+            _discover_updaters()
+            _DISCOVERY_STATE["complete"] = True
+    return UPDATERS
+
 
 __all__ = [
     "UPDATERS",
@@ -78,6 +93,7 @@ __all__ = [
     "bun_node_modules_updater",
     "cargo_vendor_updater",
     "deno_deps_updater",
+    "ensure_updaters_loaded",
     "flake_input_hash_updater",
     "github_raw_file_updater",
     "go_vendor_updater",

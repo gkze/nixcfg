@@ -215,6 +215,8 @@ async def compute_import_cargo_lock_output_hashes(
             source,
             "Fetching upstream Cargo.lock...",
             operation="compute_hash",
+            status="computing_hash",
+            detail="upstream Cargo.lock",
         )
         node = get_flake_input_node(input_name)
         locked = node.locked

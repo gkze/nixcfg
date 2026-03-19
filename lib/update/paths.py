@@ -3,6 +3,7 @@
 import os
 from functools import cache
 from pathlib import Path
+from typing import cast
 
 
 def _resolve_repo_root() -> Path:
@@ -21,7 +22,34 @@ def _resolve_repo_root() -> Path:
     return cwd
 
 
-REPO_ROOT = _resolve_repo_root()
+@cache
+def get_repo_root() -> Path:
+    """Return the current repository root, honoring runtime env overrides."""
+    return _resolve_repo_root()
+
+
+class _RepoRootProxy(os.PathLike[str]):
+    def _path(self) -> Path:
+        get_repo_root.cache_clear()
+        return get_repo_root()
+
+    def __fspath__(self) -> str:
+        return os.fspath(self._path())
+
+    def __truediv__(self, other: str) -> Path:
+        return self._path() / other
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._path(), name)
+
+    def __repr__(self) -> str:
+        return repr(self._path())
+
+    def __str__(self) -> str:
+        return str(self._path())
+
+
+REPO_ROOT: Path = cast("Path", _RepoRootProxy())
 
 # Top-level directories containing package and overlay metadata files.
 PACKAGE_DIRS = ("packages", "overlays")
@@ -58,13 +86,16 @@ def is_sources_file_path(relative_path: str) -> bool:
 
 def get_repo_file(filename: str) -> Path:
     """Return a path under the detected repository root."""
-    return REPO_ROOT / filename
+    return get_repo_root() / filename
 
 
 @cache
-def _package_file_map_cached(filename: str) -> tuple[tuple[str, Path], ...]:
+def _package_file_map_cached(
+    root: Path,
+    filename: str,
+) -> tuple[tuple[str, Path], ...]:
     """Return cached ``(name, path)`` pairs for per-package files."""
-    return tuple(sorted(_package_file_map(REPO_ROOT, filename).items()))
+    return tuple(sorted(_package_file_map(root, filename).items()))
 
 
 def _flat_package_file_name(name: str, filename: str) -> str | None:
@@ -131,7 +162,7 @@ def package_file_map_in(root: Path, filename: str) -> dict[str, Path]:
 
 def package_file_map(filename: str) -> dict[str, Path]:
     """Return ``{name: path}`` for per-package files named ``filename``."""
-    return dict(_package_file_map_cached(filename))
+    return dict(_package_file_map_cached(get_repo_root(), filename))
 
 
 def package_file_for(name: str, filename: str) -> Path | None:
@@ -170,7 +201,7 @@ def package_dir_for_in(root: Path, name: str) -> Path | None:
 
 def package_dir_for(name: str) -> Path | None:
     """Return the unique package directory for ``name`` or ``None``."""
-    return _unique_package_dir_for(REPO_ROOT, name)
+    return _unique_package_dir_for(get_repo_root(), name)
 
 
 def sources_file_for(name: str) -> Path | None:

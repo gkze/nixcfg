@@ -133,19 +133,13 @@ def _call_with_optional_context[T](
     context: UpdateContext,
     **kwargs: object,
 ) -> T:
-    try:
-        return func(*args, context=context, **kwargs)
-    except TypeError as exc:
-        if "context" not in str(exc):
-            raise
-        try:
-            return func(*args, **kwargs)
-        except TypeError as inner_exc:
-            if "info" not in str(inner_exc):
-                raise
-            trimmed = dict(kwargs)
-            trimmed.pop("info", None)
-            return func(*args, **trimmed)
+    signature = inspect.signature(func)
+    bound_kwargs = dict(kwargs)
+    if "context" in signature.parameters:
+        bound_kwargs["context"] = context
+    if "info" not in signature.parameters:
+        bound_kwargs.pop("info", None)
+    return func(*args, **bound_kwargs)
 
 
 async def _emit_single_hash_entry(
@@ -262,6 +256,8 @@ class Updater(ABC):
                 self.name,
                 f"Using pinned version: {pinned_version.version}",
                 operation="check_version",
+                status="pinned_version",
+                detail=pinned_version.version,
             )
             info = pinned_version
         else:
@@ -272,17 +268,21 @@ class Updater(ABC):
             )
             info = await self.fetch_latest(session)
 
-        yield UpdateEvent.status(
-            self.name,
-            f"Latest version: {info.version}",
-            operation="check_version",
-        )
+            yield UpdateEvent.status(
+                self.name,
+                f"Latest version: {info.version}",
+                operation="check_version",
+                status="latest_version",
+                detail=info.version,
+            )
         is_latest = await self._is_latest(context, info)
         if is_latest and not self.materialize_when_current:
             yield UpdateEvent.status(
                 self.name,
                 f"Up to date (version: {info.version})",
                 operation="check_version",
+                status="up_to_date",
+                detail={"scope": "version", "value": info.version},
             )
             yield UpdateEvent.result(self.name)
             return
@@ -297,6 +297,7 @@ class Updater(ABC):
             self.name,
             "Fetching hashes for all platforms...",
             operation="compute_hash",
+            status="fetching_hashes",
         )
         hashes_drain = ValueDrain[SourceHashes]()
         async for event in drain_value_events(
@@ -337,6 +338,8 @@ class Updater(ABC):
                 self.name,
                 unchanged_message,
                 operation="compute_hash",
+                status="up_to_date",
+                detail={"scope": "hash"},
             )
             yield UpdateEvent.result(self.name)
             return
@@ -619,6 +622,8 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             self.name,
             "Computing derivation fingerprint...",
             operation="compute_hash",
+            status="computing_hash",
+            detail="derivation fingerprint",
         )
         try:
             drv_hash = context.drv_fingerprint
@@ -863,6 +868,8 @@ class DenoManifestUpdater(FlakeInputUpdater):
             self.name,
             f"Fetching {self.lock_file} from {locked.owner}/{locked.repo}...",
             operation="compute_hash",
+            status="computing_hash",
+            detail=self.lock_file,
         )
         lock_bytes = await fetch_url(
             session,

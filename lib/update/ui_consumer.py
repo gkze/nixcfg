@@ -136,7 +136,7 @@ class EventConsumer:
     def _handle_status(self, event: UpdateEvent, item: ItemState) -> None:
         if event.message:
             apply_status(item, event.message, event.payload)
-            if is_terminal_status(event.message):
+            if is_terminal_status(event.message, event.payload):
                 if not self.renderer.is_tty:
                     self.renderer.log(event.source, event.message)
             elif self.renderer.verbose:

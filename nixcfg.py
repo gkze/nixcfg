@@ -25,7 +25,7 @@ from lib.schema_codegen import (
 )
 from lib.update.ci import app as update_ci_app
 from lib.update.cli import app as update_app
-from lib.update.paths import REPO_ROOT
+from lib.update.paths import get_repo_root
 
 _is_tty = sys.stdout.isatty()
 
@@ -109,7 +109,7 @@ def _schema_progress(message: str) -> None:
 def _display_schema_path(path: pathlib.Path) -> str:
     """Return a readable display path for schema-related outputs."""
     try:
-        return str(path.relative_to(REPO_ROOT))
+        return str(path.relative_to(get_repo_root()))
     except ValueError:
         return str(path)
 

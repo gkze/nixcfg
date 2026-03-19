@@ -179,6 +179,17 @@ def test_paths_helpers_cover_remaining_branches(
     check(update_paths.sources_file_for("missing") is None)
 
 
+def test_repo_root_proxy_string_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Expose readable string representations for the lazy repo-root proxy."""
+    monkeypatch.setenv("REPO_ROOT", str(tmp_path))
+    update_paths.get_repo_root.cache_clear()
+    check(str(update_paths.REPO_ROOT) == str(tmp_path.resolve()))
+    check(repr(update_paths.REPO_ROOT) == repr(tmp_path.resolve()))
+    monkeypatch.delenv("REPO_ROOT", raising=False)
+
+
 def test_sources_helpers_cover_loading_and_save_branches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

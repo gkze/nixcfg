@@ -7,14 +7,12 @@ import posixpath
 import re
 from dataclasses import dataclass
 from graphlib import CycleError, TopologicalSorter
-from typing import TYPE_CHECKING, Any, cast
+from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
 from lib.update.paths import REPO_ROOT
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _DOWNLOAD_ACTION_PREFIX = "actions/download-artifact@"
 _GLOB_CHARS = frozenset("*?[")
@@ -579,10 +577,12 @@ def _validate_job_artifact_flows(
 
 def validate_workflow_artifact_contracts(
     *,
-    workflow_path: Path = REPO_ROOT / ".github/workflows/update.yml",
-    repo_root: Path = REPO_ROOT,
+    workflow_path: Path | os.PathLike[str] = REPO_ROOT / ".github/workflows/update.yml",
+    repo_root: Path | os.PathLike[str] = REPO_ROOT,
 ) -> None:
     """Raise ``RuntimeError`` when artifact flow semantics are inconsistent."""
+    workflow_path = Path(workflow_path)
+    repo_root = Path(repo_root)
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     jobs_data = workflow.get("jobs")
     if not isinstance(jobs_data, dict):
