@@ -66,7 +66,7 @@
     };
     crane.url = "github:ipetkov/crane";
     opencode = {
-      url = "github:gkze/opencode?ref=feat/added_UI_themes";
+      url = "github:gkze/opencode?ref=fix/catppuccin-shell-hierarchy";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     pyproject-build-systems = {

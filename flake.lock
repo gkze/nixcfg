@@ -1580,16 +1580,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1773357742,
-        "narHash": "sha256-zDId6cAiw1jDTe0XCn530V/a2RTNVwY9ZCkfrb3hdr8=",
+        "lastModified": 1774143835,
+        "narHash": "sha256-EtPhas+X20djMqV96+pVUIKx5hFwPbdYyqDvd/2zNP0=",
         "owner": "gkze",
         "repo": "opencode",
-        "rev": "80c0788af37816e02e0c82c6b073f9c931815573",
+        "rev": "4c8e2132a3f06f046f9d2b137ddca46b340607ae",
         "type": "github"
       },
       "original": {
         "owner": "gkze",
-        "ref": "feat/added_UI_themes",
+        "ref": "fix/catppuccin-shell-hierarchy",
         "repo": "opencode",
         "type": "github"
       }
