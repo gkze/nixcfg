@@ -553,6 +553,6 @@ jobs:
           sign-commits: true
           branch: update_flake_lock_action
           delete-branch: true
-          title: "nix: Update flake.lock, sources, and crate2nix"
-          commit-message: "nix: Update flake.lock, sources, and crate2nix"
+          title: "chore: update flake.lock, sources, and crate2nix"
+          commit-message: "chore: update flake.lock, sources, and crate2nix"
           body-path: /tmp/pr-body.md
