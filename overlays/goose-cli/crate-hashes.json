@@ -1,4 +1,9 @@
 {
-  "git+https://github.com/jh-block/llama-cpp-rs.git?branch=goose-patches#llama-cpp-2@0.1.136": "1hdlh80dvjrng55z1ip4rihzypcrcda74lcy29s46skxrimz901k",
-  "git+https://github.com/jh-block/llama-cpp-rs.git?branch=goose-patches#llama-cpp-sys-2@0.1.136": "1hdlh80dvjrng55z1ip4rihzypcrcda74lcy29s46skxrimz901k"
+  "git+https://github.com/open-telemetry/opentelemetry-rust?rev=345cd74a#opentelemetry-appender-tracing@0.31.1": "15lk9f4may2ncsg7xjfdjgfkdr87qb1hqas60cyid1py8hjyqsjs",
+  "git+https://github.com/open-telemetry/opentelemetry-rust?rev=345cd74a#opentelemetry-http@0.31.0": "15lk9f4may2ncsg7xjfdjgfkdr87qb1hqas60cyid1py8hjyqsjs",
+  "git+https://github.com/open-telemetry/opentelemetry-rust?rev=345cd74a#opentelemetry-otlp@0.31.0": "15lk9f4may2ncsg7xjfdjgfkdr87qb1hqas60cyid1py8hjyqsjs",
+  "git+https://github.com/open-telemetry/opentelemetry-rust?rev=345cd74a#opentelemetry-proto@0.31.0": "15lk9f4may2ncsg7xjfdjgfkdr87qb1hqas60cyid1py8hjyqsjs",
+  "git+https://github.com/open-telemetry/opentelemetry-rust?rev=345cd74a#opentelemetry-stdout@0.31.0": "15lk9f4may2ncsg7xjfdjgfkdr87qb1hqas60cyid1py8hjyqsjs",
+  "git+https://github.com/open-telemetry/opentelemetry-rust?rev=345cd74a#opentelemetry@0.31.0": "15lk9f4may2ncsg7xjfdjgfkdr87qb1hqas60cyid1py8hjyqsjs",
+  "git+https://github.com/open-telemetry/opentelemetry-rust?rev=345cd74a#opentelemetry_sdk@0.31.0": "15lk9f4may2ncsg7xjfdjgfkdr87qb1hqas60cyid1py8hjyqsjs"
 }

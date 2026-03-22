@@ -1,13 +1,13 @@
 {
   "hashes": [
     {
-      "hash": "sha256-dDP+UcIuajyad0tZz6/jqJ9AMERUtyn0z2ohkGiSSj0=",
+      "hash": "sha256-/HmcLnScZ2pmzGnRLsNHoqrakyt++1fCv/P2IeE8pGo=",
       "hashType": "srcHash"
     },
     {
-      "hash": "sha256-Frne1xZoMqcJowMzhGrBpTYcjqQuUgbP2ak63NYbHlY=",
+      "hash": "sha256-3Y9QJC4dqvnCH3qFSsvFMK+XtHnZyYPBP1voLpHpHA4=",
       "hashType": "npmDepsHash"
     }
   ],
-  "version": "0.33.1"
+  "version": "0.34.0"
 }
