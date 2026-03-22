@@ -1,5 +1,5 @@
 {
-  "commit": "80c0788af37816e02e0c82c6b073f9c931815573",
+  "commit": "4c8e2132a3f06f046f9d2b137ddca46b340607ae",
   "hashes": [
     {
       "gitDep": "specta-2.0.0-rc.22",
@@ -18,5 +18,5 @@
     }
   ],
   "input": "opencode",
-  "version": "feat/added_UI_themes"
+  "version": "fix/catppuccin-shell-hierarchy"
 }

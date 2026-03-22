@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-0na3lipkiqSf5GB7CrR0JDgG7pQGBT0Mm/Pa2b01SSA=",
-    "x86_64-darwin": "sha256-0na3lipkiqSf5GB7CrR0JDgG7pQGBT0Mm/Pa2b01SSA="
+    "aarch64-darwin": "sha256-r+2Kjrem1ovzBYUV/7Qyv/ieeYWAb7lAvDzTJp/Gzug=",
+    "x86_64-darwin": "sha256-r+2Kjrem1ovzBYUV/7Qyv/ieeYWAb7lAvDzTJp/Gzug="
   },
   "urls": {
     "aarch64-darwin": "https://persistent.oaistatic.com/codex-app-prod/Codex.dmg",
     "x86_64-darwin": "https://persistent.oaistatic.com/codex-app-prod/Codex.dmg"
   },
-  "version": "md5.a3c2e587f5778a7621fa8fc7d36b3a7c"
+  "version": "md5.ec1a769991d77418e61166c126420f90"
 }
