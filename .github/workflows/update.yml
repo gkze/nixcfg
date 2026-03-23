@@ -3,6 +3,7 @@ name: Periodic Flake Update
 
 env:
   CACHIX_NAME: gkze
+  UPDATE_COMMIT_MESSAGE: "chore: update flake.lock, sources, and crate2nix"
 
 on:
   schedule:
@@ -330,11 +331,12 @@ jobs:
       - name: Free disk space
         if: runner.os == 'macOS'
         run: nix run .#nixcfg -- ci workflow free-disk-space
-      - name: Warm FOD cache for ${{ matrix.platform }}
-        # Build packages with platform-specific FOD hashes only after all
-        # checked-in generated artifacts have been materialized. Downstream
-        # jobs then evaluate one consistent tree instead of mixing fresh
-        # sources.json updates with stale Cargo.nix state.
+      - name: Warm dependency cache for ${{ matrix.platform }}
+        # Build platform-specific dependency closures only after all checked-in
+        # generated artifacts have been materialized. This includes classic
+        # FODs plus deterministic Deno passthru closures (e.g. linear-cli).
+        # Downstream jobs then evaluate one consistent tree instead of mixing
+        # fresh sources.json updates with stale Cargo.nix state.
         run: nix run .#nixcfg -- ci cache fod
 
   # Phase 7: Quality gates
@@ -577,6 +579,6 @@ jobs:
           sign-commits: true
           branch: update_flake_lock_action
           delete-branch: true
-          title: "chore: update flake.lock, sources, and crate2nix"
-          commit-message: "chore: update flake.lock, sources, and crate2nix"
+          title: ${{ env.UPDATE_COMMIT_MESSAGE }}
+          commit-message: ${{ env.UPDATE_COMMIT_MESSAGE }}
           body-path: /tmp/pr-body.md

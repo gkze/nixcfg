@@ -1,21 +1,22 @@
 """Build platform-specific FOD sub-derivations and push them to Cachix.
 
 After ``compute-hashes`` discovers correct hashes and writes them to
-``sources.json``, this step builds each **FOD sub-derivation** (not the
-full package) on the *same* runner and then **explicitly pushes** the
-resulting store path to Cachix.  Downstream jobs (e.g. ``darwin-shared``)
-then get a cache hit instead of rebuilding the FOD — which would produce
-a different hash due to non-determinism (e.g. Bun's ``node_modules``
-layout, Deno's SQLite cache, HTTP metadata, timestamps).
+``sources.json``, this step builds each **cache-warming sub-derivation**
+(not the full package) on the *same* runner and then **explicitly pushes**
+the resulting store path to Cachix. This includes classic fixed-output
+sub-derivations such as Bun ``node_modules`` and deterministic Deno
+``passthru.denoDeps`` closures. Downstream jobs (e.g. ``darwin-shared``)
+then get a cache hit instead of rebuilding the dependency closure — which
+would otherwise re-hit the network or reproduce non-deterministic inputs.
 
 The explicit ``cachix push`` is necessary because the Cachix daemon's
 automatic store-path detection may miss FODs built inside nested ``nix
 build`` invocations (e.g. ``nix run .#nixcfg -- ci cache fod``
 spawns its own ``nix build --impure``).
 
-Only the FOD is built because the full package may need resources not
-available inside the Nix sandbox (e.g. ``deno compile`` downloads a
-runtime binary).
+Only the dependency closure is built because the full package may need
+resources not available inside the Nix sandbox (e.g. ``deno compile`` or
+other later build phases).
 """
 
 from __future__ import annotations
@@ -64,6 +65,10 @@ _PACKAGE_HASH_TYPE_TO_FOD_ATTR: dict[tuple[str, str], str] = {
     ("mux", "nodeModulesHash"): ".offlineCache",
 }
 
+_DENO_DEPS_MANIFEST_FILE_NAME = "deno-deps.json"
+_DENO_DEPS_ATTR = ".passthru.denoDeps"
+_DENO_RUNTIME_URL_PREFIX = "https://dl.deno.land/release/"
+
 
 @dataclass(frozen=True)
 class FodTarget:
@@ -101,10 +106,28 @@ def _resolve_fod_attr(package: str, hash_type: str) -> str | None:
     )
 
 
+def _has_platform_denort_hash(entry: SourceEntry, system: str) -> bool:
+    """Return whether *entry* has a platform-specific denort runtime hash."""
+    if entry.hashes.entries is None:
+        return False
+    return any(
+        h.platform == system
+        and h.hash_type == "sha256"
+        and isinstance(h.url, str)
+        and h.url.startswith(_DENO_RUNTIME_URL_PREFIX)
+        and "/denort-" in h.url
+        for h in entry.hashes.entries
+    )
+
+
 def _find_fod_targets(system: str) -> list[FodTarget]:
-    """Discover FOD sub-derivations that need building for *system*."""
+    """Discover cache-warming sub-derivations that need building for *system*."""
     targets: list[FodTarget] = []
-    for name, path in sorted(package_file_map(SOURCES_FILE_NAME).items()):
+    seen: set[tuple[str, str]] = set()
+    sources_files = package_file_map(SOURCES_FILE_NAME)
+    deno_manifest_packages = set(package_file_map(_DENO_DEPS_MANIFEST_FILE_NAME))
+
+    for name, path in sorted(sources_files.items()):
         try:
             entry = update_sources.load_source_entry(path)
         except Exception:
@@ -113,15 +136,68 @@ def _find_fod_targets(system: str) -> list[FodTarget]:
         for h in _platform_fod_entries(entry, system):
             fod_attr = _resolve_fod_attr(name, h.hash_type)
             if fod_attr is None:
+                if (
+                    name in deno_manifest_packages
+                    and h.hash_type == "sha256"
+                    and isinstance(h.url, str)
+                    and h.url.startswith(_DENO_RUNTIME_URL_PREFIX)
+                    and "/denort-" in h.url
+                ):
+                    log.debug(
+                        "Skipping %s sha256 denort hash in FOD scan; handled via %s",
+                        name,
+                        _DENO_DEPS_ATTR,
+                    )
+                    continue
                 log.warning(
                     "No FOD attribute mapping for hash type %s in %s — skipping",
                     h.hash_type,
                     name,
                 )
                 continue
+            target_key = (name, fod_attr)
+            if target_key in seen:
+                continue
+            seen.add(target_key)
             targets.append(
                 FodTarget(package=name, hash_type=h.hash_type, fod_attr=fod_attr)
             )
+
+    for name in sorted(deno_manifest_packages):
+        path = sources_files.get(name)
+        if path is None:
+            log.warning(
+                "Skipping %s: found %s without matching %s",
+                name,
+                _DENO_DEPS_MANIFEST_FILE_NAME,
+                SOURCES_FILE_NAME,
+            )
+            continue
+        try:
+            entry = update_sources.load_source_entry(path)
+        except Exception:
+            log.warning("Skipping %s: failed to load sources.json", name, exc_info=True)
+            continue
+        if not _has_platform_denort_hash(entry, system):
+            log.debug(
+                "Skipping %s%s: no platform-specific denort hash for %s",
+                name,
+                _DENO_DEPS_ATTR,
+                system,
+            )
+            continue
+        target_key = (name, _DENO_DEPS_ATTR)
+        if target_key in seen:
+            continue
+        seen.add(target_key)
+        targets.append(
+            FodTarget(
+                package=name,
+                hash_type="denoDeps",
+                fod_attr=_DENO_DEPS_ATTR,
+            )
+        )
+
     return targets
 
 
@@ -384,5 +460,5 @@ def cli(
 main = make_main(app, prog_name="cache fod")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())

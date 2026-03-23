@@ -15,10 +15,13 @@
    git add <files>
    git commit -S -m "message"
    ```
+   For multiline commit messages, use multiple `-m` flags or `git commit -S -F <file>`.
+   Do **not** pass literal `\n` escapes inside a single `-m` string.
 1. **Hand off** - Provide context for next session
 
 **CRITICAL RULES:**
 
 - ALWAYS sign commits with `-S` flag (e.g., `git commit -S -m "message"`)
 - Keep commit message subject and body lines at 80 characters or fewer
+- For multiline commit bodies, use real newlines via multiple `-m` flags or `-F`
 - Do NOT push automatically - let the user decide when to push

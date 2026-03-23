@@ -54,7 +54,7 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         wfc,
         "package_file_map",
-        lambda _name: {"demo": Path("path")},
+        lambda name: {"demo": Path("path")} if name == wfc.SOURCES_FILE_NAME else {},
     )
     monkeypatch.setattr("lib.update.sources.load_source_entry", lambda _path: entry)
     targets = object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
@@ -65,12 +65,45 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         wfc,
         "package_file_map",
-        lambda _name: {"mux": Path("path")},
+        lambda name: {"mux": Path("path")} if name == wfc.SOURCES_FILE_NAME else {},
     )
     targets = object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
     check(len(targets) == 1)
     check(targets[0].package == "mux")
     check(targets[0].fod_attr == ".offlineCache")
+
+    deno_entry = SourceEntry(
+        version="1",
+        hashes=HashCollection(
+            entries=[
+                HashEntry.create(
+                    "sha256",
+                    "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
+                    platform="x86_64-linux",
+                    url=(
+                        "https://dl.deno.land/release/v2.6.10/"
+                        "denort-x86_64-unknown-linux-gnu.zip"
+                    ),
+                ),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        wfc,
+        "package_file_map",
+        lambda name: (
+            {"linear-cli": Path("path")}
+            if name in (wfc.SOURCES_FILE_NAME, wfc._DENO_DEPS_MANIFEST_FILE_NAME)
+            else {}
+        ),
+    )
+    monkeypatch.setattr(
+        "lib.update.sources.load_source_entry", lambda _path: deno_entry
+    )
+    targets = object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
+    check(len(targets) == 1)
+    check(targets[0].package == "linear-cli")
+    check(targets[0].fod_attr == ".passthru.denoDeps")
 
     bad_entry = SourceEntry(
         version="1",
@@ -84,6 +117,11 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
             ]
         ),
     )
+    monkeypatch.setattr(
+        wfc,
+        "package_file_map",
+        lambda name: {"bad": Path("path")} if name == wfc.SOURCES_FILE_NAME else {},
+    )
     monkeypatch.setattr("lib.update.sources.load_source_entry", lambda _path: bad_entry)
     check(object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == [])
 
@@ -94,13 +132,140 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
         )
         == []
     )
+    check(
+        object.__getattribute__(wfc, "_has_platform_denort_hash")(
+            no_entries, "x86_64-linux"
+        )
+        is False
+    )
 
     def _boom(_path: Path) -> SourceEntry:
         msg = "boom"
         raise RuntimeError(msg)
 
+    monkeypatch.setattr(
+        wfc,
+        "package_file_map",
+        lambda name: {"boom": Path("path")} if name == wfc.SOURCES_FILE_NAME else {},
+    )
     monkeypatch.setattr("lib.update.sources.load_source_entry", _boom)
     check(object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == [])
+
+
+def test_find_fod_targets_handles_deno_edge_cases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run this test case."""
+    duplicate_entry = SourceEntry(
+        version="1",
+        hashes=HashCollection(
+            entries=[
+                HashEntry.create(
+                    "nodeModulesHash",
+                    "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    platform="x86_64-linux",
+                ),
+                HashEntry.create(
+                    "nodeModulesHash",
+                    "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+                    platform="x86_64-linux",
+                ),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        wfc,
+        "package_file_map",
+        lambda name: {"demo": Path("path")} if name == wfc.SOURCES_FILE_NAME else {},
+    )
+    monkeypatch.setattr(
+        "lib.update.sources.load_source_entry", lambda _path: duplicate_entry
+    )
+    targets = object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
+    check(len(targets) == 1)
+    check(targets[0].fod_attr == ".node_modules")
+
+    monkeypatch.setattr(
+        wfc,
+        "package_file_map",
+        lambda name: (
+            {"linear-cli": Path("manifest")}
+            if name == wfc._DENO_DEPS_MANIFEST_FILE_NAME
+            else {}
+        ),
+    )
+    check(object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == [])
+
+    calls = 0
+
+    def _load_then_fail(_path: Path) -> SourceEntry:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return SourceEntry(version="1", hashes=HashCollection(mapping={"x": "y"}))
+        msg = "boom"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(
+        wfc,
+        "package_file_map",
+        lambda name: (
+            {"linear-cli": Path("path")}
+            if name in (wfc.SOURCES_FILE_NAME, wfc._DENO_DEPS_MANIFEST_FILE_NAME)
+            else {}
+        ),
+    )
+    monkeypatch.setattr("lib.update.sources.load_source_entry", _load_then_fail)
+    check(object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == [])
+
+    no_denort_entry = SourceEntry(
+        version="1",
+        hashes=HashCollection(
+            entries=[
+                HashEntry.create(
+                    "sha256",
+                    "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
+                    platform="x86_64-linux",
+                    url="https://example.com/not-denort.zip",
+                ),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "lib.update.sources.load_source_entry", lambda _path: no_denort_entry
+    )
+    check(object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == [])
+
+    deno_entry = SourceEntry(
+        version="1",
+        hashes=HashCollection(
+            entries=[
+                HashEntry.create(
+                    "sha256",
+                    "sha256-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD=",
+                    platform="x86_64-linux",
+                    url=(
+                        "https://dl.deno.land/release/v2.6.10/"
+                        "denort-x86_64-unknown-linux-gnu.zip"
+                    ),
+                ),
+            ]
+        ),
+    )
+    monkeypatch.setattr("lib.update.sources.load_source_entry", lambda _path: deno_entry)
+    monkeypatch.setattr(
+        wfc,
+        "_resolve_fod_attr",
+        lambda package, hash_type: (
+            wfc._DENO_DEPS_ATTR
+            if package == "linear-cli" and hash_type == "sha256"
+            else None
+        ),
+    )
+    targets = object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
+    check(len(targets) == 1)
+    check(targets[0].package == "linear-cli")
+    check(targets[0].fod_attr == ".passthru.denoDeps")
 
 
 def test_build_fod_expr(monkeypatch: pytest.MonkeyPatch) -> None:
