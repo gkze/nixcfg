@@ -1,7 +1,7 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-7WMBOB0n/zn4d50uwRiLuRTAF2aSuXu/rWw9ZfOXmns=",
-    "x86_64-darwin": "sha256-7WMBOB0n/zn4d50uwRiLuRTAF2aSuXu/rWw9ZfOXmns="
+    "aarch64-darwin": "sha256-Sfa4ZUx/jN9+tC6BPaKJekIAJij0Lliuvwrk1XYfDuY=",
+    "x86_64-darwin": "sha256-Sfa4ZUx/jN9+tC6BPaKJekIAJij0Lliuvwrk1XYfDuY="
   },
   "urls": {
     "aarch64-darwin": "https://download.thecommander.app/release/Commander.dmg",

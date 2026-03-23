@@ -34,6 +34,9 @@ class CommanderUpdater(DownloadHashUpdater):
     """Resolve Commander version from the public changelog."""
 
     name = "commander"
+    # Commander republishes a stable release URL in place, so refresh hashes
+    # even when the changelog version string has not changed.
+    materialize_when_current = True
     CHANGELOG_URL = "https://thecommander.app/changelog.html"
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "https://download.thecommander.app/release/Commander.dmg",
