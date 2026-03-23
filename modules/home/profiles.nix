@@ -80,6 +80,12 @@ let
       url = "https://mcp.notion.com/mcp";
       oauth = { };
     };
+    # PlanetScale MCP (hosted remote server) - authenticates via `opencode mcp auth planetscale`
+    planetscale = {
+      type = "remote";
+      url = "https://mcp.pscale.dev/mcp/planetscale";
+      enabled = true;
+    };
     sentry = {
       type = "remote";
       url = "https://mcp.sentry.dev/mcp";
