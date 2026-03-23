@@ -252,7 +252,9 @@ def test_find_fod_targets_handles_deno_edge_cases(
             ]
         ),
     )
-    monkeypatch.setattr("lib.update.sources.load_source_entry", lambda _path: deno_entry)
+    monkeypatch.setattr(
+        "lib.update.sources.load_source_entry", lambda _path: deno_entry
+    )
     monkeypatch.setattr(
         wfc,
         "_resolve_fod_attr",
