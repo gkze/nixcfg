@@ -89,10 +89,40 @@
     ;
 
   mountpoint-s3 = prev.mountpoint-s3.overrideAttrs (old: {
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ prev.python3 ];
     buildInputs =
       prev.lib.optionals prev.stdenv.hostPlatform.isDarwin [ prev.macfuse-stubs ]
       ++ prev.lib.optionals prev.stdenv.hostPlatform.isLinux [ prev.fuse3 ];
     doCheck = !prev.stdenv.hostPlatform.isDarwin;
+    postPatch = (old.postPatch or "") + ''
+      METRICS_RECORDER_PATH="$cargoDepsCopy/metrics-0.24.1/src/recorder/mod.rs" \
+        python - <<'PY'
+      from os import environ
+      from pathlib import Path
+
+      path = Path(environ["METRICS_RECORDER_PATH"])
+      text = path.read_text()
+      original = "    fn new(recorder: &'a dyn Recorder) -> Self {"
+      updated = "    fn new(recorder: &'a (dyn Recorder + 'a)) -> Self {"
+      if original not in text:
+          raise SystemExit("metrics recorder signature not found")
+      text = text.replace(original, updated, 1)
+
+      original = "        let recorder_ptr = unsafe { NonNull::new_unchecked(recorder as *const _ as *mut _) };"
+      updated = """        // SAFETY: We extend `'a` to `'static` to satisfy the signature of `LOCAL_RECORDER`, which
+          // has an implied `'static` bound on `dyn Recorder`. We enforce that all usages of `LOCAL_RECORDER`
+          // are limited to `'a` as we mediate its access entirely through `LocalRecorderGuard<'a>`.
+          let recorder_ptr = unsafe {
+              std::mem::transmute::<*const (dyn Recorder + 'a), *mut (dyn Recorder + 'static)>(
+                  recorder as &'a (dyn Recorder + 'a),
+              )
+          };
+          let recorder_ptr = unsafe { NonNull::new_unchecked(recorder_ptr) };"""
+      if original not in text:
+          raise SystemExit("metrics recorder pointer cast not found")
+      path.write_text(text.replace(original, updated, 1))
+      PY
+    '';
     meta = old.meta // {
       platforms = prev.lib.platforms.unix;
     };

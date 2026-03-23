@@ -281,6 +281,7 @@ def test_google_chrome_updater_paths(
 ) -> None:
     """Run this test case."""
     updater = google_chrome_module.GoogleChromeUpdater()
+    check(updater.materialize_when_current is True)
     monkeypatch.setattr(
         google_chrome_module,
         "fetch_json",

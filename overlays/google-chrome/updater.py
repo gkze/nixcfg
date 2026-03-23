@@ -17,6 +17,7 @@ class GoogleChromeUpdater(DownloadHashUpdater):
     """Resolve latest Google Chrome version and download hashes."""
 
     name = "google-chrome"
+    materialize_when_current = True
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
         "x86_64-linux": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb",
