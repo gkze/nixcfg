@@ -39,11 +39,14 @@ jobs:
       - &cache_nix
         uses: actions/cache@v5
         with:
-          path: ~/.cache/nix
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
+          path: |
+            ~/.cache/nix
+            !~/.cache/nix/*.sqlite*
+            !~/.cache/nix/**/*.sqlite*
+          key: nix-cache-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
           restore-keys: |
-            nix-cache-${{ runner.os }}-${{ runner.arch }}-
-            nix-cache-${{ runner.os }}-
+            nix-cache-v2-${{ runner.os }}-${{ runner.arch }}-
+            nix-cache-v2-${{ runner.os }}-
       - name: Snapshot superset flake input
         run: |
           python3 - <<'PY'
@@ -101,11 +104,14 @@ jobs:
       - &cache_nix_arch
         uses: actions/cache@v5
         with:
-          path: ~/.cache/nix
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
+          path: |
+            ~/.cache/nix
+            !~/.cache/nix/*.sqlite*
+            !~/.cache/nix/**/*.sqlite*
+          key: nix-cache-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
           restore-keys: |
-            nix-cache-${{ runner.os }}-${{ runner.arch }}-
-            nix-cache-${{ runner.os }}-
+            nix-cache-v2-${{ runner.os }}-${{ runner.arch }}-
+            nix-cache-v2-${{ runner.os }}-
       - name: Resolve upstream versions
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -373,29 +379,41 @@ jobs:
     name: ${{ matrix.package }}
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 16
       matrix:
         include:
           - package: zed-editor-nightly
-            target: .#darwinConfigurations.argus.pkgs.zed-editor-nightly
+            target: .#pkgs.aarch64-darwin.zed-editor-nightly
           - package: goose-cli
-            target: .#darwinConfigurations.argus.pkgs.goose-cli
+            target: .#pkgs.aarch64-darwin.goose-cli
           - package: superset
-            target: .#darwinConfigurations.argus.pkgs.superset
+            target: .#pkgs.aarch64-darwin.superset
           - package: opencode
-            target: .#darwinConfigurations.argus.pkgs.opencode
+            target: .#pkgs.aarch64-darwin.opencode
           - package: opencode-desktop
-            target: .#darwinConfigurations.argus.pkgs.opencode-desktop
+            target: .#pkgs.aarch64-darwin.opencode-desktop
           - package: codex
-            target: .#darwinConfigurations.argus.pkgs.codex
+            target: .#pkgs.aarch64-darwin.codex
           - package: scratch
-            target: .#darwinConfigurations.argus.pkgs.scratch
+            target: .#pkgs.aarch64-darwin.scratch
           - package: czkawka
-            target: .#darwinConfigurations.argus.pkgs.czkawka
+            target: .#pkgs.aarch64-darwin.czkawka
           - package: gemini-cli
-            target: .#darwinConfigurations.argus.pkgs.gemini-cli
+            target: .#pkgs.aarch64-darwin.gemini-cli
           - package: element-desktop
-            target: .#darwinConfigurations.argus.pkgs.element-desktop
+            target: .#pkgs.aarch64-darwin.element-desktop
+          - package: linear-cli
+            target: .#pkgs.aarch64-darwin.linear-cli
+          - package: lumen
+            target: .#pkgs.aarch64-darwin.lumen
+          - package: mountpoint-s3
+            target: .#pkgs.aarch64-darwin.mountpoint-s3
+          - package: mux
+            target: .#pkgs.aarch64-darwin.mux
+          - package: neovide
+            target: .#pkgs.aarch64-darwin.neovide
+          - package: rust-analyzer-unwrapped
+            target: .#pkgs.aarch64-darwin.rust-analyzer-unwrapped
     steps:
       - *checkout
       - *setup_nix
@@ -439,16 +457,22 @@ jobs:
         run: |
           nix run .#nixcfg -- ci cache closure \
             --mode intersection \
-            --exclude-ref .#darwinConfigurations.argus.pkgs.zed-editor-nightly \
-            --exclude-ref .#darwinConfigurations.argus.pkgs.goose-cli \
-            --exclude-ref .#darwinConfigurations.argus.pkgs.superset \
-            --exclude-ref .#darwinConfigurations.argus.pkgs.opencode \
-            --exclude-ref .#darwinConfigurations.argus.pkgs.opencode-desktop \
-            --exclude-ref .#darwinConfigurations.argus.pkgs.codex \
-            --exclude-ref .#darwinConfigurations.argus.pkgs.scratch \
-            --exclude-ref .#darwinConfigurations.argus.pkgs.czkawka \
-            --exclude-ref .#darwinConfigurations.argus.pkgs.gemini-cli \
-            --exclude-ref .#darwinConfigurations.argus.pkgs.element-desktop \
+            --exclude-ref .#pkgs.aarch64-darwin.zed-editor-nightly \
+            --exclude-ref .#pkgs.aarch64-darwin.goose-cli \
+            --exclude-ref .#pkgs.aarch64-darwin.superset \
+            --exclude-ref .#pkgs.aarch64-darwin.opencode \
+            --exclude-ref .#pkgs.aarch64-darwin.opencode-desktop \
+            --exclude-ref .#pkgs.aarch64-darwin.codex \
+            --exclude-ref .#pkgs.aarch64-darwin.scratch \
+            --exclude-ref .#pkgs.aarch64-darwin.czkawka \
+            --exclude-ref .#pkgs.aarch64-darwin.gemini-cli \
+            --exclude-ref .#pkgs.aarch64-darwin.element-desktop \
+            --exclude-ref .#pkgs.aarch64-darwin.linear-cli \
+            --exclude-ref .#pkgs.aarch64-darwin.lumen \
+            --exclude-ref .#pkgs.aarch64-darwin.mountpoint-s3 \
+            --exclude-ref .#pkgs.aarch64-darwin.mux \
+            --exclude-ref .#pkgs.aarch64-darwin.neovide \
+            --exclude-ref .#pkgs.aarch64-darwin.rust-analyzer-unwrapped \
             .#darwinConfigurations.argus.system \
             .#darwinConfigurations.rocinante.system
 

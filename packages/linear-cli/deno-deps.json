@@ -8043,7 +8043,7 @@
           "url": "https://jsr.io/@std/fs/1.0.13/testdata/expand_wildcard.js"
         },
         {
-          "cache_path": "remote/https/jsr.io/80077c360638996b82b8606447e63ef58985c0985feaf219bed039841d872073",
+          "cache_path": "remote/https/jsr.io/ce1f38a625d0f42d20f73d08335dbb5d0b1af23aaecac6541f3e1c54852875d7",
           "media_type": "text/plain",
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "url": "https://jsr.io/@std/fs/1.0.13/testdata/glob/a[b]c/foo"
