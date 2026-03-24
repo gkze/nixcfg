@@ -1414,6 +1414,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "opencode" = rec {
+      packageId = "opencode";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "opencode";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "outline" = rec {
       packageId = "outline";
       build = internal.buildRustCrateWithFeatures {
@@ -7038,10 +7048,6 @@ rec {
             packageId = "anyhow";
           }
           {
-            name = "async-tar";
-            packageId = "async-tar";
-          }
-          {
             name = "collections";
             packageId = "collections";
           }
@@ -7089,10 +7095,6 @@ rec {
           {
             name = "settings";
             packageId = "settings";
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "thiserror";
@@ -15268,6 +15270,10 @@ rec {
             packageId = "async-trait";
           }
           {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
             name = "collections";
             packageId = "collections";
           }
@@ -15304,6 +15310,10 @@ rec {
             features = [ "futures-traits" ];
           }
           {
+            name = "rand";
+            packageId = "rand 0.9.2";
+          }
+          {
             name = "schemars";
             packageId = "schemars";
             features = [ "indexmap2" ];
@@ -15323,6 +15333,10 @@ rec {
             packageId = "settings";
           }
           {
+            name = "sha2";
+            packageId = "sha2";
+          }
+          {
             name = "slotmap";
             packageId = "slotmap";
           }
@@ -15337,6 +15351,10 @@ rec {
           {
             name = "terminal";
             packageId = "terminal";
+          }
+          {
+            name = "tiny_http";
+            packageId = "tiny_http";
           }
           {
             name = "url";
@@ -23356,6 +23374,10 @@ rec {
             features = [ "termination" ];
           }
           {
+            name = "db";
+            packageId = "db";
+          }
+          {
             name = "debug_adapter_extension";
             packageId = "debug_adapter_extension";
           }
@@ -30346,6 +30368,13 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("windows" == target."os" or null);
+            features = [ "windows-manifest" ];
+          }
+          {
             name = "gpui_linux";
             packageId = "gpui_linux";
             usesDefaultFeatures = false;
@@ -36069,6 +36098,11 @@ rec {
             name = "open_router";
             packageId = "open_router";
             features = [ "schemars" "schemars" ];
+          }
+          {
+            name = "opencode";
+            packageId = "opencode";
+            features = [ "schemars" ];
           }
           {
             name = "partial-json-fixer";
@@ -43429,6 +43463,56 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "schemars" ];
       };
+      "opencode" = rec {
+        crateName = "opencode";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/opencode"; };
+        libPath = "src/opencode.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "google_ai";
+            packageId = "google_ai";
+          }
+          {
+            name = "http_client";
+            packageId = "http_client";
+          }
+          {
+            name = "schemars";
+            packageId = "schemars";
+            optional = true;
+            features = [ "indexmap2" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+          {
+            name = "strum";
+            packageId = "strum 0.27.2";
+            features = [ "derive" ];
+          }
+        ];
+        features = {
+          "schemars" = [ "dep:schemars" ];
+        };
+        resolvedDefaultFeatures = [ "default" "schemars" ];
+      };
       "opener" = rec {
         crateName = "opener";
         version = "0.7.2";
@@ -48115,6 +48199,10 @@ rec {
           {
             name = "context_server";
             packageId = "context_server";
+          }
+          {
+            name = "credentials_provider";
+            packageId = "credentials_provider";
           }
           {
             name = "dap";
@@ -67125,9 +67213,9 @@ rec {
       };
       "tree-sitter-rust" = rec {
         crateName = "tree-sitter-rust";
-        version = "0.24.0";
+        version = "0.24.1";
         edition = "2021";
-        sha256 = "1q8vqslcnp2pvyg06733ddag4i4w3jlv5s1bf8h28jk89h1ii6sb";
+        sha256 = "1yavi3hnqrx6vmgvw4jdkhcvsmxgwnhn83bgd3dis9l70qxgf5gp";
         build = "bindings/rust/build.rs";
         libName = "tree_sitter_rust";
         libPath = "bindings/rust/lib.rs";

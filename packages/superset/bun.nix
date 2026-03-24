@@ -3304,6 +3304,7 @@
   "@superset/typescript" = copyPathToStore ./tooling/typescript;
   "@superset/ui" = copyPathToStore ./packages/ui;
   "@superset/web" = copyPathToStore ./apps/web;
+  "@superset/workspace-client" = copyPathToStore ./packages/workspace-client;
   "@superset/workspace-fs" = copyPathToStore ./packages/workspace-fs;
   "@swc/helpers@0.5.15" = fetchurl {
     url = "https://registry.npmjs.org/@swc/helpers/-/helpers-0.5.15.tgz";
