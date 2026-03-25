@@ -34,14 +34,19 @@ class CommanderUpdater(DownloadHashUpdater):
     """Resolve Commander version from the public changelog."""
 
     name = "commander"
-    # Commander republishes a stable release URL in place, so refresh hashes
-    # even when the changelog version string has not changed.
-    materialize_when_current = True
+    VERSIONED_URL_TEMPLATE = (
+        "https://download.thecommander.app/release/Commander-{version}.dmg"
+    )
     CHANGELOG_URL = "https://thecommander.app/changelog.html"
     PLATFORMS: ClassVar[dict[str, str]] = {
-        "aarch64-darwin": "https://download.thecommander.app/release/Commander.dmg",
-        "x86_64-darwin": "https://download.thecommander.app/release/Commander.dmg",
+        "aarch64-darwin": "darwin",
+        "x86_64-darwin": "darwin",
     }
+
+    def get_download_url(self, platform: str, info: VersionInfo) -> str:
+        """Return the version-pinned Commander DMG URL for ``platform``."""
+        _ = platform
+        return self.VERSIONED_URL_TEMPLATE.format(version=info.version)
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Parse the latest release version from the changelog page."""

@@ -131,50 +131,21 @@ def test_commander_fetches_latest_version_from_html_changelog(
     check(latest.version == "0.7.875")
 
 
-def test_commander_refreshes_hashes_when_version_matches(
+def test_commander_uses_versioned_download_urls(
     commander_module: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Commander should refresh hashes even when the version is unchanged."""
+    """Commander should pin each release to a versioned DMG URL."""
     updater = commander_module.CommanderUpdater()
-    current = SourceEntry(
-        version="0.7.890",
-        hashes={
-            "aarch64-darwin": "sha256-7WMBOB0n/zn4d50uwRiLuRTAF2aSuXu/rWw9ZfOXmns=",
-            "x86_64-darwin": "sha256-7WMBOB0n/zn4d50uwRiLuRTAF2aSuXu/rWw9ZfOXmns=",
-        },
-        urls={
-            "aarch64-darwin": "https://download.thecommander.app/release/Commander.dmg",
-            "x86_64-darwin": "https://download.thecommander.app/release/Commander.dmg",
-        },
+    latest = VersionInfo(version="0.7.890")
+
+    check(
+        updater.get_download_url("aarch64-darwin", latest)
+        == "https://download.thecommander.app/release/Commander-0.7.890.dmg"
     )
-    called = False
-
-    async def _fake_fetch_latest(_session: object) -> VersionInfo:
-        return VersionInfo(version="0.7.890")
-
-    async def _fake_fetch_hashes(
-        info: VersionInfo,
-        session: object,
-        *,
-        context: object | None = None,
-    ) -> EventStream:
-        nonlocal called
-        _ = (info, session, context)
-        called = True
-        yield UpdateEvent.value(
-            "commander",
-            {
-                "aarch64-darwin": "sha256-Sfa4ZUx/jN9+tC6BPaKJekIAJij0Lliuvwrk1XYfDuY=",
-                "x86_64-darwin": "sha256-Sfa4ZUx/jN9+tC6BPaKJekIAJij0Lliuvwrk1XYfDuY=",
-            },
-        )
-
-    monkeypatch.setattr(updater, "fetch_latest", _fake_fetch_latest)
-    monkeypatch.setattr(updater, "fetch_hashes", _fake_fetch_hashes)
-
-    _run(_collect(updater.update_stream(current, object())))
-    check(called)
+    check(
+        updater.get_download_url("x86_64-darwin", latest)
+        == "https://download.thecommander.app/release/Commander-0.7.890.dmg"
+    )
 
 
 def test_commander_rejects_changelog_without_release_heading(
