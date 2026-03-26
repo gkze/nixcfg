@@ -827,9 +827,9 @@
     url = "https://registry.npmjs.org/@durable-streams/client/-/client-0.2.1.tgz";
     hash = "sha512-+mGdK6TuDR9fJPo8jw6DufPfoUv6g+27xoPES76GXQc6y3val9Oe/SK2o2FV9sqqLSE19HEUSxTp0D6CZebfZw==";
   };
-  "@electric-sql/client@1.5.12" = fetchurl {
-    url = "https://registry.npmjs.org/@electric-sql/client/-/client-1.5.12.tgz";
-    hash = "sha512-mWDEpKog0Zo4WOjReW4x9ELaHsjTthpziLVJkjmSdh/4Y/ZHw5EoY5e9dJX9itPSKVk9GNFz3YfHFv5EAyCOmw==";
+  "@electric-sql/client@1.5.13" = fetchurl {
+    url = "https://registry.npmjs.org/@electric-sql/client/-/client-1.5.13.tgz";
+    hash = "sha512-cR5U/mDNUTRrdrZ8Fr3QPFKwTwDUZ2ux88mEvIxQq5PoyW3UrHkK/GIq3arHoeiXrUnieRIz2U+TBOaQKld8XA==";
   };
   "@electron/asar@3.4.1" = fetchurl {
     url = "https://registry.npmjs.org/@electron/asar/-/asar-3.4.1.tgz";
@@ -3298,12 +3298,14 @@
   "@superset/marketing" = copyPathToStore ./apps/marketing;
   "@superset/mcp" = copyPathToStore ./packages/mcp;
   "@superset/mobile" = copyPathToStore ./apps/mobile;
+  "@superset/pane-layout" = copyPathToStore ./packages/pane-layout;
   "@superset/scripts" = copyPathToStore ./packages/scripts;
   "@superset/shared" = copyPathToStore ./packages/shared;
   "@superset/trpc" = copyPathToStore ./packages/trpc;
   "@superset/typescript" = copyPathToStore ./tooling/typescript;
   "@superset/ui" = copyPathToStore ./packages/ui;
   "@superset/web" = copyPathToStore ./apps/web;
+  "@superset/workspace-client" = copyPathToStore ./packages/workspace-client;
   "@superset/workspace-fs" = copyPathToStore ./packages/workspace-fs;
   "@swc/helpers@0.5.15" = fetchurl {
     url = "https://registry.npmjs.org/@swc/helpers/-/helpers-0.5.15.tgz";
@@ -3449,13 +3451,13 @@
     url = "https://registry.npmjs.org/@tanstack/db-ivm/-/db-ivm-0.1.17.tgz";
     hash = "sha512-DK7vm56CDxNuRAdsbiPs+gITJ+16tUtYgZg3BRTLYKGIDsy8sdIO7sQFq5zl7Y+aIKAPmMAbVp9UjJ75FTtwgQ==";
   };
-  "@tanstack/db@0.5.31" = fetchurl {
-    url = "https://registry.npmjs.org/@tanstack/db/-/db-0.5.31.tgz";
-    hash = "sha512-q2gCcFLkQec6AwA8aSDDOEAT7hlyVn67J/kseUoZfEPyiokmx1oBekg27tywirmlSqc3Q5GUi5Vt/mjQ85gQmQ==";
+  "@tanstack/db@0.5.33" = fetchurl {
+    url = "https://registry.npmjs.org/@tanstack/db/-/db-0.5.33.tgz";
+    hash = "sha512-8pV3jZdqx6VgDubuddoT0UbQi8RrlCJ/kjhmgPIZUjvfhD3sz1TRMK4RTwOOf/JPTQ4qwWy5ggYLUTJxZZRB2w==";
   };
-  "@tanstack/electric-db-collection@0.2.39" = fetchurl {
-    url = "https://registry.npmjs.org/@tanstack/electric-db-collection/-/electric-db-collection-0.2.39.tgz";
-    hash = "sha512-5t/N6ArP29sEjJJqu331e1RMtXCmgN4qtPzuxaUrtftOhm/b0O5H4rrt/TXsmttkWqeb5t8wH84LjvTjM4OX3Q==";
+  "@tanstack/electric-db-collection@0.2.41" = fetchurl {
+    url = "https://registry.npmjs.org/@tanstack/electric-db-collection/-/electric-db-collection-0.2.41.tgz";
+    hash = "sha512-V8vmLrKrUYrATXtMTlAmAJ6PoDji4qf7iJ8pWqoxDgdHMGcgU0oOMbFSSHywRzscgVeKFRo+LJTSuZTrwTFn2A==";
   };
   "@tanstack/history@1.154.14" = fetchurl {
     url = "https://registry.npmjs.org/@tanstack/history/-/history-1.154.14.tgz";
@@ -3473,9 +3475,9 @@
     url = "https://registry.npmjs.org/@tanstack/query-devtools/-/query-devtools-5.92.0.tgz";
     hash = "sha512-N8D27KH1vEpVacvZgJL27xC6yPFUy0Zkezn5gnB3L3gRCxlDeSuiya7fKge8Y91uMTnC8aSxBQhcK6ocY7alpQ==";
   };
-  "@tanstack/react-db@0.1.75" = fetchurl {
-    url = "https://registry.npmjs.org/@tanstack/react-db/-/react-db-0.1.75.tgz";
-    hash = "sha512-23LVu1zArKXaPug7euZO07SsEjATfzvLQSuCOW+C4bK6V17CL6129EbrW23q9KUwnMkp8VpLOpqZniNY4ib3ig==";
+  "@tanstack/react-db@0.1.77" = fetchurl {
+    url = "https://registry.npmjs.org/@tanstack/react-db/-/react-db-0.1.77.tgz";
+    hash = "sha512-rN9UTE6LrmXrkeo5S1O6zE7altQhFIhWjF0Afbt42/GPsCUGH9sI0Ll24SpkpRsYSorGc06Z5r8LwhzcJvTmiQ==";
   };
   "@tanstack/react-query-devtools@5.91.2" = fetchurl {
     url = "https://registry.npmjs.org/@tanstack/react-query-devtools/-/react-query-devtools-5.91.2.tgz";
