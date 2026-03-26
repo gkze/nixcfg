@@ -60,7 +60,11 @@ let
     cp "$out/crates/zed/RELEASE_CHANNEL" "$out/crates/release_channel/RELEASE_CHANNEL"
 
     if [ -d "$out/crates/edit_prediction_cli" ]; then
-      cp -r "$out/crates/languages/src" "$out/crates/edit_prediction_cli/workspace-languages-src"
+      if [ -d "$out/crates/grammars/src" ]; then
+        cp -r "$out/crates/grammars/src" "$out/crates/edit_prediction_cli/workspace-language-configs-src"
+      elif [ -d "$out/crates/languages/src" ]; then
+        cp -r "$out/crates/languages/src" "$out/crates/edit_prediction_cli/workspace-language-configs-src"
+      fi
     fi
 
     ${copyZedManifestFor "remote_server"}
@@ -115,9 +119,21 @@ let
     ''}
 
     ${patchIfExists "crates/edit_prediction_cli/src/filter_languages.rs" ''
-      substituteInPlace "$out/crates/edit_prediction_cli/src/filter_languages.rs" \
-        --replace-fail '#[folder = "../languages/src/"]' '#[folder = "workspace-languages-src/"]' \
-        --replace-fail 'concat!(env!("CARGO_MANIFEST_DIR"), "/../languages/src")' 'concat!(env!("CARGO_MANIFEST_DIR"), "/workspace-languages-src")'
+      if grep -Fq '#[folder = "../grammars/src/"]' "$out/crates/edit_prediction_cli/src/filter_languages.rs"; then
+        substituteInPlace "$out/crates/edit_prediction_cli/src/filter_languages.rs" \
+          --replace-fail '#[folder = "../grammars/src/"]' '#[folder = "workspace-language-configs-src/"]'
+      elif grep -Fq '#[folder = "../languages/src/"]' "$out/crates/edit_prediction_cli/src/filter_languages.rs"; then
+        substituteInPlace "$out/crates/edit_prediction_cli/src/filter_languages.rs" \
+          --replace-fail '#[folder = "../languages/src/"]' '#[folder = "workspace-language-configs-src/"]'
+      fi
+
+      if grep -Fq 'concat!(env!("CARGO_MANIFEST_DIR"), "/../grammars/src")' "$out/crates/edit_prediction_cli/src/filter_languages.rs"; then
+        substituteInPlace "$out/crates/edit_prediction_cli/src/filter_languages.rs" \
+          --replace-fail 'concat!(env!("CARGO_MANIFEST_DIR"), "/../grammars/src")' 'concat!(env!("CARGO_MANIFEST_DIR"), "/workspace-language-configs-src")'
+      elif grep -Fq 'concat!(env!("CARGO_MANIFEST_DIR"), "/../languages/src")' "$out/crates/edit_prediction_cli/src/filter_languages.rs"; then
+        substituteInPlace "$out/crates/edit_prediction_cli/src/filter_languages.rs" \
+          --replace-fail 'concat!(env!("CARGO_MANIFEST_DIR"), "/../languages/src")' 'concat!(env!("CARGO_MANIFEST_DIR"), "/workspace-language-configs-src")'
+      fi
     ''}
 
     substituteInPlace "$out/crates/cli/src/main.rs" \
