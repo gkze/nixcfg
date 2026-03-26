@@ -1014,6 +1014,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "grammars" = rec {
+      packageId = "grammars";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "grammars";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "html_to_markdown" = rec {
       packageId = "html_to_markdown";
       build = internal.buildRustCrateWithFeatures {
@@ -1118,6 +1128,16 @@ rec {
       packageId = "language";
       build = internal.buildRustCrateWithFeatures {
         packageId = "language";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "language_core" = rec {
+      packageId = "language_core";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "language_core";
       };
 
       # Debug support which might change between releases.
@@ -1408,6 +1428,16 @@ rec {
       packageId = "open_router";
       build = internal.buildRustCrateWithFeatures {
         packageId = "open_router";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "opencode" = rec {
+      packageId = "opencode";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "opencode";
       };
 
       # Debug support which might change between releases.
@@ -3855,10 +3885,6 @@ rec {
             packageId = "assistant_text_thread";
           }
           {
-            name = "async-fs";
-            packageId = "async-fs";
-          }
-          {
             name = "audio";
             packageId = "audio";
           }
@@ -3882,10 +3908,6 @@ rec {
           {
             name = "cloud_api_types";
             packageId = "cloud_api_types";
-          }
-          {
-            name = "cloud_llm_client";
-            packageId = "cloud_llm_client";
           }
           {
             name = "collections";
@@ -4593,38 +4615,6 @@ rec {
           "serde" = [ "dep:serde" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
-      };
-      "alloc-no-stdlib" = rec {
-        crateName = "alloc-no-stdlib";
-        version = "2.0.4";
-        edition = "2015";
-        crateBin = [];
-        sha256 = "1cy6r2sfv5y5cigv86vms7n5nlwhx1rbyxwcraqnmm1rxiib2yyc";
-        libName = "alloc_no_stdlib";
-        authors = [
-          "Daniel Reiter Horn <danielrh@dropbox.com>"
-        ];
-        features = {
-        };
-      };
-      "alloc-stdlib" = rec {
-        crateName = "alloc-stdlib";
-        version = "0.2.2";
-        edition = "2015";
-        crateBin = [];
-        sha256 = "1kkfbld20ab4165p29v172h8g0wvq8i06z8vnng14whw0isq5ywl";
-        libName = "alloc_stdlib";
-        authors = [
-          "Daniel Reiter Horn <danielrh@dropbox.com>"
-        ];
-        dependencies = [
-          {
-            name = "alloc-no-stdlib";
-            packageId = "alloc-no-stdlib";
-          }
-        ];
-        features = {
-        };
       };
       "allocator-api2" = rec {
         crateName = "allocator-api2";
@@ -5628,10 +5618,6 @@ rec {
             packageId = "clock";
           }
           {
-            name = "cloud_llm_client";
-            packageId = "cloud_llm_client";
-          }
-          {
             name = "collections";
             packageId = "collections";
           }
@@ -5963,7 +5949,7 @@ rec {
           "zstd" = [ "compression-codecs/zstd" ];
           "zstdmt" = [ "compression-codecs/zstdmt" "zstd" ];
         };
-        resolvedDefaultFeatures = [ "deflate" "deflate64" "futures-io" "gzip" ];
+        resolvedDefaultFeatures = [ "bzip2" "deflate" "deflate64" "futures-io" "gzip" ];
       };
       "async-dispatcher" = rec {
         crateName = "async-dispatcher";
@@ -7038,10 +7024,6 @@ rec {
             packageId = "anyhow";
           }
           {
-            name = "async-tar";
-            packageId = "async-tar";
-          }
-          {
             name = "collections";
             packageId = "collections";
           }
@@ -7089,10 +7071,6 @@ rec {
           {
             name = "settings";
             packageId = "settings";
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "thiserror";
@@ -10699,75 +10677,6 @@ rec {
         ];
 
       };
-      "brotli" = rec {
-        crateName = "brotli";
-        version = "8.0.2";
-        edition = "2015";
-        crateBin = [];
-        sha256 = "0q25r00z3gm5wzvv4vfxvlx5zjb8i4jwyznrvdcp7abs7ihbkn2b";
-        authors = [
-          "Daniel Reiter Horn <danielrh@dropbox.com>"
-          "The Brotli Authors"
-        ];
-        dependencies = [
-          {
-            name = "alloc-no-stdlib";
-            packageId = "alloc-no-stdlib";
-          }
-          {
-            name = "alloc-stdlib";
-            packageId = "alloc-stdlib";
-            optional = true;
-          }
-          {
-            name = "brotli-decompressor";
-            packageId = "brotli-decompressor";
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "alloc-stdlib" = [ "dep:alloc-stdlib" ];
-          "benchmark" = [ "brotli-decompressor/benchmark" ];
-          "default" = [ "std" ];
-          "disable-timer" = [ "brotli-decompressor/disable-timer" ];
-          "ffi-api" = [ "brotli-decompressor/ffi-api" ];
-          "seccomp" = [ "brotli-decompressor/seccomp" ];
-          "sha2" = [ "dep:sha2" ];
-          "std" = [ "alloc-stdlib" "brotli-decompressor/std" ];
-          "validation" = [ "sha2" ];
-        };
-        resolvedDefaultFeatures = [ "alloc-stdlib" "default" "std" ];
-      };
-      "brotli-decompressor" = rec {
-        crateName = "brotli-decompressor";
-        version = "5.0.0";
-        edition = "2015";
-        crateBin = [];
-        sha256 = "00yyswj1rj20ma4wr4wcci4r9ywlgvxa87nqsv5rik5y588vhjw7";
-        libName = "brotli_decompressor";
-        authors = [
-          "Daniel Reiter Horn <danielrh@dropbox.com>"
-          "The Brotli Authors"
-        ];
-        dependencies = [
-          {
-            name = "alloc-no-stdlib";
-            packageId = "alloc-no-stdlib";
-          }
-          {
-            name = "alloc-stdlib";
-            packageId = "alloc-stdlib";
-            optional = true;
-          }
-        ];
-        features = {
-          "alloc-stdlib" = [ "dep:alloc-stdlib" ];
-          "default" = [ "std" ];
-          "std" = [ "alloc-stdlib" ];
-          "unsafe" = [ "alloc-no-stdlib/unsafe" "alloc-stdlib/unsafe" ];
-        };
-        resolvedDefaultFeatures = [ "alloc-stdlib" "std" ];
-      };
       "brush-parser" = rec {
         crateName = "brush-parser";
         version = "0.3.0";
@@ -11200,7 +11109,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
-      "bzip2" = rec {
+      "bzip2 0.4.4" = rec {
         crateName = "bzip2";
         version = "0.4.4";
         edition = "2015";
@@ -11224,6 +11133,27 @@ rec {
           "tokio" = [ "tokio-io" "futures" ];
           "tokio-io" = [ "dep:tokio-io" ];
         };
+      };
+      "bzip2 0.6.1" = rec {
+        crateName = "bzip2";
+        version = "0.6.1";
+        edition = "2021";
+        sha256 = "0v1lgjxy944fdvsl97wmqs7f288crv7xddalk6y82jpk4jn3z9gk";
+        dependencies = [
+          {
+            name = "libbz2-rs-sys";
+            packageId = "libbz2-rs-sys";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "rust-allocator" ];
+          }
+        ];
+        features = {
+          "bzip2-sys" = [ "dep:bzip2-sys" ];
+          "default" = [ "dep:libbz2-rs-sys" ];
+          "static" = [ "bzip2-sys?/static" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
       };
       "bzip2-sys" = rec {
         crateName = "bzip2-sys";
@@ -14979,6 +14909,11 @@ rec {
         ];
         dependencies = [
           {
+            name = "bzip2";
+            packageId = "bzip2 0.6.1";
+            optional = true;
+          }
+          {
             name = "compression-core";
             packageId = "compression-core";
           }
@@ -15018,7 +14953,7 @@ rec {
           "zstd-safe" = [ "dep:zstd-safe" ];
           "zstdmt" = [ "zstd" "zstd-safe/zstdmt" ];
         };
-        resolvedDefaultFeatures = [ "deflate" "deflate64" "flate2" "gzip" "memchr" ];
+        resolvedDefaultFeatures = [ "bzip2" "deflate" "deflate64" "flate2" "gzip" "memchr" ];
       };
       "compression-core" = rec {
         crateName = "compression-core";
@@ -15268,6 +15203,10 @@ rec {
             packageId = "async-trait";
           }
           {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
             name = "collections";
             packageId = "collections";
           }
@@ -15304,6 +15243,10 @@ rec {
             features = [ "futures-traits" ];
           }
           {
+            name = "rand";
+            packageId = "rand 0.9.2";
+          }
+          {
             name = "schemars";
             packageId = "schemars";
             features = [ "indexmap2" ];
@@ -15323,6 +15266,10 @@ rec {
             packageId = "settings";
           }
           {
+            name = "sha2";
+            packageId = "sha2";
+          }
+          {
             name = "slotmap";
             packageId = "slotmap";
           }
@@ -15337,6 +15284,10 @@ rec {
           {
             name = "terminal";
             packageId = "terminal";
+          }
+          {
+            name = "tiny_http";
+            packageId = "tiny_http";
           }
           {
             name = "url";
@@ -18085,7 +18036,7 @@ rec {
           {
             name = "async-compression";
             packageId = "async-compression";
-            features = [ "gzip" "futures-io" ];
+            features = [ "bzip2" "gzip" "futures-io" ];
           }
           {
             name = "async-pipe";
@@ -20711,10 +20662,6 @@ rec {
           {
             name = "anyhow";
             packageId = "anyhow";
-          }
-          {
-            name = "brotli";
-            packageId = "brotli";
           }
           {
             name = "buffer_diff";
@@ -23356,6 +23303,10 @@ rec {
             features = [ "termination" ];
           }
           {
+            name = "db";
+            packageId = "db";
+          }
+          {
             name = "debug_adapter_extension";
             packageId = "debug_adapter_extension";
           }
@@ -23944,7 +23895,7 @@ rec {
           {
             name = "async-compression";
             packageId = "async-compression";
-            features = [ "gzip" "futures-io" ];
+            features = [ "bzip2" "gzip" "futures-io" ];
           }
           {
             name = "async-tar";
@@ -28382,10 +28333,6 @@ rec {
             packageId = "call";
           }
           {
-            name = "cloud_llm_client";
-            packageId = "cloud_llm_client";
-          }
-          {
             name = "collections";
             packageId = "collections";
           }
@@ -30346,6 +30293,13 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("windows" == target."os" or null);
+            features = [ "windows-manifest" ];
+          }
+          {
             name = "gpui_linux";
             packageId = "gpui_linux";
             usesDefaultFeatures = false;
@@ -30764,6 +30718,151 @@ rec {
           "test-support" = [ "gpui/test-support" ];
         };
         resolvedDefaultFeatures = [ "default" "scap" "screen-capture" ];
+      };
+      "grammars" = rec {
+        crateName = "grammars";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/grammars"; };
+        libPath = "src/grammars.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "language_core";
+            packageId = "language_core";
+          }
+          {
+            name = "rust-embed";
+            packageId = "rust-embed";
+            features = [ "include-exclude" ];
+          }
+          {
+            name = "toml";
+            packageId = "toml 0.8.23";
+          }
+          {
+            name = "tree-sitter";
+            packageId = "tree-sitter";
+            optional = true;
+            features = [ "wasm" ];
+          }
+          {
+            name = "tree-sitter-bash";
+            packageId = "tree-sitter-bash";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-c";
+            packageId = "tree-sitter-c";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-cpp";
+            packageId = "tree-sitter-cpp";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-css";
+            packageId = "tree-sitter-css";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-diff";
+            packageId = "tree-sitter-diff";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-gitcommit";
+            packageId = "tree-sitter-gitcommit";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-go";
+            packageId = "tree-sitter-go";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-gomod";
+            packageId = "tree-sitter-gomod";
+            rename = "tree-sitter-go-mod";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-gowork";
+            packageId = "tree-sitter-gowork";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-jsdoc";
+            packageId = "tree-sitter-jsdoc";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-json";
+            packageId = "tree-sitter-json";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-md";
+            packageId = "tree-sitter-md";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-python";
+            packageId = "tree-sitter-python";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-regex";
+            packageId = "tree-sitter-regex";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-rust";
+            packageId = "tree-sitter-rust";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-typescript";
+            packageId = "tree-sitter-typescript";
+            optional = true;
+          }
+          {
+            name = "tree-sitter-yaml";
+            packageId = "tree-sitter-yaml";
+            optional = true;
+          }
+          {
+            name = "util";
+            packageId = "util";
+          }
+        ];
+        features = {
+          "load-grammars" = [ "tree-sitter" "tree-sitter-bash" "tree-sitter-c" "tree-sitter-cpp" "tree-sitter-css" "tree-sitter-diff" "tree-sitter-gitcommit" "tree-sitter-go" "tree-sitter-go-mod" "tree-sitter-gowork" "tree-sitter-jsdoc" "tree-sitter-json" "tree-sitter-md" "tree-sitter-python" "tree-sitter-regex" "tree-sitter-rust" "tree-sitter-typescript" "tree-sitter-yaml" ];
+          "test-support" = [ "load-grammars" ];
+          "tree-sitter" = [ "dep:tree-sitter" ];
+          "tree-sitter-bash" = [ "dep:tree-sitter-bash" ];
+          "tree-sitter-c" = [ "dep:tree-sitter-c" ];
+          "tree-sitter-cpp" = [ "dep:tree-sitter-cpp" ];
+          "tree-sitter-css" = [ "dep:tree-sitter-css" ];
+          "tree-sitter-diff" = [ "dep:tree-sitter-diff" ];
+          "tree-sitter-gitcommit" = [ "dep:tree-sitter-gitcommit" ];
+          "tree-sitter-go" = [ "dep:tree-sitter-go" ];
+          "tree-sitter-go-mod" = [ "dep:tree-sitter-go-mod" ];
+          "tree-sitter-gowork" = [ "dep:tree-sitter-gowork" ];
+          "tree-sitter-jsdoc" = [ "dep:tree-sitter-jsdoc" ];
+          "tree-sitter-json" = [ "dep:tree-sitter-json" ];
+          "tree-sitter-md" = [ "dep:tree-sitter-md" ];
+          "tree-sitter-python" = [ "dep:tree-sitter-python" ];
+          "tree-sitter-regex" = [ "dep:tree-sitter-regex" ];
+          "tree-sitter-rust" = [ "dep:tree-sitter-rust" ];
+          "tree-sitter-typescript" = [ "dep:tree-sitter-typescript" ];
+          "tree-sitter-yaml" = [ "dep:tree-sitter-yaml" ];
+        };
+        resolvedDefaultFeatures = [ "load-grammars" "tree-sitter" "tree-sitter-bash" "tree-sitter-c" "tree-sitter-cpp" "tree-sitter-css" "tree-sitter-diff" "tree-sitter-gitcommit" "tree-sitter-go" "tree-sitter-go-mod" "tree-sitter-gowork" "tree-sitter-jsdoc" "tree-sitter-json" "tree-sitter-md" "tree-sitter-python" "tree-sitter-regex" "tree-sitter-rust" "tree-sitter-typescript" "tree-sitter-yaml" ];
       };
       "grid" = rec {
         crateName = "grid";
@@ -32057,7 +32156,7 @@ rec {
           {
             name = "async-compression";
             packageId = "async-compression";
-            features = [ "gzip" "futures-io" ];
+            features = [ "bzip2" "gzip" "futures-io" ];
           }
           {
             name = "async-fs";
@@ -35430,6 +35529,10 @@ rec {
             packageId = "itertools 0.14.0";
           }
           {
+            name = "language_core";
+            packageId = "language_core";
+          }
+          {
             name = "log";
             packageId = "log";
             features = [ "kv_unstable_serde" "serde" ];
@@ -35459,11 +35562,6 @@ rec {
           {
             name = "rpc";
             packageId = "rpc";
-          }
-          {
-            name = "schemars";
-            packageId = "schemars";
-            features = [ "indexmap2" ];
           }
           {
             name = "semver";
@@ -35582,6 +35680,11 @@ rec {
             features = [ "test-support" ];
           }
           {
+            name = "criterion";
+            packageId = "criterion";
+            features = [ "html_reports" ];
+          }
+          {
             name = "ctor";
             packageId = "ctor";
           }
@@ -35691,6 +35794,83 @@ rec {
           "tree-sitter-typescript" = [ "dep:tree-sitter-typescript" ];
         };
         resolvedDefaultFeatures = [ "rand" "test-support" "tree-sitter-md" "tree-sitter-python" "tree-sitter-rust" "tree-sitter-typescript" ];
+      };
+      "language_core" = rec {
+        crateName = "language_core";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/language_core"; };
+        libPath = "src/language_core.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "collections";
+            packageId = "collections";
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "log";
+            packageId = "log";
+            features = [ "kv_unstable_serde" "serde" ];
+          }
+          {
+            name = "lsp";
+            packageId = "lsp";
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot";
+          }
+          {
+            name = "regex";
+            packageId = "regex";
+          }
+          {
+            name = "schemars";
+            packageId = "schemars";
+            features = [ "indexmap2" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+          {
+            name = "toml";
+            packageId = "toml 0.8.23";
+          }
+          {
+            name = "tree-sitter";
+            packageId = "tree-sitter";
+            features = [ "wasm" ];
+          }
+          {
+            name = "util";
+            packageId = "util";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            features = [ "test-support" ];
+          }
+        ];
+        features = {
+        };
       };
       "language_extension" = rec {
         crateName = "language_extension";
@@ -36071,6 +36251,11 @@ rec {
             features = [ "schemars" "schemars" ];
           }
           {
+            name = "opencode";
+            packageId = "opencode";
+            features = [ "schemars" ];
+          }
+          {
             name = "partial-json-fixer";
             packageId = "partial-json-fixer";
           }
@@ -36426,7 +36611,7 @@ rec {
           {
             name = "async-compression";
             packageId = "async-compression";
-            features = [ "gzip" "futures-io" ];
+            features = [ "bzip2" "gzip" "futures-io" ];
           }
           {
             name = "async-fs";
@@ -36461,6 +36646,10 @@ rec {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "grammars";
+            packageId = "grammars";
           }
           {
             name = "http_client";
@@ -36536,11 +36725,6 @@ rec {
             packageId = "rope";
           }
           {
-            name = "rust-embed";
-            packageId = "rust-embed";
-            features = [ "include-exclude" ];
-          }
-          {
             name = "semver";
             packageId = "semver";
             features = [ "serde" ];
@@ -36590,99 +36774,14 @@ rec {
             packageId = "theme";
           }
           {
-            name = "toml";
-            packageId = "toml 0.8.23";
-          }
-          {
             name = "tree-sitter";
             packageId = "tree-sitter";
             optional = true;
             features = [ "wasm" ];
           }
           {
-            name = "tree-sitter-bash";
-            packageId = "tree-sitter-bash";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-c";
-            packageId = "tree-sitter-c";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-cpp";
-            packageId = "tree-sitter-cpp";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-css";
-            packageId = "tree-sitter-css";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-diff";
-            packageId = "tree-sitter-diff";
-            optional = true;
-          }
-          {
             name = "tree-sitter-gitcommit";
             packageId = "tree-sitter-gitcommit";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-go";
-            packageId = "tree-sitter-go";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-gomod";
-            packageId = "tree-sitter-gomod";
-            rename = "tree-sitter-go-mod";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-gowork";
-            packageId = "tree-sitter-gowork";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-jsdoc";
-            packageId = "tree-sitter-jsdoc";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-json";
-            packageId = "tree-sitter-json";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-md";
-            packageId = "tree-sitter-md";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-python";
-            packageId = "tree-sitter-python";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-regex";
-            packageId = "tree-sitter-regex";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-rust";
-            packageId = "tree-sitter-rust";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-typescript";
-            packageId = "tree-sitter-typescript";
-            optional = true;
-          }
-          {
-            name = "tree-sitter-yaml";
-            packageId = "tree-sitter-yaml";
             optional = true;
           }
           {
@@ -36695,6 +36794,11 @@ rec {
           }
         ];
         devDependencies = [
+          {
+            name = "fs";
+            packageId = "fs";
+            features = [ "test-support" ];
+          }
           {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
@@ -36735,6 +36839,10 @@ rec {
             packageId = "tree-sitter-python";
           }
           {
+            name = "tree-sitter-rust";
+            packageId = "tree-sitter-rust";
+          }
+          {
             name = "tree-sitter-typescript";
             packageId = "tree-sitter-typescript";
           }
@@ -36744,28 +36852,12 @@ rec {
           }
         ];
         features = {
-          "load-grammars" = [ "tree-sitter" "tree-sitter-bash" "tree-sitter-c" "tree-sitter-cpp" "tree-sitter-css" "tree-sitter-diff" "tree-sitter-gitcommit" "tree-sitter-go" "tree-sitter-go-mod" "tree-sitter-gowork" "tree-sitter-jsdoc" "tree-sitter-json" "tree-sitter-md" "tree-sitter-python" "tree-sitter-regex" "tree-sitter-rust" "tree-sitter-typescript" "tree-sitter-yaml" ];
+          "load-grammars" = [ "grammars/load-grammars" "tree-sitter" "tree-sitter-gitcommit" ];
           "test-support" = [ "load-grammars" ];
           "tree-sitter" = [ "dep:tree-sitter" ];
-          "tree-sitter-bash" = [ "dep:tree-sitter-bash" ];
-          "tree-sitter-c" = [ "dep:tree-sitter-c" ];
-          "tree-sitter-cpp" = [ "dep:tree-sitter-cpp" ];
-          "tree-sitter-css" = [ "dep:tree-sitter-css" ];
-          "tree-sitter-diff" = [ "dep:tree-sitter-diff" ];
           "tree-sitter-gitcommit" = [ "dep:tree-sitter-gitcommit" ];
-          "tree-sitter-go" = [ "dep:tree-sitter-go" ];
-          "tree-sitter-go-mod" = [ "dep:tree-sitter-go-mod" ];
-          "tree-sitter-gowork" = [ "dep:tree-sitter-gowork" ];
-          "tree-sitter-jsdoc" = [ "dep:tree-sitter-jsdoc" ];
-          "tree-sitter-json" = [ "dep:tree-sitter-json" ];
-          "tree-sitter-md" = [ "dep:tree-sitter-md" ];
-          "tree-sitter-python" = [ "dep:tree-sitter-python" ];
-          "tree-sitter-regex" = [ "dep:tree-sitter-regex" ];
-          "tree-sitter-rust" = [ "dep:tree-sitter-rust" ];
-          "tree-sitter-typescript" = [ "dep:tree-sitter-typescript" ];
-          "tree-sitter-yaml" = [ "dep:tree-sitter-yaml" ];
         };
-        resolvedDefaultFeatures = [ "load-grammars" "test-support" "tree-sitter" "tree-sitter-bash" "tree-sitter-c" "tree-sitter-cpp" "tree-sitter-css" "tree-sitter-diff" "tree-sitter-gitcommit" "tree-sitter-go" "tree-sitter-go-mod" "tree-sitter-gowork" "tree-sitter-jsdoc" "tree-sitter-json" "tree-sitter-md" "tree-sitter-python" "tree-sitter-regex" "tree-sitter-rust" "tree-sitter-typescript" "tree-sitter-yaml" ];
+        resolvedDefaultFeatures = [ "load-grammars" "test-support" "tree-sitter" "tree-sitter-gitcommit" ];
       };
       "lazy_static" = rec {
         crateName = "lazy_static";
@@ -36851,6 +36943,23 @@ rec {
           "johannesvollmer <contact@johannesvollmer.com>"
         ];
 
+      };
+      "libbz2-rs-sys" = rec {
+        crateName = "libbz2-rs-sys";
+        version = "0.2.2";
+        edition = "2021";
+        sha256 = "1xz88pa6xc372kjnr9gv4qaz5myjna9d7db5a2a7sk142md58jic";
+        libName = "libbz2_rs_sys";
+        features = {
+          "c-allocator" = [ "dep:libc" ];
+          "custom-prefix" = [ "export-symbols" ];
+          "default" = [ "std" "stdio" ];
+          "semver-prefix" = [ "export-symbols" ];
+          "std" = [ "rust-allocator" ];
+          "stdio" = [ "dep:libc" ];
+          "testing-prefix" = [ "export-symbols" ];
+        };
+        resolvedDefaultFeatures = [ "rust-allocator" ];
       };
       "libc" = rec {
         crateName = "libc";
@@ -37094,8 +37203,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/livekit-rust-sdks";
-          rev = "c1209aa155cbf4543383774f884a46ae7e53ee2e";
-          sha256 = "14d73c1axali30q5qp7767qsli3hfnf9p2l42rbh4vxn2xihrmpy";
+          rev = "147fbca3d4b592d96d33f5e6a84b59fc0b5d9bf1";
+          sha256 = "09q4cs44icvplr8iwpsnfmjqkmk8qpn1mpbgqi8z90kf00m6i756";
         };
         dependencies = [
           {
@@ -37395,8 +37504,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/livekit-rust-sdks";
-          rev = "c1209aa155cbf4543383774f884a46ae7e53ee2e";
-          sha256 = "14d73c1axali30q5qp7767qsli3hfnf9p2l42rbh4vxn2xihrmpy";
+          rev = "147fbca3d4b592d96d33f5e6a84b59fc0b5d9bf1";
+          sha256 = "09q4cs44icvplr8iwpsnfmjqkmk8qpn1mpbgqi8z90kf00m6i756";
         };
         dependencies = [
           {
@@ -37501,8 +37610,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/livekit-rust-sdks";
-          rev = "c1209aa155cbf4543383774f884a46ae7e53ee2e";
-          sha256 = "14d73c1axali30q5qp7767qsli3hfnf9p2l42rbh4vxn2xihrmpy";
+          rev = "147fbca3d4b592d96d33f5e6a84b59fc0b5d9bf1";
+          sha256 = "09q4cs44icvplr8iwpsnfmjqkmk8qpn1mpbgqi8z90kf00m6i756";
         };
         libName = "livekit_api";
         dependencies = [
@@ -37636,8 +37745,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/livekit-rust-sdks";
-          rev = "c1209aa155cbf4543383774f884a46ae7e53ee2e";
-          sha256 = "14d73c1axali30q5qp7767qsli3hfnf9p2l42rbh4vxn2xihrmpy";
+          rev = "147fbca3d4b592d96d33f5e6a84b59fc0b5d9bf1";
+          sha256 = "09q4cs44icvplr8iwpsnfmjqkmk8qpn1mpbgqi8z90kf00m6i756";
         };
         libName = "livekit_protocol";
         dependencies = [
@@ -37691,8 +37800,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/livekit-rust-sdks";
-          rev = "c1209aa155cbf4543383774f884a46ae7e53ee2e";
-          sha256 = "14d73c1axali30q5qp7767qsli3hfnf9p2l42rbh4vxn2xihrmpy";
+          rev = "147fbca3d4b592d96d33f5e6a84b59fc0b5d9bf1";
+          sha256 = "09q4cs44icvplr8iwpsnfmjqkmk8qpn1mpbgqi8z90kf00m6i756";
         };
         libName = "livekit_runtime";
         dependencies = [
@@ -38574,6 +38683,10 @@ rec {
         libPath = "src/markdown.rs";
         dependencies = [
           {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
             name = "base64";
             packageId = "base64 0.22.1";
           }
@@ -38591,6 +38704,10 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "html5ever";
+            packageId = "html5ever 0.27.0";
+          }
+          {
             name = "language";
             packageId = "language";
           }
@@ -38604,6 +38721,15 @@ rec {
             features = [ "kv_unstable_serde" "serde" ];
           }
           {
+            name = "markup5ever_rcdom";
+            packageId = "markup5ever_rcdom";
+          }
+          {
+            name = "mermaid-rs-renderer";
+            packageId = "mermaid-rs-renderer";
+            usesDefaultFeatures = false;
+          }
+          {
             name = "pulldown-cmark";
             packageId = "pulldown-cmark 0.13.0";
             usesDefaultFeatures = false;
@@ -38611,6 +38737,10 @@ rec {
           {
             name = "settings";
             packageId = "settings";
+          }
+          {
+            name = "stacksafe";
+            packageId = "stacksafe";
           }
           {
             name = "sum_tree";
@@ -38696,14 +38826,6 @@ rec {
             packageId = "anyhow";
           }
           {
-            name = "async-recursion";
-            packageId = "async-recursion";
-          }
-          {
-            name = "collections";
-            packageId = "collections";
-          }
-          {
             name = "editor";
             packageId = "editor";
           }
@@ -38713,16 +38835,8 @@ rec {
             usesDefaultFeatures = false;
           }
           {
-            name = "html5ever";
-            packageId = "html5ever 0.27.0";
-          }
-          {
             name = "language";
             packageId = "language";
-          }
-          {
-            name = "linkify";
-            packageId = "linkify";
           }
           {
             name = "log";
@@ -38734,31 +38848,8 @@ rec {
             packageId = "markdown";
           }
           {
-            name = "markup5ever_rcdom";
-            packageId = "markup5ever_rcdom";
-          }
-          {
-            name = "mermaid-rs-renderer";
-            packageId = "mermaid-rs-renderer";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "pretty_assertions";
-            packageId = "pretty_assertions";
-            features = [ "unstable" ];
-          }
-          {
-            name = "pulldown-cmark";
-            packageId = "pulldown-cmark 0.13.0";
-            usesDefaultFeatures = false;
-          }
-          {
             name = "settings";
             packageId = "settings";
-          }
-          {
-            name = "stacksafe";
-            packageId = "stacksafe";
           }
           {
             name = "theme";
@@ -38787,14 +38878,8 @@ rec {
         ];
         devDependencies = [
           {
-            name = "editor";
-            packageId = "editor";
-            features = [ "test-support" ];
-          }
-          {
-            name = "language";
-            packageId = "language";
-            features = [ "test-support" ];
+            name = "tempfile";
+            packageId = "tempfile";
           }
         ];
         features = {
@@ -40280,6 +40365,10 @@ rec {
             features = [ "wasm" ];
           }
           {
+            name = "unicode-segmentation";
+            packageId = "unicode-segmentation";
+          }
+          {
             name = "util";
             packageId = "util";
           }
@@ -40829,7 +40918,7 @@ rec {
           {
             name = "async-compression";
             packageId = "async-compression";
-            features = [ "gzip" "futures-io" ];
+            features = [ "bzip2" "gzip" "futures-io" ];
           }
           {
             name = "async-std";
@@ -43422,6 +43511,56 @@ rec {
           {
             name = "thiserror";
             packageId = "thiserror 2.0.17";
+          }
+        ];
+        features = {
+          "schemars" = [ "dep:schemars" ];
+        };
+        resolvedDefaultFeatures = [ "default" "schemars" ];
+      };
+      "opencode" = rec {
+        crateName = "opencode";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/opencode"; };
+        libPath = "src/opencode.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "google_ai";
+            packageId = "google_ai";
+          }
+          {
+            name = "http_client";
+            packageId = "http_client";
+          }
+          {
+            name = "schemars";
+            packageId = "schemars";
+            optional = true;
+            features = [ "indexmap2" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+          {
+            name = "strum";
+            packageId = "strum 0.27.2";
+            features = [ "derive" ];
           }
         ];
         features = {
@@ -48117,6 +48256,10 @@ rec {
             packageId = "context_server";
           }
           {
+            name = "credentials_provider";
+            packageId = "credentials_provider";
+          }
+          {
             name = "dap";
             packageId = "dap";
           }
@@ -48202,6 +48345,10 @@ rec {
           {
             name = "paths";
             packageId = "paths";
+          }
+          {
+            name = "percent-encoding";
+            packageId = "percent-encoding";
           }
           {
             name = "postage";
@@ -48570,10 +48717,6 @@ rec {
           {
             name = "command_palette_hooks";
             packageId = "command_palette_hooks";
-          }
-          {
-            name = "db";
-            packageId = "db";
           }
           {
             name = "editor";
@@ -58412,6 +58555,10 @@ rec {
             features = [ "unstable" ];
           }
           {
+            name = "agent_settings";
+            packageId = "agent_settings";
+          }
+          {
             name = "agent_ui";
             packageId = "agent_ui";
           }
@@ -67125,9 +67272,9 @@ rec {
       };
       "tree-sitter-rust" = rec {
         crateName = "tree-sitter-rust";
-        version = "0.24.0";
+        version = "0.24.1";
         edition = "2021";
-        sha256 = "1q8vqslcnp2pvyg06733ddag4i4w3jlv5s1bf8h28jk89h1ii6sb";
+        sha256 = "1yavi3hnqrx6vmgvw4jdkhcvsmxgwnhn83bgd3dis9l70qxgf5gp";
         build = "bindings/rust/build.rs";
         libName = "tree_sitter_rust";
         libPath = "bindings/rust/lib.rs";
@@ -72660,8 +72807,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/livekit-rust-sdks";
-          rev = "c1209aa155cbf4543383774f884a46ae7e53ee2e";
-          sha256 = "14d73c1axali30q5qp7767qsli3hfnf9p2l42rbh4vxn2xihrmpy";
+          rev = "147fbca3d4b592d96d33f5e6a84b59fc0b5d9bf1";
+          sha256 = "09q4cs44icvplr8iwpsnfmjqkmk8qpn1mpbgqi8z90kf00m6i756";
         };
         libName = "webrtc_sys";
         dependencies = [
@@ -72712,8 +72859,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/livekit-rust-sdks";
-          rev = "c1209aa155cbf4543383774f884a46ae7e53ee2e";
-          sha256 = "14d73c1axali30q5qp7767qsli3hfnf9p2l42rbh4vxn2xihrmpy";
+          rev = "147fbca3d4b592d96d33f5e6a84b59fc0b5d9bf1";
+          sha256 = "09q4cs44icvplr8iwpsnfmjqkmk8qpn1mpbgqi8z90kf00m6i756";
         };
         libName = "webrtc_sys_build";
         dependencies = [
@@ -81097,6 +81244,10 @@ rec {
         libPath = "src/workspace.rs";
         dependencies = [
           {
+            name = "agent_settings";
+            packageId = "agent_settings";
+          }
+          {
             name = "any_vec";
             packageId = "any_vec";
           }
@@ -82819,7 +82970,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "0.230.0";
+        version = "0.231.0";
         edition = "2024";
         crateBin = [
           {
@@ -83597,6 +83748,7 @@ rec {
           "clock" = [ "dep:clock" ];
           "mimalloc" = [ "dep:mimalloc" ];
           "test-support" = [ "gpui/test-support" "gpui_platform/screen-capture" "dep:image" "workspace/test-support" "project/test-support" "editor/test-support" "terminal_view/test-support" "image_viewer/test-support" "recent_projects/test-support" "repl/test-support" "title_bar/test-support" ];
+          "track-project-leak" = [ "gpui/leak-detection" ];
           "tracy" = [ "ztracing/tracy" ];
           "visual-tests" = [ "gpui/test-support" "gpui_platform/screen-capture" "gpui_platform/test-support" "dep:image" "dep:tempfile" "dep:action_log" "dep:agent_servers" "workspace/test-support" "project/test-support" "editor/test-support" "terminal_view/test-support" "image_viewer/test-support" "clock/test-support" "acp_thread/test-support" "action_log/test-support" "agent_ui/test-support" "db/test-support" "agent/test-support" "language_model/test-support" "fs/test-support" "recent_projects/test-support" "title_bar/test-support" ];
         };
@@ -84835,7 +84987,7 @@ rec {
           }
           {
             name = "bzip2";
-            packageId = "bzip2";
+            packageId = "bzip2 0.4.4";
             optional = true;
           }
           {

@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "x86_64-linux": "sha256-Nc3vq9aO93uRK7pkHXRkAiDpc16J254inyGhN1qjldM="
+    "x86_64-linux": "sha256-jMRv9WEvW4K11FjRiTlxYvNoJLGyrYDSNaZONukTEzs="
   },
   "urls": {
-    "x86_64-linux": "https://github.com/superset-sh/superset/releases/download/desktop-v1.2.4/superset-1.2.4-x86_64.AppImage"
+    "x86_64-linux": "https://github.com/superset-sh/superset/releases/download/desktop-v1.4.1/superset-1.4.1-x86_64.AppImage"
   },
-  "version": "1.2.4"
+  "version": "1.4.1"
 }
