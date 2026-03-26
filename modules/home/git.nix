@@ -34,6 +34,62 @@ let
     // lib.optionalAttrs (include.condition != null) {
       inherit (include) condition;
     };
+
+  batPackage = lib.attrByPath [
+    "programs"
+    "bat"
+    "package"
+  ] pkgs.bat config;
+
+  # Delta resolves bat themes from bat's compiled cache, not directly from
+  # ~/.config/bat/themes. If that cache gets cleaned, git diff starts warning
+  # that the configured Catppuccin theme is unknown until `bat cache --build`
+  # is run again.
+  batCacheAwareDelta = pkgs.writeShellApplication {
+    name = "delta";
+    text = ''
+      set -eu
+
+      cache_home="''${XDG_CACHE_HOME:-$HOME/.cache}"
+      config_home="''${XDG_CONFIG_HOME:-$HOME/.config}"
+      cache_dir="$cache_home/bat"
+      config_dir="$config_home/bat"
+      themes_bin="$cache_dir/themes.bin"
+      syntaxes_bin="$cache_dir/syntaxes.bin"
+      needs_rebuild=0
+
+      if [ ! -f "$themes_bin" ] || [ ! -f "$syntaxes_bin" ]; then
+        needs_rebuild=1
+      fi
+
+      if [ "$needs_rebuild" -eq 0 ] && [ -d "$config_dir/themes" ] && \
+        ${lib.getExe' pkgs.findutils "find"} "$config_dir/themes" -type f -newer "$themes_bin" | ${lib.getExe pkgs.gnugrep} -q .; then
+        needs_rebuild=1
+      fi
+
+      if [ "$needs_rebuild" -eq 0 ] && [ -d "$config_dir/syntaxes" ] && \
+        ${lib.getExe' pkgs.findutils "find"} "$config_dir/syntaxes" -type f -newer "$syntaxes_bin" | ${lib.getExe pkgs.gnugrep} -q .; then
+        needs_rebuild=1
+      fi
+
+      if [ "$needs_rebuild" -eq 1 ]; then
+        ${lib.getExe' pkgs.coreutils "mkdir"} -p "$cache_dir"
+        tmpdir="$(${lib.getExe' pkgs.coreutils "mktemp"} -d "''${TMPDIR:-/tmp}/delta-bat-cache.XXXXXX")"
+        cleanup() {
+          ${lib.getExe' pkgs.coreutils "rm"} -rf "$tmpdir"
+        }
+        trap cleanup EXIT
+
+        (
+          export XDG_CACHE_HOME="$cache_home"
+          cd "$tmpdir"
+          ${lib.getExe batPackage} cache --build >/dev/null 2>&1 || true
+        )
+      fi
+
+      exec ${lib.getExe pkgs.delta} "$@"
+    '';
+  };
 in
 {
   options.nixcfg.git = {
@@ -120,6 +176,7 @@ in
       delta = lib.mkIf cfg.enableDelta {
         enable = true;
         enableGitIntegration = true;
+        package = batCacheAwareDelta;
         options = {
           navigate = true;
           side-by-side = true;
