@@ -1,0 +1,27 @@
+---
+version: 1
+sources:
+  local:
+    kind: directory
+    path: schemas
+    include:
+      - "**/*.json"
+    format: json
+inputs:
+  primary:
+    kind: jsonschema
+    sources:
+      - local
+    entrypoints:
+      - ./root.json
+generators:
+  python:
+    language: python
+    tool: datamodel-code-generator
+products:
+  models:
+    inputs:
+      - primary
+    generators:
+      - python
+    output_template: generated.py

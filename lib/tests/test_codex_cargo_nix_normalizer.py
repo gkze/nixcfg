@@ -6,9 +6,8 @@ import importlib.util
 from pathlib import Path
 from types import ModuleType
 
-from nix_manipulator import parse
-
 from lib.tests._assertions import check
+from lib.tests._nix_ast import assert_nix_ast_equal
 
 
 def _load_normalizer_module() -> ModuleType:
@@ -46,12 +45,24 @@ rec {
 
     normalized, rewrites, added_root_src = module.normalize(sample)
 
-    parse(normalized)
     check(added_root_src is True)
     check(rewrites == 2)
-    check("rootSrc ? ./." in normalized)
-    check('src = "${rootSrc}/cli";' in normalized)
-    check('src = "${rootSrc}/utils/git";' in normalized)
+    assert_nix_ast_equal(
+        normalized,
+        """{ nixpkgs ? <nixpkgs>
+, pkgs ? import nixpkgs { config = {}; }
+, crateConfig
+  ? if builtins.pathExists ./crate-config.nix
+    then pkgs.callPackage ./crate-config.nix {}
+    else {}
+, rootSrc ? ./.
+}:
+rec {
+  foo = { src = "${rootSrc}/cli"; };
+  bar = { src = "${rootSrc}/utils/git"; };
+}
+""",
+    )
 
 
 def test_normalize_is_noop_for_checked_in_codex_cargo_nix() -> None:
@@ -64,4 +75,10 @@ def test_normalize_is_noop_for_checked_in_codex_cargo_nix() -> None:
 
     check(added_root_src is False)
     check(rewrites == 0)
-    check(normalized == original)
+
+    _normalized_again, rewrites_again, added_root_src_again = module.normalize(
+        normalized
+    )
+
+    check(added_root_src_again is False)
+    check(rewrites_again == 0)

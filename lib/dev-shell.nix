@@ -16,6 +16,11 @@ let
     ${lib.getExe pkgs.uv} run coverage run -m pytest
     ${lib.getExe pkgs.uv} run coverage report
   '';
+  ghawfrGoQualityCheck = pkgs.writeShellScript "quality-ghawfr-go" ''
+    set -euo pipefail
+    cd ghawfr
+    ${lib.getExe pkgs.go} test ./...
+  '';
   yamllintQualityCheck = pkgs.writeShellScript "quality-yamllint" ''
     set -euo pipefail
     ${lib.getExe pkgs.git} ls-files -z -- '*.yml' '*.yaml' \
@@ -57,6 +62,19 @@ let
         enable = true;
         name = "quality-pytest";
         entry = "${pytestQualityCheck}";
+        pass_filenames = false;
+        always_run = true;
+        priority = qualityPriority;
+        stages = [
+          "pre-commit"
+          "manual"
+        ];
+      };
+
+      quality-ghawfr-go = {
+        enable = true;
+        name = "quality-ghawfr-go";
+        entry = "${ghawfrGoQualityCheck}";
         pass_filenames = false;
         always_run = true;
         priority = qualityPriority;
@@ -119,6 +137,7 @@ pkgs.devshell.mkShell {
     with pkgs;
     [
       flake-edit
+      go
       nh
       nil
       nix-init

@@ -79,6 +79,8 @@ jobs:
             command: uv run ruff check --config pyproject.toml . && uv run ty check .
           - name: pytest
             command: uv sync --frozen --group dev && uv run coverage run -m pytest && uv run coverage report
+          - name: ghawfr-go
+            command: cd ghawfr && go test ./...
           - name: crate2nix
             command: uv run python -m lib.update.ci.crate2nix
           - name: workflow-artifacts

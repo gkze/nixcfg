@@ -28,6 +28,50 @@ _EXIT_STATUS_THREE = 3
 _THREE_SECONDS = 3.0
 
 
+class _NeverEndingStream:
+    async def readline(self) -> bytes:
+        await asyncio.Future()
+
+
+class _TimeoutProc:
+    def __init__(
+        self,
+        *,
+        stdout: _NeverEndingStream | None = None,
+        stderr: _NeverEndingStream | None = None,
+    ) -> None:
+        self.stdout = stdout
+        self.stderr = stderr
+        self.killed = False
+        self.returncode = 0
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        await asyncio.Future()
+
+    def kill(self) -> None:
+        self.killed = True
+
+    async def wait(self) -> int:
+        return 0
+
+
+async def _raise_timeout_immediately(
+    awaitable: object,
+    *_args: object,
+    **_kwargs: object,
+) -> object:
+    close = getattr(awaitable, "close", None)
+    if callable(close):
+        close()
+    raise TimeoutError
+
+
+async def _timed_out_stdout_lines(*_args: object, **_kwargs: object):
+    if False:
+        yield ""
+    raise TimeoutError
+
+
 def test_raise_timeout_raises_timeout_error() -> None:
     """Run this test case."""
     with pytest.raises(TimeoutError):
@@ -166,18 +210,32 @@ def test_stream_process_success_events() -> None:
     check(any(line.stream == "stderr" and "err-1" in line.text for line in lines))
 
 
-def test_stream_process_timeout() -> None:
-    """Run this test case."""
+def test_stream_process_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Timeouts should kill the subprocess and surface ``TimeoutError``."""
+    proc = _TimeoutProc(stdout=_NeverEndingStream(), stderr=_NeverEndingStream())
+
+    async def _create_subprocess_exec(
+        *_args: object, **_kwargs: object
+    ) -> _TimeoutProc:
+        return proc
+
+    monkeypatch.setattr(
+        "lib.nix.commands.base.asyncio.create_subprocess_exec",
+        _create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "lib.nix.commands.base.asyncio.wait_for",
+        _raise_timeout_immediately,
+    )
 
     async def _run() -> None:
-        async for _event in stream_process(
-            [PYTHON, "-c", "import time; time.sleep(2)"],
-            timeout=0.1,
-        ):
+        async for _event in stream_process(["nix"], timeout=5.0):
             pass
 
     with pytest.raises(TimeoutError):
         asyncio.run(_run())
+
+    check(proc.killed)
 
 
 def test_stream_process_handles_missing_streams(
@@ -262,15 +320,30 @@ def test_run_nix_hash_mismatch_error() -> None:
         asyncio.run(run_nix([PYTHON, "-c", script], timeout=5.0))
 
 
-def test_run_nix_timeout_raises_command_error() -> None:
-    """Run this test case."""
+def test_run_nix_timeout_raises_command_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Timeouts should kill the subprocess and raise ``NixCommandError``."""
+    proc = _TimeoutProc()
+
+    async def _create_subprocess_exec(
+        *_args: object, **_kwargs: object
+    ) -> _TimeoutProc:
+        return proc
+
+    monkeypatch.setattr(
+        "lib.nix.commands.base.asyncio.create_subprocess_exec",
+        _create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "lib.nix.commands.base.asyncio.wait_for",
+        _raise_timeout_immediately,
+    )
+
     with pytest.raises(NixCommandError, match="timed out"):
-        asyncio.run(
-            run_nix(
-                [PYTHON, "-c", "import time; time.sleep(2)"],
-                timeout=0.1,
-            )
-        )
+        asyncio.run(run_nix(["nix"], timeout=5.0))
+
+    check(proc.killed)
 
 
 def test_stream_nix_success_and_error_paths() -> None:
@@ -297,20 +370,37 @@ def test_stream_nix_success_and_error_paths() -> None:
         asyncio.run(_collect([PYTHON, "-c", hash_script]))
 
 
-def test_stream_nix_timeout() -> None:
-    """Run this test case."""
+def test_stream_nix_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Timeouts should kill the subprocess and raise ``NixCommandError``."""
+    proc = _TimeoutProc()
+
+    async def _create_stream_process(*_args: object, **_kwargs: object):
+        stream = _NeverEndingStream()
+        return proc, stream, stream
+
+    async def _drain_stderr_stream(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "lib.nix.commands.base._create_stream_process",
+        _create_stream_process,
+    )
+    monkeypatch.setattr(
+        "lib.nix.commands.base._drain_stderr_stream",
+        _drain_stderr_stream,
+    )
+    monkeypatch.setattr(
+        "lib.nix.commands.base._iter_timed_stdout_lines",
+        _timed_out_stdout_lines,
+    )
 
     async def _run() -> list[str]:
-        return [
-            line
-            async for line in stream_nix(
-                [PYTHON, "-c", "import time; time.sleep(2)"],
-                timeout=0.1,
-            )
-        ]
+        return [line async for line in stream_nix(["nix"], timeout=5.0)]
 
     with pytest.raises(NixCommandError, match="timed out"):
         asyncio.run(_run())
+
+    check(proc.killed)
 
 
 def test_stream_nix_zero_timeout_uses_deadline_check() -> None:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -128,40 +126,39 @@ def test_targets_use_dedicated_source_installables() -> None:
     )
 
 
-def test_crate2nix_source_installables_are_exported_via_package_registry() -> None:
-    """Companion crate2nix source entries should be discoverable from packages."""
-    if shutil.which("nix") is None:
-        pytest.skip("nix command not available")
+def test_crate2nix_source_installables_are_wired_through_package_registry() -> None:
+    """Package registry wiring should include crate2nix companion sources."""
+    packages_root = crate2nix.REPO_ROOT / "packages"
+    companion_entries = {
+        f"{path.parent.name}-crate2nix-src"
+        for path in packages_root.glob("*/crate2nix-src.nix")
+    }
 
-    cmd = [
-        "nix",
-        "eval",
-        "--impure",
-        "--json",
-        "--expr",
-        "let registry = import "
-        + str(crate2nix.REPO_ROOT / "packages" / "registry.nix")
-        + " {}; in {"
-        + ' darwin = builtins.attrNames (registry.forSystem "aarch64-darwin");'
-        + ' linux = builtins.attrNames (registry.forSystem "x86_64-linux");'
-        + " }",
-    ]
-    result = subprocess.run(  # noqa: S603
-        cmd,
-        check=True,
-        capture_output=True,
-        text=True,
+    check(
+        {
+            "codex-crate2nix-src",
+            "goose-cli-crate2nix-src",
+            "opencode-desktop-crate2nix-src",
+            "zed-editor-nightly-crate2nix-src",
+        }
+        <= companion_entries
     )
-    exported = json.loads(result.stdout)
 
-    check("codex-crate2nix-src" in exported["darwin"])
-    check("codex-crate2nix-src" in exported["linux"])
-    check("goose-cli-crate2nix-src" in exported["darwin"])
-    check("goose-cli-crate2nix-src" in exported["linux"])
-    check("opencode-desktop-crate2nix-src" in exported["darwin"])
-    check("opencode-desktop-crate2nix-src" not in exported["linux"])
-    check("zed-editor-nightly-crate2nix-src" in exported["darwin"])
-    check("zed-editor-nightly-crate2nix-src" not in exported["linux"])
+    registry = (packages_root / "registry.nix").read_text(encoding="utf-8")
+    check('fileName = "crate2nix-src.nix";' in registry)
+    check("packagePaths = discoveredPackagePaths // companionPackagePaths;" in registry)
+    check(
+        "forSystem = system: builtins.removeAttrs packagePaths (unsupportedForSystem system);"
+        in registry
+    )
+    check(
+        'opencode-desktop-crate2nix-src = system: builtins.match ".*-darwin" system != null;'
+        in registry
+    )
+    check(
+        'zed-editor-nightly-crate2nix-src = system: builtins.match ".*-darwin" system != null;'
+        in registry
+    )
 
 
 def test_run_writes_refreshed_files(monkeypatch, tmp_path: Path) -> None:
@@ -282,20 +279,36 @@ def test_run_helper_and_build_patched_src_error_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Surface subprocess failures and empty nix build output."""
+    seen_env: dict[str, str] = {}
 
     def _success(
-        _args: list[str], *, cwd: Path, text: bool, capture_output: bool, check: bool
+        _args: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str] | None,
+        text: bool,
+        capture_output: bool,
+        check: bool,
     ) -> subprocess.CompletedProcess[str]:
         del cwd, text, capture_output, check
+        if env is not None:
+            seen_env["FLAG"] = env["FLAG"]
         return subprocess.CompletedProcess(["cmd"], 0, stdout="ok\n", stderr="")
 
     monkeypatch.setattr(crate2nix.subprocess, "run", _success)
-    check(crate2nix._run(["cmd"]).stdout == "ok\n")
+    check(crate2nix._run(["cmd"], env={"FLAG": "1"}).stdout == "ok\n")
+    check(seen_env == {"FLAG": "1"})
 
     def _failure(
-        _args: list[str], *, cwd: Path, text: bool, capture_output: bool, check: bool
+        _args: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str] | None,
+        text: bool,
+        capture_output: bool,
+        check: bool,
     ) -> subprocess.CompletedProcess[str]:
-        del cwd, text, capture_output, check
+        del cwd, env, text, capture_output, check
         return subprocess.CompletedProcess(["cmd"], 1, stdout="", stderr="boom")
 
     monkeypatch.setattr(crate2nix.subprocess, "run", _failure)
@@ -368,8 +381,15 @@ def test_refresh_target_materializes_normalized_outputs(
         lambda _path: lambda text: (text.replace("raw", "normalized") + "\n", 2, True),
     )
 
-    def _run(args: list[str], *, cwd: Path = crate2nix.REPO_ROOT):
+    def _run(
+        args: list[str],
+        *,
+        cwd: Path = crate2nix.REPO_ROOT,
+        env: dict[str, str] | None = None,
+    ):
+        del cwd
         check(args[args.index("-f") + 1] == str(patched_src / "nested/Cargo.toml"))
+        check(env == {"CARGO_NET_GIT_FETCH_WITH_CLI": "true"})
         generated_cargo = Path(args[args.index("-o") + 1])
         generated_hashes = Path(args[args.index("-h") + 1])
         generated_cargo.write_text(

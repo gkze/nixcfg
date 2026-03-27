@@ -724,12 +724,13 @@ def test_fetch_github_api_no_params_and_paginated_limits(
         return [{"x": 1}]
 
     monkeypatch.setattr(net, "fetch_github_api", _fetch_full_pages)
-    full = _run_with_session(
-        lambda session: net.fetch_github_api_paginated(
-            session,
-            "repos/a/b/tags",
-            per_page=1,
-            max_pages=2,
+    with pytest.warns(UserWarning, match=r"may be truncated after 2 page\(s\)"):
+        full = _run_with_session(
+            lambda session: net.fetch_github_api_paginated(
+                session,
+                "repos/a/b/tags",
+                per_page=1,
+                max_pages=2,
+            )
         )
-    )
     check(full == [{"x": 1}, {"x": 1}])

@@ -3,12 +3,24 @@
 from __future__ import annotations
 
 import pytest
-from nix_manipulator import parse
+from nix_manipulator.expressions.binary import BinaryExpression
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.operator import Operator
+from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.primitive import StringPrimitive
+from nix_manipulator.expressions.select import Select
+from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.flake_lock import FlakeLockNode, LockedRef
 from lib.tests._assertions import check
-from lib.update.flake import flake_fetch_expr
+from lib.tests._nix_ast import assert_nix_ast_equal
+from lib.update.flake import (
+    flake_fetch_expr,
+    flake_fetch_expression,
+    nixpkgs_expression,
+)
 from lib.update.nix import (
     _build_fetch_from_github_call,
     _build_fetch_from_github_expr,
@@ -17,7 +29,10 @@ from lib.update.nix import (
     _build_nix_expr,
     _build_overlay_attr_expr,
     _build_overlay_expr,
+    _build_overlay_expression,
 )
+from lib.update.nix_expr import identifier_attr_path
+from lib.update.paths import REPO_ROOT
 from lib.update.sources import nix_source_names
 
 
@@ -35,28 +50,29 @@ def test_flake_fetch_expr_builds_parseable_fetch_tree() -> None:
 
     expr = flake_fetch_expr(node)
 
-    parse(expr)
-    check("builtins.fetchTree" in expr)
-    check('owner = "NixOS";' in expr)
-    check('repo = "nixpkgs";' in expr)
+    assert_nix_ast_equal(expr, flake_fetch_expression(node))
 
 
 def test_build_nix_expr_wraps_body_with_pkgs_binding() -> None:
     """_build_nix_expr should construct a parseable let-expression."""
     expr = _build_nix_expr("pkgs.hello")
 
-    parse(expr)
-    check(expr.startswith("let pkgs = "))
-    check(expr.endswith("in pkgs.hello"))
+    assert_nix_ast_equal(
+        expr,
+        LetExpression(
+            local_variables=[Binding(name="pkgs", value=nixpkgs_expression())],
+            value=identifier_attr_path("pkgs", "hello"),
+        ),
+    )
 
 
 def test_build_overlay_expr_supports_explicit_system() -> None:
     """_build_overlay_expr should produce parseable Nix for explicit systems."""
     expr = _build_overlay_expr("chatgpt", system="x86_64-linux")
 
-    parse(expr)
-    check('system = "x86_64-linux";' in expr)
-    check('in applied."chatgpt"' in expr)
+    assert_nix_ast_equal(
+        expr, _build_overlay_expression("chatgpt", system="x86_64-linux")
+    )
 
 
 def test_build_fetch_from_github_expr_is_parseable() -> None:
@@ -67,10 +83,14 @@ def test_build_fetch_from_github_expr_is_parseable() -> None:
         rev="v1.11.0",
     )
 
-    parse(expr)
-    check("pkgs.fetchFromGitHub" in expr)
-    check('repo = "element-desktop";' in expr)
-    check('rev = "v1.11.0";' in expr)
+    assert_nix_ast_equal(
+        expr,
+        _build_fetch_from_github_call(
+            "element-hq",
+            "element-desktop",
+            rev="v1.11.0",
+        ),
+    )
 
 
 def test_build_fetch_from_github_expr_supports_tag_post_fetch_and_expr_hash() -> None:
@@ -85,10 +105,18 @@ def test_build_fetch_from_github_expr_supports_tag_post_fetch_and_expr_hash() ->
         post_fetch="rm -rf $out/*.xcarchive",
     )
 
-    parse(expr)
-    check('tag = "v2.0.0";' in expr)
-    check('hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";' in expr)
-    check('postFetch = "rm -rf $out/*.xcarchive";' in expr)
+    assert_nix_ast_equal(
+        expr,
+        _build_fetch_from_github_call(
+            "getsentry",
+            "sentry-cli",
+            tag="v2.0.0",
+            hash_value=StringPrimitive(
+                value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            ),
+            post_fetch="rm -rf $out/*.xcarchive",
+        ),
+    )
 
 
 def test_build_fetch_from_github_call_requires_exactly_one_selector() -> None:
@@ -116,8 +144,27 @@ def test_build_flake_attr_expr_quotes_dynamic_segments() -> None:
         quoted_indices=(1,),
     )
 
-    parse(expr)
-    check('flake.pkgs."x86_64-linux".deno.version' in expr)
+    assert_nix_ast_equal(
+        expr,
+        LetExpression(
+            local_variables=[
+                Binding(
+                    name="flake",
+                    value=FunctionCall(
+                        name=identifier_attr_path("builtins", "getFlake"),
+                        argument=StringPrimitive(value="path:/tmp/repo"),
+                    ),
+                ),
+            ],
+            value=identifier_attr_path(
+                "flake",
+                "pkgs",
+                '"x86_64-linux"',
+                "deno",
+                "version",
+            ),
+        ),
+    )
 
 
 def test_build_fetch_yarn_deps_expr_is_parseable() -> None:
@@ -131,9 +178,41 @@ def test_build_fetch_yarn_deps_expr_is_parseable() -> None:
         )
     )
 
-    parse(expr)
-    check("pkgs.fetchYarnDeps" in expr)
-    check('yarnLock = src + "/yarn.lock";' in expr)
+    assert_nix_ast_equal(
+        expr,
+        LetExpression(
+            local_variables=[
+                Binding(
+                    name="src",
+                    value=_build_fetch_from_github_call(
+                        "element-hq",
+                        "element-desktop",
+                        rev="v1.11.0",
+                        hash_value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    ),
+                ),
+            ],
+            value=FunctionCall(
+                name=identifier_attr_path("pkgs", "fetchYarnDeps"),
+                argument=AttributeSet(
+                    values=[
+                        Binding(
+                            name="yarnLock",
+                            value=BinaryExpression(
+                                left=identifier_attr_path("src"),
+                                operator=Operator(name="+"),
+                                right=StringPrimitive(value="/yarn.lock"),
+                            ),
+                        ),
+                        Binding(
+                            name="hash",
+                            value=identifier_attr_path("pkgs", "lib", "fakeHash"),
+                        ),
+                    ],
+                ),
+            ),
+        ),
+    )
 
 
 def test_build_overlay_attr_expr_wraps_selection_target() -> None:
@@ -144,9 +223,15 @@ def test_build_overlay_attr_expr_wraps_selection_target() -> None:
         system="x86_64-linux",
     )
 
-    parse(expr)
-    check('system = "x86_64-linux";' in expr)
-    check('in applied."gemini-cli").node_modules' in expr)
+    assert_nix_ast_equal(
+        expr,
+        Select(
+            expression=Parenthesis(
+                value=_build_overlay_expression("gemini-cli", system="x86_64-linux"),
+            ),
+            attribute="node_modules",
+        ),
+    )
 
 
 def test_build_overlay_attr_expr_skips_empty_attr_segments() -> None:
@@ -157,8 +242,21 @@ def test_build_overlay_attr_expr_skips_empty_attr_segments() -> None:
         system="x86_64-linux",
     )
 
-    parse(expr)
-    check(".passthru.denoDeps" in expr)
+    assert_nix_ast_equal(
+        expr,
+        Select(
+            expression=Select(
+                expression=Parenthesis(
+                    value=_build_overlay_expression(
+                        "gemini-cli",
+                        system="x86_64-linux",
+                    ),
+                ),
+                attribute="passthru",
+            ),
+            attribute="denoDeps",
+        ),
+    )
 
 
 def test_nix_source_names_uses_parseable_ast_expression(
@@ -183,5 +281,23 @@ def test_nix_source_names_uses_parseable_ast_expression(
     names = nix_source_names()
 
     check(names == {"foo", "bar"})
-    parse(captured["expr"])
-    check("builtins.getFlake" in captured["expr"])
+    assert_nix_ast_equal(
+        captured["expr"],
+        LetExpression(
+            local_variables=[
+                Binding(
+                    name="flake",
+                    value=FunctionCall(
+                        name=identifier_attr_path("builtins", "getFlake"),
+                        argument=StringPrimitive(
+                            value=f"git+file://{REPO_ROOT}?dirty=1"
+                        ),
+                    ),
+                ),
+            ],
+            value=FunctionCall(
+                name=identifier_attr_path("builtins", "attrNames"),
+                argument=identifier_attr_path("flake", "outputs", "lib", "sources"),
+            ),
+        ),
+    )

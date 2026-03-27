@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import re
 
-from nix_manipulator import parse
-
 from lib.cargo_nix_normalizer import _normalize_with_fallback, normalize
 from lib.tests._assertions import check
+from lib.tests._nix_ast import assert_nix_ast_equal
 
 
 def test_normalize_rewrites_local_workspace_paths() -> None:
@@ -30,11 +29,24 @@ rec {
         local_path_prefixes=("crates", "vendor"),
     )
 
-    parse(normalized)
     check(added_root_src is True)
     check(rewrites == 2)
-    check('src = "${rootSrc}/crates/foo";' in normalized)
-    check('src = "${rootSrc}/vendor/v8";' in normalized)
+    assert_nix_ast_equal(
+        normalized,
+        """{ nixpkgs ? <nixpkgs>
+, pkgs ? import nixpkgs { config = {}; }
+, crateConfig
+  ? if builtins.pathExists ./crate-config.nix
+    then pkgs.callPackage ./crate-config.nix {}
+    else {}
+, rootSrc ? ./.
+}:
+rec {
+  foo = { src = "${rootSrc}/crates/foo"; };
+  bar = { src = "${rootSrc}/vendor/v8"; };
+}
+""",
+    )
 
 
 def test_normalize_rewrites_exact_local_workspace_roots() -> None:
@@ -56,10 +68,23 @@ rec {
         local_path_prefixes=("cli",),
     )
 
-    parse(normalized)
     check(added_root_src is True)
     check(rewrites == 1)
-    check('src = "${rootSrc}/cli";' in normalized)
+    assert_nix_ast_equal(
+        normalized,
+        """{ nixpkgs ? <nixpkgs>
+, pkgs ? import nixpkgs { config = {}; }
+, crateConfig
+  ? if builtins.pathExists ./crate-config.nix
+    then pkgs.callPackage ./crate-config.nix {}
+    else {}
+, rootSrc ? ./.
+}:
+rec {
+  foo = { src = "${rootSrc}/cli"; };
+}
+""",
+    )
 
 
 def test_normalize_fallback_rewrites_store_paths() -> None:
@@ -94,7 +119,23 @@ rec {
 
     check(added_root_src is True)
     check(rewrites == 1)
-    check("import nixpkgs { }" in normalized)
-    check("src = lib.cleanSourceWith {" in normalized)
-    check("filter = sourceFilter;" in normalized)
-    check('src = "${rootSrc}/crates/foo";' in normalized)
+    assert_nix_ast_equal(
+        normalized,
+        """{ nixpkgs ? <nixpkgs>
+, pkgs ? import nixpkgs { }
+, crateConfig
+  ? if builtins.pathExists ./crate-config.nix
+    then pkgs.callPackage ./crate-config.nix {}
+    else {}
+, rootSrc ? ./.
+}:
+rec {
+  foo = {
+    src = lib.cleanSourceWith {
+      filter = sourceFilter;
+      src = "${rootSrc}/crates/foo";
+    };
+  };
+}
+""",
+    )

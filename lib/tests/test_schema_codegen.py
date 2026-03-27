@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
+import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,6 +12,8 @@ import pytest
 from lib.schema_codegen.config import DirectorySource
 from lib.schema_codegen.runner import (
     DEFAULT_CONFIG_PATH,
+    _entrypoint_class_suffix,
+    _resolve_body_class_conflicts,
     generate_schema_codegen_target,
     list_schema_codegen_targets,
     load_schema_codegen_config,
@@ -63,9 +68,13 @@ def test_list_schema_codegen_targets_reads_repo_config() -> None:
     """Load the checked-in config and expose the initial targets."""
     summaries = list_schema_codegen_targets(config_path=DEFAULT_CONFIG_PATH)
 
-    check([summary.name for summary in summaries] == ["github-actions", "nix-models"])
-    check(str(summaries[0].output).endswith("lib/github_actions/models/_generated.py"))
-    check(str(summaries[1].output).endswith("lib/nix/models/_generated.py"))
+    check(
+        [summary.name for summary in summaries]
+        == ["codegen-manifest-models", "github-actions", "nix-models"]
+    )
+    check(str(summaries[0].output).endswith("lib/schema_codegen/models/_generated.py"))
+    check(str(summaries[1].output).endswith("lib/github_actions/models/_generated.py"))
+    check(str(summaries[2].output).endswith("lib/nix/models/_generated.py"))
 
 
 def test_load_schema_codegen_config_resolves_explicit_paths_from_cwd(
@@ -111,9 +120,6 @@ targets:
 
 def test_generate_schema_codegen_target_from_directory_source(tmp_path: Path) -> None:
     """Generate models from a local directory source with inlined refs."""
-    pytest.importorskip("datamodel_code_generator")
-    pytest.importorskip("referencing")
-
     schemas_dir = tmp_path / "schemas"
     schemas_dir.mkdir()
     (schemas_dir / "defs.json").write_text(
@@ -160,6 +166,9 @@ defaults:
     target_python_version: "3.14"
     use_annotated: true
     field_constraints: true
+    formatters:
+      - ruff-format
+      - ruff-check
 sources:
   local:
     kind: directory
@@ -204,9 +213,6 @@ def test_generate_schema_codegen_target_from_url_source(
     tmp_path: Path,
 ) -> None:
     """Generate models from a URL-backed source using the source URI alias."""
-    pytest.importorskip("datamodel_code_generator")
-    pytest.importorskip("referencing")
-
     config_path = tmp_path / "schema_codegen.yaml"
     config_path.write_text(
         """
@@ -215,6 +221,9 @@ defaults:
     input_file_type: jsonschema
     output_model_type: pydantic_v2.BaseModel
     target_python_version: "3.14"
+    formatters:
+      - ruff-format
+      - ruff-check
 sources:
   remote:
     kind: url
@@ -258,13 +267,167 @@ targets:
     check("name:" in rendered)
 
 
+def test_generate_schema_codegen_target_from_multiple_entrypoints_yields_valid_python(
+    tmp_path: Path,
+) -> None:
+    """Compose multi-entrypoint outputs into syntactically valid Python."""
+    repo_root = DEFAULT_CONFIG_PATH.parent
+    config_path = tmp_path / "schema_codegen.yaml"
+    config_path.write_text(
+        f"""
+defaults:
+  generator:
+    input_file_type: jsonschema
+    output_model_type: pydantic_v2.BaseModel
+    target_python_version: "3.14"
+    use_annotated: true
+    field_constraints: true
+    formatters:
+      - ruff-format
+      - ruff-check
+sources:
+  local:
+    kind: directory
+    path: {repo_root / "schemas/codegen"}
+    include:
+      - "*.json"
+    format: json
+registry_profiles:
+  local:
+    aliases:
+      - relative-path
+      - basename
+    resource:
+      mode: from-contents
+targets:
+  demo:
+    sources:
+      - local
+    registry_profile: local
+    entrypoints:
+      - ./codegen.schema.json
+      - ./codegen-lock.schema.json
+    prepare:
+      dereference: inline-refs
+      merge_ref_siblings: false
+    generator:
+      output: generated.py
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    output_path = generate_schema_codegen_target(
+        config_path=config_path,
+        target_name="demo",
+    )
+    rendered = output_path.read_text(encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("_generated_demo", output_path)
+    check(spec is not None)
+    check(spec.loader is not None)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module.__name__] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(module.__name__, None)
+    manifest_model = module.CodegenManifest
+    lockfile_model = module.CodegenLockfile
+
+    check("class CodegenManifest" in rendered)
+    check("class CodegenLockfile" in rendered)
+    check("SourcesCodegenLockSchema" in rendered)
+    check(
+        lockfile_model.model_validate({
+            "version": 1,
+            "sources": {
+                "local": {
+                    "kind": "directory",
+                    "path": "schemas",
+                    "content_sha256": "a" * 64,
+                }
+            },
+        })
+    )
+    check(
+        manifest_model.model_validate({
+            "version": 1,
+            "sources": {
+                "local": {
+                    "kind": "directory",
+                    "path": "schemas",
+                    "format": "json",
+                }
+            },
+            "inputs": {
+                "primary": {
+                    "kind": "jsonschema",
+                    "sources": ["local"],
+                    "entrypoints": ["./codegen.schema.json"],
+                }
+            },
+            "generators": {
+                "python": {
+                    "language": "python",
+                    "tool": "datamodel-code-generator",
+                }
+            },
+            "products": {
+                "models": {
+                    "inputs": ["primary"],
+                    "generators": ["python"],
+                    "output_template": "generated.py",
+                }
+            },
+        })
+    )
+
+
+def test_resolve_body_class_conflicts_renames_mismatched_duplicates() -> None:
+    """Rename conflicting helper classes while dropping byte-identical duplicates."""
+    manifest_body = """
+class Shared(BaseModel):
+    value: int
+
+class Different(BaseModel):
+    value: int
+"""
+    lock_body = """
+class Shared(BaseModel):
+    value: int
+
+class Different(BaseModel):
+    value: str
+
+class UsesDifferent(BaseModel):
+    item: Different
+"""
+    seen_signatures: dict[str, str] = {}
+    used_names: set[str] = set()
+
+    first = _resolve_body_class_conflicts(
+        manifest_body,
+        entrypoint="./codegen.schema.json",
+        seen_signatures=seen_signatures,
+        used_names=used_names,
+    )
+    second = _resolve_body_class_conflicts(
+        lock_body,
+        entrypoint="./codegen-lock.schema.json",
+        seen_signatures=seen_signatures,
+        used_names=used_names,
+    )
+
+    check(_entrypoint_class_suffix("./codegen-lock.schema.json") == "CodegenLockSchema")
+    check("class Shared(BaseModel):" in first)
+    check("class Shared(BaseModel):" not in second)
+    check("class DifferentCodegenLockSchema(BaseModel):" in second)
+    check("item: DifferentCodegenLockSchema" in second)
+
+
 def test_generate_schema_codegen_target_rejects_recursive_refs(
     tmp_path: Path,
 ) -> None:
     """Fail fast when inline dereference encounters a recursive schema."""
-    pytest.importorskip("datamodel_code_generator")
-    pytest.importorskip("referencing")
-
     schemas_dir = tmp_path / "schemas"
     schemas_dir.mkdir()
     (schemas_dir / "root.json").write_text(
@@ -293,6 +456,9 @@ defaults:
     output_model_type: pydantic_v2.BaseModel
     target_python_version: "3.14"
     field_constraints: true
+    formatters:
+      - ruff-format
+      - ruff-check
 sources:
   local:
     kind: directory
@@ -326,3 +492,27 @@ targets:
             config_path=config_path,
             target_name="demo",
         )
+
+
+def test_codegen_manifest_schemas_use_stable_urn_ids_and_optional_metadata() -> None:
+    """Keep unpublished schema IDs non-hosted and metadata fields optional."""
+    repo_root = DEFAULT_CONFIG_PATH.parent
+    manifest_schema = json.loads(
+        (repo_root / "schemas/codegen/codegen.schema.json").read_text(encoding="utf-8")
+    )
+    lock_schema = json.loads(
+        (repo_root / "schemas/codegen/codegen-lock.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    check(str(manifest_schema["$id"]).startswith("urn:uuid:"))
+    check(str(lock_schema["$id"]).startswith("urn:uuid:"))
+    check("generated_at" not in lock_schema["required"])
+    check(
+        "fetched_at" not in lock_schema["$defs"]["LockedUrlSource"].get("required", [])
+    )
+    check(
+        "fetched_at"
+        not in lock_schema["$defs"]["LockedGitHubRawSource"].get("required", [])
+    )

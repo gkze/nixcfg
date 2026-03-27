@@ -215,8 +215,10 @@ do_not_mutate = ["lib/nix/models/_generated.py"]
 dev = [
   "cosmic-ray>=8.3.18",
   "coverage>=7.13.4",
+  "datamodel-code-generator[http]>=0.54.0",
   "mutmut>=3.5.0",
   "pytest>=9.0.2",
+  "referencing>=0.37.0",
   "ruff>=0.15.2",
   "ty>=0.0.18",
 ]

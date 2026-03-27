@@ -8,6 +8,7 @@ import sys
 from typing import Annotated
 
 import click
+import httpx
 import typer
 from rich.console import Console
 from rich.tree import Tree
@@ -22,6 +23,7 @@ from lib.schema_codegen import (
     DEFAULT_CONFIG_PATH,
     generate_schema_codegen_target,
     list_schema_codegen_targets,
+    write_codegen_lockfile,
 )
 from lib.update.ci import app as update_ci_app
 from lib.update.cli import app as update_app
@@ -166,6 +168,53 @@ def schema_generate(
         )
     except (FileNotFoundError, RuntimeError, TypeError, ValueError) as exc:
         typer.echo(f"Schema generation failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"Generated {_display_schema_path(output_path)}")
+
+
+@schema_app.command(
+    name="lock",
+    help="Materialize a canonical codegen lockfile from a v1 manifest.",
+)
+def schema_lock(
+    manifest: Annotated[
+        pathlib.Path,
+        typer.Argument(help="Path to the canonical codegen manifest (YAML or JSON)."),
+    ],
+    *,
+    output: Annotated[
+        pathlib.Path | None,
+        typer.Option(
+            "-o",
+            "--output",
+            help="Path to write the lockfile. Defaults to codegen.lock.json next to the manifest.",
+        ),
+    ] = None,
+    include_metadata: Annotated[
+        bool,
+        typer.Option(
+            "-m",
+            "--include-metadata",
+            help="Include non-semantic timestamps and provenance metadata.",
+        ),
+    ] = False,
+) -> None:
+    """Write a deterministic lockfile for the canonical codegen manifest schema."""
+    try:
+        output_path = write_codegen_lockfile(
+            manifest_path=manifest,
+            lockfile_path=output,
+            include_metadata=include_metadata,
+            progress=_schema_progress,
+        )
+    except (
+        FileNotFoundError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        httpx.HTTPError,
+    ) as exc:
+        typer.echo(f"Schema lockfile generation failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(f"Generated {_display_schema_path(output_path)}")
 

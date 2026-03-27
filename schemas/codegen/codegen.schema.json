@@ -1,0 +1,540 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:uuid:91ecce5b-1b16-5b54-a5b3-a3b9556351aa",
+  "title": "CodegenManifest",
+  "description": "Language-agnostic manifest for pinned sources, prepared inputs, and generator products.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "sources",
+    "inputs",
+    "generators",
+    "products"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Manifest format version."
+    },
+    "defaults": {
+      "$ref": "#/$defs/Defaults"
+    },
+    "sources": {
+      "title": "SourceMap",
+      "description": "Named source definitions materialized locally before generators run.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/Source"
+      },
+      "minProperties": 1
+    },
+    "registry_profiles": {
+      "title": "RegistryProfileMap",
+      "description": "Reusable schema registry profiles for JSON Schema-oriented inputs.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/RegistryProfile"
+      }
+    },
+    "inputs": {
+      "title": "InputMap",
+      "description": "Prepared logical inputs derived from one or more sources.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/Input"
+      },
+      "minProperties": 1
+    },
+    "generators": {
+      "title": "GeneratorMap",
+      "description": "Named generator profiles. Generators are tool-specific but source-agnostic.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/Generator"
+      },
+      "minProperties": 1
+    },
+    "products": {
+      "title": "ProductMap",
+      "description": "Named products generated from configured inputs and generators.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/Product"
+      },
+      "minProperties": 1
+    }
+  },
+  "$defs": {
+    "Identifier": {
+      "title": "Identifier",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+      "description": "Stable manifest identifier used as a map key."
+    },
+    "NonEmptyString": {
+      "title": "NonEmptyString",
+      "type": "string",
+      "minLength": 1
+    },
+    "PathString": {
+      "title": "PathString",
+      "type": "string",
+      "minLength": 1,
+      "description": "Filesystem path expressed with POSIX separators."
+    },
+    "HttpsUrl": {
+      "title": "HttpsUrl",
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://",
+      "description": "Absolute HTTPS URL."
+    },
+    "SchemaFormat": {
+      "title": "SchemaFormat",
+      "type": "string",
+      "enum": [
+        "json",
+        "yaml"
+      ]
+    },
+    "LanguageName": {
+      "title": "LanguageName",
+      "type": "string",
+      "minLength": 1,
+      "description": "Target language identifier such as python or go."
+    },
+    "Defaults": {
+      "title": "Defaults",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fetch": {
+          "$ref": "#/$defs/FetchDefaults"
+        },
+        "generator": {
+          "$ref": "#/$defs/GeneratorDefaults"
+        }
+      }
+    },
+    "FetchDefaults": {
+      "title": "FetchDefaults",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cache_dir": {
+          "$ref": "#/$defs/PathString"
+        }
+      }
+    },
+    "GeneratorDefaults": {
+      "title": "GeneratorDefaults",
+      "type": "object",
+      "description": "Tool-specific default generator options merged into individual generator profiles.",
+      "additionalProperties": true
+    },
+    "Source": {
+      "title": "Source",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/DirectorySource"
+        },
+        {
+          "$ref": "#/$defs/UrlSource"
+        },
+        {
+          "$ref": "#/$defs/GitHubRawSource"
+        }
+      ]
+    },
+    "DirectorySource": {
+      "title": "DirectorySource",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "path",
+        "format"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "directory"
+        },
+        "path": {
+          "$ref": "#/$defs/PathString"
+        },
+        "include": {
+          "title": "IncludePatterns",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonEmptyString"
+          },
+          "minItems": 1
+        },
+        "format": {
+          "$ref": "#/$defs/SchemaFormat"
+        },
+        "description": {
+          "$ref": "#/$defs/NonEmptyString"
+        }
+      }
+    },
+    "UrlSource": {
+      "title": "UrlSource",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "uri",
+        "format"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "url"
+        },
+        "uri": {
+          "$ref": "#/$defs/HttpsUrl"
+        },
+        "format": {
+          "$ref": "#/$defs/SchemaFormat"
+        },
+        "description": {
+          "$ref": "#/$defs/NonEmptyString"
+        }
+      }
+    },
+    "GitHubRawSource": {
+      "title": "GitHubRawSource",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "owner",
+        "repo",
+        "ref",
+        "path",
+        "format"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "github-raw"
+        },
+        "owner": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "repo": {
+          "$ref": "#/$defs/NonEmptyString"
+        },
+        "ref": {
+          "$ref": "#/$defs/NonEmptyString",
+          "description": "Pinned commit SHA, tag, or branch reference to fetch."
+        },
+        "path": {
+          "$ref": "#/$defs/PathString"
+        },
+        "format": {
+          "$ref": "#/$defs/SchemaFormat"
+        },
+        "description": {
+          "$ref": "#/$defs/NonEmptyString"
+        },
+        "metadata": {
+          "$ref": "#/$defs/GitHubRawSourceMetadata"
+        }
+      }
+    },
+    "GitHubRawSourceMetadata": {
+      "title": "GitHubRawSourceMetadata",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tag": {
+          "$ref": "#/$defs/NonEmptyString"
+        },
+        "package": {
+          "$ref": "#/$defs/NonEmptyString"
+        },
+        "package_version": {
+          "$ref": "#/$defs/NonEmptyString"
+        }
+      }
+    },
+    "RegistryProfile": {
+      "title": "RegistryProfile",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource"
+      ],
+      "properties": {
+        "aliases": {
+          "title": "AliasStrategies",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AliasStrategy"
+          },
+          "uniqueItems": true
+        },
+        "resource": {
+          "$ref": "#/$defs/ResourceConfig"
+        },
+        "registry": {
+          "$ref": "#/$defs/RegistryConfig"
+        }
+      }
+    },
+    "AliasStrategy": {
+      "title": "AliasStrategy",
+      "type": "string",
+      "enum": [
+        "basename",
+        "internal-id",
+        "relative-path",
+        "source-uri"
+      ]
+    },
+    "ResourceConfig": {
+      "title": "ResourceConfig",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "from-contents"
+          ]
+        },
+        "default_specification": {
+          "$ref": "#/$defs/NonEmptyString"
+        }
+      }
+    },
+    "RegistryConfig": {
+      "title": "RegistryConfig",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "crawl": {
+          "type": "boolean"
+        },
+        "retrieve": {
+          "$ref": "#/$defs/RetrieveConfig"
+        }
+      }
+    },
+    "RetrieveConfig": {
+      "title": "RetrieveConfig",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "none"
+          ]
+        }
+      }
+    },
+    "Input": {
+      "title": "Input",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/JsonSchemaInput"
+        },
+        {
+          "$ref": "#/$defs/WorkflowTemplateSchemaInput"
+        }
+      ]
+    },
+    "JsonSchemaInput": {
+      "title": "JsonSchemaInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "sources",
+        "entrypoints"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "jsonschema"
+        },
+        "sources": {
+          "$ref": "#/$defs/SourceRefList"
+        },
+        "registry_profile": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "entrypoints": {
+          "title": "EntrypointList",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonEmptyString"
+          },
+          "minItems": 1
+        },
+        "prepare": {
+          "$ref": "#/$defs/PrepareConfig"
+        },
+        "description": {
+          "$ref": "#/$defs/NonEmptyString"
+        }
+      }
+    },
+    "WorkflowTemplateSchemaInput": {
+      "title": "WorkflowTemplateSchemaInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "sources"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "workflow-template-schema"
+        },
+        "sources": {
+          "$ref": "#/$defs/SourceRefList"
+        },
+        "root": {
+          "$ref": "#/$defs/NonEmptyString",
+          "description": "Optional top-level definition name to treat as the logical entrypoint."
+        },
+        "prepare": {
+          "$ref": "#/$defs/PrepareConfig"
+        },
+        "description": {
+          "$ref": "#/$defs/NonEmptyString"
+        }
+      }
+    },
+    "SourceRefList": {
+      "title": "SourceRefList",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "PrepareConfig": {
+      "title": "PrepareConfig",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dereference": {
+          "type": "string",
+          "enum": [
+            "inline-refs",
+            "none"
+          ]
+        },
+        "merge_ref_siblings": {
+          "type": "boolean"
+        },
+        "schema_transforms": {
+          "title": "SchemaTransforms",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonEmptyString"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "Generator": {
+      "title": "Generator",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "language",
+        "tool"
+      ],
+      "properties": {
+        "language": {
+          "$ref": "#/$defs/LanguageName"
+        },
+        "tool": {
+          "$ref": "#/$defs/NonEmptyString"
+        },
+        "options": {
+          "title": "GeneratorOptions",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "description": {
+          "$ref": "#/$defs/NonEmptyString"
+        }
+      }
+    },
+    "Product": {
+      "title": "Product",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputs",
+        "generators",
+        "output_template"
+      ],
+      "properties": {
+        "inputs": {
+          "$ref": "#/$defs/InputRefList"
+        },
+        "generators": {
+          "$ref": "#/$defs/GeneratorRefList"
+        },
+        "output_template": {
+          "$ref": "#/$defs/NonEmptyString"
+        },
+        "description": {
+          "$ref": "#/$defs/NonEmptyString"
+        }
+      }
+    },
+    "InputRefList": {
+      "title": "InputRefList",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "GeneratorRefList": {
+      "title": "GeneratorRefList",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  }
+}

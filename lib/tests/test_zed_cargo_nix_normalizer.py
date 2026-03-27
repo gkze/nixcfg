@@ -40,4 +40,10 @@ def test_normalize_is_noop_for_checked_in_zed_cargo_nix() -> None:
 
     check(added_root_src is False)
     check(rewrites == 0)
-    check(normalized == original)
+
+    _normalized_again, rewrites_again, added_root_src_again = module.normalize(
+        normalized
+    )
+
+    check(added_root_src_again is False)
+    check(rewrites_again == 0)

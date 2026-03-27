@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import importlib
+import io
 import json
 import re
+import tokenize
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -665,40 +668,56 @@ def _strip_generated_headers(code: str) -> str:
 
 
 def _collect_imports(code: str) -> tuple[set[str], str]:
-    """Extract import lines and return them separately from the remaining body."""
+    """Extract import statements and return them separately from the body."""
+    tree = ast.parse(code)
+    lines = code.splitlines()
     imports: set[str] = set()
-    body: list[str] = []
-    for line in code.splitlines():
-        if line.startswith(("from ", "import ")):
-            imports.add(line)
-        else:
-            body.append(line)
+    import_line_numbers: set[int] = set()
+
+    for node in tree.body:
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        start = node.lineno - 1
+        end = node.end_lineno if node.end_lineno is not None else node.lineno
+        imports.add("\n".join(lines[start:end]))
+        import_line_numbers.update(range(start, end))
+
+    body = [
+        line for index, line in enumerate(lines) if index not in import_line_numbers
+    ]
     return imports, "\n".join(body)
+
+
+def _format_import_alias(alias: ast.alias) -> str:
+    """Render one import alias back to source form."""
+    return alias.name if alias.asname is None else f"{alias.name} as {alias.asname}"
 
 
 def _import_module_sort_key(module: str) -> tuple[int, str]:
     """Sort stdlib imports ahead of third-party imports."""
-    module_name = module.removeprefix("from ").split(" import", maxsplit=1)[0]
-    return (1 if module_name.startswith("pydantic") else 0, module_name)
+    return (1 if module.startswith("pydantic") else 0, module)
 
 
 def _compose_imports_block(all_imports: set[str]) -> str:
     """Compose one deduplicated import block."""
     from_imports: dict[str, set[str]] = {}
     bare_imports: set[str] = set()
-    for import_line in all_imports - {"from __future__ import annotations"}:
-        if import_line.startswith("from "):
-            module, names = import_line.split(" import ", maxsplit=1)
-            from_imports.setdefault(module, set()).update(
-                name.strip() for name in names.split(",")
+    for import_stmt in all_imports:
+        node = ast.parse(import_stmt).body[0]
+        if isinstance(node, ast.ImportFrom):
+            module_name = node.module or ""
+            if module_name == "__future__":
+                continue
+            from_imports.setdefault(module_name, set()).update(
+                _format_import_alias(alias) for alias in node.names
             )
-        else:
-            bare_imports.add(import_line)
+        elif isinstance(node, ast.Import):
+            bare_imports.update(_format_import_alias(alias) for alias in node.names)
 
-    lines: list[str] = sorted(bare_imports)
+    lines: list[str] = [f"import {name}" for name in sorted(bare_imports)]
     previous_group: int | None = None
-    for module in sorted(from_imports, key=_import_module_sort_key):
-        group, _module_name = _import_module_sort_key(module)
+    for module_name in sorted(from_imports, key=_import_module_sort_key):
+        group, _ = _import_module_sort_key(module_name)
         if (
             previous_group is not None
             and group != previous_group
@@ -706,9 +725,87 @@ def _compose_imports_block(all_imports: set[str]) -> str:
             and lines[-1] != ""
         ):
             lines.append("")
-        lines.append(f"{module} import {', '.join(sorted(from_imports[module]))}")
+        lines.append(
+            f"from {module_name} import {', '.join(sorted(from_imports[module_name]))}"
+        )
         previous_group = group
     return "\n".join(lines)
+
+
+def _entrypoint_class_suffix(entrypoint: str) -> str:
+    """Return a stable CamelCase suffix derived from one entrypoint label."""
+    parts = re.findall(r"[A-Za-z0-9]+", _normalize_entrypoint_name(entrypoint))
+    return "".join(part.capitalize() for part in parts) or "Schema"
+
+
+def _class_signature(node: ast.ClassDef) -> str:
+    """Return one class definition's semantic signature for dedupe checks."""
+    return ast.dump(node, annotate_fields=True, include_attributes=False)
+
+
+def _rename_name_tokens(code: str, *, rename_map: dict[str, str]) -> str:
+    """Rename Python identifiers without touching strings or comments."""
+    if not rename_map:
+        return code
+    tokens: list[tokenize.TokenInfo] = []
+    for token_info in tokenize.generate_tokens(io.StringIO(code).readline):
+        replacement = token_info
+        if token_info.type == tokenize.NAME and token_info.string in rename_map:
+            replacement = tokenize.TokenInfo(
+                type=token_info.type,
+                string=rename_map[token_info.string],
+                start=token_info.start,
+                end=token_info.end,
+                line=token_info.line,
+            )
+        tokens.append(replacement)
+    return tokenize.untokenize(tokens)
+
+
+def _resolve_body_class_conflicts(
+    body: str,
+    *,
+    entrypoint: str,
+    seen_signatures: dict[str, str],
+    used_names: set[str],
+) -> str:
+    """Rename conflicting helper classes and drop byte-identical duplicates."""
+    tree = ast.parse(body)
+    drop_lines: set[int] = set()
+    rename_map: dict[str, str] = {}
+    suffix = _entrypoint_class_suffix(entrypoint)
+
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        signature = _class_signature(node)
+        previous = seen_signatures.get(node.name)
+        if previous is None:
+            seen_signatures[node.name] = signature
+            used_names.add(node.name)
+            continue
+        if previous == signature:
+            end = node.end_lineno if node.end_lineno is not None else node.lineno
+            drop_lines.update(range(node.lineno - 1, end))
+            continue
+
+        candidate = f"{node.name}{suffix}"
+        counter = 2
+        while candidate in used_names:
+            candidate = f"{node.name}{suffix}{counter}"
+            counter += 1
+        rename_map[node.name] = candidate
+        used_names.add(candidate)
+        seen_signatures[candidate] = signature
+
+    rewritten = _rename_name_tokens(body, rename_map=rename_map)
+    if not drop_lines:
+        return rewritten
+    return "\n".join(
+        line
+        for index, line in enumerate(rewritten.splitlines())
+        if index not in drop_lines
+    )
 
 
 def _dedupe_classes(code: str) -> str:
@@ -797,6 +894,8 @@ def generate_schema_codegen_target(
 
     all_imports: set[str] = set()
     bodies: list[str] = []
+    seen_class_signatures: dict[str, str] = {}
+    used_class_names: set[str] = set()
     total = len(resolved_target.target.entrypoints)
     for index, entrypoint in enumerate(resolved_target.target.entrypoints, start=1):
         _emit_progress(progress, f"Preparing schema {index}/{total}: {entrypoint}")
@@ -811,6 +910,12 @@ def generate_schema_codegen_target(
             schema=schema,
         )
         imports, body = _collect_imports(_strip_generated_headers(code))
+        body = _resolve_body_class_conflicts(
+            body,
+            entrypoint=entrypoint,
+            seen_signatures=seen_class_signatures,
+            used_names=used_class_names,
+        )
         all_imports |= imports
         bodies.append(f"\n# === {_normalize_entrypoint_name(entrypoint)} ===\n{body}")
 

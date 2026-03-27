@@ -28,6 +28,12 @@ sources:
     include:
       - "*.yaml"
     format: yaml
+  codegen-manifest-schemas:
+    kind: directory
+    path: schemas/codegen
+    include:
+      - "*.json"
+    format: json
 registry_profiles:
   autodetect:
     resource:
@@ -51,7 +57,30 @@ registry_profiles:
       crawl: true
       retrieve:
         kind: none
+  local-relative:
+    resource:
+      mode: from-contents
+    aliases:
+      - relative-path
+      - basename
+      - internal-id
+    registry:
+      crawl: true
+      retrieve:
+        kind: none
 targets:
+  codegen-manifest-models:
+    sources:
+      - codegen-manifest-schemas
+    registry_profile: local-relative
+    entrypoints:
+      - ./codegen.schema.json
+      - ./codegen-lock.schema.json
+    prepare:
+      dereference: inline-refs
+      merge_ref_siblings: false
+    generator:
+      output: lib/schema_codegen/models/_generated.py
   github-actions:
     sources:
       - github-workflow-schema

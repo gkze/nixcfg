@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -158,10 +159,16 @@ def _load_normalizer(path: Path) -> _Normalizer:
     return _normalize
 
 
-def _run(args: list[str], *, cwd: Path = REPO_ROOT) -> subprocess.CompletedProcess[str]:
+def _run(
+    args: list[str],
+    *,
+    cwd: Path = REPO_ROOT,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     completed = subprocess.run(  # noqa: S603
         args,
         cwd=cwd,
+        env=(os.environ | env) if env is not None else None,
         text=True,
         capture_output=True,
         check=False,
@@ -200,20 +207,28 @@ def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
         generated_cargo = tmp_root / "Cargo.nix"
         generated_hashes = tmp_root / "crate-hashes.json"
 
-        _run([
-            "nix",
-            "run",
-            "nixpkgs#crate2nix",
-            "--",
-            "generate",
-            "-f",
-            str(patched_src / target.cargo_manifest_relpath),
-            "-o",
-            str(generated_cargo),
-            "-h",
-            str(generated_hashes),
-            "--default-features",
-        ])
+        _run(
+            [
+                "nix",
+                "run",
+                "nixpkgs#crate2nix",
+                "--",
+                "generate",
+                "-f",
+                str(patched_src / target.cargo_manifest_relpath),
+                "-o",
+                str(generated_cargo),
+                "-h",
+                str(generated_hashes),
+                "--default-features",
+            ],
+            env={
+                # Prefer the git CLI over Cargo/libgit2 for git dependencies and
+                # submodules. This keeps the upstream Cargo workspace intact
+                # while avoiding libgit2-specific fetch issues on macOS.
+                "CARGO_NET_GIT_FETCH_WITH_CLI": "true",
+            },
+        )
 
         cargo_text, _rewrites, _added_root_src = normalize(
             generated_cargo.read_text(encoding="utf-8")

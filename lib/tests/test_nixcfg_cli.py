@@ -226,27 +226,71 @@ def test_nixcfg_schema_generate_forwards_target_and_config(
     check("Generated /tmp/generated.py" in result.output)
 
 
-def test_nixcfg_all_commands_support_short_help_alias() -> None:
-    """Ensure every command exposes `-h` alongside `--help`."""
-    root = get_command(nixcfg.app)
+def test_nixcfg_schema_lock_forwards_manifest_output_and_metadata(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Ensure `nixcfg schema lock` forwards manifest-path arguments."""
+    called: dict[str, object] = {}
+
+    def _fake_lock(
+        *,
+        manifest_path: Path,
+        lockfile_path: Path | None,
+        include_metadata: bool,
+        progress: object,
+    ) -> Path:
+        called.update(
+            manifest_path=manifest_path,
+            lockfile_path=lockfile_path,
+            include_metadata=include_metadata,
+            progress=progress,
+        )
+        return Path("/tmp/codegen.lock.json")
+
+    monkeypatch.setattr("nixcfg.write_codegen_lockfile", _fake_lock)
+
     runner = CliRunner()
+    result = runner.invoke(
+        nixcfg.app,
+        [
+            "schema",
+            "lock",
+            "codegen.yaml",
+            "--output",
+            "custom.lock.json",
+            "--include-metadata",
+        ],
+    )
+
+    check(result.exit_code == 0)
+    check(called["manifest_path"] == Path("codegen.yaml"))
+    check(called["lockfile_path"] == Path("custom.lock.json"))
+    check(called["include_metadata"] is True)
+    check(called["progress"] is nixcfg._schema_progress)
+    check("Generated /tmp/codegen.lock.json" in result.output)
+
+
+def test_nixcfg_all_commands_support_short_help_alias() -> None:
+    """Ensure every command accepts `-h` alongside `--help`."""
+    root = get_command(nixcfg.app)
     failures: list[str] = []
     command_paths: list[list[str]] = []
 
     def _walk(cmd: click.Command, path: list[str]) -> None:
         command_paths.append(path)
-        if not isinstance(cmd, click.Group):
-            return
-        for name, subcommand in cmd.commands.items():
-            _walk(subcommand, [*path, name])
+        if isinstance(cmd, click.Group):
+            for name, subcommand in cmd.commands.items():
+                _walk(subcommand, [*path, name])
 
     _walk(root, [])
 
     for path in command_paths:
-        result = runner.invoke(nixcfg.app, [*path, "-h"])
-        if result.exit_code != 0:
-            path_display = "nixcfg" if not path else f"nixcfg {' '.join(path)}"
-            failures.append(f"{path_display} (-h) -> exit {result.exit_code}")
+        try:
+            root.main(args=[*path, "-h"], prog_name="nixcfg", standalone_mode=False)
+        except click.exceptions.Exit as exc:
+            if exc.exit_code != 0:
+                path_display = "nixcfg" if not path else f"nixcfg {' '.join(path)}"
+                failures.append(f"{path_display} (-h) -> exit {exc.exit_code}")
 
     check(failures == [], failures)
 

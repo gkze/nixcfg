@@ -44,3 +44,9 @@ __pycache__
 # Dolt artifacts
 .dolt/
 *.db
+
+# ghawfr runtime state
+/.ghawfr/
+
+# ghawfr schema audit cache
+/ghawfr/workflow/schema/.cache/

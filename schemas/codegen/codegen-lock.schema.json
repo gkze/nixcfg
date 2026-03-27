@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:uuid:985354c0-fced-5105-a650-961698070d9c",
+  "title": "CodegenLockfile",
+  "description": "Resolved source pins and integrity metadata for a code generation manifest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "sources"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Lockfile format version."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Informational lockfile timestamp. Omit by default in reproducible output."
+    },
+    "manifest_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Normalized relative POSIX path from the lockfile directory to the manifest file."
+    },
+    "sources": {
+      "title": "LockedSourceMap",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/LockedSource"
+      },
+      "minProperties": 1
+    }
+  },
+  "$defs": {
+    "Identifier": {
+      "title": "Identifier",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+    },
+    "NonEmptyString": {
+      "title": "NonEmptyString",
+      "type": "string",
+      "minLength": 1
+    },
+    "PathString": {
+      "title": "PathString",
+      "type": "string",
+      "minLength": 1,
+      "description": "POSIX-style path string using '/' separators and no leading './'."
+    },
+    "HttpsUrl": {
+      "title": "HttpsUrl",
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "Sha256Hex": {
+      "title": "Sha256Hex",
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Lowercase hexadecimal SHA-256 digest."
+    },
+    "LockedSource": {
+      "title": "LockedSource",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/LockedDirectorySource"
+        },
+        {
+          "$ref": "#/$defs/LockedUrlSource"
+        },
+        {
+          "$ref": "#/$defs/LockedGitHubRawSource"
+        }
+      ]
+    },
+    "LockedDirectorySource": {
+      "title": "LockedDirectorySource",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "path"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "directory"
+        },
+        "path": {
+          "$ref": "#/$defs/PathString"
+        },
+        "content_sha256": {
+          "$ref": "#/$defs/Sha256Hex",
+          "description": "Optional digest of the materialized directory file set: sort matched relative paths, append '<path>\\0<file-sha256>\\n' records, then SHA-256 the UTF-8 bytes."
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Informational digest timestamp. Omit by default in reproducible output."
+        }
+      }
+    },
+    "LockedUrlSource": {
+      "title": "LockedUrlSource",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "uri",
+        "sha256"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "url"
+        },
+        "uri": {
+          "$ref": "#/$defs/HttpsUrl"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "fetched_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Informational fetch timestamp. Omit by default in reproducible output."
+        },
+        "etag": {
+          "$ref": "#/$defs/NonEmptyString",
+          "description": "Informational HTTP ETag metadata from the fetch response. Omit by default in reproducible output."
+        },
+        "last_modified": {
+          "$ref": "#/$defs/NonEmptyString",
+          "description": "Informational HTTP Last-Modified metadata from the fetch response. Omit by default in reproducible output."
+        }
+      }
+    },
+    "LockedGitHubRawSource": {
+      "title": "LockedGitHubRawSource",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "owner",
+        "repo",
+        "ref",
+        "path",
+        "uri",
+        "sha256"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "github-raw"
+        },
+        "owner": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "repo": {
+          "$ref": "#/$defs/NonEmptyString"
+        },
+        "ref": {
+          "$ref": "#/$defs/NonEmptyString",
+          "description": "Immutable commit SHA actually fetched. Original tag or branch provenance may be preserved separately as metadata."
+        },
+        "path": {
+          "$ref": "#/$defs/PathString"
+        },
+        "uri": {
+          "$ref": "#/$defs/HttpsUrl"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "fetched_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Informational fetch timestamp. Omit by default in reproducible output."
+        },
+        "tag": {
+          "$ref": "#/$defs/NonEmptyString",
+          "description": "Informational original tag name, when the manifest pinned a tag that resolved to the stored commit SHA."
+        },
+        "package": {
+          "$ref": "#/$defs/NonEmptyString",
+          "description": "Informational upstream package name for provenance and diagnostics."
+        },
+        "package_version": {
+          "$ref": "#/$defs/NonEmptyString",
+          "description": "Informational upstream package version for provenance and diagnostics."
+        }
+      }
+    }
+  }
+}

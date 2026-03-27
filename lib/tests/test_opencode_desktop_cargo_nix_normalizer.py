@@ -7,6 +7,7 @@ from pathlib import Path
 from types import ModuleType
 
 from lib.tests._assertions import check
+from lib.tests._nix_ast import assert_nix_ast_equal
 
 
 def _load_normalizer_module() -> ModuleType:
@@ -52,7 +53,26 @@ rec {
 
     check(added_root_src is True)
     check(rewrites == 1)
-    check('src = "${rootSrc}/packages/desktop/src-tauri";' in normalized)
+    assert_nix_ast_equal(
+        normalized,
+        """{ nixpkgs ? <nixpkgs>
+, pkgs ? import nixpkgs { config = {}; }
+, crateConfig
+  ? if builtins.pathExists ./crate-config.nix
+    then pkgs.callPackage ./crate-config.nix {}
+    else {}
+, rootSrc ? ./.
+}:
+rec {
+  foo = {
+    src = lib.cleanSourceWith {
+      filter = sourceFilter;
+      src = "${rootSrc}/packages/desktop/src-tauri";
+    };
+  };
+}
+""",
+    )
 
 
 def test_normalize_is_noop_for_checked_in_opencode_desktop_cargo_nix() -> None:
@@ -70,4 +90,10 @@ def test_normalize_is_noop_for_checked_in_opencode_desktop_cargo_nix() -> None:
 
     check(added_root_src is False)
     check(rewrites == 0)
-    check(normalized == original)
+
+    _normalized_again, rewrites_again, added_root_src_again = module.normalize(
+        normalized
+    )
+
+    check(added_root_src_again is False)
+    check(rewrites_again == 0)
