@@ -693,6 +693,12 @@ in
         web-devicons.enable = true;
         which-key.enable = true;
       };
+      extraLuaPackages =
+        luaPkgs: with luaPkgs; [
+          # rest.nvim optional dependencies; without these Neovim warns on startup.
+          mimetypes
+          xml2lua
+        ];
       extraPlugins =
         with pkgs.vimPlugins;
         [
