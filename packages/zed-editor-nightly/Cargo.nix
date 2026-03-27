@@ -13054,6 +13054,10 @@ rec {
             packageId = "credentials_provider";
           }
           {
+            name = "db";
+            packageId = "db";
+          }
+          {
             name = "derive_more";
             packageId = "derive_more";
             features = [ "add" "add_assign" "deref" "deref_mut" "from_str" "mul" "mul_assign" "not" ];
@@ -21108,7 +21112,7 @@ rec {
           {
             name = "rust-embed";
             packageId = "rust-embed";
-            features = [ "include-exclude" "debug-embed" ];
+            features = [ "include-exclude" ];
           }
           {
             name = "serde";
@@ -29334,10 +29338,6 @@ rec {
             features = [ "serde" ];
           }
           {
-            name = "circular-buffer";
-            packageId = "circular-buffer";
-          }
-          {
             name = "cocoa";
             packageId = "cocoa 0.26.0";
             target = { target, features }: ("macos" == target."os" or null);
@@ -29521,10 +29521,14 @@ rec {
             packageId = "refineable";
           }
           {
+            name = "regex";
+            packageId = "regex";
+          }
+          {
             name = "resvg";
             packageId = "resvg";
             usesDefaultFeatures = false;
-            features = [ "text" "system-fonts" "memmap-fonts" ];
+            features = [ "text" "system-fonts" "memmap-fonts" "raster-images" ];
           }
           {
             name = "scheduler";
@@ -29582,6 +29586,10 @@ rec {
           {
             name = "thiserror";
             packageId = "thiserror 2.0.17";
+          }
+          {
+            name = "ttf-parser";
+            packageId = "ttf-parser 0.25.1";
           }
           {
             name = "url";
@@ -53661,6 +53669,16 @@ rec {
         sha256 = "0hyz89wyasn0wdnpw7qy5iyl4xv3yx36hk3crb4h6pm5q2c8g4m8";
         dependencies = [
           {
+            name = "gif";
+            packageId = "gif";
+            optional = true;
+          }
+          {
+            name = "image-webp";
+            packageId = "image-webp";
+            optional = true;
+          }
+          {
             name = "log";
             packageId = "log";
           }
@@ -53686,6 +53704,11 @@ rec {
             packageId = "usvg";
             usesDefaultFeatures = false;
           }
+          {
+            name = "zune-jpeg";
+            packageId = "zune-jpeg";
+            optional = true;
+          }
         ];
         features = {
           "default" = [ "text" "system-fonts" "memmap-fonts" "raster-images" ];
@@ -53696,7 +53719,7 @@ rec {
           "system-fonts" = [ "usvg/system-fonts" ];
           "text" = [ "usvg/text" ];
         };
-        resolvedDefaultFeatures = [ "memmap-fonts" "system-fonts" "text" ];
+        resolvedDefaultFeatures = [ "gif" "image-webp" "memmap-fonts" "raster-images" "system-fonts" "text" ];
       };
       "rfc6979" = rec {
         crateName = "rfc6979";
@@ -54593,9 +54616,9 @@ rec {
       };
       "rust-embed" = rec {
         crateName = "rust-embed";
-        version = "8.7.2";
+        version = "8.11.0";
         edition = "2018";
-        sha256 = "12hprnl569f1pg2sn960gfla913mk1mxdwpn2a6vl9iad2w0hn82";
+        sha256 = "09wdk33zavfn2w3id20jidywvf4abfjg1wbfy21psdss6nwkq484";
         libName = "rust_embed";
         authors = [
           "pyrossh"
@@ -54637,13 +54660,13 @@ rec {
           "warp" = [ "dep:warp" ];
           "warp-ex" = [ "warp" "tokio" "mime_guess" ];
         };
-        resolvedDefaultFeatures = [ "debug-embed" "include-exclude" ];
+        resolvedDefaultFeatures = [ "include-exclude" ];
       };
       "rust-embed-impl" = rec {
         crateName = "rust-embed-impl";
-        version = "8.7.2";
+        version = "8.11.0";
         edition = "2018";
-        sha256 = "171lshvdh122ypbf23gmhvrqnhbk0q9g27gaq6g82w9b76jg2rb0";
+        sha256 = "1ancyg87vx07w5m39538bwvj3hlizk8fd15kk8argsf8qzj042fs";
         procMacro = true;
         libName = "rust_embed_impl";
         authors = [
@@ -54679,13 +54702,13 @@ rec {
           "mime-guess" = [ "rust-embed-utils/mime-guess" ];
           "shellexpand" = [ "dep:shellexpand" ];
         };
-        resolvedDefaultFeatures = [ "debug-embed" "include-exclude" ];
+        resolvedDefaultFeatures = [ "include-exclude" ];
       };
       "rust-embed-utils" = rec {
         crateName = "rust-embed-utils";
-        version = "8.7.2";
+        version = "8.11.0";
         edition = "2018";
-        sha256 = "151m1966qk75y10msazdp0xj4fqw1khcry0z946bf84bcj0hrk7n";
+        sha256 = "1cf3wmwdivxqzizav813y42ln9r9jya3q1xi6finyzzywq5yzkav";
         libName = "rust_embed_utils";
         authors = [
           "pyrossh"
@@ -54711,7 +54734,7 @@ rec {
           "mime-guess" = [ "mime_guess" ];
           "mime_guess" = [ "dep:mime_guess" ];
         };
-        resolvedDefaultFeatures = [ "debug-embed" "globset" "include-exclude" ];
+        resolvedDefaultFeatures = [ "globset" "include-exclude" ];
       };
       "rust_decimal" = rec {
         crateName = "rust_decimal";
@@ -57700,7 +57723,7 @@ rec {
           {
             name = "rust-embed";
             packageId = "rust-embed";
-            features = [ "include-exclude" "debug-embed" ];
+            features = [ "include-exclude" ];
           }
           {
             name = "schemars";
@@ -63870,17 +63893,13 @@ rec {
             features = [ "add" "add_assign" "deref" "deref_mut" "from_str" "mul" "mul_assign" "not" ];
           }
           {
-            name = "fs";
-            packageId = "fs";
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "gpui_util";
+            packageId = "gpui_util";
           }
           {
             name = "log";
@@ -63935,21 +63954,12 @@ rec {
             packageId = "thiserror 2.0.17";
           }
           {
-            name = "util";
-            packageId = "util";
-          }
-          {
             name = "uuid";
             packageId = "uuid";
             features = [ "v4" "v5" "v7" "serde" ];
           }
         ];
         devDependencies = [
-          {
-            name = "fs";
-            packageId = "fs";
-            features = [ "test-support" ];
-          }
           {
             name = "gpui";
             packageId = "gpui";
@@ -63963,7 +63973,7 @@ rec {
           }
         ];
         features = {
-          "test-support" = [ "gpui/test-support" "fs/test-support" "settings/test-support" ];
+          "test-support" = [ "gpui/test-support" "settings/test-support" ];
         };
         resolvedDefaultFeatures = [ "default" "test-support" ];
       };
@@ -67441,7 +67451,7 @@ rec {
           "gvar-alloc" = [ "std" ];
           "no-std-float" = [ "core_maths" ];
         };
-        resolvedDefaultFeatures = [ "apple-layout" "core_maths" "glyph-names" "no-std-float" "opentype-layout" "std" "variable-fonts" ];
+        resolvedDefaultFeatures = [ "apple-layout" "core_maths" "default" "glyph-names" "no-std-float" "opentype-layout" "std" "variable-fonts" ];
       };
       "tungstenite 0.20.1" = rec {
         crateName = "tungstenite";
@@ -67978,6 +67988,10 @@ rec {
             packageId = "gpui_macros";
           }
           {
+            name = "gpui_util";
+            packageId = "gpui_util";
+          }
+          {
             name = "icons";
             packageId = "icons";
           }
@@ -68025,10 +68039,6 @@ rec {
           {
             name = "ui_macros";
             packageId = "ui_macros";
-          }
-          {
-            name = "util";
-            packageId = "util";
           }
           {
             name = "windows";
