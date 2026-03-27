@@ -2054,6 +2054,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "theme_settings" = rec {
+      packageId = "theme_settings";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "theme_settings";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "time_format" = rec {
       packageId = "time_format";
       build = internal.buildRustCrateWithFeatures {
@@ -2669,8 +2679,8 @@ rec {
             packageId = "settings";
           }
           {
-            name = "theme";
-            packageId = "theme";
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -4157,6 +4167,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "time";
@@ -14234,6 +14248,11 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+            features = [ "test-support" ];
+          }
+          {
             name = "unindent";
             packageId = "unindent";
           }
@@ -14378,6 +14397,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "time";
@@ -14711,6 +14734,10 @@ rec {
             features = [ "test-support" ];
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "workspace";
             packageId = "workspace";
             features = [ "test-support" ];
@@ -14869,6 +14896,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -15548,6 +15579,10 @@ rec {
             name = "theme";
             packageId = "theme";
             features = [ "test-support" ];
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "util";
@@ -19017,6 +19052,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "tree-sitter";
             packageId = "tree-sitter";
             features = [ "wasm" ];
@@ -19739,6 +19778,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -21509,8 +21552,8 @@ rec {
             packageId = "text";
           }
           {
-            name = "theme";
-            packageId = "theme";
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "time";
@@ -21795,6 +21838,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "time";
@@ -23859,8 +23906,8 @@ rec {
             packageId = "task";
           }
           {
-            name = "theme";
-            packageId = "theme";
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "tokio";
@@ -24112,6 +24159,10 @@ rec {
             packageId = "theme_extension";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "zlog";
             packageId = "zlog";
           }
@@ -24225,8 +24276,8 @@ rec {
             packageId = "telemetry";
           }
           {
-            name = "theme";
-            packageId = "theme";
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -24716,6 +24767,11 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+            features = [ "test-support" ];
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
             features = [ "test-support" ];
           }
           {
@@ -28112,6 +28168,10 @@ rec {
             packageId = "db";
           }
           {
+            name = "editor";
+            packageId = "editor";
+          }
+          {
             name = "feature_flags";
             packageId = "feature_flags";
           }
@@ -28141,6 +28201,10 @@ rec {
             packageId = "project";
           }
           {
+            name = "search";
+            packageId = "search";
+          }
+          {
             name = "settings";
             packageId = "settings";
           }
@@ -28150,8 +28214,16 @@ rec {
             features = [ "union" "const_new" ];
           }
           {
+            name = "smol";
+            packageId = "smol";
+          }
+          {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "time";
@@ -28482,6 +28554,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "time";
@@ -33578,8 +33654,8 @@ rec {
             packageId = "settings";
           }
           {
-            name = "theme";
-            packageId = "theme";
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -33902,8 +33978,8 @@ rec {
             features = [ "preserve_order" "raw_value" ];
           }
           {
-            name = "theme";
-            packageId = "theme";
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -35259,6 +35335,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "tree-sitter-json";
             packageId = "tree-sitter-json";
           }
@@ -35734,6 +35814,10 @@ rec {
             name = "text";
             packageId = "text";
             features = [ "test-support" ];
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "toml";
@@ -36593,6 +36677,10 @@ rec {
             name = "semver";
             packageId = "semver";
             features = [ "serde" ];
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "util";
@@ -38759,6 +38847,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "ui";
             packageId = "ui";
           }
@@ -38860,8 +38952,8 @@ rec {
             packageId = "settings";
           }
           {
-            name = "theme";
-            packageId = "theme";
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -39955,8 +40047,8 @@ rec {
             packageId = "smol";
           }
           {
-            name = "theme";
-            packageId = "theme";
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "util";
@@ -43059,6 +43151,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "ui";
             packageId = "ui";
           }
@@ -43463,6 +43559,10 @@ rec {
             name = "theme";
             packageId = "theme";
             features = [ "test-support" ];
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "workspace";
@@ -43975,6 +44075,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "ui";
             packageId = "ui";
           }
@@ -44138,6 +44242,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -46812,6 +46920,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "ui";
             packageId = "ui";
           }
@@ -47110,6 +47222,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -48817,6 +48933,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "ui";
             packageId = "ui";
           }
@@ -48934,6 +49054,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "util";
@@ -52368,8 +52492,8 @@ rec {
             packageId = "settings";
           }
           {
-            name = "theme";
-            packageId = "theme";
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -52744,6 +52868,10 @@ rec {
             features = [ "test-support" ];
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "unindent";
             packageId = "unindent";
           }
@@ -52959,6 +53087,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -54484,8 +54616,8 @@ rec {
             packageId = "settings";
           }
           {
-            name = "theme";
-            packageId = "theme";
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -55999,6 +56131,10 @@ rec {
             name = "theme";
             packageId = "theme";
           }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
         ];
 
       };
@@ -56845,6 +56981,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "tracing";
@@ -58035,6 +58175,10 @@ rec {
             features = [ "test-support" ];
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "workspace";
             packageId = "workspace";
             features = [ "test-support" ];
@@ -58207,6 +58351,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -58634,6 +58782,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -61063,6 +61215,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "title_bar";
             packageId = "title_bar";
             features = [ "stories" ];
@@ -62936,6 +63092,10 @@ rec {
             features = [ "test-support" ];
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "workspace";
             packageId = "workspace";
             features = [ "test-support" ];
@@ -63541,6 +63701,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "thiserror";
             packageId = "thiserror 2.0.17";
           }
@@ -63727,6 +63891,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "ui";
             packageId = "ui";
           }
@@ -63898,15 +64066,6 @@ rec {
             usesDefaultFeatures = false;
           }
           {
-            name = "gpui_util";
-            packageId = "gpui_util";
-          }
-          {
-            name = "log";
-            packageId = "log";
-            features = [ "kv_unstable_serde" "serde" ];
-          }
-          {
             name = "palette";
             packageId = "palette";
             usesDefaultFeatures = false;
@@ -63941,10 +64100,6 @@ rec {
             features = [ "preserve_order" "raw_value" ];
           }
           {
-            name = "settings";
-            packageId = "settings";
-          }
-          {
             name = "strum";
             packageId = "strum 0.27.2";
             features = [ "derive" ];
@@ -63966,14 +64121,9 @@ rec {
             usesDefaultFeatures = false;
             features = [ "test-support" ];
           }
-          {
-            name = "settings";
-            packageId = "settings";
-            features = [ "test-support" ];
-          }
         ];
         features = {
-          "test-support" = [ "gpui/test-support" "settings/test-support" ];
+          "test-support" = [ "gpui/test-support" ];
         };
         resolvedDefaultFeatures = [ "default" "test-support" ];
       };
@@ -64004,6 +64154,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
         ];
 
@@ -64084,6 +64238,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "vscode_theme";
             packageId = "vscode_theme";
           }
@@ -64137,6 +64295,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "ui";
             packageId = "ui";
           }
@@ -64154,6 +64316,97 @@ rec {
           }
         ];
 
+      };
+      "theme_settings" = rec {
+        crateName = "theme_settings";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/theme_settings"; };
+        libPath = "src/theme_settings.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "collections";
+            packageId = "collections";
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "gpui_util";
+            packageId = "gpui_util";
+          }
+          {
+            name = "log";
+            packageId = "log";
+            features = [ "kv_unstable_serde" "serde" ];
+          }
+          {
+            name = "palette";
+            packageId = "palette";
+            usesDefaultFeatures = false;
+            features = [ "std" "std" ];
+          }
+          {
+            name = "refineable";
+            packageId = "refineable";
+          }
+          {
+            name = "schemars";
+            packageId = "schemars";
+            features = [ "indexmap2" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+          {
+            name = "serde_json_lenient";
+            packageId = "serde_json_lenient";
+            features = [ "preserve_order" "raw_value" ];
+          }
+          {
+            name = "settings";
+            packageId = "settings";
+          }
+          {
+            name = "theme";
+            packageId = "theme";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "v7" "serde" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            features = [ "test-support" ];
+          }
+          {
+            name = "settings";
+            packageId = "settings";
+            features = [ "test-support" ];
+          }
+        ];
+        features = {
+          "test-support" = [ "gpui/test-support" "settings/test-support" "theme/test-support" ];
+        };
+        resolvedDefaultFeatures = [ "default" "test-support" ];
       };
       "thiserror 1.0.69" = rec {
         crateName = "thiserror";
@@ -68140,8 +68393,8 @@ rec {
             packageId = "settings";
           }
           {
-            name = "theme";
-            packageId = "theme";
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -69318,6 +69571,10 @@ rec {
           {
             name = "theme";
             packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -73900,8 +74157,8 @@ rec {
             packageId = "settings";
           }
           {
-            name = "theme";
-            packageId = "theme";
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "ui";
@@ -81411,6 +81668,10 @@ rec {
             packageId = "theme";
           }
           {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "ui";
             packageId = "ui";
           }
@@ -83552,6 +83813,10 @@ rec {
           {
             name = "theme_selector";
             packageId = "theme_selector";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
           }
           {
             name = "time";
