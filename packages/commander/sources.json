@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-k3iuGQG6oGY5nuy8hB0fAIu55t5OEw/e5QN+D1KMYis=",
-    "x86_64-darwin": "sha256-k3iuGQG6oGY5nuy8hB0fAIu55t5OEw/e5QN+D1KMYis="
+    "aarch64-darwin": "sha256-BK3Mz/ySA8yKlXBvb65WmhN7tRcdR7yr1k46mO2Cs/0=",
+    "x86_64-darwin": "sha256-BK3Mz/ySA8yKlXBvb65WmhN7tRcdR7yr1k46mO2Cs/0="
   },
   "urls": {
-    "aarch64-darwin": "https://download.thecommander.app/release/Commander-0.7.946.dmg",
-    "x86_64-darwin": "https://download.thecommander.app/release/Commander-0.7.946.dmg"
+    "aarch64-darwin": "https://download.thecommander.app/release/Commander-0.7.949.dmg",
+    "x86_64-darwin": "https://download.thecommander.app/release/Commander-0.7.949.dmg"
   },
-  "version": "0.7.946"
+  "version": "0.7.949"
 }
