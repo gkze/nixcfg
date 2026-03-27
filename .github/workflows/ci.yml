@@ -29,7 +29,12 @@ jobs:
           skipPush: true
       - uses: actions/cache@v5
         with:
-          path: ~/.cache/nix
+          # Cache immutable tarball fetch artifacts only. Nix recreates
+          # mutable SQLite metadata caches locally, and persisting them via
+          # archive-based CI caches can restore malformed databases.
+          path: |
+            ~/.cache/nix/tarball-cache
+            ~/.cache/nix/tarball-cache-v2
           key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
@@ -103,7 +108,12 @@ jobs:
           skipPush: true
       - uses: actions/cache@v5
         with:
-          path: ~/.cache/nix
+          # Cache immutable tarball fetch artifacts only. Nix recreates
+          # mutable SQLite metadata caches locally, and persisting them via
+          # archive-based CI caches can restore malformed databases.
+          path: |
+            ~/.cache/nix/tarball-cache
+            ~/.cache/nix/tarball-cache-v2
           key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-

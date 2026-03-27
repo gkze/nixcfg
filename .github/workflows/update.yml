@@ -35,19 +35,21 @@ jobs:
         with:
           name: ${{ env.CACHIX_NAME }}
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
-      - name: Verify workflow artifact contracts
-        run: nix run .#nixcfg -- ci workflow verify-artifacts
       - &cache_nix
         uses: actions/cache@v5
         with:
+          # Cache immutable tarball fetch artifacts only. Nix recreates
+          # mutable SQLite metadata caches locally, and persisting them via
+          # archive-based CI caches can restore malformed databases.
           path: |
-            ~/.cache/nix
-            !~/.cache/nix/*.sqlite*
-            !~/.cache/nix/**/*.sqlite*
-          key: nix-cache-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
+            ~/.cache/nix/tarball-cache
+            ~/.cache/nix/tarball-cache-v2
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
           restore-keys: |
-            nix-cache-v2-${{ runner.os }}-${{ runner.arch }}-
-            nix-cache-v2-${{ runner.os }}-
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-
+            nix-cache-${{ runner.os }}-
+      - name: Verify workflow artifact contracts
+        run: nix run .#nixcfg -- ci workflow verify-artifacts
       - name: Snapshot superset flake input
         run: |
           python3 - <<'PY'
@@ -105,14 +107,16 @@ jobs:
       - &cache_nix_arch
         uses: actions/cache@v5
         with:
+          # Cache immutable tarball fetch artifacts only. Nix recreates
+          # mutable SQLite metadata caches locally, and persisting them via
+          # archive-based CI caches can restore malformed databases.
           path: |
-            ~/.cache/nix
-            !~/.cache/nix/*.sqlite*
-            !~/.cache/nix/**/*.sqlite*
-          key: nix-cache-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
+            ~/.cache/nix/tarball-cache
+            ~/.cache/nix/tarball-cache-v2
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
           restore-keys: |
-            nix-cache-v2-${{ runner.os }}-${{ runner.arch }}-
-            nix-cache-v2-${{ runner.os }}-
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-
+            nix-cache-${{ runner.os }}-
       - name: Resolve upstream versions
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -149,9 +153,16 @@ jobs:
           path: .
       - uses: actions/cache@v5
         with:
-          path: ~/.cache/nix
+          # Cache immutable tarball fetch artifacts only. Nix recreates
+          # mutable SQLite metadata caches locally, and persisting them via
+          # archive-based CI caches can restore malformed databases.
+          path: |
+            ~/.cache/nix/tarball-cache
+            ~/.cache/nix/tarball-cache-v2
           key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
-          restore-keys: nix-cache-${{ runner.os }}-${{ runner.arch }}-
+          restore-keys: |
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-
+            nix-cache-${{ runner.os }}-
       - uses: actions/download-artifact@v7
         with:
           name: pinned-versions
