@@ -58743,6 +58743,10 @@ rec {
             features = [ "serde" ];
           }
           {
+            name = "collections";
+            packageId = "collections";
+          }
+          {
             name = "editor";
             packageId = "editor";
           }
