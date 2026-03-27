@@ -222,7 +222,15 @@ in
         codesnap = {
           enable = true;
           package = pkgs.vimPlugins.codesnap-nvim;
-          settings.watermark = "";
+          settings = {
+            snapshot_config = {
+              watermark = "none";
+              code_config = {
+                font_family = config.fonts.monospace.name;
+                breadcrumbs.font_family = config.fonts.monospace.name;
+              };
+            };
+          };
         };
         conform-nvim = {
           enable = true;
