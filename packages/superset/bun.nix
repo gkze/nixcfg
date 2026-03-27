@@ -3299,7 +3299,6 @@
   "@superset/mcp" = copyPathToStore ./packages/mcp;
   "@superset/mobile" = copyPathToStore ./apps/mobile;
   "@superset/pane-layout" = copyPathToStore ./packages/pane-layout;
-  "@superset/scripts" = copyPathToStore ./packages/scripts;
   "@superset/shared" = copyPathToStore ./packages/shared;
   "@superset/trpc" = copyPathToStore ./packages/trpc;
   "@superset/typescript" = copyPathToStore ./tooling/typescript;
