@@ -90,6 +90,7 @@
       MANPAGER = "sh -c 'col -bx | bat -plman'";
       MANROFFOPT = "-c";
       NIX_PAGER = "bat -p";
+      OPENCODE_DB = "opencode.db";
       PAGER = "bat -p";
     };
     shellAliases =
@@ -270,10 +271,10 @@
       enable = true;
       settings = {
         misc.disable = [
-          "brew_cask"
-          "brew_formula"
-          # "home_manager"
-          "cursor"
+          # "brew_cask"
+          # "brew_formula"
+          "home_manager"
+          # "cursor"
         ];
         git.repos = [ (slib.srcDirBase system) ];
         misc = {
@@ -297,6 +298,11 @@
       # Disabled: auto-attach behavior is disruptive; prefer manual invocation
       enableZshIntegration = false;
       settings = {
+        # TODO: remove after a Zellij release includes
+        # https://github.com/zellij-org/zellij/pull/4892.
+        # Work around the 0.44.0 regression where themes under
+        # ~/.config/zellij/themes are not loaded on session start.
+        theme_dir = "${config.xdg.configHome}/zellij/themes";
         keybinds.normal = {
           "bind \"Alt b\"".TogglePaneFrames = { };
           "bind \"Alt s\"".Clear = { };

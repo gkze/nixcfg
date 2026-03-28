@@ -61,6 +61,16 @@ let
       type = "remote";
       url = "https://mcp.axiom.co/mcp";
     };
+    chrome-devtools = {
+      type = "local";
+      command = [
+        "npx"
+        "-y"
+        "chrome-devtools-mcp@latest"
+        "--autoConnect"
+        "--channel=stable"
+      ];
+    };
     convex = {
       type = "local";
       command = [
@@ -84,7 +94,6 @@ let
     planetscale = {
       type = "remote";
       url = "https://mcp.pscale.dev/mcp/planetscale";
-      enabled = true;
     };
     sentry = {
       type = "remote";

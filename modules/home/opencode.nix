@@ -68,6 +68,18 @@ in
     mcpServers = mkOption {
       type = types.attrsOf mcpServerType;
       default = {
+        chrome-devtools = {
+          enable = true;
+          type = "local";
+          command = [
+            "npx"
+            "-y"
+            "chrome-devtools-mcp@latest"
+            "--autoConnect"
+            "--channel=stable"
+          ];
+        };
+
         macos-automator = {
           type = "local";
           command = [

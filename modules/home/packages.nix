@@ -87,7 +87,7 @@ in
         with pkgs;
         lib.concatLists [
           (lib.optionals cfg.core.enable [
-            (coreutils.override { minimal = false; })
+            coreutils-full
             curl
             curlie
             file

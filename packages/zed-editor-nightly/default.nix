@@ -231,6 +231,7 @@ let
     "channel"
     "cli"
     "client"
+    "collections"
     "collab_ui"
     "command_palette"
     "component"
@@ -263,6 +264,7 @@ let
     "git_ui"
     "go_to_line"
     "gpui"
+    "gpui_macros"
     "gpui_platform"
     "gpui_tokio"
     "gpui_util"
@@ -298,6 +300,7 @@ let
     "outline_panel"
     "paths"
     "picker"
+    "perf"
     "platform_title_bar"
     "prettier"
     "project"
@@ -313,7 +316,9 @@ let
     "reqwest_client"
     "rope"
     "search"
+    "scheduler"
     "session"
+    "sum_tree"
     "settings"
     "settings_profile_selector"
     "settings_ui"
@@ -330,12 +335,14 @@ let
     "theme"
     "theme_extension"
     "theme_selector"
+    "theme_settings"
     "time_format"
     "title_bar"
     "toolchain_selector"
     "ui"
     "ui_prompt"
     "util"
+    "util_macros"
     "vim"
     "vim_mode_setting"
     "watch"
@@ -346,6 +353,7 @@ let
     "zed_actions"
     "zed_env_vars"
     "zlog"
+    "ztracing"
   ];
 
   commonOverride = attrs: {
@@ -408,10 +416,39 @@ let
   treeSitterOverride = attrs: {
     nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [ python3 ];
     preConfigure = (attrs.preConfigure or "") + ''
-      export DEP_WASMTIME_C_API_INCLUDE="$(echo /nix/store/*-rust_wasmtime-c-api-impl-33.0.2-lib/lib/wasmtime-c-api-impl.out/include)"
+      dep_wasmtime_include=""
+      for include_dir in /nix/store/*-rust_wasmtime-c-api-impl-33.0.2-lib/lib/wasmtime-c-api-impl.out/include; do
+        dep_wasmtime_include="$include_dir"
+        break
+      done
+      export DEP_WASMTIME_C_API_INCLUDE="$dep_wasmtime_include"
     '';
     postPatch = (attrs.postPatch or "") + ''
-      python3 -c "from pathlib import Path; path = Path('binding_rust/build.rs'); text = path.read_text(); old = '        config\\n            .define(\"TREE_SITTER_FEATURE_WASM\", \"\")\\n            .define(\"static_assert(...)\", \"\")\\n            .include(env::var(\"DEP_WASMTIME_C_API_INCLUDE\").unwrap());\\n'; new = '        config\\n            .define(\"TREE_SITTER_FEATURE_WASM\", \"\")\\n            .define(\"static_assert(...)\", \"\");\\n        if let Ok(include) = env::var(\"DEP_WASMTIME_C_API_INCLUDE\") {\\n            config.include(include);\\n        }\\n'; assert old in text, 'tree-sitter patch target not found'; path.write_text(text.replace(old, new, 1))"
+      python3 - <<'PY'
+      from pathlib import Path
+
+      path = Path("binding_rust/build.rs")
+      text = path.read_text()
+      old = (
+          "        config\n"
+          '            .define("TREE_SITTER_FEATURE_WASM", "")\n'
+          '            .define("static_assert(...)", "")\n'
+          '            .include(env::var("DEP_WASMTIME_C_API_INCLUDE").unwrap());\n'
+      )
+      new = (
+          "        config\n"
+          '            .define("TREE_SITTER_FEATURE_WASM", "")\n'
+          '            .define("static_assert(...)", "");\n'
+          '        if let Ok(include) = env::var("DEP_WASMTIME_C_API_INCLUDE") {\n'
+          '            for include in include.split_whitespace() {\n'
+          "                config.include(include);\n"
+          "            }\n"
+          "        }\n"
+      )
+
+      assert old in text, "tree-sitter patch target not found"
+      path.write_text(text.replace(old, new, 1))
+      PY
     '';
   };
 

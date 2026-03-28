@@ -6,11 +6,10 @@ const LEGACY_NIX_UPDATE_HEADERS = new Set([
   "nix: Update flake.lock, sources, and crate2nix",
 ]);
 
-function commitHeader(message: string): string {
-  return message.trim().split(/\r?\n/u, 1)[0]?.trim() ?? "";
-}
+const commitHeader = (message: string): string =>
+  message.trim().split(/\r?\n/u, 1)[0]?.trim() ?? "";
 
-const config: UserConfig = {
+export default {
   extends: ["@commitlint/config-conventional"],
   ignores: [
     (message) => {
@@ -21,6 +20,4 @@ const config: UserConfig = {
       );
     },
   ],
-};
-
-export default config;
+} satisfies UserConfig;
