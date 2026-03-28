@@ -1,15 +1,15 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-LORofWOoIpoRJftfqaO3TqWKv3IE0QWWsQg6WL6QtaA=",
-    "aarch64-linux": "sha256-v78jhiFZ1vio4mHFuwQLwJ1wZLMuc330nklKI3OEoFA=",
-    "x86_64-darwin": "sha256-AhU45DGrvRSL6l9d8Av6YpdFhxlOTc4Zm0KAr3YtJCk=",
-    "x86_64-linux": "sha256-BNLA0yHiKts4BAcyHFddrREJRSSsICLLslo+7vlKnn0="
+    "aarch64-darwin": "sha256-J3wGxqXsQmHOI+wvlKu1bkuxBn5KqI95CWOSCeBBTQg=",
+    "aarch64-linux": "sha256-zk5GdooMUEaQstveZuFFnRIWhwcV0Uox8snKgkDmps8=",
+    "x86_64-darwin": "sha256-2h72/DpRo1U7LGjUBobcqIvCbM68A0IgeuUcaXvWFvk=",
+    "x86_64-linux": "sha256-XpYWBe3O1LXjVYsx4em4j5GJGa4ehvfU5c5CfNZOUdw="
   },
   "urls": {
-    "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.88.0/darwin/arm64/droid",
-    "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.88.0/linux/arm64/droid",
-    "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.88.0/darwin/x64/droid",
-    "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.88.0/linux/x64/droid"
+    "aarch64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.89.0/darwin/arm64/droid",
+    "aarch64-linux": "https://downloads.factory.ai/factory-cli/releases/0.89.0/linux/arm64/droid",
+    "x86_64-darwin": "https://downloads.factory.ai/factory-cli/releases/0.89.0/darwin/x64/droid",
+    "x86_64-linux": "https://downloads.factory.ai/factory-cli/releases/0.89.0/linux/x64/droid"
   },
-  "version": "0.88.0"
+  "version": "0.89.0"
 }
