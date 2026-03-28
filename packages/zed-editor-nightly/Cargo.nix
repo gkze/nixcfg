@@ -67539,9 +67539,9 @@ rec {
       };
       "tree-sitter-rust" = rec {
         crateName = "tree-sitter-rust";
-        version = "0.24.1";
+        version = "0.24.2";
         edition = "2021";
-        sha256 = "1yavi3hnqrx6vmgvw4jdkhcvsmxgwnhn83bgd3dis9l70qxgf5gp";
+        sha256 = "0i8f28d2gpckdx094pvfzb6by38j65sjriiab313whh7prymg7j3";
         build = "bindings/rust/build.rs";
         libName = "tree_sitter_rust";
         libPath = "bindings/rust/lib.rs";
