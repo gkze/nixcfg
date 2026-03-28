@@ -1045,11 +1045,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1774647770,
-        "narHash": "sha256-UNNi14XiqRWWjO8ykbFwA5wRwx7EscsC+GItOVpuGjc=",
+        "lastModified": 1774719742,
+        "narHash": "sha256-+pk+eMkOE4HTWIvTUgmTvIEaeL8ICzbLNezyckQ8bco=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "02371c05a04a2876cf92e2d67a259e8f87399068",
+        "rev": "43c0145a48a0179fe4c32793d3da61e1f45cf1ba",
         "type": "github"
       },
       "original": {
@@ -1061,11 +1061,11 @@
     "homebrew-cask": {
       "flake": false,
       "locked": {
-        "lastModified": 1774697817,
-        "narHash": "sha256-dk1YK2WBGtAqOEFwTqPfe8HPr30O4wckm7VGqfJilTo=",
+        "lastModified": 1774717137,
+        "narHash": "sha256-fF94d+OihwbNxxCNs0LNIBEUSKDmxwjlOgXbe1qoELg=",
         "owner": "homebrew",
         "repo": "homebrew-cask",
-        "rev": "3c3b1019619da65529293797295e90f40b3c2530",
+        "rev": "53d313e78df8ddbd0b64de34442e1cd2e0d3135a",
         "type": "github"
       },
       "original": {
@@ -1077,11 +1077,11 @@
     "homebrew-core": {
       "flake": false,
       "locked": {
-        "lastModified": 1774698907,
-        "narHash": "sha256-l3pkqgZ3GB9N6dDutpy/FF7YiDmZfLSDX1RtS9LFuHY=",
+        "lastModified": 1774721021,
+        "narHash": "sha256-8YWVhUB9zQI4Q0h9awS9ClBZkG/d/XjOrTqrKF2XQKA=",
         "owner": "homebrew",
         "repo": "homebrew-core",
-        "rev": "25cb8cc64984b4bc9748c9588726c94b338c80aa",
+        "rev": "a37ece1b99d355561ce6f0659545ee5d9766561e",
         "type": "github"
       },
       "original": {
@@ -2449,11 +2449,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1774490495,
-        "narHash": "sha256-a9WmQWj8fF7BctZGCoyzpUjP6GJw8H+lxl+zxpGnETk=",
+        "lastModified": 1774705889,
+        "narHash": "sha256-TRTIM18gP3ccBj3m8bV1zx82xeYweNYp8/lgcdR4Zz0=",
         "owner": "pyproject-nix",
         "repo": "uv2nix",
-        "rev": "18ae62fc5e389e3069854a7c66455c22e31708fc",
+        "rev": "28355ed75b466a15ff324e1baa151b550619fe67",
         "type": "github"
       },
       "original": {
@@ -2512,11 +2512,11 @@
         "rust-overlay": "rust-overlay_5"
       },
       "locked": {
-        "lastModified": 1774660016,
-        "narHash": "sha256-thi8PElnj7wz2vIqmNuP2qvoDLnerNv0Am/OUF/GIV0=",
+        "lastModified": 1774720114,
+        "narHash": "sha256-CTpihfyGciUpeb6rRL8mC2MD87eZ67ouMsJSV82IEa0=",
         "owner": "zed-industries",
         "repo": "zed",
-        "rev": "54a95e717d4ed1589c9b0e38648f65424defc74b",
+        "rev": "d72a03827d4bfa85c404cc846b6fa7d6b0537220",
         "type": "github"
       },
       "original": {
