@@ -22,7 +22,7 @@ from lib.nix.models.sources import (
     SourceEntry,
     SourcesFile,
 )
-from lib.tests._assertions import check, expect_instance
+from lib.tests._assertions import expect_instance
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
 from lib.update.ui_consumer import ConsumeEventsOptions, EventConsumer, consume_events
@@ -111,15 +111,15 @@ def _item(
 
 def test_ui_state_terminal_status_and_visibility() -> None:
     """Run this test case."""
-    check(is_terminal_status("Updated: 1.0 -> 1.1"))
-    check(is_terminal_status("Up to date"))
-    check(is_terminal_status("still running", {"status": "updated"}))
-    check(not is_terminal_status("Checking demo (current: 1.0)"))
+    assert is_terminal_status("Updated: 1.0 -> 1.1")
+    assert is_terminal_status("Up to date")
+    assert is_terminal_status("still running", {"status": "updated"})
+    assert not is_terminal_status("Checking demo (current: 1.0)")
 
     operation = OperationState(kind=OperationKind.CHECK_VERSION, label="Checking")
-    check(not operation.visible())
+    assert not operation.visible()
     operation.message = "current 1.0"
-    check(operation.visible())
+    assert operation.visible()
 
 
 def test_ui_state_from_meta_and_command_mappers() -> None:
@@ -131,22 +131,22 @@ def test_ui_state_from_meta_and_command_mappers() -> None:
     )
     item = ItemState.from_meta(meta, max_lines=2)
 
-    check(item.name == "demo")
-    check(item.operations[OperationKind.CHECK_VERSION].label == "Checking version")
-    check(item.operations[OperationKind.COMPUTE_HASH].tail.maxlen == TWO)
+    assert item.name == "demo"
+    assert item.operations[OperationKind.CHECK_VERSION].label == "Checking version"
+    assert item.operations[OperationKind.COMPUTE_HASH].tail.maxlen == TWO
 
-    check(command_args_from_payload(["nix", "build"]) == ["nix", "build"])
-    check(command_args_from_payload(["nix", 1]) is None)
-    check(command_args_from_payload("nix build") is None)
+    assert command_args_from_payload(["nix", "build"]) == ["nix", "build"]
+    assert command_args_from_payload(["nix", 1]) is None
+    assert command_args_from_payload("nix build") is None
 
-    check(operation_for_command(None) == OperationKind.COMPUTE_HASH)
-    check(operation_for_command([]) == OperationKind.COMPUTE_HASH)
-    check(operation_for_command(["flake-edit"]) == OperationKind.UPDATE_REF)
-    check(
+    assert operation_for_command(None) == OperationKind.COMPUTE_HASH
+    assert operation_for_command([]) == OperationKind.COMPUTE_HASH
+    assert operation_for_command(["flake-edit"]) == OperationKind.UPDATE_REF
+    assert (
         operation_for_command(["nix", "flake", "lock", "--update-input", "demo"])
         == OperationKind.REFRESH_LOCK
     )
-    check(operation_for_command(["echo", "ok"]) == OperationKind.COMPUTE_HASH)
+    assert operation_for_command(["echo", "ok"]) == OperationKind.COMPUTE_HASH
 
 
 @pytest.mark.parametrize(
@@ -170,17 +170,17 @@ def test_operation_for_status_matches_expected_kind(
     kind: OperationKind,
 ) -> None:
     """Run this test case."""
-    check(operation_for_status(message) == kind)
+    assert operation_for_status(message) == kind
 
 
 def test_operation_for_status_unknown_message_returns_none() -> None:
     """Run this test case."""
-    check(operation_for_status("completely unrelated status") is None)
+    assert operation_for_status("completely unrelated status") is None
 
 
 def test_operation_for_status_prefers_typed_payload() -> None:
     """Use typed status payloads before message heuristics."""
-    check(
+    assert (
         operation_for_status(
             "custom status",
             {"operation": OperationKind.REFRESH_LOCK.value},
@@ -191,15 +191,15 @@ def test_operation_for_status_prefers_typed_payload() -> None:
 
 def test_operation_for_status_invalid_typed_payload_falls_back_or_none() -> None:
     """Ignore malformed typed payloads and fall back to message parsing."""
-    check(
+    assert (
         operation_for_status("Update available: 1 -> 2", [])
         == OperationKind.CHECK_VERSION
     )
-    check(
+    assert (
         operation_for_status("Update available: 1 -> 2", {"operation": 1})
         == OperationKind.CHECK_VERSION
     )
-    check(operation_for_status("custom status", {"operation": "not-real"}) is None)
+    assert operation_for_status("custom status", {"operation": "not-real"}) is None
 
 
 @pytest.mark.parametrize(
@@ -246,40 +246,40 @@ def test_apply_status_prefers_structured_status_payloads(
         {"operation": OperationKind.COMPUTE_HASH.value, **payload},
     )
     op = item.operations[OperationKind.COMPUTE_HASH]
-    check(op.status == expected_status)
-    check(op.message == expected_message)
+    assert op.status == expected_status
+    assert op.message == expected_message
 
 
 def test_apply_status_legacy_fallbacks_cover_remaining_message_patterns() -> None:
     """Keep legacy message parsing behavior for unsupported payloads."""
     item = _item()
     apply_status(item, "Checking demo (current: 1.0)")
-    check(item.operations[OperationKind.CHECK_VERSION].message == "current 1.0")
+    assert item.operations[OperationKind.CHECK_VERSION].message == "current 1.0"
 
     apply_status(item, "Updating ref: old -> new")
-    check(item.operations[OperationKind.UPDATE_REF].message == "old -> new")
+    assert item.operations[OperationKind.UPDATE_REF].message == "old -> new"
 
     apply_status(item, "Updating flake input 'demo'...")
-    check(item.operations[OperationKind.REFRESH_LOCK].message == "demo")
+    assert item.operations[OperationKind.REFRESH_LOCK].message == "demo"
 
     apply_status(item, "Computing hash for linux...")
-    check(item.operations[OperationKind.COMPUTE_HASH].message == "linux")
+    assert item.operations[OperationKind.COMPUTE_HASH].message == "linux"
 
     apply_status(
         item,
         "custom hash note",
         {"operation": OperationKind.COMPUTE_HASH.value},
     )
-    check(item.operations[OperationKind.COMPUTE_HASH].message == "custom hash note")
+    assert item.operations[OperationKind.COMPUTE_HASH].message == "custom hash note"
 
     apply_status(item, "Up to date (version: 2.0)")
-    check(item.operations[OperationKind.CHECK_VERSION].message == "2.0 (up to date)")
+    assert item.operations[OperationKind.CHECK_VERSION].message == "2.0 (up to date)"
 
     apply_status(item, "Up to date (ref: main)")
-    check(item.operations[OperationKind.CHECK_VERSION].message == "main (up to date)")
+    assert item.operations[OperationKind.CHECK_VERSION].message == "main (up to date)"
 
     apply_status(item, "Computing hash for archive.")
-    check(item.operations[OperationKind.COMPUTE_HASH].message == "archive")
+    assert item.operations[OperationKind.COMPUTE_HASH].message == "archive"
 
     item2 = _item()
     apply_status(
@@ -287,7 +287,7 @@ def test_apply_status_legacy_fallbacks_cover_remaining_message_patterns() -> Non
         "no parser match",
         {"operation": OperationKind.CHECK_VERSION.value},
     )
-    check(item2.operations[OperationKind.CHECK_VERSION].status == "running")
+    assert item2.operations[OperationKind.CHECK_VERSION].status == "running"
 
 
 def test_apply_status_rules_and_status_priority() -> None:
@@ -296,52 +296,52 @@ def test_apply_status_rules_and_status_priority() -> None:
 
     apply_status(item, "Latest version: 1.0.0")
     check_op = item.operations[OperationKind.CHECK_VERSION]
-    check(check_op.status == "running")
-    check(check_op.message == "1.0.0")
+    assert check_op.status == "running"
+    assert check_op.message == "1.0.0"
 
     apply_status(item, "Update available: 1.0.0 -> 1.1.0")
-    check(check_op.status == "success")
-    check(check_op.message == "1.0.0 -> 1.1.0")
+    assert check_op.status == "success"
+    assert check_op.message == "1.0.0 -> 1.1.0"
 
     # Lower-priority running statuses should not overwrite terminal success.
     apply_status(item, "Latest version: 1.1.0")
-    check(check_op.status == "success")
-    check(check_op.message == "1.0.0 -> 1.1.0")
+    assert check_op.status == "success"
+    assert check_op.message == "1.0.0 -> 1.1.0"
 
     apply_status(item, "Fetching hashes for all platforms")
     hash_op = item.operations[OperationKind.COMPUTE_HASH]
-    check(hash_op.status == "running")
-    check(hash_op.message == "all platforms")
+    assert hash_op.status == "running"
+    assert hash_op.message == "all platforms"
 
     apply_status(item, "Up to date")
-    check(hash_op.status == "no_change")
-    check(hash_op.message is None)
+    assert hash_op.status == "no_change"
+    assert hash_op.message is None
 
     # Default message pass-through for unmatched compute-hash messages.
     item2 = _item()
     apply_status(item2, "warning: cache miss")
     hash_op2 = item2.operations[OperationKind.COMPUTE_HASH]
-    check(hash_op2.status == "running")
-    check(hash_op2.message == "warning: cache miss")
+    assert hash_op2.status == "running"
+    assert hash_op2.message == "warning: cache miss"
 
 
 def test_payload_status_update_rejects_malformed_structured_details() -> None:
     """Ignore structured payload variants that do not match the expected shape."""
-    check(
+    assert (
         ui_state_module._payload_status_update({
             "status": "update_available",
             "detail": {"current": 1, "latest": "2"},
         })
         is None
     )
-    check(
+    assert (
         ui_state_module._payload_status_update({
             "status": "up_to_date",
             "detail": {"scope": "version", "value": 1},
         })
         is None
     )
-    check(
+    assert (
         ui_state_module._payload_status_update({
             "status": "updating_ref",
             "detail": {"current": "a", "latest": 2},
@@ -356,10 +356,10 @@ def test_apply_status_ignores_unknown_or_missing_operations() -> None:
     check_op = item.operations[OperationKind.CHECK_VERSION]
 
     apply_status(item, "Computing hash for demo.")
-    check(check_op.status == "pending")
+    assert check_op.status == "pending"
 
     apply_status(item, "unrelated status")
-    check(check_op.status == "pending")
+    assert check_op.status == "pending"
 
 
 def test_set_operation_status_keeps_message_when_none() -> None:
@@ -367,7 +367,7 @@ def test_set_operation_status_keeps_message_when_none() -> None:
     operation = OperationState(kind=OperationKind.CHECK_VERSION, label="Checking")
     operation.message = "existing"
     ui_state_module._set_operation_status(operation, "running", message=None)
-    check(operation.message == "existing")
+    assert operation.message == "existing"
 
 
 def test_hash_diff_lines_covers_mapping_changes() -> None:
@@ -389,23 +389,20 @@ def test_hash_diff_lines_covers_mapping_changes() -> None:
 
     lines = hash_diff_lines(old_entry, new_entry)
 
-    check(
+    assert (
         "aarch64-linux :: sha256-JnkqDwuC7lNsjafV+jOGfvs8K1xC8rk5CTOW+spjiCA= -> <removed>"
         in lines
     )
-    check(
+    assert (
         "darwin :: <none> -> sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo="
         in lines
     )
-    check(
-        (
-            "x86_64-linux :: "
-            "sha256-DJUI4pMZ7wQTnyOiuDHALmZz7FZtrTbzRzCuNOShmWE= "
-            "-> sha256-kjQj3f5Q9rV0pIBfHmTHvviIh1gcFuP4xGc8MEfMwd0="
-        )
-        in lines
-    )
-    check(all("unchanged" not in line for line in lines))
+    assert (
+        "x86_64-linux :: "
+        "sha256-DJUI4pMZ7wQTnyOiuDHALmZz7FZtrTbzRzCuNOShmWE= "
+        "-> sha256-kjQj3f5Q9rV0pIBfHmTHvviIh1gcFuP4xGc8MEfMwd0="
+    ) in lines
+    assert all("unchanged" not in line for line in lines)
 
 
 def test_hash_diff_lines_covers_entry_keys_duplicates_and_none_inputs() -> None:
@@ -429,32 +426,22 @@ def test_hash_diff_lines_covers_entry_keys_duplicates_and_none_inputs() -> None:
     )
 
     changed = hash_diff_lines(old_entry, new_entry)
-    check(
-        (
-            "sha256#2 :: sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M= "
-            "-> sha256-kjQj3f5Q9rV0pIBfHmTHvviIh1gcFuP4xGc8MEfMwd0="
-        )
-        in changed
-    )
-    check(
-        (
-            "sha256:tauri :: sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo= "
-            "-> sha256-bjX1hF6IhFhRz9fNE2j7KnSxjQKf7bn74QRR48E0hVI="
-        )
-        in changed
-    )
-    check(
-        (
-            "aarch64-darwin :: <none> -> "
-            "sha256-u9PE8j5SVfQ+SxG1A5f8A94slq8Nh5S08Y0dWxlI/kI="
-        )
-        in changed
-    )
-
+    assert (
+        "sha256#2 :: sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M= "
+        "-> sha256-kjQj3f5Q9rV0pIBfHmTHvviIh1gcFuP4xGc8MEfMwd0="
+    ) in changed
+    assert (
+        "sha256:tauri :: sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo= "
+        "-> sha256-bjX1hF6IhFhRz9fNE2j7KnSxjQKf7bn74QRR48E0hVI="
+    ) in changed
+    assert (
+        "aarch64-darwin :: <none> -> "
+        "sha256-u9PE8j5SVfQ+SxG1A5f8A94slq8Nh5S08Y0dWxlI/kI="
+    ) in changed
     added_only = hash_diff_lines(None, new_entry)
-    check(any(line.startswith("sha256 :: <none>") for line in added_only))
+    assert any(line.startswith("sha256 :: <none>") for line in added_only)
     removed_only = hash_diff_lines(old_entry, None)
-    check(any(line.endswith("-> <removed>") for line in removed_only))
+    assert any(line.endswith("-> <removed>") for line in removed_only)
 
 
 class _LiveStub:
@@ -506,27 +493,27 @@ def test_renderer_lifecycle_and_render_if_due(monkeypatch: pytest.MonkeyPatch) -
         render_interval=0.1,
     )
 
-    check(object.__getattribute__(renderer, "_live") is not None)
-    check(_LiveStub.instances[0].started)
+    assert object.__getattribute__(renderer, "_live") is not None
+    assert _LiveStub.instances[0].started
 
     renderer.render()
-    check(_LiveStub.instances[0].updated)
+    assert _LiveStub.instances[0].updated
 
     renderer.request_render()
     renderer.render_if_due(now=0.05)
-    check(renderer.needs_render)
+    assert renderer.needs_render
 
     renderer.render_if_due(now=1.0)
-    check(not renderer.needs_render)
-    check(renderer.last_render == 1.0)
+    assert not renderer.needs_render
+    assert renderer.last_render == 1.0
 
     called: list[bool] = []
     monkeypatch.setattr(renderer, "_print_final_status", lambda: called.append(True))
     renderer.finalize()
 
-    check(_LiveStub.instances[0].stopped)
-    check(called == [True])
-    check(object.__getattribute__(renderer, "_live") is None)
+    assert _LiveStub.instances[0].stopped
+    assert called == [True]
+    assert object.__getattribute__(renderer, "_live") is None
 
 
 def test_renderer_formatting_symbols_and_spinner_updates() -> None:
@@ -538,31 +525,31 @@ def test_renderer_formatting_symbols_and_spinner_updates() -> None:
     running.status = "running"
     running.message = "working"
     first_spinner = object.__getattribute__(renderer, "_render_operation")(running)
-    check(running.spinner is not None)
+    assert running.spinner is not None
     running.message = "still working"
     second_spinner = object.__getattribute__(renderer, "_render_operation")(running)
-    check(first_spinner is second_spinner)
+    assert first_spinner is second_spinner
 
     running.status = "success"
     running.message = None
     success_line = object.__getattribute__(renderer, "_render_operation")(running)
-    check(running.spinner is None)
-    check(isinstance(success_line, Text))
-    check(str(success_line).startswith("✓ "))
+    assert running.spinner is None
+    assert isinstance(success_line, Text)
+    assert str(success_line).startswith("✓ ")
 
     no_change = item.operations[OperationKind.UPDATE_REF]
     no_change.status = "no_change"
     no_change.message = None
     no_change_line = object.__getattribute__(renderer, "_render_operation")(no_change)
-    check(isinstance(no_change_line, Text))
-    check(str(no_change_line).startswith("• "))
+    assert isinstance(no_change_line, Text)
+    assert str(no_change_line).startswith("• ")
 
     error = item.operations[OperationKind.REFRESH_LOCK]
     error.status = "error"
     error.message = None
     error_line = object.__getattribute__(renderer, "_render_operation")(error)
-    check(isinstance(error_line, Text))
-    check(str(error_line).startswith("✗ "))
+    assert isinstance(error_line, Text)
+    assert str(error_line).startswith("✗ ")
 
 
 def test_renderer_build_display_with_and_without_console(
@@ -589,13 +576,13 @@ def test_renderer_build_display_with_and_without_console(
     )
 
     full = object.__getattribute__(renderer, "_build_display")(full_output=True)
-    check(full is not None)
+    assert full is not None
     clipped = object.__getattribute__(renderer, "_build_display")(full_output=False)
-    check(clipped is not None)
+    assert clipped is not None
 
     object.__setattr__(renderer, "_console", None)
     no_console = object.__getattribute__(renderer, "_build_display")()
-    check(isinstance(no_console, Text))
+    assert isinstance(no_console, Text)
 
 
 def test_renderer_detail_append_and_tty_logging_paths(
@@ -607,19 +594,19 @@ def test_renderer_detail_append_and_tty_logging_paths(
     item = _item()
     renderer = Renderer({"demo": item}, ["demo"], is_tty=True, render_interval=0.1)
 
-    check(
-        not object.__getattribute__(renderer, "_append_detail_line")("missing", "line")
+    assert not object.__getattribute__(renderer, "_append_detail_line")(
+        "missing", "line"
     )
-    check(not object.__getattribute__(renderer, "_append_detail_line")("demo", "line"))
+    assert not object.__getattribute__(renderer, "_append_detail_line")("demo", "line")
 
     item.last_operation = OperationKind.CHECK_VERSION
-    check(object.__getattribute__(renderer, "_append_detail_line")("demo", "line"))
-    check(item.operations[OperationKind.CHECK_VERSION].detail_lines == ["line"])
+    assert object.__getattribute__(renderer, "_append_detail_line")("demo", "line")
+    assert item.operations[OperationKind.CHECK_VERSION].detail_lines == ["line"]
 
     renderer.log("demo", "info")
     renderer.log_error("demo", "error")
     details = item.operations[OperationKind.CHECK_VERSION].detail_lines
-    check(details[-2:] == ["info", "error"])
+    assert details[-2:] == ["info", "error"]
 
     renderer.finalize()
 
@@ -641,11 +628,11 @@ def test_renderer_non_tty_output_and_quiet(capsys: pytest.CaptureFixture[str]) -
     verbose_renderer.render()
 
     captured = capsys.readouterr()
-    check("[demo] line" in captured.out)
-    check("[demo] info" in captured.out)
-    check("[demo] ERROR: boom" in captured.err)
-    check("[demo] ERROR: multi" in captured.err)
-    check("[demo]       detail" in captured.err)
+    assert "[demo] line" in captured.out
+    assert "[demo] info" in captured.out
+    assert "[demo] ERROR: boom" in captured.err
+    assert "[demo] ERROR: multi" in captured.err
+    assert "[demo]       detail" in captured.err
 
     quiet_renderer = Renderer(
         {"demo": item},
@@ -658,7 +645,7 @@ def test_renderer_non_tty_output_and_quiet(capsys: pytest.CaptureFixture[str]) -
     quiet_renderer.log_line("demo", "line")
     quiet_renderer.log("demo", "info")
     quiet_renderer.log_error("demo", "boom")
-    check(capsys.readouterr() == ("", ""))
+    assert capsys.readouterr() == ("", "")
 
 
 def test_renderer_private_branch_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -681,16 +668,16 @@ def test_renderer_private_branch_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         width=10,
         max_visible=1,
     )
-    check(isinstance(compact, Text))
+    assert isinstance(compact, Text)
 
     # _append_detail_line returns False when operation lookup fails.
     item.last_operation = OperationKind.CHECK_VERSION
     item.operations.pop(OperationKind.CHECK_VERSION)
-    check(not object.__getattribute__(renderer, "_append_detail_line")("demo", "x"))
+    assert not object.__getattribute__(renderer, "_append_detail_line")("demo", "x")
 
     # render_if_due early-return when needs_render is false.
     renderer.render_if_due(now=1.0)
-    check(not renderer.needs_render)
+    assert not renderer.needs_render
 
     # request_render false branch for non-tty renderer.
     non_tty_renderer = Renderer(
@@ -700,7 +687,7 @@ def test_renderer_private_branch_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         render_interval=0.1,
     )
     non_tty_renderer.request_render()
-    check(not non_tty_renderer.needs_render)
+    assert not non_tty_renderer.needs_render
 
     # _compact_lines branch where segment.text is empty.
     active_renderer = Renderer(
@@ -710,7 +697,7 @@ def test_renderer_private_branch_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         render_interval=0.1,
     )
     console = object.__getattribute__(active_renderer, "_console")
-    check(console is not None)
+    assert console is not None
     monkeypatch.setattr(
         console,
         "render_lines",
@@ -721,14 +708,14 @@ def test_renderer_private_branch_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         width=10,
         max_visible=1,
     )
-    check(compact_active is not None)
+    assert compact_active is not None
     active_renderer.finalize()
 
     # finalize with quiet=True should not print final status.
     called: list[bool] = []
     monkeypatch.setattr(renderer, "_print_final_status", lambda: called.append(True))
     renderer.finalize()
-    check(called == [])
+    assert called == []
 
 
 def test_renderer_print_final_status_uses_stdout_tty(
@@ -758,9 +745,9 @@ def test_renderer_print_final_status_uses_stdout_tty(
     renderer = Renderer({"demo": item}, ["demo"], is_tty=False, render_interval=0.1)
     object.__getattribute__(renderer, "_print_final_status")()
 
-    check(captured["no_color"] is True)
-    check(captured["highlight"] is False)
-    check("renderable" in captured)
+    assert captured["no_color"] is True
+    assert captured["highlight"] is False
+    assert "renderable" in captured
 
 
 @pytest.mark.parametrize(
@@ -877,8 +864,8 @@ def test_event_consumer_detail_priority_and_status_handlers(
     object.__getattribute__(consumer, "_set_detail")("demo", "no_change")
     object.__getattribute__(consumer, "_set_detail")("demo", "updated")
     object.__getattribute__(consumer, "_set_detail")("demo", "no_change")
-    check(consumer.update_details["demo"] == "updated")
-    check(consumer.updated)
+    assert consumer.update_details["demo"] == "updated"
+    assert consumer.updated
 
     object.__getattribute__(consumer, "_handle_status")(
         UpdateEvent.status("demo", "Latest version: 1.0.0"), item
@@ -892,8 +879,8 @@ def test_event_consumer_detail_priority_and_status_handlers(
     )
 
     renderer = _renderer(consumer)
-    check(("demo", "Latest version: 1.0.0") in renderer.line_logs)
-    check(("demo", "Updated: 1.0 -> 1.1") not in renderer.logs)
+    assert ("demo", "Latest version: 1.0.0") in renderer.line_logs
+    assert ("demo", "Updated: 1.0 -> 1.1") not in renderer.logs
 
     consumer_non_tty, _queue = _consumer(monkeypatch, is_tty=False, verbose=True)
     item_non_tty = consumer_non_tty.items["demo"]
@@ -902,14 +889,14 @@ def test_event_consumer_detail_priority_and_status_handlers(
         item_non_tty,
     )
     non_tty_renderer = _renderer(consumer_non_tty)
-    check(("demo", "Updated: 1.0 -> 1.1") in non_tty_renderer.logs)
+    assert ("demo", "Updated: 1.0 -> 1.1") in non_tty_renderer.logs
 
     result = consumer.result
-    check(result.updated)
-    check(result.errors == 0)
-    check(result.details["demo"] == "updated")
-    check(result.source_updates == {})
-    check(result.artifact_updates == {})
+    assert result.updated
+    assert result.errors == 0
+    assert result.details["demo"] == "updated"
+    assert result.source_updates == {}
+    assert result.artifact_updates == {}
 
 
 def test_event_consumer_command_start_line_and_end_paths(
@@ -932,13 +919,13 @@ def test_event_consumer_command_start_line_and_end_paths(
         ),
         item,
     )
-    check(item.active_command_op == OperationKind.UPDATE_REF)
-    check(item.last_operation == OperationKind.UPDATE_REF)
-    check(update_ref.active_commands == 1)
-    check(list(update_ref.tail) == [])
-    check(update_ref.detail_lines == [])
+    assert item.active_command_op == OperationKind.UPDATE_REF
+    assert item.last_operation == OperationKind.UPDATE_REF
+    assert update_ref.active_commands == 1
+    assert list(update_ref.tail) == []
+    assert update_ref.detail_lines == []
     renderer = _renderer(consumer)
-    check(("demo", "$ flake-edit --set-ref") in renderer.line_logs)
+    assert ("demo", "$ flake-edit --set-ref") in renderer.line_logs
 
     line_event = UpdateEvent(
         source="demo",
@@ -948,7 +935,7 @@ def test_event_consumer_command_start_line_and_end_paths(
     )
     object.__getattribute__(consumer, "_handle_line")(line_event, item)
     object.__getattribute__(consumer, "_handle_line")(line_event, item)
-    check(list(update_ref.tail) == ["[stderr] same line"])
+    assert list(update_ref.tail) == ["[stderr] same line"]
 
     object.__getattribute__(consumer, "_handle_command_end")(
         UpdateEvent(
@@ -972,9 +959,9 @@ def test_event_consumer_command_start_line_and_end_paths(
         ),
         item,
     )
-    check(update_ref.status == "success")
-    check(update_ref.active_commands == 0)
-    check(item.active_command_op is None)
+    assert update_ref.status == "success"
+    assert update_ref.active_commands == 0
+    assert item.active_command_op is None
 
     hash_op = item.operations[OperationKind.COMPUTE_HASH]
     hash_op.active_commands = 1
@@ -993,15 +980,12 @@ def test_event_consumer_command_start_line_and_end_paths(
         ),
         item,
     )
-    check(hash_op.status == "error")
-    check(
-        hash_op.detail_lines
-        == [
-            "Output tail (last 2 lines):",
-            "line-1",
-            "line-2",
-        ]
-    )
+    assert hash_op.status == "error"
+    assert hash_op.detail_lines == [
+        "Output tail (last 2 lines):",
+        "line-1",
+        "line-2",
+    ]
 
 
 def test_event_consumer_command_branches_and_source_result_dispatch(
@@ -1023,8 +1007,8 @@ def test_event_consumer_command_branches_and_source_result_dispatch(
         ),
         item,
     )
-    check(update_ref.active_commands == 2)
-    check(list(update_ref.tail) == ["keep-tail"])
+    assert update_ref.active_commands == 2
+    assert list(update_ref.tail) == ["keep-tail"]
 
     # active_commands > 0 on end should not clear active op
     item.active_command_op = OperationKind.UPDATE_REF
@@ -1041,8 +1025,8 @@ def test_event_consumer_command_branches_and_source_result_dispatch(
         ),
         item,
     )
-    check(update_ref.active_commands == 1)
-    check(item.active_command_op == OperationKind.UPDATE_REF)
+    assert update_ref.active_commands == 1
+    assert item.active_command_op == OperationKind.UPDATE_REF
 
     # allow_failure skips error status path
     hash_op = item.operations[OperationKind.COMPUTE_HASH]
@@ -1061,7 +1045,7 @@ def test_event_consumer_command_branches_and_source_result_dispatch(
         ),
         item,
     )
-    check(hash_op.status == "running")
+    assert hash_op.status == "running"
 
     # RESULT with SourceEntry payload routes through _handle_result source path.
     source_result = _source_entry(version="2.0.0", mapping={"x86_64-linux": HASH_B})
@@ -1069,8 +1053,8 @@ def test_event_consumer_command_branches_and_source_result_dispatch(
         UpdateEvent.result("demo", payload=source_result),
         item,
     )
-    check(not should_skip)
-    check(consumer.source_updates["demo"].version == "2.0.0")
+    assert not should_skip
+    assert consumer.source_updates["demo"].version == "2.0.0"
 
 
 def test_event_consumer_command_handlers_when_operation_missing(
@@ -1091,7 +1075,7 @@ def test_event_consumer_command_handlers_when_operation_missing(
         ),
         item,
     )
-    check(item.active_command_op is None)
+    assert item.active_command_op is None
 
     object.__getattribute__(consumer, "_handle_command_end")(
         UpdateEvent(
@@ -1106,7 +1090,7 @@ def test_event_consumer_command_handlers_when_operation_missing(
         ),
         item,
     )
-    check(item.operations[OperationKind.CHECK_VERSION].status == "pending")
+    assert item.operations[OperationKind.CHECK_VERSION].status == "pending"
 
     object.__getattribute__(consumer, "_handle_line")(
         UpdateEvent(
@@ -1118,7 +1102,7 @@ def test_event_consumer_command_handlers_when_operation_missing(
         item,
     )
     renderer = _renderer(consumer)
-    check(("demo", "line") in renderer.line_logs)
+    assert ("demo", "line") in renderer.line_logs
 
 
 def test_event_consumer_result_ref_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1134,7 +1118,7 @@ def test_event_consumer_result_ref_paths(monkeypatch: pytest.MonkeyPatch) -> Non
         item,
         {"current": 1, "latest": "2"},
     )
-    check(should_skip)
+    assert should_skip
 
     should_skip = object.__getattribute__(consumer, "_handle_result")(
         UpdateEvent.result(
@@ -1143,14 +1127,14 @@ def test_event_consumer_result_ref_paths(monkeypatch: pytest.MonkeyPatch) -> Non
         ),
         item,
     )
-    check(not should_skip)
+    assert not should_skip
     check_op = item.operations[OperationKind.CHECK_VERSION]
-    check(check_op.status == "success")
-    check(check_op.message == "1.0.0 -> 2.0.0")
-    check(item.operations[OperationKind.UPDATE_REF].status == "success")
-    check(item.operations[OperationKind.REFRESH_LOCK].status == "success")
+    assert check_op.status == "success"
+    assert check_op.message == "1.0.0 -> 2.0.0"
+    assert item.operations[OperationKind.UPDATE_REF].status == "success"
+    assert item.operations[OperationKind.REFRESH_LOCK].status == "success"
     renderer = _renderer(consumer)
-    check(("demo", "Updated: 1.0.0 -> 2.0.0") in renderer.logs)
+    assert ("demo", "Updated: 1.0.0 -> 2.0.0") in renderer.logs
 
 
 def test_event_consumer_source_result_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1163,10 +1147,10 @@ def test_event_consumer_source_result_paths(monkeypatch: pytest.MonkeyPatch) -> 
     object.__getattribute__(consumer, "_handle_source_result")(
         UpdateEvent.result("demo", payload=changed), item, changed
     )
-    check(consumer.source_updates["demo"] == changed)
-    check(item.operations[OperationKind.CHECK_VERSION].message == "1.0.0 -> 2.0.0")
+    assert consumer.source_updates["demo"] == changed
+    assert item.operations[OperationKind.CHECK_VERSION].message == "1.0.0 -> 2.0.0"
     renderer = _renderer(consumer)
-    check(("demo", "Updated: 1.0.0 -> 2.0.0") in renderer.logs)
+    assert ("demo", "Updated: 1.0.0 -> 2.0.0") in renderer.logs
 
     # Hash-only changed path.
     sources = SourcesFile(entries={"demo": _source_entry(version="1.0.0")})
@@ -1179,15 +1163,11 @@ def test_event_consumer_source_result_paths(monkeypatch: pytest.MonkeyPatch) -> 
         hash_only,
     )
     hash_renderer = _renderer(consumer_hash)
-    check(
-        (
-            "demo",
-            "Updated: hash sha256-JnkqDwuC7lNsjafV+jOGfvs8K1xC8rk5CTOW+spjiCA= "
-            "-> sha256-DJUI4pMZ7wQTnyOiuDHALmZz7FZtrTbzRzCuNOShmWE=",
-        )
-        in hash_renderer.logs
-    )
-
+    assert (
+        "demo",
+        "Updated: hash sha256-JnkqDwuC7lNsjafV+jOGfvs8K1xC8rk5CTOW+spjiCA= "
+        "-> sha256-DJUI4pMZ7wQTnyOiuDHALmZz7FZtrTbzRzCuNOShmWE=",
+    ) in hash_renderer.logs
     # Generic updated path with no old hash to compare.
     no_old = SourcesFile(entries={"demo": _source_entry(version=None, mapping={})})
     consumer_generic, _queue = _consumer(monkeypatch, sources=no_old, is_tty=True)
@@ -1199,7 +1179,7 @@ def test_event_consumer_source_result_paths(monkeypatch: pytest.MonkeyPatch) -> 
         generic,
     )
     generic_renderer = _renderer(consumer_generic)
-    check(("demo", "Updated") in generic_renderer.logs)
+    assert ("demo", "Updated") in generic_renderer.logs
 
 
 def test_event_consumer_artifact_paths(
@@ -1230,16 +1210,16 @@ def test_event_consumer_artifact_paths(
     )
 
     result = consumer.result
-    check(result.updated)
-    check(result.details["demo"] == "updated")
-    check(result.artifact_updates["demo"] == (changed,))
+    assert result.updated
+    assert result.details["demo"] == "updated"
+    assert result.artifact_updates["demo"] == (changed,)
     renderer = _renderer(consumer)
-    check(("demo", f"Updated artifact: {artifact_path.name}") in renderer.logs)
+    assert ("demo", f"Updated artifact: {artifact_path.name}") in renderer.logs
 
     staged_same = GeneratedArtifact.text("demo.txt", "new\n")
     staged_changed = GeneratedArtifact.text("demo.txt", "newer\n")
-    check(not object.__getattribute__(consumer, "_artifact_changed")(staged_same))
-    check(object.__getattribute__(consumer, "_artifact_changed")(staged_changed))
+    assert not object.__getattribute__(consumer, "_artifact_changed")(staged_same)
+    assert object.__getattribute__(consumer, "_artifact_changed")(staged_changed)
 
     consumer_same, _queue = _consumer(monkeypatch, is_tty=True)
     item_same = consumer_same.items["demo"]
@@ -1249,11 +1229,11 @@ def test_event_consumer_artifact_paths(
         item_same,
     )
     same_result = consumer_same.result
-    check(not same_result.updated)
-    check(same_result.details == {})
-    check(same_result.artifact_updates == {})
+    assert not same_result.updated
+    assert same_result.details == {}
+    assert same_result.artifact_updates == {}
     same_renderer = _renderer(consumer_same)
-    check(("demo", f"Updated artifact: {artifact_path.name}") not in same_renderer.logs)
+    assert ("demo", f"Updated artifact: {artifact_path.name}") not in same_renderer.logs
 
     consumer_pair, _queue = _consumer(monkeypatch, is_tty=True)
     item_pair = consumer_pair.items["demo"]
@@ -1269,7 +1249,7 @@ def test_event_consumer_artifact_paths(
         item_pair,
     )
     pair_renderer = _renderer(consumer_pair)
-    check(("demo", "Updated 2 artifacts: pair-0.txt, pair-1.txt") in pair_renderer.logs)
+    assert ("demo", "Updated 2 artifacts: pair-0.txt, pair-1.txt") in pair_renderer.logs
 
     consumer_many, _queue = _consumer(monkeypatch, is_tty=True)
     item_many = consumer_many.items["demo"]
@@ -1280,20 +1260,15 @@ def test_event_consumer_artifact_paths(
     for index in range(4):
         (tmp_path / f"artifact-{index}.txt").write_text("old\n", encoding="utf-8")
 
-    check(
-        not object.__getattribute__(consumer_many, "_dispatch")(
-            UpdateEvent.artifact("demo", many_artifacts),
-            item_many,
-        )
+    assert not object.__getattribute__(consumer_many, "_dispatch")(
+        UpdateEvent.artifact("demo", many_artifacts),
+        item_many,
     )
     many_renderer = _renderer(consumer_many)
-    check(
-        (
-            "demo",
-            "Updated 4 artifacts: artifact-0.txt, artifact-1.txt, artifact-2.txt, ...",
-        )
-        in many_renderer.logs
-    )
+    assert (
+        "demo",
+        "Updated 4 artifacts: artifact-0.txt, artifact-1.txt, artifact-2.txt, ...",
+    ) in many_renderer.logs
 
 
 def test_event_consumer_result_none_and_other_payload(
@@ -1306,21 +1281,21 @@ def test_event_consumer_result_none_and_other_payload(
     object.__getattribute__(consumer, "_handle_result")(
         UpdateEvent.result("demo", payload="updated"), item
     )
-    check(consumer.update_details["demo"] == "updated")
+    assert consumer.update_details["demo"] == "updated"
 
     item.operations[OperationKind.CHECK_VERSION].status = "pending"
     object.__getattribute__(consumer, "_handle_result")(
         UpdateEvent.result("demo", payload=None), item
     )
-    check(consumer.update_details["demo"] == "updated")
+    assert consumer.update_details["demo"] == "updated"
 
     consumer2, _queue = _consumer(monkeypatch, is_tty=True)
     item2 = consumer2.items["demo"]
     object.__getattribute__(consumer2, "_handle_result")(
         UpdateEvent.result("demo", payload=None), item2
     )
-    check(consumer2.update_details["demo"] == "no_change")
-    check(item2.operations[OperationKind.CHECK_VERSION].status == "no_change")
+    assert consumer2.update_details["demo"] == "no_change"
+    assert item2.operations[OperationKind.CHECK_VERSION].status == "no_change"
 
 
 def test_event_consumer_error_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1336,13 +1311,13 @@ def test_event_consumer_error_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         UpdateEvent.error("demo", "boom\ntrace line"),
         item,
     )
-    check(consumer.errors == 1)
-    check(consumer.update_details["demo"] == "error")
-    check(hash_op.status == "error")
-    check(hash_op.message == "boom")
-    check(hash_op.active_commands == 0)
-    check(list(hash_op.tail) == [])
-    check(hash_op.detail_lines[-1] == "trace line")
+    assert consumer.errors == 1
+    assert consumer.update_details["demo"] == "error"
+    assert hash_op.status == "error"
+    assert hash_op.message == "boom"
+    assert hash_op.active_commands == 0
+    assert list(hash_op.tail) == []
+    assert hash_op.detail_lines[-1] == "trace line"
 
     consumer_non_tty, _queue = _consumer(monkeypatch, is_tty=False)
     item_non_tty = consumer_non_tty.items["demo"]
@@ -1350,7 +1325,7 @@ def test_event_consumer_error_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         UpdateEvent.error("demo", "plain error"), item_non_tty
     )
     non_tty_renderer = _renderer(consumer_non_tty)
-    check(("demo", "plain error") in non_tty_renderer.errors)
+    assert ("demo", "plain error") in non_tty_renderer.errors
 
 
 def test_event_consumer_dispatch_routes_and_skip(
@@ -1360,68 +1335,52 @@ def test_event_consumer_dispatch_routes_and_skip(
     consumer, _queue = _consumer(monkeypatch, is_tty=True, verbose=True)
     item = consumer.items["demo"]
 
-    check(
-        not object.__getattribute__(consumer, "_dispatch")(
-            UpdateEvent.status("demo", "Checking demo (current: 1.0)"),
-            item,
-        )
+    assert not object.__getattribute__(consumer, "_dispatch")(
+        UpdateEvent.status("demo", "Checking demo (current: 1.0)"),
+        item,
     )
-    check(
-        not object.__getattribute__(consumer, "_dispatch")(
-            UpdateEvent(
-                source="demo",
-                kind=UpdateEventKind.COMMAND_START,
-                payload=["flake-edit"],
+    assert not object.__getattribute__(consumer, "_dispatch")(
+        UpdateEvent(
+            source="demo",
+            kind=UpdateEventKind.COMMAND_START,
+            payload=["flake-edit"],
+        ),
+        item,
+    )
+    assert not object.__getattribute__(consumer, "_dispatch")(
+        UpdateEvent(
+            source="demo",
+            kind=UpdateEventKind.LINE,
+            message="line",
+            stream="stdout",
+        ),
+        item,
+    )
+    assert not object.__getattribute__(consumer, "_dispatch")(
+        UpdateEvent(
+            source="demo",
+            kind=UpdateEventKind.COMMAND_END,
+            payload=CommandResult(
+                args=["flake-edit"], returncode=0, stdout="", stderr=""
             ),
-            item,
-        )
+        ),
+        item,
     )
-    check(
-        not object.__getattribute__(consumer, "_dispatch")(
-            UpdateEvent(
-                source="demo",
-                kind=UpdateEventKind.LINE,
-                message="line",
-                stream="stdout",
-            ),
-            item,
-        )
-    )
-    check(
-        not object.__getattribute__(consumer, "_dispatch")(
-            UpdateEvent(
-                source="demo",
-                kind=UpdateEventKind.COMMAND_END,
-                payload=CommandResult(
-                    args=["flake-edit"], returncode=0, stdout="", stderr=""
-                ),
-            ),
-            item,
-        )
-    )
-
     # Invalid ref-result payload causes skip-render path.
     monkeypatch.setattr(consumer, "_handle_result", lambda _event, _item: True)
-    check(
-        object.__getattribute__(consumer, "_dispatch")(
-            UpdateEvent.result(
-                "demo",
-                payload={"current": "1", "latest": "2"},
-            ),
-            item,
-        )
+    assert object.__getattribute__(consumer, "_dispatch")(
+        UpdateEvent.result(
+            "demo",
+            payload={"current": "1", "latest": "2"},
+        ),
+        item,
     )
-
-    check(
-        not object.__getattribute__(consumer, "_dispatch")(
-            UpdateEvent.error("demo", "boom"), item
-        )
+    assert not object.__getattribute__(consumer, "_dispatch")(
+        UpdateEvent.error("demo", "boom"), item
     )
-    check(
-        not object.__getattribute__(consumer, "_dispatch")(
-            UpdateEvent(source="demo", kind=UpdateEventKind.VALUE, payload="ignored"),
-            item,
-        )
+    assert not object.__getattribute__(consumer, "_dispatch")(
+        UpdateEvent(source="demo", kind=UpdateEventKind.VALUE, payload="ignored"),
+        item,
     )
 
 
@@ -1439,15 +1398,15 @@ def test_event_consumer_run_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:
         return await consumer.run()
 
     result = asyncio.run(_run())
-    check(not result.updated)
-    check(result.errors == 0)
-    check(result.details == {})
-    check(result.source_updates == {})
-    check(result.artifact_updates == {})
+    assert not result.updated
+    assert result.errors == 0
+    assert result.details == {}
+    assert result.source_updates == {}
+    assert result.artifact_updates == {}
     renderer = _renderer(consumer)
-    check(renderer.request_calls >= TWO)
-    check(len(renderer.render_due_calls) >= TWO)
-    check(renderer.finalized)
+    assert renderer.request_calls >= TWO
+    assert len(renderer.render_due_calls) >= TWO
+    assert renderer.finalized
 
 
 def test_event_consumer_run_tty_ticker_and_wrapper(
@@ -1474,13 +1433,13 @@ def test_event_consumer_run_tty_ticker_and_wrapper(
         return await run_task
 
     result = asyncio.run(_run_consumer())
-    check(not result.updated)
-    check(result.errors == 0)
-    check(result.source_updates == {})
-    check(result.artifact_updates == {})
-    check(sleep_calls >= 1)
+    assert not result.updated
+    assert result.errors == 0
+    assert result.source_updates == {}
+    assert result.artifact_updates == {}
+    assert sleep_calls >= 1
     renderer = _renderer(consumer)
-    check(renderer.finalized)
+    assert renderer.finalized
 
     async def _run_wrapper() -> ui_consumer_module.ConsumeEventsResult:
         wrapped_queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
@@ -1500,11 +1459,11 @@ def test_event_consumer_run_tty_ticker_and_wrapper(
         )
 
     result = asyncio.run(_run_wrapper())
-    check(not result.updated)
-    check(result.errors == 0)
-    check(result.details == {})
-    check(result.source_updates == {})
-    check(result.artifact_updates == {})
+    assert not result.updated
+    assert result.errors == 0
+    assert result.details == {}
+    assert result.source_updates == {}
+    assert result.artifact_updates == {}
 
 
 def test_event_consumer_run_skip_render_and_result_map_guard(
@@ -1520,7 +1479,7 @@ def test_event_consumer_run_skip_render_and_result_map_guard(
         UpdateEvent.result("demo", payload=bad_payload),
         item,
     )
-    check(should_skip)
+    assert should_skip
 
     # If check status is not pending, RESULT none should not overwrite it.
     check_op = item.operations[OperationKind.CHECK_VERSION]
@@ -1529,7 +1488,7 @@ def test_event_consumer_run_skip_render_and_result_map_guard(
         UpdateEvent.result("demo", payload=None),
         item,
     )
-    check(check_op.status == "success")
+    assert check_op.status == "success"
 
     # run loop skip-render path: _dispatch returns True, request_render not called.
     monkeypatch.setattr(consumer, "_dispatch", lambda _event, _item: True)
@@ -1541,7 +1500,7 @@ def test_event_consumer_run_skip_render_and_result_map_guard(
 
     asyncio.run(_run())
     renderer = _renderer(consumer)
-    check(renderer.request_calls == 0)
+    assert renderer.request_calls == 0
 
 
 def test_event_consumer_internal_branch_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1554,7 +1513,7 @@ def test_event_consumer_internal_branch_paths(monkeypatch: pytest.MonkeyPatch) -
         UpdateEvent.result("demo", payload="updated"),
         item,
     )
-    check(not should_skip)
+    assert not should_skip
 
     # _handle_ref_result branch when check_op is absent and update/ref ops not running.
     source_only_consumer, _queue = _consumer(
@@ -1562,14 +1521,11 @@ def test_event_consumer_internal_branch_paths(monkeypatch: pytest.MonkeyPatch) -
         op_order=(OperationKind.COMPUTE_HASH,),
     )
     source_item = source_only_consumer.items["demo"]
-    check(
-        not object.__getattribute__(source_only_consumer, "_handle_ref_result")(
-            UpdateEvent.result("demo", payload={"current": "1", "latest": "2"}),
-            source_item,
-            {"current": "1", "latest": "2"},
-        )
+    assert not object.__getattribute__(source_only_consumer, "_handle_ref_result")(
+        UpdateEvent.result("demo", payload={"current": "1", "latest": "2"}),
+        source_item,
+        {"current": "1", "latest": "2"},
     )
-
     # _handle_source_result branch variants.
     check_consumer, _queue = _consumer(monkeypatch, is_tty=True)
     check_item = check_consumer.items["demo"]
@@ -1581,7 +1537,7 @@ def test_event_consumer_internal_branch_paths(monkeypatch: pytest.MonkeyPatch) -
         check_item,
         no_version_entry,
     )
-    check(check_op.message == "already-set")
+    assert check_op.message == "already-set"
 
     no_hash_consumer, _queue = _consumer(
         monkeypatch,
@@ -1617,7 +1573,7 @@ def test_event_consumer_internal_branch_paths(monkeypatch: pytest.MonkeyPatch) -
         same_version_item,
         same_version_result,
     )
-    check(same_check.message == "already-set")
+    assert same_check.message == "already-set"
 
     # _handle_command_end branch without tail lines for nix build failure.
     hash_op = item.operations[OperationKind.COMPUTE_HASH]
@@ -1636,7 +1592,7 @@ def test_event_consumer_internal_branch_paths(monkeypatch: pytest.MonkeyPatch) -
         ),
         item,
     )
-    check(hash_op.status == "error")
+    assert hash_op.status == "error"
 
 
 def test_event_consumer_ticker_requests_render(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1661,8 +1617,8 @@ def test_event_consumer_ticker_requests_render(monkeypatch: pytest.MonkeyPatch) 
         _ = await task
 
     asyncio.run(_run())
-    check(renderer.request_calls >= 1)
-    check(len(renderer.render_due_calls) >= 1)
+    assert renderer.request_calls >= 1
+    assert len(renderer.render_due_calls) >= 1
 
 
 def test_event_consumer_error_empty_splitlines_branch(

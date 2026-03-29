@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._assertions import check
 from lib.update.ci.merge_sources import main
 
 if TYPE_CHECKING:
@@ -64,8 +63,8 @@ def test_merge_sources_fails_for_missing_and_empty_roots(tmp_path: Path) -> None
         )
 
     message = str(exc.value)
-    check(str(missing_root) in message)
-    check(str(empty_root) in message)
+    assert str(missing_root) in message
+    assert str(empty_root) in message
 
 
 def test_merge_sources_keeps_platform_hashes_from_matching_roots(
@@ -158,7 +157,7 @@ def test_merge_sources_keeps_platform_hashes_from_matching_roots(
         output_root / "packages" / "demo" / "sources.json",
     )
 
-    check(
+    assert (
         main(
             [
                 str(darwin_root),
@@ -170,7 +169,6 @@ def test_merge_sources_keeps_platform_hashes_from_matching_roots(
         )
         == 0
     )
-
     merged_path = output_root / "packages" / "demo" / "sources.json"
     merged = json.loads(merged_path.read_text(encoding="utf-8"))
     by_platform = {
@@ -178,9 +176,9 @@ def test_merge_sources_keeps_platform_hashes_from_matching_roots(
         for entry in merged["hashes"]
         if entry["hashType"] == "denoDepsHash"
     }
-    check(by_platform["aarch64-darwin"] == fresh_darwin)
-    check(by_platform["x86_64-linux"] == fresh_linux)
-    check(by_platform["aarch64-linux"] == fresh_arm_linux)
+    assert by_platform["aarch64-darwin"] == fresh_darwin
+    assert by_platform["x86_64-linux"] == fresh_linux
+    assert by_platform["aarch64-linux"] == fresh_arm_linux
 
 
 def test_merge_sources_creates_missing_output_destination(tmp_path: Path) -> None:
@@ -204,12 +202,12 @@ def test_merge_sources_creates_missing_output_destination(tmp_path: Path) -> Non
     # Output repo has the package directory but no sources.json yet.
     (output_root / "packages" / "demo").mkdir(parents=True, exist_ok=True)
 
-    check(main([str(linux_root), "--output-root", str(output_root)]) == 0)
+    assert main([str(linux_root), "--output-root", str(output_root)]) == 0
 
     merged_path = output_root / "packages" / "demo" / "sources.json"
-    check(merged_path.is_file())
+    assert merged_path.is_file()
     merged = json.loads(merged_path.read_text(encoding="utf-8"))
-    check(merged["version"] == "1.2.3")
+    assert merged["version"] == "1.2.3"
 
 
 def test_merge_sources_rejects_conflicting_non_platform_hashes(tmp_path: Path) -> None:

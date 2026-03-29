@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 import aiohttp
 import pytest
 
-from lib.tests._assertions import check
 from lib.update.events import CapturedValue, UpdateEvent, UpdateEventKind
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.github_raw_file import (
@@ -39,11 +38,11 @@ def test_github_raw_file_updater_factory_sets_class_attributes() -> None:
         repo="repo",
         path="path/to/file.txt",
     )
-    check(issubclass(updater_cls, GitHubRawFileUpdater))
-    check(updater_cls.name == "demo")
-    check(updater_cls.owner == "owner")
-    check(updater_cls.repo == "repo")
-    check(updater_cls.path == "path/to/file.txt")
+    assert issubclass(updater_cls, GitHubRawFileUpdater)
+    assert updater_cls.name == "demo"
+    assert updater_cls.owner == "owner"
+    assert updater_cls.repo == "repo"
+    assert updater_cls.path == "path/to/file.txt"
 
 
 def test_fetch_latest_uses_default_branch_and_latest_commit(
@@ -94,9 +93,9 @@ def test_fetch_latest_uses_default_branch_and_latest_commit(
             return await updater.fetch_latest(session)
 
     info = asyncio.run(_run())
-    check(info.version == "deadbeef")
-    check(info.metadata["rev"] == "deadbeef")
-    check(info.metadata["branch"] == "main")
+    assert info.version == "deadbeef"
+    assert info.metadata["rev"] == "deadbeef"
+    assert info.metadata["branch"] == "main"
 
 
 def test_fetch_hashes_emits_entries_and_validates_metadata(
@@ -146,11 +145,11 @@ def test_fetch_hashes_emits_entries_and_validates_metadata(
             session=object(),  # type: ignore[arg-type]
         )
     )
-    check(events[0].kind == UpdateEventKind.STATUS)
-    check(events[-1].kind == UpdateEventKind.VALUE)
+    assert events[0].kind == UpdateEventKind.STATUS
+    assert events[-1].kind == UpdateEventKind.VALUE
     payload = events[-1].payload
-    check(isinstance(payload, list))
-    check(payload[0].hash == "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    assert isinstance(payload, list)
+    assert payload[0].hash == "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 
 def test_fetch_hashes_accepts_typed_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -191,4 +190,4 @@ def test_fetch_hashes_accepts_typed_metadata(monkeypatch: pytest.MonkeyPatch) ->
             session=object(),  # type: ignore[arg-type]
         )
     )
-    check(events[-1].kind == UpdateEventKind.VALUE)
+    assert events[-1].kind == UpdateEventKind.VALUE

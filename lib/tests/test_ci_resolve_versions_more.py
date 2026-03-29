@@ -6,17 +6,15 @@ import asyncio
 import json
 from typing import TYPE_CHECKING
 
+import pytest
 from pydantic import BaseModel
 
 from lib.nix.models.flake_lock import FlakeLockNode
-from lib.tests._assertions import check
 from lib.update.ci import resolve_versions as rv
 from lib.update.updaters.base import VersionInfo
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 class _DemoModel(BaseModel):
@@ -32,7 +30,7 @@ def test_make_json_safe_handles_models_and_tuples() -> None:
 
     result = object.__getattribute__(rv, "_make_json_safe")(payload)
 
-    check(result == {"m": {"value": "ok"}, "items": [1, "two", None]})
+    assert result == {"m": {"value": "ok"}, "items": [1, "two", None]}
 
 
 def test_make_json_safe_rejects_unsupported_value() -> None:
@@ -40,7 +38,7 @@ def test_make_json_safe_rejects_unsupported_value() -> None:
     try:
         object.__getattribute__(rv, "_make_json_safe")({"bad": {1, 2}})
     except TypeError as exc:
-        check("not JSON-serializable" in str(exc))
+        assert "not JSON-serializable" in str(exc)
     else:
         raise AssertionError("expected TypeError")
 
@@ -52,14 +50,14 @@ def test_deserialize_validates_required_fields() -> None:
     try:
         deserialize({"version": 123, "metadata": {}})
     except TypeError as exc:
-        check("missing string 'version'" in str(exc))
+        assert "missing string 'version'" in str(exc)
     else:
         raise AssertionError("expected TypeError for invalid version")
 
     try:
         deserialize({"version": "1.2.3", "metadata": []})
     except TypeError as exc:
-        check("invalid 'metadata'" in str(exc))
+        assert "invalid 'metadata'" in str(exc)
     else:
         raise AssertionError("expected TypeError for invalid metadata")
 
@@ -84,15 +82,15 @@ def test_deserialize_rehydrates_flake_lock_node() -> None:
     })
 
     node_obj = info.metadata.get("node")
-    check(isinstance(node_obj, FlakeLockNode))
+    assert isinstance(node_obj, FlakeLockNode)
     if not isinstance(node_obj, FlakeLockNode):
         raise AssertionError("expected FlakeLockNode metadata")
-    check(node_obj.locked is not None)
+    assert node_obj.locked is not None
     if node_obj.locked is None:
         raise AssertionError("expected locked flake metadata")
-    check(node_obj.locked.owner == "sst")
-    check(node_obj.locked.repo == "opencode")
-    check(node_obj.locked.rev == "abc123")
+    assert node_obj.locked.owner == "sst"
+    assert node_obj.locked.repo == "opencode"
+    assert node_obj.locked.rev == "abc123"
 
 
 def test_deserialize_rejects_invalid_node_metadata() -> None:
@@ -114,7 +112,7 @@ def test_deserialize_rejects_invalid_node_metadata() -> None:
             },
         })
     except TypeError as exc:
-        check("invalid node metadata" in str(exc))
+        assert "invalid node metadata" in str(exc)
     else:
         raise AssertionError("expected TypeError for invalid node metadata")
 
@@ -127,7 +125,7 @@ def test_load_pinned_versions_validates_top_level_shape(tmp_path: Path) -> None:
     try:
         rv.load_pinned_versions(path)
     except TypeError as exc:
-        check("must be a JSON object" in str(exc))
+        assert "must be a JSON object" in str(exc)
     else:
         raise AssertionError("expected TypeError for non-object payload")
 
@@ -135,7 +133,7 @@ def test_load_pinned_versions_validates_top_level_shape(tmp_path: Path) -> None:
     try:
         rv.load_pinned_versions(path)
     except TypeError as exc:
-        check("Invalid pinned versions entry" in str(exc))
+        assert "Invalid pinned versions entry" in str(exc)
     else:
         raise AssertionError("expected TypeError for invalid entry")
 
@@ -188,10 +186,10 @@ def test_resolve_all_handles_fallback_init_and_failures(
 
     results, failures = asyncio.run(object.__getattribute__(rv, "_resolve_all")())
 
-    check(set(results) == {"needs-config", "no-config"})
-    check(results["needs-config"]["version"] == "1.0.0")
-    check(results["no-config"]["version"] == "2.0.0")
-    check(failures == ["fails"])
+    assert set(results) == {"needs-config", "no-config"}
+    assert results["needs-config"]["version"] == "1.0.0"
+    assert results["no-config"]["version"] == "2.0.0"
+    assert failures == ["fails"]
 
 
 def test_resolve_all_rejects_non_version_payload(
@@ -220,7 +218,7 @@ def test_resolve_all_rejects_non_version_payload(
     try:
         asyncio.run(object.__getattribute__(rv, "_resolve_all")())
     except TypeError as exc:
-        check("unexpected version payload" in str(exc))
+        assert "unexpected version payload" in str(exc)
     else:
         raise AssertionError("expected TypeError")
 
@@ -250,9 +248,49 @@ def test_resolve_all_reraises_type_error_not_related_to_config(
     try:
         asyncio.run(object.__getattribute__(rv, "_resolve_all")())
     except TypeError as exc:
-        check("totally unrelated" in str(exc))
+        assert "totally unrelated" in str(exc)
     else:
         raise AssertionError("expected TypeError")
+
+
+def test_resolve_all_reraises_multiple_taskgroup_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve grouped failures when multiple updaters error concurrently."""
+
+    class _Session:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    class _BadOne:
+        def __init__(self, *, config: object) -> None:
+            self.config = config
+
+        async def fetch_latest(self, _session: object) -> object:
+            return {"version": "bad-one"}
+
+    class _BadTwo:
+        def __init__(self, *, config: object) -> None:
+            self.config = config
+
+        async def fetch_latest(self, _session: object) -> object:
+            return {"version": "bad-two"}
+
+    monkeypatch.setattr(rv.aiohttp, "ClientSession", _Session)
+    monkeypatch.setattr(rv, "resolve_active_config", lambda _x: {})
+    monkeypatch.setattr(rv, "UPDATERS", {"one": _BadOne, "two": _BadTwo})
+
+    with pytest.raises(ExceptionGroup) as excinfo:
+        asyncio.run(object.__getattribute__(rv, "_resolve_all")())
+
+    messages = {str(exc) for exc in excinfo.value.exceptions}
+    assert messages == {
+        "unexpected version payload for one: <class 'dict'>",
+        "unexpected version payload for two: <class 'dict'>",
+    }
 
 
 def test_run_returns_error_when_no_versions(
@@ -270,8 +308,8 @@ def test_run_returns_error_when_no_versions(
 
     rc = rv.run(output=output, strict=False)
 
-    check(rc == 1)
-    check(not output.exists())
+    assert rc == 1
+    assert not output.exists()
 
 
 def test_run_writes_manifest_when_non_strict_with_failures(
@@ -302,6 +340,27 @@ def test_run_writes_manifest_when_non_strict_with_failures(
 
     rc = rv.run(output=output, strict=False)
 
-    check(rc == 0)
-    check(wrote["path"] == output)
-    check(isinstance(wrote["payload"], dict))
+    assert rc == 0
+    assert wrote["path"] == output
+    assert isinstance(wrote["payload"], dict)
+
+
+def test_main_accepts_allow_partial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Expose partial-manifest mode explicitly via CLI parsing."""
+    output = tmp_path / "pinned.json"
+    called: dict[str, object] = {}
+
+    def _fake_run(*, output: Path, strict: bool = True) -> int:
+        called["output"] = output
+        called["strict"] = strict
+        return 0
+
+    monkeypatch.setattr(rv, "run", _fake_run)
+
+    rc = rv.main(["--output", str(output), "--allow-partial"])
+
+    assert rc == 0
+    assert called["output"] == output
+    assert called["strict"] is False

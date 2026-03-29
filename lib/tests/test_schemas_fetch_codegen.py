@@ -12,7 +12,6 @@ import pytest
 
 from lib.nix.schemas import _codegen as codegen
 from lib.nix.schemas import _fetch as fetch
-from lib.tests._assertions import check
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -86,11 +85,11 @@ class _FakeRegistry:
 def test_fetch_unwrap_gh_token_variants() -> None:
     """Run this test case."""
     plain = " ghp_plain \n"
-    check(object.__getattribute__(fetch, "_unwrap_gh_token")(plain) == "ghp_plain")
+    assert object.__getattribute__(fetch, "_unwrap_gh_token")(plain) == "ghp_plain"
 
     encoded = base64.b64encode(b"ghp_encoded\n").decode()
     wrapped = f"go-keyring-base64:{encoded}"
-    check(object.__getattribute__(fetch, "_unwrap_gh_token")(wrapped) == "ghp_encoded")
+    assert object.__getattribute__(fetch, "_unwrap_gh_token")(wrapped) == "ghp_encoded"
 
 
 def test_fetch_resolve_github_token_prefers_env(
@@ -99,7 +98,7 @@ def test_fetch_resolve_github_token_prefers_env(
     """Run this test case."""
     monkeypatch.setenv("GITHUB_TOKEN", "env-token")
     monkeypatch.setattr(fetch.keyring, "get_password", lambda *_a, **_k: "ignored")
-    check(object.__getattribute__(fetch, "_resolve_github_token")() == "env-token")
+    assert object.__getattribute__(fetch, "_resolve_github_token")() == "env-token"
 
 
 def test_fetch_resolve_github_token_from_keyring(
@@ -109,7 +108,7 @@ def test_fetch_resolve_github_token_from_keyring(
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.setattr(fetch.keyring, "get_password", lambda *_a, **_k: " keyring ")
-    check(object.__getattribute__(fetch, "_resolve_github_token")() == "keyring")
+    assert object.__getattribute__(fetch, "_resolve_github_token")() == "keyring"
 
 
 def test_fetch_resolve_github_token_keyring_errors(
@@ -124,7 +123,7 @@ def test_fetch_resolve_github_token_keyring_errors(
         raise RuntimeError(msg)
 
     monkeypatch.setattr(fetch.keyring, "get_password", _boom)
-    check(object.__getattribute__(fetch, "_resolve_github_token")() is None)
+    assert object.__getattribute__(fetch, "_resolve_github_token")() is None
 
 
 def test_fetch_get_github_token_cached(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -139,9 +138,9 @@ def test_fetch_get_github_token_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     fetch.__dict__["_GITHUB_TOKEN"] = None
     monkeypatch.setattr(fetch, "_resolve_github_token", _resolve)
 
-    check(object.__getattribute__(fetch, "_get_github_token")() == "cached")
-    check(object.__getattribute__(fetch, "_get_github_token")() == "cached")
-    check(calls == 1)
+    assert object.__getattribute__(fetch, "_get_github_token")() == "cached"
+    assert object.__getattribute__(fetch, "_get_github_token")() == "cached"
+    assert calls == 1
 
 
 def test_fetch_github_get_adds_auth_header(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,10 +158,10 @@ def test_fetch_github_get_adds_auth_header(monkeypatch: pytest.MonkeyPatch) -> N
         "https://api.github.com/repos/NixOS/nix"
     )
 
-    check(payload == b"{}")
+    assert payload == b"{}"
     headers_obj = _as_object_dict(captured.get("headers"), context="github headers")
-    check(headers_obj["Authorization"] == "token gh-token")
-    check(headers_obj["Accept"] == "application/vnd.github.v3+json")
+    assert headers_obj["Authorization"] == "token gh-token"
+    assert headers_obj["Accept"] == "application/vnd.github.v3+json"
 
 
 def test_fetch_github_get_without_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,10 +179,10 @@ def test_fetch_github_get_without_token(monkeypatch: pytest.MonkeyPatch) -> None
         "https://api.github.com/repos/NixOS/nix"
     )
 
-    check(payload == b"{}")
+    assert payload == b"{}"
     headers_obj = _as_object_dict(captured.get("headers"), context="github headers")
-    check("Authorization" not in headers_obj)
-    check(headers_obj["Accept"] == "application/vnd.github.v3+json")
+    assert "Authorization" not in headers_obj
+    assert headers_obj["Accept"] == "application/vnd.github.v3+json"
 
 
 def test_fetch_download_schema_delegates_to_https_get(
@@ -194,7 +193,7 @@ def test_fetch_download_schema_delegates_to_https_get(
     payload = object.__getattribute__(fetch, "_download_schema")(
         "https://example.com/schema.yaml"
     )
-    check(payload == b"download:https://example.com/schema.yaml")
+    assert payload == b"download:https://example.com/schema.yaml"
 
 
 def test_fetch_default_branch_and_schema_listing(
@@ -215,22 +214,19 @@ def test_fetch_default_branch_and_schema_listing(
     monkeypatch.setattr(fetch, "_github_get", lambda url: responses[url])
 
     sha, branch = object.__getattribute__(fetch, "_get_default_branch_head")()
-    check((sha, branch) == ("abc123", "main"))
+    assert (sha, branch) == ("abc123", "main")
 
     files = object.__getattribute__(fetch, "_list_schema_files")("abc123")
-    check(
-        files
-        == [
-            {
-                "name": "a.yaml",
-                "download_url": f"{fetch.RAW_BASE}/abc123/{fetch.SCHEMA_PATH}/a.yaml",
-            },
-            {
-                "name": "b.yaml",
-                "download_url": f"{fetch.RAW_BASE}/abc123/{fetch.SCHEMA_PATH}/b.yaml",
-            },
-        ]
-    )
+    assert files == [
+        {
+            "name": "a.yaml",
+            "download_url": f"{fetch.RAW_BASE}/abc123/{fetch.SCHEMA_PATH}/a.yaml",
+        },
+        {
+            "name": "b.yaml",
+            "download_url": f"{fetch.RAW_BASE}/abc123/{fetch.SCHEMA_PATH}/b.yaml",
+        },
+    ]
 
 
 def test_fetch_https_get_validates_scheme() -> None:
@@ -258,8 +254,8 @@ def test_fetch_https_get_success_and_error(monkeypatch: pytest.MonkeyPatch) -> N
         port: int | None = None,
         timeout: int | None = None,
     ) -> _FakeHTTPSConnection:
-        check(port == https_port)
-        check(timeout == expected_timeout)
+        assert port == https_port
+        assert timeout == expected_timeout
         return ok_conn
 
     monkeypatch.setattr(
@@ -270,12 +266,12 @@ def test_fetch_https_get_success_and_error(monkeypatch: pytest.MonkeyPatch) -> N
     body = object.__getattribute__(fetch, "_https_get")(
         "https://example.com/path?q=1", headers={"X-Test": "1"}
     )
-    check(body == b"payload")
-    check(ok_conn.requests[0][0] == "GET")
-    check(ok_conn.requests[0][1] == "/path?q=1")
-    check(ok_conn.requests[0][2]["User-Agent"] == "nixcfg-schema-fetch")
-    check(ok_conn.requests[0][2]["X-Test"] == "1")
-    check(ok_conn.closed)
+    assert body == b"payload"
+    assert ok_conn.requests[0][0] == "GET"
+    assert ok_conn.requests[0][1] == "/path?q=1"
+    assert ok_conn.requests[0][2]["User-Agent"] == "nixcfg-schema-fetch"
+    assert ok_conn.requests[0][2]["X-Test"] == "1"
+    assert ok_conn.closed
 
     bad_response = _FakeHTTPResponse(status=404, reason="Not Found", body=b"nope")
     bad_conn = _FakeHTTPSConnection(bad_response)
@@ -285,8 +281,8 @@ def test_fetch_https_get_success_and_error(monkeypatch: pytest.MonkeyPatch) -> N
         port: int | None = None,
         timeout: int | None = None,
     ) -> _FakeHTTPSConnection:
-        check(port == https_port)
-        check(timeout == expected_timeout)
+        assert port == https_port
+        assert timeout == expected_timeout
         return bad_conn
 
     monkeypatch.setattr(
@@ -308,7 +304,7 @@ def test_fetch_https_get_wraps_timeout_errors(monkeypatch: pytest.MonkeyPatch) -
 
         def request(self, _method: str, _path: str, headers: dict[str, str]) -> None:
             self.request_calls += 1
-            check(headers["User-Agent"] == "nixcfg-schema-fetch")
+            assert headers["User-Agent"] == "nixcfg-schema-fetch"
             msg = "timed out"
             raise TimeoutError(msg)
 
@@ -328,8 +324,8 @@ def test_fetch_https_get_wraps_timeout_errors(monkeypatch: pytest.MonkeyPatch) -
         port: int | None = None,
         timeout: int | None = None,
     ) -> _TimeoutHTTPSConnection:
-        check(port == https_port)
-        check(timeout == expected_timeout)
+        assert port == https_port
+        assert timeout == expected_timeout
         return timeout_conn
 
     monkeypatch.setattr(
@@ -350,15 +346,12 @@ def test_fetch_https_get_wraps_timeout_errors(monkeypatch: pytest.MonkeyPatch) -
         object.__getattribute__(fetch, "_https_get")("https://example.com/slow")
 
     max_attempts = object.__getattribute__(fetch, "_HTTP_MAX_ATTEMPTS")
-    check(timeout_conn.request_calls == max_attempts)
-    check(timeout_conn.closed_count == max_attempts)
-    check(
-        sleep_calls
-        == [
-            object.__getattribute__(fetch, "_retry_delay_seconds")(1),
-            object.__getattribute__(fetch, "_retry_delay_seconds")(2),
-        ]
-    )
+    assert timeout_conn.request_calls == max_attempts
+    assert timeout_conn.closed_count == max_attempts
+    assert sleep_calls == [
+        object.__getattribute__(fetch, "_retry_delay_seconds")(1),
+        object.__getattribute__(fetch, "_retry_delay_seconds")(2),
+    ]
 
 
 def test_fetch_https_get_retries_retryable_http_status(
@@ -379,8 +372,8 @@ def test_fetch_https_get_retries_retryable_http_status(
         port: int | None = None,
         timeout: int | None = None,
     ) -> _FakeHTTPSConnection:
-        check(port == https_port)
-        check(timeout == expected_timeout)
+        assert port == https_port
+        assert timeout == expected_timeout
         response = next(responses)
         conn = _FakeHTTPSConnection(response)
         connections.append(conn)
@@ -401,9 +394,9 @@ def test_fetch_https_get_retries_retryable_http_status(
     body = object.__getattribute__(fetch, "_https_get")("https://example.com/retry")
 
     expected_attempts = 2
-    check(body == b"ok")
-    check(len(connections) == expected_attempts)
-    check(sleep_calls == [object.__getattribute__(fetch, "_retry_delay_seconds")(1)])
+    assert body == b"ok"
+    assert len(connections) == expected_attempts
+    assert sleep_calls == [object.__getattribute__(fetch, "_retry_delay_seconds")(1)]
 
 
 def test_fetch_https_get_retries_oserror_and_reports_failure(
@@ -438,15 +431,12 @@ def test_fetch_https_get_retries_oserror_and_reports_failure(
         object.__getattribute__(fetch, "_https_get")("https://example.com/os")
 
     max_attempts = object.__getattribute__(fetch, "_HTTP_MAX_ATTEMPTS")
-    check(conn.request_calls == max_attempts)
-    check(conn.closed_count == max_attempts)
-    check(
-        sleep_calls
-        == [
-            object.__getattribute__(fetch, "_retry_delay_seconds")(1),
-            object.__getattribute__(fetch, "_retry_delay_seconds")(2),
-        ]
-    )
+    assert conn.request_calls == max_attempts
+    assert conn.closed_count == max_attempts
+    assert sleep_calls == [
+        object.__getattribute__(fetch, "_retry_delay_seconds")(1),
+        object.__getattribute__(fetch, "_retry_delay_seconds")(2),
+    ]
 
 
 def test_fetch_https_get_retryable_status_exhausted_reports_attempts(
@@ -504,12 +494,12 @@ def test_fetch_write_and_parse_version_manifest(
     object.__getattribute__(fetch, "_write_version")("deadbeef", "main", files)
 
     manifest = object.__getattribute__(fetch, "_parse_version")()
-    check(manifest is not None)
-    check(manifest.commit == "deadbeef")
-    check(manifest.branch == "main")
-    check(manifest.repo == fetch.REPO)
-    check(manifest.path == fetch.SCHEMA_PATH)
-    check(set(manifest.checksums) == {"a.yaml", "b.yaml"})
+    assert manifest is not None
+    assert manifest.commit == "deadbeef"
+    assert manifest.branch == "main"
+    assert manifest.repo == fetch.REPO
+    assert manifest.path == fetch.SCHEMA_PATH
+    assert set(manifest.checksums) == {"a.yaml", "b.yaml"}
 
 
 def test_fetch_parse_version_invalid_payload(
@@ -519,13 +509,13 @@ def test_fetch_parse_version_invalid_payload(
     version_file = tmp_path / "_version.json"
     monkeypatch.setattr(fetch, "VERSION_FILE", version_file)
 
-    check(object.__getattribute__(fetch, "_parse_version")() is None)
+    assert object.__getattribute__(fetch, "_parse_version")() is None
 
     version_file.write_text("{not json", encoding="utf-8")
-    check(object.__getattribute__(fetch, "_parse_version")() is None)
+    assert object.__getattribute__(fetch, "_parse_version")() is None
 
     version_file.write_text(json.dumps({"commit": "x"}), encoding="utf-8")
-    check(object.__getattribute__(fetch, "_parse_version")() is None)
+    assert object.__getattribute__(fetch, "_parse_version")() is None
 
 
 def test_fetch_emit_progress_noop_when_unset() -> None:
@@ -562,21 +552,18 @@ def test_fetch_downloads_files_and_writes_manifest(
     progress: list[str] = []
     fetch.fetch(progress=progress.append)
 
-    check((schemas_dir / "a.yaml").read_bytes() == b"https://example.com/a")
-    check((schemas_dir / "b.yaml").read_bytes() == b"https://example.com/b")
-    check(writes == [("abc", "main", files)])
-    check(
-        progress
-        == [
-            f"Resolving default branch head for {fetch.REPO}.",
-            "Listing schema files for main@abc.",
-            "Fetching 2 schema file(s) from main@abc.",
-            "Downloading 1/2: a.yaml",
-            "Downloading 2/2: b.yaml",
-            "Updating schema version manifest.",
-            "Schema fetch complete.",
-        ]
-    )
+    assert (schemas_dir / "a.yaml").read_bytes() == b"https://example.com/a"
+    assert (schemas_dir / "b.yaml").read_bytes() == b"https://example.com/b"
+    assert writes == [("abc", "main", files)]
+    assert progress == [
+        f"Resolving default branch head for {fetch.REPO}.",
+        "Listing schema files for main@abc.",
+        "Fetching 2 schema file(s) from main@abc.",
+        "Downloading 1/2: a.yaml",
+        "Downloading 2/2: b.yaml",
+        "Updating schema version manifest.",
+        "Schema fetch complete.",
+    ]
 
 
 def test_fetch_check_happy_path_and_failure_modes(
@@ -610,27 +597,27 @@ def test_fetch_check_happy_path_and_failure_modes(
     monkeypatch.setattr(
         fetch, "_download_schema", lambda url: b"a" if url.endswith("/a") else b"b"
     )
-    check(fetch.check())
+    assert fetch.check()
 
     # Missing local file.
     (schemas_dir / "b.yaml").unlink()
-    check(not fetch.check())
+    assert not fetch.check()
     (schemas_dir / "b.yaml").write_bytes(b"b")
 
     # Mismatched contents.
     monkeypatch.setattr(fetch, "_download_schema", lambda _url: b"different")
-    check(not fetch.check())
+    assert not fetch.check()
 
     # Stale local file.
     monkeypatch.setattr(
         fetch, "_download_schema", lambda url: b"a" if url.endswith("/a") else b"b"
     )
     (schemas_dir / "stale.yaml").write_bytes(b"x")
-    check(not fetch.check())
+    assert not fetch.check()
 
     # No version manifest.
     monkeypatch.setattr(fetch, "_parse_version", lambda: None)
-    check(not fetch.check())
+    assert not fetch.check()
 
 
 def test_fetch_main_check_and_fetch_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -647,7 +634,7 @@ def test_fetch_main_check_and_fetch_paths(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(fetch.sys, "argv", ["fetch", "--check"])
     with pytest.raises(SystemExit):
         fetch.main()
-    check(exits[-1] == 0)
+    assert exits[-1] == 0
 
     called = {"fetch": 0}
     monkeypatch.setattr(
@@ -655,7 +642,7 @@ def test_fetch_main_check_and_fetch_paths(monkeypatch: pytest.MonkeyPatch) -> No
     )
     monkeypatch.setattr(fetch.sys, "argv", ["fetch"])
     fetch.main()
-    check(called["fetch"] == 1)
+    assert called["fetch"] == 1
 
 
 def test_codegen_load_yaml_and_walk_pointer(
@@ -668,8 +655,8 @@ def test_codegen_load_yaml_and_walk_pointer(
     (schemas_dir / "sample.yaml").write_text("a:\n  b: 1\n", encoding="utf-8")
 
     loaded = object.__getattribute__(codegen, "_load_yaml")("sample")
-    check(loaded == {"a": {"b": 1}})
-    check(
+    assert loaded == {"a": {"b": 1}}
+    assert (
         object.__getattribute__(codegen, "_walk_pointer")({"a": {"b": 1}}, "/a/b") == 1
     )
 
@@ -699,50 +686,50 @@ def test_codegen_ref_resolver_additional_paths() -> None:
     )
 
     split_ref = object.__getattribute__(resolver_cls, "_split_ref")
-    check(split_ref("remote.yaml") == ("remote.yaml", ""))
+    assert split_ref("remote.yaml") == ("remote.yaml", "")
 
     resolve_ref_target = object.__getattribute__(resolver, "_resolve_ref_target")
     target = resolve_ref_target("", root={"type": "object"})
-    check(target is None)
+    assert target is None
 
     obj_dict = {"$ref": "", "title": "demo"}
     resolve_ref = object.__getattribute__(resolver, "_resolve_ref")
-    check(resolve_ref(ref="", obj_dict=obj_dict, seen=set(), root={}) == obj_dict)
+    assert resolve_ref(ref="", obj_dict=obj_dict, seen=set(), root={}) == obj_dict
 
     resolved_list = resolver.resolve([{"x": 1}], seen=set(), root={"type": "object"})
-    check(resolved_list == [{"x": 1}])
+    assert resolved_list == [{"x": 1}]
 
 
 def test_codegen_allof_merge_helpers_and_import_normalization() -> None:
     """Run this test case."""
     result: dict[str, object] = {"type": "object"}
     object.__getattribute__(codegen, "_merge_allof_properties")(result, {})
-    check("properties" not in result)
+    assert "properties" not in result
 
     rewritten = object.__getattribute__(codegen, "_rewrite_constr_type_hints")(
         "value: constr(pattern=r'^abc$')"
     )
-    check("Annotated[" in rewritten)
-    check("StringConstraints(pattern=r'^abc$')" in rewritten)
+    assert "Annotated[" in rewritten
+    assert "StringConstraints(pattern=r'^abc$')" in rewritten
 
     normalized = object.__getattribute__(codegen, "_normalize_pydantic_imports")(
         "from pydantic import BaseModel, constr\n"
     )
-    check("StringConstraints" in normalized)
-    check("constr" not in normalized)
+    assert "StringConstraints" in normalized
+    assert "constr" not in normalized
 
     normalized_existing = object.__getattribute__(
         codegen, "_normalize_pydantic_imports"
     )("from pydantic import BaseModel, StringConstraints, constr\n")
-    check(normalized_existing.count("StringConstraints") == 1)
-    check("constr" not in normalized_existing)
+    assert normalized_existing.count("StringConstraints") == 1
+    assert "constr" not in normalized_existing
 
     imports_block = object.__getattribute__(codegen, "_compose_imports_block")({
         "from pydantic import BaseModel",
         "from typing import Any",
         "import os",
     })
-    check("import os" in imports_block)
+    assert "import os" in imports_block
 
 
 def test_codegen_build_registry_registers_multiple_uris(
@@ -795,12 +782,12 @@ def test_codegen_build_registry_registers_multiple_uris(
     monkeypatch.setattr(codegen.importlib, "import_module", _import)
     registry = object.__getattribute__(codegen, "_build_registry")()
 
-    check(registry is registry_obj)
+    assert registry is registry_obj
     keys = [key for key, _resource in registry_obj.resources]
-    check("./one.yaml" in keys)
-    check("one.yaml" in keys)
-    check("https://schemas/one" in keys)
-    check("./two.yaml" in keys)
+    assert "./one.yaml" in keys
+    assert "one.yaml" in keys
+    assert "https://schemas/one" in keys
+    assert "./two.yaml" in keys
 
 
 def test_codegen_resolve_refs_paths_and_errors() -> None:
@@ -828,9 +815,9 @@ def test_codegen_resolve_refs_paths_and_errors() -> None:
     props_obj = _as_object_dict(resolved["properties"], context="resolved properties")
     prop_a = _as_object_dict(props_obj["a"], context="property a")
     prop_b = _as_object_dict(props_obj["b"], context="property b")
-    check(prop_a["type"] == "string")
-    check(prop_a["title"] == "A")
-    check(prop_b["type"] == "string")
+    assert prop_a["type"] == "string"
+    assert prop_a["title"] == "A"
+    assert prop_b["type"] == "string"
 
     circular_schema: dict[str, object] = {
         "loop": {"$ref": "#/loop"},
@@ -842,7 +829,7 @@ def test_codegen_resolve_refs_paths_and_errors() -> None:
         _FakeRegistry({}),
     )
     loop_val = _as_object_dict(circular["loop"], context="circular loop")
-    check(loop_val["description"] == "Circular ref: #/loop")
+    assert loop_val["description"] == "Circular ref: #/loop"
 
     with pytest.raises(TypeError, match="Invalid schema registry instance"):
         object.__getattribute__(codegen, "_resolve_refs")(
@@ -888,10 +875,10 @@ def test_codegen_merge_allof_and_fixup_schema() -> None:
     object.__getattribute__(codegen, "_merge_allof_branches")(result)
 
     props = _as_object_dict(result["properties"], context="merged properties")
-    check("a" in props)
-    check(result["required"] == ["existing", "a"])
-    check(result["x-extra"] == 1)
-    check(result["allOf"] == [{"not": {"type": "null"}}, 1])
+    assert "a" in props
+    assert result["required"] == ["existing", "a"]
+    assert result["x-extra"] == 1
+    assert result["allOf"] == [{"not": {"type": "null"}}, 1]
 
     fixed = object.__getattribute__(codegen, "_fixup_schema")({
         "description": "drop me",
@@ -899,8 +886,8 @@ def test_codegen_merge_allof_and_fixup_schema() -> None:
         "allOf": [{"properties": {"a": {"const": None}}}],
     })
     fixed_dict = _as_object_dict(fixed, context="fixed schema")
-    check("description" not in fixed_dict)
-    check(fixed_dict["type"] == "null")
+    assert "description" not in fixed_dict
+    assert fixed_dict["type"] == "null"
 
 
 def test_codegen_generate_models_and_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -948,8 +935,8 @@ def test_codegen_generate_models_and_helpers(monkeypatch: pytest.MonkeyPatch) ->
     generated = object.__getattribute__(codegen, "_generate_models")(
         "demo", {"type": "object"}
     )
-    check("class Item" in generated)
-    check("schema_json" in recorded)
+    assert "class Item" in generated
+    assert "schema_json" in recorded
 
     monkeypatch.setattr(codegen, "_fixup_schema", lambda _obj: [])
     with pytest.raises(TypeError, match="Expected JSON object for fixed schema"):
@@ -971,13 +958,13 @@ def test_codegen_generate_models_and_helpers(monkeypatch: pytest.MonkeyPatch) ->
         "#   timestamp: t\n"
         "from x import y\n"
     )
-    check(stripped == "from x import y")
+    assert stripped == "from x import y"
 
     imports_found, body = object.__getattribute__(codegen, "_collect_imports")(
         "from a import b\nimport c\nclass X:\n    pass\n"
     )
-    check(imports_found == {"from a import b", "import c"})
-    check("class X" in body)
+    assert imports_found == {"from a import b", "import c"}
+    assert "class X" in body
 
 
 def test_codegen_main_writes_deduped_output(
@@ -1029,23 +1016,20 @@ def test_codegen_main_writes_deduped_output(
     codegen.main(progress=progress.append)
 
     content = output_file.read_text(encoding="utf-8")
-    check("class Shared(" in content)
-    check(content.count("class Shared(") == 1)
-    check("class One(" in content)
-    check("class Two(" in content)
-    check("from pydantic import BaseModel" in content)
-    check(content.count("from typing import Optional") == 1)
-    check(
-        progress
-        == [
-            "Building schema registry.",
-            "Generating models for 2 top-level schema(s).",
-            "Processing 1/2: one",
-            "Processing 2/2: two",
-            f"Writing generated models to {output_file}.",
-            "Schema codegen complete.",
-        ]
-    )
+    assert "class Shared(" in content
+    assert content.count("class Shared(") == 1
+    assert "class One(" in content
+    assert "class Two(" in content
+    assert "from pydantic import BaseModel" in content
+    assert content.count("from typing import Optional") == 1
+    assert progress == [
+        "Building schema registry.",
+        "Generating models for 2 top-level schema(s).",
+        "Processing 1/2: one",
+        "Processing 2/2: two",
+        f"Writing generated models to {output_file}.",
+        "Schema codegen complete.",
+    ]
 
 
 def test_codegen_main_readds_trailing_newline(
@@ -1084,7 +1068,7 @@ def test_codegen_main_readds_trailing_newline(
 
     codegen.main(progress=None)
 
-    check(output_file.read_text(encoding="utf-8").endswith("\n"))
+    assert output_file.read_text(encoding="utf-8").endswith("\n")
 
 
 def test_codegen_main_keeps_existing_trailing_newline(
@@ -1123,4 +1107,4 @@ def test_codegen_main_keeps_existing_trailing_newline(
 
     codegen.main(progress=None)
 
-    check(output_file.read_text(encoding="utf-8").endswith("\n"))
+    assert output_file.read_text(encoding="utf-8").endswith("\n")

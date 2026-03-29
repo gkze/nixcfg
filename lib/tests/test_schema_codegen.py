@@ -18,7 +18,6 @@ from lib.schema_codegen.runner import (
     list_schema_codegen_targets,
     load_schema_codegen_config,
 )
-from lib.tests._assertions import check
 
 
 def test_load_schema_codegen_config_resolves_relative_paths(tmp_path: Path) -> None:
@@ -59,22 +58,23 @@ targets:
     source = loaded.config.sources["local"]
     target = loaded.config.targets["demo"]
     source_path = source.path if isinstance(source, DirectorySource) else None
-    check(isinstance(source_path, Path))
-    check(source_path == (tmp_path / "schemas").resolve())
-    check(target.generator.output == (tmp_path / "generated/models.py").resolve())
+    assert isinstance(source_path, Path)
+    assert source_path == (tmp_path / "schemas").resolve()
+    assert target.generator.output == (tmp_path / "generated/models.py").resolve()
 
 
 def test_list_schema_codegen_targets_reads_repo_config() -> None:
     """Load the checked-in config and expose the initial targets."""
     summaries = list_schema_codegen_targets(config_path=DEFAULT_CONFIG_PATH)
 
-    check(
-        [summary.name for summary in summaries]
-        == ["codegen-manifest-models", "github-actions", "nix-models"]
-    )
-    check(str(summaries[0].output).endswith("lib/schema_codegen/models/_generated.py"))
-    check(str(summaries[1].output).endswith("lib/github_actions/models/_generated.py"))
-    check(str(summaries[2].output).endswith("lib/nix/models/_generated.py"))
+    assert [summary.name for summary in summaries] == [
+        "codegen-manifest-models",
+        "github-actions",
+        "nix-models",
+    ]
+    assert str(summaries[0].output).endswith("lib/schema_codegen/models/_generated.py")
+    assert str(summaries[1].output).endswith("lib/github_actions/models/_generated.py")
+    assert str(summaries[2].output).endswith("lib/nix/models/_generated.py")
 
 
 def test_load_schema_codegen_config_resolves_explicit_paths_from_cwd(
@@ -114,8 +114,8 @@ targets:
     monkeypatch.chdir(tmp_path)
     loaded = load_schema_codegen_config(config_path=Path("custom.yaml"))
 
-    check(loaded.path == config_path.resolve())
-    check(loaded.config.targets["demo"].generator.output == (tmp_path / "generated.py"))
+    assert loaded.path == config_path.resolve()
+    assert loaded.config.targets["demo"].generator.output == (tmp_path / "generated.py")
 
 
 def test_generate_schema_codegen_target_from_directory_source(tmp_path: Path) -> None:
@@ -203,9 +203,9 @@ targets:
     )
     rendered = output_path.read_text(encoding="utf-8")
 
-    check(output_path == (tmp_path / "generated.py").resolve())
-    check("class Person" in rendered)
-    check("age:" in rendered)
+    assert output_path == (tmp_path / "generated.py").resolve()
+    assert "class Person" in rendered
+    assert "age:" in rendered
 
 
 def test_generate_schema_codegen_target_from_url_source(
@@ -262,9 +262,9 @@ targets:
     )
     rendered = output_path.read_text(encoding="utf-8")
 
-    check(output_path == (tmp_path / "workflow_models.py").resolve())
-    check("class Workflow" in rendered)
-    check("name:" in rendered)
+    assert output_path == (tmp_path / "workflow_models.py").resolve()
+    assert "class Workflow" in rendered
+    assert "name:" in rendered
 
 
 def test_generate_schema_codegen_target_from_multiple_entrypoints_yields_valid_python(
@@ -322,8 +322,8 @@ targets:
     )
     rendered = output_path.read_text(encoding="utf-8")
     spec = importlib.util.spec_from_file_location("_generated_demo", output_path)
-    check(spec is not None)
-    check(spec.loader is not None)
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[module.__name__] = module
     try:
@@ -333,53 +333,49 @@ targets:
     manifest_model = module.CodegenManifest
     lockfile_model = module.CodegenLockfile
 
-    check("class CodegenManifest" in rendered)
-    check("class CodegenLockfile" in rendered)
-    check("SourcesCodegenLockSchema" in rendered)
-    check(
-        lockfile_model.model_validate({
-            "version": 1,
-            "sources": {
-                "local": {
-                    "kind": "directory",
-                    "path": "schemas",
-                    "content_sha256": "a" * 64,
-                }
-            },
-        })
-    )
-    check(
-        manifest_model.model_validate({
-            "version": 1,
-            "sources": {
-                "local": {
-                    "kind": "directory",
-                    "path": "schemas",
-                    "format": "json",
-                }
-            },
-            "inputs": {
-                "primary": {
-                    "kind": "jsonschema",
-                    "sources": ["local"],
-                    "entrypoints": ["./codegen.schema.json"],
-                }
-            },
-            "generators": {
-                "python": {
-                    "language": "python",
-                    "tool": "datamodel-code-generator",
-                }
-            },
-            "products": {
-                "models": {
-                    "inputs": ["primary"],
-                    "generators": ["python"],
-                    "output_template": "generated.py",
-                }
-            },
-        })
-    )
+    assert "class CodegenManifest" in rendered
+    assert "class CodegenLockfile" in rendered
+    assert "SourcesCodegenLockSchema" in rendered
+    assert lockfile_model.model_validate({
+        "version": 1,
+        "sources": {
+            "local": {
+                "kind": "directory",
+                "path": "schemas",
+                "content_sha256": "a" * 64,
+            }
+        },
+    })
+    assert manifest_model.model_validate({
+        "version": 1,
+        "sources": {
+            "local": {
+                "kind": "directory",
+                "path": "schemas",
+                "format": "json",
+            }
+        },
+        "inputs": {
+            "primary": {
+                "kind": "jsonschema",
+                "sources": ["local"],
+                "entrypoints": ["./codegen.schema.json"],
+            }
+        },
+        "generators": {
+            "python": {
+                "language": "python",
+                "tool": "datamodel-code-generator",
+            }
+        },
+        "products": {
+            "models": {
+                "inputs": ["primary"],
+                "generators": ["python"],
+                "output_template": "generated.py",
+            }
+        },
+    })
 
 
 def test_resolve_body_class_conflicts_renames_mismatched_duplicates() -> None:
@@ -417,11 +413,11 @@ class UsesDifferent(BaseModel):
         used_names=used_names,
     )
 
-    check(_entrypoint_class_suffix("./codegen-lock.schema.json") == "CodegenLockSchema")
-    check("class Shared(BaseModel):" in first)
-    check("class Shared(BaseModel):" not in second)
-    check("class DifferentCodegenLockSchema(BaseModel):" in second)
-    check("item: DifferentCodegenLockSchema" in second)
+    assert _entrypoint_class_suffix("./codegen-lock.schema.json") == "CodegenLockSchema"
+    assert "class Shared(BaseModel):" in first
+    assert "class Shared(BaseModel):" not in second
+    assert "class DifferentCodegenLockSchema(BaseModel):" in second
+    assert "item: DifferentCodegenLockSchema" in second
 
 
 def test_generate_schema_codegen_target_rejects_recursive_refs(
@@ -506,13 +502,12 @@ def test_codegen_manifest_schemas_use_stable_urn_ids_and_optional_metadata() -> 
         )
     )
 
-    check(str(manifest_schema["$id"]).startswith("urn:uuid:"))
-    check(str(lock_schema["$id"]).startswith("urn:uuid:"))
-    check("generated_at" not in lock_schema["required"])
-    check(
-        "fetched_at" not in lock_schema["$defs"]["LockedUrlSource"].get("required", [])
+    assert str(manifest_schema["$id"]).startswith("urn:uuid:")
+    assert str(lock_schema["$id"]).startswith("urn:uuid:")
+    assert "generated_at" not in lock_schema["required"]
+    assert "fetched_at" not in lock_schema["$defs"]["LockedUrlSource"].get(
+        "required", []
     )
-    check(
-        "fetched_at"
-        not in lock_schema["$defs"]["LockedGitHubRawSource"].get("required", [])
+    assert "fetched_at" not in lock_schema["$defs"]["LockedGitHubRawSource"].get(
+        "required", []
     )

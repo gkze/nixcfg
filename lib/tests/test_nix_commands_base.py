@@ -21,7 +21,7 @@ from lib.nix.commands.base import (
     stream_nix,
     stream_process,
 )
-from lib.tests._assertions import check, expect_not_none
+from lib.tests._assertions import expect_not_none
 
 PYTHON = sys.executable
 _EXIT_STATUS_THREE = 3
@@ -81,8 +81,8 @@ def test_raise_timeout_raises_timeout_error() -> None:
 def test_merge_env_sets_term_and_merges_input() -> None:
     """Run this test case."""
     merged = _merge_env({"X_TEST": "1"})
-    check(merged["TERM"] == "dumb")
-    check(merged["X_TEST"] == "1")
+    assert merged["TERM"] == "dumb"
+    assert merged["X_TEST"] == "1"
 
 
 def test_nix_command_error_str_shows_tail_only() -> None:
@@ -93,10 +93,10 @@ def test_nix_command_error_str_shows_tail_only() -> None:
     )
     text = str(NixCommandError(result, "failed"))
 
-    check("NixCommandError: failed" in text)
-    check("stderr (last 20 lines):" in text)
-    check("line-0" not in text)
-    check("line-29" in text)
+    assert "NixCommandError: failed" in text
+    assert "stderr (last 20 lines):" in text
+    assert "line-0" not in text
+    assert "line-29" in text
 
 
 def test_nix_command_error_str_shows_full_stderr_when_short() -> None:
@@ -106,17 +106,16 @@ def test_nix_command_error_str_shows_full_stderr_when_short() -> None:
     )
     text = str(NixCommandError(result, "failed"))
 
-    check("stderr:" in text)
-    check("last 20 lines" not in text)
+    assert "stderr:" in text
+    assert "last 20 lines" not in text
 
 
 def test_resolve_timeout_alias_validates_kwargs() -> None:
     """Run this test case."""
-    check(
+    assert (
         _resolve_timeout_alias(command_timeout=_THREE_SECONDS, kwargs={})
         == _THREE_SECONDS
     )
-
     with pytest.raises(TypeError, match=r"Unexpected keyword argument\(s\): extra"):
         _resolve_timeout_alias(command_timeout=_THREE_SECONDS, kwargs={"extra": True})
 
@@ -143,11 +142,11 @@ def test_hash_mismatch_parsing_and_properties() -> None:
 
     parsed = HashMismatchError.from_output(output, result)
     parsed = expect_not_none(parsed)
-    check(parsed.hash.startswith("sha256-"))
+    assert parsed.hash.startswith("sha256-")
     specified = expect_not_none(parsed.specified)
-    check(specified.startswith("sha256-"))
-    check(parsed.drv_path == "/nix/store/abc123.drv")
-    check(parsed.is_sri)
+    assert specified.startswith("sha256-")
+    assert parsed.drv_path == "/nix/store/abc123.drv"
+    assert parsed.is_sri
 
 
 def test_hash_mismatch_fallback_parsing_and_none() -> None:
@@ -161,11 +160,11 @@ def test_hash_mismatch_fallback_parsing_and_none() -> None:
     parsed = HashMismatchError.from_stderr(output, result)
 
     parsed = expect_not_none(parsed)
-    check(parsed.hash == "sha256:ef01")
-    check(parsed.specified == "sha256:abcd")
-    check(not parsed.is_sri)
+    assert parsed.hash == "sha256:ef01"
+    assert parsed.specified == "sha256:abcd"
+    assert not parsed.is_sri
 
-    check(HashMismatchError.from_output("plain error", result) is None)
+    assert HashMismatchError.from_output("plain error", result) is None
 
 
 def test_hash_mismatch_to_sri_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -175,7 +174,7 @@ def test_hash_mismatch_to_sri_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         result, got_hash="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
     )
 
-    check(asyncio.run(sri.to_sri()) == sri.hash)
+    assert asyncio.run(sri.to_sri()) == sri.hash
 
     non_sri = HashMismatchError(result, got_hash="abcd")
 
@@ -186,7 +185,7 @@ def test_hash_mismatch_to_sri_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         "lib.nix.commands.base.importlib.import_module",
         lambda _name: types.SimpleNamespace(nix_hash_convert=_convert),
     )
-    check(asyncio.run(non_sri.to_sri(hash_algo="sha512")) == "converted:sha512:abcd")
+    assert asyncio.run(non_sri.to_sri(hash_algo="sha512")) == "converted:sha512:abcd"
 
 
 def test_stream_process_success_events() -> None:
@@ -204,10 +203,10 @@ def test_stream_process_success_events() -> None:
     lines = [e for e in events if isinstance(e, ProcessLine)]
     done = [e for e in events if isinstance(e, ProcessDone)]
 
-    check(len(done) == 1)
-    check(done[0].result.returncode == 0)
-    check(any(line.stream == "stdout" and "out-1" in line.text for line in lines))
-    check(any(line.stream == "stderr" and "err-1" in line.text for line in lines))
+    assert len(done) == 1
+    assert done[0].result.returncode == 0
+    assert any(line.stream == "stdout" and "out-1" in line.text for line in lines)
+    assert any(line.stream == "stderr" and "err-1" in line.text for line in lines)
 
 
 def test_stream_process_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -235,7 +234,7 @@ def test_stream_process_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(TimeoutError):
         asyncio.run(_run())
 
-    check(proc.killed)
+    assert proc.killed
 
 
 def test_stream_process_handles_missing_streams(
@@ -262,8 +261,8 @@ def test_stream_process_handles_missing_streams(
         return [event async for event in stream_process(["nix"], timeout=1.0)]
 
     events = asyncio.run(_collect())
-    check(len(events) == 1)
-    check(isinstance(events[0], ProcessDone))
+    assert len(events) == 1
+    assert isinstance(events[0], ProcessDone)
 
 
 def test_stream_process_zero_timeout_uses_deadline_check() -> None:
@@ -283,8 +282,8 @@ def test_stream_process_zero_timeout_uses_deadline_check() -> None:
 def test_run_nix_success_and_capture_modes() -> None:
     """Run this test case."""
     result = asyncio.run(run_nix([PYTHON, "-c", "print('ok')"], timeout=5.0))
-    check(result.returncode == 0)
-    check(result.stdout.strip() == "ok")
+    assert result.returncode == 0
+    assert result.stdout.strip() == "ok"
 
     no_capture = asyncio.run(
         run_nix(
@@ -293,15 +292,15 @@ def test_run_nix_success_and_capture_modes() -> None:
             timeout=5.0,
         )
     )
-    check(no_capture.returncode == 0)
-    check(no_capture.stdout == "")
+    assert no_capture.returncode == 0
+    assert no_capture.stdout == ""
 
 
 def test_run_nix_nonzero_paths() -> None:
     """Run this test case."""
     script = "import sys; sys.stderr.write('boom\\n'); sys.exit(3)"
     result = asyncio.run(run_nix([PYTHON, "-c", script], check=False, timeout=5.0))
-    check(result.returncode == _EXIT_STATUS_THREE)
+    assert result.returncode == _EXIT_STATUS_THREE
 
     with pytest.raises(NixCommandError):
         asyncio.run(run_nix([PYTHON, "-c", script], timeout=5.0))
@@ -343,7 +342,7 @@ def test_run_nix_timeout_raises_command_error(
     with pytest.raises(NixCommandError, match="timed out"):
         asyncio.run(run_nix(["nix"], timeout=5.0))
 
-    check(proc.killed)
+    assert proc.killed
 
 
 def test_stream_nix_success_and_error_paths() -> None:
@@ -353,7 +352,7 @@ def test_stream_nix_success_and_error_paths() -> None:
         return [line async for line in stream_nix(cmd, timeout=timeout_s)]
 
     lines = asyncio.run(_collect([PYTHON, "-c", "print('a'); print('b')"]))
-    check(lines == ["a", "b"])
+    assert lines == ["a", "b"]
 
     with pytest.raises(NixCommandError):
         asyncio.run(
@@ -400,7 +399,7 @@ def test_stream_nix_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(NixCommandError, match="timed out"):
         asyncio.run(_run())
 
-    check(proc.killed)
+    assert proc.killed
 
 
 def test_stream_nix_zero_timeout_uses_deadline_check() -> None:

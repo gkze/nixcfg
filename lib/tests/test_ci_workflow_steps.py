@@ -6,7 +6,6 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lib.tests._assertions import check
 from lib.update.ci import workflow_steps
 
 if TYPE_CHECKING:
@@ -97,13 +96,13 @@ def test_generate_pr_body_includes_sources_section(
         "main",
     ])
 
-    check(exit_code == 0)
+    assert exit_code == 0
     rendered = output_file.read_text(encoding="utf-8")
-    check("No flake.lock input changes detected." in rendered)
-    check("### Per-package sources.json changes" in rendered)
-    check('-  "version": "1.0.0"' in rendered)
-    check('+  "version": "2.0.0"' in rendered)
-    check(
+    assert "No flake.lock input changes detected." in rendered
+    assert "### Per-package sources.json changes" in rendered
+    assert '-  "version": "1.0.0"' in rendered
+    assert '+  "version": "2.0.0"' in rendered
+    assert (
         "https://github.com/acme/nixcfg/blob/update_flake_lock_action/packages/demo/sources.json"
         in rendered
     )
@@ -125,9 +124,9 @@ def test_free_disk_space_requires_ci_or_force(
 
     exit_code = workflow_steps.main(["free-disk-space"])
 
-    check(exit_code == _FREE_DISK_GUARD_EXIT_CODE)
+    assert exit_code == _FREE_DISK_GUARD_EXIT_CODE
     stderr = capsys.readouterr().err
-    check("Refusing to run free-disk-space outside CI" in stderr)
+    assert "Refusing to run free-disk-space outside CI" in stderr
 
 
 def test_free_disk_space_force_local_runs_cleanup(
@@ -163,5 +162,5 @@ def test_free_disk_space_force_local_runs_cleanup(
 
     exit_code = workflow_steps.main(["free-disk-space", "--force-local"])
 
-    check(exit_code == 0)
-    check(any(cmd[:2] == ["df", "-h"] for cmd in commands))
+    assert exit_code == 0
+    assert any(cmd[:2] == ["df", "-h"] for cmd in commands)

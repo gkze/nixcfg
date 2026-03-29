@@ -2,4 +2,4 @@
 
 from lib.update.updaters.base import go_vendor_updater
 
-AxiomCliUpdater = go_vendor_updater("axiom-cli")
+AxiomCliUpdater = go_vendor_updater("axiom-cli", module=__name__)

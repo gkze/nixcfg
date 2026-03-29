@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 import aiohttp
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
-from lib.tests._assertions import check
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.updaters.base import (
     FlakeInputHashUpdater,
@@ -66,7 +65,7 @@ def test_hash_entry_updater_build_result_preserves_version() -> None:
 
     result = updater.build_result(info, hashes)
 
-    check(result.version == "v1.2.3")
+    assert result.version == "v1.2.3"
 
 
 def test_hash_entry_updater_skips_hash_fetch_when_version_matches() -> None:
@@ -89,7 +88,7 @@ def test_hash_entry_updater_skips_hash_fetch_when_version_matches() -> None:
         async with aiohttp.ClientSession() as session:
             events = [event async for event in updater.update_stream(current, session)]
 
-        check(updater.fetch_hashes_called is False)
+        assert updater.fetch_hashes_called is False
         return events
 
     events = asyncio.run(_collect_events())
@@ -97,7 +96,7 @@ def test_hash_entry_updater_skips_hash_fetch_when_version_matches() -> None:
         event.message for event in events if event.kind == UpdateEventKind.STATUS
     ]
 
-    check("Up to date (version: v2.0.0)" in status_messages)
+    assert "Up to date (version: v2.0.0)" in status_messages
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +156,7 @@ def test_flake_input_updater_recomputes_when_no_drv_hash() -> None:
         return await object.__getattribute__(updater, "_is_latest")(current, info)
 
     result = asyncio.run(_run())
-    check(result is False)
+    assert result is False
 
 
 def test_flake_input_updater_recomputes_when_version_differs() -> None:
@@ -188,7 +187,7 @@ def test_flake_input_updater_recomputes_when_version_differs() -> None:
             return result
 
     result = asyncio.run(_run())
-    check(result is False)
+    assert result is False
 
 
 def test_flake_input_updater_skips_when_fingerprint_matches() -> None:
@@ -215,7 +214,7 @@ def test_flake_input_updater_skips_when_fingerprint_matches() -> None:
             return await object.__getattribute__(updater, "_is_latest")(current, info)
 
     result = asyncio.run(_run())
-    check(result is True)
+    assert result is True
 
 
 def test_flake_input_updater_recomputes_when_fingerprint_differs() -> None:
@@ -242,7 +241,7 @@ def test_flake_input_updater_recomputes_when_fingerprint_differs() -> None:
             return await object.__getattribute__(updater, "_is_latest")(current, info)
 
     result = asyncio.run(_run())
-    check(result is False)
+    assert result is False
 
 
 def test_flake_input_updater_recomputes_when_fingerprint_fails() -> None:
@@ -269,4 +268,4 @@ def test_flake_input_updater_recomputes_when_fingerprint_fails() -> None:
             return await object.__getattribute__(updater, "_is_latest")(current, info)
 
     result = asyncio.run(_run())
-    check(result is False)
+    assert result is False

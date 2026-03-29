@@ -37,9 +37,7 @@ DEFAULT_PINNED_VERSIONS_PATH = Path("pinned-versions.json")
 
 
 def _get_updaters() -> dict[str, type[Any]]:
-    if UPDATERS is not updater_module.UPDATERS:
-        return UPDATERS
-    return UPDATERS or ensure_updaters_loaded()
+    return updater_module.resolve_registry_alias(UPDATERS, ensure_updaters_loaded)
 
 
 def _instantiate_updater(updater_cls: type[Any], *, config: object) -> Updater:
@@ -116,17 +114,11 @@ async def _resolve_all() -> tuple[dict[str, _JsonObject], list[str]]:
     config = resolve_active_config(None)
     results: dict[str, _JsonObject] = {}
     failures: list[str] = []
-    fatal_error: BaseException | None = None
 
     async with aiohttp.ClientSession() as session:
 
         async def _resolve_one(name: str, updater_cls: type[Any]) -> None:
-            nonlocal fatal_error
-            try:
-                updater: Updater = _instantiate_updater(updater_cls, config=config)
-            except TypeError as exc:
-                fatal_error = exc
-                return
+            updater: Updater = _instantiate_updater(updater_cls, config=config)
             try:
                 outcome = await updater.fetch_latest(session)
             except Exception as exc:  # noqa: BLE001
@@ -135,20 +127,22 @@ async def _resolve_all() -> tuple[dict[str, _JsonObject], list[str]]:
                 return
             if not isinstance(outcome, VersionInfo):
                 msg = f"unexpected version payload for {name}: {type(outcome)}"
-                fatal_error = TypeError(msg)
-                return
+                raise TypeError(msg)
             results[name] = _serialize_version_info(outcome)
 
-        async with asyncio.TaskGroup() as group:
-            for name, updater_cls in _get_updaters().items():
-                group.create_task(_resolve_one(name, updater_cls))
+        try:
+            async with asyncio.TaskGroup() as group:
+                for name, updater_cls in _get_updaters().items():
+                    group.create_task(_resolve_one(name, updater_cls))
+        except* Exception as exc_group:
+            if len(exc_group.exceptions) == 1:
+                raise exc_group.exceptions[0] from None
+            raise
 
-    if fatal_error is not None:
-        raise fatal_error
     return results, failures
 
 
-def run(*, output: Path, strict: bool = False) -> int:
+def run(*, output: Path, strict: bool = True) -> int:
     """Resolve versions and write a pinned-versions manifest."""
     load_all_sources()
     _get_updaters()
@@ -156,10 +150,15 @@ def run(*, output: Path, strict: bool = False) -> int:
 
     if strict and failures:
         sys.stderr.write(
-            "Error: strict mode enabled and some updaters failed: "
-            f"{', '.join(sorted(failures))}\n"
+            f"Error: some updaters failed to resolve: {', '.join(sorted(failures))}\n"
         )
         return 1
+
+    if failures:
+        sys.stderr.write(
+            "Warning: writing partial pinned versions manifest for: "
+            f"{', '.join(sorted(failures))}\n"
+        )
 
     if not results:
         sys.stderr.write("Error: no versions resolved\n")
@@ -191,11 +190,11 @@ def cli(
     strict: Annotated[
         bool,
         typer.Option(
-            "-s",
-            "--strict",
-            help="Fail if any updater fails to resolve.",
+            "--strict/--allow-partial",
+            "-s/-p",
+            help="Fail on any updater error unless partial output is explicitly allowed.",
         ),
-    ] = False,
+    ] = True,
 ) -> None:
     """Resolve upstream versions and write a manifest."""
     raise typer.Exit(code=run(output=output, strict=strict))

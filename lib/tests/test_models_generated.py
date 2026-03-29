@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 import lib.nix.models._generated as generated_models
-from lib.tests._assertions import check
 
 
 class TestGeneratedModels:
@@ -14,11 +13,11 @@ class TestGeneratedModels:
 
     def test_generated_module_exposes_core_model_types(self) -> None:
         """The generated module publishes the expected top-level model classes."""
-        check(hasattr(generated_models, "BuildResult"))
-        check(hasattr(generated_models, "ContentAddress"))
-        check(hasattr(generated_models, "FileSystemObject"))
-        check(hasattr(generated_models, "Hash"))
-        check(hasattr(generated_models, "StorePath"))
+        assert hasattr(generated_models, "BuildResult")
+        assert hasattr(generated_models, "ContentAddress")
+        assert hasattr(generated_models, "FileSystemObject")
+        assert hasattr(generated_models, "Hash")
+        assert hasattr(generated_models, "StorePath")
 
     def test_generated_build_result_validates_success_and_failure_variants(
         self,
@@ -37,8 +36,8 @@ class TestGeneratedModels:
                 },
             },
         )
-        check(success.root.success is True)
-        check(success.root.status == generated_models.Status.BUILT)
+        assert success.root.success is True
+        assert success.root.status == generated_models.Status.BUILT
 
         failure = generated_models.BuildResult.model_validate(
             {
@@ -47,8 +46,8 @@ class TestGeneratedModels:
                 "errorMsg": "hash mismatch in fixed-output derivation",
             },
         )
-        check(failure.root.success is False)
-        check(failure.root.status == generated_models.Status1.HASH_MISMATCH)
+        assert failure.root.success is False
+        assert failure.root.status == generated_models.Status1.HASH_MISMATCH
 
     def test_generated_recursive_file_system_object_parses_directory_entries(
         self,
@@ -70,10 +69,10 @@ class TestGeneratedModels:
                 },
             },
         )
-        check(fs_object.root.type == "directory")
+        assert fs_object.root.type == "directory"
         entries = fs_object.root.model_dump().get("entries")
-        check(isinstance(entries, dict))
-        check(sorted(entries) == ["hello-link", "hello.txt"])
+        assert isinstance(entries, dict)
+        assert sorted(entries) == ["hello-link", "hello.txt"]
 
     def test_generated_hash_rejects_invalid_sri(self) -> None:
         """Hash root model rejects non-SRI formatted input."""

@@ -6,7 +6,6 @@ import asyncio
 import json
 from typing import TYPE_CHECKING
 
-from lib.tests._assertions import check
 from lib.update.ci import resolve_versions as resolve_versions_module
 from lib.update.ci.resolve_versions import (
     _deserialize_version_info,
@@ -32,8 +31,8 @@ def test_serialize_roundtrip() -> None:
     )
     data = _serialize_version_info(info)
     restored = _deserialize_version_info(data)
-    check(restored.version == info.version)
-    check(restored.metadata == info.metadata)
+    assert restored.version == info.version
+    assert restored.metadata == info.metadata
 
 
 def test_serialize_empty_metadata() -> None:
@@ -41,8 +40,8 @@ def test_serialize_empty_metadata() -> None:
     info = VersionInfo(version="0.0.1", metadata={})
     data = _serialize_version_info(info)
     restored = _deserialize_version_info(data)
-    check(restored.version == "0.0.1")
-    check(restored.metadata == {})
+    assert restored.version == "0.0.1"
+    assert restored.metadata == {}
 
 
 def test_deserialize_missing_metadata() -> None:
@@ -50,8 +49,8 @@ def test_deserialize_missing_metadata() -> None:
     data = _serialize_version_info(VersionInfo(version="2.0.0", metadata={}))
     data.pop("metadata", None)
     info = _deserialize_version_info(data)
-    check(info.version == "2.0.0")
-    check(info.metadata == {})
+    assert info.version == "2.0.0"
+    assert info.metadata == {}
 
 
 def test_load_pinned_versions(tmp_path: Path) -> None:
@@ -70,10 +69,10 @@ def test_load_pinned_versions(tmp_path: Path) -> None:
     path.write_text(json.dumps(manifest), encoding="utf-8")
 
     result = load_pinned_versions(path)
-    check(set(result.keys()) == {"google-chrome", "vscode-insiders"})
-    check(result["google-chrome"].version == "145.0.7632.76")
-    check(result["google-chrome"].metadata["commit"] == "abc")
-    check(result["vscode-insiders"].version == "1.99.0")
+    assert set(result.keys()) == {"google-chrome", "vscode-insiders"}
+    assert result["google-chrome"].version == "145.0.7632.76"
+    assert result["google-chrome"].metadata["commit"] == "abc"
+    assert result["vscode-insiders"].version == "1.99.0"
 
 
 def test_serialize_to_json_string() -> None:
@@ -83,8 +82,8 @@ def test_serialize_to_json_string() -> None:
     json_str = json.dumps(data)
     restored_data = json.loads(json_str)
     restored = _deserialize_version_info(restored_data)
-    check(restored.version == info.version)
-    check(restored.metadata == info.metadata)
+    assert restored.version == info.version
+    assert restored.metadata == info.metadata
 
 
 def test_run_strict_fails_when_any_updater_fails(
@@ -101,10 +100,10 @@ def test_run_strict_fails_when_any_updater_fails(
 
     monkeypatch.setattr(resolve_versions_module, "_resolve_all", _fake_resolve_all)
 
-    rc = run(output=output, strict=True)
+    rc = run(output=output)
 
-    check(rc == 1)
-    check(not output.exists())
+    assert rc == 1
+    assert not output.exists()
 
 
 def test_main_uses_typer_parsing(
@@ -123,6 +122,6 @@ def test_main_uses_typer_parsing(
 
     rc = resolve_versions_module.main(["--output", str(output), "--strict"])
 
-    check(rc == _SENTINEL_MAIN_EXIT_CODE)
-    check(called["output"] == output)
-    check(called["strict"] is True)
+    assert rc == _SENTINEL_MAIN_EXIT_CODE
+    assert called["output"] == output
+    assert called["strict"] is True

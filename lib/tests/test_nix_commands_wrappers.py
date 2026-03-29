@@ -16,7 +16,6 @@ from lib.nix.commands import hash as hash_mod
 from lib.nix.commands import path_info as path_info_mod
 from lib.nix.commands import store as store_mod
 from lib.nix.commands.base import CommandResult, HashMismatchError, NixCommandError
-from lib.tests._assertions import check
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,27 +36,27 @@ def test_json_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def _run_nix(args: list[str], **kwargs: object) -> CommandResult:
         timeout = kwargs.get("timeout")
-        check(args == ["nix", "eval", "--json"])
-        check(timeout == _THREE_SECONDS)
+        assert args == ["nix", "eval", "--json"]
+        assert timeout == _THREE_SECONDS
         return CommandResult(args=args, returncode=0, stdout='{"x": 1}', stderr="")
 
     monkeypatch.setattr(json_mod, "run_nix", _run_nix)
     parsed = asyncio.run(
         json_mod.run_nix_json(["nix", "eval", "--json"], timeout=_THREE_SECONDS)
     )
-    check(parsed == {"x": 1})
+    assert parsed == {"x": 1}
 
     with pytest.raises(TypeError, match="command_timeout is required"):
         asyncio.run(json_mod.run_nix_json(["nix", "eval", "--json"]))
 
-    check(json_mod.as_model_mapping({"a": 1}, _Model) == {"a": {"wrapped": 1}})
+    assert json_mod.as_model_mapping({"a": 1}, _Model) == {"a": {"wrapped": 1}}
     with pytest.raises(TypeError, match="Expected JSON object"):
         json_mod.as_model_mapping([], _Model)
     with pytest.raises(TypeError, match="string keys"):
         json_mod.as_model_mapping({1: "x"}, _Model)
 
-    check(json_mod.as_model_list([1, 2], _Model) == [{"wrapped": 1}, {"wrapped": 2}])
-    check(json_mod.as_model_list({"a": 1}, _Model) == [{"wrapped": 1}])
+    assert json_mod.as_model_list([1, 2], _Model) == [{"wrapped": 1}, {"wrapped": 2}]
+    assert json_mod.as_model_list({"a": 1}, _Model) == [{"wrapped": 1}]
     with pytest.raises(TypeError, match="Expected JSON list or object"):
         json_mod.as_model_list("bad", _Model)
 
@@ -76,20 +75,16 @@ def test_build_command_args() -> None:
             extra_args=["--print-out-paths"],
         ),
     )
-    check(
-        args
-        == [
-            "nix",
-            "build",
-            "--json",
-            "--impure",
-            "--no-link",
-            "--expr",
-            "1",
-            "--print-out-paths",
-        ]
-    )
-
+    assert args == [
+        "nix",
+        "build",
+        "--json",
+        "--impure",
+        "--no-link",
+        "--expr",
+        "1",
+        "--print-out-paths",
+    ]
     installable_args = object.__getattribute__(build_mod, "_build_command_args")(
         expr=None,
         installable=".#pkg",
@@ -100,7 +95,7 @@ def test_build_command_args() -> None:
             extra_args=None,
         ),
     )
-    check(installable_args == ["nix", "build", ".#pkg"])
+    assert installable_args == ["nix", "build", ".#pkg"]
 
     with pytest.raises(ValueError, match="exactly one"):
         object.__getattribute__(build_mod, "_build_command_args")(
@@ -134,10 +129,10 @@ def test_nix_build_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(build_mod, "_BUILD_RESULT_LIST", _Adapter())
 
     built = asyncio.run(build_mod.nix_build(expr="1"))
-    check(len(built) == 1)
+    assert len(built) == 1
 
     empty = asyncio.run(build_mod.nix_build(expr="1", json_output=False))
-    check(empty == [])
+    assert empty == []
 
     async def _fail_run_nix(*_a: object, **_k: object) -> CommandResult:
         return CommandResult(args=["nix"], returncode=1, stdout="", stderr="err")
@@ -194,8 +189,8 @@ def test_nix_build_dry_run_respects_section_boundaries(
     monkeypatch.setattr(build_mod, "run_nix", _run_nix)
 
     drvs = asyncio.run(build_mod.nix_build_dry_run(".#pkg", impure=False))
-    check("--impure" not in seen_args)
-    check(drvs == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo.drv"})
+    assert "--impure" not in seen_args
+    assert drvs == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo.drv"}
 
 
 def test_nix_build_dry_run_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -213,13 +208,10 @@ def test_nix_build_dry_run_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(build_mod, "run_nix", _run_nix)
     drvs = asyncio.run(build_mod.nix_build_dry_run(".#pkg"))
-    check(
-        drvs
-        == {
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo.drv",
-            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar.drv",
-        }
-    )
+    assert drvs == {
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo.drv",
+        "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar.drv",
+    }
 
 
 def test_derivation_eval_flake_wrappers(
@@ -246,27 +238,27 @@ def test_derivation_eval_flake_wrappers(
         derivation_mod, "as_model_mapping", lambda raw, _model: {"ok": raw}
     )
     shown = asyncio.run(derivation_mod.nix_derivation_show(".#x"))
-    check("ok" in shown)
+    assert "ok" in shown
 
     monkeypatch.setattr(eval_mod, "run_nix_json", _run_nix_json)
     val = asyncio.run(eval_mod.nix_eval_json("1"))
-    check(val == {"value": 1})
+    assert val == {"value": 1}
 
     typed = asyncio.run(eval_mod.nix_eval_typed("1", dict[str, int]))
-    check(typed == {"value": 1})
+    assert typed == {"value": 1}
 
     async def _run_nix(*_a: object, **_k: object) -> CommandResult:
         return CommandResult(args=["nix"], returncode=0, stdout="raw-output", stderr="")
 
     monkeypatch.setattr(eval_mod, "run_nix", _run_nix)
-    check(asyncio.run(eval_mod.nix_eval_raw('"x"')) == "raw-output")
+    assert asyncio.run(eval_mod.nix_eval_raw('"x"')) == "raw-output"
 
     monkeypatch.setattr(flake_mod, "run_nix_json", _run_nix_json)
     monkeypatch.setattr(flake_mod, "run_nix", _run_nix)
     meta = asyncio.run(flake_mod.nix_flake_metadata("."))
     show = asyncio.run(flake_mod.nix_flake_show("."))
-    check(meta["locked"] is True)
-    check("packages" in show)
+    assert meta["locked"] is True
+    assert "packages" in show
 
     asyncio.run(flake_mod.nix_flake_lock_update("demo"))
     flake_path = tmp_path / "flake"
@@ -304,17 +296,16 @@ def test_hash_and_path_info_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
         return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(hash_mod, "run_nix", _run_nix)
-    check(asyncio.run(hash_mod.nix_hash_convert("abcd")) == "sha256-AAA=")
+    assert asyncio.run(hash_mod.nix_hash_convert("abcd")) == "sha256-AAA="
 
     async def _convert(raw_hash: str, *, hash_algo: str = "sha256") -> str:
         return f"converted:{hash_algo}:{raw_hash}"
 
     monkeypatch.setattr(hash_mod, "nix_hash_convert", _convert)
-    check(
+    assert (
         asyncio.run(hash_mod.nix_prefetch_url("https://example.com"))
         == "converted:sha256:abc"
     )
-
     seen_path_info_args: list[list[str]] = []
 
     async def _run_nix_json(args: list[str], **kwargs: object) -> object:
@@ -330,19 +321,19 @@ def test_hash_and_path_info_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
     infos = asyncio.run(
         path_info_mod.nix_path_info(["/nix/store/x"], closure_size=True)
     )
-    check(infos)
+    assert infos
     first = infos[0]
-    check(isinstance(first, list))
+    assert isinstance(first, list)
     checked_first = cast("list[dict[str, str]]", first)
-    check(checked_first)
+    assert checked_first
     head = checked_first[0]
-    check(isinstance(head, dict))
-    check(head["path"] == "/nix/store/x")
-    check("--closure-size" in seen_path_info_args[0])
+    assert isinstance(head, dict)
+    assert head["path"] == "/nix/store/x"
+    assert "--closure-size" in seen_path_info_args[0]
 
     infos_no_closure = asyncio.run(path_info_mod.nix_path_info(["/nix/store/x"]))
-    check(infos_no_closure)
-    check("--closure-size" not in seen_path_info_args[1])
+    assert infos_no_closure
+    assert "--closure-size" not in seen_path_info_args[1]
 
 
 def test_store_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -384,22 +375,22 @@ def test_store_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
     result = asyncio.run(
         store_mod.nix_store_realise(["/nix/store/demo.drv"], on_line=seen.append)
     )
-    check(seen == ["l1", "l2"])
-    check(result.returncode == 0)
+    assert seen == ["l1", "l2"]
+    assert result.returncode == 0
 
     direct = asyncio.run(
         store_mod.nix_store_realise(["/nix/store/demo.drv"], on_line=None)
     )
-    check(isinstance(direct, CommandResult))
+    assert isinstance(direct, CommandResult)
 
     deriver = asyncio.run(store_mod.nix_store_query_deriver("/nix/store/pkg"))
-    check(deriver == "/nix/store/demo.drv")
+    assert deriver == "/nix/store/demo.drv"
 
     refs = asyncio.run(store_mod.nix_store_query_references("/nix/store/pkg"))
-    check(refs == ["/nix/store/a", "/nix/store/b"])
+    assert refs == ["/nix/store/a", "/nix/store/b"]
 
     requisites = asyncio.run(store_mod.nix_store_query_requisites("/nix/store/pkg.drv"))
-    check(requisites == ["/nix/store/src-a", "/nix/store/src-b"])
+    assert requisites == ["/nix/store/src-a", "/nix/store/src-b"]
 
 
 def test_store_deriver_wrapper_handles_unknown_and_failure(
@@ -416,13 +407,13 @@ def test_store_deriver_wrapper_handles_unknown_and_failure(
         )
 
     monkeypatch.setattr(store_mod, "run_nix", _unknown)
-    check(asyncio.run(store_mod.nix_store_query_deriver("/nix/store/pkg")) is None)
+    assert asyncio.run(store_mod.nix_store_query_deriver("/nix/store/pkg")) is None
 
     async def _blank(args: list[str], **_kwargs: object) -> CommandResult:
         return CommandResult(args=args, returncode=0, stdout="\n", stderr="")
 
     monkeypatch.setattr(store_mod, "run_nix", _blank)
-    check(asyncio.run(store_mod.nix_store_query_deriver("/nix/store/pkg")) is None)
+    assert asyncio.run(store_mod.nix_store_query_deriver("/nix/store/pkg")) is None
 
     async def _bad(args: list[str], **_kwargs: object) -> CommandResult:
         return CommandResult(args=args, returncode=1, stdout="", stderr="boom")

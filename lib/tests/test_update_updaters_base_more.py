@@ -10,19 +10,22 @@ import aiohttp
 import pytest
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
-from lib.tests._assertions import check, expect_instance, expect_not_none
+from lib.tests._assertions import expect_instance, expect_not_none
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import resolve_config
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.updaters import UPDATERS, ensure_updaters_loaded
+from lib.update.updaters import flake_backed as flake_backed_module
 from lib.update.updaters.base import (
     ChecksumProvidedUpdater,
+    CommandResult,
     DenoDepsHashUpdater,
     DenoManifestUpdater,
     DownloadHashUpdater,
     FlakeInputHashUpdater,
     HashEntryUpdater,
     Updater,
+    UvLockUpdater,
     VersionInfo,
     _verify_platform_versions,
     bun_node_modules_updater,
@@ -34,6 +37,7 @@ from lib.update.updaters.base import (
     npm_deps_updater,
     register_updater,
     uv_lock_hash_updater,
+    uv_lock_updater,
 )
 
 if TYPE_CHECKING:
@@ -205,6 +209,11 @@ class _DummyDenoManifest(DenoManifestUpdater):
     input_name = "deno-manifest"
 
 
+class _DummyUvLockUpdater(UvLockUpdater):
+    name = "uv-lock"
+    input_name = "uv-lock"
+
+
 def _entry(version: str = "1.0.0", *, drv_hash: str | None = None) -> SourceEntry:
     return SourceEntry.model_validate({
         "version": version,
@@ -295,7 +304,7 @@ async def _with_session[T](
 
 def test_verify_platform_versions() -> None:
     """Run this test case."""
-    check(_verify_platform_versions({"a": "1", "b": "1"}, "x") == "1")
+    assert _verify_platform_versions({"a": "1", "b": "1"}, "x") == "1"
     with pytest.raises(RuntimeError, match="version mismatch"):
         _verify_platform_versions({"a": "1", "b": "2"}, "x")
 
@@ -303,7 +312,7 @@ def test_verify_platform_versions() -> None:
 def test_updater_is_latest_and_update_stream_paths() -> None:
     """Run this test case."""
     updater = _DummyUpdater(latest="1.0.0")
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(updater, "_is_latest")(
                 None, VersionInfo(version="1", metadata={})
@@ -311,7 +320,7 @@ def test_updater_is_latest_and_update_stream_paths() -> None:
         )
         is False
     )
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(updater, "_is_latest")(
                 _entry(version="2"), VersionInfo(version="1", metadata={})
@@ -319,14 +328,13 @@ def test_updater_is_latest_and_update_stream_paths() -> None:
         )
         is False
     )
-
     current_commit = SourceEntry(
         version="1.0.0",
         hashes=HashCollection(entries=[HashEntry.create("sha256", HASH_A)]),
         commit="0" * 40,
     )
     info_commit = VersionInfo(version="1.0.0", metadata={"commit": "0" * 40})
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(updater, "_is_latest")(current_commit, info_commit)
         )
@@ -350,15 +358,13 @@ def test_updater_is_latest_and_update_stream_paths() -> None:
     pinned_events = asyncio.run(
         _collect(_entry(), pinned=VersionInfo(version="1.0.0", metadata={}))
     )
-    check(any(e.message == "Using pinned version: 1.0.0" for e in pinned_events))
-    check(any(e.message == "Up to date (version: 1.0.0)" for e in pinned_events))
+    assert any(e.message == "Using pinned version: 1.0.0" for e in pinned_events)
+    assert any(e.message == "Up to date (version: 1.0.0)" for e in pinned_events)
 
     changed_events = asyncio.run(_collect(_entry(version="0.9.0")))
-    check(
-        any(
-            e.kind == UpdateEventKind.RESULT and isinstance(e.payload, SourceEntry)
-            for e in changed_events
-        )
+    assert any(
+        e.kind == UpdateEventKind.RESULT and isinstance(e.payload, SourceEntry)
+        for e in changed_events
     )
 
 
@@ -380,19 +386,15 @@ def test_updater_materializes_artifacts_when_current() -> None:
             ]
 
     events = asyncio.run(_collect())
-    check(any(event.kind == UpdateEventKind.ARTIFACT for event in events))
-    check(
-        any(
-            event.message == "Version up to date; refreshing generated artifacts..."
-            for event in events
-        )
+    assert any(event.kind == UpdateEventKind.ARTIFACT for event in events)
+    assert any(
+        event.message == "Version up to date; refreshing generated artifacts..."
+        for event in events
     )
-    check(any(event.message == "Source metadata unchanged" for event in events))
-    check(
-        any(
-            event.kind == UpdateEventKind.RESULT and event.payload is None
-            for event in events
-        )
+    assert any(event.message == "Source metadata unchanged" for event in events)
+    assert any(
+        event.kind == UpdateEventKind.RESULT and event.payload is None
+        for event in events
     )
 
 
@@ -412,9 +414,9 @@ def test_checksum_provided_fetch_hashes(monkeypatch: pytest.MonkeyPatch) -> None
             return [event async for event in updater.fetch_hashes(info, session)]
 
     events = asyncio.run(_collect())
-    check(any(e.kind == UpdateEventKind.STATUS for e in events))
+    assert any(e.kind == UpdateEventKind.STATUS for e in events)
     final = [e for e in events if e.kind == UpdateEventKind.VALUE][-1]
-    check(final.payload == {"x86_64-linux": HASH_A})
+    assert final.payload == {"x86_64-linux": HASH_A}
 
 
 def test_fetch_checksums_from_urls(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -436,7 +438,7 @@ def test_fetch_checksums_from_urls(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         )
     )
-    check(checksums == {"a": "sum1", "b": "sum2"})
+    assert checksums == {"a": "sum1", "b": "sum2"}
 
     with pytest.raises(RuntimeError, match="Empty checksum payload"):
         asyncio.run(
@@ -457,13 +459,13 @@ def test_download_hash_updater(monkeypatch: pytest.MonkeyPatch) -> None:
     updater = _DummyDownload(config=resolve_config())
     info = VersionInfo(version="1.0.0", metadata={})
 
-    check(
+    assert (
         updater.get_download_url("x86_64-linux", info)
         == "https://example.com/linux.tar.gz"
     )
     result = updater.build_result(info, {"x86_64-linux": HASH_A})
     urls = expect_not_none(result.urls)
-    check(urls["x86_64-linux"].endswith("linux.tar.gz"))
+    assert urls["x86_64-linux"].endswith("linux.tar.gz")
 
     async def _hashes(_name: str, urls: Iterable[str]) -> EventStream:
         mapping = dict.fromkeys(urls, HASH_A)
@@ -478,7 +480,7 @@ def test_download_hash_updater(monkeypatch: pytest.MonkeyPatch) -> None:
     events = asyncio.run(_collect())
     final = [e for e in events if e.kind == UpdateEventKind.VALUE][-1]
     payload = _require_hash_mapping(final.payload)
-    check(set(payload) == {"x86_64-linux", "aarch64-linux"})
+    assert set(payload) == {"x86_64-linux", "aarch64-linux"}
 
 
 def test_hash_entry_updater_emit_and_build_result() -> None:
@@ -486,7 +488,7 @@ def test_hash_entry_updater_emit_and_build_result() -> None:
     updater = _DummyHashEntry()
     info = VersionInfo(version="1.0.0", metadata={})
     built = updater.build_result(info, [HashEntry.create("sha256", HASH_A)])
-    check(built.input == "input")
+    assert built.input == "input"
 
     async def _stream() -> EventStream:
         yield UpdateEvent.value("x", HASH_A)
@@ -502,7 +504,7 @@ def test_hash_entry_updater_emit_and_build_result() -> None:
     )
     final = [e for e in events if e.kind == UpdateEventKind.VALUE][-1]
     payload = _require_hash_entries(final.payload)
-    check(payload[0].hash_type == "sha256")
+    assert payload[0].hash_type == "sha256"
 
     async def _no_value() -> EventStream:
         if False:
@@ -542,7 +544,7 @@ def test_flake_input_helpers_and_hash_updater_paths(
         "lib.update.updaters.base.get_flake_input_version", lambda _node: "2.0.0"
     )
     latest = asyncio.run(_with_session(updater.fetch_latest))
-    check(latest.version == "2.0.0")
+    assert latest.version == "2.0.0"
 
     current = _entry(version="1.0.0", drv_hash="drv")
     info = VersionInfo(version="1.0.0", metadata={})
@@ -550,7 +552,7 @@ def test_flake_input_helpers_and_hash_updater_paths(
         "lib.update.updaters.base.compute_drv_fingerprint",
         lambda *_a, **_k: asyncio.sleep(0, result="drv"),
     )
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(updater, "_is_latest")(
                 _entry(version="0.9.0", drv_hash="drv"),
@@ -559,7 +561,7 @@ def test_flake_input_helpers_and_hash_updater_paths(
         )
         is False
     )
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(updater, "_is_latest")(
                 _entry(version="1.0.0", drv_hash=None),
@@ -568,22 +570,21 @@ def test_flake_input_helpers_and_hash_updater_paths(
         )
         is False
     )
-    check(
+    assert (
         asyncio.run(object.__getattribute__(updater, "_is_latest")(current, info))
         is True
     )
-
     events = asyncio.run(
         _collect_events(object.__getattribute__(updater, "_finalize_result")(_entry()))
     )
-    check(any(e.kind == UpdateEventKind.STATUS for e in events))
-    check(any(e.kind == UpdateEventKind.VALUE for e in events))
+    assert any(e.kind == UpdateEventKind.STATUS for e in events)
+    assert any(e.kind == UpdateEventKind.VALUE for e in events)
 
     monkeypatch.setattr(
         "lib.update.updaters.base.compute_drv_fingerprint",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
-    check(
+    assert (
         asyncio.run(object.__getattribute__(updater, "_is_latest")(current, info))
         is False
     )
@@ -591,11 +592,9 @@ def test_flake_input_helpers_and_hash_updater_paths(
     warn_events = asyncio.run(
         _collect_events(object.__getattribute__(updater, "_finalize_result")(_entry()))
     )
-    check(
-        any(
-            e.message and "Warning: derivation fingerprint unavailable" in e.message
-            for e in warn_events
-        )
+    assert any(
+        e.message and "Warning: derivation fingerprint unavailable" in e.message
+        for e in warn_events
     )
 
     class _PlatformFlake(_DummyFlakeInput):
@@ -633,13 +632,10 @@ def test_flake_input_helpers_and_hash_updater_paths(
         [e for e in plat_events if e.kind == UpdateEventKind.VALUE][-1].payload
     )
     by_platform = {entry.platform: entry.hash for entry in plat_payload}
-    check(
-        by_platform
-        == {
-            "x86_64-linux": HASH_A,
-            "aarch64-linux": HASH_B,
-        }
-    )
+    assert by_platform == {
+        "x86_64-linux": HASH_A,
+        "aarch64-linux": HASH_B,
+    }
 
 
 def test_platform_specific_fetch_hashes_preserves_existing_on_non_native_failure(
@@ -701,13 +697,10 @@ def test_platform_specific_fetch_hashes_preserves_existing_on_non_native_failure
         [event for event in events if event.kind == UpdateEventKind.VALUE][-1].payload
     )
     by_platform = {entry.platform: entry.hash for entry in payload}
-    check(
-        by_platform
-        == {
-            "aarch64-darwin": HASH_A,
-            "x86_64-linux": "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
-        }
-    )
+    assert by_platform == {
+        "aarch64-darwin": HASH_A,
+        "x86_64-linux": "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
+    }
 
 
 def test_platform_specific_fetch_hashes_handles_native_only_and_mapping_fallback(
@@ -724,27 +717,23 @@ def test_platform_specific_fetch_hashes_handles_native_only_and_mapping_fallback
         )
     )
     updater.native_only = True
-    check(
-        object.__getattribute__(updater, "_platform_targets")("aarch64-darwin")
-        == ("aarch64-darwin",)
+    assert object.__getattribute__(updater, "_platform_targets")("aarch64-darwin") == (
+        "aarch64-darwin",
     )
-
     object.__setattr__(
         updater,
         "_current_entry",
         SourceEntry(hashes=HashCollection(mapping={"x86_64-linux": HASH_A})),
     )
-    check(
-        object.__getattribute__(updater, "_existing_platform_hashes")()
-        == {"x86_64-linux": HASH_A}
-    )
-
+    assert object.__getattribute__(updater, "_existing_platform_hashes")() == {
+        "x86_64-linux": HASH_A
+    }
     object.__setattr__(
         updater,
         "_current_entry",
         SourceEntry(hashes=HashCollection()),
     )
-    check(object.__getattribute__(updater, "_existing_platform_hashes")() == {})
+    assert object.__getattribute__(updater, "_existing_platform_hashes")() == {}
 
 
 def test_platform_specific_fetch_hashes_raises_on_native_failure(
@@ -830,13 +819,10 @@ def test_platform_specific_fetch_hashes_reports_missing_non_native_preserve(
         )
     )
 
-    check(
-        any(
-            event.message
-            == "Build failed for x86_64-linux, no existing hash to preserve"
-            for event in events
-            if event.kind == UpdateEventKind.STATUS
-        )
+    assert any(
+        event.message == "Build failed for x86_64-linux, no existing hash to preserve"
+        for event in events
+        if event.kind == UpdateEventKind.STATUS
     )
 
 
@@ -853,7 +839,7 @@ def test_deno_deps_hash_updater_paths() -> None:
     payload = _require_hash_entries(
         [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload
     )
-    check({e.platform for e in payload} == {"x86_64-linux", "aarch64-linux"})
+    assert {e.platform for e in payload} == {"x86_64-linux", "aarch64-linux"}
 
     class _BadDeno(_DummyDenoDeps):
         def _compute_hash(self, info: VersionInfo) -> EventStream:
@@ -902,14 +888,14 @@ def test_deno_manifest_updater_paths(
         )
     )
     artifact_events = [e for e in events if e.kind == UpdateEventKind.ARTIFACT]
-    check(len(artifact_events) == 1)
+    assert len(artifact_events) == 1
     payload = expect_not_none(artifact_events[0].payload)
     artifacts = expect_instance(payload, list)
-    check(len(artifacts) == 1)
+    assert len(artifacts) == 1
     artifact = expect_instance(artifacts[0], GeneratedArtifact)
-    check(artifact.path.name == updater.manifest_file)
-    check(any(e.message and "Prepared deno-deps.json" in e.message for e in events))
-    check([e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload == [])
+    assert artifact.path.name == updater.manifest_file
+    assert any(e.message and "Prepared deno-deps.json" in e.message for e in events)
+    assert [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload == []
 
     monkeypatch.setattr(
         "lib.update.updaters.base.get_flake_input_node",
@@ -935,24 +921,205 @@ def test_deno_manifest_updater_paths(
         )
 
 
+def test_uv_lock_updater_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Resolve and emit checked-in uv.lock artifacts."""
+    from pathlib import Path as PathLib
+
+    updater = _DummyUvLockUpdater(config=resolve_config())
+    node = SimpleNamespace(
+        locked=SimpleNamespace(
+            owner="o",
+            repo="r",
+            rev="a" * 40,
+            type="github",
+            nar_hash="sha256-demo",
+        ),
+    )
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "pyproject.toml").write_text(
+        "[project]\nname='demo'\nversion='1.0.0'\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_flake_input_node", lambda _name: node
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.package_dir_for", lambda _name: tmp_path
+    )
+
+    async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
+        _ = options
+        if args[:4] == ["nix", "eval", "--impure", "--raw"]:
+            yield UpdateEvent.status(updater.name, "resolving")
+            yield UpdateEvent.value(
+                updater.name,
+                CommandResult(
+                    args=args, returncode=0, stdout=f"{source_dir}\n", stderr=""
+                ),
+            )
+            return
+        if args[:3] == ["uv", "-q", "lock"]:
+            workspace_dir = PathLib(args[-1])
+            (workspace_dir / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+            yield UpdateEvent.status(updater.name, "locking")
+            yield UpdateEvent.value(
+                updater.name,
+                CommandResult(args=args, returncode=0, stdout="", stderr=""),
+            )
+            return
+        msg = f"Unexpected command: {args}"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.update_process.run_command", _fake_run_command
+    )
+
+    info = VersionInfo(version="1.0.0", metadata={})
+    events = asyncio.run(
+        _with_session(
+            lambda session: _collect_events(updater.fetch_hashes(info, session))
+        )
+    )
+    artifact_events = [e for e in events if e.kind == UpdateEventKind.ARTIFACT]
+    assert len(artifact_events) == 1
+    payload = expect_not_none(artifact_events[0].payload)
+    artifacts = expect_instance(payload, list)
+    assert len(artifacts) == 1
+    artifact = expect_instance(artifacts[0], GeneratedArtifact)
+    assert artifact.path.name == updater.lock_file
+    assert artifact.content == "version = 1\n"
+    assert any(e.message and "Prepared uv.lock" in e.message for e in events)
+    assert [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload == []
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_flake_input_node",
+        lambda _name: SimpleNamespace(locked=None),
+    )
+    with pytest.raises(RuntimeError, match="incomplete lock"):
+        asyncio.run(
+            _with_session(
+                lambda session: _collect_events(updater.fetch_hashes(info, session))
+            )
+        )
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_flake_input_node", lambda _name: node
+    )
+    monkeypatch.setattr("lib.update.updaters.base.package_dir_for", lambda _name: None)
+    with pytest.raises(RuntimeError, match="Package directory not found"):
+        asyncio.run(
+            _with_session(
+                lambda session: _collect_events(updater.fetch_hashes(info, session))
+            )
+        )
+
+
+def test_uv_lock_updater_build_result_and_helper_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Cover uv.lock result shaping and writable-tree preparation helpers."""
+
+    class _EnvUvLockUpdater(_DummyUvLockUpdater):
+        lock_env: ClassVar[dict[str, str]] = {
+            "UV_INDEX_URL": "https://example.test/{version}"
+        }
+
+    updater = _EnvUvLockUpdater(config=resolve_config())
+    info = VersionInfo(version="1.2.3", metadata={})
+    entry = updater.build_result(info, {"x86_64-linux": HASH_A})
+    assert entry.version == "1.2.3"
+    assert entry.input == "uv-lock"
+    assert entry.hashes.model_dump(mode="json") == HashCollection.from_value({
+        "x86_64-linux": HASH_A
+    }).model_dump(mode="json")
+    assert updater._render_lock_env(info) == {
+        "UV_INDEX_URL": "https://example.test/1.2.3"
+    }
+
+    root = tmp_path / "tree"
+    root.mkdir()
+    target = root / "demo.txt"
+    target.write_text("demo\n", encoding="utf-8")
+    symlink = root / "link.txt"
+    symlink.symlink_to(target)
+    target.chmod(0o400)
+
+    flake_backed_module._ensure_user_writable_tree(root)
+
+    assert target.stat().st_mode & 0o200
+    assert symlink.is_symlink()
+
+
+def test_uv_lock_updater_rejects_empty_source_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Fail when ``nix eval`` returns an empty source path."""
+    updater = _DummyUvLockUpdater(config=resolve_config())
+    node = SimpleNamespace(
+        locked=SimpleNamespace(
+            owner="o",
+            repo="r",
+            rev="a" * 40,
+            type="github",
+            nar_hash="sha256-demo",
+        ),
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_flake_input_node", lambda _name: node
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.package_dir_for", lambda _name: tmp_path
+    )
+
+    async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
+        _ = options
+        if args[:4] == ["nix", "eval", "--impure", "--raw"]:
+            yield UpdateEvent.status(updater.name, "resolving")
+            yield UpdateEvent.value(
+                updater.name,
+                CommandResult(args=args, returncode=0, stdout="", stderr=""),
+            )
+            return
+        msg = f"Unexpected command: {args}"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.update_process.run_command", _fake_run_command
+    )
+
+    with pytest.raises(RuntimeError, match="Failed to resolve source path"):
+        asyncio.run(
+            _with_session(
+                lambda session: _collect_events(
+                    updater.fetch_hashes(
+                        VersionInfo(version="1.0.0", metadata={}), session
+                    )
+                )
+            )
+        )
+
+
 def test_factory_helpers_return_expected_subclasses() -> None:
     """Run this test case."""
-    check(flake_input_hash_updater("x", "vendorHash").hash_type == "vendorHash")
-    check(go_vendor_updater("x").hash_type == "vendorHash")
-    check(cargo_vendor_updater("x").hash_type == "cargoHash")
-    check(npm_deps_updater("x").hash_type == "npmDepsHash")
-    check(bun_node_modules_updater("x").platform_specific is True)
-    check(uv_lock_hash_updater("x").hash_type == "uvLockHash")
-    check(deno_deps_updater("x").__name__.endswith("Updater"))
-    check(deno_manifest_updater("x").__name__.endswith("Updater"))
+    assert flake_input_hash_updater("x", "vendorHash").hash_type == "vendorHash"
+    assert go_vendor_updater("x").hash_type == "vendorHash"
+    assert cargo_vendor_updater("x").hash_type == "cargoHash"
+    assert npm_deps_updater("x").hash_type == "npmDepsHash"
+    assert bun_node_modules_updater("x").platform_specific is True
+    assert uv_lock_hash_updater("x").hash_type == "uvLockHash"
+    assert uv_lock_updater("x").__name__.endswith("Updater")
+    assert deno_deps_updater("x").__name__.endswith("Updater")
+    assert deno_manifest_updater("x").__name__.endswith("Updater")
 
 
 def test_emdash_uses_platform_specific_npm_hashes() -> None:
     """Ensure emdash tracks npmDepsHash per platform in CI."""
     ensure_updaters_loaded()
     updater = UPDATERS["emdash"]
-    check(getattr(updater, "hash_type", None) == "npmDepsHash")
-    check(getattr(updater, "platform_specific", False) is True)
+    assert getattr(updater, "hash_type", None) == "npmDepsHash"
+    assert getattr(updater, "platform_specific", False) is True
 
 
 async def _collect_events(stream: EventStream) -> list[UpdateEvent]:

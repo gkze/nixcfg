@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._assertions import check
 from lib.update.events import GatheredValues, UpdateEvent, UpdateEventKind
 from lib.update.nix_cargo import (
     _parse_cargo_lock_git_sources,
@@ -45,24 +44,23 @@ def _collect(stream: AsyncIterator[UpdateEvent]) -> list[UpdateEvent]:
 
 def test_cargo_lock_parsing_helpers() -> None:
     """Parse quoted assignments and git source lines."""
-    check(_parse_quoted_assignment('name = "demo"', "name") == "demo")
-    check(_parse_quoted_assignment("name = demo", "name") is None)
+    assert _parse_quoted_assignment('name = "demo"', "name") == "demo"
+    assert _parse_quoted_assignment("name = demo", "name") is None
 
     parsed = _parse_git_source_line(
         'source = "git+https://github.com/a/b?branch=main#deadbeef"'
     )
-    check(parsed == ("https://github.com/a/b", "deadbeef"))
-    check(_parse_git_source_line('source = "registry+https://example.com"') is None)
+    assert parsed == ("https://github.com/a/b", "deadbeef")
+    assert _parse_git_source_line('source = "registry+https://example.com"') is None
 
 
 def test_select_and_record_matching_git_dep() -> None:
     """Prefer direct dep keys, then unique prefix matches."""
     direct = {"dep": _dep("dep")}
-    check(
+    assert (
         _select_matching_git_dep(direct, dep_key="dep", crate_name="dep")
         is direct["dep"]
     )
-
     prefix_only = {
         "dep-1": _dep("dep-1", match_name="dep"),
     }
@@ -71,17 +69,16 @@ def test_select_and_record_matching_git_dep() -> None:
         dep_key="other",
         crate_name="dep-crate",
     )
-    check(selected is prefix_only["dep-1"])
+    assert selected is prefix_only["dep-1"]
 
     ambiguous = {
         "a": _dep("a", match_name="dep"),
         "b": _dep("b", match_name="dep"),
     }
-    check(
+    assert (
         _select_matching_git_dep(ambiguous, dep_key="other", crate_name="dep-crate")
         is None
     )
-
     unmatched = {"dep": _dep("dep", match_name="crate")}
     result: dict[str, tuple[str, str]] = {}
     _record_git_source_match(
@@ -91,14 +88,14 @@ def test_select_and_record_matching_git_dep() -> None:
         unmatched=unmatched,
         result=result,
     )
-    check(result == {"dep": ("https://github.com/a/b", "deadbeef")})
-    check(unmatched == {})
+    assert result == {"dep": ("https://github.com/a/b", "deadbeef")}
+    assert unmatched == {}
 
 
 def test_select_matching_requires_hyphenated_prefix() -> None:
     """Avoid fuzzy prefix matches that are not crate-name prefixes."""
     unmatched = {"dep": _dep("dep", match_name="dep")}
-    check(
+    assert (
         _select_matching_git_dep(
             unmatched,
             dep_key="other",
@@ -116,7 +113,7 @@ def test_select_matching_prefers_exact_crate_name() -> None:
         dep_key="other",
         crate_name="dep",
     )
-    check(selected is unmatched["dep-1.2.3"])
+    assert selected is unmatched["dep-1.2.3"]
 
 
 def test_parse_cargo_lock_git_sources_success_and_error() -> None:
@@ -136,8 +133,8 @@ def test_parse_cargo_lock_git_sources_success_and_error() -> None:
         _dep("other-2.0.0", match_name="other"),
     ]
     parsed = _parse_cargo_lock_git_sources(lock_content, deps)
-    check(parsed["crate-core-1.2.3"] == ("https://github.com/a/b", "deadbeef"))
-    check(parsed["other-2.0.0"] == ("https://github.com/c/d", "cafebabe"))
+    assert parsed["crate-core-1.2.3"] == ("https://github.com/a/b", "deadbeef")
+    assert parsed["other-2.0.0"] == ("https://github.com/c/d", "cafebabe")
 
     with pytest.raises(RuntimeError, match="Could not find git sources"):
         _parse_cargo_lock_git_sources(
@@ -166,7 +163,7 @@ def test_prefetch_git_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("lib.update.nix_cargo.run_command", _run_command_ok)
     events = _collect(_prefetch_git_hash("demo", "https://github.com/a/b", "deadbeef"))
-    check(events[-1].kind == UpdateEventKind.VALUE)
+    assert events[-1].kind == UpdateEventKind.VALUE
 
     async def _run_command_fail(
         *_args: object, **_kwargs: object
@@ -257,14 +254,11 @@ def test_compute_import_cargo_lock_output_hashes_paths(
             git_deps=deps,
         )
     )
-    check(
-        any(
-            (event.message or "") == "Fetching upstream Cargo.lock..."
-            for event in events
-        )
+    assert any(
+        (event.message or "") == "Fetching upstream Cargo.lock..." for event in events
     )
-    check(events[-1].kind == UpdateEventKind.VALUE)
-    check(events[-1].payload == {"crate-core-1.2.3": "sha256-demo"})
+    assert events[-1].kind == UpdateEventKind.VALUE
+    assert events[-1].payload == {"crate-core-1.2.3": "sha256-demo"}
 
     # locked metadata errors
     monkeypatch.setattr(
@@ -401,5 +395,5 @@ def test_compute_import_cargo_hashes_uses_provided_lockfile_content(
         )
     )
     final = events[-1]
-    check(final.kind == UpdateEventKind.VALUE)
-    check(final.payload == {"crate-core-1.2.3": "sha256-provided-lock"})
+    assert final.kind == UpdateEventKind.VALUE
+    assert final.payload == {"crate-core-1.2.3": "sha256-provided-lock"}

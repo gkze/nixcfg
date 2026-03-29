@@ -6,7 +6,6 @@ import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
 
-from lib.tests._assertions import check
 from lib.update.ci.sources_json_diff import run_diff
 
 if TYPE_CHECKING:
@@ -31,7 +30,7 @@ def test_run_diff_returns_no_changes_message(tmp_path: Path) -> None:
 
     diff = run_diff(old_file, new_file)
 
-    check(diff == "No source entry changes detected.")
+    assert diff == "No source entry changes detected."
 
 
 def test_run_diff_prefers_jd_output_when_available(
@@ -51,8 +50,8 @@ def test_run_diff_prefers_jd_output_when_available(
 
     diff = run_diff(old_file, new_file)
 
-    check(diff.startswith('@ ["version"]'))
-    check('+ "1.1.0"' in diff)
+    assert diff.startswith('@ ["version"]')
+    assert '+ "1.1.0"' in diff
 
 
 def test_run_diff_uses_jd_command_output_on_auto_mode(
@@ -82,8 +81,8 @@ def test_run_diff_uses_jd_command_output_on_auto_mode(
 
     diff = run_diff(old_file, new_file)
 
-    check(diff == '@ ["version"]\n- "1.0.0"\n+ "1.1.0"')
-    check(executed["cmd"] == ["/usr/bin/jd", str(old_file), str(new_file)])
+    assert diff == '@ ["version"]\n- "1.0.0"\n+ "1.1.0"'
+    assert executed["cmd"] == ["/usr/bin/jd", str(old_file), str(new_file)]
 
 
 def test_run_diff_uses_structural_fallback_when_jd_not_available(
@@ -107,9 +106,9 @@ def test_run_diff_uses_structural_fallback_when_jd_not_available(
 
     diff = run_diff(old_file, new_file)
 
-    check('@ ["hashes", 0, "hash"]' in diff)
-    check('- "old"' in diff)
-    check('+ "new"' in diff)
+    assert '@ ["hashes", 0, "hash"]' in diff
+    assert '- "old"' in diff
+    assert '+ "new"' in diff
 
 
 def test_run_diff_explicit_jd_format_falls_back_when_jd_unavailable(
@@ -129,8 +128,8 @@ def test_run_diff_explicit_jd_format_falls_back_when_jd_unavailable(
 
     diff = run_diff(old_file, new_file, output_format="jd")
 
-    check(diff != "No source entry changes detected.")
-    check('@ ["version"]' in diff)
+    assert diff != "No source entry changes detected."
+    assert '@ ["version"]' in diff
 
 
 def test_run_diff_summary_format_is_legible(tmp_path: Path) -> None:
@@ -154,9 +153,9 @@ def test_run_diff_summary_format_is_legible(tmp_path: Path) -> None:
 
     diff = run_diff(old_file, new_file, output_format="summary")
 
-    check('changed version: "1.0.0" -> "1.1.0"' in diff)
-    check('changed hashes.x86_64-linux: "oldhash" -> "newhash"' in diff)
-    check('added hashes.aarch64-darwin: "darwinhash"' in diff)
+    assert 'changed version: "1.0.0" -> "1.1.0"' in diff
+    assert 'changed hashes.x86_64-linux: "oldhash" -> "newhash"' in diff
+    assert 'added hashes.aarch64-darwin: "darwinhash"' in diff
 
 
 def test_run_diff_summary_format_handles_removed_fields(tmp_path: Path) -> None:
@@ -168,4 +167,4 @@ def test_run_diff_summary_format_handles_removed_fields(tmp_path: Path) -> None:
 
     diff = run_diff(old_file, new_file, output_format="summary")
 
-    check('removed urls.linux: "https://example.test"' in diff)
+    assert 'removed urls.linux: "https://example.test"' in diff

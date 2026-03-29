@@ -9,7 +9,6 @@ import click
 import pytest
 import typer
 
-from lib.tests._assertions import check
 from lib.update.ci import _cli as ci_cli
 from lib.update.ci import _subprocess as ci_subprocess
 
@@ -17,11 +16,11 @@ from lib.update.ci import _subprocess as ci_subprocess
 def test_ci_cli_typer_factory_and_dual_registration() -> None:
     """Build paired Typer apps and register one shared entrypoint."""
     app = ci_cli.make_typer_app(help_text="demo")
-    check(isinstance(app, typer.Typer))
+    assert isinstance(app, typer.Typer)
 
     dual = ci_cli.make_dual_typer_apps(help_text="dual", no_args_is_help=True)
-    check(isinstance(dual.app, typer.Typer))
-    check(isinstance(dual.standalone_app, typer.Typer))
+    assert isinstance(dual.app, typer.Typer)
+    assert isinstance(dual.standalone_app, typer.Typer)
 
     decorator = ci_cli.register_dual_entrypoint(dual, invoke_without_command=False)
 
@@ -29,7 +28,7 @@ def test_ci_cli_typer_factory_and_dual_registration() -> None:
     def _handler() -> int:
         return 0
 
-    check(callable(_handler))
+    assert callable(_handler)
 
 
 def test_ci_run_main_success_and_click_errors(
@@ -43,7 +42,7 @@ def test_ci_run_main_success_and_click_errors(
         _ = (args, prog_name, standalone_mode)
         return 7
 
-    check(
+    assert (
         ci_cli.run_main(
             _returns_int,  # type: ignore[arg-type]
             argv=["--x"],
@@ -58,7 +57,7 @@ def test_ci_run_main_success_and_click_errors(
     ) -> None:
         _ = (args, prog_name, standalone_mode)
 
-    check(
+    assert (
         ci_cli.run_main(
             _returns_none,  # type: ignore[arg-type]
             argv=None,
@@ -74,7 +73,7 @@ def test_ci_run_main_success_and_click_errors(
         _ = (args, prog_name, standalone_mode)
         raise click.exceptions.Exit(5)
 
-    check(
+    assert (
         ci_cli.run_main(
             _raises_exit,  # type: ignore[arg-type]
             argv=None,
@@ -89,7 +88,7 @@ def test_ci_run_main_success_and_click_errors(
         _ = (args, prog_name, standalone_mode)
         raise click.ClickException("bad")
 
-    check(
+    assert (
         ci_cli.run_main(
             _raises_click,  # type: ignore[arg-type]
             argv=None,
@@ -97,7 +96,7 @@ def test_ci_run_main_success_and_click_errors(
         )
         == 1
     )
-    check("bad" in capsys.readouterr().err)
+    assert "bad" in capsys.readouterr().err
 
 
 def test_ci_make_main_delegates_to_run_main(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -122,9 +121,9 @@ def test_ci_make_main_delegates_to_run_main(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(ci_cli, "run_main", _run_main)
     app = typer.Typer()
     main = ci_cli.make_main(app, prog_name="demo")
-    check(main(["--x"]) == 9)
-    check(captured["app"] is app)
-    check(captured["prog_name"] == "demo")
+    assert main(["--x"]) == 9
+    assert captured["app"] is app
+    assert captured["prog_name"] == "demo"
 
 
 class _FakeProc:
@@ -150,8 +149,8 @@ def test_ci_run_command_async_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     result = asyncio.run(
         ci_subprocess.run_command_async(["echo", "ok"], capture_output=True)
     )
-    check(result.returncode == 0)
-    check(result.stdout == "ok")
+    assert result.returncode == 0
+    assert result.stdout == "ok"
 
     async def _create_process_fail(
         *args: str, cwd: str | None, stdout: object, stderr: object
@@ -176,4 +175,4 @@ def test_ci_run_command_sync_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
         return result
 
     monkeypatch.setattr(ci_subprocess, "run_command_async", _run_command_async)
-    check(ci_subprocess.run_command(["x"]) is result)
+    assert ci_subprocess.run_command(["x"]) is result

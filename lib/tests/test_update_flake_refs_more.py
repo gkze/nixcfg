@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING, cast
 import aiohttp
 import pytest
 
-from lib.nix.models.flake_lock import FlakeLockNode, LockedRef, OriginalRef
-from lib.tests._assertions import check
+from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode, LockedRef, OriginalRef
 from lib.update.config import resolve_config
 from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
 from lib.update.flake import (
@@ -21,6 +20,7 @@ from lib.update.flake import (
     invalidate_flake_lock,
     load_flake_lock,
     nixpkgs_expr,
+    resolve_root_input_node,
     update_flake_input,
 )
 from lib.update.refs import (
@@ -86,15 +86,15 @@ def test_flake_helpers_and_fetch_expr_error_paths(
     monkeypatch.setattr("lib.update.flake.load_flake_lock", lambda: lock)
 
     node = get_flake_input_node("node-a")
-    check(isinstance(node, FlakeLockNode))
-    check(get_root_input_name("nixpkgs") == "node-a")
-    check(get_root_input_name("path-like") == "path-like")
-    check(get_root_input_name("missing") == "missing")
+    assert isinstance(node, FlakeLockNode)
+    assert get_root_input_name("nixpkgs") == "node-a"
+    assert get_root_input_name("path-like") == "path-like"
+    assert get_root_input_name("missing") == "missing"
 
     version_from_ref = get_flake_input_version(
         FlakeLockNode(original=OriginalRef(type="github", ref="v2.0.0"))
     )
-    check(version_from_ref == "v2.0.0")
+    assert version_from_ref == "v2.0.0"
 
     version_from_original_rev = get_flake_input_version(
         cast(
@@ -104,7 +104,7 @@ def test_flake_helpers_and_fetch_expr_error_paths(
             ),
         )
     )
-    check(version_from_original_rev == "cafebabe")
+    assert version_from_original_rev == "cafebabe"
 
     version_from_rev = get_flake_input_version(
         FlakeLockNode(
@@ -120,8 +120,8 @@ def test_flake_helpers_and_fetch_expr_error_paths(
             ),
         )
     )
-    check(version_from_rev == "deadbeef")
-    check(get_flake_input_version(FlakeLockNode()) == "unknown")
+    assert version_from_rev == "deadbeef"
+    assert get_flake_input_version(FlakeLockNode()) == "unknown"
 
     with pytest.raises(KeyError, match="not found"):
         get_flake_input_node("missing")
@@ -168,11 +168,54 @@ def test_update_flake_input_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     events = _run_async(update_flake_input("demo", source="demo-source"))
     event_list = cast("list[UpdateEvent]", events)
-    check(len(event_list) == 2)
-    check(event_list[0].kind == UpdateEventKind.COMMAND_START)
-    check(event_list[1].kind == UpdateEventKind.COMMAND_END)
-    check(calls == ["demo"])
-    check(invalidated == [True])
+    assert len(event_list) == 2
+    assert event_list[0].kind == UpdateEventKind.COMMAND_START
+    assert event_list[1].kind == UpdateEventKind.COMMAND_END
+    assert calls == ["demo"]
+    assert invalidated == [True]
+
+
+def test_resolve_root_input_node_handles_incomplete_follows_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Return ``None`` when a follows chain cannot be resolved cleanly."""
+    skipped_first = SimpleNamespace(
+        root_node=SimpleNamespace(inputs={"broken": ["wrapper", "nixpkgs"]}),
+        nodes={"wrapper": SimpleNamespace(inputs={"nixpkgs": "node-b"})},
+    )
+    monkeypatch.setattr(
+        "builtins.enumerate",
+        lambda _target: iter(((1, "nixpkgs"),)),
+    )
+    node, follows = resolve_root_input_node(cast("FlakeLock", skipped_first), "broken")
+    assert node is None
+    assert follows == "wrapper/nixpkgs"
+
+    monkeypatch.undo()
+
+    broken_start = SimpleNamespace(
+        root_node=SimpleNamespace(inputs={"broken": ["missing", "nixpkgs"]}),
+        nodes={},
+    )
+    node, follows = resolve_root_input_node(cast("FlakeLock", broken_start), "broken")
+    assert node is None
+    assert follows == "missing/nixpkgs"
+
+    missing_inputs = SimpleNamespace(
+        root_node=SimpleNamespace(inputs={"broken": ["wrapper", "nixpkgs"]}),
+        nodes={"wrapper": SimpleNamespace(inputs=None)},
+    )
+    node, follows = resolve_root_input_node(cast("FlakeLock", missing_inputs), "broken")
+    assert node is None
+    assert follows == "wrapper/nixpkgs"
+
+    empty_follows = SimpleNamespace(
+        root_node=SimpleNamespace(inputs={"broken": []}),
+        nodes={},
+    )
+    node, follows = resolve_root_input_node(cast("FlakeLock", empty_follows), "broken")
+    assert node is None
+    assert follows == ""
 
 
 def test_load_flake_lock_cache_can_be_invalidated(
@@ -190,55 +233,55 @@ def test_load_flake_lock_cache_can_be_invalidated(
 
     first = load_flake_lock()
     second = load_flake_lock()
-    check(first is second)
-    check(first.nodes["demo"] == "a")
+    assert first is second
+    assert first.nodes["demo"] == "a"
 
     invalidate_flake_lock()
     third = load_flake_lock()
-    check(third.nodes["demo"] == "b")
+    assert third.nodes["demo"] == "b"
     invalidate_flake_lock()
 
 
 def test_refs_version_parsing_and_selection_helpers() -> None:
     """Select latest stable tags while respecting prefix semantics."""
-    check(_is_version_ref("v1.2.3") is True)
-    check(_is_version_ref("master") is False)
-    check(_is_version_ref("nixpkgs-unstable") is False)
-    check(_is_version_ref("nixos-24.11") is False)
-    check(_is_version_ref("deadbeef") is False)
-    check(_is_version_ref("feature") is False)
+    assert _is_version_ref("v1.2.3") is True
+    assert _is_version_ref("master") is False
+    assert _is_version_ref("nixpkgs-unstable") is False
+    assert _is_version_ref("nixos-24.11") is False
+    assert _is_version_ref("deadbeef") is False
+    assert _is_version_ref("feature") is False
 
-    check(_extract_version_prefix("release-v2.3.4") == "release-v")
-    check(_extract_version_prefix("stable") == "")
-    check(_build_version_prefixes("release-v") == ["release-v", "v"])
-    check(_build_version_prefixes("v") == ["v", ""])
-    check(_build_version_prefixes("rel-") == ["rel-"])
+    assert _extract_version_prefix("release-v2.3.4") == "release-v"
+    assert _extract_version_prefix("stable") == ""
+    assert _build_version_prefixes("release-v") == ["release-v", "v"]
+    assert _build_version_prefixes("v") == ["v", ""]
+    assert _build_version_prefixes("rel-") == ["rel-"]
 
-    check(_tag_matches_prefix("release-v1.2.3", "release-v") is True)
-    check(_tag_matches_prefix("1.2.3", "") is True)
-    check(_tag_matches_prefix("v1.2.3", "") is False)
+    assert _tag_matches_prefix("release-v1.2.3", "release-v") is True
+    assert _tag_matches_prefix("1.2.3", "") is True
+    assert _tag_matches_prefix("v1.2.3", "") is False
 
-    check(str(_parse_tag_version("release-v1.2.3", "release-v")) == "1.2.3")
-    check(str(_parse_tag_version("release-v1.2.3", "release-")) == "1.2.3")
-    check(_parse_tag_version("release-v1.2.3-rc1", "release-v") is None)
-    check(_parse_tag_version("bad-tag", "release-v") is None)
+    assert str(_parse_tag_version("release-v1.2.3", "release-v")) == "1.2.3"
+    assert str(_parse_tag_version("release-v1.2.3", "release-")) == "1.2.3"
+    assert _parse_tag_version("release-v1.2.3-rc1", "release-v") is None
+    assert _parse_tag_version("bad-tag", "release-v") is None
 
-    check(
+    assert (
         _select_tag(["release-v1.2.0", "release-v1.10.0"], "release-v")
         == "release-v1.10.0"
     )
-    check(_select_tag(["release-vnext"], "release-v") == "release-vnext")
-    check(_select_tag(["x"], "release-v") is None)
+    assert _select_tag(["release-vnext"], "release-v") == "release-vnext"
+    assert _select_tag(["x"], "release-v") is None
 
     releases = [
         {"tag_name": "v1.2.3", "draft": False, "prerelease": False},
         {"tag_name": "v2.0.0-rc1", "draft": False, "prerelease": True},
         {"tag_name": "v3.0.0", "draft": True, "prerelease": False},
     ]
-    check(_select_tag_from_releases(releases, "v") == "v1.2.3")
+    assert _select_tag_from_releases(releases, "v") == "v1.2.3"
 
     tags = [{"name": "v1.0.0"}, {"name": "v2.0.0"}, {"name": 1}]
-    check(_select_tag_from_tags(tags, "v") == "v2.0.0")
+    assert _select_tag_from_tags(tags, "v") == "v2.0.0"
 
 
 def test_get_flake_inputs_with_refs_filters_expected_items(
@@ -284,8 +327,8 @@ def test_get_flake_inputs_with_refs_filters_expected_items(
     monkeypatch.setattr("lib.update.refs.load_flake_lock", lambda: model)
 
     items = get_flake_inputs_with_refs()
-    check([item.name for item in items] == ["gitlab", "valid"])
-    check(items[0].input_type == "gitlab")
+    assert [item.name for item in items] == ["gitlab", "valid"]
+    assert items[0].input_type == "gitlab"
 
 
 def test_get_flake_inputs_with_refs_empty_root_inputs(
@@ -294,14 +337,14 @@ def test_get_flake_inputs_with_refs_empty_root_inputs(
     """Return an empty list when root inputs are absent."""
     model = SimpleNamespace(root_node=SimpleNamespace(inputs=None), nodes={})
     monkeypatch.setattr("lib.update.refs.load_flake_lock", lambda: model)
-    check(get_flake_inputs_with_refs() == [])
+    assert get_flake_inputs_with_refs() == []
 
 
 def test_get_root_input_name_without_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
     """Return the requested name when the root node exposes no inputs."""
     model = SimpleNamespace(root_node=SimpleNamespace(inputs=None), nodes={})
     monkeypatch.setattr("lib.update.flake.load_flake_lock", lambda: model)
-    check(get_root_input_name("nixpkgs") == "nixpkgs")
+    assert get_root_input_name("nixpkgs") == "nixpkgs"
 
 
 def test_nixpkgs_expr_compacts_rebuilt_expression(
@@ -313,7 +356,7 @@ def test_nixpkgs_expr_compacts_rebuilt_expression(
         lambda: SimpleNamespace(rebuild=lambda: "raw-expr"),
     )
     monkeypatch.setattr("lib.update.flake.compact_nix_expr", lambda expr: f"<{expr}>")
-    check(nixpkgs_expr() == "<raw-expr>")
+    assert nixpkgs_expr() == "<raw-expr>"
 
 
 def test_fetch_first_matching_tag_falls_back_to_tags(
@@ -350,8 +393,8 @@ def test_fetch_first_matching_tag_falls_back_to_tags(
             )
 
     latest = _run_async(_run())
-    check(latest == "v1.3.0")
-    check(calls == ["repos/owner/repo/releases", "repos/owner/repo/tags"])
+    assert latest == "v1.3.0"
+    assert calls == ["repos/owner/repo/releases", "repos/owner/repo/tags"]
 
 
 def test_fetch_first_matching_tag_returns_none_when_no_match(
@@ -374,7 +417,7 @@ def test_fetch_first_matching_tag_returns_none_when_no_match(
                 config=resolve_config(),
             )
 
-    check(_run_async(_run()) is None)
+    assert _run_async(_run()) is None
 
 
 def test_fetch_github_latest_version_ref_tries_prefix_fallbacks(
@@ -407,8 +450,8 @@ def test_fetch_github_latest_version_ref_tries_prefix_fallbacks(
             )
 
     result = _run_async(_run())
-    check(result == "v1.2.3")
-    check(calls == ["release-v", "v"])
+    assert result == "v1.2.3"
+    assert calls == ["release-v", "v"]
 
 
 def test_fetch_github_latest_version_ref_returns_none_when_unmatched(
@@ -430,7 +473,7 @@ def test_fetch_github_latest_version_ref_returns_none_when_unmatched(
                 "v",
             )
 
-    check(_run_async(_run()) is None)
+    assert _run_async(_run()) is None
 
 
 def test_check_flake_ref_update_supported_and_error_paths(
@@ -451,8 +494,8 @@ def test_check_flake_ref_update_supported_and_error_paths(
             )
 
     no_latest = _run_async(_run_none())
-    check(isinstance(no_latest, RefUpdateResult))
-    check(no_latest.error == "Could not determine latest version")
+    assert isinstance(no_latest, RefUpdateResult)
+    assert no_latest.error == "Could not determine latest version"
 
     async def _latest(*_args: object, **_kwargs: object) -> str | None:
         return "v2"
@@ -467,15 +510,15 @@ def test_check_flake_ref_update_supported_and_error_paths(
             )
 
     latest = _run_async(_run_latest())
-    check(latest.latest_ref == "v2")
+    assert latest.latest_ref == "v2"
     unsupported = _run_async(
         check_flake_ref_update(
             FlakeInputRef("demo", "o", "r", "v1", "git"),
             SimpleNamespace(),
         )
     )
-    check(isinstance(unsupported, RefUpdateResult))
-    check("Unsupported input type" in (unsupported.error or ""))
+    assert isinstance(unsupported, RefUpdateResult)
+    assert "Unsupported input type" in (unsupported.error or "")
 
 
 def test_run_checked_command_and_update_flake_ref_paths(
@@ -496,8 +539,8 @@ def test_run_checked_command_and_update_flake_ref_paths(
     ok_events = _run_async(
         _run_checked_command(["x"], source="demo", error_prefix="failed")
     )
-    check(isinstance(ok_events, list))
-    check(len(ok_events) == 1)
+    assert isinstance(ok_events, list)
+    assert len(ok_events) == 1
 
     async def _stream_non_result_end(
         *_args: object,
@@ -514,8 +557,8 @@ def test_run_checked_command_and_update_flake_ref_paths(
     non_result_events = _run_async(
         _run_checked_command(["x"], source="demo", error_prefix="failed")
     )
-    check(isinstance(non_result_events, list))
-    check(len(non_result_events) == 2)
+    assert isinstance(non_result_events, list)
+    assert len(non_result_events) == 2
 
     async def _stream_fail_empty(
         *_args: object,
@@ -560,13 +603,13 @@ def test_run_checked_command_and_update_flake_ref_paths(
     monkeypatch.setattr("lib.update.refs._run_checked_command", _record_run_checked)
     github_ref = FlakeInputRef("demo", "owner", "repo", "v1", "github")
     _run_async(update_flake_ref(github_ref, "v2", source="demo"))
-    check(called_args[0][:3] == ["flake-edit", "change", "demo"])
-    check(called_args[1][:4] == ["nix", "flake", "lock", "--update-input"])
+    assert called_args[0][:3] == ["flake-edit", "change", "demo"]
+    assert called_args[1][:4] == ["nix", "flake", "lock", "--update-input"]
 
     called_args.clear()
     gitlab_ref = FlakeInputRef("demo", "owner", "repo", "v1", "gitlab")
     _run_async(update_flake_ref(gitlab_ref, "v2", source="demo"))
-    check("gitlab:owner/repo/v2" in " ".join(called_args[0]))
+    assert "gitlab:owner/repo/v2" in " ".join(called_args[0])
 
     with pytest.raises(RuntimeError, match="Unsupported input type"):
         _run_async(
@@ -633,7 +676,7 @@ def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None
             options=RefTaskOptions(),
         )
     )
-    check(any(event.kind == UpdateEventKind.ERROR for event in events_error))
+    assert any(event.kind == UpdateEventKind.ERROR for event in events_error)
 
     events_uptodate = _run_async(
         _run_case(
@@ -641,10 +684,10 @@ def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None
             options=RefTaskOptions(),
         )
     )
-    check(
-        any((event.message or "").startswith("Up to date") for event in events_uptodate)
+    assert any(
+        (event.message or "").startswith("Up to date") for event in events_uptodate
     )
-    check(any(event.kind == UpdateEventKind.RESULT for event in events_uptodate))
+    assert any(event.kind == UpdateEventKind.RESULT for event in events_uptodate)
 
     events_missing_latest = _run_async(
         _run_case(
@@ -652,7 +695,7 @@ def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None
             options=RefTaskOptions(),
         )
     )
-    check(any(event.kind == UpdateEventKind.ERROR for event in events_missing_latest))
+    assert any(event.kind == UpdateEventKind.ERROR for event in events_missing_latest)
 
     events_dry_run = _run_async(
         _run_case(
@@ -660,7 +703,7 @@ def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None
             options=RefTaskOptions(dry_run=True),
         )
     )
-    check(any("Update available" in (event.message or "") for event in events_dry_run))
+    assert any("Update available" in (event.message or "") for event in events_dry_run)
 
     lock = asyncio.Lock()
     events_real = _run_async(
@@ -671,8 +714,8 @@ def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None
             ),
         )
     )
-    check(any((event.message or "") == "updated" for event in events_real))
-    check(any(event.kind == UpdateEventKind.RESULT for event in events_real))
+    assert any((event.message or "") == "updated" for event in events_real)
+    assert any(event.kind == UpdateEventKind.RESULT for event in events_real)
 
     events_real_no_lock = _run_async(
         _run_case(
@@ -680,4 +723,4 @@ def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None
             options=RefTaskOptions(dry_run=False, config=resolve_config()),
         )
     )
-    check(any((event.message or "") == "updated" for event in events_real_no_lock))
+    assert any((event.message or "") == "updated" for event in events_real_no_lock)

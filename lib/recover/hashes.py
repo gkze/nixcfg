@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-import typer
-
+from lib.recover._cli import emit_error, emit_success, require_apply_for_stage
 from lib.recover._common import files_equal, stage_paths
 from lib.recover.snapshot import DEFAULT_GENERATION, plan_snapshot_recovery
 from lib.update import io as update_io
@@ -148,13 +146,13 @@ def run_hash_recovery(
     sync: bool = False,
 ) -> int:
     """Plan or apply hash recovery for a realised generation."""
-    if stage and not apply:
-        message = "--stage requires --apply"
-        if json_output:
-            typer.echo(json.dumps({"success": False, "error": message}))
-        else:
-            typer.echo(f"Error: {message}", err=True)
-        return 1
+    stage_validation = require_apply_for_stage(
+        apply=apply,
+        json_output=json_output,
+        stage=stage,
+    )
+    if stage_validation is not None:
+        return stage_validation
 
     try:
         plan = asyncio.run(plan_hash_recovery(generation, sync=sync))
@@ -170,23 +168,16 @@ def run_hash_recovery(
             "changed_paths": list(changed_paths or ()),
             "plan": plan.to_dict(),
         }
-        if json_output:
-            typer.echo(json.dumps(payload))
-        else:
-            typer.echo(
-                _render_plain(
-                    plan,
-                    apply=apply,
-                    stage=stage,
-                    sync=sync,
-                    changed_paths=changed_paths,
-                )
-            )
+        return emit_success(
+            json_output=json_output,
+            payload=payload,
+            plain=_render_plain(
+                plan,
+                apply=apply,
+                stage=stage,
+                sync=sync,
+                changed_paths=changed_paths,
+            ),
+        )
     except Exception as exc:  # noqa: BLE001
-        if json_output:
-            typer.echo(json.dumps({"success": False, "error": str(exc)}))
-        else:
-            typer.echo(f"Error: {exc}", err=True)
-        return 1
-    else:
-        return 0
+        return emit_error(json_output=json_output, message=str(exc))

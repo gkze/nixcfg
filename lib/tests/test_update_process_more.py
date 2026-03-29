@@ -9,7 +9,6 @@ import pytest
 
 from lib.nix.commands.base import CommandResult as LibCommandResult
 from lib.nix.commands.base import ProcessDone, ProcessLine
-from lib.tests._assertions import check
 from lib.update.config import resolve_config
 from lib.update.events import GatheredValues, UpdateEvent, UpdateEventKind
 from lib.update.process import (
@@ -43,14 +42,14 @@ def _collect_stream(stream: AsyncIterator[UpdateEvent]) -> list[UpdateEvent]:
 
 def test_sanitize_and_truncate_helpers() -> None:
     """Strip ANSI/control chars and cap long command strings."""
-    check(_sanitize_log_line("\x1b[31mhello\x1b[0m\r") == "hello")
-    check(_truncate_command("short", max_len=20) == "short")
+    assert _sanitize_log_line("\x1b[31mhello\x1b[0m\r") == "hello"
+    assert _truncate_command("short", max_len=20) == "short"
 
     escaped = _truncate_command("abc\ndef", max_len=20)
-    check("\\n" in escaped)
+    assert "\\n" in escaped
 
     truncated = _truncate_command("x" * 40, max_len=8)
-    check(truncated.endswith(" [...]"))
+    assert truncated.endswith(" [...]")
 
 
 def test_stream_command_success_and_tail_capture(
@@ -89,19 +88,16 @@ def test_stream_command_success_and_tail_capture(
     )
 
     kinds = [event.kind for event in events]
-    check(
-        kinds
-        == [
-            UpdateEventKind.COMMAND_START,
-            UpdateEventKind.LINE,
-            UpdateEventKind.COMMAND_END,
-        ]
-    )
+    assert kinds == [
+        UpdateEventKind.COMMAND_START,
+        UpdateEventKind.LINE,
+        UpdateEventKind.COMMAND_END,
+    ]
     end_payload = events[-1].payload
     if not isinstance(end_payload, type(events[-1].payload)):
         raise AssertionError
-    check(hasattr(end_payload, "tail_lines"))
-    check(tuple(end_payload.tail_lines) == ("[stderr] line-one",))
+    assert hasattr(end_payload, "tail_lines")
+    assert tuple(end_payload.tail_lines) == ("[stderr] line-one",)
 
 
 def test_stream_command_timeout_and_missing_result(
@@ -191,7 +187,7 @@ def test_run_command_and_run_nix_build(monkeypatch: pytest.MonkeyPatch) -> None:
             options=RunCommandOptions(source="demo", error="failed"),
         )
     )
-    check(out_events[-1].kind == UpdateEventKind.VALUE)
+    assert out_events[-1].kind == UpdateEventKind.VALUE
 
     async def _fake_stream_missing(
         _args: list[str],
@@ -227,10 +223,10 @@ def test_run_command_and_run_nix_build(monkeypatch: pytest.MonkeyPatch) -> None:
             options=NixBuildOptions(source="demo", verbose=True),
         )
     )
-    check(events[0].kind == UpdateEventKind.STATUS)
+    assert events[0].kind == UpdateEventKind.STATUS
     args = captured["args"]
-    check(isinstance(args, list))
-    check(args[:4] == ["nix", "build", "-L", "--verbose"])
+    assert isinstance(args, list)
+    assert args[:4] == ["nix", "build", "-L", "--verbose"]
 
 
 def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -243,28 +239,24 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
             runner=lambda: asyncio.sleep(0, result="hi"),
         )
     )
-    check(
-        [event.kind for event in events]
-        == [
-            UpdateEventKind.COMMAND_START,
-            UpdateEventKind.COMMAND_END,
-            UpdateEventKind.VALUE,
-        ]
-    )
-
+    assert [event.kind for event in events] == [
+        UpdateEventKind.COMMAND_START,
+        UpdateEventKind.COMMAND_END,
+        UpdateEventKind.VALUE,
+    ]
     monkeypatch.setattr(
         "lib.update.process.libnix_hash_convert",
         lambda _hash: asyncio.sleep(0, result="sha256-AAA="),
     )
     convert_events = _collect_stream(convert_nix_hash_to_sri("demo", "deadbeef"))
-    check(convert_events[-1].payload == "sha256-AAA=")
+    assert convert_events[-1].payload == "sha256-AAA="
 
     monkeypatch.setattr(
         "lib.update.process.libnix_prefetch_url",
         lambda _url: asyncio.sleep(0, result="sha256-BBB="),
     )
     prefetch_events = _collect_stream(compute_sri_hash("demo", "https://example.com"))
-    check(prefetch_events[-1].payload == "sha256-BBB=")
+    assert prefetch_events[-1].payload == "sha256-BBB="
 
 
 def test_compute_url_hashes_gather_and_type_errors(
@@ -283,11 +275,12 @@ def test_compute_url_hashes_gather_and_type_errors(
         compute_url_hashes("demo", ["https://a", "https://a", "https://b"])
     )
     status_count = sum(1 for event in events if event.kind == UpdateEventKind.STATUS)
-    check(status_count == 2)
+    assert status_count == 2
     value_payload = events[-1].payload
-    check(
-        value_payload == {"https://a": "hash:https://a", "https://b": "hash:https://b"}
-    )
+    assert value_payload == {
+        "https://a": "hash:https://a",
+        "https://b": "hash:https://b",
+    }
 
     async def _fake_gather(_streams: object) -> AsyncIterator[object]:
         yield GatheredValues(values={1: "x"})

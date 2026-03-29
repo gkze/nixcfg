@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 
 from lib.cargo_nix_normalizer import _normalize_with_fallback, normalize
-from lib.tests._assertions import check
 from lib.tests._nix_ast import assert_nix_ast_equal
 
 
@@ -29,8 +28,8 @@ rec {
         local_path_prefixes=("crates", "vendor"),
     )
 
-    check(added_root_src is True)
-    check(rewrites == 2)
+    assert added_root_src is True
+    assert rewrites == 2
     assert_nix_ast_equal(
         normalized,
         """{ nixpkgs ? <nixpkgs>
@@ -68,8 +67,8 @@ rec {
         local_path_prefixes=("cli",),
     )
 
-    check(added_root_src is True)
-    check(rewrites == 1)
+    assert added_root_src is True
+    assert rewrites == 1
     assert_nix_ast_equal(
         normalized,
         """{ nixpkgs ? <nixpkgs>
@@ -117,8 +116,8 @@ rec {
         rewrite_nixpkgs_config=True,
     )
 
-    check(added_root_src is True)
-    check(rewrites == 1)
+    assert added_root_src is True
+    assert rewrites == 1
     assert_nix_ast_equal(
         normalized,
         """{ nixpkgs ? <nixpkgs>

@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from lib.tests._assertions import check
 from lib.update import deno_lock
 
 
@@ -43,41 +42,39 @@ class _Client:
 
 def test_json_adapter_helpers_and_required_string() -> None:
     """Validate strict object/list/string coercion helpers."""
-    check(deno_lock._as_object_dict({"x": 1}, context="ctx") == {"x": 1})
+    assert deno_lock._as_object_dict({"x": 1}, context="ctx") == {"x": 1}
     with pytest.raises(TypeError, match="Expected JSON object"):
         deno_lock._as_object_dict([], context="ctx")
 
-    check(deno_lock._as_object_list([1, 2], context="ctx") == [1, 2])
+    assert deno_lock._as_object_list([1, 2], context="ctx") == [1, 2]
     with pytest.raises(TypeError, match="Expected JSON array"):
         deno_lock._as_object_list({}, context="ctx")
 
-    check(deno_lock._get_required_str({"x": "y"}, "x", context="ctx") == "y")
+    assert deno_lock._get_required_str({"x": "y"}, "x", context="ctx") == "y"
     with pytest.raises(TypeError, match="Expected string field 'x'"):
         deno_lock._get_required_str({}, "x", context="ctx")
     with pytest.raises(TypeError, match="Expected string field 'x'"):
         deno_lock._get_required_str({"x": 1}, "x", context="ctx")
 
-    check(deno_lock._as_package_map({"a": {}}, context="ctx") == {"a": {}})
+    assert deno_lock._as_package_map({"a": {}}, context="ctx") == {"a": {}}
     with pytest.raises(TypeError, match="Expected package map"):
         deno_lock._as_package_map([], context="ctx")
 
 
 def test_guess_media_type_and_npm_helpers() -> None:
     """Infer media types and npm tarball/cache fields."""
-    check(deno_lock._guess_media_type("mod.ts") == "text/typescript")
-    check(deno_lock._guess_media_type("mod.jsx") == "text/javascript")
-    check(deno_lock._guess_media_type("data.unknown") == "text/plain")
-    check(
-        deno_lock._url_to_cache_path("https://example.com/mod.ts?target=esnext")
-        == deno_lock._url_to_cache_path("https://example.com/mod.ts?target=esnext")
+    assert deno_lock._guess_media_type("mod.ts") == "text/typescript"
+    assert deno_lock._guess_media_type("mod.jsx") == "text/javascript"
+    assert deno_lock._guess_media_type("data.unknown") == "text/plain"
+    assert deno_lock._url_to_cache_path(
+        "https://example.com/mod.ts?target=esnext"
+    ) == deno_lock._url_to_cache_path("https://example.com/mod.ts?target=esnext")
+    assert deno_lock._parse_npm_pkg_key("left-pad@1.0.0") == ("left-pad", "1.0.0")
+    assert deno_lock._parse_npm_pkg_key("@scope/left-pad@1.0.0_peer@npm:1") == (
+        "@scope/left-pad",
+        "1.0.0",
     )
-
-    check(deno_lock._parse_npm_pkg_key("left-pad@1.0.0") == ("left-pad", "1.0.0"))
-    check(
-        deno_lock._parse_npm_pkg_key("@scope/left-pad@1.0.0_peer@npm:1")
-        == ("@scope/left-pad", "1.0.0")
-    )
-    check(
+    assert (
         deno_lock._npm_tarball_url("@scope/left-pad", "1.0.0")
         == "https://registry.npmjs.org/@scope/left-pad/-/left-pad-1.0.0.tgz"
     )
@@ -101,7 +98,7 @@ def test_fetch_jsr_meta_and_resolve_jsr_package() -> None:
     client = _Client(responses)
 
     fetched = asyncio.run(deno_lock._fetch_jsr_meta(client, "@scope", "pkg", "1.2.3"))
-    check(isinstance(fetched, dict))
+    assert isinstance(fetched, dict)
 
     package = asyncio.run(
         deno_lock._resolve_jsr_package(
@@ -110,10 +107,10 @@ def test_fetch_jsr_meta_and_resolve_jsr_package() -> None:
             {"integrity": "sha256-integrity"},
         )
     )
-    check(package.name == "@scope/pkg")
-    check(package.version == "1.2.3")
-    check(len(package.files) >= 4)
-    check(any(file.media_type == "application/json" for file in package.files))
+    assert package.name == "@scope/pkg"
+    assert package.version == "1.2.3"
+    assert len(package.files) >= 4
+    assert any(file.media_type == "application/json" for file in package.files)
 
 
 def test_resolve_all_jsr_and_npm_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,7 +146,7 @@ def test_resolve_all_jsr_and_npm_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("lib.update.deno_lock._resolve_jsr_package", _resolve_pkg)
     jsr = asyncio.run(deno_lock._resolve_all_jsr({"b": {}, "a": {}}))
-    check([pkg.name for pkg in jsr] == ["a", "b"])
+    assert [pkg.name for pkg in jsr] == ["a", "b"]
 
     with pytest.raises(RuntimeError, match="boom"):
         asyncio.run(deno_lock._resolve_all_jsr({"bad": {}}))
@@ -159,8 +156,8 @@ def test_resolve_all_jsr_and_npm_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         "left-pad@1.0.0_peer@npm:1": {"integrity": "sha512-a"},
         "@scope/pkg@2.0.0": {"integrity": "sha512-b"},
     })
-    check(len(npm) == 2)
-    check(npm[0].name == "@scope/pkg")
+    assert len(npm) == 2
+    assert npm[0].name == "@scope/pkg"
 
 
 def test_resolve_deno_deps_and_sync_wrapper(
@@ -195,12 +192,12 @@ def test_resolve_deno_deps_and_sync_wrapper(
     )
 
     manifest = asyncio.run(deno_lock.resolve_deno_deps(lock_file))
-    check(manifest.lock_version == "6")
-    check(len(manifest.jsr_packages) == 1)
-    check("Unexpected deno.lock version" in caplog.text)
+    assert manifest.lock_version == "6"
+    assert len(manifest.jsr_packages) == 1
+    assert "Unexpected deno.lock version" in caplog.text
 
     monkeypatch.setattr(
         "lib.update.deno_lock.resolve_deno_deps",
         lambda _path: asyncio.sleep(0, result=manifest),
     )
-    check(deno_lock.resolve_deno_deps_sync(lock_file) == manifest)
+    assert deno_lock.resolve_deno_deps_sync(lock_file) == manifest

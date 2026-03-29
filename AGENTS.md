@@ -1,27 +1,107 @@
 # Agent Instructions
 
-## Landing the Plane (Session Completion)
+`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md`, not `CLAUDE.md`, and keep the symlink intact.
 
-**When ending a work session**, complete ALL applicable steps below.
+## What This Repo Is
 
-**MANDATORY WORKFLOW:**
+- `nixcfg` is George's personal Nix flake for `nix-darwin`, Home Manager, reusable exported modules, custom packages/overlays, and a Python `nixcfg` CLI.
+- Primary entrypoints are:
+  - `flake.nix`
+  - `darwin/argus.nix`
+  - `darwin/rocinante.nix`
+  - `home/george/default.nix`
+  - `nixcfg.py`
+- Nix is the main language, but a large amount of real logic lives in Python under `lib/`. There is also a small Go subproject in `ghawfr/`.
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-1. **Run quality gates** (if code changed) - Tests, linters, builds
-   - For Nix configuration changes: `nh darwin switch --no-nom .`
-1. **Update issue status** - Close finished work, update in-progress items
-1. **Commit changes** - Stage and commit all work:
-   ```bash
-   git add <files>
-   git commit -S -m "message"
-   ```
-   For multiline commit messages, use multiple `-m` flags or `git commit -S -F <file>`.
-   Do **not** pass literal `\n` escapes inside a single `-m` string.
-1. **Hand off** - Provide context for next session
+## Where To Look First
 
-**CRITICAL RULES:**
+- Host or user configuration changes: `darwin/`, `home/`, `modules/`
+- Package, overlay, or build failures: `packages/`, `overlays/`, `packages/*/sources.json`, `packages/*/Cargo.nix`, `packages/*/crate-hashes.json`
+- CI and update workflow failures: `.github/workflows/`, `lib/update/`, `lib/recover/`, `nix run .#nixcfg -- ci --help`
+- Shared framework or exported API behavior: `lib.nix`, `lib/exports.nix`, `default.nix`
+- Repo-local task and agent affordances: `.dex/tasks.jsonl`, `.opencode/`
 
-- ALWAYS sign commits with `-S` flag (e.g., `git commit -S -m "message"`)
-- Keep commit message subject and body lines at 80 characters or fewer
-- For multiline commit bodies, use real newlines via multiple `-m` flags or `-F`
-- Do NOT push automatically - let the user decide when to push
+## Working Norms From Repo History
+
+- Recent 2026 history is overwhelmingly conventional-commit style. Prefer scoped subjects like `fix(ci): ...`, `feat(packages): ...`, `refactor(update): ...`, and `chore: ...`.
+- Older `updates`, `flake.lock: Update`, and `nix: Update ...` commits exist, but they are legacy or automation-oriented. New human-authored commits should be conventional.
+- If the user explicitly asks you to commit, sign the commit with `git commit -S`.
+- Recent Pi and OpenCode history for this repo is dominated by:
+  - CI and Periodic Flake Update failures
+  - Argus system closure regressions
+  - package, overlay, and crate2nix breakage
+  - OpenCode and MCP profile configuration
+  - self-review before handoff
+- Follow that pattern. For substantial changes, review your own diff before finishing, with emphasis on regressions, generated files, and CI or update side effects.
+- Many failures surface through `argus`, but the root cause is often in `packages/`, `overlays/`, or `lib/update/`, not the host module itself.
+- When the user expects cached outputs to exist already, do not assume a from-source rebuild is acceptable. Investigate why a cached path, hash, or generated artifact diverged.
+
+## Cross-Platform And Packaging Pitfalls
+
+- This flake exports `aarch64-darwin`, `aarch64-linux`, and `x86_64-linux`. Preserve platform guards and system-specific hashes when changing packages or overlays.
+- A recurring failure class in recent history is platform-specific hash drift: `sources.json`, `npmDepsHash`, `denoDepsHash`, `uv.lock`, Cargo metadata, and generated crate files getting out of sync.
+- Prefer targeted root-cause analysis over broad rebuilds. Start with logs, workflow artifacts, `git diff`, and existing recovery tooling before triggering expensive full-closure builds.
+
+## Validation
+
+- Use the narrowest relevant checks first.
+- Formatting and local hooks:
+  - `nix fmt`
+  - `prek run -a`
+- Flake evaluation and exported outputs:
+  - `nix flake check`
+  - `nix build .#checks.aarch64-darwin.darwin-argus`
+  - `nix build .#checks.aarch64-darwin.darwin-rocinante`
+  - `nix build .#homeConfigurations.george.activationPackage`
+- Actual local apply when needed:
+  - `nh darwin switch --no-nom .`
+- Python:
+  - `uv run ruff check --config pyproject.toml .`
+  - `uv run ty check .`
+  - `uv run pytest`
+  - `uv run coverage run -m pytest && uv run coverage report`
+- Go:
+  - run `go test ./...` in `ghawfr/`
+- CI and update workflow changes:
+  - `nix run .#nixcfg -- ci workflow verify-artifacts`
+  - relevant `nix run .#nixcfg -- ci ...` subcommands
+- Quality bar to remember:
+  - Python requires 3.14+
+  - `ty` warnings fail
+  - coverage floor is 100%
+  - commitlint is enforced
+
+## Generated And Sensitive Files
+
+- Do not hand-edit `.pre-commit-config.yaml`; it is generated by `git-hooks.nix`.
+- Treat these as generated or machine-maintained unless the task is explicitly about regenerating them:
+  - `packages/**/Cargo.nix`
+  - `packages/**/crate-hashes.json`
+  - `packages/**/sources.json`
+  - `packages/**/uv.lock`
+  - `overlays/**/sources.json`
+  - `lib/**/_generated.py`
+- Secrets are present. Be careful with:
+  - `secrets.yaml`
+  - `.sops.yaml`
+  - local agent history and config under `~/.pi`, `~/.claude`, and `~/.local/share/opencode`
+- Use local session history for continuity, but do not surface credentials or paste sensitive local data.
+
+## Local Continuity Sources
+
+- If the user asks "where were we?" or wants work formalized, inspect:
+  - `git status` and `git diff`
+  - `.dex/tasks.jsonl`
+  - recent Pi sessions under `~/.pi/agent/sessions/--Users-george-.config-nixcfg--/`
+  - recent OpenCode sessions in `~/.local/share/opencode/opencode.db` for the project with worktree `/Users/george/.config/nixcfg`
+- OpenCode history for this repo shows heavy use of audit and failure-investigation sessions. Reuse that pattern when the user asks for deep analysis.
+
+## Usually Ignore
+
+- These are usually local or generated state, not source of truth:
+  - `.direnv/`
+  - `.venv/`
+  - `node_modules/`
+  - `result/`
+  - `.pytest_cache/`
+  - `.ruff_cache/`

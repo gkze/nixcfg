@@ -44,41 +44,54 @@ let
 
   packagePaths = discoveredPackagePaths // companionPackagePaths;
 
-  darwinOnly = [
-    "commander"
-    "codex-desktop"
-    "conductor"
-    "opencode-desktop-crate2nix-src"
-    "zed-editor-nightly-crate2nix-src"
-  ];
-
-  sculptorSystems = [
-    "aarch64-darwin"
-    "x86_64-linux"
-  ];
-
-  supersetSystems = [
-    "aarch64-darwin"
-    "x86_64-linux"
-  ];
-
-  emdashSystems = [
-    "aarch64-darwin"
-    "aarch64-linux"
-    "x86_64-linux"
-  ];
-
-  packageSystemConstraints = {
-    commander = system: builtins.match ".*-darwin" system != null;
-    codex-desktop = system: builtins.match ".*-darwin" system != null;
-    conductor = system: builtins.match ".*-darwin" system != null;
-    opencode-desktop-crate2nix-src = system: builtins.match ".*-darwin" system != null;
-    emdash = system: builtins.elem system emdashSystems;
-    sculptor = system: builtins.elem system sculptorSystems;
-    superset = system: builtins.elem system supersetSystems;
-    zed-editor-nightly = system: builtins.match ".*-darwin" system != null;
-    zed-editor-nightly-crate2nix-src = system: builtins.match ".*-darwin" system != null;
+  supportedSystemsByGroup = {
+    emdash = [
+      "aarch64-darwin"
+      "aarch64-linux"
+      "x86_64-linux"
+    ];
+    gooseAarch64Darwin = [ "aarch64-darwin" ];
+    sculptor = [
+      "aarch64-darwin"
+      "x86_64-linux"
+    ];
+    superset = [
+      "aarch64-darwin"
+      "x86_64-linux"
+    ];
   };
+
+  packageConstraintGroups = {
+    commander = "darwin";
+    codex-desktop = "darwin";
+    conductor = "darwin";
+    emdash = "emdash";
+    goose-cli = "gooseAarch64Darwin";
+    goose-cli-crate2nix-src = "gooseAarch64Darwin";
+    opencode-desktop-crate2nix-src = "darwin";
+    sculptor = "sculptor";
+    superset = "superset";
+    zed-editor-nightly = "darwin";
+    zed-editor-nightly-crate2nix-src = "darwin";
+  };
+
+  groupConstraintPredicates = {
+    darwin = system: builtins.match ".*-darwin" system != null;
+    emdash = system: builtins.elem system supportedSystemsByGroup.emdash;
+    gooseAarch64Darwin = system: builtins.elem system supportedSystemsByGroup.gooseAarch64Darwin;
+    sculptor = system: builtins.elem system supportedSystemsByGroup.sculptor;
+    superset = system: builtins.elem system supportedSystemsByGroup.superset;
+  };
+
+  packageSystemConstraints = builtins.mapAttrs (
+    _name: group: groupConstraintPredicates.${group}
+  ) packageConstraintGroups;
+
+  darwinOnly = builtins.filter (name: packageConstraintGroups.${name} == "darwin") (
+    builtins.attrNames packageConstraintGroups
+  );
+
+  sculptorSystems = supportedSystemsByGroup.sculptor;
 
   unsupportedForSystem =
     system:

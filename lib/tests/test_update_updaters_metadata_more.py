@@ -8,7 +8,6 @@ import pytest
 from pydantic import BaseModel
 
 from lib.nix.models.flake_lock import FlakeLockNode
-from lib.tests._assertions import check
 from lib.update.updaters import metadata as metadata_module
 from lib.update.updaters.metadata import (
     NO_METADATA,
@@ -20,29 +19,33 @@ from lib.update.updaters.metadata import (
     deserialize_metadata,
     serialize_metadata,
 )
-from lib.update.updaters.registry import UPDATERS, register_updater
+from lib.update.updaters.registry import (
+    UPDATERS,
+    is_test_updater_class,
+    register_updater,
+)
 
 
 def test_mapping_metadata_helpers_and_version_info_commit_paths() -> None:
     """Expose typed metadata through dict-like helpers and commit accessors."""
     node = FlakeLockNode(locked=None)
     flake_metadata = FlakeInputMetadata(node=node, commit="abc123")
-    check(flake_metadata["node"] is node)
-    check(flake_metadata.get("commit") == "abc123")
-    check("node" in flake_metadata)
+    assert flake_metadata["node"] is node
+    assert flake_metadata.get("commit") == "abc123"
+    assert "node" in flake_metadata
 
     platform_metadata = PlatformAPIMetadata(
         platform_info={"x86_64-linux": {"sha256hash": "x"}},
         equality_fields={"build": "2026-03-01"},
     )
-    check(platform_metadata["build"] == "2026-03-01")
-    check("commit" not in platform_metadata)
+    assert platform_metadata["build"] == "2026-03-01"
+    assert "commit" not in platform_metadata
 
-    check(VersionInfo(version="1", metadata=None).commit is None)
-    check(VersionInfo(version="1", metadata=flake_metadata).commit == "abc123")
-    check(VersionInfo(version="1", metadata={"commit": "def456"}).commit == "def456")
-    check(VersionInfo(version="1", metadata={"commit": 1}).commit is None)
-    check(
+    assert VersionInfo(version="1", metadata=None).commit is None
+    assert VersionInfo(version="1", metadata=flake_metadata).commit == "abc123"
+    assert VersionInfo(version="1", metadata={"commit": "def456"}).commit == "def456"
+    assert VersionInfo(version="1", metadata={"commit": 1}).commit is None
+    assert (
         VersionInfo(version="1", metadata=DownloadUrlMetadata(url="https://x")).commit
         is None
     )
@@ -74,37 +77,33 @@ def test_serialize_and_deserialize_metadata_paths() -> None:
     class _Model(BaseModel):
         value: str
 
-    check(serialize_metadata(None) is None)
-    check(serialize_metadata({"x": [1, 2]}) == {"x": [1, 2]})
-    check(metadata_module._json_safe_value(_Model(value="x")) == {"value": "x"})
-    check(
-        metadata_module._json_safe_value(
-            DownloadUrlMetadata(url="https://example.test")
-        )
-        == {"url": "https://example.test"}
-    )
-
+    assert serialize_metadata(None) is None
+    assert serialize_metadata({"x": [1, 2]}) == {"x": [1, 2]}
+    assert metadata_module._json_safe_value(_Model(value="x")) == {"value": "x"}
+    assert metadata_module._json_safe_value(
+        DownloadUrlMetadata(url="https://example.test")
+    ) == {"url": "https://example.test"}
     release = ReleasePayloadMetadata(release={"version": "1.0.0"})
     serialized = serialize_metadata(release)
-    check(isinstance(serialized, dict))
+    assert isinstance(serialized, dict)
     serialized_map = serialized if isinstance(serialized, dict) else {}
-    check(serialized_map["__kind__"] == "release_payload")
+    assert serialized_map["__kind__"] == "release_payload"
 
     with pytest.raises(TypeError, match="not JSON-serializable"):
         serialize_metadata(object())
 
-    check(deserialize_metadata(None) is None)
-    check(deserialize_metadata("raw") == "raw")
-    check(deserialize_metadata({"plain": True}) == {"plain": True})
-    check(deserialize_metadata({"__kind__": "none", "payload": {}}) is NO_METADATA)
-    check(
+    assert deserialize_metadata(None) is None
+    assert deserialize_metadata("raw") == "raw"
+    assert deserialize_metadata({"plain": True}) == {"plain": True}
+    assert deserialize_metadata({"__kind__": "none", "payload": {}}) is NO_METADATA
+    assert (
         deserialize_metadata({
             "__kind__": "download_url",
             "payload": {"url": "https://example.test"},
         })["url"]
         == "https://example.test"
     )
-    check(
+    assert (
         deserialize_metadata({
             "__kind__": "flake_input",
             "payload": {
@@ -121,7 +120,6 @@ def test_serialize_and_deserialize_metadata_paths() -> None:
         })["node"]
         is not None
     )
-
     legacy = deserialize_metadata({
         "node": {
             "locked": {
@@ -133,7 +131,7 @@ def test_serialize_and_deserialize_metadata_paths() -> None:
             }
         }
     })
-    check(isinstance(legacy, FlakeInputMetadata))
+    assert isinstance(legacy, FlakeInputMetadata)
 
     with pytest.raises(TypeError, match="Unknown pinned version metadata kind"):
         deserialize_metadata({"__kind__": "unknown", "payload": {}})
@@ -148,7 +146,7 @@ def test_register_updater_skips_name_less_and_abstract_classes() -> None:
     class _NoName:
         pass
 
-    check(register_updater(_NoName) is _NoName)
+    assert register_updater(_NoName) is _NoName
 
     class _Abstract(ABC):
         name = "abstract-updater-test"
@@ -158,5 +156,25 @@ def test_register_updater_skips_name_less_and_abstract_classes() -> None:
             raise NotImplementedError
 
     UPDATERS.pop("abstract-updater-test", None)
-    check(register_updater(_Abstract) is _Abstract)
-    check("abstract-updater-test" not in UPDATERS)
+    assert register_updater(_Abstract) is _Abstract
+    assert "abstract-updater-test" not in UPDATERS
+
+
+def test_register_updater_allows_test_duplicates_and_detects_test_classes() -> None:
+    """Allow test-only duplicates to replace existing registrations safely."""
+
+    class _Existing:
+        __module__ = "lib.update.updaters.demo"
+        name = "test-only-updater"
+
+    class _Replacement:
+        __module__ = "lib.tests.test_demo"
+        name = "test-only-updater"
+
+    UPDATERS["test-only-updater"] = _Existing
+
+    assert is_test_updater_class(_Replacement) is True
+    assert register_updater(_Replacement) is _Replacement
+    assert UPDATERS["test-only-updater"] is _Replacement
+
+    UPDATERS.pop("test-only-updater", None)

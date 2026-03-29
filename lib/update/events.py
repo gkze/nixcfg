@@ -324,8 +324,9 @@ async def gather_event_streams[K](
     errors: list[Exception] = []
     remaining = len(streams)
     async with asyncio.TaskGroup() as group:
+        tasks: list[asyncio.Task[None]] = []
         for key, stream in streams.items():
-            group.create_task(_run(key, stream))
+            tasks.append(group.create_task(_run(key, stream)))
 
         while remaining > 0:
             item = await queue.get()
@@ -334,6 +335,9 @@ async def gather_event_streams[K](
                 continue
             if isinstance(item, Exception):
                 errors.append(item)
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
                 continue
             yield cast("UpdateEvent", item)
 

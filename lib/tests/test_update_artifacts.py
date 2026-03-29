@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from lib.tests._assertions import check
 from lib.update.artifacts import (
     GeneratedArtifact,
     dedupe_generated_artifacts,
@@ -21,12 +20,12 @@ def test_generated_artifact_json_save_and_change_detection(tmp_path: Path) -> No
         {"b": 2, "a": 1},
     )
 
-    check(artifact.has_changed(repo_root=tmp_path))
+    assert artifact.has_changed(repo_root=tmp_path)
     save_generated_artifacts([artifact], repo_root=tmp_path)
 
     written = tmp_path / "nested" / "demo.json"
-    check(written.read_text(encoding="utf-8") == '{\n  "a": 1,\n  "b": 2\n}\n')
-    check(not artifact.has_changed(repo_root=tmp_path))
+    assert written.read_text(encoding="utf-8") == '{\n  "a": 1,\n  "b": 2\n}\n'
+    assert not artifact.has_changed(repo_root=tmp_path)
 
 
 def test_dedupe_generated_artifacts_rejects_conflicts(tmp_path: Path) -> None:
@@ -39,7 +38,7 @@ def test_dedupe_generated_artifacts_rejects_conflicts(tmp_path: Path) -> None:
         [original, duplicate],
         repo_root=tmp_path,
     )
-    check(deduped == [original])
+    assert deduped == [original]
 
     with pytest.raises(RuntimeError, match="Conflicting generated artifact updates"):
         dedupe_generated_artifacts([original, conflict], repo_root=tmp_path)

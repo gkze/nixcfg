@@ -3,15 +3,6 @@
 from __future__ import annotations
 
 
-def check(condition: object, message: object | None = None) -> None:
-    """Fail the test when *condition* is false."""
-    if condition:
-        return
-    if message is None:
-        raise AssertionError
-    raise AssertionError(message)
-
-
 def expect_not_none[T](value: T | None, message: object | None = None) -> T:
     """Return *value* when present, otherwise fail the test."""
     if value is not None:

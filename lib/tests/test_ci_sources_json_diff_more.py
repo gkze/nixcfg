@@ -7,7 +7,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from lib.tests._assertions import check
 from lib.update.ci import sources_json_diff as sdiff
 
 if TYPE_CHECKING:
@@ -17,14 +16,14 @@ if TYPE_CHECKING:
 def test_buffer_writer_and_format_helpers() -> None:
     """Cover small formatting helper branches."""
     writer = sdiff._BufferWriter()
-    check(writer.write("abc") == 3)
+    assert writer.write("abc") == 3
     writer.flush()
-    check(writer.isatty() is False)
-    check(writer.value() == "abc")
+    assert writer.isatty() is False
+    assert writer.value() == "abc"
 
-    check(sdiff._format_path([]) == "$")
-    check(sdiff._format_path(["a", 0, "b"]) == "a[0].b")
-    check(sdiff._format_value("x" * 500, max_len=12).endswith("..."))
+    assert sdiff._format_path([]) == "$"
+    assert sdiff._format_path(["a", 0, "b"]) == "a[0].b"
+    assert sdiff._format_value("x" * 500, max_len=12).endswith("...")
 
 
 def test_coerce_json_value_rejects_bad_types() -> None:
@@ -32,21 +31,21 @@ def test_coerce_json_value_rejects_bad_types() -> None:
     try:
         sdiff._coerce_json_value({1: "v"}, context="root")
     except TypeError as exc:
-        check("Expected string key" in str(exc))
+        assert "Expected string key" in str(exc)
     else:
         raise AssertionError("expected TypeError")
 
     try:
         sdiff._coerce_json_value({"x": object()}, context="root")
     except TypeError as exc:
-        check("Unsupported JSON value" in str(exc))
+        assert "Unsupported JSON value" in str(exc)
     else:
         raise AssertionError("expected TypeError")
 
     try:
         sdiff._coerce_json_object(["not", "obj"], context="root")
     except TypeError as exc:
-        check("Expected JSON object" in str(exc))
+        assert "Expected JSON object" in str(exc)
     else:
         raise AssertionError("expected TypeError")
 
@@ -54,24 +53,24 @@ def test_coerce_json_value_rejects_bad_types() -> None:
 def test_path_parsing_and_node_fallbacks() -> None:
     """Parse deepdiff path strings and callable node adapters."""
     parse = sdiff._parse_deepdiff_path
-    check(parse("root") == ())
-    check(parse("root['a'][2]['b']") == ("a", 2, "b"))
+    assert parse("root") == ()
+    assert parse("root['a'][2]['b']") == ("a", 2, "b")
 
     node_no_path = SimpleNamespace()
-    check(sdiff._path_from_deepdiff_node(node_no_path) == ())
+    assert sdiff._path_from_deepdiff_node(node_no_path) == ()
 
     class _NodeList:
         def path(self, *, output_format: str = "list") -> list[object]:
             _ = output_format
             return ["root", "a", 1]
 
-    check(sdiff._path_from_deepdiff_node(_NodeList()) == ("root", "a", 1))
+    assert sdiff._path_from_deepdiff_node(_NodeList()) == ("root", "a", 1)
 
     class _NodeText:
         def path(self, **_kwargs: object) -> str:
             return "root['p'][0]"
 
-    check(sdiff._path_from_deepdiff_node(_NodeText()) == ("p", 0))
+    assert sdiff._path_from_deepdiff_node(_NodeText()) == ("p", 0)
 
     class _NodeListWithObject:
         def path(self, *, output_format: str = "list") -> list[object]:
@@ -79,27 +78,27 @@ def test_path_parsing_and_node_fallbacks() -> None:
             return ["a", object()]
 
     converted = sdiff._path_from_deepdiff_node(_NodeListWithObject())
-    check(converted[0] == "a")
-    check(isinstance(converted[1], str))
+    assert converted[0] == "a"
+    assert isinstance(converted[1], str)
 
     class _NodeWeird:
         def path(self, **_kwargs: object) -> int:
             return 42
 
-    check(sdiff._path_from_deepdiff_node(_NodeWeird()) == ())
+    assert sdiff._path_from_deepdiff_node(_NodeWeird()) == ()
 
 
 def test_iter_leaf_values_and_change_extraction() -> None:
     """Flatten nested values and extract node attributes."""
     leaves = sdiff._iter_leaf_values(("top",), {"a": [1, 2], "b": "x"})
-    check((("top", "a", 0), 1) in leaves)
-    check((("top", "a", 1), 2) in leaves)
-    check((("top", "b"), "x") in leaves)
+    assert (("top", "a", 0), 1) in leaves
+    assert (("top", "a", 1), 2) in leaves
+    assert (("top", "b"), "x") in leaves
 
     node = SimpleNamespace(t1="old", t2="new")
-    check(sdiff._extract_change_value(node, "t1") == "old")
+    assert sdiff._extract_change_value(node, "t1") == "old"
     missing = sdiff._extract_change_value(SimpleNamespace(), "t1")
-    check(sdiff._is_json_value(missing) is False)
+    assert sdiff._is_json_value(missing) is False
 
 
 def test_render_selected_format_branches(
@@ -118,17 +117,15 @@ def test_render_selected_format_branches(
     monkeypatch.setattr(sdiff, "_render_graphtage_diff", lambda *_a: "")
     monkeypatch.setattr(sdiff, "_render_plain_diff", lambda *_a: "plain")
 
-    check(
+    assert (
         sdiff._render_selected_format(  # type: ignore[arg-type]
             "auto", old_path, new_path, old_data, new_data
         )
         == "plain"
     )
-    check(
-        sdiff._render_selected_format(  # type: ignore[arg-type]
-            "graphtage", old_path, new_path, old_data, new_data
-        ).startswith("@")
-    )
+    assert sdiff._render_selected_format(  # type: ignore[arg-type]
+        "graphtage", old_path, new_path, old_data, new_data
+    ).startswith("@")
 
 
 def test_render_jd_diff_command_outcomes(
@@ -142,7 +139,7 @@ def test_render_jd_diff_command_outcomes(
     new_path.write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(sdiff.shutil, "which", lambda _name: None)
-    check(sdiff._render_jd_diff(old_path, new_path) == "")
+    assert sdiff._render_jd_diff(old_path, new_path) == ""
 
     monkeypatch.setattr(sdiff.shutil, "which", lambda _name: "/usr/bin/jd")
     monkeypatch.setattr(
@@ -150,7 +147,7 @@ def test_render_jd_diff_command_outcomes(
         "_run_command",
         lambda _args: SimpleNamespace(returncode=1, stdout="", stderr=""),
     )
-    check(sdiff._render_jd_diff(old_path, new_path) == "")
+    assert sdiff._render_jd_diff(old_path, new_path) == ""
 
 
 def test_render_graphtage_diff_import_error_returns_empty(
@@ -162,7 +159,7 @@ def test_render_graphtage_diff_import_error_returns_empty(
         raise ImportError
 
     monkeypatch.setattr(sdiff.importlib, "import_module", _import_module)
-    check(sdiff._render_graphtage_diff({"a": 1}, {"a": 2}) == "")
+    assert sdiff._render_graphtage_diff({"a": 1}, {"a": 2}) == ""
 
 
 def test_render_graphtage_diff_with_fake_modules(
@@ -213,8 +210,8 @@ def test_render_graphtage_diff_with_fake_modules(
     monkeypatch.setattr(sdiff.importlib, "import_module", _import_module)
     rendered = sdiff._render_graphtage_diff({"a": 1}, {"a": 2})
 
-    check(rendered == "rendered")
-    check(default_printer.quiet is False)
+    assert rendered == "rendered"
+    assert default_printer.quiet is False
 
 
 def test_render_plain_diff_unified_fallback_and_selection(
@@ -231,25 +228,24 @@ def test_render_plain_diff_unified_fallback_and_selection(
 
     monkeypatch.setattr(sdiff, "_collect_leaf_changes", lambda *_a: [])
     unified = sdiff._render_plain_diff(old_data, new_data)
-    check("--- old/source-entry.json" in unified)
-    check("+++ new/source-entry.json" in unified)
+    assert "--- old/source-entry.json" in unified
+    assert "+++ new/source-entry.json" in unified
 
     monkeypatch.setattr(sdiff, "_render_structural_hunks", lambda *_a: "")
     monkeypatch.setattr(sdiff, "_render_plain_diff", lambda *_a: "")
     monkeypatch.setattr(sdiff, "_render_jd_diff", lambda *_a: "")
     monkeypatch.setattr(sdiff, "_render_graphtage_diff", lambda *_a: "")
-    check(
+    assert (
         sdiff._render_selected_format("auto", old_path, new_path, old_data, new_data)
         == ""
     )
-
     monkeypatch.setattr(sdiff.shutil, "which", lambda _name: "/usr/bin/jd")
     monkeypatch.setattr(
         sdiff,
         "_run_command",
         lambda _args: SimpleNamespace(returncode=2, stdout="", stderr="bad"),
     )
-    check(sdiff._render_jd_diff(old_path, new_path) == "")
+    assert sdiff._render_jd_diff(old_path, new_path) == ""
 
 
 def test_collect_leaf_changes_covers_type_and_added_removed_branches(
@@ -278,8 +274,8 @@ def test_collect_leaf_changes_covers_type_and_added_removed_branches(
 
     monkeypatch.setattr(sdiff, "DeepDiff", lambda *_a, **_k: fake_diff)
     changes = sdiff._collect_leaf_changes({"old": 1}, {"new": 2})
-    check(any(path == ["t"] for path, *_rest in changes))
-    check(not any(path == ["same"] for path, *_rest in changes))
+    assert any(path == ["t"] for path, *_rest in changes)
+    assert not any(path == ["same"] for path, *_rest in changes)
 
 
 def test_render_structural_and_summary_branch_shapes(
@@ -298,19 +294,19 @@ def test_render_structural_and_summary_branch_shapes(
     )
 
     structural = sdiff._render_structural_hunks({"x": 1}, {"x": 2})
-    check('@ ["added"]' in structural)
-    check('+ "new"' in structural)
-    check('- "old"' in structural)
+    assert '@ ["added"]' in structural
+    assert '+ "new"' in structural
+    assert '- "old"' in structural
 
     summary = sdiff._render_summary_diff({"x": 1}, {"x": 2})
-    check("added added" in summary)
-    check("removed removed" in summary)
-    check("changed changed" in summary)
+    assert "added added" in summary
+    assert "removed removed" in summary
+    assert "changed changed" in summary
 
     monkeypatch.setattr(
         sdiff, "_collect_leaf_changes", lambda *_a: [(["noop"], missing, missing)]
     )
-    check(sdiff._render_summary_diff({"x": 1}, {"x": 2}) == "")
+    assert sdiff._render_summary_diff({"x": 1}, {"x": 2}) == ""
 
 
 def test_run_command_wrapper_delegates_to_run_command(
@@ -326,7 +322,7 @@ def test_run_command_wrapper_delegates_to_run_command(
 
     monkeypatch.setattr(sdiff, "run_command", _runner)
     _ = sdiff._run_command(["jd", "a", "b"])
-    check(seen["args"] == ["jd", "a", "b"])
+    assert seen["args"] == ["jd", "a", "b"]
 
 
 def test_run_prints_diff_and_returns_zero(
@@ -341,10 +337,10 @@ def test_run_prints_diff_and_returns_zero(
 
     rc = sdiff.run(old_sources=old_path, new_sources=new_path, output_format="summary")
 
-    check(rc == 0)
+    assert rc == 0
     out = capsys.readouterr().out
-    check(out.endswith("\n"))
-    check("changed a" in out)
+    assert out.endswith("\n")
+    assert "changed a" in out
 
 
 def test_render_selected_format_jd_falls_back_to_structural(
@@ -366,10 +362,10 @@ def test_render_selected_format_jd_falls_back_to_structural(
     rendered = sdiff._render_selected_format(
         "jd", old_path, new_path, old_data, new_data
     )
-    check(rendered.startswith('@ ["a"]'))
+    assert rendered.startswith('@ ["a"]')
 
     monkeypatch.setattr(sdiff, "_render_summary_diff", lambda *_a: "")
-    check(
+    assert (
         sdiff._render_selected_format("summary", old_path, new_path, old_data, new_data)
         == ""
     )
@@ -378,4 +374,4 @@ def test_render_selected_format_jd_falls_back_to_structural(
 def test_main_callback_path_invokes_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Invoke Typer callback path to cover cli wrapper exit."""
     monkeypatch.setattr(sdiff, "run", lambda **_kwargs: 6)
-    check(sdiff.main(["old.json", "new.json"]) == 6)
+    assert sdiff.main(["old.json", "new.json"]) == 6

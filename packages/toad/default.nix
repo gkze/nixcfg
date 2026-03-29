@@ -1,4 +1,5 @@
 {
+  mkSetuptoolsOverlay,
   mkUv2nixPackage,
   inputs,
   python314,
@@ -12,11 +13,6 @@ mkUv2nixPackage {
   packageName = "batrachian-toad";
   venvName = "batrachian-toad";
   extraOverlays = [
-    (f: p: {
-      watchdog = p.watchdog.overrideAttrs (old: {
-        buildInputs = (old.buildInputs or [ ]) ++ [ f.setuptools ];
-        nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ f.setuptools ];
-      });
-    })
+    (mkSetuptoolsOverlay [ "watchdog" ])
   ];
 }

@@ -57,6 +57,39 @@ def get_root_input_name(input_name: str) -> str:
     return input_name
 
 
+def resolve_root_input_node(
+    lock: FlakeLock,
+    input_name: str,
+) -> tuple[FlakeLockNode | None, str | None]:
+    """Resolve a root input to its final node and optional follows path."""
+    root_inputs = lock.root_node.inputs or {}
+    target = root_inputs.get(input_name)
+    follows = "/".join(target) if isinstance(target, list) else None
+    if target is None:
+        return None, follows
+    if isinstance(target, str):
+        return lock.nodes.get(target), follows
+
+    node_name: str | None = None
+    for i, segment in enumerate(target):
+        if i == 0:
+            node_name = segment
+            continue
+        if node_name is None:
+            return None, follows
+        node = lock.nodes.get(node_name)
+        if node is None or node.inputs is None:
+            return None, follows
+        ref = node.inputs.get(segment)
+        if not isinstance(ref, str):
+            return None, follows
+        node_name = ref
+
+    if node_name is None:
+        return None, follows
+    return lock.nodes.get(node_name), follows
+
+
 def get_flake_input_version(node: FlakeLockNode) -> str:
     """Extract a version string from a flake lock node."""
     if node.original:

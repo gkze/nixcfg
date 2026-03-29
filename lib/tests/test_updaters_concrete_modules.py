@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from lib.nix.models.sources import HashEntry
-from lib.tests._assertions import check, expect_instance, expect_not_none
+from lib.tests._assertions import expect_instance, expect_not_none
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import VersionInfo
@@ -120,14 +120,13 @@ def test_chatgpt_updater_paths(
         chatgpt_module, "fetch_url", lambda *_a, **_k: asyncio.sleep(0, result=xml)
     )
     latest = _run(updater.fetch_latest(object()))
-    check(latest.version == "1.2.3")
-    check(latest.metadata["url"] == "https://example.com/app.dmg")
+    assert latest.version == "1.2.3"
+    assert latest.metadata["url"] == "https://example.com/app.dmg"
 
-    check(
+    assert (
         updater.get_download_url("x86_64-darwin", latest)
         == "https://example.com/app.dmg"
     )
-
     monkeypatch.setattr(
         chatgpt_module, "fetch_url", lambda *_a, **_k: asyncio.sleep(0, result=b"<")
     )
@@ -181,19 +180,16 @@ def test_code_cursor_updater_paths(
 ) -> None:
     """Run this test case."""
     updater = code_cursor_module.CodeCursorUpdater()
-    check(
-        object.__getattribute__(updater, "_api_url")("darwin-arm64").endswith(
-            "platform=darwin-arm64&releaseTrack=stable"
-        )
+    assert object.__getattribute__(updater, "_api_url")("darwin-arm64").endswith(
+        "platform=darwin-arm64&releaseTrack=stable"
     )
-
     platform_info = {
         nix_plat: {"downloadUrl": f"https://example.com/{api_plat}.zip"}
         for nix_plat, api_plat in updater.PLATFORMS.items()
     }
     info = VersionInfo(version="1.0.0", metadata={"platform_info": platform_info})
 
-    check(
+    assert (
         object.__getattribute__(updater, "_download_url")("darwin-arm64", info)
         == "https://example.com/darwin-arm64.zip"
     )
@@ -205,8 +201,8 @@ def test_code_cursor_updater_paths(
 
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _hashes)
     checksums = _run(updater.fetch_checksums(info, object()))
-    check(set(checksums) == set(updater.PLATFORMS))
-    check(all(v == HASH_A for v in checksums.values()))
+    assert set(checksums) == set(updater.PLATFORMS)
+    assert all(v == HASH_A for v in checksums.values())
 
 
 def test_datagrip_updater_paths(
@@ -236,7 +232,7 @@ def test_datagrip_updater_paths(
         lambda *_a, **_k: asyncio.sleep(0, result=payload),
     )
     info = _run(updater.fetch_latest(object()))
-    check(info.version == "2025.1")
+    assert info.version == "2025.1"
 
     monkeypatch.setattr(
         datagrip_module,
@@ -267,12 +263,12 @@ def test_datagrip_updater_paths(
 
     monkeypatch.setattr(updater, "_fetch_checksums_from_urls", _fetch_checksums)
     parsed_checksums = _run(updater.fetch_checksums(info, object()))
-    check(parsed_checksums == dict.fromkeys(updater.PLATFORMS, "abcd"))
-    check(set(urls_seen) == set(updater.PLATFORMS))
+    assert parsed_checksums == dict.fromkeys(updater.PLATFORMS, "abcd")
+    assert set(urls_seen) == set(updater.PLATFORMS)
 
     result = updater.build_result(info, {"x86_64-linux": HASH_A})
     urls = expect_not_none(result.urls)
-    check(urls["x86_64-linux"] == "https://d/x64")
+    assert urls["x86_64-linux"] == "https://d/x64"
 
 
 def test_google_chrome_updater_paths(
@@ -281,14 +277,14 @@ def test_google_chrome_updater_paths(
 ) -> None:
     """Run this test case."""
     updater = google_chrome_module.GoogleChromeUpdater()
-    check(updater.materialize_when_current is True)
+    assert updater.materialize_when_current is True
     monkeypatch.setattr(
         google_chrome_module,
         "fetch_json",
         lambda *_a, **_k: asyncio.sleep(0, result=[{"version": "133.0.1"}]),
     )
     latest = _run(updater.fetch_latest(object()))
-    check(latest.version == "133.0.1")
+    assert latest.version == "133.0.1"
 
     monkeypatch.setattr(
         google_chrome_module,
@@ -318,12 +314,12 @@ def test_sentry_cli_updater_paths(
         lambda *_a, **_k: asyncio.sleep(0, result={"tag_name": "v2.0.0"}),
     )
     latest = _run(updater.fetch_latest(object()))
-    check(latest.version == "v2.0.0")
+    assert latest.version == "v2.0.0"
 
     src_expr = object.__getattribute__(updater, "_src_nix_expr")("v2.0.0")
     cargo_expr = object.__getattribute__(updater, "_cargo_nix_expr")("v2.0.0", HASH_A)
-    check("fetchFromGitHub" in src_expr)
-    check("fetchCargoVendor" in cargo_expr)
+    assert "fetchFromGitHub" in src_expr
+    assert "fetchCargoVendor" in cargo_expr
 
     monkeypatch.setattr(sentry_cli_module, "_build_nix_expr", lambda expr: expr)
 
@@ -339,8 +335,8 @@ def test_sentry_cli_updater_paths(
     events = _run(_collect(updater.fetch_hashes(latest, object())))
     values = [e for e in events if e.kind == UpdateEventKind.VALUE]
     payload = _require_hash_entries(values[-1].payload)
-    check(payload[0].hash_type == "srcHash")
-    check(payload[1].hash_type == "cargoHash")
+    assert payload[0].hash_type == "srcHash"
+    assert payload[1].hash_type == "cargoHash"
 
     async def _no_hash(_name: str, _expr: str) -> EventStream:
         if False:
@@ -367,7 +363,7 @@ def test_conductor_updater_paths(
         ),
     )
     latest = _run(updater.fetch_latest(object()))
-    check(latest.version == "1.2.3")
+    assert latest.version == "1.2.3"
 
     monkeypatch.setattr(
         conductor_module,
@@ -385,19 +381,16 @@ def test_droid_updater_paths(
 ) -> None:
     """Run this test case."""
     updater = droid_module.DroidUpdater()
-    check(
-        object.__getattribute__(updater, "_download_url")(
-            "x86_64-linux", "1.0.0"
-        ).endswith("/1.0.0/linux/x64/droid")
-    )
-
+    assert object.__getattribute__(updater, "_download_url")(
+        "x86_64-linux", "1.0.0"
+    ).endswith("/1.0.0/linux/x64/droid")
     monkeypatch.setattr(
         droid_module,
         "fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=b'#!/bin/sh\nVER="2.3.4"\n'),
     )
     latest = _run(updater.fetch_latest(object()))
-    check(latest.version == "2.3.4")
+    assert latest.version == "2.3.4"
 
     monkeypatch.setattr(
         droid_module,
@@ -419,14 +412,14 @@ def test_droid_updater_paths(
     checksums = _run(
         updater.fetch_checksums(VersionInfo(version="2.3.4", metadata={}), object())
     )
-    check(checksums["x86_64-linux"] == "sum")
-    check(captured["x86_64-linux"].endswith("/2.3.4/linux/x64/droid.sha256"))
+    assert checksums["x86_64-linux"] == "sum"
+    assert captured["x86_64-linux"].endswith("/2.3.4/linux/x64/droid.sha256")
 
     built = updater.build_result(
         VersionInfo(version="2.3.4", metadata={}), {"x86_64-linux": HASH_A}
     )
     built_urls = expect_not_none(built.urls)
-    check(built_urls["x86_64-linux"].endswith("/2.3.4/linux/x64/droid"))
+    assert built_urls["x86_64-linux"].endswith("/2.3.4/linux/x64/droid")
 
 
 def test_scratch_updater_paths(
@@ -444,13 +437,13 @@ def test_scratch_updater_paths(
         lambda _node: "9.9.9",
     )
     latest = _run(updater.fetch_latest(object()))
-    check(latest.version == "9.9.9")
-    check(latest.metadata["commit"] == "f" * 40)
+    assert latest.version == "9.9.9"
+    assert latest.metadata["commit"] == "f" * 40
 
     npm_expr = object.__getattribute__(updater, "_expr_for_npm_deps")()
     cargo_expr = object.__getattribute__(updater, "_expr_for_cargo_vendor")()
-    check("fetchNpmDeps" in npm_expr)
-    check("fetchCargoVendor" in cargo_expr)
+    assert "fetchNpmDeps" in npm_expr
+    assert "fetchCargoVendor" in cargo_expr
 
     async def _fixed_hash(_name: str, expr: str, **_kwargs: object) -> EventStream:
         if "fetchNpmDeps" in expr:
@@ -463,7 +456,7 @@ def test_scratch_updater_paths(
     payload = _require_hash_entries(
         [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload
     )
-    check([entry.hash_type for entry in payload] == ["npmDepsHash", "cargoHash"])
+    assert [entry.hash_type for entry in payload] == ["npmDepsHash", "cargoHash"]
 
     async def _no_hash(_name: str, _expr: str, **_kwargs: object) -> EventStream:
         if False:
@@ -477,8 +470,8 @@ def test_scratch_updater_paths(
         latest,
         [scratch_module.HashEntry.create("npmDepsHash", HASH_A)],
     )
-    check(built.input == "scratch")
-    check(built.commit == "f" * 40)
+    assert built.input == "scratch"
+    assert built.commit == "f" * 40
 
 
 def test_sculptor_updater_paths(
@@ -495,7 +488,7 @@ def test_sculptor_updater_paths(
         ),
     )
     latest = _run(updater.fetch_latest(object()))
-    check(latest.version == "2024-02-20")
+    assert latest.version == "2024-02-20"
 
     monkeypatch.setattr(
         sculptor_module,
@@ -508,7 +501,7 @@ def test_sculptor_updater_paths(
         lambda *_a, **_k: asyncio.sleep(0, result={"Last-Modified": "invalid-date"}),
     )
     fallback = _run(updater.fetch_latest(object()))
-    check(fallback.version == "invalid-da")
+    assert fallback.version == "invalid-da"
 
     monkeypatch.setattr(
         sculptor_module,

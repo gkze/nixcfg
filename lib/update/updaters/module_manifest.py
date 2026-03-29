@@ -1,0 +1,35 @@
+"""Explicit manifest of per-package updater modules."""
+
+UPDATER_MODULE_PATHS = {
+    "axiom-cli": "packages/axiom-cli/updater.py",
+    "chatgpt": "overlays/chatgpt/updater.py",
+    "code-cursor": "overlays/code-cursor/updater.py",
+    "codex-desktop": "packages/codex-desktop/updater.py",
+    "commander": "packages/commander/updater.py",
+    "conductor": "packages/conductor/updater.py",
+    "crush": "overlays/crush/updater.py",
+    "datagrip": "overlays/datagrip/updater.py",
+    "droid": "packages/droid/updater.py",
+    "element-desktop": "overlays/element-desktop/updater.py",
+    "emdash": "packages/emdash/updater.py",
+    "gemini-cli": "overlays/gemini-cli/updater.py",
+    "gogcli": "packages/gogcli/updater.py",
+    "google-chrome": "overlays/google-chrome/updater.py",
+    "goose-cli": "overlays/goose-cli/updater.py",
+    "goose-v8": "overlays/goose-v8/updater.py",
+    "homebrew-zsh-completion": "packages/homebrew-zsh-completion/updater.py",
+    "linear-cli": "packages/linear-cli/updater.py",
+    "linearis": "packages/linearis/updater.py",
+    "mux": "packages/mux/updater.py",
+    "nix-manipulator": "packages/nix-manipulator/updater.py",
+    "opencode": "overlays/opencode/updater.py",
+    "opencode-desktop": "packages/opencode-desktop/updater.py",
+    "scratch": "packages/scratch/updater.py",
+    "sculptor": "packages/sculptor/updater.py",
+    "sentry-cli": "overlays/sentry-cli/updater.py",
+    "superset": "packages/superset/updater.py",
+    "toad": "packages/toad/updater.py",
+    "vscode-insiders": "overlays/vscode-insiders/updater.py",
+}
+
+__all__ = ["UPDATER_MODULE_PATHS"]

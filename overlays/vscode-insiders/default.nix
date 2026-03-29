@@ -19,12 +19,15 @@
         .${system};
       archive_fmt = if prev.stdenv.hostPlatform.isDarwin then "zip" else "tar.gz";
     in
-    (prev.vscode.override { isInsiders = true; }).overrideAttrs {
+    (prev.vscode.override { isInsiders = true; }).overrideAttrs (old: {
       inherit version;
       src = prev.fetchurl {
         name = "VSCode-insiders-${version}-${plat}.${archive_fmt}";
         url = info.urls.${system};
         inherit hash;
       };
-    };
+      meta = (old.meta or { }) // {
+        platforms = builtins.attrNames info.urls;
+      };
+    });
 }

@@ -6,7 +6,6 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from lib.nix.commands.base import CommandResult, NixCommandError
-from lib.tests._assertions import check
 from lib.update.ci import build_shared_closure as bsc
 
 if TYPE_CHECKING:
@@ -17,9 +16,9 @@ if TYPE_CHECKING:
 
 def test_format_duration() -> None:
     """Run this test case."""
-    check(object.__getattribute__(bsc, "_format_duration")(2.3) == "2.3s")
-    check(object.__getattribute__(bsc, "_format_duration")(90) == "1m 30s")
-    check(object.__getattribute__(bsc, "_format_duration")(4000) == "1h 6m")
+    assert object.__getattribute__(bsc, "_format_duration")(2.3) == "2.3s"
+    assert object.__getattribute__(bsc, "_format_duration")(90) == "1m 30s"
+    assert object.__getattribute__(bsc, "_format_duration")(4000) == "1h 6m"
 
 
 def test_eval_and_collect(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -33,21 +32,21 @@ def test_eval_and_collect(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(bsc, "nix_build_dry_run", _dry_run)
     drvs = asyncio.run(object.__getattribute__(bsc, "_eval_one")(".#x"))
-    check(drvs == {".#x-a", ".#x-b"})
+    assert drvs == {".#x-a", ".#x-b"}
 
     all_drvs = asyncio.run(
         object.__getattribute__(bsc, "_collect_derivations")([".#a", ".#b"])
     )
-    check(".#a-a" in all_drvs)
-    check(".#b-b" in all_drvs)
+    assert ".#a-a" in all_drvs
+    assert ".#b-b" in all_drvs
 
 
 def test_build_derivations_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
-    check(
+    assert (
         asyncio.run(object.__getattribute__(bsc, "_build_derivations")(set())) is True
     )
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(bsc, "_build_derivations")(
                 {"/nix/store/a.drv"}, dry_run=True
@@ -60,7 +59,7 @@ def test_build_derivations_branches(monkeypatch: pytest.MonkeyPatch) -> None:
         return CommandResult(args=["nix-store"], returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(bsc, "nix_store_realise", _ok_realise)
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(bsc, "_build_derivations")({
                 "/nix/store/a.drv",
@@ -74,7 +73,7 @@ def test_build_derivations_branches(monkeypatch: pytest.MonkeyPatch) -> None:
         return CommandResult(args=["nix-store"], returncode=1, stdout="", stderr="")
 
     monkeypatch.setattr(bsc, "nix_store_realise", _bad_realise)
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(bsc, "_build_derivations")({"/nix/store/a.drv"})
         )
@@ -88,7 +87,7 @@ def test_build_derivations_branches(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr(bsc, "nix_store_realise", _timeout_realise)
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(bsc, "_build_derivations")({"/nix/store/a.drv"})
         )
@@ -109,25 +108,38 @@ def test_build_profiler_tracks_check_activity() -> None:
     )
     profiler.ingest_line('@nix {"action":"stop","id":7}', now=13.5)
 
-    check(len(profiler.events) == 1)
-    check(profiler.events[0].derivation.endswith("-demo.drv"))
-    check(round(profiler.events[0].duration_seconds, 1) == expected_duration)
-    check(profiler.events[0].completed is True)
+    assert len(profiler.events) == 1
+    assert profiler.events[0].derivation.endswith("-demo.drv")
+    assert round(profiler.events[0].duration_seconds, 1) == expected_duration
+    assert profiler.events[0].completed is True
 
 
 def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
 
-    async def _collect(_refs: list[str]) -> set[str]:
+    async def _collect(
+        _refs: list[str],
+        *,
+        mode: str = "union",
+        nix_verbosity: int = 0,
+    ) -> set[str]:
+        _ = (mode, nix_verbosity)
         return {"/nix/store/a.drv"}
 
-    async def _build(_drvs: set[str], *, dry_run: bool = False) -> bool:
+    async def _build(
+        _drvs: set[str],
+        *,
+        dry_run: bool = False,
+        nix_verbosity: int = 0,
+        profiler: object | None = None,
+    ) -> bool:
+        _ = (nix_verbosity, profiler)
         return not dry_run
 
     monkeypatch.setattr(bsc, "_collect_derivations", _collect)
     monkeypatch.setattr(bsc, "_build_derivations", _build)
 
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(bsc, "_async_main")(
                 flake_refs=[".#a"],
@@ -136,7 +148,7 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         == 0
     )
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(bsc, "_async_main")(
                 flake_refs=[".#a"],
@@ -145,7 +157,6 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         == 1
     )
-
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         bsc.logging, "basicConfig", lambda **kwargs: calls.append(kwargs)
@@ -157,5 +168,5 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(bsc.asyncio, "run", _run)
     rc = bsc.main([".#a", "--verbose"])
-    check(rc == 0)
-    check(calls[-1]["level"] == bsc.logging.DEBUG)
+    assert rc == 0
+    assert calls[-1]["level"] == bsc.logging.DEBUG

@@ -5,8 +5,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from lib.tests._assertions import check
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _EXCLUDED_PARTS = {".venv", "venv", "__pycache__", "mutants", "tests"}
 _FORBIDDEN_NIX_TEMPLATE_FRAGMENTS = (
@@ -85,4 +83,4 @@ def test_production_python_avoids_raw_nix_templates() -> None:
                                 f"{rel}:{node.lineno}: FunctionCall name uses raw string",
                             )
 
-    check(violations == [], "\n".join(violations))
+    assert violations == [], "\n".join(violations)

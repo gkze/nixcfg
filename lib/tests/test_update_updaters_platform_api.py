@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, ClassVar
 import aiohttp
 import pytest
 
-from lib.tests._assertions import check, expect_instance
+from lib.tests._assertions import expect_instance
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.metadata import PlatformAPIMetadata
 from lib.update.updaters.platform_api import PlatformAPIUpdater
@@ -91,14 +91,14 @@ def test_fetch_latest_accepts_mixed_platform_payload_values(
 
     latest = _run_with_session(updater.fetch_latest)
     latest_info = expect_instance(latest, VersionInfo)
-    check(latest_info.version == "1.110.0-insider")
-    check(latest_info.metadata["build"] == "2026-02-24")
-    check(latest_info.metadata["commit"] == "67c59a1440590a328f6fd0f15c37383c7576a236")
+    assert latest_info.version == "1.110.0-insider"
+    assert latest_info.metadata["build"] == "2026-02-24"
+    assert latest_info.metadata["commit"] == "67c59a1440590a328f6fd0f15c37383c7576a236"
 
     platform_info = expect_instance(latest_info.metadata["platform_info"], dict)
     linux_info = expect_instance(platform_info["x86_64-linux"], dict)
-    check(linux_info["supportsFastUpdate"] is True)
-    check(linux_info["timestamp"] == EXPECTED_TIMESTAMP)
+    assert linux_info["supportsFastUpdate"] is True
+    assert linux_info["timestamp"] == EXPECTED_TIMESTAMP
 
 
 def test_fetch_checksums_uses_checksum_field_only() -> None:
@@ -126,13 +126,10 @@ def test_fetch_checksums_uses_checksum_field_only() -> None:
         lambda session: updater.fetch_checksums(info, session)
     )
     payload = expect_instance(checksums, dict)
-    check(
-        payload
-        == {
-            "x86_64-linux": "hash-linux-x64",
-            "aarch64-linux": "hash-linux-arm64",
-        }
-    )
+    assert payload == {
+        "x86_64-linux": "hash-linux-x64",
+        "aarch64-linux": "hash-linux-arm64",
+    }
 
 
 def test_fetch_latest_requires_string_required_fields(
@@ -220,8 +217,8 @@ def test_fetch_checksums_error_paths_and_build_result_commit_normalization() -> 
         VersionInfo(version="9.9.9", metadata={"platform_info": {}, "commit": 123}),
         {"x86_64-linux": "sha256-x", "aarch64-linux": "sha256-y"},
     )
-    check(entry.version == "9.9.9")
-    check(entry.commit is None)
+    assert entry.version == "9.9.9"
+    assert entry.commit is None
 
 
 def test_missing_checksum_key_and_abstract_methods_raise() -> None:
@@ -275,7 +272,7 @@ def test_fetch_latest_payload_shape_and_optional_commit_key(
     monkeypatch.setattr("lib.update.updaters.platform_api.fetch_json", _fetch_good)
     latest = _run_with_session(no_commit.fetch_latest)
     info = expect_instance(latest, VersionInfo)
-    check("commit" not in info.metadata)
+    assert "commit" not in info.metadata
 
 
 def test_metadata_helper_accepts_typed_metadata_and_rejects_invalid_payload() -> None:
@@ -289,7 +286,7 @@ def test_metadata_helper_accepts_typed_metadata_and_rejects_invalid_payload() ->
         equality_fields={"build": "2026-03-01"},
     )
     info = VersionInfo(version="1", metadata=metadata)
-    check(updater._metadata(info) is metadata)
+    assert updater._metadata(info) is metadata
 
     with pytest.raises(TypeError, match="Expected platform_info mapping"):
         updater._metadata(VersionInfo(version="1", metadata=object()))

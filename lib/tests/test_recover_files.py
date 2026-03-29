@@ -10,7 +10,6 @@ import pytest
 
 from lib.recover import files as rf
 from lib.recover.snapshot import SnapshotPlan
-from lib.tests._assertions import check
 
 
 def test_plan_file_recovery_detects_writes_from_paths_and_globs(
@@ -49,10 +48,10 @@ def test_plan_file_recovery_detects_writes_from_paths_and_globs(
         )
     )
 
-    check(plan.path_selectors == ("flake.lock",))
-    check(plan.glob_selectors == ("docs/*.md",))
-    check(plan.write_paths == ("docs/guide.md", "flake.lock"))
-    check(plan.remove_paths == ())
+    assert plan.path_selectors == ("flake.lock",)
+    assert plan.glob_selectors == ("docs/*.md",)
+    assert plan.write_paths == ("docs/guide.md", "flake.lock")
+    assert plan.remove_paths == ()
 
 
 def test_plan_file_recovery_sync_marks_selected_local_only_files(
@@ -87,8 +86,8 @@ def test_plan_file_recovery_sync_marks_selected_local_only_files(
         )
     )
 
-    check(plan.write_paths == ())
-    check(plan.remove_paths == ("docs/extra.md",))
+    assert plan.write_paths == ()
+    assert plan.remove_paths == ("docs/extra.md",)
 
 
 def test_plan_file_recovery_rejects_missing_or_invalid_selectors(
@@ -172,15 +171,15 @@ def test_apply_file_recovery_writes_deletes_and_stages(
 
     changed = rf.apply_file_recovery(plan, stage=True)
 
-    check(changed == ("docs/old.md", "docs/remove.md"))
-    check((repo_root / "docs/old.md").read_bytes() == b"new\n")
-    check(not (repo_root / "docs/remove.md").exists())
+    assert changed == ("docs/old.md", "docs/remove.md")
+    assert (repo_root / "docs/old.md").read_bytes() == b"new\n"
+    assert not (repo_root / "docs/remove.md").exists()
     args = seen["args"]
-    check(isinstance(args, list))
+    assert isinstance(args, list)
     checked_args = args
-    check(checked_args[0].endswith("git"))
-    check(checked_args[1:] == ["add", "-A", "--", "docs/old.md", "docs/remove.md"])
-    check(seen["cwd"] == repo_root)
+    assert checked_args[0].endswith("git")
+    assert checked_args[1:] == ["add", "-A", "--", "docs/old.md", "docs/remove.md"]
+    assert seen["cwd"] == repo_root
 
 
 def test_run_file_recovery_rejects_stage_without_apply(
@@ -188,5 +187,5 @@ def test_run_file_recovery_rejects_stage_without_apply(
 ) -> None:
     """Require --apply before staging selected file changes."""
     rc = rf.run_file_recovery(stage=True, paths=("flake.lock",))
-    check(rc == 1)
-    check("--stage requires --apply" in capsys.readouterr().err)
+    assert rc == 1
+    assert "--stage requires --apply" in capsys.readouterr().err

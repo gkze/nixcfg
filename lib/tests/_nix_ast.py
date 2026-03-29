@@ -16,7 +16,7 @@ from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.source_code import NixSourceCode
 
-from lib.tests._assertions import check, expect_not_none
+from lib.tests._assertions import expect_not_none
 
 _NON_SEMANTIC_FIELD_NAMES = {
     "after",
@@ -102,7 +102,7 @@ def _parse_nix_source(value: str | NixExpression | NixSourceCode) -> NixSourceCo
         if parsed.contains_error:
             parsed = parse(_rewrite_function_formals_for_parser(rebuilt))
 
-    check(parsed.contains_error is False, "expected parseable Nix expression")
+    assert parsed.contains_error is False, "expected parseable Nix expression"
     return parsed
 
 
@@ -136,9 +136,8 @@ def _canonical_nix_parse(text: str) -> str:
         check=False,
         cwd=Path(__file__).resolve().parents[2],
     )
-    check(
-        result.returncode == 0,
-        result.stderr.strip() or "nix-instantiate --parse failed",
+    assert result.returncode == 0, (
+        result.stderr.strip() or "nix-instantiate --parse failed"
     )
     return result.stdout.strip()
 
@@ -188,21 +187,17 @@ def assert_nix_ast_equal(
         actual_expr = parse_nix_expr(actual)
         expected_expr = parse_nix_expr(expected)
     except AssertionError:
-        check(
-            _canonical_nix_parse(_source_text(actual))
-            == _canonical_nix_parse(_source_text(expected)),
-            "expected semantically equivalent Nix ASTs",
-        )
+        assert _canonical_nix_parse(_source_text(actual)) == _canonical_nix_parse(
+            _source_text(expected)
+        ), "expected semantically equivalent Nix ASTs"
         return
 
     if _semantic_tree(actual_expr) == _semantic_tree(expected_expr):
         return
 
-    check(
-        _canonical_nix_parse(_source_text(actual))
-        == _canonical_nix_parse(_source_text(expected)),
-        "expected semantically equivalent Nix ASTs",
-    )
+    assert _canonical_nix_parse(_source_text(actual)) == _canonical_nix_parse(
+        _source_text(expected)
+    ), "expected semantically equivalent Nix ASTs"
 
 
 def binding_map(bindings: Iterable[Binding | Inherit]) -> dict[str, Binding]:

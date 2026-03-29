@@ -526,7 +526,7 @@ in
         homepage = "https://github.com/block/goose";
         license = prev.lib.licenses.asl20;
         mainProgram = "goose";
-        platforms = prev.lib.platforms.linux ++ prev.lib.platforms.darwin;
+        platforms = [ "aarch64-darwin" ];
       };
     };
 }

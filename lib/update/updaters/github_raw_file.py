@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -30,15 +29,14 @@ from lib.update.updaters.registry import register_updater
 def github_raw_file_updater(
     name: str,
     *,
+    module: str | None = None,
     owner: str,
     repo: str,
     path: str,
 ) -> type[GitHubRawFileUpdater]:
     """Create a ``GitHubRawFileUpdater`` subclass with fixed repo/path settings."""
-    caller_frames = inspect.stack(context=0)
-    caller_module = caller_frames[1].frame.f_globals.get("__name__", __name__)
     attrs = {
-        "__module__": caller_module,
+        "__module__": __name__ if module is None else module,
         "name": name,
         "owner": owner,
         "repo": repo,

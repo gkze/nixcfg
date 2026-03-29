@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from lib.nix.models.sources import SourceEntry
-from lib.tests._assertions import check, expect_instance
+from lib.tests._assertions import expect_instance
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import VersionInfo
@@ -87,8 +87,8 @@ def test_mux_uses_platform_specific_node_modules_hashes(
 ) -> None:
     """Mux node_modules hashes should be tracked separately per platform."""
     updater_cls = mux_module.MuxUpdater
-    check(updater_cls.platform_specific is True)
-    check(updater_cls.hash_type == "nodeModulesHash")
+    assert updater_cls.platform_specific is True
+    assert updater_cls.hash_type == "nodeModulesHash"
 
 
 def test_commander_fetches_latest_version_from_changelog(
@@ -106,7 +106,7 @@ def test_commander_fetches_latest_version_from_changelog(
         ),
     )
     latest = _run(updater.fetch_latest(object()))
-    check(latest.version == "0.7.875")
+    assert latest.version == "0.7.875"
 
 
 def test_commander_fetches_latest_version_from_html_changelog(
@@ -128,7 +128,7 @@ def test_commander_fetches_latest_version_from_html_changelog(
         ),
     )
     latest = _run(updater.fetch_latest(object()))
-    check(latest.version == "0.7.875")
+    assert latest.version == "0.7.875"
 
 
 def test_commander_uses_versioned_download_urls(
@@ -138,11 +138,11 @@ def test_commander_uses_versioned_download_urls(
     updater = commander_module.CommanderUpdater()
     latest = VersionInfo(version="0.7.890")
 
-    check(
+    assert (
         updater.get_download_url("aarch64-darwin", latest)
         == "https://download.thecommander.app/release/Commander-0.7.890.dmg"
     )
-    check(
+    assert (
         updater.get_download_url("x86_64-darwin", latest)
         == "https://download.thecommander.app/release/Commander-0.7.890.dmg"
     )
@@ -179,7 +179,7 @@ def test_codex_desktop_version_header_priority(
         ),
     )
     latest = _run(updater.fetch_latest(object()))
-    check(latest.version == "md5.7520f1f73f7130affc2084df5b5d8476")
+    assert latest.version == "md5.7520f1f73f7130affc2084df5b5d8476"
 
     monkeypatch.setattr(
         codex_desktop_module,
@@ -187,7 +187,7 @@ def test_codex_desktop_version_header_priority(
         lambda *_a, **_k: asyncio.sleep(0, result={"ETag": '"0xABCDEF"'}),
     )
     etag_latest = _run(updater.fetch_latest(object()))
-    check(etag_latest.version == "etag.abcdef")
+    assert etag_latest.version == "etag.abcdef"
 
     monkeypatch.setattr(
         codex_desktop_module,
@@ -198,7 +198,7 @@ def test_codex_desktop_version_header_priority(
         ),
     )
     lm_latest = _run(updater.fetch_latest(object()))
-    check(lm_latest.version == "modified.20260304002501")
+    assert lm_latest.version == "modified.20260304002501"
 
 
 def test_codex_desktop_invalid_content_md5_raises(
@@ -241,9 +241,9 @@ def test_opencode_dep_key_resolution_is_exact(
     keys = opencode_desktop_module.OpencodeDesktopUpdater._resolve_git_dep_keys(
         lockfile
     )
-    check(keys["specta"] == "specta-2.0.0-rc.22")
-    check(keys["tauri"] == "tauri-2.9.5")
-    check(keys["tauri-specta"] == "tauri-specta-2.0.0-rc.21")
+    assert keys["specta"] == "specta-2.0.0-rc.22"
+    assert keys["tauri"] == "tauri-2.9.5"
+    assert keys["tauri-specta"] == "tauri-specta-2.0.0-rc.21"
 
 
 def test_opencode_hash_fetch_passes_direct_match_names(
@@ -303,10 +303,10 @@ def test_opencode_hash_fetch_passes_direct_match_names(
     events = _run(_collect(updater.fetch_hashes(VersionInfo("main", {}), object())))
     value_events = [event for event in events if event.kind == UpdateEventKind.VALUE]
     payload = expect_instance(value_events[-1].payload, list)
-    check(len(payload) == 3)
+    assert len(payload) == 3
 
     deps = expect_instance(captured["git_deps"], list)
-    check(all(dep.match_name == dep.git_dep for dep in deps))
+    assert all(dep.match_name == dep.git_dep for dep in deps)
 
 
 def test_element_desktop_reads_pinned_version_from_sources(
@@ -324,10 +324,10 @@ def test_element_desktop_reads_pinned_version_from_sources(
         lambda _p: SourceEntry.model_validate({"version": "1.12.8", "hashes": []}),
     )
     latest = _run(updater.fetch_latest(object()))
-    check(latest.version == "1.12.8")
+    assert latest.version == "1.12.8"
 
     is_latest = _run(updater._is_latest(None, latest))
-    check(is_latest is False)
+    assert is_latest is False
 
 
 def test_superset_fetches_desktop_release_assets(
@@ -354,8 +354,8 @@ def test_superset_fetches_desktop_release_assets(
     )
 
     latest = _run(updater.fetch_latest(object()))
-    check(latest.version == "1.2.3")
-    check(
+    assert latest.version == "1.2.3"
+    assert (
         updater.get_download_url("x86_64-linux", latest)
         == "https://example.test/superset-1.2.3-x86_64.AppImage"
     )
@@ -416,10 +416,9 @@ def test_superset_release_url_format(superset_module: ModuleType) -> None:
     """Generate fallback release URL and reject unsupported platforms."""
     updater = superset_module.SupersetUpdater()
     url = updater.get_download_url("x86_64-linux", VersionInfo("1.2.3", {}))
-    check(
+    assert (
         url
         == "https://github.com/superset-sh/superset/releases/download/desktop-v1.2.3/superset-1.2.3-x86_64.AppImage"
     )
-
     with pytest.raises(RuntimeError, match="Unsupported platform"):
         updater.get_download_url("aarch64-linux", VersionInfo("1.2.3", {}))

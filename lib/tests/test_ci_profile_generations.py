@@ -6,7 +6,6 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lib.tests._assertions import check
 from lib.update.ci import build_shared_closure as bsc
 from lib.update.ci import profile_generations as pg
 
@@ -31,12 +30,12 @@ def test_build_rebuild_args_public_cache_only() -> None:
         extra_substituters=None,
     )
 
-    check(args[0:2] == ["nix", "build"])
-    check("--rebuild" in args)
-    check("--log-format" in args)
-    check("internal-json" in args)
-    check("https://cache.nixos.org" in args)
-    check(args[-1] == f"{target.derivation}^*")
+    assert args[0:2] == ["nix", "build"]
+    assert "--rebuild" in args
+    assert "--log-format" in args
+    assert "internal-json" in args
+    assert "https://cache.nixos.org" in args
+    assert args[-1] == f"{target.derivation}^*"
 
 
 def test_resolve_targets_skips_missing_optional_home(
@@ -61,8 +60,8 @@ def test_resolve_targets_skips_missing_optional_home(
         )
     )
 
-    check(len(targets) == 1)
-    check(targets[0].name == "system")
+    assert len(targets) == 1
+    assert targets[0].name == "system"
 
 
 def test_async_main_profiles_and_writes_report(
@@ -119,10 +118,10 @@ def test_async_main_profiles_and_writes_report(
         )
     )
 
-    check(rc == 0)
-    check(captured["output_path"] == output_path)
-    check(captured["flake_refs"] == ["/run/current-system"])
-    check(captured["derivation_count"] == 1)
+    assert rc == 0
+    assert captured["output_path"] == output_path
+    assert captured["flake_refs"] == ["/run/current-system"]
+    assert captured["derivation_count"] == 1
 
 
 def test_main_enables_debug_logging(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -139,5 +138,5 @@ def test_main_enables_debug_logging(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pg.asyncio, "run", _run)
 
     rc = pg.main(["--verbose"])
-    check(rc == 0)
-    check(calls[-1]["level"] == pg.logging.DEBUG)
+    assert rc == 0
+    assert calls[-1]["level"] == pg.logging.DEBUG

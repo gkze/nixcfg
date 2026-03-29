@@ -7,21 +7,20 @@ from pathlib import Path
 
 import pytest
 
-from lib.tests._assertions import check
 from lib.update.ci import crate2nix
 
 
 def test_normalize_json_text_sorts_keys_and_adds_newline() -> None:
     """Canonical JSON rendering should be stable for crate-hashes.json."""
     rendered = crate2nix._normalize_json_text('{"b":1,"a":2}')
-    check(rendered == '{\n  "a": 2,\n  "b": 1\n}\n')
+    assert rendered == '{\n  "a": 2,\n  "b": 1\n}\n'
 
 
 def test_normalize_trailing_newline_collapses_extra_newlines() -> None:
     """Generated artifacts should always end with exactly one newline."""
-    check(crate2nix._normalize_trailing_newline("demo") == "demo\n")
-    check(crate2nix._normalize_trailing_newline("demo\n") == "demo\n")
-    check(crate2nix._normalize_trailing_newline("demo\n\n") == "demo\n")
+    assert crate2nix._normalize_trailing_newline("demo") == "demo\n"
+    assert crate2nix._normalize_trailing_newline("demo\n") == "demo\n"
+    assert crate2nix._normalize_trailing_newline("demo\n\n") == "demo\n"
 
 
 def test_stabilize_generated_command_comment_rewrites_dynamic_paths() -> None:
@@ -44,7 +43,7 @@ def test_stabilize_generated_command_comment_rewrites_dynamic_paths() -> None:
 
     stabilized = crate2nix._stabilize_generated_command_comment(target, refreshed)
 
-    check(
+    assert (
         '#   "generate" "-f" "Cargo.toml" "-o" "demo/Cargo.nix" '
         '"-h" "demo/crate-hashes.json" "--default-features"\n' in stabilized
     )
@@ -71,7 +70,7 @@ def test_stabilize_generated_command_comment_preserves_nested_manifest_path() ->
 
     stabilized = crate2nix._stabilize_generated_command_comment(target, refreshed)
 
-    check(
+    assert (
         '#   "generate" "-f" "packages/desktop/src-tauri/Cargo.toml" '
         '"-o" "demo/Cargo.nix" "-h" "demo/crate-hashes.json" '
         '"--default-features"\n' in stabilized
@@ -95,7 +94,7 @@ def test_stabilize_generated_command_comment_leaves_unrelated_text_unchanged() -
         "{ }\n"
     )
 
-    check(
+    assert (
         crate2nix._stabilize_generated_command_comment(target, refreshed) == refreshed
     )
 
@@ -106,24 +105,21 @@ def test_resolve_targets_skips_unsupported_platforms(monkeypatch) -> None:
 
     runnable, skipped = crate2nix._resolve_targets(())
 
-    check([target.name for target in runnable] == ["codex", "goose-cli"])
-    check(skipped == ["zed-editor-nightly", "opencode-desktop"])
+    assert [target.name for target in runnable] == ["codex", "goose-cli"]
+    assert skipped == ["zed-editor-nightly", "opencode-desktop"]
 
 
 def test_targets_use_dedicated_source_installables() -> None:
     """Built-in targets should avoid final-package passthru source paths."""
-    check(
-        {
-            name: target.patched_src_installable
-            for name, target in crate2nix.TARGETS.items()
-        }
-        == {
-            "codex": "path:.#codex-crate2nix-src",
-            "goose-cli": "path:.#goose-cli-crate2nix-src",
-            "zed-editor-nightly": "path:.#zed-editor-nightly-crate2nix-src",
-            "opencode-desktop": "path:.#opencode-desktop-crate2nix-src",
-        }
-    )
+    assert {
+        name: target.patched_src_installable
+        for name, target in crate2nix.TARGETS.items()
+    } == {
+        "codex": "path:.#codex-crate2nix-src",
+        "goose-cli": "path:.#goose-cli-crate2nix-src",
+        "zed-editor-nightly": "path:.#zed-editor-nightly-crate2nix-src",
+        "opencode-desktop": "path:.#opencode-desktop-crate2nix-src",
+    }
 
 
 def test_crate2nix_source_installables_are_wired_through_package_registry() -> None:
@@ -134,31 +130,23 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
         for path in packages_root.glob("*/crate2nix-src.nix")
     }
 
-    check(
-        {
-            "codex-crate2nix-src",
-            "goose-cli-crate2nix-src",
-            "opencode-desktop-crate2nix-src",
-            "zed-editor-nightly-crate2nix-src",
-        }
-        <= companion_entries
-    )
-
+    assert {
+        "codex-crate2nix-src",
+        "goose-cli-crate2nix-src",
+        "opencode-desktop-crate2nix-src",
+        "zed-editor-nightly-crate2nix-src",
+    } <= companion_entries
     registry = (packages_root / "registry.nix").read_text(encoding="utf-8")
-    check('fileName = "crate2nix-src.nix";' in registry)
-    check("packagePaths = discoveredPackagePaths // companionPackagePaths;" in registry)
-    check(
+    assert 'fileName = "crate2nix-src.nix";' in registry
+    assert "packagePaths = discoveredPackagePaths // companionPackagePaths;" in registry
+    assert (
         "forSystem = system: builtins.removeAttrs packagePaths (unsupportedForSystem system);"
         in registry
     )
-    check(
-        'opencode-desktop-crate2nix-src = system: builtins.match ".*-darwin" system != null;'
-        in registry
-    )
-    check(
-        'zed-editor-nightly-crate2nix-src = system: builtins.match ".*-darwin" system != null;'
-        in registry
-    )
+    assert "groupConstraintPredicates = {" in registry
+    assert 'darwin = system: builtins.match ".*-darwin" system != null;' in registry
+    assert 'opencode-desktop-crate2nix-src = "darwin";' in registry
+    assert 'zed-editor-nightly-crate2nix-src = "darwin";' in registry
 
 
 def test_run_writes_refreshed_files(monkeypatch, tmp_path: Path) -> None:
@@ -190,11 +178,11 @@ def test_run_writes_refreshed_files(monkeypatch, tmp_path: Path) -> None:
 
     rc = crate2nix.run(packages=("demo",), write=True)
 
-    check(rc == 0)
-    check((demo_dir / "Cargo.nix").read_text(encoding="utf-8") == "new cargo\n")
-    check(
-        (demo_dir / "crate-hashes.json").read_text(encoding="utf-8") == '{"new": 2}\n'
-    )
+    assert rc == 0
+    assert (demo_dir / "Cargo.nix").read_text(encoding="utf-8") == "new cargo\n"
+    assert (demo_dir / "crate-hashes.json").read_text(
+        encoding="utf-8"
+    ) == '{"new": 2}\n'
 
 
 def test_run_fails_when_drift_is_detected(monkeypatch, tmp_path: Path) -> None:
@@ -226,8 +214,8 @@ def test_run_fails_when_drift_is_detected(monkeypatch, tmp_path: Path) -> None:
 
     rc = crate2nix.run(packages=("demo",), write=False)
 
-    check(rc == 1)
-    check((demo_dir / "Cargo.nix").read_text(encoding="utf-8") == "old cargo\n")
+    assert rc == 1
+    assert (demo_dir / "Cargo.nix").read_text(encoding="utf-8") == "old cargo\n"
 
 
 def test_current_platform_normalizes_known_systems(
@@ -235,11 +223,11 @@ def test_current_platform_normalizes_known_systems(
 ) -> None:
     """Map platform.system() values to crate2nix platform names."""
     monkeypatch.setattr(crate2nix.platform, "system", lambda: "Darwin")
-    check(crate2nix._current_platform() == "darwin")
+    assert crate2nix._current_platform() == "darwin"
     monkeypatch.setattr(crate2nix.platform, "system", lambda: "Linux")
-    check(crate2nix._current_platform() == "linux")
+    assert crate2nix._current_platform() == "linux"
     monkeypatch.setattr(crate2nix.platform, "system", lambda: "Plan9")
-    check(crate2nix._current_platform() == "plan9")
+    assert crate2nix._current_platform() == "plan9"
 
 
 def test_load_normalizer_handles_success_and_type_errors(tmp_path: Path) -> None:
@@ -250,7 +238,7 @@ def test_load_normalizer_handles_success_and_type_errors(tmp_path: Path) -> None
         encoding="utf-8",
     )
     normalize = crate2nix._load_normalizer(good)
-    check(normalize("demo") == ("demo! ", 1, True))
+    assert normalize("demo") == ("demo! ", 1, True)
 
     missing = tmp_path / "missing.py"
     missing.write_text("VALUE = 1\n", encoding="utf-8")
@@ -296,8 +284,8 @@ def test_run_helper_and_build_patched_src_error_paths(
         return subprocess.CompletedProcess(["cmd"], 0, stdout="ok\n", stderr="")
 
     monkeypatch.setattr(crate2nix.subprocess, "run", _success)
-    check(crate2nix._run(["cmd"], env={"FLAG": "1"}).stdout == "ok\n")
-    check(seen_env == {"FLAG": "1"})
+    assert crate2nix._run(["cmd"], env={"FLAG": "1"}).stdout == "ok\n"
+    assert seen_env == {"FLAG": "1"}
 
     def _failure(
         _args: list[str],
@@ -322,20 +310,16 @@ def test_run_helper_and_build_patched_src_error_paths(
             ["nix"], 0, stdout="/tmp/demo\n", stderr=""
         ),
     )
-    check(
-        crate2nix._build_patched_src(
-            crate2nix.Crate2NixTarget(
-                name="demo",
-                patched_src_installable="path:.#demo",
-                cargo_nix=Path("Cargo.nix"),
-                crate_hashes=Path("crate-hashes.json"),
-                normalizer_path=Path("normalize.py"),
-                supported_platforms=("linux",),
-            )
+    assert crate2nix._build_patched_src(
+        crate2nix.Crate2NixTarget(
+            name="demo",
+            patched_src_installable="path:.#demo",
+            cargo_nix=Path("Cargo.nix"),
+            crate_hashes=Path("crate-hashes.json"),
+            normalizer_path=Path("normalize.py"),
+            supported_platforms=("linux",),
         )
-        == Path("/tmp/demo")
-    )
-
+    ) == Path("/tmp/demo")
     monkeypatch.setattr(
         crate2nix,
         "_run",
@@ -388,8 +372,8 @@ def test_refresh_target_materializes_normalized_outputs(
         env: dict[str, str] | None = None,
     ):
         del cwd
-        check(args[args.index("-f") + 1] == str(patched_src / "nested/Cargo.toml"))
-        check(env == {"CARGO_NET_GIT_FETCH_WITH_CLI": "true"})
+        assert args[args.index("-f") + 1] == str(patched_src / "nested/Cargo.toml")
+        assert env == {"CARGO_NET_GIT_FETCH_WITH_CLI": "true"}
         generated_cargo = Path(args[args.index("-o") + 1])
         generated_hashes = Path(args[args.index("-h") + 1])
         generated_cargo.write_text(
@@ -405,7 +389,7 @@ def test_refresh_target_materializes_normalized_outputs(
 
     monkeypatch.setattr(crate2nix, "_run", _run)
     refreshed = crate2nix._refresh_target(target)
-    check(
+    assert (
         refreshed.cargo_nix
         == "# This file was @generated by crate2nix 0.15.0 with the command:\n"
         '#   "generate" "-f" "nested/Cargo.toml" "-o" "demo/Cargo.nix" '
@@ -413,15 +397,15 @@ def test_refresh_target_materializes_normalized_outputs(
         "# See https://github.com/kolloch/crate2nix for more info.\n"
         "normalized cargo\n"
     )
-    check(refreshed.crate_hashes == '{\n  "a": 2,\n  "b": 1\n}\n')
+    assert refreshed.crate_hashes == '{\n  "a": 2,\n  "b": 1\n}\n'
 
 
 def test_resolve_targets_and_run_cover_remaining_control_flow(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Exercise unsupported, empty, failure, and success run branches."""
-    check(crate2nix.run(packages=("missing",), write=False) == 1)
-    check("Error: Unknown crate2nix target" in capsys.readouterr().err)
+    assert crate2nix.run(packages=("missing",), write=False) == 1
+    assert "Error: Unknown crate2nix target" in capsys.readouterr().err
 
     with pytest.raises(RuntimeError, match="Unknown crate2nix target"):
         crate2nix._resolve_targets(("missing",))
@@ -443,13 +427,13 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
     monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
 
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "darwin")
-    check(crate2nix.run(packages=("demo",), write=False) == 1)
-    check("unsupported on this platform" in capsys.readouterr().err)
+    assert crate2nix.run(packages=("demo",), write=False) == 1
+    assert "unsupported on this platform" in capsys.readouterr().err
 
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "darwin")
     monkeypatch.setattr(crate2nix, "TARGETS", {})
-    check(crate2nix.run() == 0)
-    check("No crate2nix targets are runnable" in capsys.readouterr().err)
+    assert crate2nix.run() == 0
+    assert "No crate2nix targets are runnable" in capsys.readouterr().err
 
     monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
@@ -458,8 +442,8 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
         "_refresh_target",
         lambda _target: (_ for _ in ()).throw(RuntimeError("boom")),
     )
-    check(crate2nix.run() == 1)
-    check("Skipping unsupported crate2nix targets" not in capsys.readouterr().err)
+    assert crate2nix.run() == 1
+    assert "Skipping unsupported crate2nix targets" not in capsys.readouterr().err
 
     skipped_target = crate2nix.Crate2NixTarget(
         name="zed",
@@ -478,20 +462,19 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
             crate_hashes='{\n  "a": 1\n}\n',
         ),
     )
-    check(crate2nix.run() == 0)
-    check(
+    assert crate2nix.run() == 0
+    assert (
         "Skipping unsupported crate2nix targets on this platform: zed"
         in capsys.readouterr().err
     )
-
     monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
     monkeypatch.setattr(
         crate2nix,
         "_refresh_target",
         lambda _target: (_ for _ in ()).throw(RuntimeError("boom")),
     )
-    check(crate2nix.run() == 1)
-    check("FAIL demo: boom" in capsys.readouterr().err)
+    assert crate2nix.run() == 1
+    assert "FAIL demo: boom" in capsys.readouterr().err
 
     monkeypatch.setattr(
         crate2nix,
@@ -501,8 +484,8 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
             crate_hashes='{\n  "a": 1\n}\n',
         ),
     )
-    check(crate2nix.run() == 0)
-    check(
+    assert crate2nix.run() == 0
+    assert (
         "All checked-in crate2nix artifacts are up to date." in capsys.readouterr().err
     )
 
@@ -517,5 +500,5 @@ def test_cli_callback_exits_with_run_status(monkeypatch: pytest.MonkeyPatch) -> 
         return 7
 
     monkeypatch.setattr(crate2nix, "run", _fake_run)
-    check(crate2nix.main(["--package", "demo", "--write"]) == 7)
-    check(called == {"packages": ("demo",), "write": True})
+    assert crate2nix.main(["--package", "demo", "--write"]) == 7
+    assert called == {"packages": ("demo",), "write": True}

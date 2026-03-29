@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from lib.nix.models.sources import SourceEntry
-from lib.tests._assertions import check
 from lib.update.sources import (
     nix_source_names,
     python_source_names,
@@ -25,7 +24,7 @@ def test_python_source_names_and_nix_missing_executable(
         "lib.update.sources._source_file_map",
         lambda: {"a": Path("/tmp/a"), "b": Path("/tmp/b")},
     )
-    check(python_source_names() == {"a", "b"})
+    assert python_source_names() == {"a", "b"}
 
     monkeypatch.setattr("lib.update.sources.shutil.which", lambda _tool: None)
     with pytest.raises(RuntimeError, match="nix executable not found"):
@@ -75,4 +74,4 @@ def test_validate_source_discovery_consistency_and_save_source_entry(
     target = tmp_path / "sources.json"
     save_source_entry(target, SourceEntry(hashes={"x86_64-linux": "sha256-demo"}))
     payload = json.loads(target.read_text(encoding="utf-8"))
-    check(payload["hashes"]["x86_64-linux"] == "sha256-demo")
+    assert payload["hashes"]["x86_64-linux"] == "sha256-demo"

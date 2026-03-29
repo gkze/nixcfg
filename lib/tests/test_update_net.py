@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 import aiohttp
 import pytest
 
-from lib.tests._assertions import check
 from lib.update import net
 from lib.update.config import resolve_config
 
@@ -69,7 +68,7 @@ class _FakeResponseCM:
 def test_get_github_token_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
     monkeypatch.setenv("GITHUB_TOKEN", "env-token")
-    check(object.__getattribute__(net, "_get_github_token")() == "env-token")
+    assert object.__getattribute__(net, "_get_github_token")() == "env-token"
 
 
 def test_get_github_token_from_netrc(
@@ -90,7 +89,7 @@ def test_get_github_token_from_netrc(
             return None
 
     monkeypatch.setattr(net.netrc, "netrc", lambda _path: _NetrcObj())
-    check(object.__getattribute__(net, "_get_github_token")() == "token-from-netrc")
+    assert object.__getattribute__(net, "_get_github_token")() == "token-from-netrc"
 
 
 def test_get_github_token_netrc_errors(
@@ -106,8 +105,8 @@ def test_get_github_token_netrc_errors(
         net.netrc, "netrc", lambda _path: (_ for _ in ()).throw(OSError("boom"))
     )
     with caplog.at_level(logging.WARNING):
-        check(object.__getattribute__(net, "_get_github_token")() is None)
-    check("Failed to parse" in caplog.text)
+        assert object.__getattribute__(net, "_get_github_token")() is None
+    assert "Failed to parse" in caplog.text
 
 
 def test_check_github_rate_limit_paths() -> None:
@@ -138,13 +137,13 @@ def test_build_headers_and_http_error_format(monkeypatch: pytest.MonkeyPatch) ->
     headers = object.__getattribute__(net, "_build_request_headers")(
         "https://api.github.com/repos/x/y", "ua"
     )
-    check(headers["User-Agent"] == "ua")
-    check(headers["Authorization"] == "Bearer tok")
+    assert headers["User-Agent"] == "ua"
+    assert headers["Authorization"] == "Bearer tok"
 
     nongh = object.__getattribute__(net, "_build_request_headers")(
         "https://example.com", None
     )
-    check("Authorization" not in nongh)
+    assert "Authorization" not in nongh
 
 
 def test_resolve_timeout_alias_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,9 +158,9 @@ def test_resolve_timeout_alias_delegates(monkeypatch: pytest.MonkeyPatch) -> Non
     result = object.__getattribute__(net, "_resolve_timeout_alias")(
         request_timeout=_REQUEST_TIMEOUT, kwargs={"timeout": 5}
     )
-    check(result == _RESOLVED_TIMEOUT)
-    check(called["named_timeout"] == _REQUEST_TIMEOUT)
-    check(called["named_timeout_label"] == "request_timeout")
+    assert result == _RESOLVED_TIMEOUT
+    assert called["named_timeout"] == _REQUEST_TIMEOUT
+    assert called["named_timeout_label"] == "request_timeout"
 
 
 def test_request_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -199,10 +198,10 @@ def test_request_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> None:
             session, "https://example.com", config=cfg
         )
     )
-    check(payload == b"payload")
-    check(headers == {"X": "1"})
-    check(len(requests) == 1)
-    check(requests[0]["method"] == "GET")
+    assert payload == b"payload"
+    assert headers == {"X": "1"}
+    assert len(requests) == 1
+    assert requests[0]["method"] == "GET"
 
     requests.clear()
     response_queue.extend([
@@ -233,7 +232,7 @@ def test_request_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         )
 
-    check(len(requests) == expected_attempts)
+    assert len(requests) == expected_attempts
 
 
 def test_request_does_not_close_callers_session(
@@ -267,7 +266,7 @@ def test_request_does_not_close_callers_session(
             )
             return session.closed
 
-    check(asyncio.run(_runner()) is False)
+    assert asyncio.run(_runner()) is False
 
 
 def test_request_retries_on_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -303,7 +302,7 @@ def test_request_retries_on_client_error(monkeypatch: pytest.MonkeyPatch) -> Non
             )
         )
 
-    check(call_count == expected_attempts)
+    assert call_count == expected_attempts
 
 
 def test_fetch_url_and_headers_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -311,9 +310,9 @@ def test_fetch_url_and_headers_wrappers(monkeypatch: pytest.MonkeyPatch) -> None
     calls: list[dict[str, object]] = []
 
     async def _request(*args: object, **kwargs: object) -> tuple[bytes, dict[str, str]]:
-        check(len(args) >= _MIN_POSITIONAL_ARGS)
+        assert len(args) >= _MIN_POSITIONAL_ARGS
         url = args[1]
-        check(isinstance(url, str))
+        assert isinstance(url, str)
         calls.append({
             "url": url,
             "user_agent": kwargs.get("user_agent"),
@@ -333,13 +332,13 @@ def test_fetch_url_and_headers_wrappers(monkeypatch: pytest.MonkeyPatch) -> None
             request_timeout=2.0,
         )
     )
-    check(body == b"body")
+    assert body == b"body"
 
     headers = _run_with_session(
         lambda session: net.fetch_headers(session, "https://example.com")
     )
-    check(headers == {"X": "y"})
-    check(calls[-1]["method"] == "HEAD")
+    assert headers == {"X": "y"}
+    assert calls[-1]["method"] == "HEAD"
 
 
 def test_fetch_json_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -357,8 +356,8 @@ def test_fetch_json_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     gh = _run_with_session(
         lambda session: net.fetch_json(session, "https://api.github.com/repos/x/y")
     )
-    check(gh == {"ok": 1})
-    check(checks == ["https://api.github.com/repos/x/y"])
+    assert gh == {"ok": 1}
+    assert checks == ["https://api.github.com/repos/x/y"]
 
     monkeypatch.setattr(
         net, "fetch_url", lambda *_a, **_k: asyncio.sleep(0, result=b"[1,2]")
@@ -366,7 +365,7 @@ def test_fetch_json_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     non_gh = _run_with_session(
         lambda session: net.fetch_json(session, "https://example.com/data")
     )
-    check(non_gh == [1, 2])
+    assert non_gh == [1, 2]
 
     monkeypatch.setattr(
         net, "fetch_url", lambda *_a, **_k: asyncio.sleep(0, result=b"not json")
@@ -379,11 +378,11 @@ def test_fetch_json_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_github_url_helpers_and_api_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
-    check(
+    assert (
         net.github_raw_url("a", "b", "c", "d/e")
         == "https://raw.githubusercontent.com/a/b/c/d/e"
     )
-    check(net.github_api_url("repos/a/b") == "https://api.github.com/repos/a/b")
+    assert net.github_api_url("repos/a/b") == "https://api.github.com/repos/a/b"
 
     calls: list[tuple[str, dict[str, object]]] = []
 
@@ -396,22 +395,21 @@ def test_github_url_helpers_and_api_calls(monkeypatch: pytest.MonkeyPatch) -> No
     data = _run_with_session(
         lambda session: net.fetch_github_api(session, "repos/a/b", config=cfg, x="1")
     )
-    check(data == {"default_branch": "main"})
-    check(calls[0][0] == "https://api.github.com/repos/a/b?x=1")
-    check(calls[0][1]["user_agent"] == "ua")
+    assert data == {"default_branch": "main"}
+    assert calls[0][0] == "https://api.github.com/repos/a/b?x=1"
+    assert calls[0][1]["user_agent"] == "ua"
 
     monkeypatch.setattr(
         net,
         "fetch_github_api",
         lambda *_a, **_k: asyncio.sleep(0, result={"default_branch": "trunk"}),
     )
-    check(
+    assert (
         _run_with_session(
             lambda session: net.fetch_github_default_branch(session, "a", "b")
         )
         == "trunk"
     )
-
     monkeypatch.setattr(
         net,
         "fetch_github_api",
@@ -425,7 +423,7 @@ def test_github_url_helpers_and_api_calls(monkeypatch: pytest.MonkeyPatch) -> No
             branch="main",
         )
     )
-    check(sha == "deadbeef")
+    assert sha == "deadbeef"
 
     monkeypatch.setattr(
         net, "fetch_github_api", lambda *_a, **_k: asyncio.sleep(0, result=[])
@@ -472,8 +470,8 @@ def test_fetch_github_api_paginated_stops_after_short_page(
         )
     )
 
-    check(items == [{"name": "v1"}, {"name": "v2"}, {"name": "v3"}])
-    check(page_calls == ["1", "2"])
+    assert items == [{"name": "v1"}, {"name": "v2"}, {"name": "v3"}]
+    assert page_calls == ["1", "2"]
 
 
 def test_fetch_github_api_paginated_respects_item_limit(
@@ -509,8 +507,8 @@ def test_fetch_github_api_paginated_respects_item_limit(
         )
     )
 
-    check(items == [1, 2, 1])
-    check(call_count == expected_calls)
+    assert items == [1, 2, 1]
+    assert call_count == expected_calls
 
 
 def test_fetch_github_api_paginated_requires_list_payload(
@@ -598,7 +596,7 @@ def test_token_discovery_without_netrc_auth_and_rate_limit_unknown_reset(
             _ = host
 
     monkeypatch.setattr(net.netrc, "netrc", lambda _path: _NetrcObj())
-    check(object.__getattribute__(net, "_get_github_token")() is None)
+    assert object.__getattribute__(net, "_get_github_token")() is None
 
     with pytest.raises(RuntimeError, match="Resets at unknown"):
         object.__getattribute__(net, "_check_github_rate_limit")(
@@ -613,7 +611,7 @@ def test_token_discovery_without_netrc_auth_and_rate_limit_unknown_reset(
         _FakeResponse(status=404, reason="Not Found", payload=b""),
         b"",
     )
-    check(detail == "HTTP 404 Not Found")
+    assert detail == "HTTP 404 Not Found"
 
 
 def test_get_github_token_without_netrc_and_optional_str_success(
@@ -623,11 +621,11 @@ def test_get_github_token_without_netrc_and_optional_str_success(
     """Return ``None`` when netrc is absent and parse optional string values."""
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
-    check(object.__getattribute__(net, "_get_github_token")() is None)
+    assert object.__getattribute__(net, "_get_github_token")() is None
 
     payload = {"user_agent": "ua"}
     value = object.__getattribute__(net, "_pop_optional_str")(payload, "user_agent")
-    check(value == "ua")
+    assert value == "ua"
 
 
 def test_request_non_retryable_and_exhausted_retryer(
@@ -691,8 +689,8 @@ def test_fetch_github_api_no_params_and_paginated_limits(
     payload = _run_with_session(
         lambda session: net.fetch_github_api(session, "repos/a/b")
     )
-    check(payload == {"ok": 1})
-    check(calls == ["https://api.github.com/repos/a/b"])
+    assert payload == {"ok": 1}
+    assert calls == ["https://api.github.com/repos/a/b"]
 
     with pytest.raises(ValueError, match="per_page must be >= 1"):
         _run_with_session(
@@ -733,4 +731,4 @@ def test_fetch_github_api_no_params_and_paginated_limits(
                 max_pages=2,
             )
         )
-    check(full == [{"x": 1}, {"x": 1}])
+    assert full == [{"x": 1}, {"x": 1}]

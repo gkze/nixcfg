@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final
 
-import typer
-
 from lib.nix.commands import nix_store_query_deriver, nix_store_query_requisites
+from lib.recover._cli import emit_error, emit_success
 
 DEFAULT_GENERATION: Final[str] = "/run/current-system"
 DEFAULT_MARKER_FILES: Final[tuple[str, ...]] = (
@@ -134,14 +132,10 @@ def run_snapshot_recovery(
     try:
         plan = asyncio.run(plan_snapshot_recovery(generation))
     except Exception as exc:  # noqa: BLE001
-        if json_output:
-            typer.echo(json.dumps({"success": False, "error": str(exc)}))
-        else:
-            typer.echo(f"Error: {exc}", err=True)
-        return 1
+        return emit_error(json_output=json_output, message=str(exc))
 
-    if json_output:
-        typer.echo(json.dumps({"success": True, "plan": plan.to_dict()}))
-    else:
-        typer.echo(plan.snapshot)
-    return 0
+    return emit_success(
+        json_output=json_output,
+        payload={"success": True, "plan": plan.to_dict()},
+        plain=plan.snapshot,
+    )

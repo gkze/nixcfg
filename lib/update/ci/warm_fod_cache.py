@@ -126,13 +126,24 @@ def _find_fod_targets(system: str) -> list[FodTarget]:
     seen: set[tuple[str, str]] = set()
     sources_files = package_file_map(SOURCES_FILE_NAME)
     deno_manifest_packages = set(package_file_map(_DENO_DEPS_MANIFEST_FILE_NAME))
+    source_entries: dict[str, SourceEntry] = {}
+    load_failures: dict[str, Exception] = {}
 
     for name, path in sorted(sources_files.items()):
         try:
-            entry = update_sources.load_source_entry(path)
-        except Exception:
-            log.warning("Skipping %s: failed to load sources.json", name, exc_info=True)
-            continue
+            source_entries[name] = update_sources.load_source_entry(path)
+        except Exception as exc:
+            load_failures[name] = exc
+            log.exception("Failed to load %s: invalid sources.json", name)
+
+    if load_failures:
+        details = ", ".join(
+            f"{name} ({exc})" for name, exc in sorted(load_failures.items())
+        )
+        msg = f"Failed to load per-package sources.json entries: {details}"
+        raise RuntimeError(msg)
+
+    for name, entry in sorted(source_entries.items()):
         for h in _platform_fod_entries(entry, system):
             fod_attr = _resolve_fod_attr(name, h.hash_type)
             if fod_attr is None:
@@ -164,19 +175,14 @@ def _find_fod_targets(system: str) -> list[FodTarget]:
             )
 
     for name in sorted(deno_manifest_packages):
-        path = sources_files.get(name)
-        if path is None:
+        entry = source_entries.get(name)
+        if entry is None:
             log.warning(
                 "Skipping %s: found %s without matching %s",
                 name,
                 _DENO_DEPS_MANIFEST_FILE_NAME,
                 SOURCES_FILE_NAME,
             )
-            continue
-        try:
-            entry = update_sources.load_source_entry(path)
-        except Exception:
-            log.warning("Skipping %s: failed to load sources.json", name, exc_info=True)
             continue
         if not _has_platform_denort_hash(entry, system):
             log.debug(
@@ -209,9 +215,8 @@ def _build_fod_expr(package: str, fod_attr: str, *, system: str | None = None) -
 async def _resolve_output_paths(expr: str) -> list[str]:
     """Resolve the output store paths for a Nix expression.
 
-    Runs ``nix build --json --dry-run`` which evaluates the expression
-    and returns output paths without performing a build (the derivation
-    must already be realised).  The JSON format is::
+    Runs ``nix build --json --no-link`` to evaluate the expression and
+    return output paths for the already-built derivation. The JSON format is::
 
         [{"drvPath": "/nix/store/...", "outputs": {"out": "/nix/store/..."}}]
 
@@ -248,10 +253,8 @@ async def _resolve_output_paths(expr: str) -> list[str]:
 async def _push_to_cachix(store_paths: list[str], cache_name: str) -> bool:
     """Push store paths to Cachix, returning ``True`` on success.
 
-    Falls back gracefully: if ``cachix`` is not installed or the push
-    fails, a warning is logged but the build is still considered
-    successful (the FOD exists locally and may still be served by
-    the Cachix daemon).
+    The caller decides whether a failed push should be fatal for the
+    overall workflow.
     """
     if not store_paths:
         log.debug("No store paths to push")
@@ -324,14 +327,14 @@ async def _build_one(target: FodTarget, system: str, *, cache_name: str | None) 
     # so this is essentially instant).
     if cache_name:
         store_paths = await _resolve_output_paths(expr)
-        if store_paths:
-            await _push_to_cachix(store_paths, cache_name)
-        else:
-            log.warning(
-                "Could not resolve store path for %s — "
-                "skipping cachix push (daemon may still pick it up)",
-                label,
+        if not store_paths:
+            log.error(
+                "Could not resolve store path for %s after a successful build", label
             )
+            return False
+        if not await _push_to_cachix(store_paths, cache_name):
+            log.error("Failed to push %s to cachix cache %r", label, cache_name)
+            return False
 
     return True
 
@@ -400,9 +403,13 @@ def run(
         datefmt="%H:%M:%S",
         level=logging.DEBUG if verbose else logging.INFO,
     )
-    return asyncio.run(
-        _async_main(system=system, dry_run=dry_run, cachix_cache=cachix_cache)
-    )
+    try:
+        return asyncio.run(
+            _async_main(system=system, dry_run=dry_run, cachix_cache=cachix_cache)
+        )
+    except RuntimeError:
+        log.exception("FOD cache warming failed")
+        return 1
 
 
 app = make_typer_app(

@@ -11,12 +11,11 @@ When ``--profile-output`` is provided, build activity is captured via
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import re
 import time
 from pathlib import Path
-from typing import Annotated, Literal, TypedDict, cast
+from typing import Annotated, Literal
 
 import typer
 
@@ -154,21 +153,6 @@ async def _stream_nix_build_dry_run(
         raise NixCommandError(result)
 
     return _parse_dry_run_derivations(result.stdout + result.stderr)
-
-
-class _CollectKwargs(TypedDict, total=False):
-    """Keyword arguments supported by `_collect_derivations`."""
-
-    mode: Literal["union", "intersection"]
-    nix_verbosity: int
-
-
-class _BuildKwargs(TypedDict, total=False):
-    """Keyword arguments supported by `_build_derivations`."""
-
-    dry_run: bool
-    nix_verbosity: int
-    profiler: BuildProfiler | None
 
 
 async def _realise_batch_with_profiling(
@@ -334,39 +318,6 @@ async def _build_derivations(
     return success
 
 
-def _supported_kwargs(
-    func: object,
-    kwargs: dict[str, object],
-) -> dict[str, object]:
-    """Return only keyword arguments accepted by *func*.
-
-    This keeps `_async_main` compatible with tests that monkeypatch helpers
-    using narrower signatures while still forwarding full arguments in
-    production.
-    """
-    if not callable(func):
-        return kwargs
-
-    try:
-        parameters = inspect.signature(func).parameters.values()
-    except TypeError, ValueError:
-        return dict(kwargs)
-
-    if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters):
-        return dict(kwargs)
-
-    accepted = {
-        param.name
-        for param in parameters
-        if param.kind
-        in {
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        }
-    }
-    return {name: value for name, value in kwargs.items() if name in accepted}
-
-
 async def _async_main(
     *,
     flake_refs: list[str],
@@ -377,37 +328,17 @@ async def _async_main(
     profile_output: Path | None = None,
 ) -> int:
     nix_verbosity = _nix_verbosity_from_cli(verbosity)
-    collect_kwargs: _CollectKwargs = {
-        "mode": mode,
-        "nix_verbosity": nix_verbosity,
-    }
-    supported_collect_kwargs = cast(
-        "_CollectKwargs",
-        _supported_kwargs(
-            _collect_derivations,
-            cast("dict[str, object]", collect_kwargs),
-        ),
-    )
     all_drvs = await _collect_derivations(
         flake_refs,
-        **supported_collect_kwargs,
+        mode=mode,
+        nix_verbosity=nix_verbosity,
     )
     normalized_exclude_refs = [ref for ref in (exclude_refs or []) if ref]
     if normalized_exclude_refs:
-        exclude_kwargs: _CollectKwargs = {
-            "mode": "union",
-            "nix_verbosity": nix_verbosity,
-        }
-        supported_exclude_kwargs = cast(
-            "_CollectKwargs",
-            _supported_kwargs(
-                _collect_derivations,
-                cast("dict[str, object]", exclude_kwargs),
-            ),
-        )
         excluded_drvs = await _collect_derivations(
             normalized_exclude_refs,
-            **supported_exclude_kwargs,
+            mode="union",
+            nix_verbosity=nix_verbosity,
         )
         before_exclusion = len(all_drvs)
         all_drvs -= excluded_drvs
@@ -419,22 +350,11 @@ async def _async_main(
         )
     log.info("Collected %d derivation(s) using %s mode", len(all_drvs), mode)
     profiler = BuildProfiler() if profile_output is not None else None
-
-    build_kwargs: _BuildKwargs = {
-        "dry_run": dry_run,
-        "nix_verbosity": nix_verbosity,
-        "profiler": profiler,
-    }
-    supported_build_kwargs = cast(
-        "_BuildKwargs",
-        _supported_kwargs(
-            _build_derivations,
-            cast("dict[str, object]", build_kwargs),
-        ),
-    )
     ok = await _build_derivations(
         all_drvs,
-        **supported_build_kwargs,
+        dry_run=dry_run,
+        nix_verbosity=nix_verbosity,
+        profiler=profiler,
     )
     if profiler is not None and profile_output is not None:
         profile_path = profile_output

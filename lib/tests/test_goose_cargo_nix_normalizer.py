@@ -6,7 +6,6 @@ import importlib.util
 from pathlib import Path
 from types import ModuleType
 
-from lib.tests._assertions import check
 from lib.tests._nix_ast import assert_nix_ast_equal
 
 
@@ -45,8 +44,8 @@ rec {
 
     normalized, rewrites, added_root_src = module.normalize(sample)
 
-    check(added_root_src is True)
-    check(rewrites == 2)
+    assert added_root_src is True
+    assert rewrites == 2
     assert_nix_ast_equal(
         normalized,
         """{ nixpkgs ? <nixpkgs>
@@ -75,12 +74,12 @@ def test_normalize_is_noop_for_checked_in_goose_cargo_nix() -> None:
     original = cargo_nix.read_text()
     normalized, rewrites, added_root_src = module.normalize(original)
 
-    check(added_root_src is False)
-    check(rewrites == 0)
+    assert added_root_src is False
+    assert rewrites == 0
 
     _normalized_again, rewrites_again, added_root_src_again = module.normalize(
         normalized
     )
 
-    check(added_root_src_again is False)
-    check(rewrites_again == 0)
+    assert added_root_src_again is False
+    assert rewrites_again == 0

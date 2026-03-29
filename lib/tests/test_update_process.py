@@ -6,7 +6,6 @@ import asyncio
 
 import pytest
 
-from lib.tests._assertions import check
 from lib.update.errors import format_exception
 from lib.update.events import UpdateEvent, UpdateEventKind
 from lib.update.process import run_queue_task
@@ -44,8 +43,8 @@ def test_format_exception_suppresses_traceback_by_default() -> None:
 
     formatted = format_exception(exc_info.value)
 
-    check(formatted == "bad input")
-    check("Traceback" not in formatted)
+    assert formatted == "bad input"
+    assert "Traceback" not in formatted
 
 
 def test_format_exception_includes_traceback_when_enabled() -> None:
@@ -55,8 +54,8 @@ def test_format_exception_includes_traceback_when_enabled() -> None:
 
     formatted = format_exception(exc_info.value, include_traceback=True)
 
-    check(formatted.startswith("bad input"))
-    check("ValueError" in formatted)
+    assert formatted.startswith("bad input")
+    assert "ValueError" in formatted
 
 
 def test_run_queue_task_reports_known_runtime_errors_to_events() -> None:
@@ -72,8 +71,8 @@ def test_run_queue_task_reports_known_runtime_errors_to_events() -> None:
     if not isinstance(event, UpdateEvent):
         msg = f"Expected UpdateEvent, got {type(event)}"
         raise TypeError(msg)
-    check(event.kind == UpdateEventKind.ERROR)
-    check(event.message == "boom")
+    assert event.kind == UpdateEventKind.ERROR
+    assert event.message == "boom"
 
 
 def test_run_queue_task_reports_cancelled_as_error_event() -> None:
@@ -89,7 +88,7 @@ def test_run_queue_task_reports_cancelled_as_error_event() -> None:
     if not isinstance(event, UpdateEvent):
         msg = f"Expected UpdateEvent, got {type(event)}"
         raise TypeError(msg)
-    check(event.message == "Operation cancelled")
+    assert event.message == "Operation cancelled"
 
 
 def test_run_queue_task_re_raises_unknown_exceptions() -> None:
@@ -102,4 +101,4 @@ def test_run_queue_task_re_raises_unknown_exceptions() -> None:
     with pytest.raises(_CustomProcessError):
         asyncio.run(run_queue_task(source="demo", queue=queue, task=_task))
 
-    check(queue.empty())
+    assert queue.empty()

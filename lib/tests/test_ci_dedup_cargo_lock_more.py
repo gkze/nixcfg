@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import lib.update.ci.dedup_cargo_lock as dcl
-from lib.tests._assertions import check
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -20,7 +19,7 @@ def _pkg(name: str, version: str, source: str = "") -> dcl.Package:
 def test_crates_client_and_fetch_bad_status(monkeypatch: pytest.MonkeyPatch) -> None:
     """Create crates client and handle 4xx responses."""
     client = dcl._crates_client()
-    check(str(client.base_url).startswith("https://crates.io"))
+    assert str(client.base_url).startswith("https://crates.io")
     client.close()
 
     class _Resp:
@@ -40,7 +39,7 @@ def test_crates_client_and_fetch_bad_status(monkeypatch: pytest.MonkeyPatch) -> 
             return _Resp()
 
     monkeypatch.setattr(dcl, "_crates_client", lambda: _Client())
-    check(dcl.fetch_checksum("missing", "0") is None)
+    assert dcl.fetch_checksum("missing", "0") is None
 
     class _RespNoChecksum:
         status_code = 200
@@ -59,20 +58,20 @@ def test_crates_client_and_fetch_bad_status(monkeypatch: pytest.MonkeyPatch) -> 
             return _RespNoChecksum()
 
     monkeypatch.setattr(dcl, "_crates_client", lambda: _ClientNoChecksum())
-    check(dcl.fetch_checksum("no-sum", "1") is None)
+    assert dcl.fetch_checksum("no-sum", "1") is None
 
 
 def test_parse_cargo_lock_handles_string_version_and_non_dict_entries() -> None:
     """Parse string versions and ignore invalid package nodes."""
     content = 'version = "5"\n\n[[package]]\nname = "foo"\nversion = "1"\n'
     pkgs, version = dcl.parse_cargo_lock(content)
-    check(version == 5)
-    check(len(pkgs) == 1)
+    assert version == 5
+    assert len(pkgs) == 1
 
     bad_content = 'version = "not-a-number"\n'
     pkgs2, version2 = dcl.parse_cargo_lock(bad_content)
-    check(version2 == 4)
-    check(pkgs2 == [])
+    assert version2 == 4
+    assert pkgs2 == []
 
 
 def test_parse_cargo_lock_skips_non_dict_package_nodes(
@@ -85,24 +84,24 @@ def test_parse_cargo_lock_skips_non_dict_package_nodes(
 
     monkeypatch.setattr(dcl.tomlkit, "parse", _parse)
     packages, version = dcl.parse_cargo_lock("ignored")
-    check(version == 4)
-    check(len(packages) == 1)
-    check(packages[0].name == "ok")
+    assert version == 4
+    assert len(packages) == 1
+    assert packages[0].name == "ok"
 
 
 def test_format_value_non_empty_list_and_extra_field_serialization() -> None:
     """Format list values and include truthy extra fields."""
     lines = dcl.format_value("deps", ["b", "a"])
-    check(lines[0] == "deps = [")
-    check(lines[-1] == "]")
-    check(' "a",' in lines)
+    assert lines[0] == "deps = ["
+    assert lines[-1] == "]"
+    assert ' "a",' in lines
 
     pkg = dcl.Package(
         name="x", version="1", extra_fields={"metadata": ["z", "y"], "empty": []}
     )
     rendered = dcl.format_cargo_lock([pkg], 4)
-    check("metadata = [" in rendered)
-    check("empty" not in rendered)
+    assert "metadata = [" in rendered
+    assert "empty" not in rendered
 
 
 def test_convert_gitoxide_no_checksum_and_remove_duplicates_no_registry(
@@ -116,15 +115,15 @@ def test_convert_gitoxide_no_checksum_and_remove_duplicates_no_registry(
     )
     monkeypatch.setattr(dcl, "fetch_checksum", lambda *_a: None)
     converted, count = dcl.convert_gitoxide_to_registry([git_pkg])
-    check(count == 0)
-    check(converted[0].source == git_pkg.source)
+    assert count == 0
+    assert converted[0].source == git_pkg.source
 
     deduped, removed = dcl.remove_duplicates([
         _pkg("foo", "1", "git+https://x#1"),
         _pkg("foo", "1", "git+https://y#2"),
     ])
-    check(len(deduped) == 1)
-    check(removed == 1)
+    assert len(deduped) == 1
+    assert removed == 1
 
 
 def test_dependency_map_git_other_registry_and_noop_remap() -> None:
@@ -135,8 +134,8 @@ def test_dependency_map_git_other_registry_and_noop_remap() -> None:
     ]
     final = [_pkg("file-id", "1", dcl.REGISTRY_SOURCE)]
     mapping = dcl.build_dep_replacement_map(original, final)
-    check("file-id 1 (git+https://example.com/repo)" in mapping)
-    check(
+    assert "file-id 1 (git+https://example.com/repo)" in mapping
+    assert (
         "file-id 1 (registry+https://github.com/rust-lang/crates.io-index)" in mapping
     )
 
@@ -144,8 +143,8 @@ def test_dependency_map_git_other_registry_and_noop_remap() -> None:
         name="app", version="1", dependencies=["x 1"], build_dependencies=["y 1"]
     )
     same = dcl.fix_dependency_references([pkg], {})
-    check(same == [pkg])
-    check(dcl.strip_git_commit_hash("git+https://x") == "git+https://x")
+    assert same == [pkg]
+    assert dcl.strip_git_commit_hash("git+https://x") == "git+https://x"
 
 
 def test_dependency_map_branches_when_final_package_is_not_registry() -> None:
@@ -164,12 +163,12 @@ def test_dependency_map_branches_when_final_package_is_not_registry() -> None:
         _pkg("reg", "1", "git+https://example.com/non-registry#def"),
     ]
     mapping = dcl.build_dep_replacement_map(original, final)
-    check(
+    assert (
         "gix 1 (git+https://github.com/GitoxideLabs/gitoxide?branch=main)"
         not in mapping
     )
-    check("other 1 (git+https://example.com/repo)" not in mapping)
-    check(f"reg 1 ({dcl.REGISTRY_SOURCE})" in mapping)
+    assert "other 1 (git+https://example.com/repo)" not in mapping
+    assert f"reg 1 ({dcl.REGISTRY_SOURCE})" in mapping
 
 
 def test_dependency_map_branches_when_key_missing_in_final() -> None:
@@ -182,7 +181,7 @@ def test_dependency_map_branches_when_key_missing_in_final() -> None:
         _pkg("other", "1", "git+https://example.com/repo-alt#def"),
     ]
     mapping = dcl.build_dep_replacement_map(original, [])
-    check(mapping == {})
+    assert mapping == {}
 
 
 def test_run_parse_error_and_no_changes_exit(
@@ -197,7 +196,7 @@ def test_run_parse_error_and_no_changes_exit(
         raise dcl.tomlkit_exceptions.ParseError(1, 1, "bad")
 
     monkeypatch.setattr(dcl, "parse_cargo_lock", _raise_parse)
-    check(dcl.run(cargo_lock=lock) == dcl.ExitCode.ERROR)
+    assert dcl.run(cargo_lock=lock) == dcl.ExitCode.ERROR
 
     monkeypatch.setattr(dcl, "parse_cargo_lock", lambda _c: ([], 4))
     monkeypatch.setattr(dcl, "convert_gitoxide_to_registry", lambda pkgs: (pkgs, 0))
@@ -205,4 +204,4 @@ def test_run_parse_error_and_no_changes_exit(
     monkeypatch.setattr(dcl, "build_dep_replacement_map", lambda _o, _f: {})
     monkeypatch.setattr(dcl, "fix_dependency_references", lambda pkgs, _m: pkgs)
     monkeypatch.setattr(dcl, "sort_packages", lambda pkgs: pkgs)
-    check(dcl.run(cargo_lock=lock) == dcl.ExitCode.NO_CHANGES)
+    assert dcl.run(cargo_lock=lock) == dcl.ExitCode.NO_CHANGES

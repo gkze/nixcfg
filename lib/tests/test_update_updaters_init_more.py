@@ -5,13 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
-from lib.tests._assertions import check
+from lib.update.paths import package_file_map
 from lib.update.updaters import (
     _DISCOVERY_STATE,
     UPDATERS,
     _discover_updaters,
+    _updater_module_paths,
     ensure_updaters_loaded,
 )
+from lib.update.updaters.module_manifest import UPDATER_MODULE_PATHS
 
 
 def test_discover_updaters_handles_existing_and_invalid_specs(
@@ -20,8 +22,8 @@ def test_discover_updaters_handles_existing_and_invalid_specs(
     """Skip already-imported modules and invalid import specs."""
     fake_file = Path("/tmp/updater.py")
     monkeypatch.setattr(
-        "lib.update.updaters.package_file_map",
-        lambda _name: {
+        "lib.update.updaters._updater_module_paths",
+        lambda: {
             "exists": fake_file,
             "stale": fake_file,
             "spec-none": fake_file,
@@ -69,9 +71,18 @@ def test_discover_updaters_handles_existing_and_invalid_specs(
 
     _discover_updaters()
 
-    check(len(created_modules) == 2)
-    check(len(executed_modules) == 2)
-    check(sys.modules["_updater_pkg.stale"] is not None)
+    assert len(created_modules) == 2
+    assert len(executed_modules) == 2
+    assert sys.modules["_updater_pkg.stale"] is not None
+
+
+def test_updater_manifest_matches_repo_scan() -> None:
+    """Keep the explicit updater manifest aligned with the repository layout."""
+    expected = package_file_map("updater.py")
+    manifest_paths = _updater_module_paths()
+
+    assert set(UPDATER_MODULE_PATHS) == set(expected)
+    assert manifest_paths == expected
 
 
 def test_ensure_updaters_loaded_fast_path_skips_discovery(monkeypatch) -> None:
@@ -85,8 +96,8 @@ def test_ensure_updaters_loaded_fast_path_skips_discovery(monkeypatch) -> None:
         "lib.update.updaters._discover_updaters", lambda: calls.append("run")
     )
 
-    check(ensure_updaters_loaded() is UPDATERS)
-    check(calls == [])
+    assert ensure_updaters_loaded() is UPDATERS
+    assert calls == []
 
 
 def test_ensure_updaters_loaded_rediscovers_empty_registry(monkeypatch) -> None:
@@ -101,7 +112,7 @@ def test_ensure_updaters_loaded_rediscovers_empty_registry(monkeypatch) -> None:
 
     monkeypatch.setattr("lib.update.updaters._discover_updaters", _discover)
 
-    check(ensure_updaters_loaded() == {"demo": object})
+    assert ensure_updaters_loaded() == {"demo": object}
     UPDATERS.clear()
     UPDATERS.update(original)
 
@@ -128,7 +139,7 @@ def test_ensure_updaters_loaded_rechecks_state_inside_lock(monkeypatch) -> None:
         "lib.update.updaters._discover_updaters", lambda: calls.append("run")
     )
 
-    check(ensure_updaters_loaded() == {"demo": object})
-    check(calls == [])
+    assert ensure_updaters_loaded() == {"demo": object}
+    assert calls == []
     UPDATERS.clear()
     UPDATERS.update(original)

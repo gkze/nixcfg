@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from typing import Protocol
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
-from lib.tests._assertions import check
 from lib.update.cli import (
     OutputOptions,
     UpdateOptions,
@@ -69,13 +68,10 @@ def test_merge_source_updates_native_only_preserves_other_platform_hashes() -> N
     if result_entries is None:
         raise AssertionError
     values_by_platform = {entry.platform: entry.hash for entry in result_entries}
-    check(
-        values_by_platform
-        == {
-            "aarch64-darwin": "sha256-DJUI4pMZ7wQTnyOiuDHALmZz7FZtrTbzRzCuNOShmWE=",
-            "x86_64-linux": "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
-        }
-    )
+    assert values_by_platform == {
+        "aarch64-darwin": "sha256-DJUI4pMZ7wQTnyOiuDHALmZz7FZtrTbzRzCuNOShmWE=",
+        "x86_64-linux": "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
+    }
 
 
 def test_merge_source_updates_non_native_returns_updates_unchanged() -> None:
@@ -91,7 +87,7 @@ def test_merge_source_updates_non_native_returns_updates_unchanged() -> None:
 
     merged = _merge_source_updates({}, updates, native_only=False)
 
-    check(merged is updates)
+    assert merged is updates
 
 
 def test_run_updates_list_json_outputs_sources_and_inputs(
@@ -150,62 +146,59 @@ def test_run_updates_list_json_outputs_sources_and_inputs(
     opts = UpdateOptions(list_targets=True, json=True)
     exit_code = asyncio.run(run_updates(opts))
 
-    check(exit_code == 0)
+    assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
-    check(payload["schemaVersion"] == 1)
-    check(payload["kind"] == "nixcfg-update-inventory")
-    check(payload["summary"]["totalTargets"] == 2)
-    check(payload["summary"]["counts"]["refOnly"] == 1)
-    check(payload["summary"]["counts"]["sourceOnly"] == 1)
-    check(payload["summary"]["counts"]["refAndSource"] == 0)
-    check(payload["summary"]["counts"]["unclassified"] == 0)
-    check(
-        payload["targets"]
-        == [
-            {
-                "name": "alpha",
-                "handles": {
-                    "refUpdate": False,
-                    "inputRefresh": False,
-                    "sourceUpdate": True,
-                    "artifactWrite": False,
-                },
-                "classification": "sourceOnly",
-                "backingInput": None,
-                "refTarget": None,
-                "sourceTarget": {
-                    "path": "packages/alpha/sources.json",
-                    "version": "1.0.0",
-                    "commit": None,
-                    "hashKinds": ["sha256"],
-                    "updaterKind": "download",
-                    "updaterClass": "AlphaUpdater",
-                },
-                "generatedArtifacts": [],
+    assert payload["schemaVersion"] == 1
+    assert payload["kind"] == "nixcfg-update-inventory"
+    assert payload["summary"]["totalTargets"] == 2
+    assert payload["summary"]["counts"]["refOnly"] == 1
+    assert payload["summary"]["counts"]["sourceOnly"] == 1
+    assert payload["summary"]["counts"]["refAndSource"] == 0
+    assert payload["summary"]["counts"]["unclassified"] == 0
+    assert payload["targets"] == [
+        {
+            "name": "alpha",
+            "handles": {
+                "refUpdate": False,
+                "inputRefresh": False,
+                "sourceUpdate": True,
+                "artifactWrite": False,
             },
-            {
-                "name": "tool",
-                "handles": {
-                    "refUpdate": True,
-                    "inputRefresh": False,
-                    "sourceUpdate": False,
-                    "artifactWrite": False,
-                },
-                "classification": "refOnly",
-                "backingInput": "tool",
-                "refTarget": {
-                    "input": "tool",
-                    "sourceType": "github",
-                    "owner": "owner",
-                    "repo": "repo",
-                    "selector": "v1.2.3",
-                    "lockedRev": "abc123",
-                },
-                "sourceTarget": None,
-                "generatedArtifacts": [],
+            "classification": "sourceOnly",
+            "backingInput": None,
+            "refTarget": None,
+            "sourceTarget": {
+                "path": "packages/alpha/sources.json",
+                "version": "1.0.0",
+                "commit": None,
+                "hashKinds": ["sha256"],
+                "updaterKind": "download",
+                "updaterClass": "AlphaUpdater",
             },
-        ]
-    )
+            "generatedArtifacts": [],
+        },
+        {
+            "name": "tool",
+            "handles": {
+                "refUpdate": True,
+                "inputRefresh": False,
+                "sourceUpdate": False,
+                "artifactWrite": False,
+            },
+            "classification": "refOnly",
+            "backingInput": "tool",
+            "refTarget": {
+                "input": "tool",
+                "sourceType": "github",
+                "owner": "owner",
+                "repo": "repo",
+                "selector": "v1.2.3",
+                "lockedRev": "abc123",
+            },
+            "sourceTarget": None,
+            "generatedArtifacts": [],
+        },
+    ]
 
 
 def test_run_updates_schema_outputs_json(capsys: _CaptureLike) -> None:
@@ -213,10 +206,10 @@ def test_run_updates_schema_outputs_json(capsys: _CaptureLike) -> None:
     opts = UpdateOptions(schema=True)
     exit_code = asyncio.run(run_updates(opts))
 
-    check(exit_code == 0)
+    assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
-    check(payload["type"] == "object")
-    check(payload["additionalProperties"] == {"$ref": "#/$defs/SourceEntry"})
+    assert payload["type"] == "object"
+    assert payload["additionalProperties"] == {"$ref": "#/$defs/SourceEntry"}
 
 
 def test_run_updates_validate_json_outputs_success(
@@ -236,9 +229,9 @@ def test_run_updates_validate_json_outputs_success(
     opts = UpdateOptions(validate=True, json=True)
     exit_code = asyncio.run(run_updates(opts))
 
-    check(exit_code == 0)
+    assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
-    check(payload == {"valid": True, "sources": 0})
+    assert payload == {"valid": True, "sources": 0}
 
 
 def test_run_updates_validate_json_outputs_error(
@@ -260,10 +253,10 @@ def test_run_updates_validate_json_outputs_error(
     opts = UpdateOptions(validate=True, json=True)
     exit_code = asyncio.run(run_updates(opts))
 
-    check(exit_code == 1)
+    assert exit_code == 1
     payload = json.loads(capsys.readouterr().out)
-    check(payload["valid"] is False)
-    check("bad metadata" in payload["error"])
+    assert payload["valid"] is False
+    assert "bad metadata" in payload["error"]
 
 
 def test_emit_summary_json_outputs_payload(capsys: _CaptureLike) -> None:
@@ -277,14 +270,11 @@ def test_emit_summary_json_outputs_payload(capsys: _CaptureLike) -> None:
         dry_run=False,
     )
 
-    check(exit_code == 0)
+    assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
-    check(
-        payload
-        == {
-            "updated": ["demo"],
-            "errors": [],
-            "noChange": ["stable"],
-            "success": True,
-        }
-    )
+    assert payload == {
+        "updated": ["demo"],
+        "errors": [],
+        "noChange": ["stable"],
+        "success": True,
+    }

@@ -1,6 +1,7 @@
 {
   inputs,
   flake-edit,
+  mkResolvedBuildSystemsOverlay,
   nix-prefetch-git,
   symlinkJoin,
   python314,
@@ -24,29 +25,17 @@ let
         lib.composeManyExtensions [
           inputs.pyproject-build-systems.overlays.default
           (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
-          (pfinal: pprev: {
-            nix-manipulator = pprev.nix-manipulator.overrideAttrs (old: {
-              nativeBuildInputs =
-                (old.nativeBuildInputs or [ ])
-                ++ pfinal.resolveBuildSystem {
-                  hatchling = [ ];
-                  hatch-vcs = [ ];
-                };
-            });
-            qprompt = pprev.qprompt.overrideAttrs (old: {
-              nativeBuildInputs =
-                (old.nativeBuildInputs or [ ])
-                ++ pfinal.resolveBuildSystem {
-                  setuptools = [ ];
-                };
-            });
-            yattag = pprev.yattag.overrideAttrs (old: {
-              nativeBuildInputs =
-                (old.nativeBuildInputs or [ ])
-                ++ pfinal.resolveBuildSystem {
-                  setuptools = [ ];
-                };
-            });
+          (mkResolvedBuildSystemsOverlay {
+            nix-manipulator = {
+              hatchling = [ ];
+              hatch-vcs = [ ];
+            };
+            qprompt = {
+              setuptools = [ ];
+            };
+            yattag = {
+              setuptools = [ ];
+            };
           })
         ]
       );

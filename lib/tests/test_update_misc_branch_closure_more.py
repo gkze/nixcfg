@@ -12,7 +12,6 @@ import pytest
 from lib.nix.commands.base import CommandResult as LibCommandResult
 from lib.nix.commands.base import ProcessDone, ProcessLine
 from lib.nix.models.sources import HashEntry
-from lib.tests._assertions import check
 from lib.update.events import (
     CommandResult,
     GatheredValues,
@@ -56,8 +55,8 @@ def test_deno_lock_known_version_skips_warning(
     monkeypatch.setattr("lib.update.deno_lock._resolve_all_jsr", _resolve_jsr)
     monkeypatch.setattr("lib.update.deno_lock._resolve_all_npm", lambda _lock_npm: [])
     manifest = asyncio.run(deno_lock.resolve_deno_deps(lock_file))
-    check(manifest.lock_version == "5")
-    check("Unexpected deno.lock version" not in caplog.text)
+    assert manifest.lock_version == "5"
+    assert "Unexpected deno.lock version" not in caplog.text
 
 
 def test_events_expect_source_hashes_rejects_mixed_list() -> None:
@@ -90,7 +89,7 @@ def test_compute_drv_fingerprint_without_store_prefix(
         yield UpdateEvent.value("demo", result)
 
     monkeypatch.setattr("lib.update.nix.run_command", _run_command)
-    check(asyncio.run(compute_drv_fingerprint("demo")) == "abc123")
+    assert asyncio.run(compute_drv_fingerprint("demo")) == "abc123"
 
 
 def test_nix_cargo_yields_passthrough_events(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,7 +141,7 @@ def test_nix_cargo_yields_passthrough_events(monkeypatch: pytest.MonkeyPatch) ->
             git_deps=deps,
         )
     )
-    check(any(event.kind == UpdateEventKind.STATUS for event in events))
+    assert any(event.kind == UpdateEventKind.STATUS for event in events)
 
 
 def test_stream_command_timeout_override_and_empty_sanitized_line(
@@ -173,11 +172,11 @@ def test_stream_command_timeout_override_and_empty_sanitized_line(
             options=StreamCommandOptions(source="demo", command_timeout=2.5),
         )
     )
-    check(captured["timeout"] == 2.5)
-    check(
-        [event.kind for event in events]
-        == [UpdateEventKind.COMMAND_START, UpdateEventKind.COMMAND_END]
-    )
+    assert captured["timeout"] == 2.5
+    assert [event.kind for event in events] == [
+        UpdateEventKind.COMMAND_START,
+        UpdateEventKind.COMMAND_END,
+    ]
 
 
 def test_run_nix_build_without_verbose(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -199,8 +198,8 @@ def test_run_nix_build_without_verbose(monkeypatch: pytest.MonkeyPatch) -> None:
         )
     )
     args = captured["args"]
-    check(isinstance(args, list))
-    check("--verbose" not in args)
+    assert isinstance(args, list)
+    assert "--verbose" not in args
 
 
 def test_validate_source_discovery_consistency_missing_in_python(
@@ -220,4 +219,4 @@ def test_ui_state_set_status_preserves_message_when_none() -> None:
     op = OperationState(kind=OperationKind.CHECK_VERSION, label="Checking")
     op.message = "old"
     _set_operation_status(op, "success", message=None, clear_message=False)
-    check(op.message == "old")
+    assert op.message == "old"

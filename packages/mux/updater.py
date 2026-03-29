@@ -2,4 +2,4 @@
 
 from lib.update.updaters.base import bun_node_modules_updater
 
-MuxUpdater = bun_node_modules_updater("mux")
+MuxUpdater = bun_node_modules_updater("mux", module=__name__)

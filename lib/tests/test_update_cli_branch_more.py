@@ -10,7 +10,6 @@ import aiohttp
 import pytest
 
 from lib.nix.models.sources import SourceEntry, SourcesFile
-from lib.tests._assertions import check
 from lib.update.cli import (
     OutputOptions,
     ResolvedTargets,
@@ -53,15 +52,15 @@ def _run[T](awaitable: object) -> T:
 def test_build_options_and_is_tty_env_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """Cover json alias absence and env-driven tty default resolution."""
     opts = _build_update_options({"source": "demo", "check": True})
-    check(opts.source == "demo")
-    check(opts.json is False)
+    assert opts.source == "demo"
+    assert opts.json is False
 
     monkeypatch.setenv("UPDATE_FORCE_TTY", "0")
     monkeypatch.setenv("UPDATE_NO_TTY", "0")
     monkeypatch.setenv("UPDATE_ZELLIJ_GUARD", "0")
     monkeypatch.setenv("TERM", "xterm-256color")
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    check(_is_tty() is True)
+    assert _is_tty() is True
 
 
 def test_update_summary_does_not_downgrade_status() -> None:
@@ -70,7 +69,7 @@ def test_update_summary_does_not_downgrade_status() -> None:
     summary._set_status("demo", "error")
     summary._set_status("demo", "no_change")
     summary._rebuild_lists()
-    check(summary.errors == ["demo"])
+    assert summary.errors == ["demo"]
 
 
 def test_resolved_targets_ref_source_and_item_meta_variants(
@@ -88,8 +87,8 @@ def test_resolved_targets_ref_source_and_item_meta_variants(
     )
 
     resolved_ref = ResolvedTargets.from_options(UpdateOptions(source="ref-only"))
-    check(resolved_ref.do_refs is True)
-    check(resolved_ref.do_sources is False)
+    assert resolved_ref.do_refs is True
+    assert resolved_ref.do_sources is False
 
     resolved = ResolvedTargets(
         all_source_names={"both", "src-with-input", "src-no-input"},
@@ -126,10 +125,10 @@ def test_resolved_targets_ref_source_and_item_meta_variants(
         }
     )
     meta, _order = _build_item_meta(resolved, sources)
-    check(meta["both"].origin.endswith("flake.nix + sources.json)"))
-    check(meta["flake-only"].origin.endswith("flake.nix)"))
-    check(meta["src-with-input"].origin.endswith("sources.json)"))
-    check(meta["src-no-input"].origin.endswith("sources.json)"))
+    assert meta["both"].origin.endswith("flake.nix + sources.json)")
+    assert meta["flake-only"].origin.endswith("flake.nix)")
+    assert meta["src-with-input"].origin.endswith("sources.json)")
+    assert meta["src-no-input"].origin.endswith("sources.json)")
 
 
 def test_emit_summary_dry_run_updates_and_errors(
@@ -143,10 +142,10 @@ def test_emit_summary_dry_run_updates_and_errors(
         out=OutputOptions(json_output=False, quiet=False),
         dry_run=True,
     )
-    check(code == 1)
+    assert code == 1
     captured = capsys.readouterr()
-    check("Available updates" in captured.out)
-    check("Failed: b" in captured.err)
+    assert "Available updates" in captured.out
+    assert "Failed: b" in captured.err
 
 
 def test_list_and_validate_non_json_paths(
@@ -201,19 +200,19 @@ def test_list_and_validate_non_json_paths(
             ),
         ],
     )
-    check(
+    assert (
         _handle_list_targets_request(UpdateOptions(list_targets=True, json=False)) == 0
     )
     rendered = capsys.readouterr().out
-    check("nixcfg update inventory" in rendered)
-    check("name" in rendered)
-    check("class" in rendered)
-    check("touches" in rendered)
-    check("selector" in rendered)
-    check("writes" in rendered)
+    assert "nixcfg update inventory" in rendered
+    assert "name" in rendered
+    assert "class" in rendered
+    assert "touches" in rendered
+    assert "selector" in rendered
+    assert "writes" in rendered
 
     out = OutputOptions(json_output=False, quiet=False)
-    check(_handle_validate_request(UpdateOptions(validate=False), out) is None)
+    assert _handle_validate_request(UpdateOptions(validate=False), out) is None
 
     monkeypatch.setattr(
         "lib.update.cli.load_all_sources",
@@ -222,16 +221,16 @@ def test_list_and_validate_non_json_paths(
     monkeypatch.setattr(
         "lib.update.cli.validate_source_discovery_consistency", lambda: None
     )
-    check(_handle_validate_request(UpdateOptions(validate=True, json=False), out) == 0)
-    check("Validated sources.json entries" in capsys.readouterr().out)
+    assert _handle_validate_request(UpdateOptions(validate=True, json=False), out) == 0
+    assert "Validated sources.json entries" in capsys.readouterr().out
 
     def _boom() -> None:
         msg = "broken"
         raise RuntimeError(msg)
 
     monkeypatch.setattr("lib.update.cli.validate_source_discovery_consistency", _boom)
-    check(_handle_validate_request(UpdateOptions(validate=True, json=False), out) == 1)
-    check("Validation failed" in capsys.readouterr().err)
+    assert _handle_validate_request(UpdateOptions(validate=True, json=False), out) == 1
+    assert "Validation failed" in capsys.readouterr().err
 
 
 def test_build_item_meta_without_sources_and_list_targets_without_refs(
@@ -262,8 +261,8 @@ def test_build_item_meta_without_sources_and_list_targets_without_refs(
     )
     monkeypatch.setattr("lib.update.cli.UPDATERS", {})
     meta, order = _build_item_meta(resolved, None)
-    check(meta["src"].origin.endswith("flake.nix + sources.json)"))
-    check(order == ["src"])
+    assert meta["src"].origin.endswith("flake.nix + sources.json)")
+    assert order == ["src"]
 
     monkeypatch.setattr(
         "lib.update.cli._build_update_inventory",
@@ -291,12 +290,12 @@ def test_build_item_meta_without_sources_and_list_targets_without_refs(
             )
         ],
     )
-    check(
+    assert (
         _handle_list_targets_request(UpdateOptions(list_targets=True, json=False)) == 0
     )
     rendered = capsys.readouterr().out
-    check("nixcfg update inventory" in rendered)
-    check("source" in rendered)
+    assert "nixcfg update inventory" in rendered
+    assert "source" in rendered
 
 
 def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -358,8 +357,8 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
         return events
 
     source_events = _run(_run_source_task())
-    check(any(event.message == "Starting update" for event in source_events))
-    check(any(event.message == "input refreshed" for event in source_events))
+    assert any(event.message == "Starting update" for event in source_events)
+    assert any(event.message == "input refreshed" for event in source_events)
 
     async def _update_ref(
         input_ref: FlakeInputRef,
@@ -393,7 +392,7 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
         return events
 
     ref_events = _run(_run_refs())
-    check(any(event.message == "ref phase" for event in ref_events))
+    assert any(event.message == "ref phase" for event in ref_events)
 
     calls: list[str] = []
 
@@ -415,7 +414,7 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
             )
         )
     )
-    check(calls == ["demo"])
+    assert calls == ["demo"]
 
 
 def test_update_source_task_sets_native_only_for_deno_updater(
@@ -480,11 +479,11 @@ def test_update_source_task_sets_native_only_for_deno_updater(
             )
 
     _run(_run_case())
-    check(len(created) == 1)
-    check(created[0].native_only is True)
-    check(called["count"] == 1)
-    check(called["input_name"] == "demo")
-    check(called["source"] == "demo")
+    assert len(created) == 1
+    assert created[0].native_only is True
+    assert called["count"] == 1
+    assert called["input_name"] == "demo"
+    assert called["source"] == "demo"
 
 
 def test_update_source_task_skips_input_update_when_disabled(
@@ -545,7 +544,7 @@ def test_update_source_task_skips_input_update_when_disabled(
             )
 
     _run(_run_case())
-    check(called["update_input"] == 0)
+    assert called["update_input"] == 0
 
 
 def test_persist_updates_and_build_plan_edge_paths(
@@ -594,14 +593,14 @@ def test_persist_updates_and_build_plan_edge_paths(
         source_updates={},
         details={"a": "no_change"},
     )
-    check(saved == [])
+    assert saved == []
 
     monkeypatch.setattr("lib.update.cli.UPDATERS", {})
     monkeypatch.setattr("lib.update.cli.get_flake_inputs_with_refs", list)
     plan = _build_run_plan(
         UpdateOptions(), OutputOptions(json_output=False, quiet=True)
     )
-    check(plan == 0)
+    assert plan == 0
 
 
 def test_execute_run_plan_branches_and_run_update_command_source_ref_check(
@@ -678,8 +677,8 @@ def test_execute_run_plan_branches_and_run_update_command_source_ref_check(
             UpdateOptions(), OutputOptions(json_output=False, quiet=True), cfg, plan
         )
     )
-    check(code == 0)
-    check(phase_calls == ["refs", "sources"])
+    assert code == 0
+    assert phase_calls == ["refs", "sources"]
 
     # Skip refs/sources branches in execute plan.
     phase_calls.clear()
@@ -711,8 +710,8 @@ def test_execute_run_plan_branches_and_run_update_command_source_ref_check(
             skip_plan,
         )
     )
-    check(code == 0)
-    check(phase_calls == [])
+    assert code == 0
+    assert phase_calls == []
 
     seen: dict[str, object] = {}
 
@@ -732,5 +731,5 @@ def test_execute_run_plan_branches_and_run_update_command_source_ref_check(
     monkeypatch.setattr(
         "lib.update.cli.run_updates", lambda _opts: asyncio.sleep(0, result=0)
     )
-    check(run_update_command(source="src") == 0)
-    check(seen["include_flake_edit"] is False)
+    assert run_update_command(source="src") == 0
+    assert seen["include_flake_edit"] is False

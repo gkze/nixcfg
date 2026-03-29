@@ -102,6 +102,15 @@ let
         priority = qualityPriority;
       };
 
+      quality-pinact = {
+        enable = true;
+        name = "quality-pinact";
+        entry = "${lib.getExe pkgs.pinact} run --check";
+        pass_filenames = false;
+        always_run = true;
+        priority = qualityPriority;
+      };
+
       quality-yamllint = {
         enable = true;
         name = "quality-yamllint";
@@ -143,6 +152,7 @@ pkgs.devshell.mkShell {
       nix-init
       nixos-generators
       nurl
+      pinact
       prek
       sops
       taplo

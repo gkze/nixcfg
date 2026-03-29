@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lib.nix.commands.base import CommandResult, ProcessDone, ProcessLine
-from lib.tests._assertions import check
 from lib.update.ci import build_shared_closure as bsc
 from lib.update.ci import profile_generations as pg
 
@@ -17,26 +16,26 @@ if TYPE_CHECKING:
 
 def test_nix_verbosity_helpers_cover_zero_and_positive() -> None:
     """Map CLI verbosity into nix verbosity flags."""
-    check(object.__getattribute__(pg, "_nix_verbosity_args")(0) == [])
-    check(object.__getattribute__(pg, "_nix_verbosity_args")(2) == ["-vv"])
-    check(object.__getattribute__(pg, "_nix_verbosity_from_cli")(0) == 0)
-    check(object.__getattribute__(pg, "_nix_verbosity_from_cli")(1) == 0)
-    check(object.__getattribute__(pg, "_nix_verbosity_from_cli")(3) == 2)
+    assert object.__getattribute__(pg, "_nix_verbosity_args")(0) == []
+    assert object.__getattribute__(pg, "_nix_verbosity_args")(2) == ["-vv"]
+    assert object.__getattribute__(pg, "_nix_verbosity_from_cli")(0) == 0
+    assert object.__getattribute__(pg, "_nix_verbosity_from_cli")(1) == 0
+    assert object.__getattribute__(pg, "_nix_verbosity_from_cli")(3) == 2
 
 
 def test_default_home_profile_uses_user_home(monkeypatch: pytest.MonkeyPatch) -> None:
     """Build default HM profile path from Path.home()."""
     monkeypatch.setattr(pg.Path, "home", staticmethod(lambda: Path("/tmp/home")))
     path = object.__getattribute__(pg, "_default_home_profile")()
-    check(path == "/tmp/home/.local/state/nix/profiles/home-manager")
+    assert path == "/tmp/home/.local/state/nix/profiles/home-manager"
 
 
 def test_path_exists_wrapper(tmp_path: Path) -> None:
     """Return true only when target path exists."""
     existing = tmp_path / "exists"
     existing.write_text("x", encoding="utf-8")
-    check(object.__getattribute__(pg, "_path_exists")(str(existing)) is True)
-    check(
+    assert object.__getattribute__(pg, "_path_exists")(str(existing)) is True
+    assert (
         object.__getattribute__(pg, "_path_exists")(str(tmp_path / "missing")) is False
     )
 
@@ -50,7 +49,7 @@ def test_query_deriver_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> N
         )
 
     monkeypatch.setattr(pg, "run_nix", _ok)
-    check(
+    assert (
         asyncio.run(object.__getattribute__(pg, "_query_deriver")("/profile"))
         == "/nix/store/demo.drv"
     )
@@ -75,7 +74,7 @@ def test_query_deriver_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> N
     try:
         asyncio.run(object.__getattribute__(pg, "_query_deriver")("/profile"))
     except RuntimeError as exc:
-        check("Could not resolve deriver" in str(exc))
+        assert "Could not resolve deriver" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
 
@@ -95,7 +94,7 @@ def test_resolve_targets_raises_for_required_missing_profile(
             )
         )
     except RuntimeError as exc:
-        check("Profile path not found" in str(exc))
+        assert "Profile path not found" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
 
@@ -121,7 +120,7 @@ def test_resolve_targets_raises_when_deriver_fails_for_required_target(
             )
         )
     except RuntimeError as exc:
-        check("bad deriver" in str(exc))
+        assert "bad deriver" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
 
@@ -150,8 +149,8 @@ def test_resolve_targets_skips_optional_home_when_deriver_fails(
             home_profile="/hm",
         )
     )
-    check(len(resolved) == 1)
-    check(resolved[0].name == "system")
+    assert len(resolved) == 1
+    assert resolved[0].name == "system"
 
 
 def test_resolve_targets_raises_when_no_targets_resolved(
@@ -171,7 +170,7 @@ def test_resolve_targets_raises_when_no_targets_resolved(
             )
         )
     except RuntimeError as exc:
-        check("No generation targets resolved" in str(exc))
+        assert "No generation targets resolved" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
 
@@ -192,11 +191,11 @@ def test_build_rebuild_args_respect_custom_substituters() -> None:
         extra_substituters="https://cache.extra",
     )
 
-    check("substituters" in args)
-    check("https://cache.example" in args)
-    check("extra-substituters" in args)
-    check("https://cache.extra" in args)
-    check(args[-1].endswith(".drv^*"))
+    assert "substituters" in args
+    assert "https://cache.example" in args
+    assert "extra-substituters" in args
+    assert "https://cache.extra" in args
+    assert args[-1].endswith(".drv^*")
 
     args_extra_only = object.__getattribute__(pg, "_build_rebuild_args")(
         target,
@@ -205,8 +204,8 @@ def test_build_rebuild_args_respect_custom_substituters() -> None:
         substituters=None,
         extra_substituters="https://cache.extra",
     )
-    check("substituters" not in args_extra_only)
-    check("extra-substituters" in args_extra_only)
+    assert "substituters" not in args_extra_only
+    assert "extra-substituters" in args_extra_only
 
     args_sub_only = object.__getattribute__(pg, "_build_rebuild_args")(
         target,
@@ -215,8 +214,8 @@ def test_build_rebuild_args_respect_custom_substituters() -> None:
         substituters="https://cache.example",
         extra_substituters=None,
     )
-    check("substituters" in args_sub_only)
-    check("extra-substituters" not in args_sub_only)
+    assert "substituters" in args_sub_only
+    assert "extra-substituters" not in args_sub_only
 
 
 def test_resolve_targets_home_only_skips_system_candidate(
@@ -234,8 +233,8 @@ def test_resolve_targets_home_only_skips_system_candidate(
             home_profile="/hm",
         )
     )
-    check(len(resolved) == 1)
-    check(resolved[0].name == "home-manager")
+    assert len(resolved) == 1
+    assert resolved[0].name == "home-manager"
 
 
 def test_profile_target_returns_false_on_timeout(
@@ -264,7 +263,7 @@ def test_profile_target_returns_false_on_timeout(
             extra_substituters=None,
         )
     )
-    check(ok is False)
+    assert ok is False
 
 
 def test_profile_target_handles_missing_terminal_result(
@@ -292,7 +291,7 @@ def test_profile_target_handles_missing_terminal_result(
             extra_substituters=None,
         )
     )
-    check(ok is False)
+    assert ok is False
 
 
 def test_profile_target_handles_nonzero_exit_and_success_path(
@@ -321,7 +320,7 @@ def test_profile_target_handles_nonzero_exit_and_success_path(
             extra_substituters=None,
         )
     )
-    check(ok is False)
+    assert ok is False
 
     profiler = bsc.BuildProfiler()
 
@@ -349,8 +348,8 @@ def test_profile_target_handles_nonzero_exit_and_success_path(
             extra_substituters=None,
         )
     )
-    check(ok is True)
-    check(len(profiler.events) == 1)
+    assert ok is True
+    assert len(profiler.events) == 1
 
 
 def test_async_main_validates_public_cache_flag_combo() -> None:
@@ -370,7 +369,7 @@ def test_async_main_validates_public_cache_flag_combo() -> None:
             )
         )
     except RuntimeError as exc:
-        check("cannot be combined" in str(exc))
+        assert "cannot be combined" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
 
@@ -403,8 +402,8 @@ def test_async_main_dry_run_logs_commands(monkeypatch: pytest.MonkeyPatch) -> No
             verbosity=2,
         )
     )
-    check(rc == 0)
-    check(any("DRY RUN:" in msg for msg in seen))
+    assert rc == 0
+    assert any("DRY RUN:" in msg for msg in seen)
 
 
 def test_run_returns_one_on_top_level_exception(
@@ -420,4 +419,4 @@ def test_run_returns_one_on_top_level_exception(
         raise RuntimeError("boom")
 
     monkeypatch.setattr(pg.asyncio, "run", _boom)
-    check(pg.run() == 1)
+    assert pg.run() == 1

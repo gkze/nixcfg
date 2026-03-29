@@ -3,7 +3,7 @@ name: Periodic Flake Update
 
 env:
   CACHIX_NAME: gkze
-  UPDATE_COMMIT_MESSAGE: "chore: update flake.lock, sources, and crate2nix"
+  UPDATE_COMMIT_MESSAGE: "chore: update flake.lock, sources, uv.lock, and crate2nix"
 
 on:
   schedule:
@@ -19,24 +19,26 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   # Phase 1: Update flake.lock
   update-lock:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - &checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - &setup_nix
-        uses: DeterminateSystems/determinate-nix-action@v3
+        uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919 # v3.17.1
       - &cachix
-        uses: cachix/cachix-action@v16
+        uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
           name: ${{ env.CACHIX_NAME }}
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
       - &cache_nix
-        uses: actions/cache@v5
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           # Cache immutable tarball fetch artifacts only. Nix recreates
           # mutable SQLite metadata caches locally, and persisting them via
@@ -44,7 +46,7 @@ jobs:
           path: |
             ~/.cache/nix/tarball-cache
             ~/.cache/nix/tarball-cache-v2
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/uv.lock', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
             nix-cache-${{ runner.os }}-
@@ -84,9 +86,10 @@ jobs:
       - name: Format regenerated superset bun.nix
         if: steps.superset-changed.outputs.changed == 'true'
         run: nix fmt -- packages/superset/bun.nix
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: flake-lock
+          if-no-files-found: error
           path: |
             flake.lock
             packages/superset/bun.nix
@@ -95,17 +98,18 @@ jobs:
   resolve-versions:
     needs: update-lock
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - *checkout
       - *setup_nix
       - *cachix
       - &download_flake_lock
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: flake-lock
           path: .
       - &cache_nix_arch
-        uses: actions/cache@v5
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           # Cache immutable tarball fetch artifacts only. Nix recreates
           # mutable SQLite metadata caches locally, and persisting them via
@@ -113,7 +117,7 @@ jobs:
           path: |
             ~/.cache/nix/tarball-cache
             ~/.cache/nix/tarball-cache-v2
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/uv.lock', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
             nix-cache-${{ runner.os }}-
@@ -121,7 +125,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: nix run .#nixcfg -- ci pipeline versions --output pinned-versions.json
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: pinned-versions
           if-no-files-found: error
@@ -143,15 +147,16 @@ jobs:
           - runner: ubuntu-24.04-arm
             platform: aarch64-linux
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
     steps:
       - *checkout
       - *setup_nix
       - *cachix
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: flake-lock
           path: .
-      - uses: actions/cache@v5
+      - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           # Cache immutable tarball fetch artifacts only. Nix recreates
           # mutable SQLite metadata caches locally, and persisting them via
@@ -163,7 +168,7 @@ jobs:
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
             nix-cache-${{ runner.os }}-
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: pinned-versions
           path: .
@@ -177,35 +182,50 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           UPDATE_SUBPROCESS_TIMEOUT: "14400"
         run: nix run .#nixcfg -- update --native-only --pinned-versions pinned-versions.json
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: sources-${{ matrix.platform }}
           if-no-files-found: error
           path: |
             packages/**/sources.json
             overlays/**/sources.json
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: matrix.platform == 'x86_64-linux'
+        with:
+          name: uv-locks-${{ matrix.platform }}
+          if-no-files-found: error
+          path: packages/**/uv.lock
 
   # Phase 4: Merge platform-specific hashes
   merge-hashes:
     needs: compute-hashes
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - *checkout
       - *setup_nix
       - *cachix
       - *download_flake_lock
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sources-aarch64-darwin
           path: sources-aarch64-darwin
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sources-x86_64-linux
           path: sources-x86_64-linux
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sources-aarch64-linux
           path: sources-aarch64-linux
+      - name: Materialize checked-in uv.lock artifacts
+        # uv.lock is platform-independent generated metadata. Download one
+        # canonical artifact at the repository root so the checked-in lockfiles
+        # are carried forward into merged-sources and the PR branch.
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: uv-locks-x86_64-linux
+          path: packages
       - *cache_nix
       - name: Merge per-package sources files
         run: |
@@ -213,31 +233,34 @@ jobs:
             sources-aarch64-darwin \
             sources-x86_64-linux \
             sources-aarch64-linux
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: merged-sources
+          if-no-files-found: error
           path: |
             flake.lock
             packages/superset/bun.nix
             packages/**/sources.json
+            packages/**/uv.lock
             overlays/**/sources.json
 
   # Phase 5: Refresh checked-in generated artifacts on native platforms
   crate2nix-linux:
     needs: merge-hashes
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - *checkout
       - *setup_nix
       - *cachix
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: merged-sources
           path: .
       - *cache_nix
       - name: Refresh Linux crate2nix artifacts
         run: nix run .#nixcfg -- ci pipeline crate2nix --write
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: crate2nix-linux
           if-no-files-found: error
@@ -250,11 +273,12 @@ jobs:
   crate2nix-darwin:
     needs: merge-hashes
     runs-on: macos-15
+    timeout-minutes: 120
     steps:
       - *checkout
       - *setup_nix
       - *cachix
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: merged-sources
           path: .
@@ -269,7 +293,7 @@ jobs:
           nix run .#nixcfg -- ci pipeline crate2nix --write
           --package zed-editor-nightly
           --package opencode-desktop
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: crate2nix-darwin
           if-no-files-found: error
@@ -285,27 +309,30 @@ jobs:
       - crate2nix-linux
       - crate2nix-darwin
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - *checkout
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: merged-sources
           path: .
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: crate2nix-linux
           path: .
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: crate2nix-darwin
           path: packages
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: merged-generated
+          if-no-files-found: error
           path: |
             flake.lock
             packages/superset/bun.nix
             packages/**/sources.json
+            packages/**/uv.lock
             overlays/**/sources.json
             packages/codex/Cargo.nix
             packages/codex/crate-hashes.json
@@ -330,11 +357,12 @@ jobs:
           - runner: ubuntu-24.04-arm
             platform: aarch64-linux
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
     steps:
       - *checkout
       - *setup_nix
       - *cachix
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: merged-generated
           path: .
@@ -354,11 +382,12 @@ jobs:
   quality-gates:
     needs: merge-generated
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - *checkout
       - *setup_nix
       - *cachix
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: merged-generated
           path: .
@@ -369,10 +398,10 @@ jobs:
         run: |
           nix build .#checks.x86_64-linux.editorconfig
           nix build .#checks.x86_64-linux.python
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.14"
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Install Python dependencies
         run: uv sync --frozen --group dev
       - name: Verify crate2nix artifacts are fresh
@@ -390,6 +419,7 @@ jobs:
       - quality-gates
     runs-on: macos-15
     name: ${{ matrix.package }}
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       max-parallel: 16
@@ -431,7 +461,7 @@ jobs:
       - *checkout
       - *setup_nix
       - *cachix
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: merged-generated
           path: .
@@ -451,12 +481,13 @@ jobs:
       - warm-fod-cache
       - quality-gates
     runs-on: macos-15
+    timeout-minutes: 180
     steps:
       - *checkout
       - *setup_nix
       - *cachix
       - &download_merged_sources
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: merged-generated
           path: .
@@ -497,6 +528,7 @@ jobs:
       - darwin-shared-heavy
       - darwin-shared
     runs-on: macos-15
+    timeout-minutes: 240
     steps:
       - *checkout
       - *setup_nix
@@ -517,6 +549,7 @@ jobs:
       - darwin-shared-heavy
       - darwin-shared
     runs-on: macos-15
+    timeout-minutes: 240
     steps:
       - *checkout
       - *setup_nix
@@ -537,6 +570,7 @@ jobs:
       - warm-fod-cache
       - quality-gates
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - *checkout
       - *setup_nix
@@ -557,20 +591,13 @@ jobs:
       - darwin-argus
       - darwin-rocinante
       - linux
-    if: >-
-      needs.merge-generated.result == 'success' &&
-      needs.quality-gates.result == 'success' &&
-      needs.darwin-shared-heavy.result == 'success' &&
-      needs.darwin-shared.result == 'success' &&
-      needs.darwin-argus.result == 'success' &&
-      needs.darwin-rocinante.result == 'success' &&
-      needs.linux.result == 'success'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: write
       pull-requests: write
     steps:
-      - *checkout
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - *setup_nix
       - *cachix
       - *download_merged_sources
@@ -584,7 +611,7 @@ jobs:
             --repository "${{ github.repository }}" \
             --base-ref "${{ github.base_ref || github.event.repository.default_branch }}"
 
-      - uses: peter-evans/create-pull-request@v8
+      - uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
         id: cpr
         with:
           sign-commits: true

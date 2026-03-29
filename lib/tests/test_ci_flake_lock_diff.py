@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from lib.tests._assertions import check
 from lib.update.ci.flake_lock_diff import run_diff
 
 if TYPE_CHECKING:
@@ -52,21 +51,21 @@ def test_run_diff_renders_updated_added_and_removed_inputs(tmp_path: Path) -> No
 
     diff = run_diff(old_lock, new_lock)
 
-    check("### Updated flake inputs" in diff)
-    check("| Input | Source | From | To | Diff |" in diff)
-    check(
+    assert "### Updated flake inputs" in diff
+    assert "| Input | Source | From | To | Diff |" in diff
+    assert (
         "| alpha | [example/alpha](https://github.com/example/alpha) | "
         "[aaaaaaa](https://github.com/example/alpha/commit/aaaaaaaa) | "
         "[ccccccc](https://github.com/example/alpha/commit/cccccccc) | "
         "[Diff](https://github.com/example/alpha/compare/aaaaaaaa...cccccccc) |" in diff
     )
-    check("### Added flake inputs" in diff)
-    check(
+    assert "### Added flake inputs" in diff
+    assert (
         "| gamma | [example/gamma](https://github.com/example/gamma) | "
         "[ddddddd](https://github.com/example/gamma/commit/dddddddd) |" in diff
     )
-    check("### Removed flake inputs" in diff)
-    check(
+    assert "### Removed flake inputs" in diff
+    assert (
         "| beta | [example/beta](https://github.com/example/beta) | "
         "[bbbbbbb](https://github.com/example/beta/commit/bbbbbbbb) |" in diff
     )
@@ -81,4 +80,4 @@ def test_run_diff_returns_empty_string_when_no_changes(tmp_path: Path) -> None:
 
     diff = run_diff(old_lock, new_lock)
 
-    check(diff == "")
+    assert diff == ""

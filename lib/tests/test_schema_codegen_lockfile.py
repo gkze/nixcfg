@@ -16,7 +16,6 @@ from lib.schema_codegen.lockfile import (
     write_codegen_lockfile,
 )
 from lib.schema_codegen.models._generated import CodegenLockfile
-from lib.tests._assertions import check
 
 
 class _MonkeyPatchLike:
@@ -94,20 +93,17 @@ def test_write_codegen_lockfile_hashes_directory_sources_deterministically(
         "root.json": root_bytes,
     })
 
-    check(output_path == tmp_path / "codegen.lock.json")
-    check(
-        rendered
-        == (
-            "{"
-            '"manifest_path":"codegen.yaml",'
-            '"sources":{"source":{'
-            f'"content_sha256":"{expected_sha256}",'
-            '"kind":"directory",'
-            '"path":"schemas"'
-            "}},"
-            '"version":1'
-            "}\n"
-        )
+    assert output_path == tmp_path / "codegen.lock.json"
+    assert rendered == (
+        "{"
+        '"manifest_path":"codegen.yaml",'
+        '"sources":{"source":{'
+        f'"content_sha256":"{expected_sha256}",'
+        '"kind":"directory",'
+        '"path":"schemas"'
+        "}},"
+        '"version":1'
+        "}\n"
     )
 
 
@@ -140,14 +136,14 @@ def test_build_codegen_lockfile_omits_url_metadata_by_default(
     payload = json.loads(rendered)
     source = payload["sources"]["source"]
 
-    check(isinstance(lockfile, CodegenLockfile))
-    check("generated_at" not in payload)
-    check("fetched_at" not in source)
-    check("etag" not in source)
-    check("last_modified" not in source)
-    check(source["kind"] == "url")
-    check(source["uri"] == "https://example.com/schema.json")
-    check(source["sha256"] == hashlib.sha256(b'{"title":"Remote"}\n').hexdigest())
+    assert isinstance(lockfile, CodegenLockfile)
+    assert "generated_at" not in payload
+    assert "fetched_at" not in source
+    assert "etag" not in source
+    assert "last_modified" not in source
+    assert source["kind"] == "url"
+    assert source["uri"] == "https://example.com/schema.json"
+    assert source["sha256"] == hashlib.sha256(b'{"title":"Remote"}\n').hexdigest()
 
 
 def test_build_codegen_lockfile_can_include_optional_fetch_metadata(
@@ -186,10 +182,10 @@ def test_build_codegen_lockfile_can_include_optional_fetch_metadata(
     )
     source = payload["sources"]["source"]
 
-    check(payload["generated_at"] == "2026-03-21T12:34:56Z")
-    check(source["fetched_at"] == "2026-03-21T12:34:56Z")
-    check(source["etag"] == '"abc"')
-    check(source["last_modified"] == "Wed, 04 Mar 2026 00:25:01 GMT")
+    assert payload["generated_at"] == "2026-03-21T12:34:56Z"
+    assert source["fetched_at"] == "2026-03-21T12:34:56Z"
+    assert source["etag"] == '"abc"'
+    assert source["last_modified"] == "Wed, 04 Mar 2026 00:25:01 GMT"
 
 
 def test_build_codegen_lockfile_resolves_github_raw_sources_without_provenance_by_default(
@@ -239,18 +235,15 @@ def test_build_codegen_lockfile_resolves_github_raw_sources_without_provenance_b
     payload = json.loads(rendered)
     source = payload["sources"]["source"]
 
-    check(
-        source
-        == {
-            "kind": "github-raw",
-            "owner": "actions",
-            "path": "workflow-parser/src/workflow-v1.0.json",
-            "ref": resolved_sha,
-            "repo": "languageservices",
-            "sha256": hashlib.sha256(b"{}\n").hexdigest(),
-            "uri": expected_uri,
-        }
-    )
+    assert source == {
+        "kind": "github-raw",
+        "owner": "actions",
+        "path": "workflow-parser/src/workflow-v1.0.json",
+        "ref": resolved_sha,
+        "repo": "languageservices",
+        "sha256": hashlib.sha256(b"{}\n").hexdigest(),
+        "uri": expected_uri,
+    }
 
 
 def test_build_codegen_lockfile_can_include_github_raw_provenance_metadata(
@@ -302,10 +295,10 @@ def test_build_codegen_lockfile_can_include_github_raw_provenance_metadata(
     payload = json.loads(rendered)
     source = payload["sources"]["source"]
 
-    check(source["fetched_at"] == "2026-03-21T12:34:56Z")
-    check(source["tag"] == "release-v0.3.49")
-    check(source["package"] == "@actions/workflow-parser")
-    check(source["package_version"] == "0.3.49")
+    assert source["fetched_at"] == "2026-03-21T12:34:56Z"
+    assert source["tag"] == "release-v0.3.49"
+    assert source["package"] == "@actions/workflow-parser"
+    assert source["package_version"] == "0.3.49"
 
 
 def test_write_codegen_lockfile_normalizes_manifest_path_against_custom_output(
@@ -333,7 +326,7 @@ def test_write_codegen_lockfile_normalizes_manifest_path_against_custom_output(
     write_codegen_lockfile(manifest_path=manifest_path, lockfile_path=output_path)
     payload = json.loads(output_path.read_text(encoding="utf-8"))
 
-    check(payload["manifest_path"] == "../manifests/codegen.yaml")
+    assert payload["manifest_path"] == "../manifests/codegen.yaml"
 
 
 def test_write_codegen_lockfile_matches_shared_golden_fixture(tmp_path: Path) -> None:
@@ -347,4 +340,4 @@ def test_write_codegen_lockfile_matches_shared_golden_fixture(tmp_path: Path) ->
     rendered = output_path.read_text(encoding="utf-8")
     expected = (fixture_root / "expected.codegen.lock.json").read_text(encoding="utf-8")
 
-    check(rendered == expected)
+    assert rendered == expected

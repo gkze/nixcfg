@@ -19,7 +19,10 @@ let
   version = slib.getFlakeVersion "superset";
   pname = "superset";
   upstreamSrc = inputs.superset;
-  supportedPlatforms = lib.platforms.darwin ++ [ "x86_64-linux" ];
+  supportedPlatforms = [
+    "aarch64-darwin"
+    "x86_64-linux"
+  ];
   linuxAppImage = fetchurl {
     name = "superset-${info.version}-x86_64.AppImage";
     url = info.urls."x86_64-linux";

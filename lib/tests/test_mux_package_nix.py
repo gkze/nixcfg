@@ -12,7 +12,7 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
-from lib.tests._assertions import check, expect_instance
+from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
@@ -94,7 +94,7 @@ def test_mux_declares_local_darwin_electron_artifacts() -> None:
         expect_binding(electron_dist_args.values, "installPhase").value,
         IndentedString,
     )
-    check(
+    assert (
         'ln -s ${electronZip} "$out/electron-v${electronVersion}-${electronZipPlatform}.zip"'
         in install_phase.value
     )
@@ -119,7 +119,7 @@ else
         expect_scope_binding(derivation, "electronZipChecksum").value,
         Select,
     )
-    check(
+    assert (
         electron_zip_checksum.attribute == "${electronVersion}.${electronZipPlatform}"
     )
 
@@ -130,7 +130,7 @@ else
         next(iter(checksum_bindings.values())).value, AttributeSet
     )
     platform_hashes = binding_map(version_hashes.values)
-    check(set(platform_hashes) == {'"darwin-arm64"', '"darwin-x64"'})
+    assert set(platform_hashes) == {'"darwin-arm64"', '"darwin-x64"'}
 
     assert_nix_ast_equal(
         electron_zip_checksum.default,
@@ -149,12 +149,12 @@ def test_mux_derivation_encodes_the_hermetic_darwin_packaging_contract() -> None
         expect_binding(derivation_args.values, "configurePhase").value,
         IndentedString,
     )
-    check('export npm_config_nodedir="${electronHeaders}"' in configure_phase.value)
-    check(
+    assert 'export npm_config_nodedir="${electronHeaders}"' in configure_phase.value
+    assert (
         'if [ "$resolvedElectronVersion" != "${electronVersion}" ]; then'
         in configure_phase.value
     )
-    check("./scripts/postinstall.sh" in configure_phase.value)
+    assert "./scripts/postinstall.sh" in configure_phase.value
 
     post_patch = expect_instance(
         expect_binding(derivation_args.values, "postPatch").value,
@@ -164,10 +164,10 @@ def test_mux_derivation_encodes_the_hermetic_darwin_packaging_contract() -> None
     assert_nix_ast_equal(optional_string.name, "lib.optionalString")
     assert_nix_ast_equal(optional_string.argument, "stdenv.hostPlatform.isDarwin")
     post_patch_script = expect_instance(post_patch.argument, IndentedString)
-    check('build["electronDist"] = "${electronDist}"' in post_patch_script.value)
-    check('mac["target"] = "dir"' in post_patch_script.value)
-    check('mac["hardenedRuntime"] = False' in post_patch_script.value)
-    check('mac["notarize"] = False' in post_patch_script.value)
+    assert 'build["electronDist"] = "${electronDist}"' in post_patch_script.value
+    assert 'mac["target"] = "dir"' in post_patch_script.value
+    assert 'mac["hardenedRuntime"] = False' in post_patch_script.value
+    assert 'mac["notarize"] = False' in post_patch_script.value
 
     build_phase = expect_instance(
         expect_binding(derivation_args.values, "buildPhase").value,
@@ -175,8 +175,8 @@ def test_mux_derivation_encodes_the_hermetic_darwin_packaging_contract() -> None
     )
     assert_nix_ast_equal(build_phase.condition, "stdenv.hostPlatform.isDarwin")
     darwin_build = expect_instance(build_phase.consequence, IndentedString)
-    check("bun scripts/generate-icons.ts png icns linux-icons" in darwin_build.value)
-    check(
+    assert "bun scripts/generate-icons.ts png icns linux-icons" in darwin_build.value
+    assert (
         "bun x electron-builder --mac --dir --publish never -c.mac.identity=null"
         in darwin_build.value
     )

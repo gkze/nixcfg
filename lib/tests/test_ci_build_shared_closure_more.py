@@ -13,7 +13,6 @@ from lib.nix.commands.base import (
     ProcessDone,
     ProcessLine,
 )
-from lib.tests._assertions import check
 from lib.update.ci import build_shared_closure as bsc
 
 if TYPE_CHECKING:
@@ -32,13 +31,10 @@ def test_parse_dry_run_derivations_covers_section_termination() -> None:
         "  /nix/store/cccccccccccccccccccccccccccccccc-c.drv",
     ])
     drvs = object.__getattribute__(bsc, "_parse_dry_run_derivations")(output)
-    check(
-        drvs
-        == {
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv",
-            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv",
-        }
-    )
+    assert drvs == {
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv",
+        "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv",
+    }
 
 
 def test_parse_dry_run_derivations_ends_on_non_indented_line() -> None:
@@ -50,24 +46,23 @@ def test_parse_dry_run_derivations_ends_on_non_indented_line() -> None:
         "  /nix/store/ignored.drv",
     ])
     drvs = object.__getattribute__(bsc, "_parse_dry_run_derivations")(output)
-    check(drvs == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"})
+    assert drvs == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"}
 
     stop_immediately = "\n".join([
         "these 1 derivations will be built:",
         "summary line",
     ])
-    check(
+    assert (
         object.__getattribute__(bsc, "_parse_dry_run_derivations")(stop_immediately)
         == set()
     )
-
     keep_section = "\n".join([
         "these 1 derivations will be built:",
         "  just-a-log-line",
         "  /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv",
     ])
     drvs2 = object.__getattribute__(bsc, "_parse_dry_run_derivations")(keep_section)
-    check(drvs2 == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"})
+    assert drvs2 == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"}
 
 
 def test_parse_internal_json_line_and_emit_stream_line(
@@ -75,17 +70,17 @@ def test_parse_internal_json_line_and_emit_stream_line(
 ) -> None:
     """Handle valid/invalid internal-json lines and output forwarding."""
     parse = object.__getattribute__(bsc, "_parse_internal_json_line")
-    check(parse("plain log") is None)
-    check(parse("@nix [1,2,3]") is None)
-    check(parse("@nix {not-json}") is None)
-    check(parse('@nix {"action":"start"}') == {"action": "start"})
+    assert parse("plain log") is None
+    assert parse("@nix [1,2,3]") is None
+    assert parse("@nix {not-json}") is None
+    assert parse('@nix {"action":"start"}') == {"action": "start"}
 
     emit = object.__getattribute__(bsc, "_emit_stream_line")
     emit(ProcessLine(stream="stdout", text="out\n"))
     emit(ProcessLine(stream="stderr", text="err\n"))
     captured = capsys.readouterr()
-    check(captured.out == "out\n")
-    check(captured.err == "err\n")
+    assert captured.out == "out\n"
+    assert captured.err == "err\n"
 
 
 def test_build_profiler_ingest_line_and_finalize_defensive_paths() -> None:
@@ -102,8 +97,8 @@ def test_build_profiler_ingest_line_and_finalize_defensive_paths() -> None:
         now=10.0,
     )
     profiler.finalize(now=11.0)
-    check(len(profiler.events) == 1)
-    check(profiler.events[0].completed is False)
+    assert len(profiler.events) == 1
+    assert profiler.events[0].completed is False
 
 
 def test_realise_batch_with_profiling_missing_terminal_result(
@@ -124,7 +119,7 @@ def test_realise_batch_with_profiling_missing_terminal_result(
             )
         )
     except RuntimeError as exc:
-        check("without a terminal result" in str(exc))
+        assert "without a terminal result" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
 
@@ -132,50 +127,21 @@ def test_realise_batch_with_profiling_missing_terminal_result(
 def test_combine_derivation_sets_union_intersection_and_empty() -> None:
     """Combine derivation sets according to selected mode."""
     combine = object.__getattribute__(bsc, "_combine_derivation_sets")
-    check(combine([], mode="union") == set())
-    check(
-        combine(
-            [
-                {"a", "b"},
-                {"b", "c"},
-            ],
-            mode="union",
-        )
-        == {"a", "b", "c"}
-    )
-    check(
-        combine(
-            [
-                {"a", "b"},
-                {"b", "c"},
-            ],
-            mode="intersection",
-        )
-        == {"b"}
-    )
-
-
-def test_supported_kwargs_filters_to_signature() -> None:
-    """Only pass keyword args accepted by callee signature."""
-
-    def _func(a: int, *, keep: str) -> None:
-        _ = a
-        _ = keep
-
-    filtered = object.__getattribute__(bsc, "_supported_kwargs")(
-        _func,
-        {"a": 1, "keep": "ok", "drop": True},
-    )
-    check(filtered == {"a": 1, "keep": "ok"})
-
-    class _NoSig:
-        __signature__ = None
-
-    passthrough = object.__getattribute__(bsc, "_supported_kwargs")(
-        _NoSig(),
-        {"x": 1},
-    )
-    check(passthrough == {"x": 1})
+    assert combine([], mode="union") == set()
+    assert combine(
+        [
+            {"a", "b"},
+            {"b", "c"},
+        ],
+        mode="union",
+    ) == {"a", "b", "c"}
+    assert combine(
+        [
+            {"a", "b"},
+            {"b", "c"},
+        ],
+        mode="intersection",
+    ) == {"b"}
 
 
 def test_stream_nix_build_dry_run_timeout_and_nonzero(
@@ -196,7 +162,7 @@ def test_stream_nix_build_dry_run_timeout_and_nonzero(
             )
         )
     except NixCommandError as exc:
-        check("timed out" in str(exc))
+        assert "timed out" in str(exc)
     else:
         raise AssertionError("expected NixCommandError")
 
@@ -231,7 +197,7 @@ def test_stream_nix_build_dry_run_success_and_missing_result(
             nix_verbosity=0,
         )
     )
-    check("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv" in drvs)
+    assert "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv" in drvs
 
     async def _missing_done(*_args: object, **_kwargs: object):
         yield ProcessLine(stream="stdout", text="just logs\n")
@@ -245,7 +211,7 @@ def test_stream_nix_build_dry_run_success_and_missing_result(
             )
         )
     except RuntimeError as exc:
-        check("without a terminal result" in str(exc))
+        assert "without a terminal result" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
 
@@ -295,15 +261,15 @@ def test_write_profile_report_and_summary_logging(
         profiler=profiler,
     )
     payload = json.loads(out.read_text(encoding="utf-8"))
-    check(payload["requested_derivations"] == 2)
-    check(payload["completed_derivations"] == 1)
-    check(payload["interrupted_derivations"] == 1)
-    check(len(payload["all_derivations"]) == 2)
+    assert payload["requested_derivations"] == 2
+    assert payload["completed_derivations"] == 1
+    assert payload["interrupted_derivations"] == 1
+    assert len(payload["all_derivations"]) == 2
 
     messages: list[str] = []
     monkeypatch.setattr(bsc.log, "info", lambda msg, *args: messages.append(msg % args))
     object.__getattribute__(bsc, "_log_profile_summary")([])
-    check(any("No derivation build events" in msg for msg in messages))
+    assert any("No derivation build events" in msg for msg in messages)
 
 
 def test_log_profile_summary_nonempty_rows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -327,8 +293,8 @@ def test_log_profile_summary_nonempty_rows(monkeypatch: pytest.MonkeyPatch) -> N
     seen: list[str] = []
     monkeypatch.setattr(bsc.log, "info", lambda msg, *args: seen.append(msg % args))
     object.__getattribute__(bsc, "_log_profile_summary")(rows)
-    check(any("Profiled 2 derivation(s)" in msg for msg in seen))
-    check(any("interrupted" in msg for msg in seen))
+    assert any("Profiled 2 derivation(s)" in msg for msg in seen)
+    assert any("interrupted" in msg for msg in seen)
 
 
 def test_realise_batch_with_profiling_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -355,8 +321,8 @@ def test_realise_batch_with_profiling_success(monkeypatch: pytest.MonkeyPatch) -
             profiler=profiler,
         )
     )
-    check(result.returncode == 0)
-    check(len(profiler.events) == 1)
+    assert result.returncode == 0
+    assert len(profiler.events) == 1
 
 
 def test_realise_batch_with_profiling_stdout_branch(
@@ -378,8 +344,8 @@ def test_realise_batch_with_profiling_stdout_branch(
             profiler=profiler,
         )
     )
-    check(result.returncode == 0)
-    check(profiler.events == [])
+    assert result.returncode == 0
+    assert profiler.events == []
 
 
 def test_build_derivations_uses_run_nix_when_verbose(
@@ -401,12 +367,12 @@ def test_build_derivations_uses_run_nix_when_verbose(
             nix_verbosity=1,
         )
     )
-    check(ok is True)
+    assert ok is True
     args = captured["args"]
     if not isinstance(args, list):
         raise AssertionError("expected list args")
-    check("nix-store" in args)
-    check("-v" in args)
+    assert "nix-store" in args
+    assert "-v" in args
 
 
 def test_build_derivations_uses_profiler_and_async_main_profile_block(
@@ -440,9 +406,9 @@ def test_build_derivations_uses_profiler_and_async_main_profile_block(
             profile_output=Path("/tmp/profile.json"),
         )
     )
-    check(rc == 0)
-    check(called.get("profiler") is not None)
-    check(called.get("logged") is True)
+    assert rc == 0
+    assert called.get("profiler") is not None
+    assert called.get("logged") is True
 
 
 def test_async_main_excludes_derivations_from_exclude_refs(
@@ -458,7 +424,7 @@ def test_async_main_excludes_derivations_from_exclude_refs(
                 "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv",
             }
         if refs == [".#heavy-a", ".#heavy-b"]:
-            check(kwargs.get("mode") == "union")
+            assert kwargs.get("mode") == "union"
             return {
                 "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv",
                 "/nix/store/cccccccccccccccccccccccccccccccc-c.drv",
@@ -480,8 +446,8 @@ def test_async_main_excludes_derivations_from_exclude_refs(
         )
     )
 
-    check(rc == 0)
-    check(captured.get("drvs") == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"})
+    assert rc == 0
+    assert captured.get("drvs") == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"}
 
 
 def test_build_derivations_profiler_path_invokes_realise_batch(
@@ -502,8 +468,8 @@ def test_build_derivations_profiler_path_invokes_realise_batch(
             profiler=bsc.BuildProfiler(),
         )
     )
-    check(ok is True)
-    check(len(calls) == 1)
+    assert ok is True
+    assert len(calls) == 1
 
 
 def test_eval_one_uses_stream_mode_when_verbose(
@@ -521,8 +487,8 @@ def test_eval_one_uses_stream_mode_when_verbose(
     drvs = asyncio.run(
         object.__getattribute__(bsc, "_eval_one")(".#x", nix_verbosity=1)
     )
-    check(seen == {"ref": ".#x", "nix_verbosity": 1})
-    check(drvs == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"})
+    assert seen == {"ref": ".#x", "nix_verbosity": 1}
+    assert drvs == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"}
 
 
 def test_aggregate_profile_events_accumulates_same_derivation() -> None:
@@ -539,24 +505,7 @@ def test_aggregate_profile_events_accumulates_same_derivation() -> None:
             completed=False,
         ),
     ])
-    check(len(rows) == 1)
-    check(rows[0]["seconds"] == 2.0)
-    check(rows[0]["occurrences"] == 2)
-    check(rows[0]["completed"] is False)
-
-
-def test_supported_kwargs_signature_error_branch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Return copied kwargs when inspect.signature cannot introspect callable."""
-
-    class _Callable:
-        def __call__(self, **_kwargs: object) -> None:
-            return None
-
-    monkeypatch.setattr(
-        bsc.inspect, "signature", lambda _f: (_ for _ in ()).throw(ValueError("nope"))
-    )
-    kwargs = {"x": 1}
-    filtered = object.__getattribute__(bsc, "_supported_kwargs")(_Callable(), kwargs)
-    check(filtered == kwargs)
+    assert len(rows) == 1
+    assert rows[0]["seconds"] == 2.0
+    assert rows[0]["occurrences"] == 2
+    assert rows[0]["completed"] is False

@@ -15,7 +15,6 @@ from typer.testing import CliRunner
 
 import nixcfg
 from lib.schema_codegen.runner import SchemaTargetSummary
-from lib.tests._assertions import check
 
 if TYPE_CHECKING:
     from lib.update.cli import UpdateOptions
@@ -39,8 +38,8 @@ def test_nixcfg_update_parses_native_only(monkeypatch: _MonkeyPatchLike) -> None
     runner = CliRunner()
     result = runner.invoke(nixcfg.app, ["update", "--native-only"])
 
-    check(result.exit_code == 0)
-    check(called["opts"].native_only is True)
+    assert result.exit_code == 0
+    assert called["opts"].native_only is True
 
 
 def test_nixcfg_recover_snapshot_parses_flags(monkeypatch: _MonkeyPatchLike) -> None:
@@ -62,8 +61,8 @@ def test_nixcfg_recover_snapshot_parses_flags(monkeypatch: _MonkeyPatchLike) -> 
         nixcfg.app, ["recover", "snapshot", "/run/current-system", "-j"]
     )
 
-    check(result.exit_code == 0)
-    check(called == {"generation": "/run/current-system", "json_output": True})
+    assert result.exit_code == 0
+    assert called == {"generation": "/run/current-system", "json_output": True}
 
 
 def test_nixcfg_recover_files_parses_flags(monkeypatch: _MonkeyPatchLike) -> None:
@@ -111,19 +110,16 @@ def test_nixcfg_recover_files_parses_flags(monkeypatch: _MonkeyPatchLike) -> Non
         ],
     )
 
-    check(result.exit_code == 0)
-    check(
-        called
-        == {
-            "generation": "/run/current-system",
-            "apply": True,
-            "globs": ("docs/*.md",),
-            "json_output": True,
-            "paths": ("flake.lock",),
-            "stage": True,
-            "sync": True,
-        }
-    )
+    assert result.exit_code == 0
+    assert called == {
+        "generation": "/run/current-system",
+        "apply": True,
+        "globs": ("docs/*.md",),
+        "json_output": True,
+        "paths": ("flake.lock",),
+        "stage": True,
+        "sync": True,
+    }
 
 
 def test_nixcfg_recover_hashes_parses_flags(monkeypatch: _MonkeyPatchLike) -> None:
@@ -155,17 +151,14 @@ def test_nixcfg_recover_hashes_parses_flags(monkeypatch: _MonkeyPatchLike) -> No
         ["recover", "hashes", "/run/current-system", "-a", "-g", "-s", "-j"],
     )
 
-    check(result.exit_code == 0)
-    check(
-        called
-        == {
-            "generation": "/run/current-system",
-            "apply": True,
-            "json_output": True,
-            "stage": True,
-            "sync": True,
-        }
-    )
+    assert result.exit_code == 0
+    assert called == {
+        "generation": "/run/current-system",
+        "apply": True,
+        "json_output": True,
+        "stage": True,
+        "sync": True,
+    }
 
 
 def test_nixcfg_update_help_includes_typer_options() -> None:
@@ -173,10 +166,10 @@ def test_nixcfg_update_help_includes_typer_options() -> None:
     runner = CliRunner()
     result = runner.invoke(nixcfg.app, ["update", "--help"])
 
-    check(result.exit_code == 0)
-    check("--native-only" in result.output)
-    check("--pinned-versions" in result.output)
-    check("--no-sources" in result.output)
+    assert result.exit_code == 0
+    assert "--native-only" in result.output
+    assert "--pinned-versions" in result.output
+    assert "--no-sources" in result.output
 
 
 def test_nixcfg_schema_targets_lists_configured_targets(
@@ -193,8 +186,8 @@ def test_nixcfg_schema_targets_lists_configured_targets(
     runner = CliRunner()
     result = runner.invoke(nixcfg.app, ["schema", "targets"])
 
-    check(result.exit_code == 0)
-    check("demo\tdemo.py" in result.output)
+    assert result.exit_code == 0
+    assert "demo\tdemo.py" in result.output
 
 
 def test_nixcfg_schema_generate_forwards_target_and_config(
@@ -219,11 +212,11 @@ def test_nixcfg_schema_generate_forwards_target_and_config(
         ["schema", "generate", "demo", "-c", "alt-config.yaml"],
     )
 
-    check(result.exit_code == 0)
-    check(called["target_name"] == "demo")
-    check(called["progress"] is nixcfg._schema_progress)
-    check(called["config_path"] == Path("alt-config.yaml"))
-    check("Generated /tmp/generated.py" in result.output)
+    assert result.exit_code == 0
+    assert called["target_name"] == "demo"
+    assert called["progress"] is nixcfg._schema_progress
+    assert called["config_path"] == Path("alt-config.yaml")
+    assert "Generated /tmp/generated.py" in result.output
 
 
 def test_nixcfg_schema_lock_forwards_manifest_output_and_metadata(
@@ -262,12 +255,12 @@ def test_nixcfg_schema_lock_forwards_manifest_output_and_metadata(
         ],
     )
 
-    check(result.exit_code == 0)
-    check(called["manifest_path"] == Path("codegen.yaml"))
-    check(called["lockfile_path"] == Path("custom.lock.json"))
-    check(called["include_metadata"] is True)
-    check(called["progress"] is nixcfg._schema_progress)
-    check("Generated /tmp/codegen.lock.json" in result.output)
+    assert result.exit_code == 0
+    assert called["manifest_path"] == Path("codegen.yaml")
+    assert called["lockfile_path"] == Path("custom.lock.json")
+    assert called["include_metadata"] is True
+    assert called["progress"] is nixcfg._schema_progress
+    assert "Generated /tmp/codegen.lock.json" in result.output
 
 
 def test_nixcfg_all_commands_support_short_help_alias() -> None:
@@ -292,7 +285,7 @@ def test_nixcfg_all_commands_support_short_help_alias() -> None:
                 path_display = "nixcfg" if not path else f"nixcfg {' '.join(path)}"
                 failures.append(f"{path_display} (-h) -> exit {exc.exit_code}")
 
-    check(failures == [], failures)
+    assert failures == [], failures
 
 
 def test_nixcfg_ci_registers_sources_json_diff() -> None:
@@ -300,8 +293,8 @@ def test_nixcfg_ci_registers_sources_json_diff() -> None:
     runner = CliRunner()
     result = runner.invoke(nixcfg.app, ["ci", "diff", "sources", "--help"])
 
-    check(result.exit_code == 0)
-    check("--format" in result.output)
+    assert result.exit_code == 0
+    assert "--format" in result.output
 
 
 def test_nixcfg_ci_subcommand_help_includes_resolve_options() -> None:
@@ -312,8 +305,8 @@ def test_nixcfg_ci_subcommand_help_includes_resolve_options() -> None:
         ["ci", "pipeline", "versions", "--help"],
     )
 
-    check(result.exit_code == 0)
-    check("--output" in result.output)
+    assert result.exit_code == 0
+    assert "--output" in result.output
 
 
 def test_nixcfg_ci_subcommand_help_includes_crate2nix_options() -> None:
@@ -324,9 +317,9 @@ def test_nixcfg_ci_subcommand_help_includes_crate2nix_options() -> None:
         ["ci", "pipeline", "crate2nix", "--help"],
     )
 
-    check(result.exit_code == 0)
-    check("--package" in result.output)
-    check("--write" in result.output)
+    assert result.exit_code == 0
+    assert "--package" in result.output
+    assert "--write" in result.output
 
 
 def test_nixcfg_ci_cache_generations_help_exposes_profile_options() -> None:
@@ -337,8 +330,8 @@ def test_nixcfg_ci_cache_generations_help_exposes_profile_options() -> None:
         ["ci", "cache", "generations", "--help"],
     )
 
-    check(result.exit_code == 0)
-    check("--profile-output" in result.output)
+    assert result.exit_code == 0
+    assert "--profile-output" in result.output
 
 
 def test_nixcfg_recover_snapshot_help_exposes_recovery_options() -> None:
@@ -349,8 +342,8 @@ def test_nixcfg_recover_snapshot_help_exposes_recovery_options() -> None:
         ["recover", "snapshot", "--help"],
     )
 
-    check(result.exit_code == 0)
-    check("--json" in result.output)
+    assert result.exit_code == 0
+    assert "--json" in result.output
 
 
 def test_nixcfg_recover_files_help_exposes_recovery_options() -> None:
@@ -361,13 +354,13 @@ def test_nixcfg_recover_files_help_exposes_recovery_options() -> None:
         ["recover", "files", "--help"],
     )
 
-    check(result.exit_code == 0)
-    check("--apply" in result.output)
-    check("--path" in result.output)
-    check("--glob" in result.output)
-    check("--stage" in result.output)
-    check("--sync" in result.output)
-    check("--json" in result.output)
+    assert result.exit_code == 0
+    assert "--apply" in result.output
+    assert "--path" in result.output
+    assert "--glob" in result.output
+    assert "--stage" in result.output
+    assert "--sync" in result.output
+    assert "--json" in result.output
 
 
 def test_nixcfg_recover_hashes_help_exposes_recovery_options() -> None:
@@ -378,11 +371,11 @@ def test_nixcfg_recover_hashes_help_exposes_recovery_options() -> None:
         ["recover", "hashes", "--help"],
     )
 
-    check(result.exit_code == 0)
-    check("--apply" in result.output)
-    check("--stage" in result.output)
-    check("--sync" in result.output)
-    check("--json" in result.output)
+    assert result.exit_code == 0
+    assert "--apply" in result.output
+    assert "--stage" in result.output
+    assert "--sync" in result.output
+    assert "--json" in result.output
 
 
 def test_nixcfg_tree_shows_declared_command_descriptions() -> None:
@@ -390,10 +383,10 @@ def test_nixcfg_tree_shows_declared_command_descriptions() -> None:
     runner = CliRunner()
     result = runner.invoke(nixcfg.app, ["tree"])
 
-    check(result.exit_code == 0)
-    check("ci - CI helper tools for update pipelines." in result.output)
-    check("pr-body - Pull request body generation workflow step." in result.output)
-    check(
+    assert result.exit_code == 0
+    assert "ci - CI helper tools for update pipelines." in result.output
+    assert "pr-body - Pull request body generation workflow step." in result.output
+    assert (
         "update - Update source versions/hashes and flake input refs." in result.output
     )
 
@@ -405,11 +398,11 @@ def test_nixcfg_tree_colors_empty_groups_like_leaf_commands() -> None:
     cache = cast("click.Group", ci.commands["cache"])
     closure = cache.commands["closure"]
 
-    check(
-        nixcfg._command_label("cache", cache).startswith("[bold cyan]cache[/bold cyan]")
+    assert nixcfg._command_label("cache", cache).startswith(
+        "[bold cyan]cache[/bold cyan]"
     )
-    check(
-        nixcfg._command_label("closure", closure).startswith("[green]closure[/green]")
+    assert nixcfg._command_label("closure", closure).startswith(
+        "[green]closure[/green]"
     )
 
 
@@ -440,7 +433,7 @@ def test_nixcfg_all_custom_options_have_short_and_long_forms() -> None:
             _walk(subcommand, [*path, name])
 
     _walk(root, ["nixcfg"])
-    check(missing == [])
+    assert missing == []
 
 
 def test_nixcfg_main_uses_stable_prog_name(monkeypatch: _MonkeyPatchLike) -> None:
@@ -454,4 +447,4 @@ def test_nixcfg_main_uses_stable_prog_name(monkeypatch: _MonkeyPatchLike) -> Non
 
     nixcfg.main()
 
-    check(called["prog_name"] == "nixcfg")
+    assert called["prog_name"] == "nixcfg"

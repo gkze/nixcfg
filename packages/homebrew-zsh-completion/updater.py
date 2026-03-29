@@ -4,6 +4,7 @@ from lib.update.updaters.github_raw_file import github_raw_file_updater
 
 HomebrewZshCompletionUpdater = github_raw_file_updater(
     "homebrew-zsh-completion",
+    module=__name__,
     owner="Homebrew",
     repo="brew",
     path="completions/zsh/_brew",

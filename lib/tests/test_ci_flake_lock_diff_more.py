@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lib.nix.models.flake_lock import FlakeLock
-from lib.tests._assertions import check
 from lib.update.ci import flake_lock_diff as fld
 
 if TYPE_CHECKING:
@@ -32,41 +31,38 @@ def test_format_helpers_cover_non_github_and_missing_fields() -> None:
     github_info = _info()
     plain_info = _info(type="path", owner="", repo="", rev_full="", date="")
 
-    check(fld._format_source(github_info) == "example/alpha")
-    check(fld._format_source(plain_info) == "alpha")
-    check("https://github.com/example/alpha" in fld._format_source_cell(github_info))
-    check(fld._format_source_cell(plain_info) == "alpha")
-    check(fld._format_rev_date(github_info) == "aaaaaaa (2024-01-01)")
-    check(fld._format_rev_date(plain_info) == "aaaaaaa")
-    check("/commit/aaaaaaaa" in fld._format_revision_cell(github_info))
-    check(fld._format_revision_cell(plain_info) == "aaaaaaa")
-    check(
-        "/compare/aaaaaaaa...bbbbbbbb"
-        in fld._format_compare_cell(
-            github_info, _info(rev="bbbbbbb", rev_full="bbbbbbbb")
-        )
+    assert fld._format_source(github_info) == "example/alpha"
+    assert fld._format_source(plain_info) == "alpha"
+    assert "https://github.com/example/alpha" in fld._format_source_cell(github_info)
+    assert fld._format_source_cell(plain_info) == "alpha"
+    assert fld._format_rev_date(github_info) == "aaaaaaa (2024-01-01)"
+    assert fld._format_rev_date(plain_info) == "aaaaaaa"
+    assert "/commit/aaaaaaaa" in fld._format_revision_cell(github_info)
+    assert fld._format_revision_cell(plain_info) == "aaaaaaa"
+    assert "/compare/aaaaaaaa...bbbbbbbb" in fld._format_compare_cell(
+        github_info, _info(rev="bbbbbbb", rev_full="bbbbbbbb")
     )
-    check(fld._format_compare_cell(github_info, _info(type="gitlab")) == "-")
+    assert fld._format_compare_cell(github_info, _info(type="gitlab")) == "-"
 
 
 def test_append_helpers_and_markdown_escape() -> None:
     """Append sections/tables only when data exists and escape pipes."""
     lines: list[str] = []
     fld._append_section(lines, "### A", [])
-    check(lines == [])
+    assert lines == []
 
     fld._append_section(lines, "### A", ["line"])
-    check(lines == ["### A", "line"])
+    assert lines == ["### A", "line"]
 
     fld._append_section(lines, "### B", ["line2"])
-    check(lines[2] == "")
+    assert lines[2] == ""
 
     fld._append_table(lines, "### T", ["C"], [["x|y"]])
-    check(any("x\\|y" in line for line in lines))
+    assert any("x\\|y" in line for line in lines)
 
     before = list(lines)
     fld._append_table(lines, "### Empty", ["C"], [])
-    check(lines == before)
+    assert lines == before
 
 
 def test_get_input_info_none_and_zero_timestamp() -> None:
@@ -98,11 +94,11 @@ def test_get_input_info_none_and_zero_timestamp() -> None:
         "version": 7,
     })
 
-    check(fld.get_input_info(lock, "missing") is None)
+    assert fld.get_input_info(lock, "missing") is None
     info = fld.get_input_info(lock, "alpha")
-    check(info is not None)
+    assert info is not None
     if info is not None:
-        check(info.date == "")
+        assert info.date == ""
 
 
 def test_run_and_main_wrappers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -119,9 +115,9 @@ def test_run_and_main_wrappers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
         called["new"] = new
 
     monkeypatch.setattr(fld, "_run_diff", _fake_run_diff)
-    check(fld.run(old_lock=old_path, new_lock=new_path) == 0)
-    check(called["old"] == old_path)
-    check(called["new"] == new_path)
+    assert fld.run(old_lock=old_path, new_lock=new_path) == 0
+    assert called["old"] == old_path
+    assert called["new"] == new_path
 
     monkeypatch.setattr(
         fld,
@@ -130,7 +126,7 @@ def test_run_and_main_wrappers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
             23 if prog_name == "flake-lock-diff" else 0
         ),
     )
-    check(fld.main(["--help"]) == 23)
+    assert fld.main(["--help"]) == 23
 
 
 def test_run_diff_printer_writes_output_when_nonempty(
@@ -140,14 +136,14 @@ def test_run_diff_printer_writes_output_when_nonempty(
     """Print run_diff output only when there is content."""
     monkeypatch.setattr(fld, "run_diff", lambda *_a: "DIFF")
     fld._run_diff(Path("old"), Path("new"))
-    check(capsys.readouterr().out == "DIFF\n")
+    assert capsys.readouterr().out == "DIFF\n"
 
     monkeypatch.setattr(fld, "run_diff", lambda *_a: "")
     fld._run_diff(Path("old"), Path("new"))
-    check(capsys.readouterr().out == "")
+    assert capsys.readouterr().out == ""
 
 
 def test_cli_callback_invokes_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exercise callback wrapper that raises typer.Exit with run code."""
     monkeypatch.setattr(fld, "run", lambda **_kwargs: 7)
-    check(fld.main(["old.lock", "new.lock"]) == 7)
+    assert fld.main(["old.lock", "new.lock"]) == 7

@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._assertions import check
 from lib.update.events import EventStream, UpdateEvent
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.github_release import GitHubReleaseUpdater
@@ -36,7 +35,7 @@ class _DemoReleaseUpdater(GitHubReleaseUpdater):
 def test_normalize_release_version_paths() -> None:
     """Handle prefix stripping plus malformed tags."""
     updater = _DemoReleaseUpdater()
-    check(updater._normalize_release_version("v1.2.3") == "1.2.3")
+    assert updater._normalize_release_version("v1.2.3") == "1.2.3"
 
     with pytest.raises(RuntimeError, match="Unexpected release tag format"):
         updater._normalize_release_version("1.2.3")
@@ -47,7 +46,7 @@ def test_normalize_release_version_paths() -> None:
     class _NoPrefix(_DemoReleaseUpdater):
         TAG_PREFIX = ""
 
-    check(_NoPrefix()._normalize_release_version("nightly") == "nightly")
+    assert _NoPrefix()._normalize_release_version("nightly") == "nightly"
 
 
 def test_fetch_latest_success_and_error_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -59,8 +58,8 @@ def test_fetch_latest_success_and_error_paths(monkeypatch: pytest.MonkeyPatch) -
         lambda *_args, **_kwargs: asyncio.sleep(0, result={"tag_name": "v2.0.0"}),
     )
     info = asyncio.run(updater.fetch_latest(object()))
-    check(info.version == "2.0.0")
-    check(info.metadata["tag"] == "v2.0.0")
+    assert info.version == "2.0.0"
+    assert info.metadata["tag"] == "v2.0.0"
 
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",

@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
-from lib.tests._assertions import check
 from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
 from lib.update.nix_deno import (
     _build_deno_deps_expr,
@@ -46,9 +45,9 @@ def test_hash_entry_builders_and_payload_helpers() -> None:
         computed_hashes={},
         fake_hash="sha256-fake",
     )
-    check(entries[0].platform == "x86_64-linux")
-    check(entries[0].hash == "sha256-fake")
-    check(entries[1].hash == "sha256-old")
+    assert entries[0].platform == "x86_64-linux"
+    assert entries[0].hash == "sha256-fake"
+    assert entries[1].hash == "sha256-old"
 
     original = SourceEntry(hashes={"x86_64-linux": "sha256-original"}, input="input")
     temp = _build_deno_temp_entry(
@@ -56,23 +55,23 @@ def test_hash_entry_builders_and_payload_helpers() -> None:
         original_entry=original,
         entries=entries,
     )
-    check(temp.input == "new-input")
-    check(isinstance(temp.hashes, HashCollection))
+    assert temp.input == "new-input"
+    assert isinstance(temp.hashes, HashCollection)
 
     temp_new = _build_deno_temp_entry(
         input_name="new-input", original_entry=None, entries=entries
     )
-    check(temp_new.input == "new-input")
+    assert temp_new.input == "new-input"
 
     value_event = UpdateEvent.value("demo", ("x86_64-linux", "sha256-abc"))
-    check(_try_platform_hash_event(value_event) == ("x86_64-linux", "sha256-abc"))
-    check(_try_platform_hash_event(UpdateEvent.status("demo", "x")) is None)
-    check(_try_platform_hash_event(UpdateEvent.value("demo", ("x", 1))) is None)
-    check(_try_platform_hash_event(UpdateEvent.value("demo", ("x", "y", "z"))) is None)
+    assert _try_platform_hash_event(value_event) == ("x86_64-linux", "sha256-abc")
+    assert _try_platform_hash_event(UpdateEvent.status("demo", "x")) is None
+    assert _try_platform_hash_event(UpdateEvent.value("demo", ("x", 1))) is None
+    assert _try_platform_hash_event(UpdateEvent.value("demo", ("x", "y", "z"))) is None
 
     env = _build_source_override_env("demo", temp_new)
     payload = json.loads(env["UPDATE_SOURCE_OVERRIDES_JSON"])
-    check("demo" in payload)
+    assert "demo" in payload
 
 
 def test_build_deno_deps_expr_delegates_to_overlay_builder(
@@ -89,8 +88,8 @@ def test_build_deno_deps_expr_delegates_to_overlay_builder(
         "lib.update.nix_deno._build_overlay_expr", _fake_build_overlay_expr
     )
     expr = _build_deno_deps_expr("demo", "x86_64-linux")
-    check(expr == "expr:demo:x86_64-linux")
-    check(calls == [("demo", "x86_64-linux")])
+    assert expr == "expr:demo:x86_64-linux"
+    assert calls == [("demo", "x86_64-linux")]
 
 
 def test_compute_deno_deps_hash_for_platform_emits_value_and_errors(
@@ -132,13 +131,13 @@ def test_compute_deno_deps_hash_for_platform_emits_value_and_errors(
             "x86_64-linux",
         )
     )
-    check(len(events) == 3)
-    check(events[0].kind == UpdateEventKind.STATUS)
-    check(events[1].kind == UpdateEventKind.STATUS)
-    check(events[2].kind == UpdateEventKind.VALUE)
-    check(
-        events[2].payload
-        == ("x86_64-linux", "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    assert len(events) == 3
+    assert events[0].kind == UpdateEventKind.STATUS
+    assert events[1].kind == UpdateEventKind.STATUS
+    assert events[2].kind == UpdateEventKind.VALUE
+    assert events[2].payload == (
+        "x86_64-linux",
+        "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     )
 
     async def _emit_none(
@@ -168,13 +167,13 @@ def test_existing_platform_hashes_from_entry_variants() -> None:
         HashEntry.create("denoDepsHash", "sha256-b", platform=None),
     ]
     from_entries = SourceEntry(hashes=HashCollection(entries=entries))
-    check(_existing_platform_hashes(from_entries) == {"x86_64-linux": "sha256-a"})
+    assert _existing_platform_hashes(from_entries) == {"x86_64-linux": "sha256-a"}
 
     from_mapping = SourceEntry(hashes={"aarch64-darwin": "sha256-c"})
-    check(_existing_platform_hashes(from_mapping) == {"aarch64-darwin": "sha256-c"})
+    assert _existing_platform_hashes(from_mapping) == {"aarch64-darwin": "sha256-c"}
     empty_collection = SourceEntry(hashes=HashCollection(entries=[]))
-    check(_existing_platform_hashes(empty_collection) == {})
-    check(_existing_platform_hashes(None) == {})
+    assert _existing_platform_hashes(empty_collection) == {}
+    assert _existing_platform_hashes(None) == {}
 
 
 def test_process_platform_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -213,13 +212,10 @@ def test_process_platform_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     context.config = type("_Cfg", (), {"fake_hash": "sha256-fake"})()
 
     success_events = _collect(_process_platform_hash("x86_64-linux", context=context))
-    check(
-        any(
-            (event.message or "").startswith("Computing hash")
-            for event in success_events
-        )
+    assert any(
+        (event.message or "").startswith("Computing hash") for event in success_events
     )
-    check(
+    assert (
         context.platform_hashes["x86_64-linux"]
         == "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
     )
@@ -241,22 +237,19 @@ def test_process_platform_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     recovered_events = _collect(
         _process_platform_hash("aarch64-darwin", context=context)
     )
-    check("aarch64-darwin" in context.failed_platforms)
-    check(context.platform_hashes["aarch64-darwin"] == "sha256-existing")
-    check(
-        any(
-            "preserving existing hash" in (event.message or "")
-            for event in recovered_events
-        )
+    assert "aarch64-darwin" in context.failed_platforms
+    assert context.platform_hashes["aarch64-darwin"] == "sha256-existing"
+    assert any(
+        "preserving existing hash" in (event.message or "")
+        for event in recovered_events
     )
-
     context.existing_hashes = {}
     context.failed_platforms = []
     no_existing_events = _collect(
         _process_platform_hash("aarch64-darwin", context=context)
     )
-    check(
-        any("no existing hash" in (event.message or "") for event in no_existing_events)
+    assert any(
+        "no existing hash" in (event.message or "") for event in no_existing_events
     )
 
 
@@ -313,14 +306,14 @@ def test_compute_deno_deps_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("lib.update.nix_deno._process_platform_hash", _process)
 
     events = _collect(compute_deno_deps_hash("demo", "input", native_only=False))
-    check(any("Warning:" in (event.message or "") for event in events))
+    assert any("Warning:" in (event.message or "") for event in events)
     final = events[-1]
-    check(final.kind == UpdateEventKind.VALUE)
+    assert final.kind == UpdateEventKind.VALUE
     payload = final.payload
-    check(isinstance(payload, dict))
-    check(payload["x86_64-linux"] == "sha256-x86_64-linux")
+    assert isinstance(payload, dict)
+    assert payload["x86_64-linux"] == "sha256-x86_64-linux"
 
     native_events = _collect(compute_deno_deps_hash("demo", "input", native_only=True))
     native_payload = native_events[-1].payload
-    check(isinstance(native_payload, dict))
-    check("x86_64-linux" in native_payload)
+    assert isinstance(native_payload, dict)
+    assert "x86_64-linux" in native_payload

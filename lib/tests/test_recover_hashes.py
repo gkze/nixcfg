@@ -11,7 +11,6 @@ import pytest
 
 from lib.recover import hashes as rh
 from lib.recover.snapshot import SnapshotPlan
-from lib.tests._assertions import check
 
 
 def _write_markers(root: Path) -> None:
@@ -63,10 +62,10 @@ def test_plan_hash_recovery_detects_writes(
 
     plan = asyncio.run(rh.plan_hash_recovery(str(generation), repo_root=repo_root))
 
-    check(plan.deriver == "/nix/store/demo.drv")
-    check(plan.snapshot == str(snapshot))
-    check(plan.write_paths == ("flake.lock", "packages/demo/sources.json"))
-    check(plan.remove_paths == ())
+    assert plan.deriver == "/nix/store/demo.drv"
+    assert plan.snapshot == str(snapshot)
+    assert plan.write_paths == ("flake.lock", "packages/demo/sources.json")
+    assert plan.remove_paths == ()
 
 
 def test_plan_hash_recovery_sync_marks_local_only_files(
@@ -103,8 +102,8 @@ def test_plan_hash_recovery_sync_marks_local_only_files(
         rh.plan_hash_recovery(str(realised), repo_root=repo_root, sync=True)
     )
 
-    check(plan.write_paths == ())
-    check(plan.remove_paths == ("overlays/extra/sources.json",))
+    assert plan.write_paths == ()
+    assert plan.remove_paths == ("overlays/extra/sources.json",)
 
 
 def test_apply_hash_recovery_writes_deletes_and_stages(
@@ -158,33 +157,27 @@ def test_apply_hash_recovery_writes_deletes_and_stages(
 
     changed = rh.apply_hash_recovery(plan, stage=True)
 
-    check(
-        changed
-        == (
-            "flake.lock",
-            "packages/demo/sources.json",
-            "overlays/extra/sources.json",
-        )
+    assert changed == (
+        "flake.lock",
+        "packages/demo/sources.json",
+        "overlays/extra/sources.json",
     )
-    check('"new": true' in (repo_root / "flake.lock").read_text(encoding="utf-8"))
-    check((repo_root / "packages/demo/sources.json").exists())
-    check(not (repo_root / "overlays/extra/sources.json").exists())
+    assert '"new": true' in (repo_root / "flake.lock").read_text(encoding="utf-8")
+    assert (repo_root / "packages/demo/sources.json").exists()
+    assert not (repo_root / "overlays/extra/sources.json").exists()
     args = seen["args"]
-    check(isinstance(args, list))
+    assert isinstance(args, list)
     checked_args = args
-    check(checked_args[0].endswith("git"))
-    check(
-        checked_args[1:]
-        == [
-            "add",
-            "-A",
-            "--",
-            "flake.lock",
-            "packages/demo/sources.json",
-            "overlays/extra/sources.json",
-        ]
-    )
-    check(seen["cwd"] == repo_root)
+    assert checked_args[0].endswith("git")
+    assert checked_args[1:] == [
+        "add",
+        "-A",
+        "--",
+        "flake.lock",
+        "packages/demo/sources.json",
+        "overlays/extra/sources.json",
+    ]
+    assert seen["cwd"] == repo_root
 
 
 def test_run_hash_recovery_rejects_stage_without_apply(
@@ -192,5 +185,5 @@ def test_run_hash_recovery_rejects_stage_without_apply(
 ) -> None:
     """Require --apply before staging changes."""
     rc = rh.run_hash_recovery(stage=True)
-    check(rc == 1)
-    check("--stage requires --apply" in capsys.readouterr().err)
+    assert rc == 1
+    assert "--stage requires --apply" in capsys.readouterr().err

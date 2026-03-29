@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from lib.recover import snapshot as rs
-from lib.tests._assertions import check
 
 
 def _write_markers(root: Path) -> None:
@@ -46,10 +45,10 @@ def test_plan_snapshot_recovery_resolves_generation(
 
     plan = asyncio.run(rs.plan_snapshot_recovery(str(generation)))
 
-    check(plan.generation == str(generation))
-    check(plan.resolved_target == str(realised))
-    check(plan.deriver == "/nix/store/demo.drv")
-    check(plan.snapshot == str(snapshot))
+    assert plan.generation == str(generation)
+    assert plan.resolved_target == str(realised)
+    assert plan.deriver == "/nix/store/demo.drv"
+    assert plan.snapshot == str(snapshot)
 
 
 def test_plan_snapshot_recovery_accepts_duplicate_identical_candidates(
@@ -81,7 +80,7 @@ def test_plan_snapshot_recovery_accepts_duplicate_identical_candidates(
 
     plan = asyncio.run(rs.plan_snapshot_recovery(str(realised)))
 
-    check(plan.snapshot == str(snapshot_a))
+    assert plan.snapshot == str(snapshot_a)
 
 
 def test_plan_snapshot_recovery_rejects_distinct_ambiguous_snapshots(
@@ -132,10 +131,10 @@ def test_run_snapshot_recovery_supports_plain_and_json_output(
 
     monkeypatch.setattr(rs, "plan_snapshot_recovery", _plan)
 
-    check(rs.run_snapshot_recovery("/run/current-system") == 0)
-    check(capsys.readouterr().out.strip() == "/nix/store/demo-source")
+    assert rs.run_snapshot_recovery("/run/current-system") == 0
+    assert capsys.readouterr().out.strip() == "/nix/store/demo-source"
 
-    check(rs.run_snapshot_recovery("/run/current-system", json_output=True) == 0)
+    assert rs.run_snapshot_recovery("/run/current-system", json_output=True) == 0
     payload = json.loads(capsys.readouterr().out)
-    check(payload["success"] is True)
-    check(payload["plan"]["snapshot"] == "/nix/store/demo-source")
+    assert payload["success"] is True
+    assert payload["plan"]["snapshot"] == "/nix/store/demo-source"

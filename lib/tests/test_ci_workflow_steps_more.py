@@ -7,7 +7,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from lib.tests._assertions import check
 from lib.update.ci import workflow_steps as ws
 
 if TYPE_CHECKING:
@@ -24,15 +23,15 @@ def test_xcode_version_key_and_git_show_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Sort Xcode app names and fallback when git show fails."""
-    check(ws._xcode_version_key(Path("/Applications/Xcode-16.2.app")) == (16, 2))
-    check(ws._xcode_version_key(Path("/Applications/Xcode.app")) == ())
+    assert ws._xcode_version_key(Path("/Applications/Xcode-16.2.app")) == (16, 2)
+    assert ws._xcode_version_key(Path("/Applications/Xcode.app")) == ()
 
     monkeypatch.setattr(
         ws,
         "_run",
         lambda _args, **_kwargs: _completed(["git"], returncode=1),
     )
-    check(ws._git_show("HEAD:missing") == "{}\n")
+    assert ws._git_show("HEAD:missing") == "{}\n"
 
 
 def test_source_diff_pathspecs_switches_for_flat_layout(
@@ -46,13 +45,12 @@ def test_source_diff_pathspecs_switches_for_flat_layout(
     overlay_root.mkdir()
 
     monkeypatch.setattr(ws, "PACKAGE_DIRS", (str(pkg_root), str(overlay_root)))
-    check(
-        ws._source_diff_pathspecs()
-        == (":(glob)packages/**/sources.json", ":(glob)overlays/**/sources.json")
+    assert ws._source_diff_pathspecs() == (
+        ":(glob)packages/**/sources.json",
+        ":(glob)overlays/**/sources.json",
     )
-
     (pkg_root / "demo.sources.json").write_text("{}\n", encoding="utf-8")
-    check(ws._source_diff_pathspecs() == ws.SOURCES_GIT_PATHSPECS)
+    assert ws._source_diff_pathspecs() == ws.SOURCES_GIT_PATHSPECS
 
 
 def test_cmd_list_update_targets_imports_update_cli(
@@ -71,8 +69,8 @@ def test_cmd_list_update_targets_imports_update_cli(
     fake_module = SimpleNamespace(UpdateOptions=_Options, run_updates=_run_updates)
     monkeypatch.setattr(ws.importlib, "import_module", lambda _name: fake_module)
 
-    check(ws._cmd_list_update_targets() == 9)
-    check(called["list_targets"] is True)
+    assert ws._cmd_list_update_targets() == 9
+    assert called["list_targets"] is True
 
 
 def test_direct_command_helpers_call_expected_subprocesses(
@@ -89,18 +87,21 @@ def test_direct_command_helpers_call_expected_subprocesses(
 
     monkeypatch.setattr(ws, "_run", _fake_run)
 
-    check(ws._cmd_nix_flake_update() == 0)
-    check(ws._cmd_install_darwin_tools() == 0)
-    check(ws._cmd_prefetch_flake_inputs() == 0)
-    check(ws._cmd_build_darwin_config(host="argus") == 0)
-    check(ws._cmd_smoke_check_update_app() == 0)
+    assert ws._cmd_nix_flake_update() == 0
+    assert ws._cmd_install_darwin_tools() == 0
+    assert ws._cmd_prefetch_flake_inputs() == 0
+    assert ws._cmd_build_darwin_config(host="argus") == 0
+    assert ws._cmd_smoke_check_update_app() == 0
 
-    check(["nix", "flake", "update"] in commands)
-    check(["brew", "install", "--cask", "macfuse"] in commands)
-    check(["brew", "install", "1password-cli"] in commands)
-    check(
-        ["nix", "build", "--impure", ".#darwinConfigurations.argus.system"] in commands
-    )
+    assert ["nix", "flake", "update"] in commands
+    assert ["brew", "install", "--cask", "macfuse"] in commands
+    assert ["brew", "install", "1password-cli"] in commands
+    assert [
+        "nix",
+        "build",
+        "--impure",
+        ".#darwinConfigurations.argus.system",
+    ] in commands
 
 
 def test_cmd_free_disk_space_runs_cleanup_in_ci(
@@ -128,9 +129,9 @@ def test_cmd_free_disk_space_runs_cleanup_in_ci(
         ],
     )
 
-    check(ws._cmd_free_disk_space(force_local=False) == 0)
-    check(["sudo", "rm", "-rf", "/Applications/Xcode-15.4.app"] in commands)
-    check(any(cmd[:2] == ["xcrun", "simctl"] for cmd in commands))
+    assert ws._cmd_free_disk_space(force_local=False) == 0
+    assert ["sudo", "rm", "-rf", "/Applications/Xcode-15.4.app"] in commands
+    assert any(cmd[:2] == ["xcrun", "simctl"] for cmd in commands)
 
 
 def test_command_routing_for_new_and_legacy_aliases(
@@ -156,14 +157,14 @@ def test_command_routing_for_new_and_legacy_aliases(
     monkeypatch.setattr(ws, "_cmd_generate_pr_body", lambda **_kwargs: 18)
     monkeypatch.setattr(ws, "_cmd_verify_artifacts", lambda *, workflow: 19)
 
-    check(ws.main(["darwin", "build", "argus"]) == 11)
-    check(ws.main(["darwin", "free", "--force-local"]) == 12)
-    check(ws.main(["darwin", "install"]) == 13)
-    check(ws.main(["flake", "prefetch"]) == 14)
-    check(ws.main(["flake", "update"]) == 15)
-    check(ws.main(["update-app"]) == 16)
-    check(ws.main(["update-targets"]) == 17)
-    check(
+    assert ws.main(["darwin", "build", "argus"]) == 11
+    assert ws.main(["darwin", "free", "--force-local"]) == 12
+    assert ws.main(["darwin", "install"]) == 13
+    assert ws.main(["flake", "prefetch"]) == 14
+    assert ws.main(["flake", "update"]) == 15
+    assert ws.main(["update-app"]) == 16
+    assert ws.main(["update-targets"]) == 17
+    assert (
         ws.main([
             "pr-body",
             "--output",
@@ -179,16 +180,15 @@ def test_command_routing_for_new_and_legacy_aliases(
         ])
         == 18
     )
-
-    check(ws.main(["build-darwin-config", "argus"]) == 11)
-    check(ws.main(["free-disk-space", "--force-local"]) == 12)
-    check(ws.main(["install-darwin-tools"]) == 13)
-    check(ws.main(["prefetch-flake-inputs"]) == 14)
-    check(ws.main(["nix-flake-update"]) == 15)
-    check(ws.main(["smoke-check-update-app"]) == 16)
-    check(ws.main(["list-update-targets"]) == 17)
-    check(ws.main(["verify-artifacts"]) == 19)
-    check(
+    assert ws.main(["build-darwin-config", "argus"]) == 11
+    assert ws.main(["free-disk-space", "--force-local"]) == 12
+    assert ws.main(["install-darwin-tools"]) == 13
+    assert ws.main(["prefetch-flake-inputs"]) == 14
+    assert ws.main(["nix-flake-update"]) == 15
+    assert ws.main(["smoke-check-update-app"]) == 16
+    assert ws.main(["list-update-targets"]) == 17
+    assert ws.main(["verify-artifacts"]) == 19
+    assert (
         ws.main([
             "generate-pr-body",
             "--output",
@@ -219,8 +219,8 @@ def test_cmd_verify_artifacts_reports_validation_failures(
 
     monkeypatch.setattr(ws, "validate_workflow_artifact_contracts", _fail)
 
-    check(ws._cmd_verify_artifacts(workflow=Path("workflow.yml")) == 1)
-    check("artifact contract mismatch" in capsys.readouterr().err)
+    assert ws._cmd_verify_artifacts(workflow=Path("workflow.yml")) == 1
+    assert "artifact contract mismatch" in capsys.readouterr().err
 
 
 def test_cmd_verify_artifacts_reports_success(
@@ -234,8 +234,8 @@ def test_cmd_verify_artifacts_reports_success(
 
     monkeypatch.setattr(ws, "validate_workflow_artifact_contracts", _ok)
 
-    check(ws._cmd_verify_artifacts(workflow=Path("workflow.yml")) == 0)
-    check("Verified workflow artifact contracts" in capsys.readouterr().out)
+    assert ws._cmd_verify_artifacts(workflow=Path("workflow.yml")) == 0
+    assert "Verified workflow artifact contracts" in capsys.readouterr().out
 
 
 def test_generate_pr_body_skips_no_change_package_diffs(
@@ -271,10 +271,10 @@ def test_generate_pr_body_skips_no_change_package_diffs(
             base_ref="main",
         ),
     )
-    check(rc == 0)
+    assert rc == 0
     rendered = output.read_text(encoding="utf-8")
-    check("flake diff" in rendered)
-    check("Per-package sources.json changes" not in rendered)
+    assert "flake diff" in rendered
+    assert "Per-package sources.json changes" not in rendered
 
 
 def test_generate_pr_body_renders_package_diff_and_missing_current_file(
@@ -310,10 +310,10 @@ def test_generate_pr_body_renders_package_diff_and_missing_current_file(
             base_ref="main",
         ),
     )
-    check(rc == 0)
+    assert rc == 0
     rendered = output.read_text(encoding="utf-8")
-    check("Per-package sources.json changes" in rendered)
-    check("@@ diff" in rendered)
+    assert "Per-package sources.json changes" in rendered
+    assert "@@ diff" in rendered
 
 
 def test_generate_pr_body_renders_sources_header_once_for_multiple_diffs(
@@ -353,6 +353,6 @@ def test_generate_pr_body_renders_sources_header_once_for_multiple_diffs(
             base_ref="main",
         ),
     )
-    check(rc == 0)
+    assert rc == 0
     rendered = output.read_text(encoding="utf-8")
-    check(rendered.count("### Per-package sources.json changes") == 1)
+    assert rendered.count("### Per-package sources.json changes") == 1

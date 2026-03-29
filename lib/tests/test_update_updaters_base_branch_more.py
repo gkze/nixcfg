@@ -10,7 +10,6 @@ import pytest
 
 from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import SourceEntry
-from lib.tests._assertions import check
 from lib.update.events import UpdateEvent
 from lib.update.updaters.base import (
     ChecksumProvidedUpdater,
@@ -119,9 +118,9 @@ def test_helper_aliases_and_type_guard_errors(monkeypatch: pytest.MonkeyPatch) -
     )
 
     events = _run(_collect(_compute_url_hashes("demo", ["https://x"])))
-    check(events[0].message == "url-hashes")
+    assert events[0].message == "url-hashes"
     events = _run(_collect(_convert_nix_hash_to_sri("demo", "deadbeef")))
-    check(events[0].message == "convert")
+    assert events[0].message == "convert"
 
     with pytest.raises(TypeError, match="Expected dict for platform/hash mapping"):
         _ = _ensure_str_mapping("bad")
@@ -156,7 +155,7 @@ def test_updater_sourcefile_falls_back_to_module_file(
         "lib.update.updaters.base.inspect.getmodule",
         lambda _cls: type("_Module", (), {"__file__": "/tmp/fallback.py"})(),
     )
-    check(_updater_sourcefile(_FallbackUpdater) == "/tmp/fallback.py")
+    assert _updater_sourcefile(_FallbackUpdater) == "/tmp/fallback.py"
 
 
 def test_unbound_abstract_methods_raise() -> None:
@@ -224,16 +223,16 @@ def test_update_stream_yields_intermediate_events_and_up_to_date_result() -> Non
             return [event async for event in updater.update_stream(current, session)]
 
     events = _run(_run_events())
-    check(any(event.message == "hashing" for event in events))
-    check(any(event.message == "finalizing" for event in events))
-    check(any(event.message == "Up to date" for event in events))
+    assert any(event.message == "hashing" for event in events)
+    assert any(event.message == "finalizing" for event in events)
+    assert any(event.message == "Up to date" for event in events)
 
 
 def test_download_and_hash_entry_branch_yields(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exercise DownloadHashUpdater no-base URL path and event forwarding."""
     updater = _DownloadNoBase()
     info = VersionInfo(version="1", metadata={})
-    check(updater.get_download_url("x86_64-linux", info) == "https://example.com/a")
+    assert updater.get_download_url("x86_64-linux", info) == "https://example.com/a"
 
     async def _hashes(_source_name: str, _urls: object) -> AsyncIterator[UpdateEvent]:
         yield UpdateEvent.status("download-no-base", "computing")
@@ -246,7 +245,7 @@ def test_download_and_hash_entry_branch_yields(monkeypatch: pytest.MonkeyPatch) 
             return [event async for event in updater.fetch_hashes(info, session)]
 
     events = _run(_run_events())
-    check(any(event.message == "computing" for event in events))
+    assert any(event.message == "computing" for event in events)
 
 
 def test_flake_updater_default_compute_and_fetch_hash_branches(
@@ -273,7 +272,7 @@ def test_flake_updater_default_compute_and_fetch_hash_branches(
     )
 
     # _is_latest current=None branch
-    check(
+    assert (
         _run(updater._is_latest(None, VersionInfo(version="1", metadata={}))) is False
     )
 
@@ -281,7 +280,7 @@ def test_flake_updater_default_compute_and_fetch_hash_branches(
     non_platform = _run(
         _collect(updater._compute_hash(VersionInfo(version="1", metadata={})))
     )
-    check(any(event.message == "system=None" for event in non_platform))
+    assert any(event.message == "system=None" for event in non_platform)
 
     # non-platform fetch_hashes delegates through _emit_single_hash_entry path
     async def _run_non_platform() -> list[UpdateEvent]:
@@ -294,7 +293,7 @@ def test_flake_updater_default_compute_and_fetch_hash_branches(
             ]
 
     non_platform_events = _run(_run_non_platform())
-    check(any(event.message == "system=None" for event in non_platform_events))
+    assert any(event.message == "system=None" for event in non_platform_events)
 
     class _PlatformFlake(_DefaultFlake):
         platform_specific = True
@@ -303,7 +302,7 @@ def test_flake_updater_default_compute_and_fetch_hash_branches(
     plat_events = _run(
         _collect(plat._compute_hash(VersionInfo(version="1", metadata={})))
     )
-    check(any(event.message == "system=x86_64-linux" for event in plat_events))
+    assert any(event.message == "system=x86_64-linux" for event in plat_events)
 
     async def _run_platform() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
@@ -315,7 +314,7 @@ def test_flake_updater_default_compute_and_fetch_hash_branches(
             ]
 
     platform_events = _run(_run_platform())
-    check(any(event.message == "system=x86_64-linux" for event in platform_events))
+    assert any(event.message == "system=x86_64-linux" for event in platform_events)
 
 
 def test_deno_deps_default_compute_and_type_enforcement(
@@ -343,7 +342,7 @@ def test_deno_deps_default_compute_and_type_enforcement(
     body_events = _run(
         _collect(updater._compute_hash(VersionInfo(version="1", metadata={})))
     )
-    check(any(event.message == "deno-hash" for event in body_events))
+    assert any(event.message == "deno-hash" for event in body_events)
 
     async def _run_hashes() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
@@ -355,7 +354,7 @@ def test_deno_deps_default_compute_and_type_enforcement(
             ]
 
     hash_events = _run(_run_hashes())
-    check(any(event.message == "deno-hash" for event in hash_events))
+    assert any(event.message == "deno-hash" for event in hash_events)
 
     monkeypatch.setattr(
         "lib.update.updaters.base.expect_hash_mapping", lambda _payload: ["bad"]
@@ -424,28 +423,26 @@ def test_optional_context_and_flake_helper_branches(
 
     updater = _DefaultFlake()
     typed_node = FlakeLockNode(locked=None)
-    check(
+    assert (
         updater._resolve_flake_node(
             VersionInfo(version="1", metadata=FlakeInputMetadata(node=typed_node))
         )
         is typed_node
     )
-
     fallback_node = FlakeLockNode(locked=None)
     monkeypatch.setattr(
         "lib.update.updaters.base.get_flake_input_node",
         lambda _name: fallback_node,
     )
-    check(
+    assert (
         updater._resolve_flake_node(VersionInfo(version="1", metadata=object()))
         is fallback_node
     )
-
     built = updater.build_result(
         VersionInfo(version="1", metadata={}),
         {"x86_64-linux": HASH_A},
     )
-    check(built.input == "default-flake")
+    assert built.input == "default-flake"
 
     monkeypatch.setattr(
         "lib.update.updaters.base.compute_drv_fingerprint",
@@ -460,18 +457,15 @@ def test_optional_context_and_flake_helper_branches(
         )
     )
     payload = finalized[-1].payload
-    check(isinstance(payload, SourceEntry))
+    assert isinstance(payload, SourceEntry)
     if not isinstance(payload, SourceEntry):
         raise AssertionError("expected SourceEntry payload")
-    check(payload.drv_hash == "drv")
-    check(
-        updater._existing_platform_hashes(
-            SourceEntry.model_validate({
-                "hashes": {"x86_64-linux": HASH_A},
-            })
-        )
-        == {"x86_64-linux": HASH_A}
-    )
-    check(updater._existing_platform_hashes() == {})
+    assert payload.drv_hash == "drv"
+    assert updater._existing_platform_hashes(
+        SourceEntry.model_validate({
+            "hashes": {"x86_64-linux": HASH_A},
+        })
+    ) == {"x86_64-linux": HASH_A}
+    assert updater._existing_platform_hashes() == {}
     object.__setattr__(updater, "_current_entry", "bad")
-    check(updater._existing_platform_hashes() == {})
+    assert updater._existing_platform_hashes() == {}

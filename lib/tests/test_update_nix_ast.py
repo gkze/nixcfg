@@ -14,7 +14,6 @@ from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.flake_lock import FlakeLockNode, LockedRef
-from lib.tests._assertions import check
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.update.flake import (
     flake_fetch_expr,
@@ -280,7 +279,7 @@ def test_nix_source_names_uses_parseable_ast_expression(
 
     names = nix_source_names()
 
-    check(names == {"foo", "bar"})
+    assert names == {"foo", "bar"}
     assert_nix_ast_equal(
         captured["expr"],
         LetExpression(

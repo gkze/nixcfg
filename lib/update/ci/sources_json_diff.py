@@ -98,21 +98,15 @@ def _render_graphtage_diff(
     except ImportError:
         return ""
 
-    default_printer = graphtage_printer.DEFAULT_PRINTER
     printer_cls = graphtage_printer.Printer
 
-    previous_quiet = default_printer.quiet
-    default_printer.quiet = True
-    try:
-        with (
-            contextlib.redirect_stdout(io.StringIO()),
-            contextlib.redirect_stderr(io.StringIO()),
-        ):
-            from_tree = graphtage_json.build_tree(old_data)
-            to_tree = graphtage_json.build_tree(new_data)
-            diff_tree = from_tree.diff(to_tree)
-    finally:
-        default_printer.quiet = previous_quiet
+    with (
+        contextlib.redirect_stdout(io.StringIO()),
+        contextlib.redirect_stderr(io.StringIO()),
+    ):
+        from_tree = graphtage_json.build_tree(old_data)
+        to_tree = graphtage_json.build_tree(new_data)
+        diff_tree = from_tree.diff(to_tree)
 
     writer = _BufferWriter()
     printer = printer_cls(

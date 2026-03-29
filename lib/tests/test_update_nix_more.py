@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._assertions import check
 from lib.update.config import resolve_config
 from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
 from lib.update.nix import (
@@ -43,21 +42,21 @@ def test_platform_normalization_and_current_platform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Normalize arch/OS aliases and derive current platform."""
-    check(normalize_nix_platform("arm64", "Darwin") == "aarch64-darwin")
-    check(normalize_nix_platform("amd64", "linux") == "x86_64-linux")
+    assert normalize_nix_platform("arm64", "Darwin") == "aarch64-darwin"
+    assert normalize_nix_platform("amd64", "linux") == "x86_64-linux"
 
     monkeypatch.setattr("platform.machine", lambda: "x86_64")
     monkeypatch.setattr("platform.system", lambda: "Linux")
-    check(get_current_nix_platform() == "x86_64-linux")
+    assert get_current_nix_platform() == "x86_64-linux"
 
 
 def test_tail_output_excerpt_variants() -> None:
     """Render empty, full, and truncated output excerpts."""
-    check(_tail_output_excerpt("", max_lines=2) == "<no output>")
-    check(_tail_output_excerpt("a\nb", max_lines=3) == "a\nb")
+    assert _tail_output_excerpt("", max_lines=2) == "<no output>"
+    assert _tail_output_excerpt("a\nb", max_lines=3) == "a\nb"
     truncated = _tail_output_excerpt("1\n2\n3", max_lines=2)
-    check("last 2 of 3 lines" in truncated)
-    check(truncated.endswith("2\n3"))
+    assert "last 2 of 3 lines" in truncated
+    assert truncated.endswith("2\n3")
 
 
 def test_extract_nix_hash_success_and_error_paths(
@@ -72,7 +71,7 @@ def test_extract_nix_hash_success_and_error_paths(
         "lib.update.nix.HashMismatchError.from_output",
         lambda _output, _result: _Parsed(),
     )
-    check(_extract_nix_hash("anything") == _Parsed.hash)
+    assert _extract_nix_hash("anything") == _Parsed.hash
 
     monkeypatch.setattr(
         "lib.update.nix.HashMismatchError.from_output", lambda _output, _result: None
@@ -92,17 +91,16 @@ def test_extract_nix_hash_parses_representative_nix_outputs() -> None:
         "  specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
         "     got:    sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=\n"
     )
-    check(
+    assert (
         _extract_nix_hash(fod_output)
         == "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
     )
-
     nar_output = (
         "error: hash mismatch importing path '/nix/store/abc-foo';\n"
         "  specified: 0c5b8vw40d1178xlpddw65q9gf1h2186jcc3p4swinwggbllv8mk\n"
         "  got:       1d6b9xw51a1289ymqaax76ra2gi2i3297kdd4q5sxjaxhicnmwal\n"
     )
-    check(
+    assert (
         _extract_nix_hash(nar_output)
         == "1d6b9xw51a1289ymqaax76ra2gi2i3297kdd4q5sxjaxhicnmwal"
     )
@@ -119,8 +117,8 @@ def test_emit_sri_hash_from_build_result_paths(monkeypatch: pytest.MonkeyPatch) 
         ),
     )
     direct = _collect_events(_emit_sri_hash_from_build_result("demo", result))
-    check(len(direct) == 1)
-    check(direct[0].kind == UpdateEventKind.VALUE)
+    assert len(direct) == 1
+    assert direct[0].kind == UpdateEventKind.VALUE
 
     async def _convert(_source: str, _hash: str) -> AsyncIterator[UpdateEvent]:
         yield UpdateEvent.value(
@@ -132,7 +130,7 @@ def test_emit_sri_hash_from_build_result_paths(monkeypatch: pytest.MonkeyPatch) 
     )
     monkeypatch.setattr("lib.update.nix.convert_nix_hash_to_sri", _convert)
     converted = _collect_events(_emit_sri_hash_from_build_result("demo", result))
-    check(
+    assert (
         converted[-1].payload == "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
     )
 
@@ -186,7 +184,7 @@ def test_run_fixed_output_build_and_compute_fixed_output_hash(
             options=_FixedOutputBuildOptions(success_error="it succeeded"),
         )
     )
-    check(failed_events[-1].kind == UpdateEventKind.VALUE)
+    assert failed_events[-1].kind == UpdateEventKind.VALUE
 
     # compute_fixed_output_hash end-to-end with mocked subflows
     monkeypatch.setattr(
@@ -207,7 +205,7 @@ def test_run_fixed_output_build_and_compute_fixed_output_hash(
 
     monkeypatch.setattr("lib.update.nix._emit_sri_hash_from_build_result", _emit_sri)
     events = _collect_events(compute_fixed_output_hash("demo", "pkgs.hello"))
-    check(events[-1].payload == "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=")
+    assert events[-1].payload == "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
 
 
 def test_get_nix_build_semaphore_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -217,7 +215,7 @@ def test_get_nix_build_semaphore_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     _NIX_BUILD_SEMAPHORE_STATE.size = None
     first = _get_nix_build_semaphore(cfg)
     second = _get_nix_build_semaphore(cfg)
-    check(first is second)
+    assert first is second
 
     monkeypatch.setattr("lib.update.nix.asyncio.Semaphore", lambda _n: None)
     _NIX_BUILD_SEMAPHORE_STATE.semaphore = None
@@ -244,9 +242,9 @@ def test_compute_overlay_hash_passes_fake_hash_env(
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fake_compute)
     events = _collect_events(compute_overlay_hash("demo", system="x86_64-linux"))
-    check(events[-1].payload == "ok")
-    check(captured["source"] == "demo")
-    check(captured["env"] == {"FAKE_HASHES": "1"})
+    assert events[-1].payload == "ok"
+    assert captured["source"] == "demo"
+    assert captured["env"] == {"FAKE_HASHES": "1"}
 
 
 def test_compute_drv_fingerprint_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -268,7 +266,7 @@ def test_compute_drv_fingerprint_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("lib.update.nix.run_command", _run_command_success)
     fingerprint = _run_async(compute_drv_fingerprint("demo"))
-    check(fingerprint == "abc123")
+    assert fingerprint == "abc123"
 
     async def _run_command_old_style(
         *_args: object, **_kwargs: object
@@ -285,7 +283,7 @@ def test_compute_drv_fingerprint_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         yield UpdateEvent.value("demo", result)
 
     monkeypatch.setattr("lib.update.nix.run_command", _run_command_old_style)
-    check(_run_async(compute_drv_fingerprint("demo")) == "def456")
+    assert _run_async(compute_drv_fingerprint("demo")) == "def456"
 
     async def _run_command_nonzero(
         *_args: object, **_kwargs: object

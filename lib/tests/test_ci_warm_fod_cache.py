@@ -6,29 +6,28 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 from lib.nix.commands.base import CommandResult, NixCommandError
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
-from lib.tests._assertions import check
 from lib.update.ci import warm_fod_cache as wfc
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
 
-    import pytest
-
 
 def test_format_duration_and_detect_system(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
-    check(object.__getattribute__(wfc, "_format_duration")(2.0) == "2.0s")
-    check(object.__getattribute__(wfc, "_format_duration")(90) == "1m 30s")
-    check(object.__getattribute__(wfc, "_format_duration")(4000) == "1h 6m")
+    assert object.__getattribute__(wfc, "_format_duration")(2.0) == "2.0s"
+    assert object.__getattribute__(wfc, "_format_duration")(90) == "1m 30s"
+    assert object.__getattribute__(wfc, "_format_duration")(4000) == "1h 6m"
 
     monkeypatch.setattr(
         wfc, "normalize_nix_platform", lambda machine, system: f"{machine}-{system}"
     )
     monkeypatch.setattr(wfc.platform, "machine", lambda: "x86")
     monkeypatch.setattr(wfc.platform, "system", lambda: "linux")
-    check(object.__getattribute__(wfc, "_detect_system")() == "x86-linux")
+    assert object.__getattribute__(wfc, "_detect_system")() == "x86-linux"
 
 
 def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,7 +48,7 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
         ),
     )
     hits = object.__getattribute__(wfc, "_platform_fod_entries")(entry, "x86_64-linux")
-    check(len(hits) == 1)
+    assert len(hits) == 1
 
     monkeypatch.setattr(
         wfc,
@@ -58,9 +57,9 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
     )
     monkeypatch.setattr("lib.update.sources.load_source_entry", lambda _path: entry)
     targets = object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
-    check(len(targets) == 1)
-    check(targets[0].package == "demo")
-    check(targets[0].fod_attr == ".node_modules")
+    assert len(targets) == 1
+    assert targets[0].package == "demo"
+    assert targets[0].fod_attr == ".node_modules"
 
     monkeypatch.setattr(
         wfc,
@@ -68,9 +67,9 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
         lambda name: {"mux": Path("path")} if name == wfc.SOURCES_FILE_NAME else {},
     )
     targets = object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
-    check(len(targets) == 1)
-    check(targets[0].package == "mux")
-    check(targets[0].fod_attr == ".offlineCache")
+    assert len(targets) == 1
+    assert targets[0].package == "mux"
+    assert targets[0].fod_attr == ".offlineCache"
 
     deno_entry = SourceEntry(
         version="1",
@@ -101,9 +100,9 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
         "lib.update.sources.load_source_entry", lambda _path: deno_entry
     )
     targets = object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
-    check(len(targets) == 1)
-    check(targets[0].package == "linear-cli")
-    check(targets[0].fod_attr == ".passthru.denoDeps")
+    assert len(targets) == 1
+    assert targets[0].package == "linear-cli"
+    assert targets[0].fod_attr == ".passthru.denoDeps"
 
     bad_entry = SourceEntry(
         version="1",
@@ -123,16 +122,16 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
         lambda name: {"bad": Path("path")} if name == wfc.SOURCES_FILE_NAME else {},
     )
     monkeypatch.setattr("lib.update.sources.load_source_entry", lambda _path: bad_entry)
-    check(object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == [])
+    assert object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == []
 
     no_entries = SourceEntry(version="1", hashes=HashCollection(mapping={"x": "y"}))
-    check(
+    assert (
         object.__getattribute__(wfc, "_platform_fod_entries")(
             no_entries, "x86_64-linux"
         )
         == []
     )
-    check(
+    assert (
         object.__getattribute__(wfc, "_has_platform_denort_hash")(
             no_entries, "x86_64-linux"
         )
@@ -149,7 +148,8 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
         lambda name: {"boom": Path("path")} if name == wfc.SOURCES_FILE_NAME else {},
     )
     monkeypatch.setattr("lib.update.sources.load_source_entry", _boom)
-    check(object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == [])
+    with pytest.raises(RuntimeError, match="Failed to load per-package sources.json"):
+        object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
 
 
 def test_find_fod_targets_handles_deno_edge_cases(
@@ -182,8 +182,8 @@ def test_find_fod_targets_handles_deno_edge_cases(
         "lib.update.sources.load_source_entry", lambda _path: duplicate_entry
     )
     targets = object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
-    check(len(targets) == 1)
-    check(targets[0].fod_attr == ".node_modules")
+    assert len(targets) == 1
+    assert targets[0].fod_attr == ".node_modules"
 
     monkeypatch.setattr(
         wfc,
@@ -194,7 +194,7 @@ def test_find_fod_targets_handles_deno_edge_cases(
             else {}
         ),
     )
-    check(object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == [])
+    assert object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == []
 
     calls = 0
 
@@ -216,7 +216,7 @@ def test_find_fod_targets_handles_deno_edge_cases(
         ),
     )
     monkeypatch.setattr("lib.update.sources.load_source_entry", _load_then_fail)
-    check(object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == [])
+    assert object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == []
 
     no_denort_entry = SourceEntry(
         version="1",
@@ -234,7 +234,7 @@ def test_find_fod_targets_handles_deno_edge_cases(
     monkeypatch.setattr(
         "lib.update.sources.load_source_entry", lambda _path: no_denort_entry
     )
-    check(object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == [])
+    assert object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux") == []
 
     deno_entry = SourceEntry(
         version="1",
@@ -265,9 +265,9 @@ def test_find_fod_targets_handles_deno_edge_cases(
         ),
     )
     targets = object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
-    check(len(targets) == 1)
-    check(targets[0].package == "linear-cli")
-    check(targets[0].fod_attr == ".passthru.denoDeps")
+    assert len(targets) == 1
+    assert targets[0].package == "linear-cli"
+    assert targets[0].fod_attr == ".passthru.denoDeps"
 
 
 def test_build_fod_expr(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -282,7 +282,7 @@ def test_build_fod_expr(monkeypatch: pytest.MonkeyPatch) -> None:
     expr = object.__getattribute__(wfc, "_build_fod_expr")(
         "demo", ".node_modules", system="x86_64-linux"
     )
-    check(expr == "overlay-attr:demo:.node_modules:x86_64-linux")
+    assert expr == "overlay-attr:demo:.node_modules:x86_64-linux"
 
 
 def test_resolve_output_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -301,13 +301,13 @@ def test_resolve_output_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("lib.nix.commands.base.run_nix", _ok_run_nix)
     paths = asyncio.run(object.__getattribute__(wfc, "_resolve_output_paths")("expr"))
-    check(paths == ["/nix/store/abc"])
+    assert paths == ["/nix/store/abc"]
 
     async def _bad_run_nix(*_a: object, **_k: object) -> CommandResult:
         return CommandResult(args=["nix"], returncode=1, stdout="", stderr="boom")
 
     monkeypatch.setattr("lib.nix.commands.base.run_nix", _bad_run_nix)
-    check(
+    assert (
         asyncio.run(object.__getattribute__(wfc, "_resolve_output_paths")("expr")) == []
     )
 
@@ -315,7 +315,7 @@ def test_resolve_output_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         return CommandResult(args=["nix"], returncode=0, stdout="not-json", stderr="")
 
     monkeypatch.setattr("lib.nix.commands.base.run_nix", _bad_json_run_nix)
-    check(
+    assert (
         asyncio.run(object.__getattribute__(wfc, "_resolve_output_paths")("expr")) == []
     )
 
@@ -328,27 +328,24 @@ def test_resolve_output_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr("lib.nix.commands.base.run_nix", _mixed_json)
-    check(
-        asyncio.run(object.__getattribute__(wfc, "_resolve_output_paths")("expr"))
-        == ["/nix/store/ok"]
-    )
+    assert asyncio.run(
+        object.__getattribute__(wfc, "_resolve_output_paths")("expr")
+    ) == ["/nix/store/ok"]
 
 
 def test_push_to_cachix_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
-    check(
+    assert (
         asyncio.run(object.__getattribute__(wfc, "_push_to_cachix")([], "cache"))
         is True
     )
-
     monkeypatch.setattr(wfc.shutil, "which", lambda _name: None)
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(wfc, "_push_to_cachix")(["/nix/store/a"], "cache")
         )
         is False
     )
-
     monkeypatch.setattr(wfc.shutil, "which", lambda _name: "/usr/bin/cachix")
 
     class _Proc:
@@ -368,31 +365,29 @@ def test_push_to_cachix_branches(monkeypatch: pytest.MonkeyPatch) -> None:
         "create_subprocess_exec",
         lambda *_a, **_k: asyncio.sleep(0, result=_Proc(1, b"", b"bad")),
     )
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(wfc, "_push_to_cachix")(["/nix/store/a"], "cache")
         )
         is False
     )
-
     monkeypatch.setattr(
         wfc.asyncio,
         "create_subprocess_exec",
         lambda *_a, **_k: asyncio.sleep(0, result=_Proc(0, b"ok", b"")),
     )
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(wfc, "_push_to_cachix")(["/nix/store/a"], "cache")
         )
         is True
     )
-
     monkeypatch.setattr(
         wfc.asyncio,
         "create_subprocess_exec",
         lambda *_a, **_k: asyncio.sleep(0, result=_Proc(0, b"", b"")),
     )
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(wfc, "_push_to_cachix")(["/nix/store/a"], "cache")
         )
@@ -421,7 +416,7 @@ def test_build_one_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
     )
 
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(wfc, "_build_one")(
                 target, "x86_64-linux", cache_name="cache"
@@ -429,8 +424,7 @@ def test_build_one_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         is True
     )
-
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(wfc, "_build_one")(
                 target, "x86_64-linux", cache_name=None
@@ -438,18 +432,35 @@ def test_build_one_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         is True
     )
-    check(pushed == [(["/nix/store/a"], "cache")])
+    assert pushed == [(["/nix/store/a"], "cache")]
 
     monkeypatch.setattr(
         wfc, "_resolve_output_paths", lambda _expr: asyncio.sleep(0, result=[])
     )
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(wfc, "_build_one")(
                 target, "x86_64-linux", cache_name="cache"
             )
         )
-        is True
+        is False
+    )
+
+    monkeypatch.setattr(
+        wfc,
+        "_resolve_output_paths",
+        lambda _expr: asyncio.sleep(0, result=["/nix/store/a"]),
+    )
+    monkeypatch.setattr(
+        wfc, "_push_to_cachix", lambda *_a, **_k: asyncio.sleep(0, result=False)
+    )
+    assert (
+        asyncio.run(
+            object.__getattribute__(wfc, "_build_one")(
+                target, "x86_64-linux", cache_name="cache"
+            )
+        )
+        is False
     )
 
     async def _fail_build(**_k: object) -> list[object]:
@@ -458,7 +469,7 @@ def test_build_one_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr(wfc, "nix_build", _fail_build)
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(wfc, "_build_one")(
                 target, "x86_64-linux", cache_name=None
@@ -473,7 +484,7 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wfc, "_detect_system", lambda: "x86_64-linux")
     monkeypatch.delenv("CACHIX_NAME", raising=False)
     monkeypatch.setattr(wfc, "_find_fod_targets", lambda _system: [])
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(wfc, "_async_main")(
                 system=None,
@@ -483,7 +494,6 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         == 0
     )
-
     targets = [
         wfc.FodTarget(
             package="demo", hash_type="nodeModulesHash", fod_attr=".node_modules"
@@ -491,7 +501,7 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
     monkeypatch.setattr(wfc, "_find_fod_targets", lambda _system: targets)
 
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(wfc, "_async_main")(
                 system="x86_64-linux",
@@ -501,11 +511,10 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         == 0
     )
-
     monkeypatch.setattr(
         wfc, "_build_one", lambda *_a, **_k: asyncio.sleep(0, result=True)
     )
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(wfc, "_async_main")(
                 system="x86_64-linux",
@@ -515,11 +524,10 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         == 0
     )
-
     monkeypatch.setattr(
         wfc, "_build_one", lambda *_a, **_k: asyncio.sleep(0, result=False)
     )
-    check(
+    assert (
         asyncio.run(
             object.__getattribute__(wfc, "_async_main")(
                 system="x86_64-linux",
@@ -529,7 +537,6 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         == 1
     )
-
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         wfc.logging, "basicConfig", lambda **kwargs: calls.append(kwargs)
@@ -541,5 +548,13 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(wfc.asyncio, "run", _run)
     rc = wfc.main(["--verbose"])
-    check(rc == 0)
-    check(calls[-1]["level"] == wfc.logging.DEBUG)
+    assert rc == 0
+    assert calls[-1]["level"] == wfc.logging.DEBUG
+
+    def _raise_runtime_error(_system: str) -> list[wfc.FodTarget]:
+        msg = "bad sources"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(wfc.asyncio, "run", asyncio.runners.run)
+    monkeypatch.setattr(wfc, "_find_fod_targets", _raise_runtime_error)
+    assert wfc.run(system="x86_64-linux") == 1

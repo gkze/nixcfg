@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
-from lib.tests._assertions import check
 from lib.update import constants
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import (
@@ -46,28 +45,28 @@ if TYPE_CHECKING:
 def test_default_max_nix_builds_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """Compute default max jobs for known and unknown CPU counts."""
     monkeypatch.setattr("os.cpu_count", lambda: None)
-    check(default_max_nix_builds() == 4)
+    assert default_max_nix_builds() == 4
 
     monkeypatch.setattr("os.cpu_count", lambda: 10)
-    check(default_max_nix_builds() == 7)
+    assert default_max_nix_builds() == 7
 
     monkeypatch.setattr("os.cpu_count", lambda: 1)
-    check(default_max_nix_builds() == 1)
+    assert default_max_nix_builds() == 1
 
 
 def test_env_bool_truthy_falsy_and_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Interpret environment booleans consistently and safely."""
     monkeypatch.setenv("UPDATE_BOOL_TEST", "yes")
-    check(env_bool("UPDATE_BOOL_TEST", default=False) is True)
+    assert env_bool("UPDATE_BOOL_TEST", default=False) is True
 
     monkeypatch.setenv("UPDATE_BOOL_TEST", "0")
-    check(env_bool("UPDATE_BOOL_TEST", default=True) is False)
+    assert env_bool("UPDATE_BOOL_TEST", default=True) is False
 
     monkeypatch.setenv("UPDATE_BOOL_TEST", "maybe")
-    check(env_bool("UPDATE_BOOL_TEST", default=True) is True)
+    assert env_bool("UPDATE_BOOL_TEST", default=True) is True
 
     monkeypatch.delenv("UPDATE_BOOL_TEST", raising=False)
-    check(env_bool("UPDATE_BOOL_TEST", default=False) is False)
+    assert env_bool("UPDATE_BOOL_TEST", default=False) is False
 
 
 def test_resolve_config_normalizes_aliases_and_bounds() -> None:
@@ -78,17 +77,17 @@ def test_resolve_config_normalizes_aliases_and_bounds() -> None:
         log_tail_lines=0,
         max_nix_builds=0,
     )
-    check(cfg.default_retries == 0)
-    check(cfg.default_log_tail_lines == 1)
-    check(cfg.max_nix_builds == 1)
-    check(cfg.deno_deps_platforms == ("x86_64-linux", "aarch64-darwin"))
+    assert cfg.default_retries == 0
+    assert cfg.default_log_tail_lines == 1
+    assert cfg.max_nix_builds == 1
+    assert cfg.deno_deps_platforms == ("x86_64-linux", "aarch64-darwin")
 
 
 def test_resolve_config_accepts_hash_build_platform_alias() -> None:
     """Allow the generalized hash platform alias to override Deno targets."""
     cfg = resolve_config(hash_build_platforms=("aarch64-linux",))
-    check(cfg.deno_deps_platforms == ("aarch64-linux",))
-    check(cfg.hash_build_platforms == ("aarch64-linux",))
+    assert cfg.deno_deps_platforms == ("aarch64-linux",)
+    assert cfg.hash_build_platforms == ("aarch64-linux",)
 
 
 def test_resolve_active_config_and_default_config_reference() -> None:
@@ -105,8 +104,8 @@ def test_resolve_active_config_and_default_config_reference() -> None:
         max_nix_builds=2,
         deno_deps_platforms=("x86_64-linux",),
     )
-    check(resolve_active_config(custom) is custom)
-    check(resolve_active_config(None) is DEFAULT_CONFIG)
+    assert resolve_active_config(custom) is custom
+    assert resolve_active_config(None) is DEFAULT_CONFIG
 
 
 def test_resolve_active_config_reloads_when_env_changes(
@@ -114,7 +113,7 @@ def test_resolve_active_config_reloads_when_env_changes(
 ) -> None:
     """Recompute the default config when UPDATE_* env overrides change."""
     monkeypatch.setenv("UPDATE_HTTP_TIMEOUT", "99")
-    check(resolve_active_config(None).default_timeout == 99)
+    assert resolve_active_config(None).default_timeout == 99
     monkeypatch.delenv("UPDATE_HTTP_TIMEOUT", raising=False)
 
 
@@ -126,8 +125,8 @@ def test_resolve_timeout_alias_success_and_errors() -> None:
         named_timeout_label="request_timeout",
         kwargs=kwargs,
     )
-    check(resolved == 2.0)
-    check(kwargs == {})
+    assert resolved == 2.0
+    assert kwargs == {}
 
     with pytest.raises(TypeError, match="Pass only one"):
         constants.resolve_timeout_alias(
@@ -154,16 +153,16 @@ def test_resolve_timeout_alias_success_and_errors() -> None:
 def test_update_event_expect_helpers_and_type_guards() -> None:
     """Validate payload conversion helpers for common event payloads."""
     cmd = CommandResult(args=["nix"], returncode=0, stdout="", stderr="")
-    check(expect_command_result(cmd) is cmd)
+    assert expect_command_result(cmd) is cmd
     with pytest.raises(TypeError, match="Expected CommandResult payload"):
         expect_command_result("x")
 
-    check(expect_str("ok") == "ok")
+    assert expect_str("ok") == "ok"
     with pytest.raises(TypeError, match="Expected string payload"):
         expect_str(1)
 
     mapping = {"sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
-    check(expect_hash_mapping(mapping) == mapping)
+    assert expect_hash_mapping(mapping) == mapping
     with pytest.raises(TypeError, match="Expected hash mapping payload"):
         expect_hash_mapping({"a": 1})
 
@@ -172,38 +171,38 @@ def test_update_event_expect_helpers_and_type_guards() -> None:
             "sha256", "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         )
     ]
-    check(expect_source_hashes(mapping) == mapping)
-    check(expect_source_hashes(entries) == entries)
+    assert expect_source_hashes(mapping) == mapping
+    assert expect_source_hashes(entries) == entries
     with pytest.raises(TypeError, match="Expected SourceHashes payload"):
         expect_source_hashes(["bad"])
     with pytest.raises(TypeError, match="Expected SourceHashes payload"):
         expect_source_hashes("bad")
 
     source_entry = SourceEntry(hashes=HashCollection.from_value(mapping))
-    check(expect_source_entry(source_entry) is source_entry)
+    assert expect_source_entry(source_entry) is source_entry
     with pytest.raises(TypeError, match="Expected SourceEntry payload"):
         expect_source_entry("bad")
 
     artifact = GeneratedArtifact.text("demo.txt", "content\n")
-    check(expect_artifact_updates([artifact]) == [artifact])
+    assert expect_artifact_updates([artifact]) == [artifact]
     with pytest.raises(TypeError, match="Expected GeneratedArtifact list payload"):
         expect_artifact_updates([artifact, "bad"])
     with pytest.raises(TypeError, match="Expected GeneratedArtifact list payload"):
         expect_artifact_updates("bad")
 
-    check(is_nix_build_command(["nix", "build", "foo"]) is True)
-    check(is_nix_build_command(["nix", "eval"]) is False)
-    check(is_nix_build_command(None) is False)
+    assert is_nix_build_command(["nix", "build", "foo"]) is True
+    assert is_nix_build_command(["nix", "eval"]) is False
+    assert is_nix_build_command(None) is False
 
     plain_status = UpdateEvent.status("demo", "working")
-    check(plain_status.payload is None)
+    assert plain_status.payload is None
 
     typed_status = UpdateEvent.status(
         "demo",
         "working",
         operation="compute_hash",
     )
-    check(typed_status.payload == {"operation": "compute_hash"})
+    assert typed_status.payload == {"operation": "compute_hash"}
 
 
 def _collect_async[T](stream: AsyncIterator[T]) -> list[T]:
@@ -225,8 +224,8 @@ def test_drain_value_events_and_require_value() -> None:
 
     drain = ValueDrain[str]()
     forwarded = _collect_async(drain_value_events(_events(), drain, parse=expect_str))
-    check([event.kind for event in forwarded] == [UpdateEventKind.STATUS])
-    check(require_value(drain, "missing") == "value")
+    assert [event.kind for event in forwarded] == [UpdateEventKind.STATUS]
+    assert require_value(drain, "missing") == "value"
 
     with pytest.raises(RuntimeError, match="missing payload"):
 
@@ -249,11 +248,11 @@ def test_capture_stream_value_emits_wrapper() -> None:
         yield UpdateEvent.value("demo", "captured")
 
     items = _collect_async(capture_stream_value(_events(), error="missing"))
-    check(isinstance(items[0], UpdateEvent))
+    assert isinstance(items[0], UpdateEvent)
     wrapped = items[1]
     if not isinstance(wrapped, CapturedValue):
         raise AssertionError
-    check(wrapped.captured == "captured")
+    assert wrapped.captured == "captured"
 
 
 def test_gather_event_streams_success_and_errors() -> None:
@@ -267,9 +266,9 @@ def test_gather_event_streams_success_and_errors() -> None:
         gather_event_streams({"a": _stream_ok("a", "1"), "b": _stream_ok("b", "2")})
     )
     statuses = [item for item in items if isinstance(item, UpdateEvent)]
-    check(len(statuses) == 2)
+    assert len(statuses) == 2
     gathered = [item for item in items if isinstance(item, GatheredValues)][0]
-    check(gathered.values == {"a": "1", "b": "2"})
+    assert gathered.values == {"a": "1", "b": "2"}
 
     with pytest.raises(RuntimeError, match="missing payload"):
 
@@ -302,6 +301,30 @@ def test_gather_event_streams_success_and_errors() -> None:
         _collect_async(gather_event_streams({"a": _boom_one(), "b": _boom_two()}))
 
 
+def test_gather_event_streams_cancels_siblings_after_error() -> None:
+    """Cancel in-flight sibling streams once one stream fails."""
+    cancelled = False
+
+    async def _slow_stream() -> AsyncIterator[UpdateEvent]:
+        nonlocal cancelled
+        try:
+            await asyncio.sleep(1)
+            yield UpdateEvent.value("slow", "late")
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+
+    async def _boom() -> AsyncIterator[UpdateEvent]:
+        yield UpdateEvent.status("boom", "starting")
+        msg = "boom"
+        raise RuntimeError(msg)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        _collect_async(gather_event_streams({"slow": _slow_stream(), "boom": _boom()}))
+
+    assert cancelled is True
+
+
 def test_update_event_status_includes_structured_fields() -> None:
     """Preserve structured status metadata on status events."""
     event = UpdateEvent.status(
@@ -311,25 +334,18 @@ def test_update_event_status_includes_structured_fields() -> None:
         status="computing_hash",
         detail="linux",
     )
-    check(
-        event.payload
-        == {
-            "operation": "compute_hash",
-            "status": "computing_hash",
-            "detail": "linux",
-        }
-    )
-
+    assert event.payload == {
+        "operation": "compute_hash",
+        "status": "computing_hash",
+        "detail": "linux",
+    }
     status_only = UpdateEvent.status(
         "demo",
         "done",
         status="updated",
         detail={"version": "1.2.3"},
     )
-    check(
-        status_only.payload
-        == {
-            "status": "updated",
-            "detail": {"version": "1.2.3"},
-        }
-    )
+    assert status_only.payload == {
+        "status": "updated",
+        "detail": {"version": "1.2.3"},
+    }
