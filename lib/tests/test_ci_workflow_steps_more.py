@@ -104,6 +104,26 @@ def test_direct_command_helpers_call_expected_subprocesses(
     ] in commands
 
 
+def test_cmd_validate_bun_lock_reports_success_and_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Render Bun lock validation results to stdout and stderr."""
+    monkeypatch.setattr(
+        ws, "validate_source_package_exact_versions", lambda _path: None
+    )
+    assert ws._cmd_validate_bun_lock(lock_file=Path("bun.lock")) == 0
+    assert "Validated Bun source package overrides" in capsys.readouterr().out
+
+    def _fail(_path: Path) -> None:
+        msg = "bun lock mismatch"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(ws, "validate_source_package_exact_versions", _fail)
+    assert ws._cmd_validate_bun_lock(lock_file=Path("bun.lock")) == 1
+    assert "bun lock mismatch" in capsys.readouterr().err
+
+
 def test_cmd_free_disk_space_runs_cleanup_in_ci(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -156,6 +176,7 @@ def test_command_routing_for_new_and_legacy_aliases(
     monkeypatch.setattr(ws, "_cmd_list_update_targets", lambda: 17)
     monkeypatch.setattr(ws, "_cmd_generate_pr_body", lambda **_kwargs: 18)
     monkeypatch.setattr(ws, "_cmd_verify_artifacts", lambda *, workflow: 19)
+    monkeypatch.setattr(ws, "_cmd_validate_bun_lock", lambda *, lock_file: 20)
 
     assert ws.main(["darwin", "build", "argus"]) == 11
     assert ws.main(["darwin", "free", "--force-local"]) == 12
@@ -188,6 +209,7 @@ def test_command_routing_for_new_and_legacy_aliases(
     assert ws.main(["smoke-check-update-app"]) == 16
     assert ws.main(["list-update-targets"]) == 17
     assert ws.main(["verify-artifacts"]) == 19
+    assert ws.main(["validate-bun-lock", "--lock-file", "bun.lock"]) == 20
     assert (
         ws.main([
             "generate-pr-body",

@@ -43,6 +43,8 @@ let
     cp -R ${upstreamSrc}/. "$tmpdir"
     chmod -R u+w "$tmpdir"
 
+    nix run "path:$repo_root#nixcfg" -- ci workflow validate-bun-lock --lock-file "$tmpdir/bun.lock"
+
     (
       cd "$tmpdir"
       nix run "${inputs.bun2nix}#bun2nix" -- \

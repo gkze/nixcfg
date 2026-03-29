@@ -14,6 +14,7 @@ from typing import Annotated
 
 import typer
 
+from lib.update.bun_lock import validate_source_package_exact_versions
 from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.ci._subprocess import run_command as _run
 from lib.update.ci.flake_lock_diff import run_diff as run_flake_lock_diff
@@ -133,6 +134,16 @@ def _cmd_verify_artifacts(*, workflow: Path) -> int:
         sys.stderr.write(f"{exc}\n")
         return 1
     sys.stdout.write(f"Verified workflow artifact contracts for {workflow}\n")
+    return 0
+
+
+def _cmd_validate_bun_lock(*, lock_file: Path) -> int:
+    try:
+        validate_source_package_exact_versions(lock_file)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+    sys.stdout.write(f"Validated Bun source package overrides for {lock_file}\n")
     return 0
 
 
@@ -425,6 +436,22 @@ def command_verify_artifacts(
 ) -> None:
     """Validate artifact path contracts in one workflow file."""
     raise typer.Exit(code=_cmd_verify_artifacts(workflow=workflow))
+
+
+@app.command("validate-bun-lock")
+def command_validate_bun_lock(
+    *,
+    lock_file: Annotated[
+        Path,
+        typer.Option(
+            "-l",
+            "--lock-file",
+            help="Textual bun.lock file to validate.",
+        ),
+    ] = Path("bun.lock"),
+) -> None:
+    """Validate exact-version consistency for source-package Bun overrides."""
+    raise typer.Exit(code=_cmd_validate_bun_lock(lock_file=lock_file))
 
 
 @app.command("build-darwin-config")
