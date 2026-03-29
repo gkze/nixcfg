@@ -67,7 +67,6 @@ let
     conductor = "darwin";
     emdash = "emdash";
     goose-cli = "gooseAarch64Darwin";
-    goose-cli-crate2nix-src = "gooseAarch64Darwin";
     opencode-desktop-crate2nix-src = "darwin";
     sculptor = "sculptor";
     superset = "superset";

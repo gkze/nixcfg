@@ -145,6 +145,7 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
     )
     assert "groupConstraintPredicates = {" in registry
     assert 'darwin = system: builtins.match ".*-darwin" system != null;' in registry
+    assert 'goose-cli-crate2nix-src = "gooseAarch64Darwin";' not in registry
     assert 'opencode-desktop-crate2nix-src = "darwin";' in registry
     assert 'zed-editor-nightly-crate2nix-src = "darwin";' in registry
 
