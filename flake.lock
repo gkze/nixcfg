@@ -113,15 +113,16 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1770895533,
-        "narHash": "sha256-v3QaK9ugy9bN9RXDnjw0i2OifKmz2NnKM82agtqm/UY=",
-        "owner": "nix-community",
+        "lastModified": 1774758434,
+        "narHash": "sha256-/uec+U7aWf2b+b+o2XfK5yeeXPfhh4AZj6o8J+Y4SW0=",
+        "owner": "gkze",
         "repo": "bun2nix",
-        "rev": "c843f477b15f51151f8c6bcc886954699440a6e1",
+        "rev": "61b324513cdffb453042b26ef7194775346c4d8d",
         "type": "github"
       },
       "original": {
-        "owner": "nix-community",
+        "owner": "gkze",
+        "ref": "fix-source-package-routing",
         "repo": "bun2nix",
         "type": "github"
       }

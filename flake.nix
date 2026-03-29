@@ -61,7 +61,8 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     bun2nix = {
-      url = "github:nix-community/bun2nix";
+      # Temporary fork until upstream bun2nix handles 3-tuple tarball entries.
+      url = "github:gkze/bun2nix?ref=fix-source-package-routing";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     crane.url = "github:ipetkov/crane";
