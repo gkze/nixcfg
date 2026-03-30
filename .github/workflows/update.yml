@@ -149,7 +149,6 @@ jobs:
     steps:
       - *checkout
       - *setup_nix
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - *cachix
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -174,6 +173,7 @@ jobs:
       - name: Free disk space
         if: runner.os == 'macOS'
         run: nix run .#nixcfg -- ci workflow free-disk-space
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Compute hashes for ${{ matrix.platform }}
         # Run update with pinned versions to ensure all platforms use the
         # same upstream version (resolved in the resolve-versions job).
