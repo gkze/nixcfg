@@ -124,6 +124,57 @@ def test_cmd_validate_bun_lock_reports_success_and_failure(
     assert "bun lock mismatch" in capsys.readouterr().err
 
 
+def test_cmd_prepare_bun_lock_reports_validation_relock_and_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Render Bun lock preparation results to stdout and stderr."""
+    monkeypatch.setattr(
+        ws,
+        "prepare_source_package_lock",
+        lambda *_args, **_kwargs: False,
+    )
+    assert (
+        ws._cmd_prepare_bun_lock(
+            workspace_root=Path(),
+            lock_file=Path("bun.lock"),
+            bun_executable="bun",
+        )
+        == 0
+    )
+    assert "Validated Bun source package overrides" in capsys.readouterr().out
+
+    monkeypatch.setattr(
+        ws,
+        "prepare_source_package_lock",
+        lambda *_args, **_kwargs: True,
+    )
+    assert (
+        ws._cmd_prepare_bun_lock(
+            workspace_root=Path(),
+            lock_file=Path("bun.lock"),
+            bun_executable="/nix/store/demo/bin/bun",
+        )
+        == 0
+    )
+    assert "Relocked Bun source package overrides" in capsys.readouterr().out
+
+    def _fail(*_args: object, **_kwargs: object) -> bool:
+        msg = "relock failed"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(ws, "prepare_source_package_lock", _fail)
+    assert (
+        ws._cmd_prepare_bun_lock(
+            workspace_root=Path(),
+            lock_file=Path("bun.lock"),
+            bun_executable="bun",
+        )
+        == 1
+    )
+    assert "relock failed" in capsys.readouterr().err
+
+
 def test_cmd_free_disk_space_runs_cleanup_in_ci(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -177,6 +228,11 @@ def test_command_routing_for_new_and_legacy_aliases(
     monkeypatch.setattr(ws, "_cmd_generate_pr_body", lambda **_kwargs: 18)
     monkeypatch.setattr(ws, "_cmd_verify_artifacts", lambda *, workflow: 19)
     monkeypatch.setattr(ws, "_cmd_validate_bun_lock", lambda *, lock_file: 20)
+    monkeypatch.setattr(
+        ws,
+        "_cmd_prepare_bun_lock",
+        lambda *, workspace_root, lock_file, bun_executable: 21,
+    )
 
     assert ws.main(["darwin", "build", "argus"]) == 11
     assert ws.main(["darwin", "free", "--force-local"]) == 12
@@ -210,6 +266,16 @@ def test_command_routing_for_new_and_legacy_aliases(
     assert ws.main(["list-update-targets"]) == 17
     assert ws.main(["verify-artifacts"]) == 19
     assert ws.main(["validate-bun-lock", "--lock-file", "bun.lock"]) == 20
+    assert (
+        ws.main([
+            "prepare-bun-lock",
+            "--workspace-root",
+            ".",
+            "--lock-file",
+            "bun.lock",
+        ])
+        == 21
+    )
     assert (
         ws.main([
             "generate-pr-body",

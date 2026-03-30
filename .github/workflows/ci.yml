@@ -45,7 +45,7 @@ jobs:
           path: |
             ~/.cache/nix/tarball-cache
             ~/.cache/nix/tarball-cache-v2
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix') }}
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix', 'packages/superset/bun.lock') }}
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
             nix-cache-${{ runner.os }}-

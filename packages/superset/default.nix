@@ -43,15 +43,21 @@ let
     cp -R ${upstreamSrc}/. "$tmpdir"
     chmod -R u+w "$tmpdir"
 
-    nix run "path:$repo_root#nixcfg" -- ci workflow validate-bun-lock --lock-file "$tmpdir/bun.lock"
+    nix run "path:$repo_root#nixcfg" -- ci workflow prepare-bun-lock \
+      --workspace-root "$tmpdir" \
+      --lock-file "$tmpdir/bun.lock" \
+      --bun-executable "${lib.getExe bun}"
 
     (
       cd "$tmpdir"
       nix run "${inputs.bun2nix}#bun2nix" -- \
         --lock-file bun.lock \
         --copy-prefix ./ \
-        --output-file "$repo_root/packages/superset/bun.nix"
+        --output-file "$tmpdir/bun.nix"
     )
+
+    cp "$tmpdir/bun.lock" "$repo_root/packages/superset/bun.lock"
+    cp "$tmpdir/bun.nix" "$repo_root/packages/superset/bun.nix"
   '';
   srcWithBun = stdenvNoCC.mkDerivation {
     pname = "superset-src-with-bun";
@@ -62,7 +68,29 @@ let
       mkdir -p "$out"
       cp -R "$src"/. "$out"
       chmod -R u+w "$out"
+      # Keep Bun's checked-in lock aligned with the generated bun.nix graph.
+      cp ${./bun.lock} "$out/bun.lock"
       cp ${./bun.nix} "$out/bun.nix"
+      python3 - <<'PY'
+      import json
+      import re
+      from pathlib import Path
+
+      root = Path("$out")
+      package_json_path = root / "package.json"
+      lock_path = root / "bun.lock"
+
+      package_json = json.loads(package_json_path.read_text())
+      lock_payload = json.loads(
+          re.sub(r",(?=\s*[}\]])", "", lock_path.read_text())
+      )
+      overrides = lock_payload.get("overrides", {})
+      if isinstance(overrides, dict):
+          package_json["resolutions"] = {
+              key: value for key, value in overrides.items() if isinstance(value, str)
+          }
+      package_json_path.write_text(json.dumps(package_json, indent=2) + "\n")
+      PY
     '';
   };
   # Electron externalizes these modules at runtime. Keep this list aligned

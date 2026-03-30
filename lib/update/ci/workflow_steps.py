@@ -14,7 +14,10 @@ from typing import Annotated
 
 import typer
 
-from lib.update.bun_lock import validate_source_package_exact_versions
+from lib.update.bun_lock import (
+    prepare_source_package_lock,
+    validate_source_package_exact_versions,
+)
 from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.ci._subprocess import run_command as _run
 from lib.update.ci.flake_lock_diff import run_diff as run_flake_lock_diff
@@ -144,6 +147,31 @@ def _cmd_validate_bun_lock(*, lock_file: Path) -> int:
         sys.stderr.write(f"{exc}\n")
         return 1
     sys.stdout.write(f"Validated Bun source package overrides for {lock_file}\n")
+    return 0
+
+
+def _cmd_prepare_bun_lock(
+    *,
+    workspace_root: Path,
+    lock_file: Path,
+    bun_executable: str,
+) -> int:
+    try:
+        relocked = prepare_source_package_lock(
+            workspace_root,
+            lock_file,
+            bun_executable=bun_executable,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+
+    if relocked:
+        sys.stdout.write(
+            f"Relocked Bun source package overrides for {lock_file} via {bun_executable}\n"
+        )
+    else:
+        sys.stdout.write(f"Validated Bun source package overrides for {lock_file}\n")
     return 0
 
 
@@ -452,6 +480,44 @@ def command_validate_bun_lock(
 ) -> None:
     """Validate exact-version consistency for source-package Bun overrides."""
     raise typer.Exit(code=_cmd_validate_bun_lock(lock_file=lock_file))
+
+
+@app.command("prepare-bun-lock")
+def command_prepare_bun_lock(
+    *,
+    workspace_root: Annotated[
+        Path,
+        typer.Option(
+            "-w",
+            "--workspace-root",
+            help="Workspace root used when relocking bun.lock.",
+        ),
+    ],
+    lock_file: Annotated[
+        Path,
+        typer.Option(
+            "-l",
+            "--lock-file",
+            help="Textual bun.lock file to validate or relock.",
+        ),
+    ] = Path("bun.lock"),
+    bun_executable: Annotated[
+        str,
+        typer.Option(
+            "-b",
+            "--bun-executable",
+            help="Bun executable used for lockfile regeneration.",
+        ),
+    ] = "bun",
+) -> None:
+    """Validate a Bun lock and relock once when source overrides disagree."""
+    raise typer.Exit(
+        code=_cmd_prepare_bun_lock(
+            workspace_root=workspace_root,
+            lock_file=lock_file,
+            bun_executable=bun_executable,
+        )
+    )
 
 
 @app.command("build-darwin-config")
