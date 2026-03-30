@@ -92,16 +92,19 @@ def test_build_update_options_and_required_tools(
 
     monkeypatch.setattr(
         "lib.update.cli.shutil.which",
-        lambda tool: None if tool == "flake-edit" else "/bin/x",
+        lambda tool: None if tool in {"flake-edit", "uv"} else "/bin/x",
     )
     monkeypatch.setattr(
         "lib.update.cli.UPDATERS",
         {"demo": type("_U", (), {"required_tools": ("nix",)})},
     )
 
+    assert check_required_tools() == ["uv"]
     assert check_required_tools(needs_sources=False) == []
     assert check_required_tools(source="demo") == []
-    assert check_required_tools(include_flake_edit=True) == ["flake-edit"]
+    assert check_required_tools(source="demo", include_flake_edit=True) == [
+        "flake-edit"
+    ]
     assert check_required_tools(source="unknown", needs_sources=True) == []
 
 

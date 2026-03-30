@@ -1,7 +1,7 @@
 """Shared constants and tiny helpers for update workflows."""
 
 REQUIRED_TOOLS = ("nix",)
-ALL_TOOLS = ("nix", "nix-prefetch-url")
+ALL_TOOLS = ("nix", "nix-prefetch-url", "uv")
 
 FIXED_OUTPUT_NOISE = (
     "error: hash mismatch in fixed-output derivation",
