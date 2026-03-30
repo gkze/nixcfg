@@ -64,6 +64,9 @@ let
     inherit version;
     src = upstreamSrc;
     dontUnpack = true;
+
+    nativeBuildInputs = [ python3 ];
+
     installPhase = ''
       mkdir -p "$out"
       cp -R "$src"/. "$out"
