@@ -93,12 +93,16 @@ let
       '';
 
   desktopPackageVersionCheck =
-    if version == desktopPackageVersion || lib.hasPrefix "${desktopPackageVersion}-" version then
+    if
+      version == desktopPackageVersion
+      || lib.hasPrefix "${desktopPackageVersion}-" version
+      || lib.hasPrefix "${desktopPackageVersion}+" version
+    then
       true
     else
       throw ''
         packages/opencode-desktop/default.nix has desktop version ${version},
-        expected ${desktopPackageVersion} or ${desktopPackageVersion}-<suffix>
+        expected ${desktopPackageVersion}, ${desktopPackageVersion}-<suffix>, or ${desktopPackageVersion}+<build-metadata>
       '';
 
   rootCrateOverride = _attrs: {

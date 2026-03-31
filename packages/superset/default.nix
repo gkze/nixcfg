@@ -65,35 +65,16 @@ let
     src = upstreamSrc;
     dontUnpack = true;
 
-    nativeBuildInputs = [ python3 ];
+    nativeBuildInputs = [ bun ];
 
     installPhase = ''
       mkdir -p "$out"
       cp -R "$src"/. "$out"
       chmod -R u+w "$out"
-      # Keep Bun's checked-in lock aligned with the generated bun.nix graph.
       cp ${./bun.lock} "$out/bun.lock"
+      cp ${./align-package-json.ts} "$out/align-package-json.ts"
+      bun "$out/align-package-json.ts"
       cp ${./bun.nix} "$out/bun.nix"
-      python3 - <<'PY'
-      import json
-      import re
-      from pathlib import Path
-
-      root = Path("$out")
-      package_json_path = root / "package.json"
-      lock_path = root / "bun.lock"
-
-      package_json = json.loads(package_json_path.read_text())
-      lock_payload = json.loads(
-          re.sub(r",(?=\s*[}\]])", "", lock_path.read_text())
-      )
-      overrides = lock_payload.get("overrides", {})
-      if isinstance(overrides, dict):
-          package_json["resolutions"] = {
-              key: value for key, value in overrides.items() if isinstance(value, str)
-          }
-      package_json_path.write_text(json.dumps(package_json, indent=2) + "\n")
-      PY
     '';
   };
   # Electron externalizes these modules at runtime. Keep this list aligned
