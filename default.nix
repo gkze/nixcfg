@@ -21,7 +21,7 @@ let
       pkgsFor,
       outputs,
     }:
-    import (nixcfgPath "lib.nix") {
+    import (src + "/lib.nix") {
       inherit
         inputs
         lib
@@ -112,14 +112,19 @@ let
             (if builtins.isAttrs outputsArg then outputsArg else { }) // { inherit (self) lib; }
           else
             throw "default.nix: mkPackages needs `outputsArg.lib` (or import default.nix with `lib` and `pkgsFor`).";
+        packageSelfSource = import (nixcfgPath "package-self-source.nix") {
+          inherit (resolvedOutputs) lib;
+          outputs = resolvedOutputs;
+        };
       in
       builtins.mapAttrs (
-        _: path:
+        name: path:
         pkgs.callPackage path (
           {
             inputs = inputsArg;
             outputs = resolvedOutputs;
           }
+          // packageSelfSource.callPackageArgs name
           // extraPackageArgs
         )
       ) (packageRegistry.forSystem system);

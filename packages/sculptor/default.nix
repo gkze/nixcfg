@@ -1,6 +1,6 @@
 {
   mkDmgApp,
-  outputs,
+  selfSource,
   stdenv,
   appimageTools,
   fetchurl,
@@ -8,8 +8,6 @@
   ...
 }:
 let
-  inherit (outputs.lib) sources;
-  info = sources.sculptor;
   inherit (stdenv.hostPlatform) system;
   inherit (stdenv) isDarwin;
   meta = with lib; {
@@ -27,25 +25,26 @@ in
 if isDarwin then
   mkDmgApp {
     pname = "sculptor";
-    inherit info meta;
+    info = selfSource;
+    inherit meta;
   }
 else
   let
     src = fetchurl {
-      name = "Sculptor_${info.version}.AppImage";
-      url = info.urls.${system};
-      hash = info.hashes.${system};
+      name = "Sculptor_${selfSource.version}.AppImage";
+      url = selfSource.urls.${system};
+      hash = selfSource.hashes.${system};
     };
   in
   appimageTools.wrapType2 {
     pname = "sculptor";
-    inherit (info) version;
+    inherit (selfSource) version;
     inherit meta src;
 
     extraInstallCommands =
       let
         appimageContents = appimageTools.extractType2 {
-          inherit (info) version;
+          inherit (selfSource) version;
           inherit src;
           pname = "sculptor";
         };

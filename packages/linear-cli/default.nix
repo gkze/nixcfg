@@ -1,17 +1,13 @@
 {
   mkDenoApplication,
   inputs,
-  outputs,
+  selfSource,
   lib,
   ...
 }:
-let
-  slib = outputs.lib;
-  version = slib.getFlakeVersion "linear-cli";
-in
 mkDenoApplication {
   pname = "linear-cli";
-  inherit version;
+  version = lib.removePrefix "v" selfSource.version;
   src = inputs.linear-cli;
   denoDepsSrc = ./deno-deps.json;
   entrypoint = "src/main.ts";

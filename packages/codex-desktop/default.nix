@@ -1,16 +1,13 @@
 {
   mkDmgApp,
-  outputs,
+  selfSource,
   lib,
   ...
 }:
-let
-  inherit (outputs.lib) sources;
-in
 mkDmgApp {
   pname = "codex-desktop";
   appName = "codex";
-  info = sources.codex-desktop;
+  info = selfSource;
   meta = with lib; {
     description = "Codex desktop app";
     homepage = "https://chatgpt.com/codex/get-started";

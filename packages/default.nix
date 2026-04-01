@@ -8,18 +8,26 @@
 {
   system ? null,
   flakelight,
+  lib,
+  outputs,
   ...
 }:
 let
   discovery = import ../lib/discovery.nix;
   registry = import ./registry.nix { src = ../.; };
-  imported = flakelight.importDir ./.;
+  packageSelfSource = import ../lib/package-self-source.nix { inherit lib outputs; };
+
+  imported = builtins.mapAttrs packageSelfSource.injectIntoFunction (flakelight.importDir ./.);
   crate2nixSourceEntries = discovery.discoverCompanionEntries {
     root = ./.;
     directories = builtins.attrNames imported;
     fileName = "crate2nix-src.nix";
   };
-  all = imported // builtins.mapAttrs (_: import) crate2nixSourceEntries.entries;
+  all =
+    imported
+    // builtins.mapAttrs (
+      name: path: packageSelfSource.injectIntoFunction name (import path)
+    ) crate2nixSourceEntries.entries;
   systemEval = builtins.tryEval system;
   resolvedSystem =
     if systemEval.success && systemEval.value != null then systemEval.value else "x86_64-linux";

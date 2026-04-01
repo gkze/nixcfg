@@ -1,5 +1,5 @@
 {
-  sources,
+  selfSource,
   slib,
   prev,
   ...
@@ -16,7 +16,7 @@ let
       prev.crush.override { inherit buildGoModule; }
     else
       prev.crush;
-  inherit (sources.crush) version;
+  inherit (selfSource) version;
   src = prev.fetchFromGitHub {
     owner = "charmbracelet";
     repo = "crush";

@@ -1,6 +1,6 @@
 {
   slib,
-  sources,
+  selfSource,
   prev,
   ...
 }:
@@ -10,7 +10,7 @@
       filteredSrc = prev.fetchFromGitHub {
         owner = "getsentry";
         repo = "sentry-cli";
-        tag = sources.sentry-cli.version;
+        tag = selfSource.version;
         hash = slib.sourceHash "sentry-cli" "srcHash";
         postFetch = ''
           find $out -name '*.xcarchive' -type d -exec rm -rf {} +
@@ -18,7 +18,7 @@
       };
     in
     prev.sentry-cli.overrideAttrs (old: {
-      inherit (sources.sentry-cli) version;
+      inherit (selfSource) version;
       src = filteredSrc;
       buildInputs = (old.buildInputs or [ ]) ++ [ prev.curl ];
       cargoDeps = prev.rustPlatform.fetchCargoVendor {

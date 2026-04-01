@@ -1,12 +1,12 @@
 {
   prev,
   slib,
-  sources,
+  selfSource,
   ...
 }:
 {
   element-desktop = prev.element-desktop.overrideAttrs (_: rec {
-    inherit (sources.element-desktop) version;
+    inherit (selfSource) version;
     src = prev.fetchFromGitHub {
       owner = "element-hq";
       repo = "element-desktop";

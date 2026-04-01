@@ -65,9 +65,12 @@ let
     commander = "darwin";
     codex-desktop = "darwin";
     conductor = "darwin";
+    granola = "darwin";
+    wispr-flow = "darwin";
     emdash = "emdash";
     goose-cli = "gooseAarch64Darwin";
     opencode-desktop-crate2nix-src = "darwin";
+    raycast = "darwin";
     sculptor = "sculptor";
     superset = "superset";
     zed-editor-nightly = "darwin";

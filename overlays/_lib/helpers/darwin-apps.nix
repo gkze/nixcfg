@@ -5,6 +5,7 @@
       pname,
       info,
       appName ? pname,
+      macApp ? { },
       meta ? { },
     }:
     let
@@ -16,6 +17,13 @@
       inherit pname;
       inherit (info) version;
       inherit meta;
+
+      passthru.macApp = {
+        bundleName = "${capitalizedAppName}.app";
+        bundleRelPath = "Applications/${capitalizedAppName}.app";
+        installMode = "symlink";
+      }
+      // macApp;
 
       src = prev.fetchurl {
         name = "${capitalizedAppName}_${info.version}_${arch}.dmg";

@@ -201,11 +201,14 @@ in
               container
               cyberduck
               google-chrome
+              granola
               iina
               mas
               notion-app
+              raycast
               rapidapi
               sloth-app
+              wispr-flow
             ]
           ))
 

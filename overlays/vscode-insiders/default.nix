@@ -1,5 +1,5 @@
 {
-  sources,
+  selfSource,
   system,
   prev,
   ...
@@ -7,7 +7,7 @@
 {
   vscode-insiders =
     let
-      info = sources.vscode-insiders;
+      info = selfSource;
       inherit (info) version;
       hash = info.hashes.${system};
       plat =

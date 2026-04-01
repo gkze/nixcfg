@@ -1,0 +1,12 @@
+{
+  "commit": "2fa143f9a55806bb9067a244a8756d9fa2b50901",
+  "hashes": {
+    "aarch64-darwin": "sha256-tEg6bFdd7eUNqwEBEXoVtungrVSKL4H3dn9Dq2b3rG4=",
+    "x86_64-darwin": "sha256-UV/3fg/AO1uqLXCqOXRwRe1mK9zm9orcIQqMb61EodE="
+  },
+  "urls": {
+    "aarch64-darwin": "https://releases.raycast.com/releases/1.104.11/download?build=arm",
+    "x86_64-darwin": "https://releases.raycast.com/releases/1.104.11/download?build=x86_64"
+  },
+  "version": "1.104.11"
+}

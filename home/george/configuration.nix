@@ -21,6 +21,7 @@
     ./nixvim.nix
     "${slib.modulesPath}/home/opencode.nix"
     "${slib.modulesPath}/home/packages.nix"
+    "${slib.modulesPath}/home/zen.nix"
     "${slib.modulesPath}/home/languages/python.nix"
     "${slib.modulesPath}/home/languages/rust.nix"
     "${slib.modulesPath}/home/stylix.nix"
@@ -110,15 +111,24 @@
       };
   };
 
-  xdg.configFile."zen-folders.yaml".source = ./zen-folders.yaml;
-
   nixcfg = {
+    zen = {
+      enable = true;
+      profile = "Default (twilight)";
+      chromeSource = ./zen/chrome;
+      userJsSource = ./zen/user.js;
+      foldersSource = ./zen/folders.yaml;
+    };
+
     languages = {
       bun.enable = true;
       go.enable = true;
       python.enable = true;
       rust.enable = true;
     };
+    # Keep Wispr Flow managed from /Applications only so macOS sees one canonical app bundle.
+    packageSets.excludePackagesByName = [ "wispr-flow" ];
+    macApps.systemApplications = [ { package = pkgs.wispr-flow; } ];
     git = {
       signingKey = userMeta.gpg.keys.signing;
       identities = {

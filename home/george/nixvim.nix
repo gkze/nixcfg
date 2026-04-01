@@ -5,8 +5,298 @@
   ...
 }:
 let
-  inherit (builtins) concatStringsSep;
-  inherit (lib.attrsets) mapAttrsToList;
+  inherit (builtins)
+    concatStringsSep
+    head
+    isAttrs
+    isString
+    ;
+  inherit (lib.attrsets) listToAttrs mapAttrsToList;
+  inherit (lib.lists) flatten;
+
+  intersperse =
+    sep: list:
+    let
+      go =
+        xs:
+        if xs == [ ] then
+          [ ]
+        else if builtins.length xs == 1 then
+          [ (head xs) ]
+        else
+          [
+            (head xs)
+            sep
+          ]
+          ++ go (builtins.tail xs);
+    in
+    go list;
+
+  keymapData = import ./nvim-keymaps.nix;
+  helpers = config.lib.nixvim;
+
+  scopeSectionTitles = scope: map (section: section.title) scope.sections;
+
+  sectionItems =
+    scope: sectionNames:
+    flatten (
+      map (
+        section: if builtins.elem section.title sectionNames then section.items else [ ]
+      ) scope.sections
+    );
+
+  mkKeymapListFromSections =
+    scope: sectionNames:
+    map (item: {
+      inherit (item) key;
+      inherit (item) action;
+      mode = item.mode or "n";
+      options = {
+        desc = item.desc or item.summary or "";
+      };
+    }) (sectionItems scope sectionNames);
+
+  mkKeymapList = scope: mkKeymapListFromSections scope (scopeSectionTitles scope);
+
+  mkAttrsetFromItems =
+    items:
+    listToAttrs (
+      map (item: {
+        name = item.key;
+        value = item.action;
+      }) items
+    );
+
+  mkAttrsetFromSections = scope: sectionNames: mkAttrsetFromItems (sectionItems scope sectionNames);
+
+  mkAttrset = scope: mkAttrsetFromSections scope (scopeSectionTitles scope);
+
+  mkNestedAttrset =
+    scope:
+    listToAttrs (
+      map (section: {
+        name = section.title;
+        value = mkAttrsetFromItems section.items;
+      }) scope.sections
+    );
+
+  itemDisplayAction =
+    item:
+    item.displayAction or (
+      if isString item.action then
+        item.action
+      else if isAttrs item.action && item.action ? __raw then
+        item.action.__raw
+      else
+        "<lua>"
+    );
+
+  flattenPickerEntries =
+    scopes:
+    flatten (
+      map (
+        scope:
+        flatten (
+          map (
+            section:
+            map (item: {
+              scope = scope.label;
+              section = section.title;
+              attrPath = concatStringsSep "." scope.attrPath;
+              inherit (scope) kind;
+              context = scope.context or "";
+              inherit (item) key;
+              mode = item.mode or "n";
+              displayAction = itemDisplayAction item;
+              desc = item.desc or item.summary or "";
+            }) section.items
+          ) scope.sections
+        )
+      ) scopes
+    );
+
+  renderScope =
+    scope:
+    let
+      contextLine =
+        if scope ? context && scope.context != "" then "Context: ${scope.context}\n\n" else "";
+      renderItem =
+        item:
+        "- `${item.key}` (`${item.mode or "n"}`) → `${itemDisplayAction item}` — ${
+          item.desc or item.summary or ""
+        }";
+    in
+    ''
+      ## ${scope.label}
+
+      Attr path: `${concatStringsSep "." scope.attrPath}`
+
+      ${contextLine}${
+        concatStringsSep "\n\n" (
+          map (section: ''
+            ### ${section.title}
+
+            ${concatStringsSep "\n" (map renderItem section.items)}
+          '') scope.sections
+        )
+      }
+    '';
+
+  pickerScopes = [
+    keymapData.global
+    keymapData.lsp
+    keymapData.treesitterSelection
+    keymapData.treesitterTextobjectsMove
+    keymapData.treesitterTextobjectsSelect
+    keymapData.blinkCmp
+    keymapData.telescope
+    keymapData.gitlinker
+    keymapData.alpha
+  ];
+
+  globalKeymaps = mkKeymapList keymapData.global;
+  lspExtraKeymaps = mkKeymapListFromSections keymapData.lsp [ "Docs / diagnostics" ];
+  lspBufKeymaps = mkAttrsetFromSections keymapData.lsp [ "Navigation" ];
+  treesitterSelectionKeymaps = mkAttrset keymapData.treesitterSelection;
+  treesitterTextobjectsMoveMappings = mkNestedAttrset keymapData.treesitterTextobjectsMove;
+  treesitterTextobjectsSelectKeymaps = mkAttrset keymapData.treesitterTextobjectsSelect;
+  blinkCmpKeymaps = mkAttrset keymapData.blinkCmp;
+  telescopeEnterRaw = (head (sectionItems keymapData.telescope [ "Prompt" ])).action.__raw;
+  gitlinkerMapping = (head (sectionItems keymapData.gitlinker [ "Linking" ])).action;
+  alphaButtons = sectionItems keymapData.alpha [ "Buttons" ];
+  alphaLayout =
+    let
+      button = item: {
+        type = "button";
+        val = item.label or item.desc or item.key;
+        on_press.__raw = "function() vim.cmd[[${item.action}]] end";
+        opts = {
+          shortcut = item.key;
+          align_shortcut = "right";
+          keymap = [
+            "n"
+            item.key
+            ":${item.action}<CR>"
+            { }
+          ];
+          position = "center";
+          width = 50;
+        };
+      };
+      padding = v: {
+        type = "padding";
+        val = v;
+        opts.position = "center";
+      };
+      buttons = intersperse (padding 1) (map button alphaButtons);
+    in
+    [
+      (padding 2)
+      {
+        type = "text";
+        val = [
+          "███╗   ██╗██╗██╗  ██╗██╗   ██╗██╗███╗   ███╗"
+          "████╗  ██║██║╚██╗██╔╝██║   ██║██║████╗ ████║"
+          "██╔██╗ ██║██║ ╚███╔╝ ██║   ██║██║██╔████╔██║"
+          "██║╚██╗██║██║ ██╔██╗ ╚██╗ ██╔╝██║██║╚██╔╝██║"
+          "██║ ╚████║██║██╔╝ ██╗ ╚████╔╝ ██║██║ ╚═╝ ██║"
+          "╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝     ╚═╝"
+        ];
+        opts = {
+          position = "center";
+          hl = "Type";
+        };
+      }
+      (padding 2)
+      {
+        type = "group";
+        val = buttons;
+      }
+      (padding 2)
+      {
+        type = "text";
+        val = "Crankenstein";
+        opts = {
+          position = "center";
+          hl = "Keyword";
+        };
+      }
+    ];
+  pickerEntries = flattenPickerEntries pickerScopes;
+  keymapsDoc = ''
+    # George's Neovim keymap cheat sheet
+
+    Generated from `home/george/nvim-keymaps.nix`.
+  ''
+  + "\n\n"
+  + concatStringsSep "\n\n" (map renderScope pickerScopes);
+  keymapsLua = ''
+    local entries = ${helpers.toLuaObject pickerEntries}
+    local M = {}
+
+    local doc_path = vim.fn.stdpath("config") .. "/doc/nvim-keymaps.md"
+
+    local function open_doc()
+      vim.cmd.edit(doc_path)
+    end
+
+    function M.open_doc()
+      open_doc()
+    end
+
+    function M.pick()
+      local pickers = require("telescope.pickers")
+      local finders = require("telescope.finders")
+      local previewers = require("telescope.previewers")
+      local conf = require("telescope.config").values
+      local actions = require("telescope.actions")
+      local action_state = require("telescope.actions.state")
+
+      pickers.new({}, {
+        prompt_title = "Neovim keymaps",
+        finder = finders.new_table({
+          results = entries,
+          entry_maker = function(e)
+            return {
+              value = e,
+              ordinal = table.concat({ e.scope or "", e.section or "", e.key or "", e.desc or "" }, " "),
+              display = string.format("[%s] %s — %s", e.scope or "?", e.key or "", e.desc or ""),
+            }
+          end,
+        }),
+        sorter = conf.generic_sorter({}),
+        previewer = previewers.new_buffer_previewer({
+          define_preview = function(self, entry)
+            local e = entry.value
+            local lines = {
+              "Scope: " .. (e.scope or ""),
+              "Section: " .. (e.section or ""),
+              "Attr path: " .. (e.attrPath or ""),
+              "Kind: " .. (e.kind or ""),
+              "Context: " .. (e.context or ""),
+              "Mode: " .. (e.mode or ""),
+              "Key: " .. (e.key or ""),
+              "Action: " .. (e.displayAction or ""),
+              "Description: " .. (e.desc or ""),
+            }
+            vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
+          end,
+        }),
+        attach_mappings = function(prompt_bufnr, map)
+          actions.select_default:replace(function()
+            local selection = action_state.get_selected_entry()
+            actions.close(prompt_bufnr)
+            if selection and selection.value then
+              open_doc()
+            end
+          end)
+          return true
+        end,
+      }):find()
+    end
+
+    return M
+  '';
 in
 {
   programs.nixvim = {
@@ -100,71 +390,7 @@ in
       plugins = {
         alpha = {
           enable = true;
-          settings.layout =
-            let
-              button = val: shortcut: cmd: {
-                type = "button";
-                inherit val;
-                on_press.__raw = "function() vim.cmd[[${cmd}]] end";
-                opts = {
-                  inherit shortcut;
-                  align_shortcut = "right";
-                  keymap = [
-                    "n"
-                    shortcut
-                    ":${cmd}<CR>"
-                    { }
-                  ];
-                  position = "center";
-                  width = 50;
-                };
-              };
-              padding = v: {
-                type = "padding";
-                val = v;
-                opts.position = "center";
-              };
-            in
-            [
-              (padding 2)
-              {
-                type = "text";
-                val = [
-                  "███╗   ██╗██╗██╗  ██╗██╗   ██╗██╗███╗   ███╗"
-                  "████╗  ██║██║╚██╗██╔╝██║   ██║██║████╗ ████║"
-                  "██╔██╗ ██║██║ ╚███╔╝ ██║   ██║██║██╔████╔██║"
-                  "██║╚██╗██║██║ ██╔██╗ ╚██╗ ██╔╝██║██║╚██╔╝██║"
-                  "██║ ╚████║██║██╔╝ ██╗ ╚████╔╝ ██║██║ ╚═╝ ██║"
-                  "╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝     ╚═╝"
-                ];
-                opts = {
-                  position = "center";
-                  hl = "Type";
-                };
-              }
-              (padding 2)
-              {
-                type = "group";
-                val = [
-                  (button " New file" "e" "ene")
-                  (padding 1)
-                  (button "󰈞 Find file(s)" "f" "Telescope find_files")
-                  (padding 1)
-                  (button "󰈞 Find text" "t" "Telescope live_grep")
-                  (padding 1)
-                  (button " Quit Neovim" "q" "qall")
-                ];
-              }
-              (padding 2)
-              {
-                type = "text";
-                val = "Crankenstein";
-                opts = {
-                  position = "center";
-                  hl = "Keyword";
-                };
-              }
-            ];
+          settings.layout = alphaLayout;
         };
         blink-cmp = {
           enable = true;
@@ -177,30 +403,7 @@ in
                 auto_show_delay_ms = 100;
               };
             };
-            keymap = {
-              "<Enter>" = [
-                "select_and_accept"
-                "fallback"
-              ];
-              "<Tab>" = [
-                "select_next"
-                "fallback"
-              ];
-              "<S-Tab>" = [
-                "select_prev"
-                "fallback"
-              ];
-              "<C-d>" = [ "scroll_documentation_down" ];
-              "<C-f>" = [ "scroll_documentation_up" ];
-              "<C-Tab>" = [
-                "snippet_forward"
-                "fallback"
-              ];
-              "<C-S-Tab>" = [
-                "snippet_backward"
-                "fallback"
-              ];
-            };
+            keymap = blinkCmpKeymaps;
             signature.enabled = true;
           };
         };
@@ -282,7 +485,7 @@ in
               "try.gitea.io" = "get_gitea_type_url";
               "try.gogs.io" = "get_gogs_type_url";
             };
-            opts.mappings = "<C-c>l";
+            opts.mappings = gitlinkerMapping;
           };
         };
         gitsigns = {
@@ -299,19 +502,8 @@ in
         lsp = {
           enable = true;
           keymaps = {
-            extra = [
-              {
-                action = "<CMD>Lspsaga hover_doc<Enter>";
-                key = "K";
-              }
-            ];
-            lspBuf = {
-              "<C-k>" = "signature_help";
-              "gD" = "references";
-              "gd" = "definition";
-              "gi" = "implementation";
-              "gt" = "type_definition";
-            };
+            extra = lspExtraKeymaps;
+            lspBuf = lspBufKeymaps;
           };
           servers = {
             bashls.enable = true;
@@ -509,22 +701,7 @@ in
           enable = true;
           settings.defaults = {
             layout_config.preview_width = 0.5;
-            mappings.i."<CR>".__raw = ''
-              function(prompt_bufnr)
-                local picker = require('telescope.actions.state').get_current_picker(prompt_bufnr)
-                local multi = picker:get_multi_selection()
-                if not vim.tbl_isempty(multi) then
-                  require('telescope.actions').close(prompt_bufnr)
-                  for _, j in pairs(multi) do
-                    if j.path ~= nil then
-                      vim.cmd(string.format('%s %s', 'edit', j.path))
-                    end
-                  end
-                else
-                  require('telescope.actions').select_default(prompt_bufnr)
-                end
-              end
-            '';
+            mappings.i."<CR>".__raw = telescopeEnterRaw;
           };
         };
         toggleterm = {
@@ -549,12 +726,7 @@ in
             };
             incremental_selection = {
               enable = true;
-              keymaps = {
-                init_selection = "gnn";
-                node_incremental = "grn";
-                scope_incremental = "grc";
-                node_decremental = "grm";
-              };
+              keymaps = treesitterSelectionKeymaps;
             };
           };
         };
@@ -564,74 +736,12 @@ in
             lsp_interop.enable = true;
             move = {
               enable = true;
-              gotoNextStart = {
-                "]]" = "@class.outer";
-                "]a" = "@attribute.outer";
-                "]b" = "@block.outer";
-                "]c" = "@call.outer";
-                "]f" = "@function.outer";
-                "]i" = "@conditional.outer";
-                "]p" = "@parameter.outer";
-                "]s" = "@statement.outer";
-                "]v" = "@assignment.outer";
-              };
-              gotoNextEnd = {
-                "]A" = "@attribute.inner";
-                "]B" = "@block.outer";
-                "]C" = "@call.outer";
-                "]F" = "@function.outer";
-                "]I" = "@conditional.outer";
-                "]P" = "@parameter.outer";
-                "]S" = "@statement.outer";
-                "]V" = "@assignment.outer";
-                "][" = "@class.outer";
-              };
-              gotoPreviousStart = {
-                "[[" = "@class.outer";
-                "[a" = "@attribute.outer";
-                "[b" = "@block.outer";
-                "[c" = "@call.outer";
-                "[f" = "@function.outer";
-                "[i" = "@conditional.outer";
-                "[p" = "@parameter.outer";
-                "[s" = "@statement.outer";
-                "[v" = "@assignment.outer";
-              };
-              gotoPreviousEnd = {
-                "[A" = "@attribute.outer";
-                "[B" = "@block.outer";
-                "[C" = "@call.outer";
-                "[F" = "@function.outer";
-                "[I" = "@conditional.outer";
-                "[P" = "@parameter.outer";
-                "[S" = "@statement.outer";
-                "[V" = "@assignment.outer";
-                "[]" = "@class.outer";
-              };
-            };
+            }
+            // treesitterTextobjectsMoveMappings;
             select = {
               enable = true;
               lookahead = true;
-              keymaps = {
-                "aC" = "@class.outer";
-                "aa" = "@parameter.outer";
-                "ab" = "@block.outer";
-                "ac" = "@call.outer";
-                "af" = "@function.outer";
-                "ai" = "@conditional.outer";
-                "al" = "@loop.outer";
-                "av" = "@assignment.outer";
-                "iC" = "@class.inner";
-                "ia" = "@parameter.inner";
-                "ib" = "@block.inner";
-                "ic" = "@call.inner";
-                "if" = "@function.inner";
-                "ii" = "@conditional.inner";
-                "il" = "@loop.inner";
-                "iv" = "@assignment.inner";
-                "lv" = "@assignment.lhs";
-                "rv" = "@assignment.rhs";
-              };
+              keymaps = treesitterTextobjectsSelectKeymaps;
             };
           };
         };
@@ -723,7 +833,7 @@ in
           vim-nickel
         ]
         ++ lib.lists.optionals (!pkgs.stdenv.isDarwin) [ nvim-dbee ];
-      initLua =
+      extraConfigLuaPost =
         let
           helpers = config.lib.nixvim;
           extraPluginsConfig = {
@@ -739,6 +849,12 @@ in
             ''
               vim.g.opencode_opts = vim.g.opencode_opts or {}
               vim.o.autoread = true
+              vim.api.nvim_create_user_command("NvimKeymaps", function()
+                require("nvim-keymaps").pick()
+              end, {})
+              vim.api.nvim_create_user_command("NvimKeymapsDoc", function()
+                require("nvim-keymaps").open_doc()
+              end, {})
             ''
             ''
               if vim.g.neovide then
@@ -748,237 +864,12 @@ in
             ''
           ]
         );
-      keymaps = [
-        {
-          key = ";";
-          action = ":";
-        }
-        {
-          key = "<leader>\<";
-          action = ":BufferLineMovePrev<CR>";
-        }
-        {
-          key = "<leader>\>";
-          action = ":BufferLineMoveNext<CR>";
-        }
-        {
-          key = "<leader>w";
-          action = ":write<CR>";
-        }
-        {
-          key = "<leader>W";
-          action = ":wall<CR>";
-        }
-        {
-          key = "<leader>x";
-          action = ":Bdelete<CR>";
-        }
-        {
-          key = "<leader>T";
-          action = ":tabnew<CR>";
-        }
-        {
-          key = "<leader>C";
-          action = ":tabclose<CR>";
-        }
-        {
-          key = "<leader>,";
-          action = ":BufferLineCyclePrev<CR>";
-        }
-        {
-          key = "<leader>.";
-          action = ":BufferLineCycleNext<CR>";
-        }
-        {
-          key = "<leader>]";
-          action = ":tabnext<CR>";
-        }
-        {
-          key = "<leader>[";
-          action = ":tabprevious<CR>";
-        }
-        {
-          key = "<C-A-h>";
-          action = ":Treewalker Left<CR>";
-        }
-        {
-          key = "<C-A-j>";
-          action = ":Treewalker Down<CR>";
-        }
-        {
-          key = "<C-A-k>";
-          action = ":Treewalker Up<CR>";
-        }
-        {
-          key = "<C-A-l>";
-          action = ":Treewalker Right<CR>";
-        }
-        {
-          key = "<leader>i";
-          action = ":set invlist<CR>";
-        }
-        {
-          key = "<C-l>i";
-          action = ":LspInfo<CR>";
-        }
-        {
-          key = "<C-l>r";
-          action = ":LspRestart<CR>";
-        }
-        {
-          key = "<S-s>";
-          action = ":'<,'>sort<CR>";
-        }
-        {
-          key = "<leader>c";
-          action = ":ToggleTerm<CR>";
-        }
-        {
-          key = "<leader>d";
-          action = ":DiffviewOpen<CR>";
-        }
-        {
-          key = "<leader>D";
-          action = ":DiffviewClose<CR>";
-        }
-        {
-          key = "<leader>f";
-          action = ":Telescope find_files<CR>";
-        }
-        {
-          key = "<leader>F";
-          action = ":Telescope find_files hidden=true<CR>";
-        }
-        {
-          key = "<leader>G";
-          action = ":Telescope live_grep<CR>";
-        }
-        {
-          key = "<leader>at";
-          action = ":AerialToggle<CR>";
-        }
-        {
-          key = "<leader>aO";
-          action = ":AerialOpenAll<CR>";
-        }
-        {
-          key = "<leader>aC";
-          action = ":AerialCloseAll<CR>";
-        }
-        {
-          key = "<leader>z";
-          action = ":nohlsearch<CR>";
-        }
-        {
-          key = "<leader>h";
-          action.__raw = ''require("smart-splits").move_cursor_left'';
-        }
-        {
-          key = "<leader>j";
-          action.__raw = ''require("smart-splits").move_cursor_down'';
-        }
-        {
-          key = "<leader>k";
-          action.__raw = ''require("smart-splits").move_cursor_up'';
-        }
-        {
-          key = "<leader>l";
-          action.__raw = ''require("smart-splits").move_cursor_right'';
-        }
-        {
-          key = "<leader>H";
-          action.__raw = ''require("smart-splits").resize_left'';
-        }
-        {
-          key = "<leader>J";
-          action.__raw = ''require("smart-splits").resize_down'';
-        }
-        {
-          key = "<leader>K";
-          action.__raw = ''require("smart-splits").resize_up'';
-        }
-        {
-          key = "<leader>L";
-          action.__raw = ''require("smart-splits").resize_right'';
-        }
-        {
-          key = "<leader>m";
-          action = ":Telescope keymaps<CR>";
-        }
-        {
-          key = "<leader>s";
-          action = ":Neotree focus<CR>";
-        }
-        {
-          key = "<leader>p";
-          action = ":Trouble diagnostics<CR>";
-        }
-        {
-          key = "<leader>e";
-          action = ":Neotree reveal<CR>";
-        }
-        {
-          key = "<leader>r";
-          action = ":IncRename ";
-        }
-        {
-          key = "<leader>n";
-          action = ":Navbuddy<CR>";
-        }
-        {
-          key = "<leader>t";
-          action = ":Neotree toggle filesystem<CR>";
-        }
-        {
-          key = "<leader>v";
-          action = ":Neotree toggle git_status<CR>";
-        }
-        {
-          key = "<leader>gc";
-          action = ":Neogit<CR>";
-        }
-        {
-          key = "<leader>gb";
-          action = ":Neogit branch<CR>";
-        }
-        # CodeCompanion
-        {
-          key = "<leader>cc";
-          action = ":CodeCompanionChat Toggle<CR>";
-          options.desc = "Toggle CodeCompanion chat";
-        }
-        {
-          key = "<leader>ca";
-          action = ":CodeCompanionActions<CR>";
-          options.desc = "CodeCompanion actions";
-        }
-        {
-          key = "<leader>ci";
-          action = ":CodeCompanion<CR>";
-          options.desc = "CodeCompanion inline";
-        }
-        {
-          key = "ga";
-          action = ":CodeCompanionChat Add<CR>";
-          mode = "v";
-          options.desc = "Add selection to chat";
-        }
-        {
-          key = "<leader>ua";
-          action.__raw = ''function() require("opencode").ask("@this: ", { submit = true }) end'';
-          options.desc = "Opencode ask";
-        }
-        {
-          key = "<leader>us";
-          action.__raw = ''function() require("opencode").select() end'';
-          options.desc = "Opencode select";
-        }
-        {
-          key = "<leader>ut";
-          action.__raw = ''function() require("opencode").toggle() end'';
-          options.desc = "Opencode toggle";
-        }
-      ];
+      keymaps = globalKeymaps;
     };
+  };
+
+  home.file = {
+    ".config/nvim/doc/nvim-keymaps.md".text = keymapsDoc;
+    ".config/nvim/lua/nvim-keymaps.lua".text = keymapsLua;
   };
 }

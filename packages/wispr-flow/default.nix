@@ -5,14 +5,16 @@
   ...
 }:
 mkDmgApp {
-  pname = "conductor";
+  pname = "wispr-flow";
+  appName = "Wispr Flow";
   info = selfSource;
+  macApp.installMode = "copy";
   meta = with lib; {
-    description = "Run a team of coding agents on your Mac";
-    homepage = "https://www.conductor.build/";
+    description = "AI voice dictation app for macOS";
+    homepage = "https://wisprflow.ai/";
     license = licenses.unfree;
     platforms = platforms.darwin;
     sourceProvenance = with sourceTypes; [ binaryNativeCode ];
-    mainProgram = "conductor";
+    mainProgram = "wispr-flow";
   };
 }

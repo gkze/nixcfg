@@ -6,10 +6,20 @@
   ...
 }:
 let
-  inherit (lib) mkOption types;
+  inherit (lib) attrByPath mkOption types;
   cfg = config.darwinDefaults;
+  macApps = import ../../lib/mac-apps.nix { inherit lib pkgs; };
+  systemMacAppEntries = config.nixcfg.macApps.systemApplications;
+  homeMacAppEntries =
+    attrByPath [ "home-manager" "users" primaryUser "nixcfg" "macApps" "systemApplications" ] [ ]
+      config;
+  # In embedded Home Manager setups, let nix-darwin own /Applications and consume
+  # the per-user declarations from home-manager.users.<name> when needed.
+  activeMacAppEntries = if systemMacAppEntries != [ ] then systemMacAppEntries else homeMacAppEntries;
 in
 {
+  options.nixcfg.macApps.systemApplications = macApps.systemApplicationsOption;
+
   options.darwinDefaults = {
     keyboard.capsLockToEscape = mkOption {
       type = types.bool;
@@ -76,6 +86,13 @@ in
   };
 
   config = {
+    assertions =
+      lib.optional (systemMacAppEntries != [ ]) (macApps.uniqueBundleNamesAssertion systemMacAppEntries)
+      ++ lib.optional (systemMacAppEntries != [ ] && homeMacAppEntries != [ ]) {
+        assertion = false;
+        message = "Configure macOS system applications in either nixcfg.macApps.systemApplications or home-manager.users.${primaryUser}.nixcfg.macApps.systemApplications, not both.";
+      };
+
     system = {
       keyboard = {
         enableKeyMapping = true;
@@ -113,6 +130,15 @@ in
       };
       inherit primaryUser;
       stateVersion = 6;
+
+      activationScripts.applications.text = lib.mkAfter (
+        macApps.systemApplicationsScript {
+          entries = activeMacAppEntries;
+          stateDirectory = "/Applications/.nixcfg-mac-apps";
+          stateName = "darwin-system";
+          writable = false;
+        }
+      );
     };
 
     users.users.${primaryUser} = {

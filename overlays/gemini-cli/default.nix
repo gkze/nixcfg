@@ -1,5 +1,5 @@
 {
-  sources,
+  selfSource,
   slib,
   prev,
   ...
@@ -7,7 +7,7 @@
 {
   gemini-cli =
     let
-      inherit (sources.gemini-cli) version;
+      inherit (selfSource) version;
       src = prev.fetchFromGitHub {
         owner = "google-gemini";
         repo = "gemini-cli";

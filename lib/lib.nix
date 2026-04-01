@@ -513,8 +513,7 @@ rec {
         ;
       includeDefaultUserModules = includeDefaultUserModule;
       users = [ user ];
-      homeModules =
-        toList extraHomeModules ++ optionals work [ (_: { nixcfg.profiles.work.enable = true; }) ];
+      homeModules = toList extraHomeModules ++ optionals work [ (_: { profiles.work.enable = true; }) ];
       systemModules = [
         inputs.nix-homebrew.darwinModules.nix-homebrew
         "${modulesPath}/darwin/homebrew.nix"
@@ -530,7 +529,7 @@ rec {
         inputs.nix-rosetta-builder.darwinModules.default
         { nix-rosetta-builder.onDemand = true; }
       ]
-      ++ optionals work [ { nixcfg.profiles.work.enable = true; } ]
+      ++ optionals work [ { profiles.work.enable = true; } ]
       ++ toList extraSystemModules;
     };
 }

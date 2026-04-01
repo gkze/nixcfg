@@ -2,10 +2,11 @@
   prev,
   slib,
   sources,
+  selfSource,
   ...
 }:
 let
-  inherit (sources.goose-cli) version;
+  inherit (selfSource) version;
 
   upstreamSrc = prev.fetchFromGitHub {
     owner = "block";

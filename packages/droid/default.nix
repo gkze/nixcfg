@@ -1,24 +1,21 @@
 {
   stdenvNoCC,
   fetchurl,
-  outputs,
+  selfSource,
   lib,
   stdenv,
   ...
 }:
 let
-  inherit (outputs.lib) sources;
-  info = sources.droid;
   inherit (stdenv.hostPlatform) system;
-  inherit (info) version;
 in
 stdenvNoCC.mkDerivation {
   pname = "droid";
-  inherit version;
+  inherit (selfSource) version;
 
   src = fetchurl {
-    url = info.urls.${system};
-    hash = info.hashes.${system};
+    url = selfSource.urls.${system};
+    hash = selfSource.hashes.${system};
   };
 
   dontUnpack = true;

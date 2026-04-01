@@ -19,33 +19,68 @@ This tool reconciles the session against a declarative YAML config file.
 List order in YAML = render order. Workspace is referenced by human name.
 Tabs are matched by URL substring (case-insensitive).
 
+Optional workspace metadata lives under `__workspace__`, for example:
+
+    Work:
+      __workspace__:
+        icon: "🏢"
+        containerTabId: 6
+        hasCollapsedPinnedTabs: false
+        theme:
+          gradientColors: ["#8caaee", "#99d1db"]
+          opacity: 0.5
+          texture: 0
+      AI:
+        OpenAI: platform.openai.com
+
+`containerTabId` is used when creating a missing workspace. Existing
+workspaces keep their current container ID; zen-folders warns instead of
+rewriting it in-place.
+
 Zen must be closed when making changes -- it overwrites the session on quit.
 """
-
 from __future__ import annotations
 
 import argparse
+import configparser
+import contextlib
+import errno
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
+import uuid as uuidlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 
 import lz4.block
 import yaml
 from yaml.constructor import ConstructorError
 from yaml.resolver import BaseResolver
 
-ZEN_PROFILES: Final = Path.home() / "Library/Application Support/zen/Profiles"
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None
+
+ZEN_APPLICATION_SUPPORT: Final = Path.home() / "Library/Application Support/zen"
+ZEN_PROFILES: Final = ZEN_APPLICATION_SUPPORT / "Profiles"
+PROFILES_INI: Final = ZEN_APPLICATION_SUPPORT / "profiles.ini"
 SESSION_FILENAME: Final = "zen-sessions.jsonlz4"
 SESSION_HEADER_PREFIX: Final[bytes] = b"mozLz40\0"
 SESSION_HEADER_SIZE: Final[int] = 12
-DEFAULT_PROFILE: Final = "ecrjha3i.Default (twilight)"
-DEFAULT_YAML: Final = Path.home() / ".config/nixcfg/home/george/zen-folders.yaml"
+DEFAULT_YAML: Final = Path.home() / ".config/zen/folders.yaml"
 GROUP_COLOR: Final = "zen-workspace-color"
+WORKSPACE_META_KEY: Final = "__workspace__"
+DEFAULT_WORKSPACE_THEME: Final = {
+    "type": "gradient",
+    "gradientColors": [],
+    "opacity": 0.5,
+    "texture": 0,
+}
 MAX_SESSION_UNCOMPRESSED_BYTES: Final = 256 * 1024 * 1024
 MAX_ID_ATTEMPTS: Final = 10000
 PROFILE_LOCK_FILENAMES: Final[tuple[str, ...]] = ("parent.lock", ".parentlock", "lock")
@@ -61,6 +96,51 @@ class SessionFormatError(ZenFoldersError):
 
 class UniqueKeyLoader(yaml.SafeLoader):
     """YAML loader that rejects duplicate mapping keys."""
+
+
+@dataclass(frozen=True)
+class WorkspaceThemeSpec:
+    """Declarative workspace theme metadata parsed from config."""
+
+    type: str = "gradient"
+    gradient_colors: tuple[str, ...] = ()
+    opacity: float = 0.5
+    texture: int = 0
+
+    def to_session_dict(self) -> dict[str, object]:
+        """Convert to the theme shape stored in Zen session JSON."""
+        return {
+            "type": self.type,
+            "gradientColors": list(self.gradient_colors),
+            "opacity": self.opacity,
+            "texture": self.texture,
+        }
+
+    def to_config_dict(self) -> dict[str, object]:
+        """Convert to the declarative YAML shape used by zen-folders."""
+        data: dict[str, object] = {
+            "gradientColors": list(self.gradient_colors),
+            "opacity": self.opacity,
+            "texture": self.texture,
+        }
+        if self.type != DEFAULT_WORKSPACE_THEME["type"]:
+            data["type"] = self.type
+        return data
+
+    def is_default(self) -> bool:
+        """Return whether this matches Zen's current workspace theme default."""
+        return self == WorkspaceThemeSpec()
+
+
+@dataclass(frozen=True)
+class WorkspaceSpec:
+    """Declarative workspace metadata parsed from config."""
+
+    name: str
+    icon: str | None = None
+    container_tab_id: int | None = None
+    has_collapsed_pinned_tabs: bool | None = None
+    theme: WorkspaceThemeSpec | None = None
 
 
 def _stdout(message: str = "") -> None:
@@ -113,21 +193,151 @@ UniqueKeyLoader.add_constructor(
 # -- Session I/O -------------------------------------------------------------
 
 
-def session_file(profile: str) -> Path:
-    """Resolve a profile argument to an on-disk session file path."""
-    candidate = Path(profile).expanduser()
+def _load_profiles_ini() -> configparser.RawConfigParser | None:
+    """Load Zen's profiles.ini if it exists and is parseable."""
+    if not PROFILES_INI.exists():
+        return None
 
-    if candidate.is_file():
-        return candidate
+    parser = configparser.RawConfigParser()
+    try:
+        with PROFILES_INI.open(encoding="utf-8") as handle:
+            parser.read_file(handle)
+    except (OSError, configparser.Error):
+        return None
+    return parser
 
-    profile_path = candidate if candidate.is_absolute() else ZEN_PROFILES / profile
-    if not profile_path.exists():
-        msg = f"Profile not found: {profile_path}"
+
+def _profile_path_from_ini(raw_path: str) -> Path | None:
+    """Resolve one profiles.ini path field into an absolute profile path."""
+    value = raw_path.strip()
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = ZEN_APPLICATION_SUPPORT / path
+    return path
+
+
+def _profiles_from_ini() -> list[tuple[str, Path, bool]]:
+    """Return (name, path, is_default) tuples from profiles.ini."""
+    parser = _load_profiles_ini()
+    if parser is None:
+        return []
+
+    profiles: list[tuple[str, Path, bool]] = []
+    for section in parser.sections():
+        if not section.startswith("Profile"):
+            continue
+        name = parser.get(section, "Name", fallback="").strip()
+        path = _profile_path_from_ini(parser.get(section, "Path", fallback=""))
+        if path is None:
+            continue
+        profiles.append(
+            (name, path, parser.getboolean(section, "Default", fallback=False))
+        )
+    return profiles
+
+
+def _profile_dir_from_name(name: str) -> Path | None:
+    """Resolve a human profile name from profiles.ini to a directory."""
+    name_cf = name.strip().casefold()
+    if not name_cf:
+        return None
+
+    for profile_name, path, _ in _profiles_from_ini():
+        if profile_name and profile_name.casefold() == name_cf:
+            return path
+    return None
+
+
+def _default_profile_dir() -> Path | None:
+    """Auto-detect the default Zen profile directory."""
+    parser = _load_profiles_ini()
+    if parser is not None:
+        for section in parser.sections():
+            if not section.startswith("Install"):
+                continue
+            path = _profile_path_from_ini(parser.get(section, "Default", fallback=""))
+            if path is not None:
+                return path
+
+    for _, path, is_default in _profiles_from_ini():
+        if is_default:
+            return path
+
+    profiles = _profiles_from_ini()
+    if profiles:
+        return profiles[0][1]
+
+    if ZEN_PROFILES.exists():
+        dirs = sorted(path for path in ZEN_PROFILES.iterdir() if path.is_dir())
+        if len(dirs) == 1:
+            return dirs[0]
+
+    return None
+
+
+def _available_profile_hints() -> str:
+    """Return profile names or directory names for error messages."""
+    names = [name for name, _, _ in _profiles_from_ini() if name]
+    if names:
+        return ", ".join(names)
+
+    if ZEN_PROFILES.exists():
+        dirs = sorted(path.name for path in ZEN_PROFILES.iterdir() if path.is_dir())
+        if dirs:
+            return ", ".join(dirs)
+
+    return "<none found>"
+
+
+def resolve_profile_dir(profile: str | None) -> Path:
+    """Resolve a profile selector into an on-disk profile directory path."""
+    if profile is None or not profile.strip():
+        detected = _default_profile_dir()
+        if detected is not None:
+            return detected
+        msg = (
+            "Unable to auto-detect a Zen profile. Pass --profile with a "
+            "profile name, directory, or session file path."
+        )
         raise ZenFoldersError(msg)
-    if not profile_path.is_dir():
+
+    candidate = Path(profile).expanduser()
+    if candidate.is_file():
+        return candidate.parent
+    if candidate.exists():
+        if candidate.is_dir():
+            return candidate
+        msg = f"Profile path is not a directory: {candidate}"
+        raise ZenFoldersError(msg)
+    if candidate.is_absolute():
+        msg = f"Profile not found: {candidate}"
+        raise ZenFoldersError(msg)
+
+    profile_path = ZEN_PROFILES / profile
+    if profile_path.exists():
+        if profile_path.is_dir():
+            return profile_path
         msg = f"Profile path is not a directory: {profile_path}"
         raise ZenFoldersError(msg)
 
+    named_profile = _profile_dir_from_name(profile)
+    if named_profile is not None:
+        return named_profile
+
+    msg = f"Profile '{profile}' not found. Available: {_available_profile_hints()}"
+    raise ZenFoldersError(msg)
+
+
+def session_file(profile: str | None) -> Path:
+    """Resolve a profile argument to an on-disk session file path."""
+    if profile is not None:
+        candidate = Path(profile).expanduser()
+        if candidate.is_file():
+            return candidate
+
+    profile_path = resolve_profile_dir(profile)
     path = profile_path / SESSION_FILENAME
     if not path.exists():
         msg = f"Session file not found: {path}"
@@ -309,6 +519,172 @@ def _normalize_tab_specs(folder_name: str, tabs_raw: object) -> list[dict]:
     return tabs
 
 
+def _parse_workspace_theme(
+    workspace: str, raw_theme: object
+) -> WorkspaceThemeSpec:
+    """Validate and normalize one declarative workspace theme block."""
+    if not isinstance(raw_theme, dict):
+        msg = (
+            f"Workspace '{workspace}' theme must be an object, "
+            f"not {type(raw_theme).__name__}."
+        )
+        raise ZenFoldersError(msg)
+
+    theme_map = cast("dict[str, object]", raw_theme)
+    allowed_keys = {"type", "gradientColors", "opacity", "texture"}
+    unknown_keys = sorted(key for key in theme_map if key not in allowed_keys)
+    if unknown_keys:
+        msg = (
+            f"Unsupported theme key(s) in workspace '{workspace}': "
+            f"{', '.join(unknown_keys)}"
+        )
+        raise ZenFoldersError(msg)
+
+    default_theme_type = cast("str", DEFAULT_WORKSPACE_THEME["type"])
+    theme_type_obj = theme_map.get("type", default_theme_type)
+    if not isinstance(theme_type_obj, str) or not theme_type_obj.strip():
+        msg = f"Workspace '{workspace}' theme.type must be a non-empty string."
+        raise ZenFoldersError(msg)
+    theme_type = theme_type_obj.strip()
+    if theme_type != "gradient":
+        msg = (
+            f"Workspace '{workspace}' theme.type must currently be 'gradient', "
+            f"not {theme_type!r}."
+        )
+        raise ZenFoldersError(msg)
+
+    raw_colors_obj = theme_map.get("gradientColors", [])
+    if not isinstance(raw_colors_obj, list):
+        msg = (
+            f"Workspace '{workspace}' theme.gradientColors must be a list, "
+            f"not {type(raw_colors_obj).__name__}."
+        )
+        raise ZenFoldersError(msg)
+    gradient_colors: list[str] = []
+    for color in raw_colors_obj:
+        if not isinstance(color, str) or not color.strip():
+            msg = (
+                f"Workspace '{workspace}' theme.gradientColors entries must be "
+                "non-empty strings."
+            )
+            raise ZenFoldersError(msg)
+        gradient_colors.append(color.strip())
+
+    default_opacity = cast("float", DEFAULT_WORKSPACE_THEME["opacity"])
+    opacity_obj = theme_map.get("opacity", default_opacity)
+    if not isinstance(opacity_obj, int | float) or isinstance(opacity_obj, bool):
+        msg = (
+            f"Workspace '{workspace}' theme.opacity must be a number, "
+            f"not {type(opacity_obj).__name__}."
+        )
+        raise ZenFoldersError(msg)
+    opacity = float(opacity_obj)
+    if opacity < 0 or opacity > 1:
+        msg = f"Workspace '{workspace}' theme.opacity must be between 0 and 1."
+        raise ZenFoldersError(msg)
+
+    default_texture = cast("int", DEFAULT_WORKSPACE_THEME["texture"])
+    texture_obj = theme_map.get("texture", default_texture)
+    if not isinstance(texture_obj, int) or isinstance(texture_obj, bool):
+        msg = (
+            f"Workspace '{workspace}' theme.texture must be an integer, "
+            f"not {type(texture_obj).__name__}."
+        )
+        raise ZenFoldersError(msg)
+    if texture_obj < 0:
+        msg = f"Workspace '{workspace}' theme.texture must be >= 0."
+        raise ZenFoldersError(msg)
+
+    return WorkspaceThemeSpec(
+        type=theme_type,
+        gradient_colors=tuple(gradient_colors),
+        opacity=opacity,
+        texture=texture_obj,
+    )
+
+
+def _parse_workspace_spec(workspace: str, folders_raw: object) -> WorkspaceSpec:
+    """Parse optional workspace metadata from one workspace mapping."""
+    if folders_raw is None:
+        return WorkspaceSpec(name=workspace)
+    if not isinstance(folders_raw, dict):
+        msg = (
+            f"Workspace '{workspace}' must map to a folder mapping, "
+            f"not {type(folders_raw).__name__}."
+        )
+        raise ZenFoldersError(msg)
+
+    folders_map = cast("dict[str, object]", folders_raw)
+    raw_meta = folders_map.get(WORKSPACE_META_KEY)
+    if raw_meta is None:
+        return WorkspaceSpec(name=workspace)
+    if not isinstance(raw_meta, dict):
+        msg = (
+            f"Workspace metadata key {WORKSPACE_META_KEY!r} in '{workspace}' "
+            f"must map to an object, not {type(raw_meta).__name__}."
+        )
+        raise ZenFoldersError(msg)
+
+    meta_map = cast("dict[str, object]", raw_meta)
+    allowed_keys = {"icon", "containerTabId", "hasCollapsedPinnedTabs", "theme"}
+    unknown_keys = sorted(key for key in meta_map if key not in allowed_keys)
+    if unknown_keys:
+        msg = (
+            f"Unsupported workspace metadata key(s) in '{workspace}': "
+            f"{', '.join(unknown_keys)}"
+        )
+        raise ZenFoldersError(msg)
+
+    icon = meta_map.get("icon")
+    if icon is not None:
+        if not isinstance(icon, str) or not icon.strip():
+            msg = f"Workspace '{workspace}' icon must be a non-empty string."
+            raise ZenFoldersError(msg)
+        icon = icon.strip()
+
+    raw_container_tab_id = meta_map.get("containerTabId")
+    container_tab_id: int | None = None
+    if raw_container_tab_id is not None:
+        if not isinstance(raw_container_tab_id, int) or isinstance(
+            raw_container_tab_id, bool
+        ):
+            msg = (
+                f"Workspace '{workspace}' containerTabId must be an integer, "
+                f"not {type(raw_container_tab_id).__name__}."
+            )
+            raise ZenFoldersError(msg)
+        if raw_container_tab_id < 0:
+            msg = f"Workspace '{workspace}' containerTabId must be >= 0."
+            raise ZenFoldersError(msg)
+        container_tab_id = raw_container_tab_id
+
+    raw_collapsed = meta_map.get("hasCollapsedPinnedTabs")
+    has_collapsed_pinned_tabs: bool | None = None
+    if raw_collapsed is not None:
+        if not isinstance(raw_collapsed, bool):
+            msg = (
+                f"Workspace '{workspace}' hasCollapsedPinnedTabs must be a bool, "
+                f"not {type(raw_collapsed).__name__}."
+            )
+            raise ZenFoldersError(msg)
+        has_collapsed_pinned_tabs = raw_collapsed
+
+    raw_theme = meta_map.get("theme")
+    theme = (
+        _parse_workspace_theme(workspace, raw_theme)
+        if raw_theme is not None
+        else None
+    )
+
+    return WorkspaceSpec(
+        name=workspace,
+        icon=icon,
+        container_tab_id=container_tab_id,
+        has_collapsed_pinned_tabs=has_collapsed_pinned_tabs,
+        theme=theme,
+    )
+
+
 def _normalize_folder_specs(workspace: str, folders_raw: object) -> list[dict]:
     """Normalize folder definitions for one workspace."""
     if folders_raw is None:
@@ -323,6 +699,8 @@ def _normalize_folder_specs(workspace: str, folders_raw: object) -> list[dict]:
     folders: list[dict] = []
     seen_names: set[str] = set()
     for folder_name, tabs_raw in folders_raw.items():
+        if folder_name == WORKSPACE_META_KEY:
+            continue
         if not isinstance(folder_name, str) or not folder_name.strip():
             msg = "Folder names must be non-empty strings."
             raise ZenFoldersError(msg)
@@ -339,17 +717,21 @@ def _normalize_folder_specs(workspace: str, folders_raw: object) -> list[dict]:
     return folders
 
 
-def parse_config(raw: dict) -> tuple[str, list[dict]]:
-    """Parse map-based YAML config into workspace name plus normalized folders."""
+def parse_config(raw: dict) -> tuple[WorkspaceSpec, list[dict]]:
+    """Parse YAML config into workspace metadata plus normalized folders."""
     workspace_key = _parse_workspace_key(raw)
     workspace = workspace_key.strip()
-    return workspace, _normalize_folder_specs(workspace, raw[workspace_key])
+    workspace_raw = raw[workspace_key]
+    return (
+        _parse_workspace_spec(workspace, workspace_raw),
+        _normalize_folder_specs(workspace, workspace_raw),
+    )
 
 
 # -- Helpers ------------------------------------------------------------------
 
 
-def load_session(profile: str) -> tuple[Path, dict]:
+def load_session(profile: str | None) -> tuple[Path, dict]:
     """Load and decode a profile's session payload."""
     path = session_file(profile)
     return path, read_session(path)
@@ -380,17 +762,197 @@ def tab_title(tab: dict) -> str:
     return _tab_entry_field(tab, "title")
 
 
-def resolve_workspace(session: dict, name: str) -> str:
-    """Resolve a workspace name to its UUID. Falls back to treating name as UUID."""
+def workspace_record_by_name(session: dict, name: str) -> dict | None:
+    """Return the workspace record matching *name*, if present."""
     name_cf = name.strip().casefold()
     for space in session.get("spaces", []):
         if not isinstance(space, dict):
             continue
         space_name = space.get("name")
         if isinstance(space_name, str) and space_name.casefold() == name_cf:
-            uuid = space.get("uuid")
-            if isinstance(uuid, str) and uuid:
-                return uuid
+            return space
+    return None
+
+
+def workspace_record_by_uuid(session: dict, uuid: str) -> dict | None:
+    """Return the workspace record matching *uuid*, if present."""
+    for space in session.get("spaces", []):
+        if isinstance(space, dict) and space.get("uuid") == uuid:
+            return space
+    return None
+
+
+def workspace_container_tab_id(session: dict, workspace_uuid: str) -> int:
+    """Return the numeric container tab ID for one workspace."""
+    space = workspace_record_by_uuid(session, workspace_uuid)
+    if not isinstance(space, dict):
+        return 0
+    raw = space.get("containerTabId", 0)
+    if isinstance(raw, dict):
+        raw = raw.get("id", 0)
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+        return raw
+    return 0
+
+
+def workspace_has_collapsed_pinned_tabs(space: dict) -> bool:
+    """Return the persisted collapsed-pinned-tabs flag for one workspace."""
+    return bool(space.get("hasCollapsedPinnedTabs", False))
+
+
+def workspace_theme_from_record(space: dict) -> WorkspaceThemeSpec:
+    """Normalize one session workspace theme into the declarative theme shape."""
+    raw_theme = space.get("theme")
+    if not isinstance(raw_theme, dict):
+        return WorkspaceThemeSpec()
+
+    theme_map = cast("dict[str, object]", raw_theme)
+    default_theme_type = cast("str", DEFAULT_WORKSPACE_THEME["type"])
+    theme_type_obj = theme_map.get("type", default_theme_type)
+    if not isinstance(theme_type_obj, str) or not theme_type_obj.strip():
+        theme_type_obj = default_theme_type
+
+    raw_colors_obj = theme_map.get("gradientColors", [])
+    if not isinstance(raw_colors_obj, list):
+        raw_colors_obj = []
+    gradient_colors = tuple(
+        color.strip()
+        for color in raw_colors_obj
+        if isinstance(color, str) and color.strip()
+    )
+
+    default_opacity = cast("float", DEFAULT_WORKSPACE_THEME["opacity"])
+    opacity_obj = theme_map.get("opacity", default_opacity)
+    if (
+        not isinstance(opacity_obj, int | float)
+        or isinstance(opacity_obj, bool)
+        or opacity_obj < 0
+        or opacity_obj > 1
+    ):
+        opacity_obj = default_opacity
+
+    default_texture = cast("int", DEFAULT_WORKSPACE_THEME["texture"])
+    texture_obj = theme_map.get("texture", default_texture)
+    if (
+        not isinstance(texture_obj, int)
+        or isinstance(texture_obj, bool)
+        or texture_obj < 0
+    ):
+        texture_obj = default_texture
+
+    return WorkspaceThemeSpec(
+        type=theme_type_obj.strip(),
+        gradient_colors=gradient_colors,
+        opacity=float(opacity_obj),
+        texture=texture_obj,
+    )
+
+
+def create_workspace_entry(spec: WorkspaceSpec) -> dict:
+    """Construct a new workspace entry for the session file."""
+    workspace = {
+        "uuid": f"{{{uuidlib.uuid4()}}}",
+        "name": spec.name,
+        "theme": (
+            spec.theme.to_session_dict()
+            if spec.theme is not None
+            else WorkspaceThemeSpec().to_session_dict()
+        ),
+        "containerTabId": spec.container_tab_id or 0,
+        "hasCollapsedPinnedTabs": spec.has_collapsed_pinned_tabs or False,
+    }
+    if spec.icon:
+        workspace["icon"] = spec.icon
+    return workspace
+
+
+def ensure_workspace(session: dict, spec: WorkspaceSpec) -> tuple[str, WorkspaceSpec | None]:
+    """Resolve a workspace, creating it in-session when missing."""
+    existing = workspace_record_by_name(session, spec.name)
+    if existing is not None:
+        uuid = existing.get("uuid")
+        if isinstance(uuid, str) and uuid:
+            return uuid, None
+        msg = f"Workspace '{spec.name}' exists but has no valid UUID."
+        raise ZenFoldersError(msg)
+
+    workspace = create_workspace_entry(spec)
+    session.setdefault("spaces", []).append(workspace)
+    return workspace["uuid"], spec
+
+
+def plan_workspace_metadata_updates(
+    plan: Plan,
+    session: dict,
+    workspace_uuid: str,
+    spec: WorkspaceSpec,
+) -> None:
+    """Record safe workspace metadata updates and container-ID mismatches."""
+    space = workspace_record_by_uuid(session, workspace_uuid)
+    if not isinstance(space, dict):
+        return
+
+    current_icon = space.get("icon") if isinstance(space.get("icon"), str) else None
+    if spec.icon is not None and current_icon != spec.icon:
+        plan.workspace_updates.append(
+            f"icon: {current_icon or '<unset>'} -> {spec.icon}"
+        )
+
+    if spec.theme is not None:
+        current_theme = workspace_theme_from_record(space)
+        if current_theme != spec.theme:
+            plan.workspace_updates.append(
+                "theme: "
+                f"{current_theme.to_config_dict()} -> {spec.theme.to_config_dict()}"
+            )
+
+    if spec.has_collapsed_pinned_tabs is not None:
+        current_collapsed = workspace_has_collapsed_pinned_tabs(space)
+        if current_collapsed != spec.has_collapsed_pinned_tabs:
+            plan.workspace_updates.append(
+                "hasCollapsedPinnedTabs: "
+                f"{current_collapsed} -> {spec.has_collapsed_pinned_tabs}"
+            )
+
+    if spec.container_tab_id is not None:
+        current_container_tab_id = workspace_container_tab_id(session, workspace_uuid)
+        if current_container_tab_id != spec.container_tab_id:
+            plan.warnings.append(
+                f"Workspace '{spec.name}' has containerTabId "
+                f"{current_container_tab_id}, but config requests "
+                f"{spec.container_tab_id}. zen-folders does not rewrite "
+                "container IDs for existing workspaces; recreate the "
+                "workspace if you need to change it."
+            )
+
+
+
+def apply_workspace_metadata(
+    session: dict,
+    workspace_uuid: str,
+    spec: WorkspaceSpec,
+) -> None:
+    """Apply safe workspace metadata updates for an existing workspace."""
+    space = workspace_record_by_uuid(session, workspace_uuid)
+    if not isinstance(space, dict):
+        return
+
+    if spec.icon is not None:
+        space["icon"] = spec.icon
+    if spec.theme is not None:
+        space["theme"] = spec.theme.to_session_dict()
+    if spec.has_collapsed_pinned_tabs is not None:
+        space["hasCollapsedPinnedTabs"] = spec.has_collapsed_pinned_tabs
+
+
+
+def resolve_workspace(session: dict, name: str) -> str:
+    """Resolve a workspace name to its UUID. Falls back to treating name as UUID."""
+    existing = workspace_record_by_name(session, name)
+    if existing is not None:
+        uuid = existing.get("uuid")
+        if isinstance(uuid, str) and uuid:
+            return uuid
 
     # Maybe it's already a UUID
     if name.startswith("{") and name.endswith("}"):
@@ -435,24 +997,101 @@ def folders_for_workspace(session: dict, workspace: str) -> list[dict]:
     ]
 
 
-def zen_profile_dir(profile: str) -> Path:
+def zen_profile_dir(profile: str | None) -> Path:
     """Resolve a profile argument to the profile directory path."""
-    candidate = Path(profile).expanduser()
-    if candidate.is_file():
-        return candidate.parent
-    profile_path = candidate if candidate.is_absolute() else ZEN_PROFILES / profile
-    if profile_path.exists() and profile_path.is_dir():
-        return profile_path
-    return session_file(profile).parent
+    return resolve_profile_dir(profile)
 
 
-def zen_is_running(profile: str) -> bool:
-    """Heuristically detect whether Zen still holds the profile lock."""
+def zen_lock_paths(profile: str | None) -> list[Path]:
+    """Return existing profile lock-file paths for one Zen profile."""
     profile_dir = zen_profile_dir(profile)
-    return any((profile_dir / name).exists() for name in PROFILE_LOCK_FILENAMES)
+    return [
+        profile_dir / name
+        for name in PROFILE_LOCK_FILENAMES
+        if (profile_dir / name).exists()
+    ]
 
 
-def require_zen_closed(profile: str) -> None:
+def _lock_probe_state(path: Path) -> bool | None:
+    """Return whether *path* appears actively locked, if probeable."""
+    if fcntl is None:
+        return None
+
+    try:
+        fd = os.open(path, os.O_RDWR)
+    except OSError:
+        return None
+
+    locked = False
+    try:
+        try:
+            fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EAGAIN):
+                locked = True
+            else:
+                return None
+        else:
+            with contextlib.suppress(OSError):
+                fcntl.lockf(fd, fcntl.LOCK_UN)
+        return locked
+    finally:
+        os.close(fd)
+
+
+def zen_profile_lock_state(profile: str | None) -> bool | None:
+    """Return whether the target profile lock appears active."""
+    locks = zen_lock_paths(profile)
+    if not locks:
+        return False
+
+    saw_unknown = False
+    for path in locks:
+        state = _lock_probe_state(path)
+        if state is True:
+            return True
+        if state is None:
+            saw_unknown = True
+    if saw_unknown:
+        return None
+    return False
+
+
+def zen_process_is_running() -> bool | None:
+    """Best-effort detection of a running Zen/Twilight GUI process."""
+    try:
+        result = subprocess.run(
+            ["/bin/ps", "ax", "-o", "command="],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        return None
+
+    for line in result.stdout.splitlines():
+        command = line.strip().casefold()
+        if not command:
+            continue
+        if ".app/contents/macos/zen" in command:
+            return True
+    return False
+
+
+def zen_is_running(profile: str | None) -> bool:
+    """Detect whether Zen appears to be actively using the target profile."""
+    lock_state = zen_profile_lock_state(profile)
+    if lock_state is not None:
+        return lock_state
+
+    process_state = zen_process_is_running()
+    if process_state is not None:
+        return process_state
+
+    return bool(zen_lock_paths(profile))
+
+
+def require_zen_closed(profile: str | None) -> None:
     """Abort when Zen is currently running against the target profile."""
     path = session_file(profile)
     if zen_is_running(profile):
@@ -618,6 +1257,7 @@ def make_pinned_tab(
     workspace_uuid: str,
     folder_id: str,
     sync_id: str,
+    user_context_id: int = 0,
 ) -> dict:
     """Construct a new pinned tab payload for insertion into session JSON."""
     return {
@@ -630,7 +1270,7 @@ def make_pinned_tab(
         "zenSyncId": sync_id,
         "groupId": folder_id,
         "searchMode": 0,
-        "userContextId": 0,
+        "userContextId": user_context_id,
     }
 
 
@@ -642,6 +1282,8 @@ class Plan:
 
     def __init__(self) -> None:
         """Initialize empty change collections for one reconciliation run."""
+        self.workspace_to_create: WorkspaceSpec | None = None
+        self.workspace_updates: list[str] = []
         self.folders_to_create: list[str] = []  # names
         self.folders_to_delete: list[str] = []  # names
         self.tabs_to_create: list[tuple[str, str]] = []  # (url_preview, folder)
@@ -655,7 +1297,9 @@ class Plan:
     def has_changes(self) -> bool:
         """Return whether this plan has any data-mutating operations."""
         return bool(
-            self.folders_to_create
+            self.workspace_to_create
+            or self.workspace_updates
+            or self.folders_to_create
             or self.folders_to_delete
             or self.tabs_to_create
             or self.tab_moves
@@ -1033,6 +1677,7 @@ def _create_folder(
     """Create a folder plus group and placeholder tab entries."""
     folder_id = next_sync_id(existing_ids)
     empty_id = next_sync_id(existing_ids)
+    user_context_id = workspace_container_tab_id(session, workspace_uuid)
     session["tabs"].append({
         "entries": [],
         "lastAccessed": 0,
@@ -1043,7 +1688,7 @@ def _create_folder(
         "groupId": folder_id,
         "zenIsEmpty": True,
         "searchMode": 0,
-        "userContextId": 0,
+        "userContextId": user_context_id,
     })
     session["groups"].append({
         "pinned": True,
@@ -1114,6 +1759,9 @@ def _assign_tabs_for_folder(
                 workspace_uuid=context.workspace_uuid,
                 folder_id=folder_id,
                 sync_id=next_sync_id(context.existing_ids),
+                user_context_id=workspace_container_tab_id(
+                    context.session, context.workspace_uuid
+                ),
             )
             context.session["tabs"].append(tab)
             context.all_pinned.append(tab)
@@ -1360,6 +2008,10 @@ def _print_lines(lines: list[str]) -> None:
 def _plan_summary_parts(plan: Plan) -> list[str]:
     """Build a short human summary of plan operations."""
     parts: list[str] = []
+    if plan.workspace_to_create is not None:
+        parts.append(f"create workspace '{plan.workspace_to_create.name}'")
+    if plan.workspace_updates:
+        parts.append("update workspace metadata")
     if plan.folders_to_create:
         parts.append(f"create {len(plan.folders_to_create)} folder(s)")
     if plan.folders_to_delete:
@@ -1395,6 +2047,16 @@ def _print_plan_collection(title: str, prefix: str, items: list[str]) -> None:
     _stdout(title)
     for item in items:
         _stdout(f"  {prefix} {item}")
+    _stdout()
+
+
+def _print_workspace_updates(updates: list[str]) -> None:
+    """Render planned workspace metadata updates."""
+    if not updates:
+        return
+    _stdout("Workspace metadata to update:")
+    for item in updates:
+        _stdout(f"  ~ {item}")
     _stdout()
 
 
@@ -1664,7 +2326,24 @@ def cmd_dump(args: argparse.Namespace) -> int:
     folders = _ordered_folders(folders_for_workspace(session, workspace_uuid))
 
     # Build map-based structure: {workspace: {folder: {title: url}}}
-    folders_map: dict[str, dict[str, str]] = {}
+    workspace_map: dict[str, object] = {}
+    space = workspace_record_by_uuid(session, workspace_uuid)
+    if isinstance(space, dict):
+        workspace_meta: dict[str, object] = {}
+        icon = space.get("icon")
+        if isinstance(icon, str) and icon:
+            workspace_meta["icon"] = icon
+        container_tab_id = workspace_container_tab_id(session, workspace_uuid)
+        if container_tab_id != 0:
+            workspace_meta["containerTabId"] = container_tab_id
+        if workspace_has_collapsed_pinned_tabs(space):
+            workspace_meta["hasCollapsedPinnedTabs"] = True
+        theme = workspace_theme_from_record(space)
+        if not theme.is_default():
+            workspace_meta["theme"] = theme.to_config_dict()
+        if workspace_meta:
+            workspace_map[WORKSPACE_META_KEY] = workspace_meta
+
     for folder in folders:
         folder_id = folder.get("id")
         tabs_map: dict[str, str] = {}
@@ -1679,9 +2358,9 @@ def cmd_dump(args: argparse.Namespace) -> int:
                         title = f"{base_title} ({suffix})"
                         suffix += 1
                     tabs_map[title] = url
-        folders_map[folder_display_name(folder)] = tabs_map
+        workspace_map[folder_display_name(folder)] = tabs_map
 
-    result: dict = {ws_name: folders_map}
+    result: dict = {ws_name: workspace_map}
     output = yaml.dump(
         result, default_flow_style=False, sort_keys=False, allow_unicode=True
     )
@@ -1704,16 +2383,38 @@ def cmd_diff(args: argparse.Namespace) -> int:
     """Show a dry-run reconciliation plan for the provided config."""
     _, session = load_session(args.profile)
     raw_config = load_yaml(Path(args.config))
-    config_workspace_name, config_folders = parse_config(raw_config)
+    workspace_spec, config_folders = parse_config(raw_config)
 
-    workspace_uuid = resolve_workspace(session, config_workspace_name)
-    plan = compute_plan(session, config_folders, workspace_uuid)
+    preview_session = dict(session)
+    preview_session["spaces"] = list(session.get("spaces", []))
+    try:
+        workspace_uuid = resolve_workspace(preview_session, workspace_spec.name)
+        created_workspace = None
+    except ZenFoldersError:
+        workspace_uuid, created_workspace = ensure_workspace(
+            preview_session, workspace_spec
+        )
+
+    plan = compute_plan(preview_session, config_folders, workspace_uuid)
+    plan.workspace_to_create = created_workspace
+    if created_workspace is None:
+        plan_workspace_metadata_updates(
+            plan,
+            preview_session,
+            workspace_uuid,
+            workspace_spec,
+        )
 
     if not plan.has_changes and not plan.warnings:
         _stdout("No changes needed. Session matches config.")
         return 0
 
     _print_plan_warnings(plan)
+    if plan.workspace_to_create is not None:
+        _stdout("Workspace to create:")
+        _stdout(f"  + {plan.workspace_to_create.name}")
+        _stdout()
+    _print_workspace_updates(plan.workspace_updates)
     _print_plan_collection("Folders to create:", "+", plan.folders_to_create)
     _print_plan_collection("Folders to delete:", "-", plan.folders_to_delete)
     _print_tab_moves(plan.tab_moves)
@@ -1729,10 +2430,23 @@ def cmd_apply(args: argparse.Namespace) -> int:
     require_zen_closed(args.profile)
     path, session = load_session(args.profile)
     raw_config = load_yaml(Path(args.config))
-    config_workspace_name, config_folders = parse_config(raw_config)
+    workspace_spec, config_folders = parse_config(raw_config)
 
-    workspace_uuid = resolve_workspace(session, config_workspace_name)
+    try:
+        workspace_uuid = resolve_workspace(session, workspace_spec.name)
+        created_workspace = None
+    except ZenFoldersError:
+        workspace_uuid, created_workspace = ensure_workspace(session, workspace_spec)
+
     plan = compute_plan(session, config_folders, workspace_uuid)
+    plan.workspace_to_create = created_workspace
+    if created_workspace is None:
+        plan_workspace_metadata_updates(
+            plan,
+            session,
+            workspace_uuid,
+            workspace_spec,
+        )
 
     if plan.warnings:
         for warning in plan.warnings:
@@ -1757,6 +2471,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     backup = backup_session(path)
     _stdout(f"Backup: {backup.name}")
 
+    apply_workspace_metadata(session, workspace_uuid, workspace_spec)
     apply_plan(session, config_folders, workspace_uuid, plan)
     write_session(path, session)
     _stdout("Applied successfully.")
@@ -1788,6 +2503,21 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_is_running(args: argparse.Namespace) -> int:
+    """Return whether Zen appears to be actively using the target profile."""
+    if zen_is_running(args.profile):
+        _stdout("running")
+        return 0
+    _stdout("not-running")
+    return 1
+
+
+def cmd_profile_path(args: argparse.Namespace) -> int:
+    """Print the resolved profile directory path and exit."""
+    _stdout(str(zen_profile_dir(args.profile)))
+    return 0
+
+
 # -- Main ---------------------------------------------------------------------
 
 
@@ -1795,16 +2525,28 @@ def main() -> int:
     """Parse CLI arguments and dispatch to the selected subcommand."""
     parser = argparse.ArgumentParser(
         description="Declarative pinned-tab folder management for Zen browser.",
-        epilog="Zen must be closed for commands that modify the session.",
+        epilog=(
+            "Zen must be closed for commands that modify the session.\n\n"
+            "Optional workspace metadata example:\n"
+            "  Work:\n"
+            "    __workspace__:\n"
+            '      icon: "🏢"\n'
+            "      containerTabId: 6\n"
+            "      hasCollapsedPinnedTabs: false\n"
+            "      theme:\n"
+            '        gradientColors: ["#8caaee", "#99d1db"]\n'
+            "        opacity: 0.5\n"
+            "        texture: 0\n"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "-p",
         "--profile",
-        default=DEFAULT_PROFILE,
+        default=None,
         help=(
-            "Zen profile directory name (under ~/Library/Application Support/zen/Profiles), "
-            "or a direct path to a profile directory/session file"
+            "Zen profile directory name, a direct path to a profile directory/session file, "
+            "or a human profile name from profiles.ini. Default: auto-detect from profiles.ini"
         ),
     )
     parser.add_argument(
@@ -1853,6 +2595,15 @@ def main() -> int:
     # -- check --
     sub.add_parser("check", help="Run structural consistency check for folders")
 
+    # -- is-running --
+    sub.add_parser(
+        "is-running",
+        help="Exit 0 if Zen appears to be using the target profile, else 1",
+    )
+
+    # -- profile-path --
+    sub.add_parser("profile-path", help="Print the resolved profile directory path")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -1866,6 +2617,8 @@ def main() -> int:
         "diff": cmd_diff,
         "apply": cmd_apply,
         "check": cmd_check,
+        "is-running": cmd_is_running,
+        "profile-path": cmd_profile_path,
     }
     try:
         return dispatch[args.command](args)

@@ -1,22 +1,20 @@
 {
   stdenvNoCC,
   fetchurl,
-  outputs,
+  selfSource,
   lib,
   ...
 }:
 let
-  inherit (outputs.lib) sources;
-  info = sources.commander;
   appName = "Commander";
 in
 stdenvNoCC.mkDerivation {
   pname = "commander";
-  inherit (info) version;
+  inherit (selfSource) version;
 
   src = fetchurl {
-    url = info.urls.${stdenvNoCC.hostPlatform.system};
-    hash = info.hashes.${stdenvNoCC.hostPlatform.system};
+    url = selfSource.urls.${stdenvNoCC.hostPlatform.system};
+    hash = selfSource.hashes.${stdenvNoCC.hostPlatform.system};
   };
 
   dontUnpack = true;

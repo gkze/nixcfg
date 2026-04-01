@@ -13,18 +13,35 @@ let
     && name != "default.nix"
     && !(builtins.elem (stripNixSuffix name) fragDirs)
   ) entryNames;
+
+  # Overlay fragments with a sibling sources.json get that entry as
+  # `selfSource`, which keeps single-source overlays from repeatedly indexing
+  # into the shared sources attrset.
+  withSelfSource =
+    name:
+    fragArgs
+    // (
+      if fragArgs ? sources && builtins.hasAttr name fragArgs.sources then
+        {
+          selfSource = fragArgs.sources.${name};
+        }
+      else
+        { }
+    );
+
   dirPairs = builtins.map (name: {
     inherit name;
-    attrs = import (overlayDir + "/${name}") fragArgs;
+    attrs = import (overlayDir + "/${name}") (withSelfSource name);
   }) fragDirs;
   filePairs = builtins.map (
     name:
     let
-      attrs = import (overlayDir + "/${name}") fragArgs;
+      fragmentName = stripNixSuffix name;
+      attrs = import (overlayDir + "/${name}") (withSelfSource fragmentName);
     in
     if builtins.isAttrs attrs then
       {
-        name = builtins.substring 0 ((builtins.stringLength name) - 4) name;
+        name = fragmentName;
         inherit attrs;
       }
     else

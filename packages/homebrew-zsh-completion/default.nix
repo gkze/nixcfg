@@ -2,16 +2,14 @@
   fetchurl,
   lib,
   stdenvNoCC,
-  outputs,
+  selfSource,
   ...
 }:
 let
-  slib = outputs.lib;
-  info = slib.sourceEntry "homebrew-zsh-completion";
-  inherit (info) version;
+  inherit (selfSource) version;
   source = lib.findFirst (
     entry: entry.hashType == "sha256" && lib.hasInfix "/${version}/" entry.url
-  ) null info.hashes;
+  ) null selfSource.hashes;
 in
 assert source != null;
 stdenvNoCC.mkDerivation {

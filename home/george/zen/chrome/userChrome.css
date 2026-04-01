@@ -1,0 +1,214 @@
+/* Catppuccin Frappe Blue userChrome.css
+ *
+ * Declarative source of truth for Zen/Twilight chrome styling in nixcfg.
+ *
+ * Known unsafe on this macOS/Twilight setup after a full restart:
+ *   1. hbox#titlebar { background-color: #292c3c !important; }
+ *   2. restoring the macOS Zen background-variable block for toolbar /
+ *      generic background layers
+ *
+ * Both changes caused Twilight to relaunch into
+ * safe/recovery/troubleshoot mode.
+ *
+ * This managed version keeps the working Catppuccin styling and the final
+ * splitter treatment that preserves the sidebar/content seam while still
+ * allowing a subtle neutral hover highlight.
+ */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --zen-colors-primary: #414559 !important;
+    --zen-primary-color: #8caaee !important;
+    --zen-colors-secondary: #414559 !important;
+    --zen-colors-tertiary: #292c3c !important;
+    --zen-colors-border: #8caaee !important;
+    --toolbarbutton-icon-fill: #8caaee !important;
+    --lwt-text-color: #c6d0f5 !important;
+    --toolbar-field-color: #c6d0f5 !important;
+    --tab-selected-textcolor: rgb(169, 189, 241) !important;
+    --toolbar-field-focus-color: #c6d0f5 !important;
+    --toolbar-color: #c6d0f5 !important;
+    --newtab-text-primary-color: #c6d0f5 !important;
+    --arrowpanel-color: #c6d0f5 !important;
+    --arrowpanel-background: #303446 !important;
+    --sidebar-text-color: #c6d0f5 !important;
+    --lwt-sidebar-text-color: #c6d0f5 !important;
+    --lwt-sidebar-background-color: #232634 !important;
+    --toolbar-bgcolor: #414559 !important;
+    --newtab-background-color: #303446 !important;
+    --zen-themed-toolbar-bg: #292c3c !important;
+    --zen-main-browser-background: #292c3c !important;
+    --toolbox-bgcolor-inactive: #292c3c !important;
+    --zen-element-separation: 8px !important;
+    --zen-webview-border-radius: 10px !important;
+  }
+
+  #permissions-granted-icon {
+    color: #292c3c !important;
+  }
+
+  .sidebar-placesTree {
+    background-color: #303446 !important;
+  }
+
+  #zen-workspaces-button {
+    background-color: #303446 !important;
+  }
+
+  #TabsToolbar {
+    background-color: #292c3c !important;
+  }
+
+  .urlbar-background {
+    background-color: #303446 !important;
+  }
+
+  .content-shortcuts {
+    background-color: #303446 !important;
+    border-color: #8caaee !important;
+  }
+
+  .urlbarView-url {
+    color: #8caaee !important;
+  }
+
+  #zenEditBookmarkPanelFaviconContainer {
+    background: #232634 !important;
+  }
+
+  #zen-media-controls-toolbar {
+    & #zen-media-progress-bar {
+      &::-moz-range-track {
+        background: #414559 !important;
+      }
+    }
+  }
+
+  toolbar .toolbarbutton-1 {
+    &:not([disabled]) {
+      &:is([open], [checked])
+        > :is(
+          .toolbarbutton-icon,
+          .toolbarbutton-text,
+          .toolbarbutton-badge-stack
+        ) {
+        fill: #232634;
+      }
+    }
+  }
+
+  .identity-color-blue {
+    --identity-tab-color: #8caaee !important;
+    --identity-icon-color: #8caaee !important;
+  }
+
+  .identity-color-turquoise {
+    --identity-tab-color: #81c8be !important;
+    --identity-icon-color: #81c8be !important;
+  }
+
+  .identity-color-green {
+    --identity-tab-color: #a6d189 !important;
+    --identity-icon-color: #a6d189 !important;
+  }
+
+  .identity-color-yellow {
+    --identity-tab-color: #e5c890 !important;
+    --identity-icon-color: #e5c890 !important;
+  }
+
+  .identity-color-orange {
+    --identity-tab-color: #ef9f76 !important;
+    --identity-icon-color: #ef9f76 !important;
+  }
+
+  .identity-color-red {
+    --identity-tab-color: #e78284 !important;
+    --identity-icon-color: #e78284 !important;
+  }
+
+  .identity-color-pink {
+    --identity-tab-color: #f4b8e4 !important;
+    --identity-icon-color: #f4b8e4 !important;
+  }
+
+  .identity-color-purple {
+    --identity-tab-color: #ca9ee6 !important;
+    --identity-icon-color: #ca9ee6 !important;
+  }
+
+  #zen-appcontent-navbar-container {
+    background-color: #292c3c !important;
+  }
+
+  /* Splitter styling:
+   * keep the idle rail matched to the sidebar, then brighten the actual
+   * splitter element itself on hover. This avoids relying on pseudo-elements,
+   * which don't seem to render consistently here.
+   */
+  #sidebar-splitter,
+  #zen-sidebar-splitter {
+    --catppuccin-splitter-idle: #292c3c;
+    --catppuccin-splitter-hover-neutral: color-mix(
+      in srgb,
+      white 28%,
+      #292c3c 72%
+    );
+    border: none !important;
+    opacity: 1 !important;
+    background: var(--catppuccin-splitter-idle) !important;
+    background-color: var(--catppuccin-splitter-idle) !important;
+    transition:
+      background-color 0.18s ease-in-out,
+      background 0.18s ease-in-out,
+      opacity 0.18s ease-in-out !important;
+  }
+
+  #sidebar-splitter::before,
+  #zen-sidebar-splitter::before {
+    display: none !important;
+    opacity: 0 !important;
+  }
+
+  #sidebar-splitter:hover,
+  #zen-sidebar-splitter:hover {
+    background: var(--catppuccin-splitter-hover-neutral) !important;
+    background-color: var(--catppuccin-splitter-hover-neutral) !important;
+  }
+
+  /* Wrapper appearance reset that proved safe in testing */
+  #zen-main-app-wrapper,
+  #zen-appcontent-wrapper,
+  #zen-sidebar-splitter,
+  #zen-browser-background {
+    appearance: unset !important;
+    -moz-default-appearance: none !important;
+  }
+
+  /* Wrapper/background painting that proved safe in testing */
+  #zen-main-app-wrapper,
+  #zen-appcontent-wrapper,
+  #zen-browser-background,
+  .zen-browser-generic-background,
+  .zen-toolbar-background,
+  #navigator-toolbox,
+  #tabbrowser-tabbox,
+  #main-window {
+    background: #292c3c !important;
+    background-color: #292c3c !important;
+  }
+
+  /* Safer seam test: remove panel shadows that can show through at the
+   * sidebar/content corner intersections.
+   */
+  #zen-tabbox-wrapper #sidebar-box,
+  #tabbrowser-tabbox #tabbrowser-tabpanels .browserSidebarContainer {
+    box-shadow: none !important;
+  }
+
+  /* Intentionally omitted because it triggered startup recovery mode:
+   * hbox#titlebar {
+   *   background-color: #292c3c !important;
+   * }
+   */
+}

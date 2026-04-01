@@ -5,14 +5,14 @@
   ...
 }:
 mkDmgApp {
-  pname = "conductor";
+  pname = "raycast";
   info = selfSource;
   meta = with lib; {
-    description = "Run a team of coding agents on your Mac";
-    homepage = "https://www.conductor.build/";
+    description = "Productivity launcher and command palette for macOS";
+    homepage = "https://www.raycast.com/";
     license = licenses.unfree;
     platforms = platforms.darwin;
     sourceProvenance = with sourceTypes; [ binaryNativeCode ];
-    mainProgram = "conductor";
+    mainProgram = "raycast";
   };
 }

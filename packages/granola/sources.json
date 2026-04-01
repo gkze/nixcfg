@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-KBNX+N4KwSMrYMY5ovfjjXiHWiQVCgEKQqYeWq2mlyg=",
+    "x86_64-darwin": "sha256-KBNX+N4KwSMrYMY5ovfjjXiHWiQVCgEKQqYeWq2mlyg="
+  },
+  "urls": {
+    "aarch64-darwin": "https://dr2v7l5emb758.cloudfront.net/7.87.7/Granola-7.87.7-mac-universal.zip",
+    "x86_64-darwin": "https://dr2v7l5emb758.cloudfront.net/7.87.7/Granola-7.87.7-mac-universal.zip"
+  },
+  "version": "7.87.7"
+}
