@@ -1,12 +1,16 @@
 { config, lib, ... }:
 let
   inherit (lib)
+    concatLists
     mapAttrs
+    mapAttrs'
     mapAttrsToList
     mkEnableOption
     mkIf
     mkOption
+    nameValuePair
     optionalAttrs
+    recursiveUpdate
     types
     ;
 
@@ -49,20 +53,115 @@ let
     };
   };
 
+  profileType = types.submodule {
+    options = {
+      mcpServers = mkOption {
+        type = types.attrsOf (types.attrsOf types.anything);
+        default = { };
+        description = "Per-profile MCP server overrides merged over nixcfg.opencode.mcpServers.";
+      };
+
+      settings = mkOption {
+        type = types.attrsOf types.anything;
+        default = { };
+        description = "Additional top-level settings merged over the shared OpenCode config.";
+      };
+    };
+  };
+
   mkServerConfig =
     server:
-    {
-      enabled = server.enable;
-      inherit (server) type;
+    let
+      enabled = server.enabled or (server.enable or false);
+      serverType = server.type or "local";
+      command = server.command or [ ];
+      url = server.url or null;
+      environment = server.environment or { };
+      extras = removeAttrs server [
+        "command"
+        "enable"
+        "enabled"
+        "environment"
+        "type"
+        "url"
+      ];
+    in
+    extras
+    // {
+      inherit enabled;
+      type = serverType;
     }
-    // optionalAttrs (server.command != [ ]) { inherit (server) command; }
-    // optionalAttrs (server.url != null) { inherit (server) url; }
-    // optionalAttrs (server.environment != { }) { inherit (server) environment; };
+    // optionalAttrs (command != [ ]) { inherit command; }
+    // optionalAttrs (url != null) { inherit url; }
+    // optionalAttrs (environment != { }) { inherit environment; };
+
+  renderMcpServers = servers: mapAttrs (_: mkServerConfig) servers;
+
+  mergeProfileMcpServers = profileMcpServers: recursiveUpdate cfg.mcpServers profileMcpServers;
+
+  mkServerAssertions =
+    optionPath: servers:
+    mapAttrsToList (
+      name: server:
+      let
+        isLocal = (server.type or "local") == "local";
+        command = server.command or [ ];
+        url = server.url or null;
+        isValid = if isLocal then command != [ ] else url != null;
+      in
+      {
+        assertion = isValid;
+        message =
+          if isLocal then
+            "${optionPath}.${name}: local servers require a non-empty command."
+          else
+            "${optionPath}.${name}: remote servers require a non-null url.";
+      }
+    ) servers;
+
+  baseOpencodeSettings = {
+    theme = config.theme.slug;
+    plugin = cfg.plugins;
+    tui.scroll_acceleration.enabled = true;
+  };
+
+  emptyProfile = {
+    settings = { };
+    mcpServers = { };
+  };
+
+  mkProfileConfig =
+    profile:
+    let
+      mergedSettings = recursiveUpdate baseOpencodeSettings profile.settings;
+      mergedMcpServers = mergeProfileMcpServers profile.mcpServers;
+    in
+    mergedSettings
+    // {
+      "$schema" = profile.settings."$schema" or "https://opencode.ai/config.json";
+      mcp = renderMcpServers mergedMcpServers;
+    };
+
+  activeProfileConfig = cfg.profiles.${cfg.activeProfile} or emptyProfile;
 in
 {
   options.nixcfg.opencode = {
     enable = mkEnableOption "OpenCode client configuration" // {
       default = true;
+    };
+
+    activeProfile = mkOption {
+      type = types.str;
+      default = "personal";
+      description = "Named OpenCode profile materialized to opencode/active.json for GUI launches.";
+    };
+
+    profiles = mkOption {
+      type = types.attrsOf profileType;
+      default = {
+        personal = { };
+      };
+      description = "Named OpenCode profile overrides materialized to opencode/<name>.json.";
     };
 
     mcpServers = mkOption {
@@ -105,36 +204,45 @@ in
       type = types.listOf types.str;
       default = [
         "@franlol/opencode-md-table-formatter"
-        "@mohak34/opencode-notifier@latest"
+        # "@mohak34/opencode-notifier@latest"
       ];
       description = "OpenCode plugins to install.";
     };
   };
 
   config = mkIf cfg.enable {
-    assertions = mapAttrsToList (
-      name: server:
-      let
-        isValid = if server.type == "local" then server.command != [ ] else server.url != null;
-      in
+    assertions = [
       {
-        assertion = isValid;
-        message =
-          if server.type == "local" then
-            "nixcfg.opencode.mcpServers.${name}: local servers require a non-empty command."
-          else
-            "nixcfg.opencode.mcpServers.${name}: remote servers require a non-null url.";
+        assertion = builtins.hasAttr cfg.activeProfile cfg.profiles;
+        message = "nixcfg.opencode.activeProfile must match a key in nixcfg.opencode.profiles.";
       }
-    ) cfg.mcpServers;
+    ]
+    ++ mkServerAssertions "nixcfg.opencode.mcpServers" cfg.mcpServers
+    ++ concatLists (
+      mapAttrsToList (
+        profileName: profile:
+        mkServerAssertions "nixcfg.opencode.profiles.${profileName}.mcpServers" (
+          mergeProfileMcpServers profile.mcpServers
+        )
+      ) cfg.profiles
+    );
 
     programs.opencode = {
       enable = true;
-      settings = {
-        theme = config.theme.slug;
-        plugin = cfg.plugins;
-        tui.scroll_acceleration.enabled = true;
-        mcp = mapAttrs (_: mkServerConfig) cfg.mcpServers;
+      settings = baseOpencodeSettings // {
+        mcp = renderMcpServers cfg.mcpServers;
       };
     };
+
+    xdg.configFile =
+      mapAttrs' (
+        profileName: profile:
+        nameValuePair "opencode/${profileName}.json" {
+          text = builtins.toJSON (mkProfileConfig profile);
+        }
+      ) cfg.profiles
+      // {
+        "opencode/active.json".text = builtins.toJSON (mkProfileConfig activeProfileConfig);
+      };
   };
 }

@@ -8,6 +8,6 @@ lib.mkDarwinHost {
   brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
   extraSystemModules = [
     "${lib.modulesPath}/darwin/george/town-dock-apps.nix"
-    (lib.mkSetOpencodeEnvModule "work.json")
+    (lib.mkSetOpencodeEnvModule "active.json")
   ];
 }

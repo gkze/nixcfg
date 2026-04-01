@@ -134,6 +134,10 @@ let
   };
 in
 {
+  imports = [
+    (lib.mkAliasOptionModule [ "nixcfg" "profiles" "work" ] [ "profiles" "work" ])
+  ];
+
   options.profiles.work = {
     enable = mkEnableOption "work profile — adds work packages, MCP servers, and shell integrations";
 
@@ -151,7 +155,7 @@ in
     opencodeMcp = mkOption {
       type = types.attrsOf types.anything;
       default = defaultOpencodeMcp;
-      description = "MCP server map written to opencode/work.json when the work profile is enabled.";
+      description = "MCP server map merged into nixcfg.opencode.profiles.work.mcpServers when the work profile is enabled.";
     };
 
     topgradeDisable = mkOption {
@@ -170,9 +174,9 @@ in
   config = mkIf cfg.enable {
     home.packages = cfg.packages;
 
-    xdg.configFile."opencode/work.json".text = builtins.toJSON {
-      "$schema" = "https://opencode.ai/config.json";
-      mcp = lib.mapAttrs (_: server: server // { enabled = server.enabled or false; }) cfg.opencodeMcp;
+    nixcfg.opencode = {
+      activeProfile = lib.mkDefault "work";
+      profiles.work.mcpServers = cfg.opencodeMcp;
     };
 
     programs = {

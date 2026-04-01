@@ -10,6 +10,10 @@ let
   cfg = config.profiles.work;
 in
 {
+  imports = [
+    (lib.mkAliasOptionModule [ "nixcfg" "profiles" "work" ] [ "profiles" "work" ])
+  ];
+
   options.profiles.work = {
     enable = mkEnableOption "work profile — adds work Homebrew casks and Mac App Store apps";
 
