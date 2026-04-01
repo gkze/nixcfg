@@ -97,7 +97,11 @@ def test_fetch_resolve_github_token_prefers_env(
 ) -> None:
     """Run this test case."""
     monkeypatch.setenv("GITHUB_TOKEN", "env-token")
-    monkeypatch.setattr(fetch.keyring, "get_password", lambda *_a, **_k: "ignored")
+    monkeypatch.setattr(
+        fetch.http_utils.keyring,
+        "get_password",
+        lambda *_a, **_k: "ignored",
+    )
     assert object.__getattribute__(fetch, "_resolve_github_token")() == "env-token"
 
 
@@ -107,7 +111,11 @@ def test_fetch_resolve_github_token_from_keyring(
     """Run this test case."""
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GH_TOKEN", raising=False)
-    monkeypatch.setattr(fetch.keyring, "get_password", lambda *_a, **_k: " keyring ")
+    monkeypatch.setattr(
+        fetch.http_utils.keyring,
+        "get_password",
+        lambda *_a, **_k: " keyring ",
+    )
     assert object.__getattribute__(fetch, "_resolve_github_token")() == "keyring"
 
 
@@ -122,7 +130,7 @@ def test_fetch_resolve_github_token_keyring_errors(
         msg = "no keyring"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr(fetch.keyring, "get_password", _boom)
+    monkeypatch.setattr(fetch.http_utils.keyring, "get_password", _boom)
     assert object.__getattribute__(fetch, "_resolve_github_token")() is None
 
 
@@ -243,53 +251,41 @@ def test_fetch_https_get_validates_hostname() -> None:
 
 def test_fetch_https_get_success_and_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
-    ok_response = _FakeHTTPResponse(status=200, reason="OK", body=b"payload")
-    ok_conn = _FakeHTTPSConnection(ok_response)
+    captured: dict[str, object] = {}
 
-    https_port = 443
-    expected_timeout = object.__getattribute__(fetch, "_HTTP_TIMEOUT_SECONDS")
+    def _fetch_url_bytes(url: str, **kwargs: object) -> tuple[bytes, dict[str, str]]:
+        captured["url"] = url
+        captured.update(kwargs)
+        return b"payload", {"X": "1"}
 
-    def _ok_connection(
-        _host: str,
-        port: int | None = None,
-        timeout: int | None = None,
-    ) -> _FakeHTTPSConnection:
-        assert port == https_port
-        assert timeout == expected_timeout
-        return ok_conn
-
-    monkeypatch.setattr(
-        fetch.http.client,
-        "HTTPSConnection",
-        _ok_connection,
-    )
+    monkeypatch.setattr(fetch.http_utils, "fetch_url_bytes", _fetch_url_bytes)
     body = object.__getattribute__(fetch, "_https_get")(
         "https://example.com/path?q=1", headers={"X-Test": "1"}
     )
     assert body == b"payload"
-    assert ok_conn.requests[0][0] == "GET"
-    assert ok_conn.requests[0][1] == "/path?q=1"
-    assert ok_conn.requests[0][2]["User-Agent"] == "nixcfg-schema-fetch"
-    assert ok_conn.requests[0][2]["X-Test"] == "1"
-    assert ok_conn.closed
-
-    bad_response = _FakeHTTPResponse(status=404, reason="Not Found", body=b"nope")
-    bad_conn = _FakeHTTPSConnection(bad_response)
-
-    def _bad_connection(
-        _host: str,
-        port: int | None = None,
-        timeout: int | None = None,
-    ) -> _FakeHTTPSConnection:
-        assert port == https_port
-        assert timeout == expected_timeout
-        return bad_conn
-
-    monkeypatch.setattr(
-        fetch.http.client,
-        "HTTPSConnection",
-        _bad_connection,
+    assert captured["url"] == "https://example.com/path?q=1"
+    assert captured["attempts"] == object.__getattribute__(fetch, "_HTTP_MAX_ATTEMPTS")
+    assert captured["max_backoff"] == object.__getattribute__(
+        fetch, "_HTTP_BACKOFF_MAX_SECONDS"
     )
+    assert captured["timeout"] == object.__getattribute__(
+        fetch, "_HTTP_TIMEOUT_SECONDS"
+    )
+    assert captured["headers"] == {
+        "User-Agent": "nixcfg-schema-fetch",
+        "X-Test": "1",
+    }
+
+    def _status_error(_url: str, **_kwargs: object) -> tuple[bytes, dict[str, str]]:
+        raise fetch.http_utils.SyncRequestError(
+            url="https://example.com/missing",
+            attempts=1,
+            kind="status",
+            detail="HTTP 404 Not Found",
+            status=404,
+        )
+
+    monkeypatch.setattr(fetch.http_utils, "fetch_url_bytes", _status_error)
     with pytest.raises(RuntimeError, match="HTTP 404"):
         object.__getattribute__(fetch, "_https_get")("https://example.com/missing")
 
@@ -297,106 +293,37 @@ def test_fetch_https_get_success_and_error(monkeypatch: pytest.MonkeyPatch) -> N
 def test_fetch_https_get_wraps_timeout_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
 
-    class _TimeoutHTTPSConnection:
-        def __init__(self) -> None:
-            self.closed_count = 0
-            self.request_calls = 0
+    def _timeout(_url: str, **_kwargs: object) -> tuple[bytes, dict[str, str]]:
+        raise fetch.http_utils.SyncRequestError(
+            url="https://example.com/slow",
+            attempts=3,
+            kind="timeout",
+            detail="timed out",
+        )
 
-        def request(self, _method: str, _path: str, headers: dict[str, str]) -> None:
-            self.request_calls += 1
-            assert headers["User-Agent"] == "nixcfg-schema-fetch"
-            msg = "timed out"
-            raise TimeoutError(msg)
-
-        def close(self) -> None:
-            self.closed_count += 1
-
-    timeout_conn = _TimeoutHTTPSConnection()
-    sleep_calls: list[float] = []
-    https_port = 443
-    expected_timeout = object.__getattribute__(fetch, "_HTTP_TIMEOUT_SECONDS")
-
-    def _sleep(seconds: float) -> None:
-        sleep_calls.append(seconds)
-
-    def _connection_factory(
-        _host: str,
-        port: int | None = None,
-        timeout: int | None = None,
-    ) -> _TimeoutHTTPSConnection:
-        assert port == https_port
-        assert timeout == expected_timeout
-        return timeout_conn
-
-    monkeypatch.setattr(
-        fetch.time,
-        "sleep",
-        _sleep,
-    )
-    monkeypatch.setattr(
-        fetch.http.client,
-        "HTTPSConnection",
-        _connection_factory,
-    )
-
+    monkeypatch.setattr(fetch.http_utils, "fetch_url_bytes", _timeout)
     with pytest.raises(
         RuntimeError,
         match=r"Timed out fetching https://example\.com/slow after 3 attempt\(s\)",
     ):
         object.__getattribute__(fetch, "_https_get")("https://example.com/slow")
 
-    max_attempts = object.__getattribute__(fetch, "_HTTP_MAX_ATTEMPTS")
-    assert timeout_conn.request_calls == max_attempts
-    assert timeout_conn.closed_count == max_attempts
-    assert sleep_calls == [
-        object.__getattribute__(fetch, "_retry_delay_seconds")(1),
-        object.__getattribute__(fetch, "_retry_delay_seconds")(2),
-    ]
-
 
 def test_fetch_https_get_retries_retryable_http_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Run this test case."""
-    responses = iter([
-        _FakeHTTPResponse(status=503, reason="Busy", body=b"busy"),
-        _FakeHTTPResponse(status=200, reason="OK", body=b"ok"),
-    ])
-    connections: list[_FakeHTTPSConnection] = []
+    calls = 0
 
-    https_port = 443
-    expected_timeout = object.__getattribute__(fetch, "_HTTP_TIMEOUT_SECONDS")
+    def _fetch_url_bytes(_url: str, **_kwargs: object) -> tuple[bytes, dict[str, str]]:
+        nonlocal calls
+        calls += 1
+        return b"ok", {}
 
-    def _make_conn(
-        _host: str,
-        port: int | None = None,
-        timeout: int | None = None,
-    ) -> _FakeHTTPSConnection:
-        assert port == https_port
-        assert timeout == expected_timeout
-        response = next(responses)
-        conn = _FakeHTTPSConnection(response)
-        connections.append(conn)
-        return conn
-
-    sleep_calls: list[float] = []
-
-    def _sleep(seconds: float) -> None:
-        sleep_calls.append(seconds)
-
-    monkeypatch.setattr(
-        fetch.time,
-        "sleep",
-        _sleep,
-    )
-    monkeypatch.setattr(fetch.http.client, "HTTPSConnection", _make_conn)
-
+    monkeypatch.setattr(fetch.http_utils, "fetch_url_bytes", _fetch_url_bytes)
     body = object.__getattribute__(fetch, "_https_get")("https://example.com/retry")
-
-    expected_attempts = 2
     assert body == b"ok"
-    assert len(connections) == expected_attempts
-    assert sleep_calls == [object.__getattribute__(fetch, "_retry_delay_seconds")(1)]
+    assert calls == 1
 
 
 def test_fetch_https_get_retries_oserror_and_reports_failure(
@@ -404,57 +331,37 @@ def test_fetch_https_get_retries_oserror_and_reports_failure(
 ) -> None:
     """Run this test case."""
 
-    class _OSErrorHTTPSConnection:
-        def __init__(self) -> None:
-            self.closed_count = 0
-            self.request_calls = 0
+    def _network(_url: str, **_kwargs: object) -> tuple[bytes, dict[str, str]]:
+        raise fetch.http_utils.SyncRequestError(
+            url="https://example.com/os",
+            attempts=3,
+            kind="network",
+            detail="network down",
+        )
 
-        def request(self, _method: str, _path: str, headers: dict[str, str]) -> None:
-            _ = headers
-            self.request_calls += 1
-            msg = "network down"
-            raise OSError(msg)
-
-        def close(self) -> None:
-            self.closed_count += 1
-
-    conn = _OSErrorHTTPSConnection()
-    sleep_calls: list[float] = []
-
-    monkeypatch.setattr(fetch.time, "sleep", sleep_calls.append)
-    monkeypatch.setattr(fetch.http.client, "HTTPSConnection", lambda *_a, **_k: conn)
-
+    monkeypatch.setattr(fetch.http_utils, "fetch_url_bytes", _network)
     with pytest.raises(
         RuntimeError,
         match=r"Network error fetching https://example\.com/os after 3 attempt\(s\): network down",
     ):
         object.__getattribute__(fetch, "_https_get")("https://example.com/os")
 
-    max_attempts = object.__getattribute__(fetch, "_HTTP_MAX_ATTEMPTS")
-    assert conn.request_calls == max_attempts
-    assert conn.closed_count == max_attempts
-    assert sleep_calls == [
-        object.__getattribute__(fetch, "_retry_delay_seconds")(1),
-        object.__getattribute__(fetch, "_retry_delay_seconds")(2),
-    ]
-
 
 def test_fetch_https_get_retryable_status_exhausted_reports_attempts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Run this test case."""
-    max_attempts = object.__getattribute__(fetch, "_HTTP_MAX_ATTEMPTS")
-    responses = iter(
-        [_FakeHTTPResponse(status=503, reason="Busy", body=b"busy")] * max_attempts
-    )
 
-    monkeypatch.setattr(
-        fetch.http.client,
-        "HTTPSConnection",
-        lambda *_a, **_k: _FakeHTTPSConnection(next(responses)),
-    )
-    monkeypatch.setattr(fetch.time, "sleep", lambda _seconds: None)
+    def _status(_url: str, **_kwargs: object) -> tuple[bytes, dict[str, str]]:
+        raise fetch.http_utils.SyncRequestError(
+            url="https://example.com/retry-fail",
+            attempts=3,
+            kind="status",
+            detail="HTTP 503 Busy",
+            status=503,
+        )
 
+    monkeypatch.setattr(fetch.http_utils, "fetch_url_bytes", _status)
     with pytest.raises(
         RuntimeError,
         match=r"HTTP 503 fetching https://example\.com/retry-fail after 3 attempt\(s\)",
@@ -472,6 +379,39 @@ def test_fetch_https_get_handles_zero_attempt_configuration(
         RuntimeError, match=r"Failed fetching https://example\.com/never"
     ):
         object.__getattribute__(fetch, "_https_get")("https://example.com/never")
+
+
+def test_fetch_https_get_reraises_unexpected_value_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve unrelated URL validation failures from the shared helper."""
+
+    def _bad_value(_url: str, **_kwargs: object) -> tuple[bytes, dict[str, str]]:
+        raise ValueError("unexpected validation failure")
+
+    monkeypatch.setattr(fetch.http_utils, "fetch_url_bytes", _bad_value)
+    with pytest.raises(ValueError, match="unexpected validation failure"):
+        object.__getattribute__(fetch, "_https_get")("https://example.com/value")
+
+
+def test_fetch_https_get_wraps_unknown_request_error_kinds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fallback to a generic fetch failure for unknown request error kinds."""
+
+    def _unknown(_url: str, **_kwargs: object) -> tuple[bytes, dict[str, str]]:
+        raise fetch.http_utils.SyncRequestError(
+            url="https://example.com/unknown",
+            attempts=2,
+            kind="other",
+            detail="mystery",
+        )
+
+    monkeypatch.setattr(fetch.http_utils, "fetch_url_bytes", _unknown)
+    with pytest.raises(
+        RuntimeError, match=r"Failed fetching https://example\.com/unknown"
+    ):
+        object.__getattribute__(fetch, "_https_get")("https://example.com/unknown")
 
 
 def test_fetch_write_and_parse_version_manifest(
@@ -666,7 +606,7 @@ def test_codegen_load_yaml_and_walk_pointer(
 
 def test_codegen_object_coercion_and_progress_helpers() -> None:
     """Run this test case."""
-    with pytest.raises(TypeError, match="Expected object for demo"):
+    with pytest.raises(TypeError, match="Expected JSON object for demo"):
         _as_object_dict([], context="demo")
 
     with pytest.raises(TypeError, match="Expected string key in demo"):

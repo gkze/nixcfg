@@ -18,7 +18,7 @@ from nix_manipulator.expressions.primitive import StringPrimitive
 
 from lib.nix.commands.base import run_nix
 from lib.nix.models.sources import SourceEntry, SourcesFile
-from lib.update.io import atomic_write_text
+from lib.update.io import atomic_write_json
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT, package_dir_for, package_file_map
 
@@ -120,11 +120,6 @@ def validate_source_discovery_consistency() -> None:
     raise RuntimeError("\n".join(lines))
 
 
-def _atomic_write_json(path: Path, payload: object) -> None:
-    content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    atomic_write_text(path, content)
-
-
 def save_sources(sources: SourcesFile) -> None:
     """Write each entry back to its per-package ``sources.json``.
 
@@ -154,9 +149,9 @@ def save_sources(sources: SourcesFile) -> None:
             continue
         lock_path = path.with_suffix(".json.lock")
         with FileLock(lock_path):
-            _atomic_write_json(path, entry.to_dict())
+            atomic_write_json(path, entry.to_dict())
 
 
 def save_source_entry(path: Path, entry: SourceEntry) -> None:
     """Write one per-package ``sources.json`` entry atomically."""
-    _atomic_write_json(path, entry.to_dict())
+    atomic_write_json(path, entry.to_dict())

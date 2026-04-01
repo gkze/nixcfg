@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import Protocol, cast
 from urllib.parse import urlparse
 
-import httpx
 import yaml
 
+from lib import codegen_utils, http_utils, json_utils
 from lib.schema_codegen.config import (
     AliasStrategy,
     CodegenTarget,
@@ -92,8 +92,7 @@ class _ReferencingJsonSchemaModule(Protocol):
 
 DEFAULT_CONFIG_PATH = REPO_ROOT / "schema_codegen.yaml"
 
-type JsonScalar = str | int | float | bool | None
-type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
+type JsonValue = json_utils.JsonValue
 type ProgressReporter = Callable[[str], None]
 
 
@@ -137,31 +136,8 @@ def _import_optional(module_name: str, *, feature: str) -> object:
         raise RuntimeError(msg) from exc
 
 
-def _as_object_dict(value: object, *, context: str) -> dict[str, object]:
-    """Return ``value`` as ``dict[str, object]`` or raise ``TypeError``."""
-    if not isinstance(value, dict):
-        msg = f"Expected object for {context}, got {type(value).__name__}"
-        raise TypeError(msg)
-    result: dict[str, object] = {}
-    for key, item in value.items():
-        if not isinstance(key, str):
-            msg = f"Expected string key in {context}, got {type(key).__name__}"
-            raise TypeError(msg)
-        result[key] = item
-    return result
-
-
-def _coerce_json_value(value: object, *, context: str) -> JsonValue:
-    """Convert arbitrary JSON-compatible data to ``JsonValue`` recursively."""
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    if isinstance(value, list):
-        return [_coerce_json_value(item, context=f"{context}[]") for item in value]
-    obj = _as_object_dict(value, context=context)
-    return {
-        key: _coerce_json_value(item, context=f"{context}.{key}")
-        for key, item in obj.items()
-    }
+_as_object_dict = json_utils.as_object_dict
+_coerce_json_value = json_utils.coerce_json_value
 
 
 def _emit_progress(progress: ProgressReporter | None, message: str) -> None:
@@ -186,18 +162,26 @@ def _parse_schema_text(text: str, *, fmt: SchemaFormat, context: str) -> JsonVal
 
 def _read_url_source(source: URLSource) -> str:
     """Fetch a remote schema document over HTTPS."""
-    parsed = urlparse(source.uri)
-    if parsed.scheme != "https" or not parsed.netloc:
+    try:
+        payload, _headers = http_utils.fetch_url_bytes(
+            source.uri,
+            headers=http_utils.build_github_headers(
+                source.uri,
+                token=http_utils.resolve_github_token(
+                    allow_keyring=True,
+                    allow_netrc=True,
+                ),
+                user_agent="nixcfg-schema-codegen",
+            ),
+            timeout=30.0,
+        )
+    except ValueError as exc:
         msg = f"Only absolute HTTPS schema URLs are supported, got {source.uri!r}"
-        raise RuntimeError(msg)
-
-    response: httpx.Response = httpx.get(
-        source.uri,
-        follow_redirects=True,
-        timeout=30.0,
-    )
-    response.raise_for_status()
-    return response.text
+        raise RuntimeError(msg) from exc
+    except http_utils.SyncRequestError as exc:
+        msg = f"Failed to fetch schema URL {source.uri!r}: {exc.detail}"
+        raise RuntimeError(msg) from exc
+    return payload.decode()
 
 
 def _load_source_documents(source: SchemaSource) -> tuple[_LoadedSchemaDocument, ...]:
@@ -612,45 +596,8 @@ def _prepare_entrypoint_schema(
     return contents
 
 
-_CONSTR_PATTERN = re.compile(
-    r"constr\(\s*pattern=(?P<literal>r?(?:'[^']*'|\"[^\"]*\"))\s*\)"
-)
-
-
-def _rewrite_constr_type_hints(code: str) -> str:
-    """Rewrite ``constr(pattern=...)`` annotations to ``StringConstraints``."""
-
-    def _replace(match: re.Match[str]) -> str:
-        literal = match.group("literal")
-        line_start = match.string.rfind("\n", 0, match.start()) + 1
-        indent = match.string[line_start : match.start()]
-        inner = f"{indent}    "
-        return (
-            "Annotated[\n"
-            f"{inner}str,\n"
-            f"{inner}StringConstraints(pattern={literal}),\n"
-            f"{indent}]"
-        )
-
-    return _CONSTR_PATTERN.sub(_replace, code)
-
-
-def _normalize_pydantic_imports(code: str) -> str:
-    """Replace ``constr`` imports with ``StringConstraints`` when needed."""
-    lines: list[str] = []
-    for raw_line in code.splitlines():
-        line = raw_line
-        if raw_line.startswith("from pydantic import ") and "constr" in raw_line:
-            names = [
-                name.strip()
-                for name in raw_line.split("import ", maxsplit=1)[1].split(",")
-            ]
-            names = [name for name in names if name != "constr"]
-            if "StringConstraints" not in names:
-                names.append("StringConstraints")
-            line = f"from pydantic import {', '.join(sorted(names))}"
-        lines.append(line)
-    return "\n".join(lines)
+_rewrite_constr_type_hints = codegen_utils.rewrite_constr_type_hints
+_normalize_pydantic_imports = codegen_utils.normalize_pydantic_imports
 
 
 def _strip_generated_headers(code: str) -> str:

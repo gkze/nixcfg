@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 import aiohttp
 from pydantic import TypeAdapter, ValidationError
 
+from lib import json_utils
+
 if TYPE_CHECKING:
     from collections.abc import Coroutine
     from pathlib import Path
@@ -36,40 +38,11 @@ NPM_REGISTRY = "https://registry.npmjs.org"
 # Concurrency limit for fetching JSR meta files.
 JSR_FETCH_CONCURRENCY = 20
 
-_OBJECT_DICT_ADAPTER = TypeAdapter(dict[str, object])
-_OBJECT_LIST_ADAPTER = TypeAdapter(list[object])
-_STRING_ADAPTER = TypeAdapter(str)
+_as_object_dict = json_utils.as_object_dict
+_as_object_list = json_utils.as_object_list
+_get_required_str = json_utils.get_required_str
+
 _PACKAGE_MAP_ADAPTER = TypeAdapter(dict[str, dict[str, object]])
-
-
-def _as_object_dict(value: object, *, context: str) -> dict[str, object]:
-    """Return *value* as a ``dict[str, object]`` or raise ``TypeError``."""
-    try:
-        return _OBJECT_DICT_ADAPTER.validate_python(value, strict=True)
-    except ValidationError as exc:
-        msg = f"Expected JSON object for {context}"
-        raise TypeError(msg) from exc
-
-
-def _as_object_list(value: object, *, context: str) -> list[object]:
-    """Return *value* as a list or raise ``TypeError``."""
-    try:
-        return _OBJECT_LIST_ADAPTER.validate_python(value, strict=True)
-    except ValidationError as exc:
-        msg = f"Expected JSON array for {context}"
-        raise TypeError(msg) from exc
-
-
-def _get_required_str(mapping: dict[str, object], key: str, *, context: str) -> str:
-    """Get required string field *key* from *mapping*."""
-    if key not in mapping:
-        msg = f"Expected string field {key!r} in {context}"
-        raise TypeError(msg)
-    try:
-        return _STRING_ADAPTER.validate_python(mapping[key], strict=True)
-    except ValidationError as exc:
-        msg = f"Expected string field {key!r} in {context}"
-        raise TypeError(msg) from exc
 
 
 def _as_package_map(value: object, *, context: str) -> dict[str, dict[str, object]]:

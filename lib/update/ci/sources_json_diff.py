@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Annotated, TypeGuard
 import typer
 from deepdiff import DeepDiff
 
+from lib import json_utils
 from lib.update.ci._cli import (
     make_dual_typer_apps,
     make_main,
@@ -27,8 +28,7 @@ if TYPE_CHECKING:
     import subprocess
     from collections.abc import Callable
 
-JsonScalar = str | int | float | bool | None
-JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
+JsonValue = json_utils.JsonValue
 PathSegment = str | int
 PathTuple = tuple[PathSegment, ...]
 NoChangesMessage = "No source entry changes detected."
@@ -41,47 +41,8 @@ class _MissingType:
 _MISSING = _MissingType()
 
 
-class _BufferWriter:
-    def __init__(self) -> None:
-        self._parts: list[str] = []
-
-    def write(self, text: str) -> int:
-        self._parts.append(text)
-        return len(text)
-
-    def isatty(self) -> bool:
-        return False
-
-    def flush(self) -> None:
-        return
-
-    def value(self) -> str:
-        return "".join(self._parts)
-
-
-def _coerce_json_value(value: object, *, context: str) -> JsonValue:
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    if isinstance(value, list):
-        return [_coerce_json_value(item, context=f"{context}[]") for item in value]
-    if isinstance(value, dict):
-        obj: dict[str, JsonValue] = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                msg = f"Expected string key in {context}, got {type(key).__name__}"
-                raise TypeError(msg)
-            obj[key] = _coerce_json_value(item, context=f"{context}.{key}")
-        return obj
-    msg = f"Unsupported JSON value in {context}: {type(value).__name__}"
-    raise TypeError(msg)
-
-
-def _coerce_json_object(value: object, *, context: str) -> dict[str, JsonValue]:
-    coerced = _coerce_json_value(value, context=context)
-    if not isinstance(coerced, dict):
-        msg = f"Expected JSON object in {context}, got {type(coerced).__name__}"
-        raise TypeError(msg)
-    return coerced
+_coerce_json_value = json_utils.coerce_json_value
+_coerce_json_object = json_utils.coerce_json_object
 
 
 def _is_json_value(value: JsonValue | _MissingType) -> TypeGuard[JsonValue]:
@@ -108,7 +69,7 @@ def _render_graphtage_diff(
         to_tree = graphtage_json.build_tree(new_data)
         diff_tree = from_tree.diff(to_tree)
 
-    writer = _BufferWriter()
+    writer = io.StringIO()
     printer = printer_cls(
         out_stream=writer,
         ansi_color=False,
@@ -118,7 +79,7 @@ def _render_graphtage_diff(
     with printer:
         graphtage_json.JSONFormatter.DEFAULT_INSTANCE.print(printer, diff_tree)
 
-    return writer.value().strip()
+    return writer.getvalue().strip()
 
 
 def _render_jd_diff(_old_path: pathlib.Path, _new_path: pathlib.Path) -> str:

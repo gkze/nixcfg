@@ -224,7 +224,7 @@ def test_sources_helpers_cover_loading_and_save_branches(
     )
     monkeypatch.setattr(
         update_sources,
-        "_atomic_write_json",
+        "atomic_write_json",
         lambda path, payload: writes.append(path),
     )
 

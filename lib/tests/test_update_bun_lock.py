@@ -68,32 +68,26 @@ def test_helper_error_paths_and_url_fetch(monkeypatch: pytest.MonkeyPatch) -> No
     with pytest.raises(ValueError, match="Unsupported source package URL scheme"):
         bun_lock._fetch_url_bytes("file:///tmp/demo.tgz")
 
-    class _Response:
-        def __enter__(self) -> _Response:
-            return self
+    calls: list[tuple[str, object]] = []
 
-        def __exit__(self, *_args: object) -> bool:
-            return False
+    def _fetch_url_bytes(
+        url: str,
+        **kwargs: object,
+    ) -> tuple[bytes, dict[str, str]]:
+        calls.append((url, kwargs.get("timeout")))
+        assert kwargs["allowed_schemes"] == frozenset({"http", "https"})
+        assert kwargs["attempts"] == bun_lock._FETCH_RETRIES
+        assert kwargs["backoff"] == 1.0
+        return b"payload", {}
 
-        def read(self) -> bytes:
-            return b"payload"
-
-    attempts = {"count": 0}
-
-    def _urlopen(url: str, *, timeout: float) -> _Response:
-        assert timeout == bun_lock._FETCH_TIMEOUT_SECONDS
-        if url != "https://example.test/pkg.tgz":
-            msg = f"unexpected url: {url}"
-            raise AssertionError(msg)
-        if attempts["count"] == 0:
-            attempts["count"] += 1
-            raise OSError("temporary failure")
-        return _Response()
-
-    monkeypatch.setattr(bun_lock.time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(bun_lock.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(bun_lock.http_utils, "fetch_url_bytes", _fetch_url_bytes)
     assert bun_lock._fetch_url_bytes("https://example.test/pkg.tgz") == b"payload"
-    assert attempts["count"] == 1
+    assert calls == [
+        (
+            "https://example.test/pkg.tgz",
+            bun_lock._FETCH_TIMEOUT_SECONDS,
+        )
+    ]
     assert bun_lock._parse_github_release_asset("https://example.test/pkg.tgz") is None
     assert (
         bun_lock._rewrite_github_release_asset_version(
@@ -433,14 +427,73 @@ def test_fetch_url_bytes_reports_final_failure_and_zero_retry_runtime_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Surface terminal fetch failures and zero-retry configuration errors."""
-    monkeypatch.setattr(bun_lock.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(bun_lock, "_FETCH_RETRIES", 1)
     monkeypatch.setattr(
-        bun_lock.urllib.request,
-        "urlopen",
-        lambda _url, *, timeout: (_ for _ in ()).throw(OSError(timeout)),
+        bun_lock.http_utils,
+        "fetch_url_bytes",
+        lambda _url, **_kwargs: (_ for _ in ()).throw(
+            bun_lock.http_utils.SyncRequestError(
+                url="https://example.test/pkg.tgz",
+                attempts=1,
+                kind="network",
+                detail=str(bun_lock._FETCH_TIMEOUT_SECONDS),
+            )
+        ),
     )
     with pytest.raises(OSError, match=str(bun_lock._FETCH_TIMEOUT_SECONDS)):
+        bun_lock._fetch_url_bytes("https://example.test/pkg.tgz")
+
+    monkeypatch.setattr(
+        bun_lock.http_utils,
+        "fetch_url_bytes",
+        lambda _url, **_kwargs: (_ for _ in ()).throw(
+            bun_lock.http_utils.SyncRequestError(
+                url="https://example.test/pkg.tgz",
+                attempts=2,
+                kind="status",
+                detail="HTTP 503 Busy",
+                status=503,
+            )
+        ),
+    )
+    with pytest.raises(
+        RuntimeError,
+        match=r"HTTP 503 fetching https://example.test/pkg.tgz after 2 attempt\(s\)",
+    ):
+        bun_lock._fetch_url_bytes("https://example.test/pkg.tgz")
+
+    monkeypatch.setattr(
+        bun_lock.http_utils,
+        "fetch_url_bytes",
+        lambda _url, **_kwargs: (_ for _ in ()).throw(
+            bun_lock.http_utils.SyncRequestError(
+                url="https://example.test/pkg.tgz",
+                attempts=1,
+                kind="status",
+                detail="HTTP 404 Missing",
+                status=404,
+            )
+        ),
+    )
+    with pytest.raises(
+        RuntimeError,
+        match=r"HTTP 404 fetching https://example.test/pkg.tgz$",
+    ):
+        bun_lock._fetch_url_bytes("https://example.test/pkg.tgz")
+
+    monkeypatch.setattr(
+        bun_lock.http_utils,
+        "fetch_url_bytes",
+        lambda _url, **_kwargs: (_ for _ in ()).throw(
+            bun_lock.http_utils.SyncRequestError(
+                url="https://example.test/pkg.tgz",
+                attempts=2,
+                kind="other",
+                detail="mystery",
+            )
+        ),
+    )
+    with pytest.raises(RuntimeError, match="Failed to fetch source package URL"):
         bun_lock._fetch_url_bytes("https://example.test/pkg.tgz")
 
     monkeypatch.setattr(bun_lock, "_FETCH_RETRIES", 0)

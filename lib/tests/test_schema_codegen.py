@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from lib.schema_codegen.config import DirectorySource
+from lib.schema_codegen import runner as codegen_runner
+from lib.schema_codegen.config import DirectorySource, SchemaFormat, URLSource
 from lib.schema_codegen.runner import (
     DEFAULT_CONFIG_PATH,
     _entrypoint_class_suffix,
@@ -206,6 +207,68 @@ targets:
     assert output_path == (tmp_path / "generated.py").resolve()
     assert "class Person" in rendered
     assert "age:" in rendered
+
+
+def test_read_url_source_uses_extended_github_token_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolve GitHub auth consistently for remote schema fetches."""
+    captured: dict[str, object] = {}
+
+    def _resolve_github_token(**kwargs: object) -> str:
+        captured["resolve"] = kwargs
+        return "gh-token"
+
+    def _build_github_headers(url: str, **kwargs: object) -> dict[str, str]:
+        captured["headers"] = (url, kwargs)
+        return {"Authorization": "Bearer gh-token"}
+
+    def _fetch_url_bytes(url: str, **kwargs: object) -> tuple[bytes, dict[str, str]]:
+        captured["fetch"] = (url, kwargs)
+        return b"{}", {}
+
+    monkeypatch.setattr(
+        codegen_runner.http_utils,
+        "resolve_github_token",
+        _resolve_github_token,
+    )
+    monkeypatch.setattr(
+        codegen_runner.http_utils,
+        "build_github_headers",
+        _build_github_headers,
+    )
+    monkeypatch.setattr(
+        codegen_runner.http_utils,
+        "fetch_url_bytes",
+        _fetch_url_bytes,
+    )
+
+    payload = codegen_runner._read_url_source(
+        URLSource(
+            format=SchemaFormat.JSON,
+            uri="https://api.github.com/repos/x/y/contents/schema.json",
+        )
+    )
+
+    assert payload == "{}"
+    assert captured["resolve"] == {
+        "allow_keyring": True,
+        "allow_netrc": True,
+    }
+    assert captured["headers"] == (
+        "https://api.github.com/repos/x/y/contents/schema.json",
+        {
+            "token": "gh-token",
+            "user_agent": "nixcfg-schema-codegen",
+        },
+    )
+    assert captured["fetch"] == (
+        "https://api.github.com/repos/x/y/contents/schema.json",
+        {
+            "headers": {"Authorization": "Bearer gh-token"},
+            "timeout": 30.0,
+        },
+    )
 
 
 def test_generate_schema_codegen_target_from_url_source(

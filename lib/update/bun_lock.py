@@ -9,22 +9,20 @@ import re
 import subprocess
 import tarfile
 import tempfile
-import time
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter, ValidationError
+from lib import http_utils, json_utils
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
 
-_OBJECT_DICT_ADAPTER = TypeAdapter(dict[str, object])
-_OBJECT_LIST_ADAPTER = TypeAdapter(list[object])
-_STRING_ADAPTER = TypeAdapter(str)
+_as_object_dict = json_utils.as_object_dict
+_as_object_list = json_utils.as_object_list
+_get_required_str = json_utils.get_required_str
 
 _TRAILING_COMMA = re.compile(r",(?=\s*[}\]])")
 _EXACT_VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]*$")
@@ -56,36 +54,6 @@ class SourcePackageExactVersionMismatch:
     current_version: str
     dependency_url: str
     package_url: str | None
-
-
-def _as_object_dict(value: object, *, context: str) -> dict[str, object]:
-    """Return *value* as ``dict[str, object]`` or raise ``TypeError``."""
-    try:
-        return _OBJECT_DICT_ADAPTER.validate_python(value, strict=True)
-    except ValidationError as exc:
-        msg = f"Expected JSON object for {context}"
-        raise TypeError(msg) from exc
-
-
-def _as_object_list(value: object, *, context: str) -> list[object]:
-    """Return *value* as ``list[object]`` or raise ``TypeError``."""
-    try:
-        return _OBJECT_LIST_ADAPTER.validate_python(value, strict=True)
-    except ValidationError as exc:
-        msg = f"Expected JSON array for {context}"
-        raise TypeError(msg) from exc
-
-
-def _get_required_str(mapping: dict[str, object], key: str, *, context: str) -> str:
-    """Return required string field *key* from *mapping*."""
-    if key not in mapping:
-        msg = f"Expected string field {key!r} in {context}"
-        raise TypeError(msg)
-    try:
-        return _STRING_ADAPTER.validate_python(mapping[key], strict=True)
-    except ValidationError as exc:
-        msg = f"Expected string field {key!r} in {context}"
-        raise TypeError(msg) from exc
 
 
 def _normalize_textual_json(text: str) -> str:
@@ -145,25 +113,30 @@ def _fetch_url_bytes(url: str) -> bytes:
     if parsed.scheme not in {"https", "http"}:
         msg = f"Unsupported source package URL scheme: {url}"
         raise ValueError(msg)
-
-    last_error: OSError | None = None
-    for attempt in range(_FETCH_RETRIES):
-        try:
-            # Source package URLs are limited to explicit HTTP(S) tarballs.
-            with urllib.request.urlopen(  # noqa: S310
-                url,
-                timeout=_FETCH_TIMEOUT_SECONDS,
-            ) as response:
-                return response.read()
-        except OSError as exc:
-            last_error = exc
-            if attempt + 1 < _FETCH_RETRIES:
-                time.sleep(1)
-
-    if last_error is None:
+    if _FETCH_RETRIES < 1:
         msg = f"Failed to fetch source package URL: {url}"
         raise RuntimeError(msg)
-    raise last_error
+
+    try:
+        payload, _headers = http_utils.fetch_url_bytes(
+            url,
+            allowed_schemes=frozenset({"http", "https"}),
+            attempts=_FETCH_RETRIES,
+            backoff=1.0,
+            timeout=_FETCH_TIMEOUT_SECONDS,
+        )
+    except http_utils.SyncRequestError as exc:
+        if exc.kind in {"network", "timeout"}:
+            raise OSError(exc.detail) from exc
+        if exc.kind == "status":
+            msg = f"HTTP {exc.status} fetching {url}"
+            if exc.attempts > 1:
+                msg = f"{msg} after {exc.attempts} attempt(s)"
+            raise RuntimeError(msg) from exc
+        msg = f"Failed to fetch source package URL: {url}"
+        raise RuntimeError(msg) from exc
+    else:
+        return payload
 
 
 def _package_json_member_name(names: list[str]) -> str | None:

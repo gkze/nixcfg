@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,11 +16,11 @@ if TYPE_CHECKING:
 
 def test_buffer_writer_and_format_helpers() -> None:
     """Cover small formatting helper branches."""
-    writer = sdiff._BufferWriter()
+    writer = io.StringIO()
     assert writer.write("abc") == 3
     writer.flush()
     assert writer.isatty() is False
-    assert writer.value() == "abc"
+    assert writer.getvalue() == "abc"
 
     assert sdiff._format_path([]) == "$"
     assert sdiff._format_path(["a", 0, "b"]) == "a[0].b"

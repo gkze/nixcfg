@@ -10,11 +10,11 @@ import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
-import httpx
 import yaml
 
+from lib import http_utils
 from lib.schema_codegen.models._generated import CodegenLockfile, CodegenManifest
 
 DEFAULT_LOCKFILE_NAME = "codegen.lock.json"
@@ -133,11 +133,6 @@ def _iter_materialized_directory_files(
     return tuple(sorted(matched.items()))
 
 
-def _sha256_hex(payload: bytes) -> str:
-    """Return the lowercase hexadecimal SHA-256 digest for ``payload``."""
-    return hashlib.sha256(payload).hexdigest()
-
-
 def _hash_directory_materialization(
     *,
     source_root: Path,
@@ -149,34 +144,37 @@ def _hash_directory_materialization(
         source_root=source_root,
         include_patterns=include_patterns,
     ):
-        file_sha256 = _sha256_hex(path.read_bytes())
+        file_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
         records.append(f"{relative_path}\0{file_sha256}\n".encode())
-    return _sha256_hex(b"".join(records))
+    return hashlib.sha256(b"".join(records)).hexdigest()
 
 
 def _build_http_headers(url: str) -> dict[str, str]:
     """Return request headers for lockfile fetches."""
-    headers = {"User-Agent": "nixcfg-codegen-lockfile"}
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token and url.startswith(f"{_GITHUB_API_BASE}/"):
-        headers["Authorization"] = f"Bearer {token}"
-    return headers
+    return http_utils.build_github_headers(
+        url,
+        token=http_utils.resolve_github_token(
+            allow_keyring=True,
+            allow_netrc=True,
+        ),
+        user_agent="nixcfg-codegen-lockfile",
+    )
 
 
 def _fetch_https_bytes(url: str) -> tuple[bytes, Mapping[str, str]]:
     """Fetch one HTTPS URL and return response bytes plus response headers."""
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.netloc:
+    try:
+        return http_utils.fetch_url_bytes(
+            url,
+            headers=_build_http_headers(url),
+            timeout=30.0,
+        )
+    except ValueError as exc:
         msg = f"Only absolute HTTPS URLs are supported, got {url!r}"
-        raise RuntimeError(msg)
-    response = httpx.get(
-        url,
-        follow_redirects=True,
-        headers=_build_http_headers(url),
-        timeout=30.0,
-    )
-    response.raise_for_status()
-    return response.content, dict(response.headers)
+        raise RuntimeError(msg) from exc
+    except http_utils.SyncRequestError as exc:
+        msg = f"Failed to fetch {url}: {exc.detail}"
+        raise RuntimeError(msg) from exc
 
 
 def _fetch_https_json(url: str) -> Mapping[str, object]:
@@ -262,7 +260,7 @@ def _build_locked_url_source(
     locked: dict[str, object] = {
         "kind": "url",
         "uri": uri,
-        "sha256": _sha256_hex(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
     }
     if include_metadata:
         locked["fetched_at"] = _utcnow()
@@ -300,7 +298,7 @@ def _build_locked_github_raw_source(
         "ref": resolved_ref,
         "path": source_path,
         "uri": uri,
-        "sha256": _sha256_hex(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
     }
     metadata = source.get("metadata")
     metadata_map = (

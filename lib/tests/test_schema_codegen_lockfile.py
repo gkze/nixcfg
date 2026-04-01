@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from lib.schema_codegen import lockfile as codegen_lockfile
 from lib.schema_codegen.lockfile import (
     build_codegen_lockfile,
     render_codegen_lockfile,
@@ -57,6 +58,46 @@ def _directory_content_sha256(entries: dict[str, bytes]) -> str:
         for path in sorted(entries)
     )
     return hashlib.sha256(records).hexdigest()
+
+
+def test_build_http_headers_uses_extended_github_token_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolve GitHub auth consistently for lockfile fetches."""
+    captured: dict[str, object] = {}
+
+    def _resolve_github_token(**kwargs: object) -> str:
+        captured["resolve"] = kwargs
+        return "gh-token"
+
+    def _build_github_headers(url: str, **kwargs: object) -> dict[str, str]:
+        captured["url"] = url
+        captured["headers"] = kwargs
+        return {"Authorization": "Bearer gh-token"}
+
+    monkeypatch.setattr(
+        codegen_lockfile.http_utils,
+        "resolve_github_token",
+        _resolve_github_token,
+    )
+    monkeypatch.setattr(
+        codegen_lockfile.http_utils,
+        "build_github_headers",
+        _build_github_headers,
+    )
+
+    headers = codegen_lockfile._build_http_headers("https://api.github.com/repos/x/y")
+
+    assert headers == {"Authorization": "Bearer gh-token"}
+    assert captured["url"] == "https://api.github.com/repos/x/y"
+    assert captured["resolve"] == {
+        "allow_keyring": True,
+        "allow_netrc": True,
+    }
+    assert captured["headers"] == {
+        "token": "gh-token",
+        "user_agent": "nixcfg-codegen-lockfile",
+    }
 
 
 def test_write_codegen_lockfile_hashes_directory_sources_deterministically(

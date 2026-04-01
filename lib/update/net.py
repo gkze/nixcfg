@@ -2,19 +2,17 @@
 
 import json
 import logging
-import netrc
-import os
 import urllib.parse
 import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import cast
 
 import aiohttp
-from pydantic import TypeAdapter, ValidationError
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt
 from tenacity.wait import wait_exponential
 
+from lib import http_utils, json_utils
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.constants import resolve_timeout_alias
 
@@ -23,23 +21,19 @@ type JSONValue = JSONScalar | dict[str, "JSONValue"] | list["JSONValue"]
 type JSONDict = dict[str, JSONValue]
 type JSONList = list[JSONValue]
 
-_JSON_DICT_ADAPTER = TypeAdapter(dict[str, JSONValue])
-_JSON_LIST_ADAPTER = TypeAdapter(list[JSONValue])
-_STRING_ADAPTER = TypeAdapter(str)
-
 
 def _expect_json_dict(payload: JSONValue, *, context: str) -> JSONDict:
     try:
-        return _JSON_DICT_ADAPTER.validate_python(payload, strict=True)
-    except ValidationError as exc:
+        return json_utils.as_json_object(payload, context=context)
+    except TypeError as exc:
         msg = f"Expected JSON object from {context}, got {type(payload).__name__}"
         raise RuntimeError(msg) from exc
 
 
 def _expect_json_list(payload: JSONValue, *, context: str) -> JSONList:
     try:
-        return _JSON_LIST_ADAPTER.validate_python(payload, strict=True)
-    except ValidationError as exc:
+        return json_utils.as_json_list(payload, context=context)
+    except TypeError as exc:
         msg = f"Expected JSON array from {context}, got {type(payload).__name__}"
         raise RuntimeError(msg) from exc
 
@@ -50,10 +44,13 @@ def _expect_json_string_field(
     *,
     context: str,
 ) -> str:
-    value = payload.get(field)
     try:
-        return _STRING_ADAPTER.validate_python(value, strict=True)
-    except ValidationError as exc:
+        return json_utils.get_required_str(
+            cast("dict[str, object]", payload),
+            field,
+            context=context,
+        )
+    except TypeError as exc:
         msg = f"Expected string field {field!r} in {context}"
         raise RuntimeError(msg) from exc
 
@@ -72,24 +69,7 @@ class _NonRetryableStatusError(RuntimeError):
 
 
 def _get_github_token() -> str | None:
-    token = os.environ.get("GITHUB_TOKEN")
-    if token:
-        return token
-    netrc_path = Path.home() / ".netrc"
-    if netrc_path.exists():
-        try:
-            netrc_data = netrc.netrc(str(netrc_path))
-            for host in ("api.github.com", "github.com"):
-                auth = netrc_data.authenticators(host)
-                if auth:
-                    return auth[2]  # password field contains token
-        except (netrc.NetrcParseError, OSError) as exc:
-            logger.warning(
-                "Failed to parse %s for GitHub token discovery: %s",
-                netrc_path,
-                exc,
-            )
-    return None
+    return http_utils.resolve_github_token(allow_netrc=True, logger=logger)
 
 
 def _check_github_rate_limit(headers: dict[str, str], url: str) -> None:
@@ -113,13 +93,11 @@ def _check_github_rate_limit(headers: dict[str, str], url: str) -> None:
 
 
 def _build_request_headers(url: str, user_agent: str | None) -> dict[str, str]:
-    headers: dict[str, str] = {}
-    if user_agent:
-        headers["User-Agent"] = user_agent
-    github_token = _get_github_token()
-    if url.startswith("https://api.github.com/") and github_token:
-        headers["Authorization"] = f"Bearer {github_token}"
-    return headers
+    return http_utils.build_github_headers(
+        url,
+        token=_get_github_token(),
+        user_agent=user_agent,
+    )
 
 
 def _format_http_error(response: aiohttp.ClientResponse, payload: bytes) -> str:

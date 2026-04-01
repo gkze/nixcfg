@@ -13,22 +13,17 @@ Usage:
 
 from __future__ import annotations
 
-import base64
 import functools
 import hashlib
-import http.client
 import json
-import os
 import sys
-import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
-import keyring
-from keyring.errors import KeyringError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from lib import http_utils
 
 REPO = "NixOS/nix"
 SCHEMA_PATH = "doc/manual/source/protocols/json/schema"
@@ -37,12 +32,10 @@ RAW_BASE = f"https://raw.githubusercontent.com/{REPO}"
 
 SCHEMAS_DIR = Path(__file__).resolve().parent
 VERSION_FILE = SCHEMAS_DIR / "_version.json"
-_HTTP_BAD_REQUEST = 400
 _HTTP_TIMEOUT_SECONDS = 5
 _HTTP_MAX_ATTEMPTS = 3
 _HTTP_BACKOFF_BASE_SECONDS = 0.5
 _HTTP_BACKOFF_MAX_SECONDS = 5.0
-_RETRYABLE_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 type ProgressReporter = Callable[[str], None]
 
@@ -62,26 +55,10 @@ class SchemaVersionManifest(BaseModel):
 
 def _resolve_github_token() -> str | None:
     """Return a GitHub token from env vars or the gh CLI credential store."""
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token:
-        return token
-
-    # Read from the same keychain entry that ``gh auth token`` uses.
-    try:
-        raw = keyring.get_password("gh:github.com", "")
-    except KeyringError, RuntimeError:
-        return None
-    return _unwrap_gh_token(raw) if raw else None
+    return http_utils.resolve_github_token(allow_keyring=True)
 
 
-_GO_KEYRING_PREFIX = "go-keyring-base64:"
-
-
-def _unwrap_gh_token(raw: str) -> str | None:
-    """Decode the ``go-keyring-base64:`` wrapper that gh uses in keychains."""
-    if raw.startswith(_GO_KEYRING_PREFIX):
-        raw = base64.b64decode(raw[len(_GO_KEYRING_PREFIX) :]).decode()
-    return raw.strip() or None
+_unwrap_gh_token = http_utils.unwrap_go_keyring_token
 
 
 @functools.lru_cache(maxsize=1)
@@ -92,11 +69,15 @@ def _get_github_token() -> str | None:
 
 def _github_get(url: str) -> bytes:
     """Make an authenticated (preferred) or anonymous GET request to GitHub."""
-    headers = {"Accept": "application/vnd.github.v3+json"}
-    token = _get_github_token()
-    if token:
-        headers["Authorization"] = f"token {token}"
-    return _https_get(url, headers=headers)
+    return _https_get(
+        url,
+        headers=http_utils.build_github_headers(
+            url,
+            accept="application/vnd.github.v3+json",
+            auth_scheme="token",
+            token=_get_github_token(),
+        ),
+    )
 
 
 def _get_default_branch_head() -> tuple[str, str]:
@@ -129,73 +110,49 @@ def _download_schema(url: str) -> bytes:
 
 def _https_get(url: str, headers: dict[str, str] | None = None) -> bytes:
     """Fetch a URL over HTTPS only and return response bytes."""
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.netloc:
-        msg = f"Only absolute HTTPS URLs are allowed, got: {url!r}"
-        raise ValueError(msg)
+    if _HTTP_MAX_ATTEMPTS < 1:
+        msg = f"Failed fetching {url}"
+        raise RuntimeError(msg)
 
-    path = parsed.path or "/"
-    if parsed.query:
-        path = f"{path}?{parsed.query}"
-
-    host = parsed.hostname
-    if host is None:
-        msg = f"Could not parse host from URL: {url!r}"
-        raise ValueError(msg)
-    port = parsed.port or 443
-
-    all_headers = {"User-Agent": "nixcfg-schema-fetch"}
+    request_headers = {"User-Agent": "nixcfg-schema-fetch"}
     if headers:
-        all_headers.update(headers)
+        request_headers.update(headers)
 
-    for attempt in range(1, _HTTP_MAX_ATTEMPTS + 1):
-        conn = http.client.HTTPSConnection(
-            host,
-            port=port,
+    try:
+        payload, _response_headers = http_utils.fetch_url_bytes(
+            url,
+            headers=request_headers,
+            attempts=_HTTP_MAX_ATTEMPTS,
+            backoff=_HTTP_BACKOFF_BASE_SECONDS,
+            max_backoff=_HTTP_BACKOFF_MAX_SECONDS,
             timeout=_HTTP_TIMEOUT_SECONDS,
         )
-        try:
-            conn.request("GET", path, headers=all_headers)
-            response = conn.getresponse()
-            body = response.read()
-        except TimeoutError as exc:
-            if attempt >= _HTTP_MAX_ATTEMPTS:
-                msg = f"Timed out fetching {url} after {attempt} attempt(s)"
-                raise RuntimeError(msg) from exc
-
-            time.sleep(_retry_delay_seconds(attempt))
-            continue
-        except OSError as exc:
-            if attempt >= _HTTP_MAX_ATTEMPTS:
-                msg = f"Network error fetching {url} after {attempt} attempt(s): {exc}"
-                raise RuntimeError(msg) from exc
-
-            time.sleep(_retry_delay_seconds(attempt))
-            continue
-        finally:
-            conn.close()
-
-        if response.status >= _HTTP_BAD_REQUEST:
-            if (
-                response.status in _RETRYABLE_HTTP_STATUS_CODES
-                and attempt < _HTTP_MAX_ATTEMPTS
-            ):
-                time.sleep(_retry_delay_seconds(attempt))
-                continue
-
-            msg = f"HTTP {response.status} fetching {url}"
-            if attempt > 1:
-                msg = f"{msg} after {attempt} attempt(s)"
-            raise RuntimeError(msg)
-        return body
-
-    msg = f"Failed fetching {url}"
-    raise RuntimeError(msg)
-
-
-def _sha256(data: bytes) -> str:
-    """Return hex SHA-256 digest of ``data``."""
-    return hashlib.sha256(data).hexdigest()
+    except ValueError as exc:
+        message = str(exc)
+        if message.startswith("Only absolute HTTPS URLs"):
+            raise ValueError(message) from exc
+        if message.startswith("Could not parse host from URL"):
+            raise ValueError(message) from exc
+        raise
+    except http_utils.SyncRequestError as exc:
+        if exc.kind == "timeout":
+            msg = f"Timed out fetching {url} after {exc.attempts} attempt(s)"
+            raise RuntimeError(msg) from exc
+        if exc.kind == "network":
+            msg = (
+                f"Network error fetching {url} after {exc.attempts} attempt(s): "
+                f"{exc.detail}"
+            )
+            raise RuntimeError(msg) from exc
+        if exc.kind == "status":
+            msg = f"HTTP {exc.status} fetching {url}"
+            if exc.attempts > 1:
+                msg = f"{msg} after {exc.attempts} attempt(s)"
+            raise RuntimeError(msg) from exc
+        msg = f"Failed fetching {url}"
+        raise RuntimeError(msg) from exc
+    else:
+        return payload
 
 
 def _emit_progress(progress: ProgressReporter | None, message: str) -> None:
@@ -205,20 +162,13 @@ def _emit_progress(progress: ProgressReporter | None, message: str) -> None:
     progress(message)
 
 
-def _retry_delay_seconds(attempt: int) -> float:
-    """Return the exponential backoff delay before the next attempt."""
-    return min(
-        _HTTP_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)), _HTTP_BACKOFF_MAX_SECONDS
-    )
-
-
 def _write_version(commit_sha: str, branch: str, files: list[dict[str, str]]) -> None:
     """Write _version.json with pinned commit info and checksums."""
     checksums: dict[str, str] = {}
     for f in sorted(files, key=lambda x: x["name"]):
         path = SCHEMAS_DIR / f["name"]
         if path.exists():
-            checksums[f["name"]] = _sha256(path.read_bytes())
+            checksums[f["name"]] = hashlib.sha256(path.read_bytes()).hexdigest()
 
     manifest = SchemaVersionManifest(
         commit=commit_sha,

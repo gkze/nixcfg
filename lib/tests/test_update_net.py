@@ -68,6 +68,7 @@ class _FakeResponseCM:
 def test_get_github_token_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
     monkeypatch.setenv("GITHUB_TOKEN", "env-token")
+    monkeypatch.delenv("GH_TOKEN", raising=False)
     assert object.__getattribute__(net, "_get_github_token")() == "env-token"
 
 
@@ -76,6 +77,7 @@ def test_get_github_token_from_netrc(
 ) -> None:
     """Run this test case."""
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     (tmp_path / ".netrc").write_text(
         "machine github.com login u password p\n", encoding="utf-8"
@@ -88,7 +90,7 @@ def test_get_github_token_from_netrc(
                 return ("u", "a", "token-from-netrc")
             return None
 
-    monkeypatch.setattr(net.netrc, "netrc", lambda _path: _NetrcObj())
+    monkeypatch.setattr(net.http_utils.netrc, "netrc", lambda _path: _NetrcObj())
     assert object.__getattribute__(net, "_get_github_token")() == "token-from-netrc"
 
 
@@ -99,10 +101,13 @@ def test_get_github_token_netrc_errors(
 ) -> None:
     """Run this test case."""
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     (tmp_path / ".netrc").write_text("x", encoding="utf-8")
     monkeypatch.setattr(
-        net.netrc, "netrc", lambda _path: (_ for _ in ()).throw(OSError("boom"))
+        net.http_utils.netrc,
+        "netrc",
+        lambda _path: (_ for _ in ()).throw(OSError("boom")),
     )
     with caplog.at_level(logging.WARNING):
         assert object.__getattribute__(net, "_get_github_token")() is None
@@ -545,6 +550,18 @@ def test_json_expect_helpers_and_optional_type_errors() -> None:
     with pytest.raises(RuntimeError, match="Expected JSON object"):
         object.__getattribute__(net, "_expect_json_dict")([], context="ctx")
 
+    with pytest.raises(RuntimeError, match="Expected JSON object"):
+        object.__getattribute__(net, "_expect_json_dict")(
+            {"nested": {1, 2}},
+            context="ctx",
+        )
+
+    with pytest.raises(RuntimeError, match="Expected JSON array"):
+        object.__getattribute__(net, "_expect_json_list")(
+            [{"nested": {1, 2}}],
+            context="ctx",
+        )
+
     with pytest.raises(RuntimeError, match="Expected string field 'x' in ctx"):
         object.__getattribute__(net, "_expect_json_string_field")(
             {},
@@ -586,6 +603,7 @@ def test_token_discovery_without_netrc_auth_and_rate_limit_unknown_reset(
 ) -> None:
     """Handle missing netrc auths and unknown GitHub reset timestamps."""
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     (tmp_path / ".netrc").write_text(
         "machine example login u password p\n", encoding="utf-8"
@@ -595,7 +613,7 @@ def test_token_discovery_without_netrc_auth_and_rate_limit_unknown_reset(
         def authenticators(self, host: str) -> None:
             _ = host
 
-    monkeypatch.setattr(net.netrc, "netrc", lambda _path: _NetrcObj())
+    monkeypatch.setattr(net.http_utils.netrc, "netrc", lambda _path: _NetrcObj())
     assert object.__getattribute__(net, "_get_github_token")() is None
 
     with pytest.raises(RuntimeError, match="Resets at unknown"):
