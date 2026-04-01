@@ -67,8 +67,8 @@
     };
     crane.url = "github:ipetkov/crane";
     opencode = {
-      # Temporary fork until upstream fixes desktop session theme regressions.
-      url = "github:gkze/opencode?ref=fix/desktop-session-theme-regressions";
+      # Temporary fork until upstream lands desktop session theme DB fixes.
+      url = "github:gkze/opencode?ref=stack/desktop-session-theme-db-fixes";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     pyproject-build-systems = {

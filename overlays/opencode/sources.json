@@ -1,22 +1,22 @@
 {
-  "drvHash": "zay2svlsd0fr08gnpxsq7axy1gafb33b",
+  "drvHash": "ppr91v0p76mdaxhgz9zjha5nwrcvs29a",
   "hashes": [
     {
-      "hash": "sha256-3GXmqG7yihJ91wS/jlW19qxGI62b1bFJnpGB4LcMlpY=",
+      "hash": "sha256-2quQjqzh02uHn0KdqwJ+8bVWqXyhFjlMX7zHr/Ct5HU=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     },
     {
-      "hash": "sha256-oB4Ptc+MH76MEw0DZodmCCz87qOmbzi26751ZM4DYyE=",
+      "hash": "sha256-IUEuE48ZRLVO32TX9i1ZNDmMi+vNs8BwOZf5xkhkFtE=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-linux"
     },
     {
-      "hash": "sha256-0JgEA54d1ZZ0IWUmxCJP2fnQ2cpmLO25G+hafUbHFLw=",
+      "hash": "sha256-I/I7YGrZPmnIPSh/BzvgAfQOMn90Jh3aFABVMqUn+Xw=",
       "hashType": "nodeModulesHash",
       "platform": "x86_64-linux"
     }
   ],
   "input": "opencode",
-  "version": "fix/desktop-session-theme-regressions"
+  "version": "stack/desktop-session-theme-db-fixes"
 }

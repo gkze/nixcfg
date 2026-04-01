@@ -1598,16 +1598,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1775007608,
-        "narHash": "sha256-gyuFuIksRlPdhaKEUycbVuBXxXC27ExrD+YIZTPF8CA=",
+        "lastModified": 1775080146,
+        "narHash": "sha256-6+3zCF1UAlhTI7AbufkFBxQQ9IODUz6bwaqPtJjdkPA=",
         "owner": "gkze",
         "repo": "opencode",
-        "rev": "d1e65eb420c98c1d54998b87e05d40e41bc3f2a2",
+        "rev": "8f7d4c548cf814cf0f07a14d7085c464fbf75177",
         "type": "github"
       },
       "original": {
         "owner": "gkze",
-        "ref": "fix/desktop-session-theme-regressions",
+        "ref": "stack/desktop-session-theme-db-fixes",
         "repo": "opencode",
         "type": "github"
       }
