@@ -15,6 +15,7 @@ UPDATER_MODULE_PATHS = {
     "gemini-cli": "overlays/gemini-cli/updater.py",
     "gogcli": "packages/gogcli/updater.py",
     "google-chrome": "overlays/google-chrome/updater.py",
+    "granola": "packages/granola/updater.py",
     "goose-cli": "overlays/goose-cli/updater.py",
     "goose-v8": "overlays/goose-v8/updater.py",
     "homebrew-zsh-completion": "packages/homebrew-zsh-completion/updater.py",
@@ -24,12 +25,14 @@ UPDATER_MODULE_PATHS = {
     "nix-manipulator": "packages/nix-manipulator/updater.py",
     "opencode": "overlays/opencode/updater.py",
     "opencode-desktop": "packages/opencode-desktop/updater.py",
+    "raycast": "packages/raycast/updater.py",
     "scratch": "packages/scratch/updater.py",
     "sculptor": "packages/sculptor/updater.py",
     "sentry-cli": "overlays/sentry-cli/updater.py",
     "superset": "packages/superset/updater.py",
     "toad": "packages/toad/updater.py",
     "vscode-insiders": "overlays/vscode-insiders/updater.py",
+    "wispr-flow": "packages/wispr-flow/updater.py",
 }
 
 __all__ = ["UPDATER_MODULE_PATHS"]

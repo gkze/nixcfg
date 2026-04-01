@@ -5,17 +5,14 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
+from lib.update.updaters._sourcefile import resolve_sourcefile
+
 UPDATERS: dict[str, type[Any]] = {}
 
 
 def updater_sourcefile(cls: type[object]) -> str | None:
     """Return the source file for ``cls`` when available."""
-    try:
-        return inspect.getsourcefile(cls)
-    except OSError, TypeError:
-        module = inspect.getmodule(cls)
-        module_file = getattr(module, "__file__", None)
-        return module_file if isinstance(module_file, str) else None
+    return resolve_sourcefile(cls, inspect_module=inspect)
 
 
 def is_test_updater_class(cls: type[object]) -> bool:

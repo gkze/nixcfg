@@ -15,6 +15,7 @@ from lib.update.config import (
     UpdateConfig,
     default_max_nix_builds,
     env_bool,
+    hash_build_platforms_for,
     resolve_active_config,
     resolve_config,
 )
@@ -90,6 +91,28 @@ def test_resolve_config_accepts_hash_build_platform_alias() -> None:
     assert cfg.hash_build_platforms == ("aarch64-linux",)
 
 
+def test_hash_build_platforms_for_accepts_real_and_legacy_configs() -> None:
+    """Read canonical platforms from UpdateConfig and legacy config doubles."""
+    cfg = resolve_config(hash_build_platforms=("aarch64-linux",))
+    assert hash_build_platforms_for(cfg) == ("aarch64-linux",)
+
+    legacy_cfg = type("_LegacyCfg", (), {"deno_deps_platforms": ["x86_64-linux"]})()
+    assert hash_build_platforms_for(legacy_cfg) == ("x86_64-linux",)
+
+
+def test_hash_build_platforms_for_rejects_invalid_legacy_shapes() -> None:
+    """Reject malformed legacy platform overrides with clear errors."""
+    missing_cfg = type("_MissingCfg", (), {})()
+    with pytest.raises(TypeError, match="Expected hash-build platform list/tuple"):
+        hash_build_platforms_for(missing_cfg)
+
+    bad_item_cfg = type(
+        "_BadItemCfg", (), {"deno_deps_platforms": ["x86_64-linux", 1]}
+    )()
+    with pytest.raises(TypeError, match="Hash-build platforms must be strings"):
+        hash_build_platforms_for(bad_item_cfg)
+
+
 def test_resolve_active_config_and_default_config_reference() -> None:
     """Prefer explicit config and otherwise return the global default."""
     custom = UpdateConfig(
@@ -115,6 +138,12 @@ def test_resolve_active_config_reloads_when_env_changes(
     monkeypatch.setenv("UPDATE_HTTP_TIMEOUT", "99")
     assert resolve_active_config(None).default_timeout == 99
     monkeypatch.delenv("UPDATE_HTTP_TIMEOUT", raising=False)
+
+
+def test_resolve_config_ignores_none_overrides() -> None:
+    """Keep environment defaults when explicit overrides are None."""
+    cfg = resolve_config(http_timeout=None, retries=None, hash_build_platforms=None)
+    assert cfg == DEFAULT_CONFIG
 
 
 def test_resolve_timeout_alias_success_and_errors() -> None:

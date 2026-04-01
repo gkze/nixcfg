@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
-from lib.update.config import UpdateConfig, resolve_active_config
+from lib.update.config import (
+    UpdateConfig,
+    hash_build_platforms_for,
+    resolve_active_config,
+)
 from lib.update.events import (
     CommandResult,
     EventStream,
@@ -239,7 +243,7 @@ async def compute_deno_deps_hash(
     """
     config = resolve_active_config(config)
     current_platform = get_current_nix_platform()
-    platforms = getattr(config, "hash_build_platforms", config.deno_deps_platforms)
+    platforms = hash_build_platforms_for(config)
     if current_platform not in platforms:
         msg = (
             f"Current platform {current_platform} not in supported platforms: "

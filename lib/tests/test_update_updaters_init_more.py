@@ -12,6 +12,7 @@ from lib.update.updaters import (
     _discover_updaters,
     _updater_module_paths,
     ensure_updaters_loaded,
+    resolve_registry_alias,
 )
 from lib.update.updaters.module_manifest import UPDATER_MODULE_PATHS
 
@@ -143,3 +144,36 @@ def test_ensure_updaters_loaded_rechecks_state_inside_lock(monkeypatch) -> None:
     assert calls == []
     UPDATERS.clear()
     UPDATERS.update(original)
+
+
+def test_resolve_registry_alias_returns_non_shared_registry_directly() -> None:
+    """Preserve caller-owned registry aliases without triggering discovery."""
+    registry_alias = {"demo": object}
+
+    calls: list[str] = []
+    resolved = resolve_registry_alias(
+        registry_alias, loader=lambda: calls.append("run")
+    )
+
+    assert resolved is registry_alias
+    assert calls == []
+
+
+def test_resolve_registry_alias_uses_loader_only_for_shared_empty_registry(
+    monkeypatch,
+) -> None:
+    """Load the shared registry lazily when the shared alias is still empty."""
+    original = dict(UPDATERS)
+    UPDATERS.clear()
+    try:
+        calls: list[str] = []
+
+        def _loader() -> dict[str, type[object]]:
+            calls.append("run")
+            return {"demo": object}
+
+        assert resolve_registry_alias(UPDATERS, loader=_loader) == {"demo": object}
+        assert calls == ["run"]
+    finally:
+        UPDATERS.clear()
+        UPDATERS.update(original)

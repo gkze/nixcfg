@@ -4,6 +4,9 @@ This module is a compatibility facade over focused UI modules:
 - ``ui_state`` for state models and status mapping
 - ``ui_render`` for terminal/non-terminal rendering
 - ``ui_consumer`` for queued event processing
+
+Internal callers should usually import the focused modules directly. Keep this
+facade for external imports and compatibility.
 """
 
 from lib.update.ui_consumer import (

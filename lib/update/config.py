@@ -87,6 +87,20 @@ def _settings_to_config(settings: UpdateSettings) -> UpdateConfig:
     )
 
 
+def hash_build_platforms_for(config: object) -> tuple[str, ...]:
+    """Return configured hash-build platforms from config or legacy config objects."""
+    platforms = getattr(config, "hash_build_platforms", None)
+    if platforms is None:
+        platforms = getattr(config, "deno_deps_platforms", None)
+    if not isinstance(platforms, list | tuple):
+        msg = f"Expected hash-build platform list/tuple, got {type(platforms)}"
+        raise TypeError(msg)
+    if any(not isinstance(platform, str) for platform in platforms):
+        msg = "Hash-build platforms must be strings"
+        raise TypeError(msg)
+    return tuple(platforms)
+
+
 def default_settings() -> UpdateSettings:
     """Return settings resolved from the current environment."""
     return UpdateSettings()
@@ -140,17 +154,23 @@ def env_bool(name: str, *, default: bool = False) -> bool:
     return default
 
 
+def _normalize_platform_override_names(
+    overrides: dict[str, object],
+) -> dict[str, object]:
+    """Collapse old platform override names onto the canonical settings field."""
+    normalized = dict(overrides)
+    for alias in ("hash_build_platforms", "deno_platforms"):
+        value = normalized.pop(alias, None)
+        if value is not None:
+            normalized["deno_deps_platforms"] = value
+    return normalized
+
+
 def resolve_config(**overrides: Unpack[_ResolveConfigOverrides]) -> UpdateConfig:
     """Build an UpdateConfig by merging explicit overrides onto env defaults."""
     settings_data = default_settings().model_dump()
 
-    normalized_overrides: dict[str, object] = dict(overrides)
-    hash_build_platforms = normalized_overrides.pop("hash_build_platforms", None)
-    deno_platforms = normalized_overrides.pop("deno_platforms", None)
-    if hash_build_platforms is not None:
-        normalized_overrides["deno_deps_platforms"] = hash_build_platforms
-    if deno_platforms is not None:
-        normalized_overrides["deno_deps_platforms"] = deno_platforms
+    normalized_overrides = _normalize_platform_override_names(dict(overrides))
 
     for setting_name, value in normalized_overrides.items():
         if value is not None:
@@ -167,6 +187,7 @@ __all__ = [
     "default_max_nix_builds",
     "default_settings",
     "env_bool",
+    "hash_build_platforms_for",
     "resolve_active_config",
     "resolve_config",
 ]

@@ -10,40 +10,38 @@ import sys
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
+import lib.update.updaters.base as _updaters_base
+import lib.update.updaters.github_raw_file as _github_raw_file_module
+import lib.update.updaters.github_release as _github_release_module
+import lib.update.updaters.platform_api as _platform_api_module
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters.base import (
-    UPDATERS,
-    CargoLockGitDep,
-    ChecksumProvidedUpdater,
-    DenoDepsHashUpdater,
-    DownloadHashUpdater,
-    FlakeInputHashUpdater,
-    FlakeInputUpdater,
-    HashEntryUpdater,
-    UpdateContext,
-    Updater,
-    UvLockUpdater,
-    VersionInfo,
-    bun_node_modules_updater,
-    cargo_vendor_updater,
-    deno_deps_updater,
-    flake_input_hash_updater,
-    go_vendor_updater,
-    npm_deps_updater,
-    register_updater,
-    uv_lock_hash_updater,
-    uv_lock_updater,
-)
-from lib.update.updaters.github_raw_file import (
-    GitHubRawFileUpdater,
-    github_raw_file_updater,
-)
-from lib.update.updaters.github_release import GitHubReleaseUpdater
 from lib.update.updaters.module_manifest import UPDATER_MODULE_PATHS
-from lib.update.updaters.platform_api import (
-    DownloadingPlatformAPIUpdater,
-    PlatformAPIUpdater,
-)
+from lib.update.updaters.registry import UPDATERS, register_updater
+
+CargoLockGitDep = _updaters_base.CargoLockGitDep
+ChecksumProvidedUpdater = _updaters_base.ChecksumProvidedUpdater
+DenoDepsHashUpdater = _updaters_base.DenoDepsHashUpdater
+DownloadHashUpdater = _updaters_base.DownloadHashUpdater
+FlakeInputHashUpdater = _updaters_base.FlakeInputHashUpdater
+FlakeInputUpdater = _updaters_base.FlakeInputUpdater
+HashEntryUpdater = _updaters_base.HashEntryUpdater
+UpdateContext = _updaters_base.UpdateContext
+Updater = _updaters_base.Updater
+UvLockUpdater = _updaters_base.UvLockUpdater
+VersionInfo = _updaters_base.VersionInfo
+bun_node_modules_updater = _updaters_base.bun_node_modules_updater
+cargo_vendor_updater = _updaters_base.cargo_vendor_updater
+deno_deps_updater = _updaters_base.deno_deps_updater
+flake_input_hash_updater = _updaters_base.flake_input_hash_updater
+go_vendor_updater = _updaters_base.go_vendor_updater
+npm_deps_updater = _updaters_base.npm_deps_updater
+uv_lock_hash_updater = _updaters_base.uv_lock_hash_updater
+uv_lock_updater = _updaters_base.uv_lock_updater
+GitHubRawFileUpdater = _github_raw_file_module.GitHubRawFileUpdater
+github_raw_file_updater = _github_raw_file_module.github_raw_file_updater
+GitHubReleaseUpdater = _github_release_module.GitHubReleaseUpdater
+DownloadingPlatformAPIUpdater = _platform_api_module.DownloadingPlatformAPIUpdater
+PlatformAPIUpdater = _platform_api_module.PlatformAPIUpdater
 
 if TYPE_CHECKING:
     from collections.abc import Callable

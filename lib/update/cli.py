@@ -96,13 +96,8 @@ from lib.update.sources import (
     save_sources,
     validate_source_discovery_consistency,
 )
-from lib.update.ui import (
-    ConsumeEventsOptions,
-    ItemMeta,
-    OperationKind,
-    SummaryStatus,
-    consume_events,
-)
+from lib.update.ui_consumer import ConsumeEventsOptions, consume_events
+from lib.update.ui_state import ItemMeta, OperationKind, SummaryStatus
 from lib.update.updaters import UPDATERS, ensure_updaters_loaded
 from lib.update.updaters.base import FlakeInputHashUpdater, Updater, VersionInfo
 

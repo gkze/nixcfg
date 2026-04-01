@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import os
 import shutil
 import sys
 import tempfile
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Protocol, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import (
@@ -42,75 +41,11 @@ from lib.update.updaters.core import (
 from lib.update.updaters.metadata import FlakeInputMetadata, VersionInfo
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     import aiohttp
 
     from lib.update.config import UpdateConfig
-    from lib.update.process import RunCommandOptions
 
-
-class _UpdateProcessModule(Protocol):
-    RunCommandOptions: type[RunCommandOptions]
-
-    def run_command(
-        self, args: list[str], *, options: RunCommandOptions
-    ) -> EventStream: ...
-
-
-class _BaseModule(Protocol):
-    package_dir_for: Callable[[str], Path | None]
-    update_process: _UpdateProcessModule
-
-    def compute_deno_deps_hash(
-        self,
-        source: str,
-        input_name: str,
-        *,
-        native_only: bool = False,
-        config: UpdateConfig | None = None,
-    ) -> EventStream: ...
-
-    def compute_drv_fingerprint(
-        self,
-        source: str,
-        *,
-        system: str | None = None,
-        config: UpdateConfig | None = None,
-    ) -> Awaitable[str]: ...
-
-    def compute_overlay_hash(
-        self,
-        source: str,
-        *,
-        system: str | None = None,
-        config: UpdateConfig | None = None,
-    ) -> EventStream: ...
-
-    def expect_hash_mapping(self, payload: object) -> HashMapping: ...
-
-    def expect_str(self, payload: object) -> str: ...
-
-    def fetch_url(
-        self,
-        session: aiohttp.ClientSession,
-        url: str,
-        *,
-        user_agent: str | None = None,
-        request_timeout: float | None = None,
-        config: UpdateConfig | None = None,
-        **kwargs: object,
-    ) -> Awaitable[bytes]: ...
-
-    def get_current_nix_platform(self) -> str: ...
-
-    def get_flake_input_node(self, input_name: str) -> FlakeLockNode: ...
-
-    def get_flake_input_version(self, node: FlakeLockNode) -> str: ...
-
-
-def _base_module() -> _BaseModule:
-    return cast("_BaseModule", importlib.import_module("lib.update.updaters.base"))
+from lib.update.updaters._base_proxy import base_module as _base_module
 
 
 def _ensure_user_writable_tree(root: Path) -> None:

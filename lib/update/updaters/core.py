@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, Protocol, cast
+from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import (
     HashCollection,
@@ -33,38 +32,14 @@ from lib.update.events import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterable
+    from collections.abc import Callable
 
     import aiohttp
 
-    from lib.update.config import UpdateConfig
     from lib.update.events import EventStream
     from lib.update.updaters.metadata import VersionInfo
 
-
-class _BaseModule(Protocol):
-    def compute_url_hashes(
-        self, source_name: str, urls: Iterable[str]
-    ) -> EventStream: ...
-
-    def convert_nix_hash_to_sri(
-        self, source_name: str, nix_hash: str
-    ) -> EventStream: ...
-
-    def fetch_url(
-        self,
-        session: aiohttp.ClientSession,
-        url: str,
-        *,
-        user_agent: str | None = None,
-        request_timeout: float | None = None,
-        config: UpdateConfig | None = None,
-        **kwargs: object,
-    ) -> Awaitable[bytes]: ...
-
-
-def _base_module() -> _BaseModule:
-    return cast("_BaseModule", importlib.import_module("lib.update.updaters.base"))
+from lib.update.updaters._base_proxy import base_module as _base_module
 
 
 @dataclass(frozen=True)

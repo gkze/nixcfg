@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, ClassVar, cast
 
 import pytest
+import typer
 
 if TYPE_CHECKING:
     from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
@@ -34,6 +35,7 @@ from lib.update.cli import (
     _generated_artifact_paths,
     _get_updaters,
     _handle_list_targets_request,
+    _handle_preflight_requests,
     _handle_schema_request,
     _handle_validate_request,
     _inventory_classification,
@@ -59,6 +61,7 @@ from lib.update.cli import (
     _source_backing_input_name,
     _source_hash_kinds,
     check_required_tools,
+    cli,
     run_update_command,
     run_updates,
 )
@@ -313,6 +316,53 @@ def test_preflight_handlers_schema_list_validate(
     assert validate_err == 1
     err_payload = json.loads(capsys.readouterr().out)
     assert err_payload["valid"] is False
+
+
+def test_handle_preflight_requests_checks_schema_list_then_validate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run preflight handlers in order and stop at the first non-None result."""
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        "lib.update.cli._validate_list_sort_option",
+        lambda _opts, _out: calls.append("sort") or None,
+    )
+    monkeypatch.setattr(
+        "lib.update.cli._handle_schema_request",
+        lambda _opts: calls.append("schema") or None,
+    )
+    monkeypatch.setattr(
+        "lib.update.cli._handle_list_targets_request",
+        lambda _opts: calls.append("list") or None,
+    )
+    monkeypatch.setattr(
+        "lib.update.cli._handle_validate_request",
+        lambda _opts, _out: calls.append("validate") or 9,
+    )
+
+    assert _handle_preflight_requests(UpdateOptions(), OutputOptions()) == 9
+    assert calls == ["sort", "schema", "list", "validate"]
+
+    calls.clear()
+    monkeypatch.setattr(
+        "lib.update.cli._handle_schema_request",
+        lambda _opts: calls.append("schema") or 4,
+    )
+    assert _handle_preflight_requests(UpdateOptions(), OutputOptions()) == 4
+    assert calls == ["sort", "schema"]
+
+    calls.clear()
+    monkeypatch.setattr(
+        "lib.update.cli._handle_schema_request",
+        lambda _opts: calls.append("schema") or None,
+    )
+    monkeypatch.setattr(
+        "lib.update.cli._handle_list_targets_request",
+        lambda _opts: calls.append("list") or 5,
+    )
+    assert _handle_preflight_requests(UpdateOptions(), OutputOptions()) == 5
+    assert calls == ["sort", "schema", "list"]
 
 
 def test_list_helpers_resolve_root_and_source_string() -> None:
@@ -1432,3 +1482,15 @@ def test_execute_run_plan_and_top_level_entrypoints(
         "lib.update.cli.run_updates", lambda _opts: asyncio.sleep(0, result=5)
     )
     assert run_update_command(list_targets=True) == 5
+
+
+def test_cli_callback_raises_typer_exit_with_run_update_command_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expose the imperative command result through Typer's exit wrapper."""
+    monkeypatch.setattr("lib.update.cli.run_update_command", lambda **_kwargs: 7)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        cli()
+
+    assert exc_info.value.exit_code == 7

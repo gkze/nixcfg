@@ -21,6 +21,7 @@ from lib.update.nix import (
     get_current_nix_platform,
 )
 from lib.update.nix_deno import compute_deno_deps_hash
+from lib.update.updaters._sourcefile import resolve_sourcefile
 from lib.update.updaters.core import (
     CargoLockGitDep,
     ChecksumProvidedUpdater,
@@ -69,12 +70,7 @@ convert_nix_hash_to_sri: Callable[[str, str], EventStream] = _convert_nix_hash_t
 
 
 def _updater_sourcefile(cls: type[Updater]) -> str | None:
-    try:
-        return inspect.getsourcefile(cls)
-    except OSError, TypeError:
-        module = inspect.getmodule(cls)
-        module_file = getattr(module, "__file__", None)
-        return module_file if isinstance(module_file, str) else None
+    return resolve_sourcefile(cls, inspect_module=inspect)
 
 
 from lib.update.updaters.factories import (  # noqa: E402
