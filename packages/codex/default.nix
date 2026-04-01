@@ -68,10 +68,14 @@ let
     '';
   };
 
-  rmcpOverride = attrs: {
-    CARGO_CRATE_NAME = attrs.crateName or "rmcp";
-    CARGO_PKG_VERSION = attrs.version or "0.15.0";
-  };
+  rmcpOverride =
+    attrs:
+    assert attrs ? crateName;
+    assert attrs ? version;
+    {
+      CARGO_CRATE_NAME = attrs.crateName;
+      CARGO_PKG_VERSION = attrs.version;
+    };
 
   runfilesOverride = attrs: {
     src = "${attrs.src}/rust/runfiles";

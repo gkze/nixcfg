@@ -400,12 +400,16 @@ let
     patches = (attrs.patches or [ ]) ++ [ ./hipstr-no-serde-bytes.patch ];
   };
 
-  # rmcp 0.12.0 uses env! for Cargo package vars during compilation, but
+  # rmcp uses env! for Cargo package vars during compilation, but
   # buildRustCrate does not export those automatically.
-  rmcpOverride = attrs: {
-    CARGO_CRATE_NAME = attrs.crateName or "rmcp";
-    CARGO_PKG_VERSION = attrs.version or "0.12.0";
-  };
+  rmcpOverride =
+    attrs:
+    assert attrs ? crateName;
+    assert attrs ? version;
+    {
+      CARGO_CRATE_NAME = attrs.crateName;
+      CARGO_PKG_VERSION = attrs.version;
+    };
 
   # V8 is the most bespoke part of the package: source build via GN/Ninja,
   # darwin SDK knobs, bindgen/libclang wiring, and a suppressed cc-wrapper

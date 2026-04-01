@@ -413,44 +413,50 @@ let
     nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [ cmake ];
   };
 
-  treeSitterOverride = attrs: {
-    nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [ python3 ];
-    preConfigure = (attrs.preConfigure or "") + ''
-      dep_wasmtime_include=""
-      for include_dir in /nix/store/*-rust_wasmtime-c-api-impl-33.0.2-lib/lib/wasmtime-c-api-impl.out/include; do
-        dep_wasmtime_include="$include_dir"
-        break
-      done
-      export DEP_WASMTIME_C_API_INCLUDE="$dep_wasmtime_include"
-    '';
-    postPatch = (attrs.postPatch or "") + ''
-      python3 - <<'PY'
-      from pathlib import Path
+  treeSitterOverride =
+    attrs:
+    let
+      wasmtimeCApiIncludeDirs =
+        lib.concatMapStringsSep " " (dep: "${dep.lib}/lib/wasmtime-c-api-impl.out/include")
+          (builtins.filter (dep: (dep.crateName or "") == "wasmtime-c-api-impl") (attrs.dependencies or [ ]));
+    in
+    {
+      nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [ python3 ];
+      preConfigure = (attrs.preConfigure or "") + ''
+        export DEP_WASMTIME_C_API_INCLUDE="${wasmtimeCApiIncludeDirs}"
+        if [ -z "$DEP_WASMTIME_C_API_INCLUDE" ]; then
+          echo "missing wasmtime-c-api-impl include path for tree-sitter" >&2
+          exit 1
+        fi
+      '';
+      postPatch = (attrs.postPatch or "") + ''
+        python3 - <<'PY'
+        from pathlib import Path
 
-      path = Path("binding_rust/build.rs")
-      text = path.read_text()
-      old = (
-          "        config\n"
-          '            .define("TREE_SITTER_FEATURE_WASM", "")\n'
-          '            .define("static_assert(...)", "")\n'
-          '            .include(env::var("DEP_WASMTIME_C_API_INCLUDE").unwrap());\n'
-      )
-      new = (
-          "        config\n"
-          '            .define("TREE_SITTER_FEATURE_WASM", "")\n'
-          '            .define("static_assert(...)", "");\n'
-          '        if let Ok(include) = env::var("DEP_WASMTIME_C_API_INCLUDE") {\n'
-          '            for include in include.split_whitespace() {\n'
-          "                config.include(include);\n"
-          "            }\n"
-          "        }\n"
-      )
+        path = Path("binding_rust/build.rs")
+        text = path.read_text()
+        old = (
+            "        config\n"
+            '            .define("TREE_SITTER_FEATURE_WASM", "")\n'
+            '            .define("static_assert(...)", "")\n'
+            '            .include(env::var("DEP_WASMTIME_C_API_INCLUDE").unwrap());\n'
+        )
+        new = (
+            "        config\n"
+            '            .define("TREE_SITTER_FEATURE_WASM", "")\n'
+            '            .define("static_assert(...)", "");\n'
+            '        if let Ok(include) = env::var("DEP_WASMTIME_C_API_INCLUDE") {\n'
+            '            for include in include.split_whitespace() {\n'
+            "                config.include(include);\n"
+            "            }\n"
+            "        }\n"
+        )
 
-      assert old in text, "tree-sitter patch target not found"
-      path.write_text(text.replace(old, new, 1))
-      PY
-    '';
-  };
+        assert old in text, "tree-sitter patch target not found"
+        path.write_text(text.replace(old, new, 1))
+        PY
+      '';
+    };
 
   zedOverride = attrs: {
     buildInputs = (attrs.buildInputs or [ ]) ++ [ git ];
@@ -537,14 +543,10 @@ let
     // commonCrateOverrides
     // {
       documented = documentedOverride;
-      "documented 0.9.2" = documentedOverride;
       gpui_macos = attrs: (commonOverride attrs) // (gpuiMacosOverride attrs);
       rav1e = rav1eOverride;
-      "rav1e 0.7.1" = rav1eOverride;
       tree-sitter = treeSitterOverride;
-      "tree-sitter 0.26.3" = treeSitterOverride;
       wasmtime-c-api-impl = wasmtimeCApiImplOverride;
-      "wasmtime-c-api-impl 33.0.2" = wasmtimeCApiImplOverride;
       webrtc-sys = attrs: (commonOverride attrs) // (webrtcSysOverride attrs);
       zed = attrs: (commonOverride attrs) // (zedOverride attrs);
     };
