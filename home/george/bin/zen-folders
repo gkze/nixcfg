@@ -54,7 +54,7 @@ import time
 import uuid as uuidlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, cast
+from typing import Any, Final, cast
 
 import lz4.block
 import yaml
@@ -62,7 +62,7 @@ from yaml.constructor import ConstructorError
 from yaml.resolver import BaseResolver
 
 try:
-    import fcntl
+    fcntl: Any = __import__("fcntl")
 except ImportError:  # pragma: no cover - non-POSIX fallback
     fcntl = None
 

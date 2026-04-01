@@ -12,6 +12,7 @@ import pytest
 from rich.segment import Segment
 from rich.text import Text
 
+import lib.update.ui as ui_module
 import lib.update.ui_consumer as ui_consumer_module
 import lib.update.ui_render as ui_render_module
 import lib.update.ui_state as ui_state_module
@@ -55,6 +56,18 @@ DEFAULT_OP_ORDER = (
     OperationKind.REFRESH_LOCK,
     OperationKind.COMPUTE_HASH,
 )
+
+
+def test_ui_facade_reexports_focused_modules() -> None:
+    """Public facade should continue exposing the focused UI APIs."""
+    assert ui_module.consume_events is consume_events
+    assert ui_module.ConsumeEventsOptions is ConsumeEventsOptions
+    assert ui_module.EventConsumer is EventConsumer
+    assert ui_module.Renderer is Renderer
+    assert ui_module.ItemMeta is ItemMeta
+    assert ui_module.ItemState is ItemState
+    assert ui_module.OperationKind is OperationKind
+    assert ui_module.OperationState is OperationState
 
 
 def _hash_entry(

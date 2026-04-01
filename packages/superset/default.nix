@@ -146,14 +146,14 @@ else
     '';
 
     postPatch = ''
-            substituteInPlace package.json \
-              --replace-fail '"postinstall": "./scripts/postinstall.sh"' '"postinstall": ""'
+      substituteInPlace package.json \
+        --replace-fail '"postinstall": "./scripts/postinstall.sh"' '"postinstall": ""'
 
-            substituteInPlace apps/desktop/electron-builder.ts \
-              --replace-fail 'target: "default",' 'target: "dir",
-                identity: null,' \
-              --replace-fail 'hardenedRuntime: true,' 'hardenedRuntime: false,' \
-              --replace-fail 'notarize: true,' 'notarize: false,'
+      substituteInPlace apps/desktop/electron-builder.ts \
+        --replace-fail 'target: "default",' 'target: "dir",
+          identity: null,' \
+        --replace-fail 'hardenedRuntime: true,' 'hardenedRuntime: false,' \
+        --replace-fail 'notarize: true,' 'notarize: false,'
     '';
 
     buildPhase = ''
