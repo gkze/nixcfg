@@ -85,6 +85,8 @@ jobs:
             command: nix fmt -- --ci
           - name: editorconfig
             command: nix run --inputs-from . nixpkgs#editorconfig-checker
+          - name: css
+            command: nix build .#checks.x86_64-linux.css
           - name: python
             command: uv run ruff check --config pyproject.toml . && uv run ty check .
           - name: pytest

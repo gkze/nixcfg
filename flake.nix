@@ -382,6 +382,17 @@
                         "-conf"
                         ".yamlfmt"
                       ];
+                      biome-css = {
+                        command = lib.getExe pkgs.biome;
+                        options = [
+                          "format"
+                          "--config-path"
+                          "biome.jsonc"
+                          "--write"
+                        ];
+                        includes = lintFiles.css.globs;
+                        excludes = lintFiles.css.excludeGlobs;
+                      };
                       "markdown-table-formatter" = {
                         command = lib.getExe' (pkgs.python3.withPackages (
                           ps: with ps; [
@@ -412,6 +423,26 @@
               ${lib.getExe outputs'.formatter} .
             ''
           );
+
+          checks.css =
+            {
+              lib,
+              pkgs,
+              ...
+            }:
+            pkgs.runCommand "check-css" { } ''
+              export HOME="$TMPDIR"
+              cp -a ${./.} src
+              cd src
+              ${lib.getExe' pkgs.findutils "find"} . \
+                \( -path './.direnv' -o -path './.venv' -o -path './node_modules' -o -path './result' \) -prune -o \
+                -type f -name '*.css' -print0 \
+                | ${lib.getExe' pkgs.findutils "xargs"} -0 -r ${lib.getExe pkgs.biome} check \
+                    --config-path biome.jsonc \
+                    --error-on-warnings \
+                    --max-diagnostics=none
+              touch $out
+            '';
 
           checks.python =
             {

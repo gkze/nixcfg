@@ -1,0 +1,44 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.2/schema.json",
+
+  // Keep Biome narrowly focused on repo-managed CSS for now.
+  "files": {
+    "ignoreUnknown": true
+  },
+
+  // Biome's VCS auto-discovery gets confused by this repo living under
+  // ~/.config; using an explicit config with VCS disabled keeps CLI and CI
+  // stable.
+  "vcs": {
+    "enabled": false,
+    "useIgnoreFile": false
+  },
+
+  "css": {
+    "formatter": {
+      "enabled": true,
+      "indentStyle": "space",
+      "indentWidth": 2,
+      "lineEnding": "lf"
+    },
+    "linter": {
+      "enabled": true
+    }
+  },
+
+  "overrides": [
+    {
+      "includes": ["home/george/zen/chrome/**/*.css"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noImportantStyles": "off"
+          },
+          "correctness": {
+            "noUnknownTypeSelector": "off"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -31,3 +31,8 @@ indent_size = 2
 [*.toml]
 indent_style = space
 indent_size = 2
+
+# CSS
+[*.css]
+indent_style = space
+indent_size = 2

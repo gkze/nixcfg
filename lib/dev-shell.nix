@@ -26,6 +26,14 @@ let
     ${lib.getExe pkgs.git} ls-files -z -- '*.yml' '*.yaml' \
       | ${lib.getExe' pkgs.findutils "xargs"} -0 -r ${lib.getExe pkgs.yamllint} -c .yamllint
   '';
+  cssQualityCheck = pkgs.writeShellScript "quality-css" ''
+    set -euo pipefail
+    ${lib.getExe pkgs.git} ls-files -z -- '*.css' \
+      | ${lib.getExe' pkgs.findutils "xargs"} -0 -r ${lib.getExe pkgs.biome} check \
+          --config-path biome.jsonc \
+          --error-on-warnings \
+          --max-diagnostics=none
+  '';
 
   pre-commit-check = gitHooks.lib.${pkgs.system}.run {
     inherit src;
@@ -120,6 +128,15 @@ let
         priority = qualityPriority;
       };
 
+      quality-css = {
+        enable = true;
+        name = "quality-css";
+        entry = "${cssQualityCheck}";
+        pass_filenames = false;
+        always_run = true;
+        priority = qualityPriority;
+      };
+
       check-merge-conflicts = {
         enable = true;
         priority = 0;
@@ -145,6 +162,7 @@ pkgs.devshell.mkShell {
   packages =
     with pkgs;
     [
+      biome
       flake-edit
       go
       nh

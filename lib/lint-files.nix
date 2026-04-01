@@ -18,6 +18,17 @@
     globs = [ "*.toml" ];
   };
 
+  css = {
+    regex = "\\.css$";
+    globs = [ "*.css" ];
+    excludeGlobs = [
+      ".direnv/**"
+      ".venv/**"
+      "node_modules/**"
+      "result/**"
+    ];
+  };
+
   shell = {
     regex = "(\\.envrc|misc/zsh-plugins/.*\\.zsh)";
     globs = [
