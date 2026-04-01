@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any, ClassVar, cast
 
 import pytest
+from rich.console import Console
+from rich.control import ControlType
+from rich.live import Live
 from rich.segment import Segment
 from rich.text import Text
 
@@ -487,6 +490,110 @@ class _LiveStub:
     def update(self, renderable: object, *, refresh: bool) -> None:
         """Run this test case."""
         self.updated.append((renderable, refresh))
+
+
+def test_install_resize_aware_live_render_replaces_rich_live_render() -> None:
+    """Wire the resize-aware renderer into the Rich Live instance used at runtime."""
+    console = Console(file=io.StringIO(), force_terminal=True, width=12, height=4)
+    live = Live(Text("abcdefghij"), console=console, auto_refresh=False, transient=True)
+
+    assert not isinstance(live._live_render, ui_render_module._ResizeAwareLiveRender)
+
+    patched = ui_render_module._install_resize_aware_live_render(live)
+
+    assert patched is live
+    assert isinstance(live._live_render, ui_render_module._ResizeAwareLiveRender)
+    assert live._live_render._console is console
+
+
+def test_resize_aware_live_render_returns_empty_controls_before_first_render() -> None:
+    """Before any render, cursor-clearing controls should be empty."""
+    console = Console(file=io.StringIO(), force_terminal=True, width=12, height=4)
+    render = ui_render_module._ResizeAwareLiveRender(Text("abc"), console=console)
+
+    assert render.position_cursor().segment.control == []
+    assert render.restore_cursor().segment.control == []
+
+
+def test_resize_aware_live_render_adds_ellipsis_for_vertical_overflow() -> None:
+    """Mirror Rich's ellipsis overflow mode while tracking wrapped line widths."""
+    console = Console(file=io.StringIO(), force_terminal=True, width=12, height=2)
+    render = ui_render_module._ResizeAwareLiveRender(
+        Text("one\ntwo\nthree"),
+        console=console,
+        vertical_overflow="ellipsis",
+    )
+
+    segments = list(render.__rich_console__(console, console.options))
+
+    assert render.last_render_height == 2
+    assert any("..." in segment.text for segment in segments)
+    assert any(segment.text == "\n" for segment in segments)
+
+
+def test_resize_aware_live_render_crops_vertical_overflow_without_ellipsis() -> None:
+    """Mirror Rich's crop overflow mode while preserving tracked line widths."""
+    console = Console(file=io.StringIO(), force_terminal=True, width=12, height=2)
+    render = ui_render_module._ResizeAwareLiveRender(
+        Text("one\ntwo\nthree"),
+        console=console,
+        vertical_overflow="crop",
+    )
+
+    segments = list(render.__rich_console__(console, console.options))
+
+    assert render.last_render_height == 2
+    assert not any(segment.text == "..." for segment in segments)
+    assert any(segment.text == "\n" for segment in segments)
+
+
+def test_resize_aware_live_render_preserves_visible_overflow() -> None:
+    """Allow visible overflow while still tracking the full rendered height."""
+    console = Console(file=io.StringIO(), force_terminal=True, width=12, height=2)
+    render = ui_render_module._ResizeAwareLiveRender(
+        Text("one\ntwo\nthree"),
+        console=console,
+        vertical_overflow="visible",
+    )
+
+    segments = list(render.__rich_console__(console, console.options))
+
+    assert render.last_render_height == 3
+    assert not any("..." in segment.text for segment in segments)
+    assert sum(segment.text == "\n" for segment in segments) == 2
+
+
+def test_resize_aware_live_render_clears_wrapped_rows_after_width_shrink() -> None:
+    """Use current console width when erasing a previously rendered frame."""
+    console = Console(file=io.StringIO(), force_terminal=True, width=12, height=4)
+    render = ui_render_module._ResizeAwareLiveRender(
+        Text("abcdefghij"), console=console
+    )
+
+    _ = list(render.__rich_console__(console, console.options))
+    assert render.last_render_height == 1
+
+    console._width = 4
+    position = render.position_cursor()
+    restore = render.restore_cursor()
+
+    assert position.segment.control == [
+        (ControlType.CARRIAGE_RETURN,),
+        (ControlType.ERASE_IN_LINE, 2),
+        (ControlType.CURSOR_UP, 1),
+        (ControlType.ERASE_IN_LINE, 2),
+        (ControlType.CURSOR_UP, 1),
+        (ControlType.ERASE_IN_LINE, 2),
+    ]
+    assert restore.segment.control == [
+        (ControlType.CARRIAGE_RETURN,),
+        (ControlType.CURSOR_UP, 1),
+        (ControlType.ERASE_IN_LINE, 2),
+        (ControlType.CURSOR_UP, 1),
+        (ControlType.ERASE_IN_LINE, 2),
+        (ControlType.CURSOR_UP, 1),
+        (ControlType.ERASE_IN_LINE, 2),
+    ]
 
 
 def test_renderer_lifecycle_and_render_if_due(monkeypatch: pytest.MonkeyPatch) -> None:

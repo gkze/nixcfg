@@ -24,17 +24,26 @@ jobs:
           persist-credentials: false
       - &setup_nix
         uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919 # v3.17.1
+        with:
+          extra-conf: |
+            extra-substituters = https://cache.garnix.io
+            extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
       - &cachix_write
         if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
+          # Push store paths incrementally as Nix finishes each build and pull
+          # from the public zed cache alongside our own cache.
           name: ${{ env.CACHIX_NAME }}
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          extraPullNames: zed
+          useDaemon: true
       - &cachix_readonly
         if: github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
         uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
           name: ${{ env.CACHIX_NAME }}
+          extraPullNames: zed
           skipPush: true
       - &cache_nix
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
@@ -88,14 +97,19 @@ jobs:
           - name: css
             command: nix build .#checks.x86_64-linux.css
           - name: python
+            uses_uv: true
             command: uv run ruff check --config pyproject.toml . && uv run ty check .
           - name: pytest
+            uses_uv: true
             command: uv sync --frozen --group dev && uv run coverage run -m pytest && uv run coverage report
           - name: ghawfr-go
+            uses_go: true
             command: cd ghawfr && go test ./...
           - name: crate2nix
+            uses_uv: true
             command: uv run python -m lib.update.ci.crate2nix
           - name: workflow-artifacts
+            uses_uv: true
             command: uv run nixcfg ci workflow verify-artifacts
           - name: pinact
             command: pinact run --check
@@ -110,12 +124,35 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
+      GOMODCACHE: ${{ github.workspace }}/.cache/go/pkg/mod
+      UV_CACHE_DIR: ${{ github.workspace }}/.cache/uv
     steps:
       - *checkout
       - *setup_nix
       - *cachix_write
       - *cachix_readonly
       - *cache_nix
+      - name: Restore uv cache
+        if: matrix.uses_uv == true
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key: uv-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}-${{ matrix.name }}
+          restore-keys: |
+            uv-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}-
+            uv-cache-${{ runner.os }}-${{ runner.arch }}-
+      - name: Restore Go cache
+        if: matrix.uses_go == true
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: go-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ghawfr/go.sum') }}
+          restore-keys: |
+            go-cache-${{ runner.os }}-${{ runner.arch }}-
       - name: Run quality gate
         env:
           QUALITY_COMMAND: ${{ matrix.command }}

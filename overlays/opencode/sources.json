@@ -1,8 +1,8 @@
 {
-  "drvHash": "41nf6dh8q1y0rh63q7yns25amgh7x26f",
+  "drvHash": "zay2svlsd0fr08gnpxsq7axy1gafb33b",
   "hashes": [
     {
-      "hash": "sha256-712rb7B5gTRz1uTx4cJQSrmq9DoBUe+UxbvawYV4XTE=",
+      "hash": "sha256-3GXmqG7yihJ91wS/jlW19qxGI62b1bFJnpGB4LcMlpY=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     },
@@ -18,5 +18,5 @@
     }
   ],
   "input": "opencode",
-  "version": "fix/catppuccin-shell-hierarchy"
+  "version": "fix/desktop-session-theme-regressions"
 }

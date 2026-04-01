@@ -29,11 +29,19 @@ jobs:
           persist-credentials: false
       - &setup_nix
         uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919 # v3.17.1
+        with:
+          extra-conf: |
+            extra-substituters = https://cache.garnix.io
+            extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
       - &cachix
         uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
+          # Push store paths incrementally as each build completes while also
+          # pulling from the public zed cache.
           name: ${{ env.CACHIX_NAME }}
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          extraPullNames: zed
+          useDaemon: true
       - &cache_nix
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
@@ -173,7 +181,11 @@ jobs:
       - name: Free disk space
         if: runner.os == 'macOS'
         run: nix run .#nixcfg -- ci workflow free-disk-space
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - &setup_uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          ignore-nothing-to-cache: true
       - name: Compute hashes for ${{ matrix.platform }}
         # Run update with pinned versions to ensure all platforms use the
         # same upstream version (resolved in the resolve-versions job).
@@ -403,7 +415,7 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.14"
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - *setup_uv
       - name: Install Python dependencies
         run: uv sync --frozen --group dev
       - name: Verify crate2nix artifacts are fresh

@@ -39,6 +39,7 @@ rewriting it in-place.
 
 Zen must be closed when making changes -- it overwrites the session on quit.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -202,7 +203,7 @@ def _load_profiles_ini() -> configparser.RawConfigParser | None:
     try:
         with PROFILES_INI.open(encoding="utf-8") as handle:
             parser.read_file(handle)
-    except (OSError, configparser.Error):
+    except OSError, configparser.Error:
         return None
     return parser
 
@@ -232,9 +233,11 @@ def _profiles_from_ini() -> list[tuple[str, Path, bool]]:
         path = _profile_path_from_ini(parser.get(section, "Path", fallback=""))
         if path is None:
             continue
-        profiles.append(
-            (name, path, parser.getboolean(section, "Default", fallback=False))
-        )
+        profiles.append((
+            name,
+            path,
+            parser.getboolean(section, "Default", fallback=False),
+        ))
     return profiles
 
 
@@ -519,9 +522,7 @@ def _normalize_tab_specs(folder_name: str, tabs_raw: object) -> list[dict]:
     return tabs
 
 
-def _parse_workspace_theme(
-    workspace: str, raw_theme: object
-) -> WorkspaceThemeSpec:
+def _parse_workspace_theme(workspace: str, raw_theme: object) -> WorkspaceThemeSpec:
     """Validate and normalize one declarative workspace theme block."""
     if not isinstance(raw_theme, dict):
         msg = (
@@ -671,9 +672,7 @@ def _parse_workspace_spec(workspace: str, folders_raw: object) -> WorkspaceSpec:
 
     raw_theme = meta_map.get("theme")
     theme = (
-        _parse_workspace_theme(workspace, raw_theme)
-        if raw_theme is not None
-        else None
+        _parse_workspace_theme(workspace, raw_theme) if raw_theme is not None else None
     )
 
     return WorkspaceSpec(
@@ -866,7 +865,9 @@ def create_workspace_entry(spec: WorkspaceSpec) -> dict:
     return workspace
 
 
-def ensure_workspace(session: dict, spec: WorkspaceSpec) -> tuple[str, WorkspaceSpec | None]:
+def ensure_workspace(
+    session: dict, spec: WorkspaceSpec
+) -> tuple[str, WorkspaceSpec | None]:
     """Resolve a workspace, creating it in-session when missing."""
     existing = workspace_record_by_name(session, spec.name)
     if existing is not None:
@@ -926,7 +927,6 @@ def plan_workspace_metadata_updates(
             )
 
 
-
 def apply_workspace_metadata(
     session: dict,
     workspace_uuid: str,
@@ -943,7 +943,6 @@ def apply_workspace_metadata(
         space["theme"] = spec.theme.to_session_dict()
     if spec.has_collapsed_pinned_tabs is not None:
         space["hasCollapsedPinnedTabs"] = spec.has_collapsed_pinned_tabs
-
 
 
 def resolve_workspace(session: dict, name: str) -> str:
@@ -1066,7 +1065,7 @@ def zen_process_is_running() -> bool | None:
             capture_output=True,
             text=True,
         )
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+    except FileNotFoundError, subprocess.SubprocessError, OSError:
         return None
 
     for line in result.stdout.splitlines():

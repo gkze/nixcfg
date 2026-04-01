@@ -148,12 +148,6 @@ else
     postPatch = ''
       substituteInPlace package.json \
         --replace-fail '"postinstall": "./scripts/postinstall.sh"' '"postinstall": ""'
-
-      substituteInPlace apps/desktop/electron-builder.ts \
-        --replace-fail 'target: "default",' 'target: "dir",
-          identity: null,' \
-        --replace-fail 'hardenedRuntime: true,' 'hardenedRuntime: false,' \
-        --replace-fail 'notarize: true,' 'notarize: false,'
     '';
 
     buildPhase = ''
@@ -192,7 +186,18 @@ else
       bun run --cwd apps/desktop compile:app
       bun run --cwd apps/desktop validate:native-runtime
       bun run --cwd apps/desktop install:deps
-      bun run --cwd apps/desktop package
+
+      (
+        cd apps/desktop
+        bun x electron-builder \
+          --config electron-builder.ts \
+          --mac \
+          --dir \
+          --publish never \
+          -c.mac.identity=null \
+          -c.mac.hardenedRuntime=false \
+          -c.mac.notarize=false
+      )
 
       runHook postBuild
     '';

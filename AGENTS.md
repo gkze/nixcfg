@@ -21,6 +21,16 @@ Before changing code, do the smallest possible orientation pass:
 
 Local history for this repo heavily favors root-cause analysis, workflow failure investigation, and explicit self-review passes. Match that style.
 
+## Non-Negotiable Guardrails
+
+These are hard rules, not suggestions.
+
+- Do not use `--no-verify` with `git commit`, `git push`, or related git flows in this repo.
+- If hooks fail, fix the underlying issue or stop and ask the user. Do not bypass the hook as a shortcut.
+- If partial staging or commit-splitting makes hooks awkward, use a safer flow instead: temporary patches, an isolated worktree, or a clean commit split that still allows hooks to run normally.
+- Before push, do not rely on spot checks when repo hooks or CI define stricter gates. Run `prek run -a` or the exact relevant CI-parity commands on the final tree.
+- Do not push changes while any known required local quality gate is failing.
+
 ## What This Repository Actually Is
 
 This is not just a personal dotfiles repo.

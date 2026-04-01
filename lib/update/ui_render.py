@@ -5,14 +5,123 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from rich.console import Console, Group, RenderableType
+from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
+from rich.control import Control, ControlType
 from rich.live import Live
+from rich.live_render import LiveRender, VerticalOverflowMethod
+from rich.segment import Segment
 from rich.spinner import Spinner
 from rich.text import Text
 from rich.tree import Tree
 
 if TYPE_CHECKING:
     from lib.update.ui_state import ItemState, OperationState
+
+
+class _ResizeAwareLiveRender(LiveRender):
+    """Track rendered line widths so inline Live clearing survives width shrink."""
+
+    def __init__(
+        self,
+        renderable: RenderableType,
+        *,
+        console: Console,
+        vertical_overflow: VerticalOverflowMethod = "ellipsis",
+    ) -> None:
+        super().__init__(renderable, vertical_overflow=vertical_overflow)
+        self._console = console
+        self._line_lengths: tuple[int, ...] = ()
+
+    def _visual_height(self) -> int:
+        if self._shape is None:
+            return 0
+        width = max(1, self._console.width)
+        return sum(
+            1 if line_length == 0 else (line_length + width - 1) // width
+            for line_length in self._line_lengths
+        )
+
+    def position_cursor(self) -> Control:
+        """Clear the previous frame using the current terminal width."""
+        height = self._visual_height()
+        if height <= 0:
+            return Control()
+        return Control(
+            ControlType.CARRIAGE_RETURN,
+            (ControlType.ERASE_IN_LINE, 2),
+            *(
+                ((ControlType.CURSOR_UP, 1), (ControlType.ERASE_IN_LINE, 2))
+                * (height - 1)
+            ),
+        )
+
+    def restore_cursor(self) -> Control:
+        """Clear the previous transient frame using the current terminal width."""
+        height = self._visual_height()
+        if height <= 0:
+            return Control()
+        return Control(
+            ControlType.CARRIAGE_RETURN,
+            *((ControlType.CURSOR_UP, 1), (ControlType.ERASE_IN_LINE, 2)) * height,
+        )
+
+    def __rich_console__(
+        self,
+        console: Console,
+        options: ConsoleOptions,
+    ) -> RenderResult:
+        renderable = self.renderable
+        style = console.get_style(self.style)
+        lines = console.render_lines(renderable, options, style=style, pad=False)
+        _, height = Segment.get_shape(lines)
+
+        if height > options.size.height:
+            if self.vertical_overflow == "crop":
+                lines = lines[: options.size.height]
+            elif self.vertical_overflow == "ellipsis":
+                lines = lines[: (options.size.height - 1)]
+                overflow_text = Text(
+                    "...",
+                    overflow="crop",
+                    justify="center",
+                    end="",
+                    style="live.ellipsis",
+                )
+                lines.append(list(console.render(overflow_text)))
+
+        self._shape = Segment.get_shape(lines)
+        self._line_lengths = tuple(Segment.get_line_length(line) for line in lines)
+
+        new_line = Segment.line()
+        last_line = len(lines) - 1
+        for index, line in enumerate(lines):
+            yield from line
+            if index != last_line:
+                yield new_line
+
+
+def _install_resize_aware_live_render(live: Live) -> Live:
+    """Swap in a resize-aware LiveRender when Rich exposes the expected hooks."""
+    if not all(
+        hasattr(live, attr)
+        for attr in ("_live_render", "console", "vertical_overflow", "get_renderable")
+    ):
+        return live
+
+    # Rich clears transient output using the wrapped height from the previous
+    # render. After a terminal width shrink that leaves stale rows behind, so
+    # replace the private LiveRender with one that recomputes visual height
+    # from the current console width before emitting cursor-clearing controls.
+    object.__setattr__(
+        live,
+        "_live_render",
+        _ResizeAwareLiveRender(
+            live.get_renderable(),
+            console=live.console,
+            vertical_overflow=live.vertical_overflow,
+        ),
+    )
+    return live
 
 
 class Renderer:
@@ -68,11 +177,13 @@ class Renderer:
         self._live: Live | None = None
         if is_tty and not self.quiet:
             self._console = Console(force_terminal=True)
-            self._live = Live(
-                Text(""),
-                console=self._console,
-                auto_refresh=False,
-                transient=True,
+            self._live = _install_resize_aware_live_render(
+                Live(
+                    Text(""),
+                    console=self._console,
+                    auto_refresh=False,
+                    transient=True,
+                )
             )
             self._live.start()
 

@@ -1,5 +1,5 @@
 {
-  "commit": "bcd0d6c843e036741040103d7de8a817fec61868",
+  "commit": "d1e65eb420c98c1d54998b87e05d40e41bc3f2a2",
   "hashes": [
     {
       "gitDep": "specta-2.0.0-rc.22",
@@ -18,5 +18,5 @@
     }
   ],
   "input": "opencode",
-  "version": "fix/catppuccin-shell-hierarchy"
+  "version": "fix/desktop-session-theme-regressions"
 }

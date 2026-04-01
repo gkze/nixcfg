@@ -67,7 +67,8 @@
     };
     crane.url = "github:ipetkov/crane";
     opencode = {
-      url = "github:gkze/opencode?ref=fix/catppuccin-shell-hierarchy";
+      # Temporary fork until upstream fixes desktop session theme regressions.
+      url = "github:gkze/opencode?ref=fix/desktop-session-theme-regressions";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     pyproject-build-systems = {
