@@ -1581,11 +1581,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1774549602,
-        "narHash": "sha256-U8Lj0NzznOJDfvHyu2ovGWqoHtcIll72M4e5FATId08=",
+        "lastModified": 1774908384,
+        "narHash": "sha256-4KUXD9KHs5sPI0occwG6ow4TTawSY8xjtCxYMrHlZr8=",
         "owner": "gkze",
         "repo": "opencode",
-        "rev": "bcd0d6c843e036741040103d7de8a817fec61868",
+        "rev": "c2ac90d411c2bda09d7509600b0aab1055149d92",
         "type": "github"
       },
       "original": {
