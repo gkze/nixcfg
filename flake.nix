@@ -128,6 +128,11 @@
       url = "github:catppuccin/bat";
       flake = false;
     };
+    # Temporary fork pin until the Twilight acrylic-gap fix lands upstream.
+    catppuccin-zen-browser = {
+      url = "github:gkze/zen-browser?ref=fix/frappe-zen-twilight-acrylic-gap";
+      flake = false;
+    };
     codex = {
       url = "github:openai/codex/rust-v0.114.0";
       flake = false;

@@ -159,6 +159,23 @@
         "type": "github"
       }
     },
+    "catppuccin-zen-browser": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1775069964,
+        "narHash": "sha256-9QDYV01dHh/WS82zQV0F2WsRWR2v6W0oB/pmucZMMAc=",
+        "owner": "gkze",
+        "repo": "zen-browser",
+        "rev": "96273ffbe6d29df1ed9a3ff8456fad8816c73984",
+        "type": "github"
+      },
+      "original": {
+        "owner": "gkze",
+        "ref": "fix/frappe-zen-twilight-acrylic-gap",
+        "repo": "zen-browser",
+        "type": "github"
+      }
+    },
     "cl-nix-lite": {
       "inputs": {
         "flake-parts": "flake-parts_3",
@@ -1764,6 +1781,7 @@
         "bun2nix": "bun2nix",
         "catppuccin-bat": "catppuccin-bat",
         "catppuccin-delta": "catppuccin-delta",
+        "catppuccin-zen-browser": "catppuccin-zen-browser",
         "codex": "codex",
         "crane": "crane",
         "curator": "curator",

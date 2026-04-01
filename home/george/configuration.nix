@@ -112,13 +112,30 @@
   };
 
   nixcfg = {
-    zen = {
-      enable = true;
-      profile = "Default (twilight)";
-      chromeSource = ./zen/chrome;
-      userJsSource = ./zen/user.js;
-      foldersSource = ./zen/folders.yaml;
-    };
+    zen =
+      let
+        capitalize =
+          s:
+          (lib.toUpper (builtins.substring 0 1 s)) + (builtins.substring 1 (builtins.stringLength s - 1) s);
+      in
+      {
+        enable = true;
+        profile = "Default (twilight)";
+        # Keep Zen chrome aligned with the repo's global Catppuccin flavor/accent.
+        # Override this flake input locally while iterating on the Catppuccin repo:
+        #   --override-input catppuccin-zen-browser path:/Users/george/Development/github.com/catppuccin/zen-browser
+        chromeSource =
+          let
+            themeDir =
+              inputs.catppuccin-zen-browser
+              + "/themes/${capitalize config.theme.variant}/${capitalize config.theme.accentColor}";
+          in
+          assert builtins.pathExists (themeDir + "/userChrome.css");
+          assert builtins.pathExists (themeDir + "/userContent.css");
+          themeDir;
+        userJsSource = ./zen/user.js;
+        foldersSource = ./zen/folders.yaml;
+      };
 
     languages = {
       bun.enable = true;

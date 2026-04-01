@@ -26,19 +26,6 @@
     }
   },
 
-  "overrides": [
-    {
-      "includes": ["home/george/zen/chrome/**/*.css"],
-      "linter": {
-        "rules": {
-          "complexity": {
-            "noImportantStyles": "off"
-          },
-          "correctness": {
-            "noUnknownTypeSelector": "off"
-          }
-        }
-      }
-    }
-  ]
+  // No repo-managed CSS currently needs custom Biome overrides.
+  "overrides": []
 }
