@@ -8,6 +8,12 @@ result
 # Local editor/LSP support from Nix-provided JS packages
 /node_modules/
 
+# Local OpenCode plugin workspace state
+/.opencode/node_modules/
+/.opencode/package.json
+/.opencode/package-lock.json
+/.opencode/bun.lock
+
 # Needed for formatting .vscode/settings.json
 !.vscode/
 

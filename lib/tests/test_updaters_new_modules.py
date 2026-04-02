@@ -105,6 +105,11 @@ def test_commander_fetches_latest_version_from_changelog(
             result=b"# Changelog\n\n## 0.7.875 - 2026-03-16\n\n- Fix stuff\n",
         ),
     )
+    monkeypatch.setattr(
+        commander_module,
+        "fetch_headers",
+        lambda *_a, **_k: asyncio.sleep(0, result={"ETag": '"abc"'}),
+    )
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == "0.7.875"
 
@@ -127,6 +132,11 @@ def test_commander_fetches_latest_version_from_html_changelog(
             ),
         ),
     )
+    monkeypatch.setattr(
+        commander_module,
+        "fetch_headers",
+        lambda *_a, **_k: asyncio.sleep(0, result={"ETag": '"abc"'}),
+    )
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == "0.7.875"
 
@@ -134,7 +144,7 @@ def test_commander_fetches_latest_version_from_html_changelog(
 def test_commander_uses_versioned_download_urls(
     commander_module: ModuleType,
 ) -> None:
-    """Commander should pin each release to a versioned DMG URL."""
+    """Commander should pin each release to a versioned DMG URL when available."""
     updater = commander_module.CommanderUpdater()
     latest = VersionInfo(version="0.7.890")
 
@@ -146,6 +156,81 @@ def test_commander_uses_versioned_download_urls(
         updater.get_download_url("x86_64-darwin", latest)
         == "https://download.thecommander.app/release/Commander-0.7.890.dmg"
     )
+
+
+def test_commander_falls_back_to_latest_download_url_when_versioned_asset_is_missing(
+    commander_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the stable latest DMG URL when versioned release assets 404."""
+    updater = commander_module.CommanderUpdater()
+    monkeypatch.setattr(
+        commander_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(
+            0,
+            result=b"# Changelog\n\n## 0.7.967 - 2026-03-30\n\n- Fix stuff\n",
+        ),
+    )
+
+    calls: list[str] = []
+
+    async def _fetch_headers(
+        _session: object,
+        url: str,
+        **_kwargs: object,
+    ) -> dict[str, str]:
+        calls.append(url)
+        if url.endswith("Commander-0.7.967.dmg"):
+            raise RuntimeError(
+                "Request to versioned asset failed after 3 attempts: HTTP error 404"
+            )
+        return {"ETag": '"fallback"'}
+
+    monkeypatch.setattr(commander_module, "fetch_headers", _fetch_headers)
+
+    latest = _run(updater.fetch_latest(object()))
+    assert latest.version == "0.7.967"
+    assert (
+        latest.metadata["url"]
+        == "https://download.thecommander.app/release/Commander.dmg"
+    )
+    assert (
+        updater.get_download_url("aarch64-darwin", latest)
+        == "https://download.thecommander.app/release/Commander.dmg"
+    )
+    assert calls == [
+        "https://download.thecommander.app/release/Commander-0.7.967.dmg",
+        "https://download.thecommander.app/release/Commander.dmg",
+    ]
+
+
+def test_commander_propagates_non_404_probe_failures(
+    commander_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not silently mask transient or unexpected probe errors."""
+    updater = commander_module.CommanderUpdater()
+    monkeypatch.setattr(
+        commander_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(
+            0,
+            result=b"# Changelog\n\n## 0.7.967 - 2026-03-30\n\n- Fix stuff\n",
+        ),
+    )
+
+    async def _fetch_headers_fail(
+        _session: object,
+        _url: str,
+        **_kwargs: object,
+    ) -> dict[str, str]:
+        raise RuntimeError("network timeout")
+
+    monkeypatch.setattr(commander_module, "fetch_headers", _fetch_headers_fail)
+
+    with pytest.raises(RuntimeError, match="network timeout"):
+        _run(updater.fetch_latest(object()))
 
 
 def test_commander_rejects_changelog_without_release_heading(

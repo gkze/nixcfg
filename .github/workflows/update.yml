@@ -179,7 +179,7 @@ jobs:
           name: pinned-versions
           path: .
       - name: Free disk space
-        if: runner.os == 'macOS'
+        if: runner.os == 'Linux' || runner.os == 'macOS'
         run: nix run .#nixcfg -- ci workflow free-disk-space
       - &setup_uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
@@ -192,7 +192,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           UPDATE_SUBPROCESS_TIMEOUT: "14400"
-        run: nix run .#nixcfg -- update --native-only --pinned-versions pinned-versions.json
+        run: |
+          if [ "${{ matrix.platform }}" = 'x86_64-linux' ]; then
+            export UPDATE_MAX_NIX_BUILDS=1
+          fi
+          nix run .#nixcfg -- update --native-only --pinned-versions pinned-versions.json
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: sources-${{ matrix.platform }}

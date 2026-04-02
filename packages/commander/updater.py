@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 if TYPE_CHECKING:
     import aiohttp
 
-from lib.update.net import fetch_url
+from lib.update.net import fetch_headers, fetch_url
 from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
-from lib.update.updaters.metadata import NO_METADATA
+from lib.update.updaters.metadata import NO_METADATA, DownloadUrlMetadata
 
 _MARKDOWN_CHANGELOG_VERSION_RE = re.compile(
     r"^##\s+([0-9]+(?:\.[0-9]+)+)\s+-\s+", re.MULTILINE
@@ -37,16 +37,61 @@ class CommanderUpdater(DownloadHashUpdater):
     VERSIONED_URL_TEMPLATE = (
         "https://download.thecommander.app/release/Commander-{version}.dmg"
     )
+    LATEST_URL = "https://download.thecommander.app/release/Commander.dmg"
     CHANGELOG_URL = "https://thecommander.app/changelog.html"
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin",
         "x86_64-darwin": "darwin",
     }
 
+    @staticmethod
+    def _download_url_from_metadata(info: VersionInfo) -> str | None:
+        metadata = info.metadata
+        if metadata is None:
+            return None
+        if isinstance(metadata, dict):
+            metadata_map = cast("dict[str, object]", metadata)
+            url = metadata_map.get("url")
+        else:
+            url = getattr(metadata, "url", None)
+        return url if isinstance(url, str) else None
+
+    @staticmethod
+    def _is_missing_release_error(exc: RuntimeError) -> bool:
+        return re.search(r"\b404\b", str(exc)) is not None
+
+    async def _resolve_download_metadata(
+        self,
+        session: aiohttp.ClientSession,
+        *,
+        version: str,
+    ) -> DownloadUrlMetadata | None:
+        versioned_url = self.VERSIONED_URL_TEMPLATE.format(version=version)
+        try:
+            await fetch_headers(
+                session,
+                versioned_url,
+                request_timeout=self.config.default_timeout,
+                config=self.config,
+            )
+        except RuntimeError as exc:
+            if not self._is_missing_release_error(exc):
+                raise
+            await fetch_headers(
+                session,
+                self.LATEST_URL,
+                request_timeout=self.config.default_timeout,
+                config=self.config,
+            )
+            return DownloadUrlMetadata(url=self.LATEST_URL)
+        return None
+
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
-        """Return the version-pinned Commander DMG URL for ``platform``."""
+        """Return a Commander DMG URL for ``platform``."""
         _ = platform
-        return self.VERSIONED_URL_TEMPLATE.format(version=info.version)
+        return self._download_url_from_metadata(
+            info
+        ) or self.VERSIONED_URL_TEMPLATE.format(version=info.version)
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Parse the latest release version from the changelog page."""
@@ -62,4 +107,5 @@ class CommanderUpdater(DownloadHashUpdater):
         if version is None:
             msg = "Could not parse latest Commander version from changelog"
             raise RuntimeError(msg)
-        return VersionInfo(version=version, metadata=NO_METADATA)
+        metadata = await self._resolve_download_metadata(session, version=version)
+        return VersionInfo(version=version, metadata=metadata or NO_METADATA)

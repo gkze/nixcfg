@@ -175,12 +175,13 @@ def test_cmd_prepare_bun_lock_reports_validation_relock_and_failure(
     assert "relock failed" in capsys.readouterr().err
 
 
-def test_cmd_free_disk_space_runs_cleanup_in_ci(
+def test_cmd_free_disk_space_runs_darwin_cleanup_in_ci(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Run all cleanup commands when CI env is enabled."""
+    """Run macOS cleanup commands when CI env is enabled."""
     monkeypatch.setenv("CI", "true")
+    monkeypatch.setattr(ws.sys, "platform", "darwin")
     commands: list[list[str]] = []
 
     def _fake_run(
@@ -203,6 +204,62 @@ def test_cmd_free_disk_space_runs_cleanup_in_ci(
     assert ws._cmd_free_disk_space(force_local=False) == 0
     assert ["sudo", "rm", "-rf", "/Applications/Xcode-15.4.app"] in commands
     assert any(cmd[:2] == ["xcrun", "simctl"] for cmd in commands)
+
+
+def test_cmd_free_disk_space_runs_linux_cleanup_in_ci(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run Linux cleanup commands when CI env is enabled."""
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setattr(ws.sys, "platform", "linux")
+    commands: list[list[str]] = []
+
+    def _fake_run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return _completed(args)
+
+    def _fake_glob(self: Path, pattern: str) -> list[Path]:
+        if self == Path("/usr/local") and pattern == "julia*":
+            return [Path("/usr/local/julia1.12.5")]
+        return []
+
+    monkeypatch.setattr(ws, "_run", _fake_run)
+    monkeypatch.setattr(ws.Path, "glob", _fake_glob)
+
+    assert ws._cmd_free_disk_space(force_local=False) == 0
+    assert ["sudo", "apt-get", "clean"] in commands
+    assert ["sudo", "swapoff", "-a"] in commands
+    assert any(
+        cmd == ["sudo", "docker", "system", "prune", "--all", "--force", "--volumes"]
+        for cmd in commands
+    )
+    assert any(
+        cmd[:3] == ["sudo", "rm", "-rf"]
+        and "/usr/local/lib/android" in cmd
+        and "/usr/local/julia1.12.5" in cmd
+        for cmd in commands
+    )
+
+
+def test_cmd_free_disk_space_rejects_unsupported_platform(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject cleanup on unsupported runner platforms."""
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setattr(ws.sys, "platform", "win32")
+    monkeypatch.setattr(
+        ws,
+        "_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("cleanup command should not run")
+        ),
+    )
+
+    assert ws._cmd_free_disk_space(force_local=False) == 2
+    assert "only supports Linux and macOS" in capsys.readouterr().err
 
 
 def test_command_routing_for_new_and_legacy_aliases(

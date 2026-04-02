@@ -58,18 +58,38 @@ def _xcode_version_key(app_path: Path) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def _cmd_free_disk_space(*, force_local: bool = False) -> int:
-    running_in_ci = os.environ.get("CI", "").lower() in {"1", "true", "yes"}
-    if not running_in_ci and not force_local:
-        sys.stderr.write(
-            "Refusing to run free-disk-space outside CI. "
-            "Re-run with --force-local to override.\n"
-        )
-        return 2
+# Large preinstalled directories documented by the official Ubuntu 24.04
+# runner image inventory. Keep this list focused on tooling the update
+# workflow does not rely on after setup-nix/setup-uv complete.
+_LINUX_CLEANUP_PATHS = (
+    "/usr/local/lib/android",
+    "/usr/share/swift",
+    "/usr/share/dotnet",
+    "/usr/share/miniconda",
+    "/usr/local/.ghcup",
+    "/usr/lib/jvm",
+    "/opt/hostedtoolcache/CodeQL",
+    "/opt/az",
+    "/usr/lib/google-cloud-sdk",
+    "/usr/local/aws-cli",
+    "/usr/local/aws-sam-cli",
+    "/opt/google",
+    "/opt/microsoft",
+    "/usr/lib/firefox",
+    "/home/linuxbrew",
+    "/usr/local/share/chromium",
+    "/usr/local/share/chromedriver-linux64",
+    "/usr/local/share/edge_driver",
+    "/usr/local/share/gecko_driver",
+)
 
-    sys.stdout.write("=== Before cleanup ===\n")
-    _run(["df", "-h", "/"])
 
+def _report_disk_usage(*paths: str) -> None:
+    args = ["df", "-h", *paths] if paths else ["df", "-h", "/"]
+    _run(args, check=False)
+
+
+def _cmd_free_disk_space_macos() -> None:
     xcodes = sorted(Path("/Applications").glob("Xcode*.app"), key=_xcode_version_key)
     latest_xcode = xcodes[-1] if xcodes else None
     for xcode in xcodes:
@@ -89,8 +109,52 @@ def _cmd_free_disk_space(*, force_local: bool = False) -> int:
         str(home / "hostedtoolcache"),
     ])
 
+
+def _cmd_free_disk_space_linux() -> None:
+    _run(["sudo", "apt-get", "clean"], check=False)
+    _run(
+        ["sudo", "docker", "system", "prune", "--all", "--force", "--volumes"],
+        check=False,
+    )
+    _run(["sudo", "swapoff", "-a"], check=False)
+
+    julia_paths = tuple(str(path) for path in Path("/usr/local").glob("julia*"))
+    _run([
+        "sudo",
+        "rm",
+        "-rf",
+        "/mnt/swapfile",
+        *_LINUX_CLEANUP_PATHS,
+        *julia_paths,
+    ])
+
+
+def _cmd_free_disk_space(*, force_local: bool = False) -> int:
+    running_in_ci = os.environ.get("CI", "").lower() in {"1", "true", "yes"}
+    if not running_in_ci and not force_local:
+        sys.stderr.write(
+            "Refusing to run free-disk-space outside CI. "
+            "Re-run with --force-local to override.\n"
+        )
+        return 2
+
+    if sys.platform == "darwin":
+        disk_paths = ("/",)
+        cleanup = _cmd_free_disk_space_macos
+    elif sys.platform.startswith("linux"):
+        disk_paths = ("/", "/mnt")
+        cleanup = _cmd_free_disk_space_linux
+    else:
+        sys.stderr.write(
+            f"free-disk-space only supports Linux and macOS runners, got {sys.platform!r}.\n"
+        )
+        return 2
+
+    sys.stdout.write("=== Before cleanup ===\n")
+    _report_disk_usage(*disk_paths)
+    cleanup()
     sys.stdout.write("=== After cleanup ===\n")
-    _run(["df", "-h", "/"])
+    _report_disk_usage(*disk_paths)
     return 0
 
 
@@ -375,7 +439,7 @@ def command_free_disk_space(
         ),
     ] = False,
 ) -> None:
-    """Free disk space on macOS CI runners."""
+    """Free disk space on Linux or macOS CI runners."""
     raise typer.Exit(code=_cmd_free_disk_space(force_local=force_local))
 
 
@@ -540,7 +604,7 @@ def command_free_disk_space_legacy(
         ),
     ] = False,
 ) -> None:
-    """Alias for `darwin free`."""
+    """Legacy alias for CI runner disk cleanup."""
     raise typer.Exit(code=_cmd_free_disk_space(force_local=force_local))
 
 
