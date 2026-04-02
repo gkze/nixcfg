@@ -176,7 +176,12 @@ def _cmd_prefetch_flake_inputs() -> int:
     return 0
 
 
-_DARWIN_SMOKE_REFS = (
+_DARWIN_LOCK_SMOKE_EXPRS = (
+    ".#darwinConfigurations.argus.config.home-manager.users.george.programs.nixvim.content",
+    ".#darwinConfigurations.rocinante.config.home-manager.users.george.programs.nixvim.content",
+)
+
+_DARWIN_FULL_SMOKE_REFS = (
     ".#darwinConfigurations.argus.system",
     ".#darwinConfigurations.rocinante.system",
     ".#homeConfigurations.george.activationPackage",
@@ -188,8 +193,14 @@ def _cmd_build_darwin_config(*, host: str) -> int:
     return 0
 
 
-def _cmd_eval_darwin_smoke() -> int:
-    for ref in _DARWIN_SMOKE_REFS:
+def _cmd_eval_darwin_lock_smoke() -> int:
+    for expr in _DARWIN_LOCK_SMOKE_EXPRS:
+        _run(["nix", "eval", "--json", "--impure", expr], stdout=subprocess.DEVNULL)
+    return 0
+
+
+def _cmd_eval_darwin_full_smoke() -> int:
+    for ref in _DARWIN_FULL_SMOKE_REFS:
         _run(["nix", "build", "--dry-run", "--impure", ref])
     return 0
 
@@ -453,10 +464,22 @@ def command_build_darwin_config(
     raise typer.Exit(code=_cmd_build_darwin_config(host=host))
 
 
+@workflow_darwin_app.command("eval-lock-smoke")
+def command_eval_darwin_lock_smoke() -> None:
+    """Evaluate lock-only-safe Darwin config expressions after a lock refresh."""
+    raise typer.Exit(code=_cmd_eval_darwin_lock_smoke())
+
+
+@workflow_darwin_app.command("eval-full-smoke")
+def command_eval_darwin_full_smoke() -> None:
+    """Dry-run full Darwin outputs once generated artifacts are materialized."""
+    raise typer.Exit(code=_cmd_eval_darwin_full_smoke())
+
+
 @workflow_darwin_app.command("eval-smoke")
-def command_eval_darwin_smoke() -> None:
-    """Dry-run evaluation of core Darwin outputs after a lock refresh."""
-    raise typer.Exit(code=_cmd_eval_darwin_smoke())
+def command_eval_darwin_smoke_compat() -> None:
+    """Backward-compatible alias for `darwin eval-full-smoke`."""
+    raise typer.Exit(code=_cmd_eval_darwin_full_smoke())
 
 
 @workflow_darwin_app.command("free")
@@ -640,10 +663,22 @@ def command_build_darwin_config_legacy(
     raise typer.Exit(code=_cmd_build_darwin_config(host=host))
 
 
+@app.command("eval-darwin-lock-smoke")
+def command_eval_darwin_lock_smoke_legacy() -> None:
+    """Alias for `darwin eval-lock-smoke`."""
+    raise typer.Exit(code=_cmd_eval_darwin_lock_smoke())
+
+
+@app.command("eval-darwin-full-smoke")
+def command_eval_darwin_full_smoke_legacy() -> None:
+    """Alias for `darwin eval-full-smoke`."""
+    raise typer.Exit(code=_cmd_eval_darwin_full_smoke())
+
+
 @app.command("eval-darwin-smoke")
 def command_eval_darwin_smoke_legacy() -> None:
-    """Alias for `darwin eval-smoke`."""
-    raise typer.Exit(code=_cmd_eval_darwin_smoke())
+    """Backward-compatible alias for `darwin eval-full-smoke`."""
+    raise typer.Exit(code=_cmd_eval_darwin_full_smoke())
 
 
 @app.command("free-disk-space")

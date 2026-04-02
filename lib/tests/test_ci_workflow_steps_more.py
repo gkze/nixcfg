@@ -91,7 +91,8 @@ def test_direct_command_helpers_call_expected_subprocesses(
     assert ws._cmd_install_darwin_tools() == 0
     assert ws._cmd_prefetch_flake_inputs() == 0
     assert ws._cmd_build_darwin_config(host="argus") == 0
-    assert ws._cmd_eval_darwin_smoke() == 0
+    assert ws._cmd_eval_darwin_lock_smoke() == 0
+    assert ws._cmd_eval_darwin_full_smoke() == 0
     assert ws._cmd_smoke_check_update_app() == 0
 
     assert ["nix", "flake", "update"] in commands
@@ -102,6 +103,20 @@ def test_direct_command_helpers_call_expected_subprocesses(
         "build",
         "--impure",
         ".#darwinConfigurations.argus.system",
+    ] in commands
+    assert [
+        "nix",
+        "eval",
+        "--json",
+        "--impure",
+        ".#darwinConfigurations.argus.config.home-manager.users.george.programs.nixvim.content",
+    ] in commands
+    assert [
+        "nix",
+        "eval",
+        "--json",
+        "--impure",
+        ".#darwinConfigurations.rocinante.config.home-manager.users.george.programs.nixvim.content",
     ] in commands
     assert [
         "nix",
@@ -294,7 +309,8 @@ def test_command_routing_for_new_and_legacy_aliases(
     monkeypatch.setattr(
         ws, "_cmd_build_darwin_config", lambda *, host: 11 if host == "argus" else 1
     )
-    monkeypatch.setattr(ws, "_cmd_eval_darwin_smoke", lambda: 22)
+    monkeypatch.setattr(ws, "_cmd_eval_darwin_lock_smoke", lambda: 22)
+    monkeypatch.setattr(ws, "_cmd_eval_darwin_full_smoke", lambda: 24)
     monkeypatch.setattr(
         ws,
         "_cmd_free_disk_space",
@@ -316,7 +332,9 @@ def test_command_routing_for_new_and_legacy_aliases(
     )
 
     assert ws.main(["darwin", "build", "argus"]) == 11
-    assert ws.main(["darwin", "eval-smoke"]) == 22
+    assert ws.main(["darwin", "eval-lock-smoke"]) == 22
+    assert ws.main(["darwin", "eval-full-smoke"]) == 24
+    assert ws.main(["darwin", "eval-smoke"]) == 24
     assert ws.main(["darwin", "free", "--force-local"]) == 12
     assert ws.main(["darwin", "install"]) == 13
     assert ws.main(["flake", "prefetch"]) == 14
@@ -340,7 +358,9 @@ def test_command_routing_for_new_and_legacy_aliases(
         == 18
     )
     assert ws.main(["build-darwin-config", "argus"]) == 11
-    assert ws.main(["eval-darwin-smoke"]) == 22
+    assert ws.main(["eval-darwin-lock-smoke"]) == 22
+    assert ws.main(["eval-darwin-full-smoke"]) == 24
+    assert ws.main(["eval-darwin-smoke"]) == 24
     assert ws.main(["free-disk-space", "--force-local"]) == 12
     assert ws.main(["install-darwin-tools"]) == 13
     assert ws.main(["prefetch-flake-inputs"]) == 14

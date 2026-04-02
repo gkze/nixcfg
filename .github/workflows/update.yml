@@ -102,8 +102,8 @@ jobs:
             packages/superset/bun.nix
             packages/superset/bun.lock
 
-  # Phase 2: Catch Darwin input breakage immediately after flake.lock refresh
-  darwin-eval-smoke:
+  # Phase 2: Catch lock-only Darwin input breakage immediately after flake.lock refresh
+  darwin-lock-smoke:
     needs: update-lock
     runs-on: macos-15
     timeout-minutes: 30
@@ -131,8 +131,8 @@ jobs:
             nix-cache-${{ runner.os }}-
       - name: Pre-fetch flake inputs
         run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
-      - name: Dry-run Darwin evaluation smoke test
-        run: nix run .#nixcfg -- ci workflow darwin eval-smoke
+      - name: Evaluate lock-only Darwin smoke expressions
+        run: nix run .#nixcfg -- ci workflow darwin eval-lock-smoke
 
   # Phase 3: Resolve upstream versions once (eliminates cross-platform race)
   resolve-versions:
@@ -159,7 +159,7 @@ jobs:
   compute-hashes:
     needs:
       - update-lock
-      - darwin-eval-smoke
+      - darwin-lock-smoke
       - resolve-versions
     strategy:
       fail-fast: false
@@ -378,8 +378,8 @@ jobs:
             packages/opencode-desktop/Cargo.nix
             packages/opencode-desktop/crate-hashes.json
 
-  # Phase 7: Validate the fully materialized Darwin update tree before fan-out
-  darwin-generated-eval-smoke:
+  # Phase 7: Validate full Darwin outputs once generated artifacts are materialized
+  darwin-full-smoke:
     needs: merge-generated
     runs-on: macos-15
     timeout-minutes: 30
@@ -395,14 +395,14 @@ jobs:
       - *cache_nix_arch
       - name: Pre-fetch flake inputs
         run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
-      - name: Dry-run Darwin evaluation smoke test
-        run: nix run .#nixcfg -- ci workflow darwin eval-smoke
+      - name: Dry-run full Darwin outputs
+        run: nix run .#nixcfg -- ci workflow darwin eval-full-smoke
 
   # Phase 8: Warm platform caches from the fully materialized update tree
   warm-fod-cache-darwin:
     needs:
       - merge-generated
-      - darwin-generated-eval-smoke
+      - darwin-full-smoke
     runs-on: macos-15
     timeout-minutes: 180
     steps:
@@ -492,7 +492,7 @@ jobs:
   darwin-shared-heavy:
     needs:
       - merge-generated
-      - darwin-generated-eval-smoke
+      - darwin-full-smoke
       - warm-fod-cache-darwin
       - quality-gates
     runs-on: macos-15
@@ -555,7 +555,7 @@ jobs:
   darwin-shared:
     needs:
       - merge-generated
-      - darwin-generated-eval-smoke
+      - darwin-full-smoke
       - warm-fod-cache-darwin
       - quality-gates
     runs-on: macos-15
