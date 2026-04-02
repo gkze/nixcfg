@@ -136,13 +136,41 @@ class _FakeProc:
         return self._stdout, self._stderr
 
 
-def test_ci_run_command_async_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Capture output and raise CalledProcessError on failed commands."""
+def test_ci_emit_hidden_output_formats_streams(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Render hidden stdout/stderr with stable labels and trailing newlines."""
+    ci_subprocess._emit_hidden_output(
+        args=["cmd", "arg with space"],
+        stdout="out",
+        stderr="err\n",
+    )
+    rendered = capsys.readouterr().err
+    assert "Command failed with hidden stdout: cmd 'arg with space'" in rendered
+    assert "out\nCommand failed with hidden stderr" in rendered
+    assert rendered.endswith("err\n")
+
+    ci_subprocess._emit_hidden_output(args=["cmd"], stdout="out\n", stderr="")
+    rendered = capsys.readouterr().err
+    assert rendered == "Command failed with hidden stdout: cmd\nout\n"
+
+    ci_subprocess._emit_hidden_output(args=["cmd"], stdout="", stderr="")
+    assert capsys.readouterr().err == ""
+
+
+def test_ci_run_command_async_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Capture output and surface hidden output when failed commands error."""
+    seen: dict[str, object] = {}
 
     async def _create_process(
         *args: str, cwd: str | None, stdout: object, stderr: object
     ) -> _FakeProc:
-        _ = (args, cwd, stdout, stderr)
+        seen["stdout"] = stdout
+        seen["stderr"] = stderr
+        _ = (args, cwd)
         return _FakeProc(returncode=0, stdout=b"ok", stderr=b"")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _create_process)
@@ -151,18 +179,68 @@ def test_ci_run_command_async_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert result.returncode == 0
     assert result.stdout == "ok"
+    assert seen["stdout"] == asyncio.subprocess.PIPE
+    assert seen["stderr"] == asyncio.subprocess.PIPE
 
     async def _create_process_fail(
         *args: str, cwd: str | None, stdout: object, stderr: object
     ) -> _FakeProc:
-        _ = (args, cwd, stdout, stderr)
-        return _FakeProc(returncode=2, stdout=b"", stderr=b"boom")
+        seen["fail_stdout"] = stdout
+        seen["fail_stderr"] = stderr
+        _ = (args, cwd)
+        return _FakeProc(returncode=2, stdout=b"hidden out", stderr=b"hidden err")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _create_process_fail)
     with pytest.raises(
         subprocess.CalledProcessError, match="returned non-zero exit status 2"
     ):
+        asyncio.run(
+            ci_subprocess.run_command_async(
+                ["false"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        )
+    rendered = capsys.readouterr().err
+    assert "Command failed with hidden stdout" in rendered
+    assert "hidden out" in rendered
+    assert "Command failed with hidden stderr" in rendered
+    assert "hidden err" in rendered
+    assert seen["fail_stdout"] == asyncio.subprocess.PIPE
+    assert seen["fail_stderr"] == asyncio.subprocess.PIPE
+
+    with pytest.raises(
+        subprocess.CalledProcessError, match="returned non-zero exit status 2"
+    ):
         asyncio.run(ci_subprocess.run_command_async(["false"]))
+
+
+def test_ci_run_command_async_honors_devnull_when_not_checking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not capture hidden output eagerly when the caller disabled check semantics."""
+    seen: dict[str, object] = {}
+
+    async def _create_process(
+        *args: str, cwd: str | None, stdout: object, stderr: object
+    ) -> _FakeProc:
+        seen["stdout"] = stdout
+        seen["stderr"] = stderr
+        _ = (args, cwd)
+        return _FakeProc(returncode=7, stdout=b"ignored", stderr=b"ignored")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _create_process)
+    result = asyncio.run(
+        ci_subprocess.run_command_async(
+            ["false"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    )
+    assert result.returncode == 7
+    assert seen["stdout"] == subprocess.DEVNULL
+    assert seen["stderr"] == subprocess.DEVNULL
 
 
 def test_ci_run_command_sync_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:

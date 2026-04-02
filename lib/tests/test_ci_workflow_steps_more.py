@@ -141,6 +141,75 @@ def test_direct_command_helpers_call_expected_subprocesses(
     ] in commands
 
 
+def test_cmd_prefetch_flake_inputs_retries_and_then_continues(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Treat prefetch as best-effort cache warming with bounded retries."""
+    attempts = 0
+    sleeps: list[float] = []
+
+    def _fake_run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise subprocess.CalledProcessError(1, args, stderr="boom")
+        return _completed(args)
+
+    monkeypatch.setattr(ws, "_run", _fake_run)
+    monkeypatch.setattr(ws.time, "sleep", lambda delay: sleeps.append(delay))
+
+    assert ws._cmd_prefetch_flake_inputs() == 0
+    assert attempts == 3
+    assert sleeps == [1.0, 2.0]
+    stderr = capsys.readouterr().err
+    assert "retrying in 1.0s" in stderr
+    assert "retrying in 2.0s" in stderr
+
+
+def test_cmd_prefetch_flake_inputs_warns_after_exhausting_retries(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Continue after repeated prefetch failures because builds are authoritative."""
+    attempts = 0
+    sleeps: list[float] = []
+
+    def _fake_run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal attempts
+        attempts += 1
+        raise subprocess.CalledProcessError(1, args, stderr="boom")
+
+    monkeypatch.setattr(ws, "_run", _fake_run)
+    monkeypatch.setattr(ws.time, "sleep", lambda delay: sleeps.append(delay))
+
+    assert ws._cmd_prefetch_flake_inputs() == 0
+    assert attempts == 3
+    assert sleeps == [1.0, 2.0]
+    stderr = capsys.readouterr().err
+    assert "failed after 3 attempts; continuing" in stderr
+
+
+def test_cmd_prefetch_flake_inputs_handles_zero_attempt_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allow tests to exercise the loop-exhausted branch explicitly."""
+    monkeypatch.setattr(ws, "_PREFETCH_FLAKE_INPUTS_ATTEMPTS", 0)
+    monkeypatch.setattr(
+        ws,
+        "_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("prefetch command should not run")
+        ),
+    )
+
+    assert ws._cmd_prefetch_flake_inputs() == 0
+
+
 def test_cmd_validate_bun_lock_reports_success_and_failure(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

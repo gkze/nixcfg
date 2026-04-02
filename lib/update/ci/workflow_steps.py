@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Annotated
 
@@ -167,12 +168,36 @@ def _cmd_install_darwin_tools() -> int:
     return 0
 
 
+_PREFETCH_FLAKE_INPUTS_ARGS = ["nix", "flake", "archive", "--json"]
+_PREFETCH_FLAKE_INPUTS_ATTEMPTS = 3
+_PREFETCH_FLAKE_INPUTS_RETRY_DELAYS = (1.0, 2.0)
+
+
 def _cmd_prefetch_flake_inputs() -> int:
-    _run(
-        ["nix", "flake", "archive", "--json"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    for attempt in range(1, _PREFETCH_FLAKE_INPUTS_ATTEMPTS + 1):
+        try:
+            _run(
+                _PREFETCH_FLAKE_INPUTS_ARGS,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError:
+            if attempt == _PREFETCH_FLAKE_INPUTS_ATTEMPTS:
+                sys.stderr.write(
+                    "Warning: prefetch-flake-inputs failed after "
+                    f"{_PREFETCH_FLAKE_INPUTS_ATTEMPTS} attempts; continuing "
+                    "because this step only warms caches.\n"
+                )
+                break
+            delay = _PREFETCH_FLAKE_INPUTS_RETRY_DELAYS[attempt - 1]
+            sys.stderr.write(
+                "Warning: prefetch-flake-inputs failed; "
+                f"retrying in {delay:.1f}s (attempt {attempt + 1}/"
+                f"{_PREFETCH_FLAKE_INPUTS_ATTEMPTS}).\n"
+            )
+            time.sleep(delay)
+        else:
+            break
     return 0
 
 
