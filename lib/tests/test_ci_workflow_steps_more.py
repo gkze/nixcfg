@@ -91,6 +91,7 @@ def test_direct_command_helpers_call_expected_subprocesses(
     assert ws._cmd_install_darwin_tools() == 0
     assert ws._cmd_prefetch_flake_inputs() == 0
     assert ws._cmd_build_darwin_config(host="argus") == 0
+    assert ws._cmd_eval_darwin_smoke() == 0
     assert ws._cmd_smoke_check_update_app() == 0
 
     assert ["nix", "flake", "update"] in commands
@@ -101,6 +102,27 @@ def test_direct_command_helpers_call_expected_subprocesses(
         "build",
         "--impure",
         ".#darwinConfigurations.argus.system",
+    ] in commands
+    assert [
+        "nix",
+        "build",
+        "--dry-run",
+        "--impure",
+        ".#darwinConfigurations.argus.system",
+    ] in commands
+    assert [
+        "nix",
+        "build",
+        "--dry-run",
+        "--impure",
+        ".#darwinConfigurations.rocinante.system",
+    ] in commands
+    assert [
+        "nix",
+        "build",
+        "--dry-run",
+        "--impure",
+        ".#homeConfigurations.george.activationPackage",
     ] in commands
 
 
@@ -272,6 +294,7 @@ def test_command_routing_for_new_and_legacy_aliases(
     monkeypatch.setattr(
         ws, "_cmd_build_darwin_config", lambda *, host: 11 if host == "argus" else 1
     )
+    monkeypatch.setattr(ws, "_cmd_eval_darwin_smoke", lambda: 22)
     monkeypatch.setattr(
         ws,
         "_cmd_free_disk_space",
@@ -284,6 +307,7 @@ def test_command_routing_for_new_and_legacy_aliases(
     monkeypatch.setattr(ws, "_cmd_list_update_targets", lambda: 17)
     monkeypatch.setattr(ws, "_cmd_generate_pr_body", lambda **_kwargs: 18)
     monkeypatch.setattr(ws, "_cmd_verify_artifacts", lambda *, workflow: 19)
+    monkeypatch.setattr(ws, "_cmd_verify_structure", lambda *, workflow: 23)
     monkeypatch.setattr(ws, "_cmd_validate_bun_lock", lambda *, lock_file: 20)
     monkeypatch.setattr(
         ws,
@@ -292,6 +316,7 @@ def test_command_routing_for_new_and_legacy_aliases(
     )
 
     assert ws.main(["darwin", "build", "argus"]) == 11
+    assert ws.main(["darwin", "eval-smoke"]) == 22
     assert ws.main(["darwin", "free", "--force-local"]) == 12
     assert ws.main(["darwin", "install"]) == 13
     assert ws.main(["flake", "prefetch"]) == 14
@@ -315,6 +340,7 @@ def test_command_routing_for_new_and_legacy_aliases(
         == 18
     )
     assert ws.main(["build-darwin-config", "argus"]) == 11
+    assert ws.main(["eval-darwin-smoke"]) == 22
     assert ws.main(["free-disk-space", "--force-local"]) == 12
     assert ws.main(["install-darwin-tools"]) == 13
     assert ws.main(["prefetch-flake-inputs"]) == 14
@@ -322,6 +348,7 @@ def test_command_routing_for_new_and_legacy_aliases(
     assert ws.main(["smoke-check-update-app"]) == 16
     assert ws.main(["list-update-targets"]) == 17
     assert ws.main(["verify-artifacts"]) == 19
+    assert ws.main(["verify-structure"]) == 23
     assert ws.main(["validate-bun-lock", "--lock-file", "bun.lock"]) == 20
     assert (
         ws.main([
@@ -381,6 +408,38 @@ def test_cmd_verify_artifacts_reports_success(
 
     assert ws._cmd_verify_artifacts(workflow=Path("workflow.yml")) == 0
     assert "Verified workflow artifact contracts" in capsys.readouterr().out
+
+
+def test_cmd_verify_structure_reports_validation_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Render workflow structure contract failures to stderr."""
+
+    def _fail(*, workflow_path: Path) -> None:
+        del workflow_path
+        msg = "structure contract mismatch"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(ws, "validate_workflow_structure_contracts", _fail)
+
+    assert ws._cmd_verify_structure(workflow=Path("workflow.yml")) == 1
+    assert "structure contract mismatch" in capsys.readouterr().err
+
+
+def test_cmd_verify_structure_reports_success(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Render successful workflow structure validation to stdout."""
+
+    def _ok(*, workflow_path: Path) -> None:
+        del workflow_path
+
+    monkeypatch.setattr(ws, "validate_workflow_structure_contracts", _ok)
+
+    assert ws._cmd_verify_structure(workflow=Path("workflow.yml")) == 0
+    assert "Verified workflow structure contracts" in capsys.readouterr().out
 
 
 def test_generate_pr_body_skips_no_change_package_diffs(

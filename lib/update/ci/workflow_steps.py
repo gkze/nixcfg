@@ -26,6 +26,9 @@ from lib.update.ci.sources_json_diff import run_diff as run_sources_diff
 from lib.update.ci.workflow_artifact_contracts import (
     validate_workflow_artifact_contracts,
 )
+from lib.update.ci.workflow_structure_contracts import (
+    validate_workflow_structure_contracts,
+)
 from lib.update.paths import (
     PACKAGE_DIRS,
     SOURCES_FILE_NAME,
@@ -173,8 +176,21 @@ def _cmd_prefetch_flake_inputs() -> int:
     return 0
 
 
+_DARWIN_SMOKE_REFS = (
+    ".#darwinConfigurations.argus.system",
+    ".#darwinConfigurations.rocinante.system",
+    ".#homeConfigurations.george.activationPackage",
+)
+
+
 def _cmd_build_darwin_config(*, host: str) -> int:
     _run(["nix", "build", "--impure", f".#darwinConfigurations.{host}.system"])
+    return 0
+
+
+def _cmd_eval_darwin_smoke() -> int:
+    for ref in _DARWIN_SMOKE_REFS:
+        _run(["nix", "build", "--dry-run", "--impure", ref])
     return 0
 
 
@@ -197,10 +213,20 @@ def _cmd_list_update_targets() -> int:
 def _cmd_verify_artifacts(*, workflow: Path) -> int:
     try:
         validate_workflow_artifact_contracts(workflow_path=workflow)
-    except RuntimeError as exc:
+    except (RuntimeError, TypeError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 1
     sys.stdout.write(f"Verified workflow artifact contracts for {workflow}\n")
+    return 0
+
+
+def _cmd_verify_structure(*, workflow: Path) -> int:
+    try:
+        validate_workflow_structure_contracts(workflow_path=workflow)
+    except (RuntimeError, TypeError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+    sys.stdout.write(f"Verified workflow structure contracts for {workflow}\n")
     return 0
 
 
@@ -427,6 +453,12 @@ def command_build_darwin_config(
     raise typer.Exit(code=_cmd_build_darwin_config(host=host))
 
 
+@workflow_darwin_app.command("eval-smoke")
+def command_eval_darwin_smoke() -> None:
+    """Dry-run evaluation of core Darwin outputs after a lock refresh."""
+    raise typer.Exit(code=_cmd_eval_darwin_smoke())
+
+
 @workflow_darwin_app.command("free")
 def command_free_disk_space(
     *,
@@ -530,6 +562,22 @@ def command_verify_artifacts(
     raise typer.Exit(code=_cmd_verify_artifacts(workflow=workflow))
 
 
+@app.command("verify-structure")
+def command_verify_structure(
+    *,
+    workflow: Annotated[
+        Path,
+        typer.Option(
+            "-w",
+            "--workflow",
+            help="Workflow file to validate.",
+        ),
+    ] = Path(".github/workflows/update.yml"),
+) -> None:
+    """Validate higher-level structure contracts in one workflow file."""
+    raise typer.Exit(code=_cmd_verify_structure(workflow=workflow))
+
+
 @app.command("validate-bun-lock")
 def command_validate_bun_lock(
     *,
@@ -590,6 +638,12 @@ def command_build_darwin_config_legacy(
 ) -> None:
     """Alias for `darwin build`."""
     raise typer.Exit(code=_cmd_build_darwin_config(host=host))
+
+
+@app.command("eval-darwin-smoke")
+def command_eval_darwin_smoke_legacy() -> None:
+    """Alias for `darwin eval-smoke`."""
+    raise typer.Exit(code=_cmd_eval_darwin_smoke())
 
 
 @app.command("free-disk-space")

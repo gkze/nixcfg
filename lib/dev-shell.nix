@@ -185,6 +185,6 @@ pkgs.devshell.mkShell {
   devshell.startup.commitlint-node-modules.text = ''
     mkdir -p node_modules
     ln -sfn "${pkgs.commitlint}/lib/node_modules/@commitlint/root/node_modules/@commitlint" node_modules/@commitlint
-    ln -sfn "${pkgs.nodePackages.typescript}/lib/node_modules/typescript" node_modules/typescript
+    ln -sfn "${pkgs.typescript}/lib/node_modules/typescript" node_modules/typescript
   '';
 }

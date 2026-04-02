@@ -444,7 +444,7 @@ in
               in
               {
                 biome.command = lib.getExe pkgs.biome;
-                prettier.command = lib.getExe pkgs.nodePackages_latest.prettier;
+                prettier.command = lib.getExe pkgs.prettier;
                 ruff_fix.command = ruffCmd;
                 ruff_format.command = ruffCmd;
                 ruff_organize_imports.command = ruffCmd;
