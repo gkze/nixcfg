@@ -92,13 +92,17 @@ nix run .#nixcfg -- ci --help
 nix run .#nixcfg -- schema --help
 ```
 
-GitHub Actions workflow [`.github/workflows/update.yml`](.github/workflows/update.yml) runs every 6 hours and:
+GitHub Actions refresh workflow [`.github/workflows/update.yml`](.github/workflows/update.yml) runs every 6 hours and:
 
 - updates [`flake.lock`](flake.lock)
 - resolves upstream versions once
 - computes per-platform [`sources.json`](packages/toad/sources.json) hashes
-- builds Darwin outputs ([`argus`](darwin/argus.nix), [`rocinante`](darwin/rocinante.nix))
 - opens a signed PR with update details
+
+The companion certification workflow [`.github/workflows/update-certify.yml`](.github/workflows/update-certify.yml) validates the resulting update branch by:
+
+- building Darwin outputs ([`argus`](darwin/argus.nix), [`rocinante`](darwin/rocinante.nix))
+- running broader Darwin/Linux quality and cache-warming checks
 
 ## Reuse as a framework
 

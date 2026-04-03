@@ -79,6 +79,13 @@ in
         default = true;
       };
     };
+    heavyOptional = {
+      enable =
+        lib.mkEnableOption "large optional apps/tools that are expensive to keep in every host closure"
+        // {
+          default = true;
+        };
+    };
   };
 
   config.home.packages =
@@ -157,12 +164,10 @@ in
             ffmpeg
             gmailctl
             gogcli
-            goose-cli
             graphviz
             grex
             httpie
             linear-cli
-            lumen
             sculptor
             sd
             sentry-cli
@@ -175,21 +180,17 @@ in
           (lib.optionals cfg.guiApps.enable (
             [
               code-cursor
-              czkawka
               dbeaver-bin
               emdash
               jetbrains.datagrip
               hoppscotch
               config.fonts.monospace.package
-              mux
               opencode-desktop
               postman
               red-reddit-cli
-              scratch
               slack
               spacedrive
               spotify
-              superset
             ]
             ++ lib.optionals stdenv.isLinux [ wl-clipboard ]
             ++ lib.optionals stdenv.isDarwin [
@@ -214,6 +215,17 @@ in
 
           (lib.optionals cfg.cloud.enable [
             mountpoint-s3
+          ])
+
+          # Keep these out of the default host closures so cache-warming
+          # priority and day-to-day installed packages stay aligned.
+          (lib.optionals cfg.heavyOptional.enable [
+            goose-cli
+            lumen
+            czkawka
+            mux
+            scratch
+            superset
           ])
         ];
     in

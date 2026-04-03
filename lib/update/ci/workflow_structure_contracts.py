@@ -82,47 +82,81 @@ def _forbid_job_run(job_data: dict[str, Any], *, job_id: str, marker: str) -> No
         raise RuntimeError(msg)
 
 
-def _darwin_shared_heavy_targets(job_data: dict[str, Any]) -> tuple[str, ...]:
+def _require_job_need(job_data: dict[str, Any], *, job_id: str, need: str) -> None:
+    if need not in _parse_job_needs(job_data, job_id=job_id):
+        msg = f"{job_id} must depend on {need}"
+        raise RuntimeError(msg)
+
+
+def _forbid_job_need(job_data: dict[str, Any], *, job_id: str, need: str) -> None:
+    if need in _parse_job_needs(job_data, job_id=job_id):
+        msg = f"{job_id} must not depend on {need}"
+        raise RuntimeError(msg)
+
+
+def _darwin_heavy_targets(job_data: dict[str, Any], *, job_id: str) -> tuple[str, ...]:
     strategy = job_data.get("strategy")
     if not isinstance(strategy, dict):
-        msg = "darwin-shared-heavy does not define a strategy mapping"
+        msg = f"{job_id} does not define a strategy mapping"
         raise TypeError(msg)
     matrix = strategy.get("matrix")
     if not isinstance(matrix, dict):
-        msg = "darwin-shared-heavy does not define a matrix mapping"
+        msg = f"{job_id} does not define a matrix mapping"
         raise TypeError(msg)
     include = matrix.get("include")
     if not isinstance(include, list) or not include:
-        msg = "darwin-shared-heavy matrix.include must be a non-empty list"
+        msg = f"{job_id} matrix.include must be a non-empty list"
         raise TypeError(msg)
 
     targets: list[str] = []
     packages_seen: set[str] = set()
     for entry in include:
         if not isinstance(entry, dict):
-            msg = f"Unsupported darwin-shared-heavy matrix entry: {entry!r}"
+            msg = f"Unsupported {job_id} matrix entry: {entry!r}"
             raise TypeError(msg)
         package = entry.get("package")
         target = entry.get("target")
         if not isinstance(package, str) or not isinstance(target, str):
             msg = (
-                "darwin-shared-heavy matrix entry must define string "
+                f"{job_id} matrix entry must define string "
                 f"package/target fields: {entry!r}"
             )
             raise TypeError(msg)
         if package in packages_seen:
-            msg = f"darwin-shared-heavy repeats package {package!r}"
+            msg = f"{job_id} repeats package {package!r}"
             raise RuntimeError(msg)
         packages_seen.add(package)
         target_suffix = target.rsplit(".", 1)[-1]
         if target_suffix != package:
             msg = (
-                "darwin-shared-heavy package/target mismatch: "
+                f"{job_id} package/target mismatch: "
                 f"package={package!r}, target={target!r}"
             )
             raise RuntimeError(msg)
         targets.append(target)
 
+    return tuple(targets)
+
+
+def _darwin_split_targets(
+    workflow_jobs: dict[str, dict[str, Any]], *, job_ids: tuple[str, ...]
+) -> tuple[str, ...]:
+    targets: list[str] = []
+    seen_targets: dict[str, str] = {}
+    for job_id in job_ids:
+        for target in _darwin_heavy_targets(
+            _require_job(workflow_jobs, job_id=job_id),
+            job_id=job_id,
+        ):
+            previous_job = seen_targets.get(target)
+            if previous_job is not None:
+                msg = (
+                    f"{job_id} repeats heavy target {target!r} already declared by "
+                    f"{previous_job!r}"
+                )
+                raise RuntimeError(msg)
+            seen_targets[target] = job_id
+            targets.append(target)
     return tuple(targets)
 
 
@@ -149,15 +183,11 @@ def _darwin_shared_exclude_refs(job_data: dict[str, Any]) -> tuple[str, ...]:
     return tuple(refs)
 
 
-def validate_workflow_structure_contracts(*, workflow_path: Path) -> None:
-    """Validate higher-level structure contracts in one workflow file."""
-    jobs = _load_jobs(workflow_path)
-
-    darwin_lock_smoke = _require_job(jobs, job_id="darwin-lock-smoke")
-    darwin_full_smoke = _require_job(jobs, job_id="darwin-full-smoke")
-    compute_hashes = _require_job(jobs, job_id="compute-hashes")
-    darwin_shared_heavy = _require_job(jobs, job_id="darwin-shared-heavy")
-    darwin_shared = _require_job(jobs, job_id="darwin-shared")
+def _validate_refresh_workflow_structure_contracts(
+    workflow_jobs: dict[str, dict[str, Any]],
+) -> None:
+    darwin_lock_smoke = _require_job(workflow_jobs, job_id="darwin-lock-smoke")
+    compute_hashes = _require_job(workflow_jobs, job_id="compute-hashes")
 
     _require_job_run(
         darwin_lock_smoke,
@@ -167,11 +197,6 @@ def validate_workflow_structure_contracts(*, workflow_path: Path) -> None:
     _forbid_job_run(
         darwin_lock_smoke,
         job_id="darwin-lock-smoke",
-        marker=_DARWIN_FULL_SMOKE_MARKER,
-    )
-    _require_job_run(
-        darwin_full_smoke,
-        job_id="darwin-full-smoke",
         marker=_DARWIN_FULL_SMOKE_MARKER,
     )
 
@@ -186,32 +211,62 @@ def validate_workflow_structure_contracts(*, workflow_path: Path) -> None:
     ):
         msg = "darwin-lock-smoke must stay in the lock-only phase"
         raise RuntimeError(msg)
-    if "merge-generated" not in _parse_job_needs(
-        darwin_full_smoke,
-        job_id="darwin-full-smoke",
-    ):
-        msg = "darwin-full-smoke must depend on merge-generated"
-        raise RuntimeError(msg)
     if "darwin-lock-smoke" not in _parse_job_needs(
         compute_hashes,
         job_id="compute-hashes",
     ):
         msg = "compute-hashes must depend on darwin-lock-smoke"
         raise RuntimeError(msg)
-    if "darwin-full-smoke" not in _parse_job_needs(
-        darwin_shared_heavy,
-        job_id="darwin-shared-heavy",
-    ):
-        msg = "darwin-shared-heavy must depend on darwin-full-smoke"
-        raise RuntimeError(msg)
-    if "darwin-full-smoke" not in _parse_job_needs(
-        darwin_shared,
-        job_id="darwin-shared",
-    ):
-        msg = "darwin-shared must depend on darwin-full-smoke"
-        raise RuntimeError(msg)
 
-    heavy_targets = set(_darwin_shared_heavy_targets(darwin_shared_heavy))
+
+def _validate_certify_workflow_structure_contracts(
+    workflow_jobs: dict[str, dict[str, Any]],
+) -> None:
+    darwin_full_smoke = _require_job(workflow_jobs, job_id="darwin-full-smoke")
+    darwin_priority_heavy = _require_job(workflow_jobs, job_id="darwin-priority-heavy")
+    darwin_extra_heavy = _require_job(workflow_jobs, job_id="darwin-extra-heavy")
+    darwin_shared = _require_job(workflow_jobs, job_id="darwin-shared")
+    darwin_argus = _require_job(workflow_jobs, job_id="darwin-argus")
+    darwin_rocinante = _require_job(workflow_jobs, job_id="darwin-rocinante")
+    linux_x86_64 = _require_job(workflow_jobs, job_id="linux-x86_64")
+
+    _require_job_run(
+        darwin_full_smoke,
+        job_id="darwin-full-smoke",
+        marker=_DARWIN_FULL_SMOKE_MARKER,
+    )
+
+    for job_id, job_data in (
+        ("darwin-priority-heavy", darwin_priority_heavy),
+        ("darwin-extra-heavy", darwin_extra_heavy),
+        ("darwin-shared", darwin_shared),
+    ):
+        _require_job_need(job_data, job_id=job_id, need="darwin-full-smoke")
+
+    for job_id, job_data in (
+        ("darwin-priority-heavy", darwin_priority_heavy),
+        ("darwin-extra-heavy", darwin_extra_heavy),
+        ("darwin-shared", darwin_shared),
+        ("darwin-argus", darwin_argus),
+        ("darwin-rocinante", darwin_rocinante),
+        ("linux-x86_64", linux_x86_64),
+    ):
+        _forbid_job_need(job_data, job_id=job_id, need="quality-gates")
+
+    for job_id, job_data in (
+        ("darwin-argus", darwin_argus),
+        ("darwin-rocinante", darwin_rocinante),
+    ):
+        _require_job_need(job_data, job_id=job_id, need="darwin-shared")
+        _require_job_need(job_data, job_id=job_id, need="darwin-priority-heavy")
+        _forbid_job_need(job_data, job_id=job_id, need="darwin-extra-heavy")
+
+    heavy_targets = set(
+        _darwin_split_targets(
+            workflow_jobs,
+            job_ids=("darwin-priority-heavy", "darwin-extra-heavy"),
+        )
+    )
     excluded_targets = set(_darwin_shared_exclude_refs(darwin_shared))
 
     if heavy_targets != excluded_targets:
@@ -224,6 +279,36 @@ def validate_workflow_structure_contracts(*, workflow_path: Path) -> None:
             problems.append(f"unexpected excludes: {', '.join(extra)}")
         msg = "Darwin heavy-target split drift detected (" + "; ".join(problems) + ")"
         raise RuntimeError(msg)
+
+
+def validate_workflow_structure_contracts(*, workflow_path: Path) -> None:
+    """Validate refresh/certification structure contracts in one workflow file."""
+    jobs = _load_jobs(workflow_path)
+
+    has_refresh_jobs = any(
+        job_id in jobs for job_id in ("darwin-lock-smoke", "compute-hashes")
+    )
+    has_certify_jobs = any(
+        job_id in jobs
+        for job_id in (
+            "darwin-full-smoke",
+            "darwin-priority-heavy",
+            "darwin-extra-heavy",
+            "darwin-shared",
+        )
+    )
+
+    if not has_refresh_jobs and not has_certify_jobs:
+        msg = (
+            f"Workflow {workflow_path} does not define refresh or certification "
+            "update jobs"
+        )
+        raise RuntimeError(msg)
+
+    if has_refresh_jobs:
+        _validate_refresh_workflow_structure_contracts(jobs)
+    if has_certify_jobs:
+        _validate_certify_workflow_structure_contracts(jobs)
 
 
 __all__ = ["validate_workflow_structure_contracts"]

@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: flake-update
+  group: flake-update-refresh
   cancel-in-progress: true
 
 permissions:
@@ -51,7 +51,19 @@ jobs:
           path: |
             ~/.cache/nix/tarball-cache
             ~/.cache/nix/tarball-cache-v2
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/uv.lock', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix', 'packages/superset/bun.lock') }}
+          key: >-
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(
+            'flake.lock',
+            'packages/**/sources.json',
+            'overlays/**/sources.json',
+            'packages/**/uv.lock',
+            'packages/**/Cargo.nix',
+            'packages/**/crate-hashes.json',
+            'overlays/**/Cargo.nix',
+            'overlays/**/crate-hashes.json',
+            'packages/superset/bun.nix',
+            'packages/superset/bun.lock'
+            ) }}
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
             nix-cache-${{ runner.os }}-
@@ -125,7 +137,19 @@ jobs:
           path: |
             ~/.cache/nix/tarball-cache
             ~/.cache/nix/tarball-cache-v2
-          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/uv.lock', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix', 'overlays/**/crate-hashes.json', 'packages/superset/bun.nix', 'packages/superset/bun.lock') }}
+          key: >-
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(
+            'flake.lock',
+            'packages/**/sources.json',
+            'overlays/**/sources.json',
+            'packages/**/uv.lock',
+            'packages/**/Cargo.nix',
+            'packages/**/crate-hashes.json',
+            'overlays/**/Cargo.nix',
+            'overlays/**/crate-hashes.json',
+            'packages/superset/bun.nix',
+            'packages/superset/bun.lock'
+            ) }}
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
             nix-cache-${{ runner.os }}-
@@ -200,8 +224,7 @@ jobs:
       - name: Free disk space
         if: runner.os == 'Linux' || runner.os == 'macOS'
         run: nix run .#nixcfg -- ci workflow free-disk-space
-      - &setup_uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           enable-cache: true
           ignore-nothing-to-cache: true
@@ -378,300 +401,32 @@ jobs:
             packages/opencode-desktop/Cargo.nix
             packages/opencode-desktop/crate-hashes.json
 
-  # Phase 7: Validate full Darwin outputs once generated artifacts are materialized
-  darwin-full-smoke:
+  # Phase 7: Refresh sanity checks required before opening the PR
+  refresh-sanity:
     needs: merge-generated
-    runs-on: macos-15
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - *checkout
       - *setup_nix
       - *cachix
-      - &download_merged_sources
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: merged-generated
           path: .
-      - *cache_nix_arch
-      - name: Pre-fetch flake inputs
-        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
-      - name: Dry-run full Darwin outputs
-        run: nix run .#nixcfg -- ci workflow darwin eval-full-smoke
-
-  # Phase 8: Warm platform caches from the fully materialized update tree
-  warm-fod-cache-darwin:
-    needs:
-      - merge-generated
-      - darwin-full-smoke
-    runs-on: macos-15
-    timeout-minutes: 180
-    steps:
-      - *checkout
-      - *setup_nix
-      - *cachix
-      - *download_merged_sources
-      - *cache_nix_arch
-      - name: Free disk space
-        run: nix run .#nixcfg -- ci workflow free-disk-space
-      - name: Warm dependency cache for aarch64-darwin
-        # Build platform-specific dependency closures only after all checked-in
-        # generated artifacts have been materialized. This includes classic
-        # FODs plus deterministic Deno passthru closures (e.g. linear-cli).
-        # Downstream jobs then evaluate one consistent tree instead of mixing
-        # fresh sources.json updates with stale Cargo.nix state.
-        run: nix run .#nixcfg -- ci cache fod
-
-  warm-fod-cache-x86_64-linux:
-    needs: merge-generated
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    steps:
-      - *checkout
-      - *setup_nix
-      - *cachix
-      - *download_merged_sources
-      - *cache_nix_arch
-      - name: Warm dependency cache for x86_64-linux
-        # Build platform-specific dependency closures only after all checked-in
-        # generated artifacts have been materialized. This includes classic
-        # FODs plus deterministic Deno passthru closures (e.g. linear-cli).
-        # Downstream jobs then evaluate one consistent tree instead of mixing
-        # fresh sources.json updates with stale Cargo.nix state.
-        run: nix run .#nixcfg -- ci cache fod
-
-  warm-fod-cache-aarch64-linux:
-    needs: merge-generated
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 180
-    steps:
-      - *checkout
-      - *setup_nix
-      - *cachix
-      - *download_merged_sources
-      - *cache_nix_arch
-      - name: Warm dependency cache for aarch64-linux
-        # Build platform-specific dependency closures only after all checked-in
-        # generated artifacts have been materialized. This includes classic
-        # FODs plus deterministic Deno passthru closures (e.g. linear-cli).
-        # Downstream jobs then evaluate one consistent tree instead of mixing
-        # fresh sources.json updates with stale Cargo.nix state.
-        run: nix run .#nixcfg -- ci cache fod
-
-  # Phase 9: Quality gates
-  quality-gates:
-    needs: merge-generated
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - *checkout
-      - *setup_nix
-      - *cachix
-      - *download_merged_sources
       - *cache_nix
       - name: Check Nix formatting
         run: nix fmt -- --ci
-      - name: Run core Nix checks
-        run: |
-          nix build .#checks.x86_64-linux.editorconfig
-          nix build .#checks.x86_64-linux.css
-          nix build .#checks.x86_64-linux.python
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.14"
-      - *setup_uv
-      - name: Install Python dependencies
-        run: uv sync --frozen --group dev
       - name: Verify crate2nix artifacts are fresh
         run: nix run .#nixcfg -- ci pipeline crate2nix
-      - name: Run pytest with coverage
-        run: |-
-          uv run coverage run -m pytest
-          uv run coverage report
-
-  # Phase 10: Build the slowest Darwin derivations in parallel
-  darwin-shared-heavy:
-    needs:
-      - merge-generated
-      - darwin-full-smoke
-      - warm-fod-cache-darwin
-      - quality-gates
-    runs-on: macos-15
-    name: ${{ matrix.package }}
-    timeout-minutes: 240
-    strategy:
-      fail-fast: false
-      max-parallel: 16
-      # Keep this split list focused on genuinely slow shared-closure members;
-      # verify-structure enforces that these targets stay aligned with the
-      # darwin-shared --exclude-ref list.
-      matrix:
-        include:
-          - package: zed-editor-nightly
-            target: .#pkgs.aarch64-darwin.zed-editor-nightly
-          - package: goose-cli
-            target: .#pkgs.aarch64-darwin.goose-cli
-          - package: superset
-            target: .#pkgs.aarch64-darwin.superset
-          - package: opencode
-            target: .#pkgs.aarch64-darwin.opencode
-          - package: opencode-desktop
-            target: .#pkgs.aarch64-darwin.opencode-desktop
-          - package: codex
-            target: .#pkgs.aarch64-darwin.codex
-          - package: scratch
-            target: .#pkgs.aarch64-darwin.scratch
-          - package: czkawka
-            target: .#pkgs.aarch64-darwin.czkawka
-          - package: gemini-cli
-            target: .#pkgs.aarch64-darwin.gemini-cli
-          - package: element-desktop
-            target: .#pkgs.aarch64-darwin.element-desktop
-          - package: linear-cli
-            target: .#pkgs.aarch64-darwin.linear-cli
-          - package: lumen
-            target: .#pkgs.aarch64-darwin.lumen
-          - package: mountpoint-s3
-            target: .#pkgs.aarch64-darwin.mountpoint-s3
-          - package: mux
-            target: .#pkgs.aarch64-darwin.mux
-          - package: neovide
-            target: .#pkgs.aarch64-darwin.neovide
-          - package: rust-analyzer-unwrapped
-            target: .#pkgs.aarch64-darwin.rust-analyzer-unwrapped
-    steps:
-      - *checkout
-      - *setup_nix
-      - *cachix
-      - *download_merged_sources
-      - *cache_nix_arch
-      - name: Free disk space
-        run: nix run .#nixcfg -- ci workflow free-disk-space
-      - name: Pre-fetch flake inputs
-        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
-      - name: Build heavy target (${{ matrix.package }})
-        run: nix build --impure ${{ matrix.target }}
-
-  # Phase 11: Build shared Darwin derivations to populate cache
-  darwin-shared:
-    needs:
-      - merge-generated
-      - darwin-full-smoke
-      - warm-fod-cache-darwin
-      - quality-gates
-    runs-on: macos-15
-    timeout-minutes: 180
-    steps:
-      - *checkout
-      - *setup_nix
-      - *cachix
-      - *download_merged_sources
-      - *cache_nix_arch
-      - name: Free disk space
-        run: nix run .#nixcfg -- ci workflow free-disk-space
-      - name: Pre-fetch flake inputs
-        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
-      - name: Build shared Darwin closure
-        # Exclude heavy packages handled by darwin-shared-heavy; keep this
-        # list aligned with that matrix (enforced by verify-structure).
-        run: |
-          nix run .#nixcfg -- ci cache closure \
-            --mode intersection \
-            --exclude-ref .#pkgs.aarch64-darwin.zed-editor-nightly \
-            --exclude-ref .#pkgs.aarch64-darwin.goose-cli \
-            --exclude-ref .#pkgs.aarch64-darwin.superset \
-            --exclude-ref .#pkgs.aarch64-darwin.opencode \
-            --exclude-ref .#pkgs.aarch64-darwin.opencode-desktop \
-            --exclude-ref .#pkgs.aarch64-darwin.codex \
-            --exclude-ref .#pkgs.aarch64-darwin.scratch \
-            --exclude-ref .#pkgs.aarch64-darwin.czkawka \
-            --exclude-ref .#pkgs.aarch64-darwin.gemini-cli \
-            --exclude-ref .#pkgs.aarch64-darwin.element-desktop \
-            --exclude-ref .#pkgs.aarch64-darwin.linear-cli \
-            --exclude-ref .#pkgs.aarch64-darwin.lumen \
-            --exclude-ref .#pkgs.aarch64-darwin.mountpoint-s3 \
-            --exclude-ref .#pkgs.aarch64-darwin.mux \
-            --exclude-ref .#pkgs.aarch64-darwin.neovide \
-            --exclude-ref .#pkgs.aarch64-darwin.rust-analyzer-unwrapped \
-            .#darwinConfigurations.argus.system \
-            .#darwinConfigurations.rocinante.system
-
-  # Phase 12: Build Darwin configurations per host
-  darwin-argus:
-    needs:
-      - merge-generated
-      - quality-gates
-      - darwin-shared-heavy
-      - darwin-shared
-    runs-on: macos-15
-    timeout-minutes: 240
-    steps:
-      - *checkout
-      - *setup_nix
-      - *cachix
-      - *download_merged_sources
-      - *cache_nix_arch
-      - name: Free disk space
-        run: nix run .#nixcfg -- ci workflow free-disk-space
-      - name: Install tools required only for full Darwin host builds
-        run: nix run .#nixcfg -- ci workflow install-darwin-tools
-      - name: Pre-fetch flake inputs
-        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
-      - run: nix run .#nixcfg -- ci workflow build-darwin-config argus
-
-  darwin-rocinante:
-    needs:
-      - merge-generated
-      - quality-gates
-      - darwin-shared-heavy
-      - darwin-shared
-    runs-on: macos-15
-    timeout-minutes: 240
-    steps:
-      - *checkout
-      - *setup_nix
-      - *cachix
-      - *download_merged_sources
-      - *cache_nix_arch
-      - name: Free disk space
-        run: nix run .#nixcfg -- ci workflow free-disk-space
-      - name: Install tools required only for full Darwin host builds
-        run: nix run .#nixcfg -- ci workflow install-darwin-tools
-      - name: Pre-fetch flake inputs
-        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
-      - run: nix run .#nixcfg -- ci workflow build-darwin-config rocinante
-
-  # Phase 13: Build a representative Linux output and update inventory
-  linux-x86_64:
-    needs:
-      - merge-generated
-      - warm-fod-cache-x86_64-linux
-      - quality-gates
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - *checkout
-      - *setup_nix
-      - *cachix
-      - *download_merged_sources
-      - *cache_nix_arch
-      - name: Build representative Linux output
-        run: nix build .#pkgs.x86_64-linux.nixcfg
       - name: Smoke-check update app evaluation
         run: nix run .#nixcfg -- ci workflow smoke-check-update-app
-      - name: List update targets
-        run: nix run .#nixcfg -- ci workflow list-update-targets
 
-  # Phase 14: Create PR with updates
+  # Phase 8: Create PR with updates
   create-pr:
     needs:
       - merge-generated
-      - quality-gates
-      - warm-fod-cache-aarch64-linux
-      - darwin-shared-heavy
-      - darwin-shared
-      - darwin-argus
-      - darwin-rocinante
-      - linux-x86_64
+      - refresh-sanity
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -681,7 +436,10 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - *setup_nix
       - *cachix
-      - *download_merged_sources
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: merged-generated
+          path: .
       - *cache_nix
       - name: Generate PR body
         run: |

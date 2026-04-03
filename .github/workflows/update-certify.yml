@@ -1,0 +1,366 @@
+--- # !yamlfmt!:ignore
+name: Periodic Flake Update Certification
+
+env:
+  CACHIX_NAME: gkze
+  UPDATE_BRANCH: update_flake_lock_action
+
+on:
+  workflow_run:
+    workflows:
+      - Periodic Flake Update
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch to certify. Defaults to the update branch from the refresh workflow.
+        required: false
+        default: update_flake_lock_action
+        type: string
+
+concurrency:
+  group: flake-update-certify
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  select-ref:
+    runs-on: ubuntu-24.04
+    outputs:
+      ref: ${{ steps.resolve.outputs.ref }}
+      exists: ${{ steps.resolve.outputs.exists }}
+    steps:
+      - name: Resolve certification ref
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || env.UPDATE_BRANCH }}
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
+        run: |
+          ref="${TARGET_REF}"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ] && [ "${WORKFLOW_RUN_CONCLUSION}" != "success" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Refresh workflow concluded with '${WORKFLOW_RUN_CONCLUSION}'; skipping certification." >&2
+            exit 0
+          fi
+          repo_url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$repo_url" "refs/heads/$ref" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+          echo "No update branch '$ref' found; skipping certification." >&2
+
+  quality-gates:
+    needs: select-ref
+    if: needs.select-ref.outputs.exists == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - &checkout_update_ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ needs.select-ref.outputs.ref }}
+      - &setup_nix
+        uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919 # v3.17.1
+        with:
+          extra-conf: |
+            extra-substituters = https://cache.garnix.io
+            extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
+      - &cachix
+        uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
+        with:
+          name: ${{ env.CACHIX_NAME }}
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          extraPullNames: zed
+          useDaemon: true
+      - &cache_nix
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cache/nix/tarball-cache
+            ~/.cache/nix/tarball-cache-v2
+          key: >-
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(
+            'flake.lock',
+            'packages/**/sources.json',
+            'overlays/**/sources.json',
+            'packages/**/uv.lock',
+            'packages/**/Cargo.nix',
+            'packages/**/crate-hashes.json',
+            'overlays/**/Cargo.nix',
+            'overlays/**/crate-hashes.json',
+            'packages/superset/bun.nix',
+            'packages/superset/bun.lock'
+            ) }}
+          restore-keys: |
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-
+            nix-cache-${{ runner.os }}-
+      - name: Check Nix formatting
+        run: nix fmt -- --ci
+      - name: Run core Nix checks
+        run: |
+          nix build .#checks.x86_64-linux.editorconfig
+          nix build .#checks.x86_64-linux.css
+          nix build .#checks.x86_64-linux.python
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          ignore-nothing-to-cache: true
+      - name: Install Python dependencies
+        run: uv sync --frozen --group dev
+      - name: Verify crate2nix artifacts are fresh
+        run: nix run .#nixcfg -- ci pipeline crate2nix
+      - name: Run pytest with coverage
+        run: |-
+          uv run coverage run -m pytest
+          uv run coverage report
+
+  darwin-full-smoke:
+    needs: select-ref
+    if: needs.select-ref.outputs.exists == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - *checkout_update_ref
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - name: Pre-fetch flake inputs
+        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - name: Dry-run full Darwin outputs
+        run: nix run .#nixcfg -- ci workflow darwin eval-full-smoke
+
+  warm-fod-cache-darwin:
+    needs:
+      - select-ref
+      - darwin-full-smoke
+    if: needs.select-ref.outputs.exists == 'true'
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - *checkout_update_ref
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - name: Free disk space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - name: Warm dependency cache for aarch64-darwin
+        run: nix run .#nixcfg -- ci cache fod
+
+  warm-fod-cache-x86_64-linux:
+    needs: select-ref
+    if: needs.select-ref.outputs.exists == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - *checkout_update_ref
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - name: Warm dependency cache for x86_64-linux
+        run: nix run .#nixcfg -- ci cache fod
+
+  warm-fod-cache-aarch64-linux:
+    needs: select-ref
+    if: needs.select-ref.outputs.exists == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - *checkout_update_ref
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - name: Warm dependency cache for aarch64-linux
+        run: nix run .#nixcfg -- ci cache fod
+
+  darwin-priority-heavy:
+    needs:
+      - select-ref
+      - darwin-full-smoke
+      - warm-fod-cache-darwin
+    if: needs.select-ref.outputs.exists == 'true'
+    runs-on: macos-15
+    name: ${{ matrix.package }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include:
+          - package: zed-editor-nightly
+            target: .#pkgs.aarch64-darwin.zed-editor-nightly
+          - package: opencode
+            target: .#pkgs.aarch64-darwin.opencode
+          - package: opencode-desktop
+            target: .#pkgs.aarch64-darwin.opencode-desktop
+          - package: codex
+            target: .#pkgs.aarch64-darwin.codex
+          - package: gemini-cli
+            target: .#pkgs.aarch64-darwin.gemini-cli
+          - package: element-desktop
+            target: .#pkgs.aarch64-darwin.element-desktop
+          - package: linear-cli
+            target: .#pkgs.aarch64-darwin.linear-cli
+          - package: neovide
+            target: .#pkgs.aarch64-darwin.neovide
+    steps:
+      - *checkout_update_ref
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - name: Free disk space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - name: Pre-fetch flake inputs
+        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - name: Build heavy target (${{ matrix.package }})
+        run: nix build --impure ${{ matrix.target }}
+
+  darwin-extra-heavy:
+    needs:
+      - select-ref
+      - darwin-full-smoke
+      - warm-fod-cache-darwin
+    if: needs.select-ref.outputs.exists == 'true'
+    runs-on: macos-15
+    name: ${{ matrix.package }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include:
+          - package: goose-cli
+            target: .#pkgs.aarch64-darwin.goose-cli
+          - package: superset
+            target: .#pkgs.aarch64-darwin.superset
+          - package: scratch
+            target: .#pkgs.aarch64-darwin.scratch
+          - package: czkawka
+            target: .#pkgs.aarch64-darwin.czkawka
+          - package: lumen
+            target: .#pkgs.aarch64-darwin.lumen
+          - package: mountpoint-s3
+            target: .#pkgs.aarch64-darwin.mountpoint-s3
+          - package: mux
+            target: .#pkgs.aarch64-darwin.mux
+          - package: rust-analyzer-unwrapped
+            target: .#pkgs.aarch64-darwin.rust-analyzer-unwrapped
+    steps:
+      - *checkout_update_ref
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - name: Free disk space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - name: Pre-fetch flake inputs
+        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - name: Build extra heavy target (${{ matrix.package }})
+        run: nix build --impure ${{ matrix.target }}
+
+  darwin-shared:
+    needs:
+      - select-ref
+      - darwin-full-smoke
+      - warm-fod-cache-darwin
+    if: needs.select-ref.outputs.exists == 'true'
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - *checkout_update_ref
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - name: Free disk space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - name: Pre-fetch flake inputs
+        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - name: Build shared Darwin closure
+        run: |
+          nix run .#nixcfg -- ci cache closure \
+            --mode intersection \
+            --exclude-ref .#pkgs.aarch64-darwin.zed-editor-nightly \
+            --exclude-ref .#pkgs.aarch64-darwin.opencode \
+            --exclude-ref .#pkgs.aarch64-darwin.opencode-desktop \
+            --exclude-ref .#pkgs.aarch64-darwin.codex \
+            --exclude-ref .#pkgs.aarch64-darwin.gemini-cli \
+            --exclude-ref .#pkgs.aarch64-darwin.element-desktop \
+            --exclude-ref .#pkgs.aarch64-darwin.linear-cli \
+            --exclude-ref .#pkgs.aarch64-darwin.neovide \
+            --exclude-ref .#pkgs.aarch64-darwin.goose-cli \
+            --exclude-ref .#pkgs.aarch64-darwin.superset \
+            --exclude-ref .#pkgs.aarch64-darwin.scratch \
+            --exclude-ref .#pkgs.aarch64-darwin.czkawka \
+            --exclude-ref .#pkgs.aarch64-darwin.lumen \
+            --exclude-ref .#pkgs.aarch64-darwin.mountpoint-s3 \
+            --exclude-ref .#pkgs.aarch64-darwin.mux \
+            --exclude-ref .#pkgs.aarch64-darwin.rust-analyzer-unwrapped \
+            .#darwinConfigurations.argus.system \
+            .#darwinConfigurations.rocinante.system
+
+  darwin-argus:
+    needs:
+      - select-ref
+      - darwin-priority-heavy
+      - darwin-shared
+    if: needs.select-ref.outputs.exists == 'true'
+    runs-on: macos-15
+    timeout-minutes: 240
+    steps:
+      - *checkout_update_ref
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - name: Free disk space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - name: Install tools required only for full Darwin host builds
+        run: nix run .#nixcfg -- ci workflow install-darwin-tools
+      - name: Pre-fetch flake inputs
+        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - run: nix run .#nixcfg -- ci workflow build-darwin-config argus
+
+  darwin-rocinante:
+    needs:
+      - select-ref
+      - darwin-priority-heavy
+      - darwin-shared
+    if: needs.select-ref.outputs.exists == 'true'
+    runs-on: macos-15
+    timeout-minutes: 240
+    steps:
+      - *checkout_update_ref
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - name: Free disk space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - name: Install tools required only for full Darwin host builds
+        run: nix run .#nixcfg -- ci workflow install-darwin-tools
+      - name: Pre-fetch flake inputs
+        run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - run: nix run .#nixcfg -- ci workflow build-darwin-config rocinante
+
+  linux-x86_64:
+    needs:
+      - select-ref
+      - warm-fod-cache-x86_64-linux
+    if: needs.select-ref.outputs.exists == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - *checkout_update_ref
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - name: Build representative Linux output
+        run: nix build .#pkgs.x86_64-linux.nixcfg
+      - name: List update targets
+        run: nix run .#nixcfg -- ci workflow list-update-targets

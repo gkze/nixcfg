@@ -567,9 +567,17 @@ jobs:
     assert "beta" in message
 
 
-def test_update_workflow_artifact_contracts_hold() -> None:
-    """Keep the checked-in update workflow artifact-safe."""
+def test_update_refresh_workflow_artifact_contracts_hold() -> None:
+    """Keep the checked-in refresh workflow artifact-safe."""
     validate_workflow_artifact_contracts(
         workflow_path=REPO_ROOT / ".github/workflows/update.yml",
+        repo_root=REPO_ROOT,
+    )
+
+
+def test_update_certify_workflow_artifact_contracts_hold() -> None:
+    """Keep the checked-in certification workflow artifact-safe."""
+    validate_workflow_artifact_contracts(
+        workflow_path=REPO_ROOT / ".github/workflows/update-certify.yml",
         repo_root=REPO_ROOT,
     )
