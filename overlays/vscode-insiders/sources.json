@@ -1,14 +1,14 @@
 {
-  "commit": "00515ed0a37c34bc524916089b1449a7c805c325",
+  "commit": "8c85df126b92b742f00c4d2107f6be50ec8298ac",
   "hashes": {
-    "aarch64-darwin": "sha256-EGBfctWFFkzZJ61kCWYL1l7o6FTvRetnvsDWTTST4XM=",
-    "aarch64-linux": "sha256-I8IvyqpVM0nAZw9B8Usg37lZybpQKWu38nGIoldi5Kc=",
-    "x86_64-linux": "sha256-UDPLqBvX7oDsyn6cofkD7bMzRYH62rGqQQbCEit+gaM="
+    "aarch64-darwin": "sha256-mcpcEM+wwmHv4GIOIwnsRR3tqAsASXVRG5Vfxk1oWs8=",
+    "aarch64-linux": "sha256-NuY6FbdJbwAw7Cic3f8WDzP3XMd5FGlvPIKGbTfJjwA=",
+    "x86_64-linux": "sha256-vOJFdU9Q7QHeZMIbUTvrCRGIfF4qsC+DaduOEOltAYg="
   },
   "urls": {
-    "aarch64-darwin": "https://update.code.visualstudio.com/1.114.0-insider/darwin-arm64/insider",
-    "aarch64-linux": "https://update.code.visualstudio.com/1.114.0-insider/linux-arm64/insider",
-    "x86_64-linux": "https://update.code.visualstudio.com/1.114.0-insider/linux-x64/insider"
+    "aarch64-darwin": "https://update.code.visualstudio.com/1.115.0-insider/darwin-arm64/insider",
+    "aarch64-linux": "https://update.code.visualstudio.com/1.115.0-insider/linux-arm64/insider",
+    "x86_64-linux": "https://update.code.visualstudio.com/1.115.0-insider/linux-x64/insider"
   },
-  "version": "1.114.0-insider"
+  "version": "1.115.0-insider"
 }
