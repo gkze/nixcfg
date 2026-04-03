@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-Nr8s/VyWl74p661YsZ1knYCCSdjo07MAgAjkK3g2NzM=",
-    "x86_64-linux": "sha256-9t2HFaPxDwzTey57iDGpY1nqhWx0faIi07JiOuZRs3Q="
+    "aarch64-darwin": "sha256-U1KJ6LWPWErizOq4XHoRBMnotvXmGuFB/wSmc31pGXU=",
+    "x86_64-linux": "sha256-Tb142IoeaaYDa6jorbmfyoCHkOI7LqkthhBJStf1cyg="
   },
   "urls": {
     "aarch64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
     "x86_64-linux": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
   },
-  "version": "147.0.7727.24"
+  "version": "147.0.7727.50"
 }

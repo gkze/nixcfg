@@ -1,4 +1,6 @@
 {
+  "git+https://github.com/agentclientprotocol/symposium-acp?rev=14086c9#sacp-derive@11.0.0": "1rb8szw5v2jp57z688pgvl8xfrq69kncy8931m7l0lfvc7gypj3m",
+  "git+https://github.com/agentclientprotocol/symposium-acp?rev=14086c9#sacp@11.0.0": "1rb8szw5v2jp57z688pgvl8xfrq69kncy8931m7l0lfvc7gypj3m",
   "git+https://github.com/open-telemetry/opentelemetry-rust?rev=345cd74a#opentelemetry-appender-tracing@0.31.1": "15lk9f4may2ncsg7xjfdjgfkdr87qb1hqas60cyid1py8hjyqsjs",
   "git+https://github.com/open-telemetry/opentelemetry-rust?rev=345cd74a#opentelemetry-http@0.31.0": "15lk9f4may2ncsg7xjfdjgfkdr87qb1hqas60cyid1py8hjyqsjs",
   "git+https://github.com/open-telemetry/opentelemetry-rust?rev=345cd74a#opentelemetry-otlp@0.31.0": "15lk9f4may2ncsg7xjfdjgfkdr87qb1hqas60cyid1py8hjyqsjs",
