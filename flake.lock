@@ -1598,16 +1598,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1775201671,
-        "narHash": "sha256-UAHlJpcc927dOd3RfFn0NoXlFIRRWyk3Q4RvwZMLGys=",
+        "lastModified": 1775329397,
+        "narHash": "sha256-dIJdvaxRm1d2ZRTEFekI+GtHYyWcmaujyaxfcU9DKH4=",
         "owner": "gkze",
         "repo": "opencode",
-        "rev": "c450b42775693869647da4ce0ba4061df8c89763",
+        "rev": "78be4ef9dc13be103abae972449eb0db251a7b10",
         "type": "github"
       },
       "original": {
         "owner": "gkze",
-        "ref": "stack/desktop-session-theme-db-fixes",
+        "ref": "gkze/fixes",
         "repo": "opencode",
         "type": "github"
       }
