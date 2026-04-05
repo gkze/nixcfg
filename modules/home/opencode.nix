@@ -121,8 +121,10 @@ let
 
   baseOpencodeSettings = {
     theme = config.theme.slug;
-    plugin = cfg.plugins;
     tui.scroll_acceleration.enabled = true;
+  }
+  // optionalAttrs (cfg.plugins != [ ]) {
+    plugin = cfg.plugins;
   };
 
   emptyProfile = {
@@ -203,7 +205,6 @@ in
     plugins = mkOption {
       type = types.listOf types.str;
       default = [
-        "@franlol/opencode-md-table-formatter"
         # "@mohak34/opencode-notifier@latest"
       ];
       description = "OpenCode plugins to install.";

@@ -6,6 +6,7 @@ implementation (which is covered elsewhere).
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
@@ -14,6 +15,8 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 import nixcfg
+from lib import http_utils
+from lib.github_actions.client import Workflow, WorkflowListRow, WorkflowRun
 from lib.schema_codegen.runner import SchemaTargetSummary
 
 if TYPE_CHECKING:
@@ -22,6 +25,67 @@ if TYPE_CHECKING:
 
 class _MonkeyPatchLike(Protocol):
     def setattr(self, target: str, value: object) -> None: ...
+
+
+def _workflow_record() -> Workflow:
+    timestamp = datetime(2026, 4, 2, 16, 0, tzinfo=UTC)
+    return Workflow.model_construct(
+        id=1,
+        node_id="WF_1",
+        name="Periodic Flake Update",
+        path=".github/workflows/update.yml",
+        state="active",
+        created_at=timestamp,
+        updated_at=timestamp,
+        url="https://api.github.com/repos/acme/demo/actions/workflows/1",
+        html_url="https://github.com/acme/demo/actions/workflows/1",
+        badge_url="https://github.com/acme/demo/actions/workflows/1/badge.svg",
+        deleted_at=None,
+    )
+
+
+def _workflow_run_record(status: str) -> WorkflowRun:
+    created_at = datetime(2026, 4, 2, 16, 0, tzinfo=UTC)
+    updated_at = datetime(2026, 4, 2, 16, 1, tzinfo=UTC)
+    conclusion = None if status != "completed" else "success"
+    return WorkflowRun.model_construct(
+        id=9,
+        name="update.yml",
+        node_id="WR_9",
+        check_suite_id=100,
+        check_suite_node_id="CS_100",
+        head_branch="main",
+        head_sha="deadbeef",
+        path=".github/workflows/update.yml@refs/heads/main",
+        run_number=683,
+        run_attempt=1,
+        referenced_workflows=[],
+        event="workflow_dispatch",
+        status=status,
+        conclusion=conclusion,
+        workflow_id=1,
+        url="https://api.github.com/repos/acme/demo/actions/runs/9",
+        html_url="https://github.com/acme/demo/actions/runs/9",
+        pull_requests=[],
+        created_at=created_at,
+        updated_at=updated_at,
+        actor=None,
+        triggering_actor=None,
+        run_started_at=created_at,
+        jobs_url="https://api.github.com/repos/acme/demo/actions/runs/9/jobs",
+        logs_url="https://api.github.com/repos/acme/demo/actions/runs/9/logs",
+        check_suite_url="https://api.github.com/check-suites/100",
+        artifacts_url="https://api.github.com/repos/acme/demo/actions/runs/9/artifacts",
+        cancel_url="https://api.github.com/repos/acme/demo/actions/runs/9/cancel",
+        rerun_url="https://api.github.com/repos/acme/demo/actions/runs/9/rerun",
+        previous_attempt_url=None,
+        workflow_url="https://api.github.com/repos/acme/demo/actions/workflows/1",
+        head_commit={},
+        repository={},
+        head_repository={},
+        head_repository_id=1,
+        display_title="Periodic Flake Update",
+    )
 
 
 def test_nixcfg_update_parses_native_only(monkeypatch: _MonkeyPatchLike) -> None:
@@ -288,6 +352,231 @@ def test_nixcfg_all_commands_support_short_help_alias() -> None:
     assert failures == [], failures
 
 
+def test_nixcfg_actions_workflows_renders_rows(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Ensure `nixcfg actions workflows` renders discovered workflows."""
+    monkeypatch.setattr(
+        "lib.github_actions.cli._workflow_rows",
+        lambda **_kwargs: (
+            WorkflowListRow(
+                workflow=_workflow_record(),
+                latest_run=_workflow_run_record("completed"),
+            ),
+        ),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["actions", "workflows"])
+
+    assert result.exit_code == 0
+    assert "Periodic Flake Update" in result.output
+    assert ".github/workflows/update.yml" in result.output
+    assert "#683 success" in result.output
+
+
+def test_nixcfg_actions_workflows_surfaces_errors_cleanly(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Ensure `nixcfg actions workflows` reports lookup failures without a traceback."""
+    monkeypatch.setattr(
+        "lib.github_actions.cli._workflow_rows",
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError("bad repo")),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["actions", "workflows", "--repo", "broken"])
+
+    assert result.exit_code != 0
+    assert "bad repo" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_nixcfg_actions_tail_forwards_workflow_and_optional_job(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Ensure `nixcfg actions tail` wires workflow, job, and auth options through."""
+    called: dict[str, object] = {}
+
+    class _FakeTailer:
+        def __init__(
+            self,
+            *,
+            api_client: object,
+            live_client: object,
+            output: object,
+            poll_interval: float,
+        ) -> None:
+            called.update(
+                api_client=api_client,
+                live_client=live_client,
+                output=output,
+                poll_interval=poll_interval,
+            )
+
+        async def tail_workflow(
+            self,
+            *,
+            workflow: object,
+            run: object,
+            requested_job_name: str | None,
+        ) -> None:
+            called.update(
+                workflow=workflow,
+                run=run,
+                requested_job_name=requested_job_name,
+            )
+
+    class _FakeLiveClient:
+        async def aclose(self) -> None:
+            called["closed"] = True
+
+    workflow = _workflow_record()
+    run = _workflow_run_record("in_progress")
+
+    monkeypatch.setattr(
+        "lib.github_actions.cli.select_named_workflow",
+        lambda _workflows, _name: workflow,
+    )
+    monkeypatch.setattr(
+        "lib.github_actions.cli.choose_live_run",
+        lambda _runs: run,
+    )
+    monkeypatch.setattr(
+        "lib.github_actions.cli.GitHubActionsTailer",
+        _FakeTailer,
+    )
+
+    class _FakeApiClient:
+        def list_workflows(self) -> tuple[Workflow, ...]:
+            return (workflow,)
+
+        def list_workflow_runs(
+            self,
+            _workflow_id: int,
+            *,
+            limit: int = 20,
+        ) -> tuple[WorkflowRun, ...]:
+            assert limit == 20
+            return (run,)
+
+    def _build_tail_clients(**kwargs: object) -> tuple[object, object]:
+        called["build_kwargs"] = kwargs
+        return _FakeApiClient(), _FakeLiveClient()
+
+    monkeypatch.setattr(
+        "lib.github_actions.cli._build_tail_clients",
+        _build_tail_clients,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        nixcfg.app,
+        [
+            "actions",
+            "tail",
+            "Periodic Flake Update",
+            "darwin-lock-smoke",
+            "-i",
+            "2.5",
+            "--chrome-debugging-url",
+            "http://127.0.0.1:9333",
+            "--allow-playwright-login",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert called["workflow"] == workflow
+    assert called["run"] == run
+    assert called["requested_job_name"] == "darwin-lock-smoke"
+    assert called["poll_interval"] == 2.5
+    assert called["closed"] is True
+    assert called["build_kwargs"] == {
+        "repo": None,
+        "server_url": None,
+        "chrome_debugging_url": "http://127.0.0.1:9333",
+        "allow_playwright_login": True,
+    }
+
+
+def test_nixcfg_actions_tail_surfaces_request_errors_cleanly(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Ensure `nixcfg actions tail` reports live-tail transport errors cleanly."""
+
+    class _FailingTailer:
+        def __init__(
+            self,
+            *,
+            api_client: object,
+            live_client: object,
+            output: object,
+            poll_interval: float,
+        ) -> None:
+            del api_client, live_client, output, poll_interval
+
+        async def tail_workflow(
+            self,
+            *,
+            workflow: object,
+            run: object,
+            requested_job_name: str | None,
+        ) -> None:
+            del workflow, run, requested_job_name
+            raise http_utils.SyncRequestError(
+                url="https://github.com/acme/demo/actions/runs/9/job/42",
+                attempts=1,
+                kind="status",
+                detail="HTTP 404 Not Found",
+                status=404,
+            )
+
+    class _FakeLiveClient:
+        async def aclose(self) -> None:
+            return None
+
+    workflow = _workflow_record()
+    run = _workflow_run_record("in_progress")
+
+    monkeypatch.setattr(
+        "lib.github_actions.cli.select_named_workflow",
+        lambda _workflows, _name: workflow,
+    )
+    monkeypatch.setattr(
+        "lib.github_actions.cli.choose_live_run",
+        lambda _runs: run,
+    )
+    monkeypatch.setattr(
+        "lib.github_actions.cli.GitHubActionsTailer",
+        _FailingTailer,
+    )
+
+    class _FakeApiClient:
+        def list_workflows(self) -> tuple[Workflow, ...]:
+            return (workflow,)
+
+        def list_workflow_runs(
+            self,
+            _workflow_id: int,
+            *,
+            limit: int = 20,
+        ) -> tuple[WorkflowRun, ...]:
+            assert limit == 20
+            return (run,)
+
+    monkeypatch.setattr(
+        "lib.github_actions.cli._build_tail_clients",
+        lambda **_kwargs: (_FakeApiClient(), _FakeLiveClient()),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["actions", "tail", "Periodic Flake Update"])
+
+    assert result.exit_code != 0
+    assert "HTTP 404 Not Found" in result.output
+    assert "FrozenInstanceError" not in result.output
+
+
 def test_nixcfg_ci_registers_sources_json_diff() -> None:
     """Ensure nested `nixcfg ci diff sources` is available."""
     runner = CliRunner()
@@ -384,6 +673,10 @@ def test_nixcfg_tree_shows_declared_command_descriptions() -> None:
     result = runner.invoke(nixcfg.app, ["tree"])
 
     assert result.exit_code == 0
+    assert (
+        "actions - GitHub Actions workflow discovery and live-tail helpers."
+        in result.output
+    )
     assert "ci - CI helper tools for update pipelines." in result.output
     assert "pr-body - Pull request body generation workflow step." in result.output
     assert (

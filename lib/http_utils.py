@@ -1,4 +1,4 @@
-"""Shared synchronous HTTP and GitHub auth helpers."""
+"""Shared HTTP and GitHub auth helpers."""
 
 from __future__ import annotations
 
@@ -13,11 +13,19 @@ from urllib.parse import urlsplit
 import httpx
 import keyring
 from keyring.errors import KeyringError
-from tenacity import Retrying, retry_if_exception_type, stop_after_attempt
+from tenacity import (
+    AsyncRetrying,
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+)
 from tenacity.wait import wait_exponential
 
 if TYPE_CHECKING:
     import logging
+    from collections.abc import Mapping
+
+    from tenacity.wait import WaitBaseT
 
 HTTP_BAD_REQUEST = 400
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
@@ -136,18 +144,12 @@ def _raise_status_error(status: int, detail: str) -> None:
     raise _NonRetryableStatusError(status, detail)
 
 
-def fetch_url_bytes(
+def _validate_request_target(
     url: str,
     *,
-    allowed_schemes: frozenset[str] = frozenset({"https"}),
-    attempts: int = 3,
-    backoff: float = 1.0,
-    max_backoff: float | None = None,
-    headers: dict[str, str] | None = None,
-    method: str = "GET",
-    timeout: float = 30.0,
-) -> tuple[bytes, dict[str, str]]:
-    """Fetch ``url`` and return response bytes plus response headers."""
+    allowed_schemes: frozenset[str],
+    attempts: int,
+) -> None:
     parsed = urlsplit(url)
     if parsed.scheme not in allowed_schemes or not parsed.netloc:
         schemes = "/".join(sorted(allowed_schemes))
@@ -160,9 +162,13 @@ def fetch_url_bytes(
         msg = f"Expected at least one HTTP attempt for {url}"
         raise RuntimeError(msg)
 
-    all_headers = dict(headers or {})
-    attempt_count = 0
-    retry_wait = (
+
+def _retry_wait(
+    *,
+    backoff: float,
+    max_backoff: float | None,
+) -> WaitBaseT:
+    return (
         wait_exponential(
             multiplier=max(0.0, backoff),
             exp_base=2,
@@ -171,9 +177,27 @@ def fetch_url_bytes(
         if max_backoff is not None
         else wait_exponential(multiplier=max(0.0, backoff), exp_base=2)
     )
+
+
+def fetch_url_bytes(
+    url: str,
+    *,
+    allowed_schemes: frozenset[str] = frozenset({"https"}),
+    attempts: int = 3,
+    backoff: float = 1.0,
+    max_backoff: float | None = None,
+    headers: Mapping[str, str] | None = None,
+    method: str = "GET",
+    timeout: float = 30.0,
+) -> tuple[bytes, dict[str, str]]:
+    """Fetch ``url`` and return response bytes plus response headers."""
+    _validate_request_target(url, allowed_schemes=allowed_schemes, attempts=attempts)
+
+    all_headers = dict(headers or {})
+    attempt_count = 0
     retryer = Retrying(
         stop=stop_after_attempt(attempts),
-        wait=retry_wait,
+        wait=_retry_wait(backoff=backoff, max_backoff=max_backoff),
         retry=retry_if_exception_type((
             _RetryableStatusError,
             httpx.TransportError,
@@ -225,3 +249,91 @@ def fetch_url_bytes(
 
     msg = f"Failed fetching {url}"
     raise RuntimeError(msg)
+
+
+async def fetch_url_bytes_async(
+    url: str,
+    *,
+    allowed_schemes: frozenset[str] = frozenset({"https"}),
+    attempts: int = 3,
+    backoff: float = 1.0,
+    max_backoff: float | None = None,
+    headers: Mapping[str, str] | None = None,
+    cookies: httpx.Cookies | None = None,
+    method: str = "GET",
+    request_timeout: float = 30.0,
+    client: httpx.AsyncClient | None = None,
+) -> tuple[bytes, dict[str, str]]:
+    """Fetch ``url`` asynchronously and return response bytes plus headers."""
+    _validate_request_target(url, allowed_schemes=allowed_schemes, attempts=attempts)
+
+    all_headers = dict(headers or {})
+    attempt_count = 0
+    retryer = AsyncRetrying(
+        stop=stop_after_attempt(attempts),
+        wait=_retry_wait(backoff=backoff, max_backoff=max_backoff),
+        retry=retry_if_exception_type((
+            _RetryableStatusError,
+            httpx.TransportError,
+        )),
+        reraise=True,
+    )
+
+    async def _run(async_client: httpx.AsyncClient) -> tuple[bytes, dict[str, str]]:
+        nonlocal attempt_count
+        async for attempt in retryer:
+            with attempt:
+                attempt_count += 1
+                response = await async_client.request(
+                    method,
+                    url,
+                    headers=all_headers,
+                    cookies=cookies,
+                    timeout=request_timeout,
+                )
+                payload = response.content
+                if response.status_code < HTTP_BAD_REQUEST:
+                    return payload, dict(response.headers)
+                detail = _format_http_error(response, payload)
+                _raise_status_error(response.status_code, detail)
+        msg = f"Failed fetching {url}"
+        raise RuntimeError(msg)
+
+    try:
+        if client is not None:
+            return await _run(client)
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=request_timeout,
+        ) as async_client:
+            return await _run(async_client)
+    except _NonRetryableStatusError as exc:
+        raise SyncRequestError(
+            url=url,
+            attempts=attempt_count,
+            kind="status",
+            detail=str(exc),
+            status=exc.status,
+        ) from exc
+    except _RetryableStatusError as exc:
+        raise SyncRequestError(
+            url=url,
+            attempts=attempt_count,
+            kind="status",
+            detail=str(exc),
+            status=exc.status,
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise SyncRequestError(
+            url=url,
+            attempts=attempt_count,
+            kind="timeout",
+            detail=str(exc),
+        ) from exc
+    except httpx.TransportError as exc:
+        raise SyncRequestError(
+            url=url,
+            attempts=attempt_count,
+            kind="network",
+            detail=str(exc),
+        ) from exc

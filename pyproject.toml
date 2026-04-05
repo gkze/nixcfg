@@ -32,6 +32,7 @@ dependencies = [
   "tenacity>=9.1.4",
   "tomlkit>=0.14.0",
   "typer>=0.24.1",
+  "githubkit>=0.15.1",
 ]
 
 [project.scripts]

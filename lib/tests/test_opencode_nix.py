@@ -174,9 +174,7 @@ def test_active_profile_json_includes_shared_settings_and_profile_overrides() ->
 
     assert active["$schema"] == "https://opencode.ai/config.json"
     assert active["theme"] == "override-theme"
-    assert active["plugin"] == [
-        "@franlol/opencode-md-table-formatter",
-    ]
+    assert "plugin" not in active
     assert active["tui"]["scroll_acceleration"]["enabled"] is True
     assert active["mcp"]["chrome-devtools"]["command"] == [
         "npx",

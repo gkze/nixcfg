@@ -80,9 +80,14 @@ def test_keymap_catalog_keeps_critical_navigation_and_opencode_bindings() -> Non
     """Critical bindings should survive the catalog refactor unchanged."""
     entries = _catalog_entries()
 
-    assert ("global", "<leader>km", "Browse keymap cheat sheet") in entries
-    assert ("global", "<leader>kd", "Open keymap doc") in entries
-    assert ("global", "<leader>oa", "OpenCode ask") in entries
-    assert ("global", "<leader>ot", "OpenCode toggle") in entries
+    assert ("global", "<leader>m", "Browse keymap cheat sheet") in entries
+    assert ("global", "<leader>M", "Open keymap doc") in entries
+    assert ("global", "<leader>O", "OpenCode ask") in entries
+    assert ("global", "<leader>o", "OpenCode toggle") in entries
+    assert ("global", "<leader>c", "Toggle CodeCompanion chat") in entries
+    assert ("global", "<leader>e", "Neo-tree filesystem") in entries
+    assert ("global", "<leader>G", "Open Neogit") in entries
+    assert ("global", "<leader>t", "New tab") in entries
+    assert ("global", "<leader>q", "Close tab") in entries
     assert ("lsp", "gd", "Go to definition") in entries
     assert ("telescope", "<CR>", "Select multi or default") in entries

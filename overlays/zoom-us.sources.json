@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-YSUaM8YAJHigm4M9W34/bD164M8f/hbhtcmHyUwFN20=",
+    "x86_64-darwin": "sha256-jIKBCrnvF101WJm8Tcpi2R5jRsqRXH7NQVGkSTnAeMA="
+  },
+  "urls": {
+    "aarch64-darwin": "https://zoom.us/client/7.0.0.77593/zoomusInstallerFull.pkg?archType=arm64",
+    "x86_64-darwin": "https://zoom.us/client/7.0.0.77593/zoomusInstallerFull.pkg"
+  },
+  "version": "7.0.0.77593"
+}

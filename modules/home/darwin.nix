@@ -14,8 +14,27 @@ in
   options.nixcfg.macApps.systemApplications = macApps.systemApplicationsOption;
 
   config = {
-    assertions = lib.optional (cfg.systemApplications != [ ]) (
-      macApps.uniqueBundleNamesAssertion cfg.systemApplications
+    assertions = lib.optionals (cfg.systemApplications != [ ]) [
+      (macApps.uniqueBundleNamesAssertion cfg.systemApplications)
+      (macApps.managedAppsNotInPackageListsAssertion {
+        entries = cfg.systemApplications;
+        packageLists = [
+          {
+            label = "home.packages";
+            inherit (config.home) packages;
+          }
+        ];
+      })
+    ];
+
+    home.activation.nixcfgProfileAppBundleAudit = lib.mkIf (cfg.systemApplications != [ ]) (
+      lib.hm.dag.entryAfter [ "installPackages" ] (
+        macApps.profileBundleLeakAuditScript {
+          packagePaths = map toString config.home.packages;
+          managedBundleNames = map (entry: entry.bundleName) cfg.systemApplications;
+          label = "home.packages";
+        }
+      )
     );
 
     home.activation.nixcfgSystemApplications = lib.mkIf standaloneActivation (

@@ -15,6 +15,7 @@ from rich.tree import Tree
 from typer.main import get_command
 
 from lib.cli import HELP_CONTEXT_SETTINGS
+from lib.github_actions.cli import app as github_actions_app
 from lib.nix.schemas._codegen import main as codegen_main
 from lib.nix.schemas._fetch import check as schema_check
 from lib.nix.schemas._fetch import fetch as fetch_schemas
@@ -40,6 +41,7 @@ app = typer.Typer(
     context_settings=dict(HELP_CONTEXT_SETTINGS),
 )
 
+app.add_typer(github_actions_app, name="actions")
 app.add_typer(update_ci_app, name="ci")
 app.add_typer(recover_app, name="recover")
 

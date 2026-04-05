@@ -61,31 +61,31 @@ rec {
         title = "Buffers";
         items = [
           {
-            key = "<leader>bp";
+            key = "<leader>,";
             mode = "n";
             action = ":BufferLineCyclePrev<CR>";
             desc = "Previous buffer";
           }
           {
-            key = "<leader>bn";
+            key = "<leader>.";
             mode = "n";
             action = ":BufferLineCycleNext<CR>";
             desc = "Next buffer";
           }
           {
-            key = "<leader>bh";
+            key = "<leader><";
             mode = "n";
             action = ":BufferLineMovePrev<CR>";
             desc = "Move buffer left";
           }
           {
-            key = "<leader>bl";
+            key = "<leader>>";
             mode = "n";
             action = ":BufferLineMoveNext<CR>";
             desc = "Move buffer right";
           }
           {
-            key = "<leader>bd";
+            key = "<leader>b";
             mode = "n";
             action = ":Bdelete<CR>";
             desc = "Delete buffer";
@@ -96,13 +96,13 @@ rec {
         title = "Tabs";
         items = [
           {
-            key = "<leader>tn";
+            key = "<leader>t";
             mode = "n";
             action = ":tabnew<CR>";
             desc = "New tab";
           }
           {
-            key = "<leader>tc";
+            key = "<leader>q";
             mode = "n";
             action = ":tabclose<CR>";
             desc = "Close tab";
@@ -113,37 +113,37 @@ rec {
         title = "Search and pickers";
         items = [
           {
-            key = "<leader>ff";
+            key = "<leader>f";
             mode = "n";
             action = ":Telescope find_files<CR>";
             desc = "Find files";
           }
           {
-            key = "<leader>fh";
+            key = "<leader>F";
             mode = "n";
             action = ":Telescope find_files hidden=true<CR>";
             desc = "Find hidden files";
           }
           {
-            key = "<leader>fg";
+            key = "<leader>/";
             mode = "n";
             action = ":Telescope live_grep<CR>";
             desc = "Live grep";
           }
           {
-            key = "<leader>fk";
+            key = "<leader>?";
             mode = "n";
             action = ":Telescope keymaps<CR>";
             desc = "Find keymaps";
           }
           {
-            key = "<leader>km";
+            key = "<leader>m";
             mode = "n";
             action = ":NvimKeymaps<CR>";
             desc = "Browse keymap cheat sheet";
           }
           {
-            key = "<leader>kd";
+            key = "<leader>M";
             mode = "n";
             action = ":NvimKeymapsDoc<CR>";
             desc = "Open keymap doc";
@@ -264,49 +264,49 @@ rec {
         title = "Navigation panes";
         items = [
           {
-            key = "<leader>nf";
+            key = "<leader>N";
             mode = "n";
             action = ":Neotree focus<CR>";
             desc = "Neo-tree focus";
           }
           {
-            key = "<leader>nr";
+            key = "<leader>E";
             mode = "n";
             action = ":Neotree reveal<CR>";
             desc = "Neo-tree reveal";
           }
           {
-            key = "<leader>nt";
+            key = "<leader>e";
             mode = "n";
             action = ":Neotree toggle filesystem<CR>";
             desc = "Neo-tree filesystem";
           }
           {
-            key = "<leader>ng";
+            key = "<leader>g";
             mode = "n";
             action = ":Neotree toggle git_status<CR>";
             desc = "Neo-tree git status";
           }
           {
-            key = "<leader>nb";
+            key = "<leader>n";
             mode = "n";
             action = ":Navbuddy<CR>";
             desc = "Navbuddy";
           }
           {
-            key = "<leader>na";
+            key = "<leader>A";
             mode = "n";
             action = ":AerialToggle<CR>";
             desc = "Toggle Aerial";
           }
           {
-            key = "<leader>no";
+            key = "<leader>v";
             mode = "n";
             action = ":AerialOpenAll<CR>";
             desc = "Open all Aerial symbols";
           }
           {
-            key = "<leader>nc";
+            key = "<leader>V";
             mode = "n";
             action = ":AerialCloseAll<CR>";
             desc = "Close all Aerial symbols";
@@ -317,25 +317,25 @@ rec {
         title = "Git";
         items = [
           {
-            key = "<leader>gg";
+            key = "<leader>G";
             mode = "n";
             action = ":Neogit<CR>";
             desc = "Open Neogit";
           }
           {
-            key = "<leader>gb";
+            key = "<leader>B";
             mode = "n";
             action = ":Neogit branch<CR>";
             desc = "Neogit branch";
           }
           {
-            key = "<leader>gd";
+            key = "<leader>d";
             mode = "n";
             action = ":DiffviewOpen<CR>";
             desc = "Open Diffview";
           }
           {
-            key = "<leader>gD";
+            key = "<leader>D";
             mode = "n";
             action = ":DiffviewClose<CR>";
             desc = "Close Diffview";
@@ -357,25 +357,25 @@ rec {
         title = "Terminal and AI";
         items = [
           {
-            key = "<leader>tt";
+            key = "<leader>T";
             mode = "n";
             action = ":ToggleTerm<CR>";
             desc = "Toggle terminal";
           }
           {
-            key = "<leader>cc";
+            key = "<leader>c";
             mode = "n";
             action = ":CodeCompanionChat Toggle<CR>";
             desc = "Toggle CodeCompanion chat";
           }
           {
-            key = "<leader>ca";
+            key = "<leader>a";
             mode = "n";
             action = ":CodeCompanionActions<CR>";
             desc = "CodeCompanion actions";
           }
           {
-            key = "<leader>ci";
+            key = "<leader>C";
             mode = "n";
             action = ":CodeCompanion<CR>";
             desc = "CodeCompanion inline";
@@ -387,7 +387,7 @@ rec {
             desc = "Add selection to CodeCompanion";
           }
           {
-            key = "<leader>oa";
+            key = "<leader>O";
             mode = "n";
             action = {
               __raw = ''function() require("opencode").ask("@this: ", { submit = true }) end'';
@@ -395,7 +395,7 @@ rec {
             desc = "OpenCode ask";
           }
           {
-            key = "<leader>os";
+            key = "<leader>s";
             mode = "n";
             action = {
               __raw = ''function() require("opencode").select() end'';
@@ -403,7 +403,7 @@ rec {
             desc = "OpenCode select";
           }
           {
-            key = "<leader>ot";
+            key = "<leader>o";
             mode = "n";
             action = {
               __raw = ''function() require("opencode").toggle() end'';

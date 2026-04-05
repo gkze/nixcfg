@@ -26,9 +26,21 @@
 
       helpers = import ./_lib/helpers.nix fragArgs;
 
+      withManagedMacApp =
+        package: bundleName:
+        package.overrideAttrs (old: {
+          passthru = (old.passthru or { }) // {
+            macApp = {
+              inherit bundleName;
+              bundleRelPath = "Applications/${bundleName}";
+              installMode = "copy";
+            };
+          };
+        });
+
       tinyOverlays = {
-        chatgpt = final.mkSourceOverride "chatgpt" prev.chatgpt;
-        code-cursor = final.mkSourceOverride "code-cursor" prev.code-cursor;
+        chatgpt = withManagedMacApp (final.mkSourceOverride "chatgpt" prev.chatgpt) "ChatGPT.app";
+        code-cursor = withManagedMacApp (final.mkSourceOverride "code-cursor" prev.code-cursor) "Cursor.app";
         commander = final.callPackage ../packages/commander { selfSource = sources.commander; };
         inherit (prev) flake-edit;
         google-chrome = final.mkSourceOverride "google-chrome" prev.google-chrome;
@@ -39,7 +51,7 @@
           else
             inputs.zed.packages.${system}.default;
         jetbrains = prev.jetbrains // {
-          datagrip = final.mkSourceOverride "datagrip" prev.jetbrains.datagrip;
+          datagrip = withManagedMacApp (final.mkSourceOverride "datagrip" prev.jetbrains.datagrip) "DataGrip.app";
         };
       };
     in

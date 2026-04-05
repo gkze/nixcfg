@@ -143,9 +143,37 @@
       python.enable = true;
       rust.enable = true;
     };
-    # Keep Wispr Flow managed from /Applications only so macOS sees one canonical app bundle.
-    packageSets.excludePackagesByName = [ "wispr-flow" ];
-    macApps.systemApplications = [ { package = pkgs.wispr-flow; } ];
+    # Keep the known-problem mutable macOS app bundles managed from /Applications only so
+    # Launch Services has one canonical bundle to touch and old store paths do not pick up
+    # App Management metadata that blocks garbage collection. This list is intentionally
+    # targeted to the apps that have already shown the GC/xattr failure mode or whose
+    # embedded CLIs should resolve through the copied /Applications bundle.
+    packageSets.excludePackagesByName = [
+      "chatgpt"
+      "cursor"
+      "datagrip"
+      "wispr-flow"
+    ];
+    macApps.systemApplications = [
+      {
+        package = pkgs.chatgpt;
+        mode = "copy";
+      }
+      {
+        package = pkgs.code-cursor;
+        mode = "copy";
+      }
+      {
+        package = pkgs.jetbrains.datagrip;
+        mode = "copy";
+      }
+      {
+        package = pkgs.vscode-insiders;
+        mode = "copy";
+      }
+      { package = pkgs.wispr-flow; }
+      { package = pkgs.zoom-us; }
+    ];
     git = {
       signingKey = userMeta.gpg.keys.signing;
       identities = {
@@ -312,7 +340,8 @@
     };
     vscode = {
       enable = true;
-      package = pkgs.vscode-insiders;
+      package = null;
+      pname = "vscode-insiders";
     };
     yazi = {
       enable = true;
@@ -330,11 +359,53 @@
         # Work around the 0.44.0 regression where themes under
         # ~/.config/zellij/themes are not loaded on session start.
         theme_dir = "${config.xdg.configHome}/zellij/themes";
-        keybinds.normal = {
-          "bind \"Alt b\"".TogglePaneFrames = { };
-          "bind \"Alt s\"".Clear = { };
-          "bind \"Alt L\"".GoToNextTab = { };
-          "bind \"Alt H\"".GoToPreviousTab = { };
+        keybinds = {
+          normal = {
+            "bind \"Alt b\"".TogglePaneFrames = { };
+            "bind \"Alt s\"".Clear = { };
+            "bind \"Alt L\"".GoToNextTab = { };
+            "bind \"Alt H\"".GoToPreviousTab = { };
+          };
+          pane._children = [
+            # Symmetric directional splits; Zellij core supports Left/Up even
+            # though the shipped defaults only expose Down/Right shortcuts.
+            {
+              bind = {
+                _args = [ "H" ];
+                _children = [
+                  { NewPane._args = [ "Left" ]; }
+                  { SwitchToMode._args = [ "Normal" ]; }
+                ];
+              };
+            }
+            {
+              bind = {
+                _args = [ "J" ];
+                _children = [
+                  { NewPane._args = [ "Down" ]; }
+                  { SwitchToMode._args = [ "Normal" ]; }
+                ];
+              };
+            }
+            {
+              bind = {
+                _args = [ "K" ];
+                _children = [
+                  { NewPane._args = [ "Up" ]; }
+                  { SwitchToMode._args = [ "Normal" ]; }
+                ];
+              };
+            }
+            {
+              bind = {
+                _args = [ "L" ];
+                _children = [
+                  { NewPane._args = [ "Right" ]; }
+                  { SwitchToMode._args = [ "Normal" ]; }
+                ];
+              };
+            }
+          ];
         };
         default_layout = "compact";
         pane_frames = false;

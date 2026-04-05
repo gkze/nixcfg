@@ -1,18 +1,62 @@
 { lib, pkgs }:
 let
+  inherit (builtins) concatLists filter;
   inherit (lib)
     attrByPath
     concatMapStringsSep
+    concatStringsSep
     escapeShellArg
     getExe
     literalExpression
     mkDefault
     mkOption
+    optionalString
     types
     unique
     ;
 
   packageLabel = package: package.pname or package.name or "<unknown package>";
+
+  packageOutPath = package: if package ? outPath then toString package.outPath else null;
+
+  packageBundleName = package: attrByPath [ "passthru" "macApp" "bundleName" ] null package;
+
+  entryConflictsWithPackage =
+    entry: candidate:
+    let
+      entryOutPath = packageOutPath entry.package;
+      candidateOutPath = packageOutPath candidate;
+      candidateBundleName = packageBundleName candidate;
+    in
+    (entryOutPath != null && candidateOutPath != null && entryOutPath == candidateOutPath)
+    || (candidateBundleName != null && entry.bundleName == candidateBundleName);
+
+  formatPackageListConflict =
+    conflict:
+    let
+      managedLabel = packageLabel conflict.entry.package;
+      candidateLabel = packageLabel conflict.candidate;
+    in
+    "- ${conflict.entry.bundleName} (${managedLabel}) also appears in ${conflict.label}"
+    + optionalString (candidateLabel != managedLabel) " as ${candidateLabel}"
+    + ".";
+
+  managedAppsPackageListConflicts =
+    entries: packageLists:
+    concatLists (
+      map (
+        entry:
+        concatLists (
+          map (
+            packageList:
+            map (candidate: {
+              inherit entry candidate;
+              inherit (packageList) label;
+            }) (filter (candidate: entryConflictsWithPackage entry candidate) packageList.packages)
+          ) packageLists
+        )
+      ) entries
+    );
 
   requiredMacAppAttr =
     package: attr:
@@ -76,6 +120,85 @@ in
       builtins.length (unique (map (entry: entry.bundleName) entries)) == builtins.length entries;
     message = "nixcfg.macApps.systemApplications must not contain duplicate bundleName values.";
   };
+
+  managedAppsNotInPackageListsAssertion =
+    {
+      entries,
+      packageLists,
+    }:
+    let
+      conflicts = managedAppsPackageListConflicts entries packageLists;
+      conflictLines = unique (map formatPackageListConflict conflicts);
+    in
+    {
+      assertion = conflicts == [ ];
+      message = concatStringsSep "\n" (
+        [
+          "nixcfg.macApps.systemApplications packages must not also appear in other installed package lists."
+        ]
+        ++ conflictLines
+      );
+    };
+
+  profileBundleLeakAuditScript =
+    {
+      packagePaths,
+      managedBundleNames,
+      label ? "home.packages",
+    }:
+    let
+      uniqueManagedBundleNames = unique managedBundleNames;
+    in
+    ''
+            packageListLabel=${escapeShellArg label}
+
+            managedBundleNames=(
+      ${quotedLines uniqueManagedBundleNames}
+            )
+
+            packagePaths=(
+      ${quotedLines packagePaths}
+            )
+
+            bundle_is_managed() {
+              local needle="$1"
+              local managedBundleName
+
+              for managedBundleName in "''${managedBundleNames[@]}"; do
+                if [ "$managedBundleName" = "$needle" ]; then
+                  return 0
+                fi
+              done
+
+              return 1
+            }
+
+            offendingBundles=()
+
+            for packagePath in "''${packagePaths[@]}"; do
+              if [ ! -d "$packagePath/Applications" ]; then
+                continue
+              fi
+
+              for appBundle in "$packagePath"/Applications/*.app; do
+                if [ "$appBundle" = "$packagePath/Applications/*.app" ] || [ ! -d "$appBundle" ]; then
+                  continue
+                fi
+
+                bundleName="''${appBundle##*/}"
+                if bundle_is_managed "$bundleName"; then
+                  offendingBundles+=("$bundleName <= $packagePath")
+                fi
+              done
+            done
+
+            if [ "''${#offendingBundles[@]}" -ne 0 ]; then
+              echo "Managed macOS app bundles must not be exposed through $packageListLabel." >&2
+              echo "Move those packages out of $packageListLabel so /Applications stays the only mutable app-bundle surface." >&2
+              printf ' - %s\n' "''${offendingBundles[@]}" >&2
+              exit 1
+            fi
+    '';
 
   systemApplicationsScript =
     {
