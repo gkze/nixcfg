@@ -547,29 +547,53 @@
     url = "https://registry.npmjs.org/@babel/types/-/types-7.29.0.tgz";
     hash = "sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==";
   };
-  "@better-auth/core@1.4.18" = fetchurl {
-    url = "https://registry.npmjs.org/@better-auth/core/-/core-1.4.18.tgz";
-    hash = "sha512-q+awYgC7nkLEBdx2sW0iJjkzgSHlIxGnOpsN1r/O1+a4m7osJNHtfK2mKJSL1I+GfNyIlxJF8WvD/NLuYMpmcg==";
+  "@better-auth/api-key@1.5.6" = fetchurl {
+    url = "https://registry.npmjs.org/@better-auth/api-key/-/api-key-1.5.6.tgz";
+    hash = "sha512-jr3m4/caFxn9BuY9pGDJ4B1HP1Qoqmyd7heBHm4KUFel+a9Whe/euROgZ/L+o7mbmUdZtreneaU15dpn0tJZ5g==";
   };
-  "@better-auth/expo@1.4.18" = fetchurl {
-    url = "https://registry.npmjs.org/@better-auth/expo/-/expo-1.4.18.tgz";
-    hash = "sha512-hrAgqtwe5R1eVsdMtxU8iLMZTHKeww5xpdqqyVWYO5UAwit/pb97d8TBGDfSj/uq5ihklC/0RNYg9SQNVTHSsQ==";
+  "@better-auth/core@1.5.6" = fetchurl {
+    url = "https://registry.npmjs.org/@better-auth/core/-/core-1.5.6.tgz";
+    hash = "sha512-Ez9DZdIMFyxHremmoLz1emFPGNQomDC1jqqBPnZ6Ci+6TiGN3R9w/Y03cJn6I8r1ycKgOzeVMZtJ/erOZ27Gsw==";
   };
-  "@better-auth/oauth-provider@1.4.18" = fetchurl {
-    url = "https://registry.npmjs.org/@better-auth/oauth-provider/-/oauth-provider-1.4.18.tgz";
-    hash = "sha512-9Hexp9tVDEY3T7p+2Vj0JBX+IvinXt0MFCWTjJYrsuzhJyXCO8EoECP3Dq6Ja8Yp39ttmLH5friEykakpkwcMQ==";
+  "@better-auth/drizzle-adapter@1.5.6" = fetchurl {
+    url = "https://registry.npmjs.org/@better-auth/drizzle-adapter/-/drizzle-adapter-1.5.6.tgz";
+    hash = "sha512-VfFFmaoFw3ug12SiSuIwzrMoHyIVmkMGWm9gZ4sXdYYVX4HboCL4m3fjzOhppcmK5OGatRuU+N1UX6wxCITcXw==";
   };
-  "@better-auth/stripe@1.4.18" = fetchurl {
-    url = "https://registry.npmjs.org/@better-auth/stripe/-/stripe-1.4.18.tgz";
-    hash = "sha512-T1vUPHEnzd3/gQH2e9BigfqcaOZ3W+jBVlfHpXZVGoat1oKFPtKnJ3OHmfU1MwSCjNSdIFllrN6U6DhsQlZoEQ==";
+  "@better-auth/expo@1.5.6" = fetchurl {
+    url = "https://registry.npmjs.org/@better-auth/expo/-/expo-1.5.6.tgz";
+    hash = "sha512-LZsX8c1hbo+W3EEx3bpuO+MCl8BKhuiboGs8+Kaq6TaB3Ca684oGgvWAhHVPaH4yd6TA+jdX5QC+RXb9xX2Gmw==";
   };
-  "@better-auth/telemetry@1.4.18" = fetchurl {
-    url = "https://registry.npmjs.org/@better-auth/telemetry/-/telemetry-1.4.18.tgz";
-    hash = "sha512-e5rDF8S4j3Um/0LIVATL2in9dL4lfO2fr2v1Wio4qTMRbfxqnUDTa+6SZtwdeJrbc4O+a3c+IyIpjG9Q/6GpfQ==";
+  "@better-auth/kysely-adapter@1.5.6" = fetchurl {
+    url = "https://registry.npmjs.org/@better-auth/kysely-adapter/-/kysely-adapter-1.5.6.tgz";
+    hash = "sha512-Fnf+h8WVKtw6lEOmVmiVVzDf3shJtM60AYf9XTnbdCeUd6MxN/KnaJZpkgtYnRs7a+nwtkVB+fg4lGETebGFXQ==";
   };
-  "@better-auth/utils@0.3.0" = fetchurl {
-    url = "https://registry.npmjs.org/@better-auth/utils/-/utils-0.3.0.tgz";
-    hash = "sha512-W+Adw6ZA6mgvnSnhOki270rwJ42t4XzSK6YWGF//BbVXL6SwCLWfyzBc1lN2m/4RM28KubdBKQ4X5VMoLRNPQw==";
+  "@better-auth/memory-adapter@1.5.6" = fetchurl {
+    url = "https://registry.npmjs.org/@better-auth/memory-adapter/-/memory-adapter-1.5.6.tgz";
+    hash = "sha512-rS7ZsrIl5uvloUgNN0u9LOZJMMXnsZXVdUZ3MrTBKWM2KpoJjzPr9yN3Szyma5+0V7SltnzSGHPkYj2bEzzmlA==";
+  };
+  "@better-auth/mongo-adapter@1.5.6" = fetchurl {
+    url = "https://registry.npmjs.org/@better-auth/mongo-adapter/-/mongo-adapter-1.5.6.tgz";
+    hash = "sha512-6+M3MS2mor8fTUV3EI1FBLP0cs6QfbN+Ovx9+XxR/GdfKIBoNFzmPEPRbdGt+ft6PvrITsUm+T70+kkHgVSP6w==";
+  };
+  "@better-auth/oauth-provider@1.5.6" = fetchurl {
+    url = "https://registry.npmjs.org/@better-auth/oauth-provider/-/oauth-provider-1.5.6.tgz";
+    hash = "sha512-DSkdC4GLwUiDwwd4hxQZa+aqzFoMXQV0Im3k4igzGIW6VB2S0p0CIR+YCOxJP7lAP+1eepxvjTfG07sTXzu2Bw==";
+  };
+  "@better-auth/prisma-adapter@1.5.6" = fetchurl {
+    url = "https://registry.npmjs.org/@better-auth/prisma-adapter/-/prisma-adapter-1.5.6.tgz";
+    hash = "sha512-UxY9vQJs1Tt+O+T2YQnseDMlWmUSQvFZSBb5YiFRg7zcm+TEzujh4iX2/csA0YiZptLheovIuVWTP9nriewEBA==";
+  };
+  "@better-auth/stripe@1.5.6" = fetchurl {
+    url = "https://registry.npmjs.org/@better-auth/stripe/-/stripe-1.5.6.tgz";
+    hash = "sha512-MVs9TKnFF0MV+bB+olMVBd5hwq4AhA6HYIdmZmUDzIv08dj968myhWr955R3dBMFsuS7+Bz7v4xQ3dlgU+ctCQ==";
+  };
+  "@better-auth/telemetry@1.5.6" = fetchurl {
+    url = "https://registry.npmjs.org/@better-auth/telemetry/-/telemetry-1.5.6.tgz";
+    hash = "sha512-yXC7NSxnIFlxDkGdpD7KA+J9nqIQAPCJKe77GoaC5bWoe/DALo1MYorZfTgOafS7wrslNtsPT4feV/LJi1ubqQ==";
+  };
+  "@better-auth/utils@0.3.1" = fetchurl {
+    url = "https://registry.npmjs.org/@better-auth/utils/-/utils-0.3.1.tgz";
+    hash = "sha512-+CGp4UmZSUrHHnpHhLPYu6cV+wSUSvVbZbNykxhUDocpVNTo9uFFxw/NqJlh1iC4wQ9HKKWGCKuZ5wUgS0v6Kg==";
   };
   "@better-fetch/fetch@1.1.21" = fetchurl {
     url = "https://registry.npmjs.org/@better-fetch/fetch/-/fetch-1.1.21.tgz";
@@ -634,6 +658,14 @@
   "@chevrotain/utils@11.1.2" = fetchurl {
     url = "https://registry.npmjs.org/@chevrotain/utils/-/utils-11.1.2.tgz";
     hash = "sha512-4mudFAQ6H+MqBTfqLmU7G1ZwRzCLfJEooL/fsF6rCX5eePMbGhoy5n4g+G4vlh2muDcsCTJtL+uKbOzWxs5LHA==";
+  };
+  "@clack/core@0.4.2" = fetchurl {
+    url = "https://registry.npmjs.org/@clack/core/-/core-0.4.2.tgz";
+    hash = "sha512-NYQfcEy8MWIxrT5Fj8nIVchfRFA26yYKJcvBS7WlUIlw2OmQOY9DhGGXMovyI5J5PpxrCPGkgUi207EBrjpBvg==";
+  };
+  "@clack/prompts@0.10.1" = fetchurl {
+    url = "https://registry.npmjs.org/@clack/prompts/-/prompts-0.10.1.tgz";
+    hash = "sha512-Q0T02vx8ZM9XSv9/Yde0jTmmBQufZhPJfYAg2XrrrxWWaZgq1rr8nU8Hv710BQ1dhoP8rtY7YUdpGej2Qza/cw==";
   };
   "@cloudflare/kv-asset-handler@0.4.2" = fetchurl {
     url = "https://registry.npmjs.org/@cloudflare/kv-asset-handler/-/kv-asset-handler-0.4.2.tgz";
@@ -3391,6 +3423,8 @@
   "@superset/api" = copyPathToStore ./apps/api;
   "@superset/auth" = copyPathToStore ./packages/auth;
   "@superset/chat" = copyPathToStore ./packages/chat;
+  "@superset/cli" = copyPathToStore ./packages/cli;
+  "@superset/cli-framework" = copyPathToStore ./packages/cli-framework;
   "@superset/db" = copyPathToStore ./packages/db;
   "@superset/desktop" = copyPathToStore ./apps/desktop;
   "@superset/desktop-mcp" = copyPathToStore ./packages/desktop-mcp;
@@ -4866,13 +4900,13 @@
     url = "https://registry.npmjs.org/before-after-hook/-/before-after-hook-4.0.0.tgz";
     hash = "sha512-q6tR3RPqIB1pMiTRMFcZwuG5T8vwp+vUvEG0vuI6B+Rikh5BfPp2fQ82c925FOs+b0lcFQ8CFrL+KbilfZFhOQ==";
   };
-  "better-auth@1.4.18" = fetchurl {
-    url = "https://registry.npmjs.org/better-auth/-/better-auth-1.4.18.tgz";
-    hash = "sha512-bnyifLWBPcYVltH3RhS7CM62MoelEqC6Q+GnZwfiDWNfepXoQZBjEvn4urcERC7NTKgKq5zNBM8rvPvRBa6xcg==";
+  "better-auth@1.5.6" = fetchurl {
+    url = "https://registry.npmjs.org/better-auth/-/better-auth-1.5.6.tgz";
+    hash = "sha512-QSpJTqaT1XVfWRQe/fm3PgeuwOIlz1nWX/Dx7nsHStJ382bLzmDbQk2u7IT0IJ6wS5SRxfqEE1Ev9TXontgyAQ==";
   };
-  "better-call@1.1.8" = fetchurl {
-    url = "https://registry.npmjs.org/better-call/-/better-call-1.1.8.tgz";
-    hash = "sha512-XMQ2rs6FNXasGNfMjzbyroSwKwYbZ/T3IxruSS6U2MJRsSYh3wYtG3o6H00ZlKZ/C/UPOAD97tqgQJNsxyeTXw==";
+  "better-call@1.3.2" = fetchurl {
+    url = "https://registry.npmjs.org/better-call/-/better-call-1.3.2.tgz";
+    hash = "sha512-4cZIfrerDsNTn3cm+MhLbUePN0gdwkhSXEuG7r/zuQ8c/H7iU0/jSK5TD3FW7U0MgKHce/8jGpPYNO4Ve+4NBw==";
   };
   "better-opn@3.0.2" = fetchurl {
     url = "https://registry.npmjs.org/better-opn/-/better-opn-3.0.2.tgz";
@@ -5955,9 +5989,9 @@
     url = "https://registry.npmjs.org/electron-winstaller/-/electron-winstaller-5.4.0.tgz";
     hash = "sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==";
   };
-  "electron@40.2.1" = fetchurl {
-    url = "https://registry.npmjs.org/electron/-/electron-40.2.1.tgz";
-    hash = "sha512-0zOeyN8LB1KHIjVV5jyMmQmkqx3J8OkkVlab3p7vOM28jI46blxW7M52Tcdi6X2m5o2jj8ejOlAh5+boL3w8aQ==";
+  "electron@40.8.5" = fetchurl {
+    url = "https://registry.npmjs.org/electron/-/electron-40.8.5.tgz";
+    hash = "sha512-pgTY/VPQKaiU4sTjfU96iyxCXrFm4htVPCMRT4b7q9ijNTRgtLmLvcmzp2G4e7xDrq9p7OLHSmu1rBKFf6Y1/A==";
   };
   "embla-carousel-react@8.6.0" = fetchurl {
     url = "https://registry.npmjs.org/embla-carousel-react/-/embla-carousel-react-8.6.0.tgz";
@@ -9311,6 +9345,10 @@
     url = "https://registry.npmjs.org/react-hook-form/-/react-hook-form-7.72.0.tgz";
     hash = "sha512-V4v6jubaf6JAurEaVnT9aUPKFbNtDgohj5CIgVGyPHvT9wRx5OZHVjz31GsxnPNI278XMu+ruFz+wGOscHaLKw==";
   };
+  "react-hotkeys-hook@5.2.4" = fetchurl {
+    url = "https://registry.npmjs.org/react-hotkeys-hook/-/react-hotkeys-hook-5.2.4.tgz";
+    hash = "sha512-BgKg+A1+TawkYluh5Bo4cTmcgMN5L29uhJbDUQdHwPX+qgXRjIPYU5kIDHyxnAwCkCBiu9V5OpB2mpyeluVF2A==";
+  };
   "react-icons@5.6.0" = fetchurl {
     url = "https://registry.npmjs.org/react-icons/-/react-icons-5.6.0.tgz";
     hash = "sha512-RH93p5ki6LfOiIt0UtDyNg/cee+HLVR6cHHtW3wALfo+eOHTp8RnU2kRkI6E+H19zMIs03DyxUG/GfZMOGvmiA==";
@@ -9835,9 +9873,9 @@
     url = "https://registry.npmjs.org/server-only/-/server-only-0.0.1.tgz";
     hash = "sha512-qepMx2JxAa5jjfzxG79yPPq+8BuFToHd1hm7kI+Z4zAq1ftQiP7HcxMhDDItrbtwVeLg/cY2JnKnrcFkmiswNA==";
   };
-  "set-cookie-parser@2.7.2" = fetchurl {
-    url = "https://registry.npmjs.org/set-cookie-parser/-/set-cookie-parser-2.7.2.tgz";
-    hash = "sha512-oeM1lpU/UvhTxw+g3cIfxXHyJRc/uidd3yK1P242gzHds0udQBYzs3y8j4gCCW+ZJ7ad0yctld8RYO+bdurlvw==";
+  "set-cookie-parser@3.1.0" = fetchurl {
+    url = "https://registry.npmjs.org/set-cookie-parser/-/set-cookie-parser-3.1.0.tgz";
+    hash = "sha512-kjnC1DXBHcxaOaOXBHBeRtltsDG2nUiUni+jP92M9gYdW12rsmx92UsfpH7o5tDRs7I1ZZPSQJQGv3UaRfCiuw==";
   };
   "setprototypeof@1.2.0" = fetchurl {
     url = "https://registry.npmjs.org/setprototypeof/-/setprototypeof-1.2.0.tgz";
