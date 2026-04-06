@@ -1,5 +1,5 @@
 {
-  "commit": "c450b42775693869647da4ce0ba4061df8c89763",
+  "commit": "78be4ef9dc13be103abae972449eb0db251a7b10",
   "hashes": [
     {
       "gitDep": "specta-2.0.0-rc.22",
@@ -18,5 +18,5 @@
     }
   ],
   "input": "opencode",
-  "version": "stack/desktop-session-theme-db-fixes"
+  "version": "gkze/fixes"
 }
