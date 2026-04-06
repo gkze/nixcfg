@@ -172,7 +172,7 @@ def _fetch_https_bytes(url: str) -> tuple[bytes, Mapping[str, str]]:
     except ValueError as exc:
         msg = f"Only absolute HTTPS URLs are supported, got {url!r}"
         raise RuntimeError(msg) from exc
-    except http_utils.SyncRequestError as exc:
+    except http_utils.RequestError as exc:
         msg = f"Failed to fetch {url}: {exc.detail}"
         raise RuntimeError(msg) from exc
 

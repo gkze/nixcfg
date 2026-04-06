@@ -15,6 +15,33 @@ let
   initialLib = lib;
   initialPkgsFor = pkgsFor;
 
+  requireLib =
+    candidate:
+    if candidate != null then
+      candidate
+    else if initialLib != null then
+      initialLib
+    else
+      throw "default.nix: pass `lib` to mkLib (typically nixpkgs.lib).";
+
+  requirePkgsFor =
+    candidate:
+    if candidate != null then
+      candidate
+    else if initialPkgsFor != null then
+      initialPkgsFor
+    else
+      throw "default.nix: pass `pkgsFor` to mkLib (system -> pkgs attrset).";
+
+  resolveOutputsWithLib =
+    outputsArg:
+    if builtins.isAttrs outputsArg && outputsArg ? lib && outputsArg.lib != null then
+      outputsArg
+    else if self.lib != null then
+      (if builtins.isAttrs outputsArg then outputsArg else { }) // { inherit (self) lib; }
+    else
+      throw "default.nix: mkPackages needs `outputsArg.lib` (or import default.nix with `lib` and `pkgsFor`).";
+
   mkLibImpl =
     {
       lib,
@@ -105,13 +132,7 @@ let
         extraPackageArgs ? { },
       }:
       let
-        resolvedOutputs =
-          if builtins.isAttrs outputsArg && outputsArg ? lib && outputsArg.lib != null then
-            outputsArg
-          else if self.lib != null then
-            (if builtins.isAttrs outputsArg then outputsArg else { }) // { inherit (self) lib; }
-          else
-            throw "default.nix: mkPackages needs `outputsArg.lib` (or import default.nix with `lib` and `pkgsFor`).";
+        resolvedOutputs = resolveOutputsWithLib outputsArg;
         packageSelfSource = import (nixcfgPath "package-self-source.nix") {
           inherit (resolvedOutputs) lib;
           outputs = resolvedOutputs;
@@ -137,20 +158,8 @@ let
       }@args:
       mkLibImpl (
         {
-          lib =
-            if lib != null then
-              lib
-            else if initialLib != null then
-              initialLib
-            else
-              throw "default.nix: pass `lib` to mkLib (typically nixpkgs.lib).";
-          pkgsFor =
-            if pkgsFor != null then
-              pkgsFor
-            else if initialPkgsFor != null then
-              initialPkgsFor
-            else
-              throw "default.nix: pass `pkgsFor` to mkLib (system -> pkgs attrset).";
+          lib = requireLib lib;
+          pkgsFor = requirePkgsFor pkgsFor;
           outputs = self;
         }
         // builtins.removeAttrs args [

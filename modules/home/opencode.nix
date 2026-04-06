@@ -119,9 +119,12 @@ let
       }
     ) servers;
 
+  baseOpencodeTui = {
+    scroll_acceleration.enabled = true;
+  };
+
   baseOpencodeSettings = {
     theme = config.theme.slug;
-    tui.scroll_acceleration.enabled = true;
   }
   // optionalAttrs (cfg.plugins != [ ]) {
     plugin = cfg.plugins;
@@ -135,7 +138,9 @@ let
   mkProfileConfig =
     profile:
     let
-      mergedSettings = recursiveUpdate baseOpencodeSettings profile.settings;
+      mergedSettings = recursiveUpdate (
+        baseOpencodeSettings // { tui = baseOpencodeTui; }
+      ) profile.settings;
       mergedMcpServers = mergeProfileMcpServers profile.mcpServers;
     in
     mergedSettings
@@ -233,6 +238,7 @@ in
       settings = baseOpencodeSettings // {
         mcp = renderMcpServers cfg.mcpServers;
       };
+      tui = baseOpencodeTui;
     };
 
     xdg.configFile =

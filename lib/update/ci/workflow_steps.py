@@ -49,6 +49,10 @@ class PRBodyOptions:
     compare_head: str = "update_flake_lock_action"
 
 
+class GitHistoryReadError(RuntimeError):
+    """Raised when Git history cannot be read for PR body generation."""
+
+
 def _cmd_nix_flake_update() -> int:
     _run(["nix", "flake", "update"])
     return 0
@@ -301,11 +305,30 @@ def _cmd_prepare_bun_lock(
     return 0
 
 
-def _git_show(pathspec: str) -> str:
+def _is_missing_history_pathspec(stderr: str, pathspec: str) -> bool:
+    missing_markers = (
+        "exists on disk, but not in",
+        "does not exist in",
+        "pathspec",
+    )
+    stderr_lower = stderr.lower()
+    path_tail = pathspec.split(":", 1)[-1]
+    return path_tail.lower() in stderr_lower and any(
+        marker in stderr_lower for marker in missing_markers
+    )
+
+
+def _git_show(pathspec: str, *, missing_ok: bool = True) -> str:
     result = _run(["git", "show", pathspec], check=False, capture_output=True)
-    if result.returncode != 0:
+    if result.returncode == 0:
+        return result.stdout
+
+    stderr = (result.stderr or "").strip()
+    if missing_ok and stderr and _is_missing_history_pathspec(stderr, pathspec):
         return "{}\n"
-    return result.stdout
+
+    message = stderr or f"git show {pathspec!r} exited with code {result.returncode}"
+    raise GitHistoryReadError(message)
 
 
 def _source_diff_pathspecs() -> tuple[str, ...]:
@@ -325,6 +348,90 @@ def _source_diff_pathspecs() -> tuple[str, ...]:
     )
 
 
+def _compare_url(options: PRBodyOptions) -> str:
+    return (
+        f"{options.server_url}/{options.repository}/compare/"
+        f"{options.base_ref}...{options.compare_head}"
+    )
+
+
+def _collect_changed_source_files() -> list[str]:
+    source_files_result = _run(
+        [
+            "git",
+            "diff",
+            "--name-only",
+            "HEAD",
+            "--",
+            *_source_diff_pathspecs(),
+        ],
+        capture_output=True,
+    )
+    source_files = [
+        line.strip() for line in source_files_result.stdout.splitlines() if line.strip()
+    ]
+
+    untracked_result = _run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        capture_output=True,
+    )
+    untracked_sources = [
+        path
+        for line in untracked_result.stdout.splitlines()
+        if (path := line.strip()) and is_sources_file_path(path)
+    ]
+    return sorted({*source_files, *untracked_sources})
+
+
+def _current_sources_snapshot(file_path: str) -> str:
+    current_path = Path(file_path)
+    if current_path.is_file():
+        return current_path.read_text(encoding="utf-8")
+    return "{}\n"
+
+
+def _render_source_diff_sections(
+    *,
+    temp_root: Path,
+    source_files: list[str],
+    options: PRBodyOptions,
+) -> list[str]:
+    body_lines: list[str] = []
+    rendered_sources_diffs = False
+    for index, file_path in enumerate(source_files):
+        old_json = temp_root / f"old-sources-{index}.json"
+        new_json = temp_root / f"new-sources-{index}.json"
+        old_json.write_text(
+            _git_show(f"HEAD:{file_path}", missing_ok=True),
+            encoding="utf-8",
+        )
+        new_json.write_text(_current_sources_snapshot(file_path), encoding="utf-8")
+
+        pkg_diff = run_sources_diff(old_json, new_json, output_format="unified")
+        if pkg_diff == NoChangesMessage:
+            continue
+
+        if not rendered_sources_diffs:
+            body_lines.extend(["", "### Per-package sources.json changes"])
+            rendered_sources_diffs = True
+
+        file_diff_url = (
+            f"{options.server_url}/{options.repository}/blob/"
+            f"{options.compare_head}/{file_path}"
+        )
+        body_lines.extend([
+            "",
+            "<details>",
+            f'<summary><a href="{file_diff_url}"><code>{file_path}</code></a></summary>',
+            "",
+            "```diff",
+            pkg_diff,
+            "```",
+            "</details>",
+        ])
+    return body_lines
+
+
 def generate_pr_body(
     *,
     output: str | Path,
@@ -340,88 +447,26 @@ def generate_pr_body(
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
         old_lock_path = temp_root / "old-flake.lock"
-        old_lock_path.write_text(_git_show("HEAD:flake.lock"), encoding="utf-8")
+        old_lock_path.write_text(
+            _git_show("HEAD:flake.lock", missing_ok=False),
+            encoding="utf-8",
+        )
 
         flake_diff = run_flake_lock_diff(old_lock_path, Path("flake.lock"))
-        compare_url = (
-            f"{options.server_url}/{options.repository}/compare/"
-            f"{options.base_ref}...{options.compare_head}"
-        )
         body_lines = [
             f"**[Workflow run]({options.workflow_url})**",
             "",
-            f"**[Compare]({compare_url})**",
+            f"**[Compare]({_compare_url(options)})**",
             "",
+            flake_diff or "No flake.lock input changes detected.",
         ]
-        if flake_diff:
-            body_lines.append(flake_diff)
-        else:
-            body_lines.append("No flake.lock input changes detected.")
-
-        source_files_result = _run(
-            [
-                "git",
-                "diff",
-                "--name-only",
-                "HEAD",
-                "--",
-                *_source_diff_pathspecs(),
-            ],
-            capture_output=True,
-        )
-        source_files = [
-            line.strip()
-            for line in source_files_result.stdout.splitlines()
-            if line.strip()
-        ]
-
-        untracked_result = _run(
-            ["git", "ls-files", "--others", "--exclude-standard"],
-            capture_output=True,
-        )
-        untracked_sources = [
-            path
-            for line in untracked_result.stdout.splitlines()
-            if (path := line.strip()) and is_sources_file_path(path)
-        ]
-        source_files = sorted({*source_files, *untracked_sources})
-
-        rendered_sources_diffs = False
-        for file_path in source_files:
-            old_json = temp_root / "old-sources.json"
-            new_json = temp_root / "new-sources.json"
-            old_json.write_text(_git_show(f"HEAD:{file_path}"), encoding="utf-8")
-
-            current_path = Path(file_path)
-            if current_path.is_file():
-                new_json.write_text(
-                    current_path.read_text(encoding="utf-8"), encoding="utf-8"
-                )
-            else:
-                new_json.write_text("{}\n", encoding="utf-8")
-
-            pkg_diff = run_sources_diff(old_json, new_json, output_format="unified")
-            if pkg_diff == NoChangesMessage:
-                continue
-
-            if not rendered_sources_diffs:
-                body_lines.extend(["", "### Per-package sources.json changes"])
-                rendered_sources_diffs = True
-
-            file_diff_url = (
-                f"{options.server_url}/{options.repository}/blob/"
-                f"{options.compare_head}/{file_path}"
+        body_lines.extend(
+            _render_source_diff_sections(
+                temp_root=temp_root,
+                source_files=_collect_changed_source_files(),
+                options=options,
             )
-            body_lines.extend([
-                "",
-                "<details>",
-                f'<summary><a href="{file_diff_url}"><code>{file_path}</code></a></summary>',
-                "",
-                "```diff",
-                pkg_diff,
-                "```",
-                "</details>",
-            ])
+        )
 
     output_path.write_text("\n".join(body_lines) + "\n", encoding="utf-8")
     return 0

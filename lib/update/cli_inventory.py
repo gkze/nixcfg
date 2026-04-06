@@ -32,6 +32,28 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class InventoryDependencies:
+    """Collaborators required to build update inventory rows."""
+
+    load_sources: Callable[[], SourcesFile]
+    source_path_map: Callable[[str], dict[str, Path]]
+    list_ref_inputs: Callable[[], list[FlakeInputRef]]
+    load_lock: Callable[[], FlakeLock]
+    get_updaters: Callable[[], dict[str, type[Updater]]]
+    source_file_for: Callable[[str], Path | None]
+    resolve_root_input_node: Callable[
+        [FlakeLock, str], tuple[FlakeLockNode | None, str | None]
+    ]
+    source_backing_input_name: Callable[
+        [str, type[Updater] | None, SourceEntry | None], str | None
+    ]
+    generated_artifact_paths: Callable[[str, type[Updater]], tuple[str, ...]]
+    source_hash_kinds: Callable[[SourceEntry | None], tuple[str, ...]]
+    classify_updater_kind: Callable[[type[Updater]], str]
+    repo_relative_path: Callable[[Path | None], str | None]
+
+
+@dataclass(frozen=True)
 class _InventoryHandles:
     ref_update: bool
     input_refresh: bool
@@ -347,6 +369,84 @@ def _build_inventory_summary(targets: list[_InventoryTarget]) -> dict[str, objec
     return {"totalTargets": len(targets), "counts": counts}
 
 
+def build_update_inventory(
+    *, dependencies: InventoryDependencies
+) -> list[_InventoryTarget]:
+    """Build logical update targets from one cohesive dependency bundle."""
+    sources = dependencies.load_sources()
+    path_map = dependencies.source_path_map("sources.json")
+    ref_inputs = {item.name: item for item in dependencies.list_ref_inputs()}
+    lock = dependencies.load_lock()
+    updaters = dependencies.get_updaters()
+
+    targets: list[_InventoryTarget] = []
+    all_names = sorted(set(updaters) | set(ref_inputs))
+    for name in all_names:
+        updater_cls = updaters.get(name)
+        entry = sources.entries.get(name)
+        ref_input = ref_inputs.get(name)
+        source_backing_input = dependencies.source_backing_input_name(
+            name,
+            updater_cls,
+            entry,
+        )
+        backing_input = source_backing_input or (
+            ref_input.name if ref_input is not None else None
+        )
+        generated_artifacts = (
+            ()
+            if updater_cls is None
+            else dependencies.generated_artifact_paths(name, updater_cls)
+        )
+        handles = _InventoryHandles(
+            ref_update=name in ref_inputs,
+            input_refresh=source_backing_input is not None and updater_cls is not None,
+            source_update=updater_cls is not None,
+            artifact_write=bool(generated_artifacts),
+        )
+        classification = _inventory_classification(handles)
+
+        ref_target: _InventoryRefTarget | None = None
+        if ref_input is not None:
+            node, _follows = dependencies.resolve_root_input_node(lock, name)
+            locked = node.locked if node is not None else None
+            ref_target = _InventoryRefTarget(
+                input_name=ref_input.name,
+                source_type=ref_input.input_type,
+                owner=ref_input.owner,
+                repo=ref_input.repo,
+                selector=ref_input.ref,
+                locked_rev=locked.rev if locked is not None else None,
+            )
+
+        source_target: _InventorySourceTarget | None = None
+        if updater_cls is not None:
+            source_target = _InventorySourceTarget(
+                path=dependencies.repo_relative_path(
+                    path_map.get(name) or dependencies.source_file_for(name)
+                ),
+                version=entry.version if entry is not None else None,
+                commit=entry.commit if entry is not None else None,
+                hash_kinds=dependencies.source_hash_kinds(entry),
+                updater_kind=dependencies.classify_updater_kind(updater_cls),
+                updater_class=updater_cls.__name__,
+            )
+
+        targets.append(
+            _InventoryTarget(
+                name=name,
+                handles=handles,
+                classification=classification,
+                backing_input=backing_input,
+                ref_target=ref_target,
+                source_target=source_target,
+                generated_artifacts=generated_artifacts,
+            )
+        )
+
+    return targets
+
+
 def _build_update_inventory(
     *,
     load_sources: Callable[[], SourcesFile],
@@ -366,70 +466,22 @@ def _build_update_inventory(
     classify_updater_kind: Callable[[type[Updater]], str],
     repo_relative_path: Callable[[Path | None], str | None],
 ) -> list[_InventoryTarget]:
-    sources = load_sources()
-    path_map = source_path_map("sources.json")
-    ref_inputs = {item.name: item for item in list_ref_inputs()}
-    lock = load_lock()
-    updaters = get_updaters()
-
-    targets: list[_InventoryTarget] = []
-    all_names = sorted(set(updaters) | set(ref_inputs))
-    for name in all_names:
-        updater_cls = updaters.get(name)
-        entry = sources.entries.get(name)
-        ref_input = ref_inputs.get(name)
-        source_backing_input = source_backing_input_name(name, updater_cls, entry)
-        backing_input = source_backing_input or (
-            ref_input.name if ref_input is not None else None
+    return build_update_inventory(
+        dependencies=InventoryDependencies(
+            load_sources=load_sources,
+            source_path_map=source_path_map,
+            list_ref_inputs=list_ref_inputs,
+            load_lock=load_lock,
+            get_updaters=get_updaters,
+            source_file_for=source_file_for,
+            resolve_root_input_node=resolve_root_input_node,
+            source_backing_input_name=source_backing_input_name,
+            generated_artifact_paths=generated_artifact_paths,
+            source_hash_kinds=source_hash_kinds,
+            classify_updater_kind=classify_updater_kind,
+            repo_relative_path=repo_relative_path,
         )
-        generated_artifacts = (
-            () if updater_cls is None else generated_artifact_paths(name, updater_cls)
-        )
-        handles = _InventoryHandles(
-            ref_update=name in ref_inputs,
-            input_refresh=source_backing_input is not None and updater_cls is not None,
-            source_update=updater_cls is not None,
-            artifact_write=bool(generated_artifacts),
-        )
-        classification = _inventory_classification(handles)
-
-        ref_target: _InventoryRefTarget | None = None
-        if ref_input is not None:
-            node, _follows = resolve_root_input_node(lock, name)
-            locked = node.locked if node is not None else None
-            ref_target = _InventoryRefTarget(
-                input_name=ref_input.name,
-                source_type=ref_input.input_type,
-                owner=ref_input.owner,
-                repo=ref_input.repo,
-                selector=ref_input.ref,
-                locked_rev=locked.rev if locked is not None else None,
-            )
-
-        source_target: _InventorySourceTarget | None = None
-        if updater_cls is not None:
-            source_target = _InventorySourceTarget(
-                path=repo_relative_path(path_map.get(name) or source_file_for(name)),
-                version=entry.version if entry is not None else None,
-                commit=entry.commit if entry is not None else None,
-                hash_kinds=source_hash_kinds(entry),
-                updater_kind=classify_updater_kind(updater_cls),
-                updater_class=updater_cls.__name__,
-            )
-
-        targets.append(
-            _InventoryTarget(
-                name=name,
-                handles=handles,
-                classification=classification,
-                backing_input=backing_input,
-                ref_target=ref_target,
-                source_target=source_target,
-                generated_artifacts=generated_artifacts,
-            )
-        )
-
-    return targets
+    )
 
 
 def _inventory_sort_value(target: _InventoryTarget, sort_by: str) -> str:
@@ -572,7 +624,32 @@ def _handle_list_targets_request(
     return 0
 
 
+InventoryHandles = _InventoryHandles
+InventoryRefTarget = _InventoryRefTarget
+InventorySourceTarget = _InventorySourceTarget
+InventoryTarget = _InventoryTarget
+ListRow = _ListRow
+build_inventory_summary = _build_inventory_summary
+classify_updater_kind = _classify_updater_kind
+collect_flake_inputs_for_list = _collect_flake_inputs_for_list
+collect_source_entries_for_list = _collect_source_entries_for_list
+flake_source_string = _flake_source_string
+generated_artifact_paths = _generated_artifact_paths
+handle_list_targets_request = _handle_list_targets_request
+inventory_classification = _inventory_classification
+inventory_sort_value = _inventory_sort_value
+repo_relative_path = _repo_relative_path
+row_sort_value = _row_sort_value
+source_backing_input_name = _source_backing_input_name
+source_hash_kinds = _source_hash_kinds
+
 __all__ = [
+    "InventoryDependencies",
+    "InventoryHandles",
+    "InventoryRefTarget",
+    "InventorySourceTarget",
+    "InventoryTarget",
+    "ListRow",
     "_InventoryHandles",
     "_InventoryRefTarget",
     "_InventorySourceTarget",
@@ -592,4 +669,18 @@ __all__ = [
     "_row_sort_value",
     "_source_backing_input_name",
     "_source_hash_kinds",
+    "build_inventory_summary",
+    "build_update_inventory",
+    "classify_updater_kind",
+    "collect_flake_inputs_for_list",
+    "collect_source_entries_for_list",
+    "flake_source_string",
+    "generated_artifact_paths",
+    "handle_list_targets_request",
+    "inventory_classification",
+    "inventory_sort_value",
+    "repo_relative_path",
+    "row_sort_value",
+    "source_backing_input_name",
+    "source_hash_kinds",
 ]

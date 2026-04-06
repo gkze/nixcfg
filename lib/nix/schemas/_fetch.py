@@ -134,7 +134,7 @@ def _https_get(url: str, headers: dict[str, str] | None = None) -> bytes:
         if message.startswith("Could not parse host from URL"):
             raise ValueError(message) from exc
         raise
-    except http_utils.SyncRequestError as exc:
+    except http_utils.RequestError as exc:
         if exc.kind == "timeout":
             msg = f"Timed out fetching {url} after {exc.attempts} attempt(s)"
             raise RuntimeError(msg) from exc

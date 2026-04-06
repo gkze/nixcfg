@@ -149,7 +149,7 @@ async def _discover_cdp_browser_ws_urls(
                     allowed_schemes=_LOCAL_CDP_SCHEMES,
                     client=client,
                 )
-            except http_utils.SyncRequestError:
+            except http_utils.RequestError:
                 continue
             try:
                 decoded = json.loads(payload)

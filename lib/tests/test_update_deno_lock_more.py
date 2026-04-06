@@ -60,6 +60,12 @@ def test_json_adapter_helpers_and_required_string() -> None:
     with pytest.raises(TypeError, match="Expected package map"):
         deno_lock._as_package_map([], context="ctx")
 
+    assert deno_lock._parse_jsr_checksum("sha256-deadbeef", context="ctx") == "deadbeef"
+    with pytest.raises(ValueError, match="Expected sha256 checksum"):
+        deno_lock._parse_jsr_checksum("sha512-deadbeef", context="ctx")
+    with pytest.raises(ValueError, match="Expected hexadecimal sha256 checksum"):
+        deno_lock._parse_jsr_checksum("sha256-not-hex", context="ctx")
+
 
 def test_guess_media_type_and_npm_helpers() -> None:
     """Infer media types and npm tarball/cache fields."""
@@ -89,16 +95,19 @@ def test_fetch_jsr_meta_and_resolve_jsr_package() -> None:
             "/data.json": {"checksum": "sha256-cafebabe"},
         }
     }
+    version_meta_body = json.dumps(meta).encode("utf-8")
     responses = {
         "https://jsr.io/@scope/pkg/meta.json": _Response(body=b"{}"),
         "https://jsr.io/@scope/pkg/1.2.3_meta.json": _Response(
-            body=b"{}", json_payload=meta
+            body=version_meta_body,
+            json_payload=meta,
         ),
     }
     client = _Client(responses)
 
     fetched = asyncio.run(deno_lock._fetch_jsr_meta(client, "@scope", "pkg", "1.2.3"))
-    assert isinstance(fetched, dict)
+    assert fetched.document == meta
+    assert fetched.payload == version_meta_body
 
     package = asyncio.run(
         deno_lock._resolve_jsr_package(

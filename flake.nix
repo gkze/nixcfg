@@ -71,6 +71,15 @@
       url = "github:gkze/opencode?ref=gkze/fixes";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    hermes-agent = {
+      url = "github:NousResearch/hermes-agent/v2026.4.3";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        pyproject-build-systems.follows = "pyproject-build-systems";
+        pyproject-nix.follows = "pyproject-nix";
+        uv2nix.follows = "uv2nix";
+      };
+    };
     pyproject-build-systems = {
       url = "github:pyproject-nix/build-system-pkgs";
       inputs = {
@@ -153,6 +162,10 @@
     gitui-key-config = {
       url = "github:extrawurst/gitui/8876c1d0f616d55a0c0957683781fd32af815ae3";
       flake = false;
+    };
+    googleworkspace-cli = {
+      url = "github:googleworkspace/cli";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
     catppuccin-delta = {
       url = "github:catppuccin/delta";

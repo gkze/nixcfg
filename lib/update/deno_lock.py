@@ -75,6 +75,14 @@ class JsrPackage:
 
 
 @dataclass(frozen=True)
+class JsrMetaDocument:
+    """One fetched JSR metadata document with its original response payload."""
+
+    payload: bytes
+    document: dict[str, object]
+
+
+@dataclass(frozen=True)
 class NpmPackage:
     """A resolved npm package tarball."""
 
@@ -155,20 +163,38 @@ def _guess_media_type(path: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _parse_jsr_checksum(checksum: str, *, context: str) -> str:
+    """Validate and normalize a JSR ``sha256-<hex>`` checksum."""
+    if not checksum.startswith("sha256-"):
+        msg = f"Expected sha256 checksum for {context}, got {checksum!r}"
+        raise ValueError(msg)
+    sha256_hex = checksum.removeprefix("sha256-")
+    if not sha256_hex or any(
+        char not in "0123456789abcdefABCDEF" for char in sha256_hex
+    ):
+        msg = f"Expected hexadecimal sha256 checksum for {context}, got {checksum!r}"
+        raise ValueError(msg)
+    return sha256_hex.lower()
+
+
 async def _fetch_jsr_meta(
     client: aiohttp.ClientSession,
     scope: str,
     name: str,
     version: str,
-) -> dict[str, object]:
+) -> JsrMetaDocument:
     """Fetch the ``_meta.json`` for a JSR package version."""
     url = f"{JSR_REGISTRY}/{scope}/{name}/{version}_meta.json"
     async with client.get(url) as resp:
         resp.raise_for_status()
-        return _as_object_dict(
-            await resp.json(),
+        payload = await resp.read()
+    return JsrMetaDocument(
+        payload=payload,
+        document=_as_object_dict(
+            json.loads(payload),
             context=f"jsr meta for {scope}/{name}@{version}",
-        )
+        ),
+    )
 
 
 async def _resolve_jsr_package(
@@ -181,9 +207,9 @@ async def _resolve_jsr_package(
     scope, rest = pkg_key.split("/", 1)
     name, version = rest.rsplit("@", 1)
 
-    meta = await _fetch_jsr_meta(client, scope, name, version)
+    version_meta = await _fetch_jsr_meta(client, scope, name, version)
     manifest = _as_object_dict(
-        meta.get("manifest", {}),
+        version_meta.document.get("manifest", {}),
         context=f"manifest for {pkg_key}",
     )
 
@@ -199,8 +225,10 @@ async def _resolve_jsr_package(
             "checksum",
             context=f"manifest file entry {pkg_key}:{file_path}",
         )
-        # JSR checksums are "sha256-<hex>" format
-        sha256_hex = checksum.removeprefix("sha256-")
+        sha256_hex = _parse_jsr_checksum(
+            checksum,
+            context=f"manifest file entry {pkg_key}:{file_path}",
+        )
         cache_path = _url_to_cache_path(url)
         media_type = _guess_media_type(file_path)
         files.append(
@@ -214,20 +242,21 @@ async def _resolve_jsr_package(
 
     # Also cache the meta.json and version_meta.json themselves
     # (Deno fetches these during module resolution).
-    # We fetch them here and compute sha256 so that Nix fetchurl can verify.
-    for meta_path in [
-        f"/{scope}/{name}/meta.json",
-        f"/{scope}/{name}/{version}_meta.json",
-    ]:
-        meta_url = f"{JSR_REGISTRY}{meta_path}"
-        cache_path = _url_to_cache_path(meta_url)
-        async with client.get(meta_url) as meta_resp:
-            meta_resp.raise_for_status()
-            meta_content = await meta_resp.read()
+    meta_documents = {
+        f"/{scope}/{name}/{version}_meta.json": version_meta.payload,
+    }
+    meta_url = f"{JSR_REGISTRY}/{scope}/{name}/meta.json"
+    async with client.get(meta_url) as meta_resp:
+        meta_resp.raise_for_status()
+        meta_documents[f"/{scope}/{name}/meta.json"] = await meta_resp.read()
+
+    for meta_path, meta_content in meta_documents.items():
+        resolved_meta_url = f"{JSR_REGISTRY}{meta_path}"
+        cache_path = _url_to_cache_path(resolved_meta_url)
         meta_sha256 = hashlib.sha256(meta_content).hexdigest()
         files.append(
             JsrFile(
-                url=meta_url,
+                url=resolved_meta_url,
                 sha256=meta_sha256,
                 cache_path=cache_path,
                 media_type="application/json",

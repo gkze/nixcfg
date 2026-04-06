@@ -25,44 +25,62 @@ from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update.artifacts import GeneratedArtifact, save_generated_artifacts
 from lib.update.ci.resolve_versions import load_pinned_versions
 from lib.update.cli_inventory import (
-    _build_inventory_summary,
-    _classify_updater_kind,
-    _flake_source_string,
-    _inventory_classification,
-    _inventory_sort_value,
-    _InventoryHandles,
-    _InventoryRefTarget,
-    _InventorySourceTarget,
-    _InventoryTarget,
-    _ListRow,
-    _row_sort_value,
-    _source_backing_input_name,
-    _source_hash_kinds,
+    InventoryDependencies,
+    InventoryHandles,
+    InventoryRefTarget,
+    InventorySourceTarget,
+    InventoryTarget,
+    ListRow,
+    row_sort_value,
 )
 from lib.update.cli_inventory import (
-    _build_update_inventory as _build_update_inventory_impl,
+    build_inventory_summary as _build_inventory_summary_impl,
 )
 from lib.update.cli_inventory import (
-    _collect_flake_inputs_for_list as _collect_flake_inputs_for_list_impl,
+    build_update_inventory as _build_update_inventory_impl,
 )
 from lib.update.cli_inventory import (
-    _collect_source_entries_for_list as _collect_source_entries_for_list_impl,
+    classify_updater_kind as _classify_updater_kind_impl,
 )
 from lib.update.cli_inventory import (
-    _generated_artifact_paths as _generated_artifact_paths_impl,
+    collect_flake_inputs_for_list as _collect_flake_inputs_for_list_impl,
 )
 from lib.update.cli_inventory import (
-    _handle_list_targets_request as _handle_list_targets_request_impl,
+    collect_source_entries_for_list as _collect_source_entries_for_list_impl,
 )
 from lib.update.cli_inventory import (
-    _repo_relative_path as _repo_relative_path_impl,
+    flake_source_string as _flake_source_string_impl,
+)
+from lib.update.cli_inventory import (
+    generated_artifact_paths as _generated_artifact_paths_impl,
+)
+from lib.update.cli_inventory import (
+    handle_list_targets_request as _handle_list_targets_request_impl,
+)
+from lib.update.cli_inventory import (
+    inventory_classification as _inventory_classification,
+)
+from lib.update.cli_inventory import (
+    inventory_sort_value as _inventory_sort_value,
+)
+from lib.update.cli_inventory import (
+    repo_relative_path as _repo_relative_path_impl,
+)
+from lib.update.cli_inventory import (
+    source_backing_input_name as _source_backing_input_name_impl,
+)
+from lib.update.cli_inventory import (
+    source_hash_kinds as _source_hash_kinds_impl,
 )
 from lib.update.cli_options import UpdateOptions, UpdateSortBy, UpdateTTYMode
 from lib.update.cli_validation import (
-    _handle_validate_request as _handle_validate_request_impl,
+    ValidationDependencies,
 )
 from lib.update.cli_validation import (
-    _validate_list_sort_option as _validate_list_sort_option_impl,
+    handle_validate_request as _handle_validate_request_impl,
+)
+from lib.update.cli_validation import (
+    validate_list_sort_option as _validate_list_sort_option_impl,
 )
 from lib.update.config import (
     UpdateConfig,
@@ -100,6 +118,18 @@ from lib.update.ui_consumer import ConsumeEventsOptions, consume_events
 from lib.update.ui_state import ItemMeta, OperationKind, SummaryStatus
 from lib.update.updaters import UPDATERS, ensure_updaters_loaded
 from lib.update.updaters.base import FlakeInputHashUpdater, Updater, VersionInfo
+
+_InventoryHandles = InventoryHandles
+_InventoryRefTarget = InventoryRefTarget
+_InventorySourceTarget = InventorySourceTarget
+_InventoryTarget = InventoryTarget
+_ListRow = ListRow
+_build_inventory_summary = _build_inventory_summary_impl
+_classify_updater_kind = _classify_updater_kind_impl
+_flake_source_string = _flake_source_string_impl
+_row_sort_value = row_sort_value
+_source_backing_input_name = _source_backing_input_name_impl
+_source_hash_kinds = _source_hash_kinds_impl
 
 _PRESERVED_INVENTORY_EXPORTS = (
     _InventoryHandles,
@@ -552,8 +582,8 @@ def _generated_artifact_paths(name: str, updater_cls: type[Updater]) -> tuple[st
     )
 
 
-def _build_update_inventory() -> list[_InventoryTarget]:
-    return _build_update_inventory_impl(
+def _inventory_dependencies() -> InventoryDependencies:
+    return InventoryDependencies(
         load_sources=load_all_sources,
         source_path_map=package_file_map,
         list_ref_inputs=get_flake_inputs_with_refs,
@@ -567,6 +597,10 @@ def _build_update_inventory() -> list[_InventoryTarget]:
         classify_updater_kind=_classify_updater_kind,
         repo_relative_path=_repo_relative_path,
     )
+
+
+def _build_update_inventory() -> list[_InventoryTarget]:
+    return _build_update_inventory_impl(dependencies=_inventory_dependencies())
 
 
 def _collect_flake_inputs_for_list() -> list[_ListRow]:
@@ -594,12 +628,18 @@ def _handle_list_targets_request(opts: UpdateOptions) -> int | None:
     )
 
 
+def _validation_dependencies() -> ValidationDependencies:
+    return ValidationDependencies(
+        load_sources=load_all_sources,
+        validate_source_discovery_consistency=validate_source_discovery_consistency,
+    )
+
+
 def _handle_validate_request(opts: UpdateOptions, out: OutputOptions) -> int | None:
     return _handle_validate_request_impl(
         opts,
         out,
-        load_sources=load_all_sources,
-        validate_source_discovery_consistency=validate_source_discovery_consistency,
+        dependencies=_validation_dependencies(),
     )
 
 
@@ -940,37 +980,20 @@ async def run_updates(opts: UpdateOptions) -> int:
     return await _execute_run_plan(opts, out, config, run_plan)
 
 
-def run_update_command(  # noqa: PLR0913
-    source: str | None = None,
-    *,
-    check: bool = False,
-    deno_platforms: str | None = None,
-    fake_hash: str | None = None,
-    http_timeout: int | None = None,
-    json_output: bool = False,
-    list_targets: bool = False,
-    log_tail_lines: int | None = None,
-    max_nix_builds: int | None = None,
-    native_only: bool = False,
-    no_input: bool = False,
-    no_refs: bool = False,
-    no_sources: bool = False,
-    pinned_versions: str | None = None,
-    quiet: bool = False,
-    render_interval: float | None = None,
-    retries: int | None = None,
-    retry_backoff: float | None = None,
-    schema: bool = False,
-    sort_by: UpdateSortBy = "name",
-    subprocess_timeout: int | None = None,
-    tty: UpdateTTYMode = "auto",
-    user_agent: str | None = None,
-    validate: bool = False,
-    verbose: bool = False,
-    zellij_guard: bool | None = None,
+def run_update_command(
+    options: UpdateOptions | None = None,
+    /,
+    **overrides: object,
 ) -> int:
-    """Run update workflow from typed CLI options."""
-    opts = UpdateOptions.from_mapping(locals())
+    """Run the update workflow from one options object or keyword overrides."""
+    if options is not None and overrides:
+        msg = "run_update_command accepts either UpdateOptions or keyword overrides"
+        raise TypeError(msg)
+
+    opts = options if options is not None else _build_update_options(overrides)
+    if not isinstance(opts, UpdateOptions):
+        msg = f"Expected UpdateOptions, got {type(opts)!r}"
+        raise TypeError(msg)
 
     if not (opts.list_targets or opts.schema or opts.validate):
         needs_flake_edit = not opts.no_refs and not opts.native_only

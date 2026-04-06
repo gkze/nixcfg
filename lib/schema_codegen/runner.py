@@ -178,7 +178,7 @@ def _read_url_source(source: URLSource) -> str:
     except ValueError as exc:
         msg = f"Only absolute HTTPS schema URLs are supported, got {source.uri!r}"
         raise RuntimeError(msg) from exc
-    except http_utils.SyncRequestError as exc:
+    except http_utils.RequestError as exc:
         msg = f"Failed to fetch schema URL {source.uri!r}: {exc.detail}"
         raise RuntimeError(msg) from exc
     return payload.decode()

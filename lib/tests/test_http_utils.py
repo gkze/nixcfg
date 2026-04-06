@@ -102,14 +102,19 @@ def test_resolve_github_token_prefers_env_keyring_and_netrc(
     assert http_utils.resolve_github_token(allow_netrc=True) == "netrc-token"
 
 
-def test_resolve_github_token_logs_netrc_parse_errors(
+def test_resolve_github_token_logs_keyring_and_netrc_errors(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Log malformed netrc parsing failures when requested."""
+    """Log malformed keyring/netrc lookups when a logger is provided."""
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setattr(
+        http_utils.keyring,
+        "get_password",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("keyring-boom")),
+    )
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     (tmp_path / ".netrc").write_text("x", encoding="utf-8")
     monkeypatch.setattr(
@@ -120,7 +125,15 @@ def test_resolve_github_token_logs_netrc_parse_errors(
 
     logger = logging.getLogger("http-utils-test")
     with caplog.at_level(logging.WARNING):
-        assert http_utils.resolve_github_token(allow_netrc=True, logger=logger) is None
+        assert (
+            http_utils.resolve_github_token(
+                allow_keyring=True,
+                allow_netrc=True,
+                logger=logger,
+            )
+            is None
+        )
+    assert "Failed to read GitHub token from keyring" in caplog.text
     assert "Failed to parse" in caplog.text
 
 
@@ -209,9 +222,7 @@ def test_fetch_url_bytes_retries_and_reports_failures(
         _FakeResponse(status_code=404, reason_phrase="Missing", content=b"nope")
     ])
     monkeypatch.setattr(http_utils.httpx, "Client", lambda **_kwargs: status_client)
-    with pytest.raises(
-        http_utils.SyncRequestError, match="HTTP 404 Missing"
-    ) as exc_info:
+    with pytest.raises(http_utils.RequestError, match="HTTP 404 Missing") as exc_info:
         http_utils.fetch_url_bytes("https://example.com/missing", backoff=0.0)
     assert exc_info.value.kind == "status"
     assert exc_info.value.status == 404
@@ -219,7 +230,7 @@ def test_fetch_url_bytes_retries_and_reports_failures(
 
     timeout_client = _FakeClient([http_utils.httpx.ReadTimeout("slow")])
     monkeypatch.setattr(http_utils.httpx, "Client", lambda **_kwargs: timeout_client)
-    with pytest.raises(http_utils.SyncRequestError, match="slow") as exc_info:
+    with pytest.raises(http_utils.RequestError, match="slow") as exc_info:
         http_utils.fetch_url_bytes(
             "https://example.com/slow",
             attempts=1,
@@ -230,7 +241,7 @@ def test_fetch_url_bytes_retries_and_reports_failures(
 
     network_client = _FakeClient([http_utils.httpx.ConnectError("down")])
     monkeypatch.setattr(http_utils.httpx, "Client", lambda **_kwargs: network_client)
-    with pytest.raises(http_utils.SyncRequestError, match="down") as exc_info:
+    with pytest.raises(http_utils.RequestError, match="down") as exc_info:
         http_utils.fetch_url_bytes(
             "https://example.com/down",
             attempts=1,

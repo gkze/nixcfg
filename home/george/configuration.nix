@@ -117,22 +117,25 @@
         capitalize =
           s:
           (lib.toUpper (builtins.substring 0 1 s)) + (builtins.substring 1 (builtins.stringLength s - 1) s);
+        themeDir =
+          inputs.catppuccin-zen-browser
+          + "/themes/${capitalize config.theme.variant}/${capitalize config.theme.accentColor}";
+        logoName = "zen-logo-${config.theme.variant}.svg";
       in
       {
         enable = true;
         profile = "Default (twilight)";
-        # Keep Zen chrome aligned with the repo's global Catppuccin flavor/accent.
-        # Override this flake input locally while iterating on the Catppuccin repo:
-        #   --override-input catppuccin-zen-browser path:/Users/george/Development/github.com/catppuccin/zen-browser
+        # Follow the forked Catppuccin branch pinned in flake.lock.
         chromeSource =
-          let
-            themeDir =
-              inputs.catppuccin-zen-browser
-              + "/themes/${capitalize config.theme.variant}/${capitalize config.theme.accentColor}";
-          in
           assert builtins.pathExists (themeDir + "/userChrome.css");
           assert builtins.pathExists (themeDir + "/userContent.css");
-          themeDir;
+          assert builtins.pathExists (themeDir + "/${logoName}");
+          pkgs.runCommand "zen-catppuccin-theme-${config.theme.variant}-${config.theme.accentColor}" { } ''
+            mkdir -p "$out"
+            ln -s "${themeDir}/userChrome.css" "$out/userChrome.css"
+            ln -s "${themeDir}/userContent.css" "$out/userContent.css"
+            ln -s "${themeDir}/${logoName}" "$out/${logoName}"
+          '';
         userJsSource = ./zen/user.js;
         foldersSource = ./zen/folders.yaml;
       };

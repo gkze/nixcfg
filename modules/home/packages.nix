@@ -167,6 +167,7 @@ in
             graphviz
             grex
             httpie
+            hermes-agent
             linear-cli
             sculptor
             sd

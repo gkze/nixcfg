@@ -5,12 +5,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+
+import pytest
 
 from lib.update.ci import workflow_steps as ws
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def _completed(
@@ -22,16 +20,40 @@ def _completed(
 def test_xcode_version_key_and_git_show_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Sort Xcode app names and fallback when git show fails."""
+    """Sort Xcode app names and fallback only for missing historical files."""
     assert ws._xcode_version_key(Path("/Applications/Xcode-16.2.app")) == (16, 2)
     assert ws._xcode_version_key(Path("/Applications/Xcode.app")) == ()
 
     monkeypatch.setattr(
         ws,
         "_run",
-        lambda _args, **_kwargs: _completed(["git"], returncode=1),
+        lambda _args, **_kwargs: subprocess.CompletedProcess(
+            args=["git"],
+            returncode=1,
+            stdout="",
+            stderr="fatal: path 'missing' exists on disk, but not in 'HEAD'",
+        ),
     )
     assert ws._git_show("HEAD:missing") == "{}\n"
+
+
+def test_git_show_raises_for_unexpected_history_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raise explicit errors for Git failures unrelated to missing files."""
+    monkeypatch.setattr(
+        ws,
+        "_run",
+        lambda _args, **_kwargs: subprocess.CompletedProcess(
+            args=["git"],
+            returncode=128,
+            stdout="",
+            stderr="fatal: bad revision 'HEAD'",
+        ),
+    )
+
+    with pytest.raises(ws.GitHistoryReadError, match="bad revision"):
+        ws._git_show("HEAD:flake.lock", missing_ok=False)
 
 
 def test_source_diff_pathspecs_switches_for_flat_layout(

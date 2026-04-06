@@ -460,28 +460,7 @@ class UvLockUpdater(FlakeInputUpdater):
             for key, value in self.lock_env.items()
         }
 
-    async def fetch_hashes(
-        self,
-        info: VersionInfo,
-        session: aiohttp.ClientSession,
-        *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
-        """Materialize ``uv.lock`` and emit it as a generated artifact."""
-        _ = (session, _coerce_context(context))
-        node = self._resolve_flake_node(info)
-        locked = node.locked
-        if locked is None or not locked.owner or not locked.repo or not locked.rev:
-            msg = f"Cannot resolve source for {self._input}: incomplete lock"
-            raise RuntimeError(msg)
-
-        yield UpdateEvent.status(
-            self.name,
-            f"Resolving source tree for {locked.owner}/{locked.repo}...",
-            operation="compute_hash",
-            status="computing_hash",
-            detail=self.lock_file,
-        )
+    async def _resolve_source_path(self, node: FlakeLockNode) -> EventStream:
         source_path_expr = (
             f"let src = {flake_fetch_expr(node)}; "
             "in if builtins.isAttrs src then src.outPath else src"
@@ -504,10 +483,90 @@ class UvLockUpdater(FlakeInputUpdater):
             source_path_drain,
             "Missing nix eval result for source path",
         )
-        source_path = Path(source_path_result.stdout.strip())
-        if not source_path_result.stdout.strip():
+        resolved_path = source_path_result.stdout.strip()
+        if not resolved_path:
             msg = f"Failed to resolve source path for {self._input}"
             raise RuntimeError(msg)
+        yield UpdateEvent.value(self.name, resolved_path)
+
+    def _expect_path_payload(self, payload: object, *, context: str) -> Path:
+        if isinstance(payload, str):
+            return Path(payload)
+        msg = f"Expected {context} path payload, got {type(payload)!r}"
+        raise TypeError(msg)
+
+    async def _copy_workspace(self, source_path: Path, workspace_dir: Path) -> None:
+        await asyncio.to_thread(
+            shutil.copytree,
+            source_path,
+            workspace_dir,
+            symlinks=True,
+        )
+        await asyncio.to_thread(_ensure_user_writable_tree, workspace_dir)
+
+    async def _run_uv_lock(
+        self,
+        *,
+        info: VersionInfo,
+        home_dir: Path,
+        workspace_dir: Path,
+    ) -> EventStream:
+        uv_result_drain = ValueDrain[CommandResult]()
+        async for event in drain_value_events(
+            _base_module().update_process.run_command(
+                ["uv", "-q", "lock", "--directory", str(workspace_dir)],
+                options=_base_module().update_process.RunCommandOptions(
+                    source=self.name,
+                    error="uv lock did not return output",
+                    env={
+                        "HOME": str(home_dir),
+                        "UV_PYTHON": sys.executable,
+                        **self._render_lock_env(info),
+                    },
+                    config=self.config,
+                ),
+            ),
+            uv_result_drain,
+            parse=expect_command_result,
+        ):
+            yield event
+        require_value(uv_result_drain, "Missing uv lock result")
+        yield UpdateEvent.value(self.name, str(workspace_dir / self.lock_file))
+
+    async def fetch_hashes(
+        self,
+        info: VersionInfo,
+        session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
+    ) -> EventStream:
+        """Materialize ``uv.lock`` and emit it as a generated artifact."""
+        _ = (session, _coerce_context(context))
+        node = self._resolve_flake_node(info)
+        locked = node.locked
+        if locked is None or not locked.owner or not locked.repo or not locked.rev:
+            msg = f"Cannot resolve source for {self._input}: incomplete lock"
+            raise RuntimeError(msg)
+
+        yield UpdateEvent.status(
+            self.name,
+            f"Resolving source tree for {locked.owner}/{locked.repo}...",
+            operation="compute_hash",
+            status="computing_hash",
+            detail=self.lock_file,
+        )
+
+        source_path_drain = ValueDrain[Path]()
+        async for event in drain_value_events(
+            self._resolve_source_path(node),
+            source_path_drain,
+            parse=lambda payload: self._expect_path_payload(
+                payload,
+                context="resolved source",
+            ),
+        ):
+            yield event
+        source_path = require_value(source_path_drain, "Missing resolved source path")
 
         pkg_dir = _base_module().package_dir_for(self.name)
         if pkg_dir is None:
@@ -526,37 +585,25 @@ class UvLockUpdater(FlakeInputUpdater):
                 "Copying source tree for lock resolution...",
                 operation="compute_hash",
             )
-            await asyncio.to_thread(
-                shutil.copytree,
-                source_path,
-                workspace_dir,
-                symlinks=True,
-            )
-            await asyncio.to_thread(_ensure_user_writable_tree, workspace_dir)
+            await self._copy_workspace(source_path, workspace_dir)
 
-            uv_result_drain = ValueDrain[CommandResult]()
+            lock_file_drain = ValueDrain[Path]()
             async for event in drain_value_events(
-                _base_module().update_process.run_command(
-                    ["uv", "-q", "lock", "--directory", str(workspace_dir)],
-                    options=_base_module().update_process.RunCommandOptions(
-                        source=self.name,
-                        error="uv lock did not return output",
-                        env={
-                            "HOME": str(home_dir),
-                            "UV_PYTHON": sys.executable,
-                            **self._render_lock_env(info),
-                        },
-                        config=self.config,
-                    ),
+                self._run_uv_lock(
+                    info=info,
+                    home_dir=home_dir,
+                    workspace_dir=workspace_dir,
                 ),
-                uv_result_drain,
-                parse=expect_command_result,
+                lock_file_drain,
+                parse=lambda payload: self._expect_path_payload(
+                    payload,
+                    context="uv lock",
+                ),
             ):
                 yield event
-            require_value(uv_result_drain, "Missing uv lock result")
-
+            resolved_lock_path = require_value(lock_file_drain, "Missing uv lock path")
             lock_text = await asyncio.to_thread(
-                (workspace_dir / self.lock_file).read_text,
+                resolved_lock_path.read_text,
                 encoding="utf-8",
             )
 

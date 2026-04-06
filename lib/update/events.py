@@ -281,6 +281,12 @@ class _GatherDone:
     pass
 
 
+@dataclass(frozen=True)
+class _StreamError[K]:
+    key: K
+    error: Exception
+
+
 async def gather_event_streams[K](
     streams: dict[K, EventStream],
 ) -> AsyncGenerator[UpdateEvent | GatheredValues[K]]:
@@ -299,7 +305,7 @@ async def gather_event_streams[K](
                 yield item  # forward UpdateEvent to caller
     """
     done = _GatherDone()
-    queue: asyncio.Queue[UpdateEvent | Exception | _GatherDone] = asyncio.Queue()
+    queue: asyncio.Queue[UpdateEvent | _StreamError[K] | _GatherDone] = asyncio.Queue()
     results: dict[K, UpdateEventPayload] = {}
 
     def _required_payload(event: UpdateEvent) -> UpdateEventPayload:
@@ -317,11 +323,11 @@ async def gather_event_streams[K](
                 else:
                     await queue.put(event)
         except Exception as exc:  # noqa: BLE001
-            await queue.put(exc)
+            await queue.put(_StreamError(key=key, error=exc))
         finally:
             await queue.put(done)
 
-    errors: list[Exception] = []
+    errors: list[_StreamError[K]] = []
     remaining = len(streams)
     async with asyncio.TaskGroup() as group:
         tasks: list[asyncio.Task[None]] = []
@@ -333,7 +339,7 @@ async def gather_event_streams[K](
             if item == done:
                 remaining -= 1
                 continue
-            if isinstance(item, Exception):
+            if isinstance(item, _StreamError):
                 errors.append(item)
                 for task in tasks:
                     if not task.done():
@@ -343,10 +349,13 @@ async def gather_event_streams[K](
 
     if errors:
         if len(errors) == 1:
-            raise errors[0]
-        message = "; ".join(str(error) for error in errors)
+            error = errors[0].error
+            if hasattr(error, "add_note"):
+                error.add_note(f"event stream key: {errors[0].key!r}")
+            raise error
+        message = "; ".join(f"{error.key!r}: {error.error}" for error in errors)
         aggregate = RuntimeError(f"Multiple event streams failed: {message}")
         for error in errors:
-            aggregate.add_note(repr(error))
+            aggregate.add_note(f"{error.key!r}: {error.error!r}")
         raise aggregate
     yield GatheredValues(results)

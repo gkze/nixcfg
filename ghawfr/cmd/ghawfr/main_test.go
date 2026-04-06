@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gkze/ghawfr/backend"
 	"github.com/gkze/ghawfr/backend/qemu"
@@ -150,6 +152,89 @@ func TestLocalExpressionContextIncludesRunnerFields(t *testing.T) {
 	}
 	if got, want := context.Runner.ToolCache, filepath.Join(workspace, ".ghawfr", "runner", "tool-cache"); got != want {
 		t.Fatalf("context.Runner.ToolCache = %q, want %q", got, want)
+	}
+}
+
+func TestConfiguredDurationSupportsSecondsAndDurations(t *testing.T) {
+	t.Setenv("GHAWFR_TEST_TIMEOUT", "15")
+	got, err := configuredDuration("GHAWFR_TEST_TIMEOUT", 2)
+	if err != nil {
+		t.Fatalf("configuredDuration seconds: %v", err)
+	}
+	if got != 15*time.Second {
+		t.Fatalf("configuredDuration seconds = %v, want 15s", got)
+	}
+
+	t.Setenv("GHAWFR_TEST_TIMEOUT", "1m30s")
+	got, err = configuredDuration("GHAWFR_TEST_TIMEOUT", 2)
+	if err != nil {
+		t.Fatalf("configuredDuration duration: %v", err)
+	}
+	if got != 90*time.Second {
+		t.Fatalf("configuredDuration duration = %v, want 90s", got)
+	}
+}
+
+func TestConfiguredDurationRejectsInvalidValues(t *testing.T) {
+	t.Setenv("GHAWFR_TEST_TIMEOUT", "0")
+	if _, err := configuredDuration("GHAWFR_TEST_TIMEOUT", time.Second); err == nil {
+		t.Fatal("configuredDuration zero error = nil, want validation error")
+	}
+
+	t.Setenv("GHAWFR_TEST_TIMEOUT", "banana")
+	if _, err := configuredDuration("GHAWFR_TEST_TIMEOUT", time.Second); err == nil {
+		t.Fatal("configuredDuration parse error = nil, want validation error")
+	}
+}
+
+func TestRunWorkflowContextSavesPartialStateOnError(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, "partial.yml")
+	if err := os.WriteFile(workflowPath, []byte(`
+name: Partial
+on: workflow_dispatch
+jobs:
+  alpha:
+    runs-on: macos-latest
+    steps:
+      - run: touch alpha.done
+  beta:
+    needs: alpha
+    runs-on: macos-latest
+    steps:
+      - uses: actions/does-not-exist@v1
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+	t.Setenv("GHAWFR_PROVIDER", "local")
+
+	err = runWorkflowContext(context.Background(), workflowPath, "")
+	if err == nil {
+		t.Fatal("runWorkflowContext error = nil, want workflow error")
+	}
+	if !strings.Contains(err.Error(), "not supported by this backend") {
+		t.Fatalf("runWorkflowContext error = %v, want unsupported action backend error", err)
+	}
+
+	statePath := runStatePath(root, workflowPath)
+	runState, err := state.Load(statePath)
+	if err != nil {
+		t.Fatalf("Load state: %v", err)
+	}
+	record := runState.Jobs[workflow.JobID("alpha")]
+	if record == nil {
+		t.Fatal("state record for alpha = nil, want success record")
+	}
+	if got, want := record.Status, state.JobStatusSuccess; got != want {
+		t.Fatalf("record.Status = %q, want %q", got, want)
 	}
 }
 

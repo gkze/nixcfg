@@ -49,8 +49,8 @@ class _NonRetryableStatusError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class SyncRequestError(RuntimeError):
-    """A failed synchronous HTTP request after validation and retries."""
+class RequestError(RuntimeError):
+    """A failed HTTP request after validation and retries."""
 
     url: str
     attempts: int
@@ -61,6 +61,9 @@ class SyncRequestError(RuntimeError):
     def __str__(self) -> str:
         """Render the underlying transport/status detail."""
         return self.detail
+
+
+SyncRequestError = RequestError
 
 
 def unwrap_go_keyring_token(raw: str) -> str | None:
@@ -84,8 +87,10 @@ def resolve_github_token(
     if allow_keyring:
         try:
             raw = keyring.get_password("gh:github.com", "")
-        except KeyringError, RuntimeError:
+        except (KeyringError, RuntimeError) as exc:
             raw = None
+            if logger is not None:
+                logger.warning("Failed to read GitHub token from keyring: %s", exc)
         if raw:
             token = unwrap_go_keyring_token(raw)
             if token:
@@ -179,6 +184,38 @@ def _retry_wait(
     )
 
 
+def _as_request_error(
+    *,
+    url: str,
+    attempts: int,
+    exc: Exception,
+) -> RequestError:
+    if isinstance(exc, (_NonRetryableStatusError, _RetryableStatusError)):
+        return RequestError(
+            url=url,
+            attempts=attempts,
+            kind="status",
+            detail=str(exc),
+            status=exc.status,
+        )
+    if isinstance(exc, httpx.TimeoutException):
+        return RequestError(
+            url=url,
+            attempts=attempts,
+            kind="timeout",
+            detail=str(exc),
+        )
+    if isinstance(exc, httpx.TransportError):
+        return RequestError(
+            url=url,
+            attempts=attempts,
+            kind="network",
+            detail=str(exc),
+        )
+    msg = f"Unsupported request error type: {type(exc)!r}"
+    raise TypeError(msg)
+
+
 def fetch_url_bytes(
     url: str,
     *,
@@ -216,36 +253,13 @@ def fetch_url_bytes(
                         return payload, dict(response.headers)
                     detail = _format_http_error(response, payload)
                     _raise_status_error(response.status_code, detail)
-    except _NonRetryableStatusError as exc:
-        raise SyncRequestError(
-            url=url,
-            attempts=attempt_count,
-            kind="status",
-            detail=str(exc),
-            status=exc.status,
-        ) from exc
-    except _RetryableStatusError as exc:
-        raise SyncRequestError(
-            url=url,
-            attempts=attempt_count,
-            kind="status",
-            detail=str(exc),
-            status=exc.status,
-        ) from exc
-    except httpx.TimeoutException as exc:
-        raise SyncRequestError(
-            url=url,
-            attempts=attempt_count,
-            kind="timeout",
-            detail=str(exc),
-        ) from exc
-    except httpx.TransportError as exc:
-        raise SyncRequestError(
-            url=url,
-            attempts=attempt_count,
-            kind="network",
-            detail=str(exc),
-        ) from exc
+    except (
+        _NonRetryableStatusError,
+        _RetryableStatusError,
+        httpx.TimeoutException,
+        httpx.TransportError,
+    ) as exc:
+        raise _as_request_error(url=url, attempts=attempt_count, exc=exc) from exc
 
     msg = f"Failed fetching {url}"
     raise RuntimeError(msg)
@@ -307,33 +321,10 @@ async def fetch_url_bytes_async(
             timeout=request_timeout,
         ) as async_client:
             return await _run(async_client)
-    except _NonRetryableStatusError as exc:
-        raise SyncRequestError(
-            url=url,
-            attempts=attempt_count,
-            kind="status",
-            detail=str(exc),
-            status=exc.status,
-        ) from exc
-    except _RetryableStatusError as exc:
-        raise SyncRequestError(
-            url=url,
-            attempts=attempt_count,
-            kind="status",
-            detail=str(exc),
-            status=exc.status,
-        ) from exc
-    except httpx.TimeoutException as exc:
-        raise SyncRequestError(
-            url=url,
-            attempts=attempt_count,
-            kind="timeout",
-            detail=str(exc),
-        ) from exc
-    except httpx.TransportError as exc:
-        raise SyncRequestError(
-            url=url,
-            attempts=attempt_count,
-            kind="network",
-            detail=str(exc),
-        ) from exc
+    except (
+        _NonRetryableStatusError,
+        _RetryableStatusError,
+        httpx.TimeoutException,
+        httpx.TransportError,
+    ) as exc:
+        raise _as_request_error(url=url, attempts=attempt_count, exc=exc) from exc

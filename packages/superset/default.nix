@@ -1,6 +1,7 @@
 {
   inputs,
   outputs,
+  pkgs,
   selfSource,
   stdenv,
   stdenvNoCC,
@@ -9,9 +10,11 @@
   bun2nix,
   appimageTools,
   fetchurl,
+  libarchive,
   python3,
   writeShellScriptBin,
   makeWrapper,
+  zig_0_15,
   ...
 }:
 let
@@ -60,6 +63,113 @@ let
     cp "$tmpdir/bun.lock" "$repo_root/packages/superset/bun.lock"
     cp "$tmpdir/bun.nix" "$repo_root/packages/superset/bun.nix"
   '';
+  invalidBunNixErr = ''
+    packages/superset/bun.nix failed to evaluate.
+
+    Regenerate it with:
+
+    ```sh
+    bun2nix -o bun.nix
+    ```
+  '';
+  extractHost =
+    url:
+    let
+      match = builtins.match "https?://([^/]+).*" url;
+    in
+    if match != null then builtins.elemAt match 0 else null;
+  extractBunPackage = writeShellScriptBin "extract-bun-package" ''
+    throw_usage() {
+      echo "Missing required flags"
+      echo "Usage: --package <pkg> --out <out>"
+      exit 1
+    }
+
+    pkg=""
+    out=""
+
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --package)
+          shift
+          pkg="$1"
+          ;;
+        --out)
+          shift
+          out="$1"
+          ;;
+        --package=*)
+          pkg="''${1#--package=}"
+          ;;
+        --out=*)
+          out="''${1#--out=}"
+          ;;
+        -*)
+          echo "Unknown option: $1"
+          throw_usage
+          ;;
+        *)
+          echo "Unexpected positional arg: $1"
+          throw_usage
+          ;;
+      esac
+      shift
+    done
+
+    if [ -z "$pkg" ] || [ -z "$out" ]; then
+      throw_usage
+    fi
+
+    mkdir -p "$out"
+
+    if [[ "$pkg" = *.tgz ]]; then
+      ${lib.getExe' libarchive "bsdtar"} --extract \
+        --file "$pkg" \
+        --directory "$out" \
+        --strip-components=1 \
+        --no-same-owner \
+        --no-same-permissions
+    else
+      cp -r "$pkg/." "$out"
+    fi
+
+    chmod -R u+rwx "$out"
+  '';
+  bunWithFakeNode = stdenvNoCC.mkDerivation {
+    name = "bun-with-fake-node";
+    dontUnpack = true;
+    dontBuild = true;
+
+    installPhase = ''
+      cp -r "${bun}/." "$out"
+      chmod u+w "$out/bin"
+
+      for node_binary in node npm npx; do
+        ln -s "$out/bin/bun" "$out/bin/$node_binary"
+      done
+    '';
+  };
+  bunCacheEntryCreator = stdenvNoCC.mkDerivation {
+    pname = "bun2nix-cache-entry-creator";
+    inherit (bun2nix) version;
+    src = inputs.bun2nix + "/programs/cache-entry-creator";
+
+    nativeBuildInputs = [ zig_0_15.hook ];
+
+    postConfigure = ''
+      ln -s ${
+        pkgs.callPackage (inputs.bun2nix + "/programs/cache-entry-creator/deps.nix") { }
+      } $ZIG_GLOBAL_CACHE_DIR/p
+    '';
+
+    zigBuildFlags = [ "--release=fast" ];
+    doCheck = true;
+
+    meta = {
+      description = "Cache entry creator for bun packages";
+      mainProgram = "cache_entry_creator";
+    };
+  };
   srcWithBun = stdenvNoCC.mkDerivation {
     pname = "superset-src-with-bun";
     inherit version;
@@ -78,6 +188,72 @@ let
       cp ${./bun.nix} "$out/bun.nix"
     '';
   };
+  bunDeps =
+    let
+      bunPackages = lib.filterAttrs (_: value: lib.isStorePath value) (
+        builtins.addErrorContext invalidBunNixErr (pkgs.callPackage "${srcWithBun}/bun.nix" { })
+      );
+      buildBunPackage =
+        name: pkg:
+        let
+          pkgUrl = pkg.passthru.url or null;
+          registryHost =
+            if pkgUrl != null then
+              let
+                host = extractHost pkgUrl;
+              in
+              if host != null && host != "registry.npmjs.org" then host else null
+            else
+              null;
+        in
+        stdenv.mkDerivation {
+          name = "bun-pkg-${name}";
+
+          nativeBuildInputs = [ bunWithFakeNode ];
+          phases = [
+            "extractPhase"
+            "patchPhase"
+            "cacheEntryPhase"
+          ];
+
+          extractPhase = ''
+            runHook preExtract
+
+            "${lib.getExe extractBunPackage}" \
+              --package "${pkg}" \
+              --out "$out/share/bun-packages/${name}"
+
+            runHook postExtract
+          '';
+
+          patchPhase = ''
+            runHook prePatch
+
+            patchShebangs "$out/share/bun-packages"
+
+            runHook postPatch
+          '';
+
+          cacheEntryPhase = ''
+            runHook preCacheEntry
+
+            "${lib.getExe bunCacheEntryCreator}" \
+              --out "$out/share/bun-cache" \
+              --name "${name}" \
+              --package "$out/share/bun-packages/${name}" \
+              ${lib.optionalString (registryHost != null) ''--registry "${registryHost}"''}
+
+            runHook postCacheEntry
+          '';
+
+          preferLocalBuild = true;
+          allowSubstitutes = false;
+        };
+    in
+    pkgs.symlinkJoin {
+      name = "bun-cache";
+      paths = builtins.attrValues (builtins.mapAttrs buildBunPackage bunPackages);
+    };
   # Electron externalizes these modules at runtime. Keep this list aligned
   # with apps/desktop/electron.vite.config.ts and validate-native-runtime.ts
 in
@@ -128,9 +304,7 @@ else
 
     strictDeps = true;
 
-    bunDeps = bun2nix.fetchBunDeps {
-      bunNix = "${srcWithBun}/bun.nix";
-    };
+    inherit bunDeps;
 
     bunInstallFlags = [
       "--frozen-lockfile"

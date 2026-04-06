@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 from typing import TYPE_CHECKING
 
 import pytest
@@ -306,7 +307,7 @@ def test_gather_event_streams_success_and_errors() -> None:
 
         _collect_async(gather_event_streams({"x": _missing_payload()}))
 
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(RuntimeError, match="boom") as exc_info:
 
         async def _boom() -> AsyncIterator[UpdateEvent]:
             msg = "boom"
@@ -315,7 +316,9 @@ def test_gather_event_streams_success_and_errors() -> None:
 
         _collect_async(gather_event_streams({"x": _boom()}))
 
-    with pytest.raises(RuntimeError, match="Multiple event streams failed"):
+    assert "event stream key: 'x'" in "\n".join(exc_info.value.__notes__)
+
+    with pytest.raises(RuntimeError, match="Multiple event streams failed") as exc_info:
 
         async def _boom_one() -> AsyncIterator[UpdateEvent]:
             msg = "first"
@@ -328,6 +331,10 @@ def test_gather_event_streams_success_and_errors() -> None:
             yield UpdateEvent.status("never", "never")
 
         _collect_async(gather_event_streams({"a": _boom_one(), "b": _boom_two()}))
+
+    notes = "\n".join(exc_info.value.__notes__)
+    assert "'a': RuntimeError('first')" in notes
+    assert "'b': RuntimeError('second')" in notes
 
 
 def test_gather_event_streams_cancels_siblings_after_error() -> None:
@@ -352,6 +359,30 @@ def test_gather_event_streams_cancels_siblings_after_error() -> None:
         _collect_async(gather_event_streams({"slow": _slow_stream(), "boom": _boom()}))
 
     assert cancelled is True
+
+
+def test_gather_event_streams_reraises_without_add_note_support(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-raise a single stream error even if add_note is unavailable."""
+    original_hasattr = builtins.hasattr
+
+    def _fake_hasattr(obj: object, name: str) -> bool:
+        if isinstance(obj, RuntimeError) and name == "add_note":
+            return False
+        return original_hasattr(obj, name)
+
+    monkeypatch.setattr("builtins.hasattr", _fake_hasattr)
+
+    async def _boom() -> AsyncIterator[UpdateEvent]:
+        msg = "boom"
+        raise RuntimeError(msg)
+        yield UpdateEvent.status("never", "never")
+
+    with pytest.raises(RuntimeError, match="boom") as exc_info:
+        _collect_async(gather_event_streams({"x": _boom()}))
+
+    assert not getattr(exc_info.value, "__notes__", [])
 
 
 def test_update_event_status_includes_structured_fields() -> None:

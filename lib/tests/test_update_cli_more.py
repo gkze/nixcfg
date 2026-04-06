@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourcesFile
+from lib.update import cli_inventory as cli_inventory_module
+from lib.update import cli_validation as cli_validation_module
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.cli import (
     OutputOptions,
@@ -1122,6 +1124,154 @@ def test_build_update_inventory_uses_logical_targets(
     assert by_name["ref-only"].ref_target.locked_rev is None
 
 
+def test_inventory_wrapper_builds_dependency_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wrap raw inventory collaborators into one dependency bundle."""
+    captured: dict[str, object] = {}
+
+    def _fake_build_update_inventory(*, dependencies: object) -> list[object]:
+        captured["dependencies"] = dependencies
+        return ["wrapped"]
+
+    monkeypatch.setattr(
+        cli_inventory_module,
+        "build_update_inventory",
+        _fake_build_update_inventory,
+    )
+
+    def load_sources() -> SourcesFile:
+        return cast("SourcesFile", object())
+
+    def source_path_map(_name: str) -> dict[str, Path]:
+        return {}
+
+    def list_ref_inputs() -> list[FlakeInputRef]:
+        return []
+
+    def load_lock() -> FlakeLock:
+        return cast("FlakeLock", object())
+
+    def get_updaters() -> dict[str, type[Updater]]:
+        return {}
+
+    def source_file_for(_name: str) -> Path | None:
+        return None
+
+    def resolve_root_input_node(
+        _lock: FlakeLock, _name: str
+    ) -> tuple[FlakeLockNode | None, str | None]:
+        return (None, None)
+
+    def source_backing_input_name(
+        _name: str,
+        _updater: type[Updater] | None,
+        _entry: SourceEntry | None,
+    ) -> str | None:
+        return None
+
+    def generated_artifact_paths(
+        _name: str, _updater: type[Updater]
+    ) -> tuple[str, ...]:
+        return ()
+
+    def source_hash_kinds(_entry: SourceEntry | None) -> tuple[str, ...]:
+        return ()
+
+    def classify_updater_kind(_updater: type[Updater]) -> str:
+        return "demo"
+
+    def repo_relative_path(_path: Path | None) -> str | None:
+        return None
+
+    assert cli_inventory_module._build_update_inventory(
+        load_sources=load_sources,
+        source_path_map=source_path_map,
+        list_ref_inputs=list_ref_inputs,
+        load_lock=load_lock,
+        get_updaters=get_updaters,
+        source_file_for=source_file_for,
+        resolve_root_input_node=resolve_root_input_node,
+        source_backing_input_name=source_backing_input_name,
+        generated_artifact_paths=generated_artifact_paths,
+        source_hash_kinds=source_hash_kinds,
+        classify_updater_kind=classify_updater_kind,
+        repo_relative_path=repo_relative_path,
+    ) == ["wrapped"]
+
+    dependencies = captured["dependencies"]
+    assert isinstance(dependencies, cli_inventory_module.InventoryDependencies)
+    assert dependencies.load_sources is load_sources
+    assert dependencies.source_path_map is source_path_map
+    assert dependencies.list_ref_inputs is list_ref_inputs
+    assert dependencies.load_lock is load_lock
+    assert dependencies.get_updaters is get_updaters
+    assert dependencies.source_file_for is source_file_for
+    assert dependencies.resolve_root_input_node is resolve_root_input_node
+    assert dependencies.source_backing_input_name is source_backing_input_name
+    assert dependencies.generated_artifact_paths is generated_artifact_paths
+    assert dependencies.source_hash_kinds is source_hash_kinds
+    assert dependencies.classify_updater_kind is classify_updater_kind
+    assert dependencies.repo_relative_path is repo_relative_path
+
+
+def test_validation_wrappers_delegate_to_shared_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Forward validation requests through the shared helper wrappers."""
+    captured: dict[str, object] = {}
+
+    def _fake_handle_validate_request(
+        opts: UpdateOptions,
+        out: OutputOptions,
+        *,
+        dependencies: object,
+    ) -> int:
+        captured["opts"] = opts
+        captured["out"] = out
+        captured["dependencies"] = dependencies
+        return 7
+
+    monkeypatch.setattr(
+        cli_validation_module,
+        "handle_validate_request",
+        _fake_handle_validate_request,
+    )
+
+    opts = UpdateOptions(validate=True)
+    out = OutputOptions(json_output=True)
+
+    def load_sources() -> SourcesFile:
+        return cast("SourcesFile", object())
+
+    def validate() -> None:
+        return None
+
+    assert (
+        cli_validation_module._handle_validate_request(
+            opts,
+            out,
+            load_sources=load_sources,
+            validate_source_discovery_consistency=validate,
+        )
+        == 7
+    )
+
+    dependencies = captured["dependencies"]
+    assert captured["opts"] is opts
+    assert captured["out"] is out
+    assert isinstance(dependencies, cli_validation_module.ValidationDependencies)
+    assert dependencies.load_sources is load_sources
+    assert dependencies.validate_source_discovery_consistency is validate
+
+    monkeypatch.setattr(
+        cli_validation_module,
+        "validate_list_sort_option",
+        lambda _opts, _out: 9,
+    )
+    assert cli_validation_module._validate_list_sort_option(opts, out) == 9
+
+
 def test_runtime_config_and_tty_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """Resolve runtime config and evaluate header display toggles."""
     captured: dict[str, object] = {}
@@ -1494,3 +1644,15 @@ def test_cli_callback_raises_typer_exit_with_run_update_command_status(
         cli()
 
     assert exc_info.value.exit_code == 7
+
+
+def test_run_update_command_rejects_invalid_option_inputs() -> None:
+    """Reject mixed invocation styles and non-UpdateOptions objects."""
+    with pytest.raises(
+        TypeError,
+        match="run_update_command accepts either UpdateOptions or keyword overrides",
+    ):
+        run_update_command(UpdateOptions(), list_targets=True)
+
+    with pytest.raises(TypeError, match="Expected UpdateOptions, got"):
+        run_update_command(cast("UpdateOptions", object()))

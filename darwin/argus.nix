@@ -8,6 +8,18 @@ lib.mkDarwinHost {
   brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
   extraHomeModules = [
     "${lib.modulesPath}/home/darwin-closure-priority.nix"
+    (
+      { pkgs, ... }:
+      {
+        # Install a few large host-specific tools on argus without opting this
+        # host into the full
+        # heavyOptional package set.
+        nixcfg.packageSets.extraPackages = [
+          pkgs.goose-cli
+          pkgs.gws
+        ];
+      }
+    )
   ];
   extraSystemModules = [
     "${lib.modulesPath}/darwin/george/town-dock-apps.nix"

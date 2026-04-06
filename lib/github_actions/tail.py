@@ -116,7 +116,7 @@ class GitHubActionsLiveClient:
         """Return hidden live-log transport metadata exposed on one job page."""
         best_info = LiveJobPageInfo()
         saw_success = False
-        last_error: http_utils.SyncRequestError | None = None
+        last_error: http_utils.RequestError | None = None
 
         async for headers, cookies in self._job_page_attempts():
             try:
@@ -125,7 +125,7 @@ class GitHubActionsLiveClient:
                     headers=headers,
                     cookies=cookies,
                 )
-            except http_utils.SyncRequestError as exc:
+            except http_utils.RequestError as exc:
                 if not self._should_retry_web_fetch(exc):
                     raise
                 last_error = exc
@@ -216,7 +216,7 @@ class GitHubActionsLiveClient:
                     headers=headers,
                     cookies=cookies,
                 )
-            except http_utils.SyncRequestError as exc:
+            except http_utils.RequestError as exc:
                 last_error = exc
                 if not self._should_retry_web_fetch(exc):
                     raise
@@ -320,7 +320,7 @@ class GitHubActionsLiveClient:
             return None
         return await self._cookie_provider.get_cookies()
 
-    def _should_retry_web_fetch(self, exc: http_utils.SyncRequestError) -> bool:
+    def _should_retry_web_fetch(self, exc: http_utils.RequestError) -> bool:
         return exc.kind == "status" and exc.status in _WEB_FALLBACK_STATUSES
 
     def _build_web_headers(

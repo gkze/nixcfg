@@ -92,11 +92,11 @@ let
     in
     builtins.seq sourceCollisionGuard (dirSources // flatSources);
   packageSources = scanSourcesIn (src + "/packages") // scanSourcesIn (src + "/overlays");
-  sourceOverrides =
-    let
-      raw = getEnv "UPDATE_SOURCE_OVERRIDES_JSON";
-    in
-    if raw == "" then { } else fromJSON raw;
+  readSourceOverrides = raw: if raw == "" then { } else fromJSON raw;
+  updateEvaluation = {
+    sourceOverrides = readSourceOverrides (getEnv "UPDATE_SOURCE_OVERRIDES_JSON");
+    fakeHashes = getEnv "FAKE_HASHES" == "1";
+  };
 in
 rec {
   inherit (crate2nixTauri)
@@ -109,14 +109,14 @@ rec {
   flakeLock = (fromJSON (readFile (src + "/flake.lock"))).nodes;
   # UPDATE_SOURCE_OVERRIDES_JSON allows update tooling to override selected
   # sources entries during evaluation without mutating tracked sources.json files.
-  sources = packageSources // sourceOverrides;
+  sources = packageSources // updateEvaluation.sourceOverrides;
 
   # When FAKE_HASHES=1, all sourceHash* functions return lib.fakeHash instead
   # of reading from sources.json.  This lets the update script evaluate the
   # overlay derivations with placeholder hashes to trigger hash-mismatch errors
   # from which the correct hashes are extracted — without duplicating any
   # derivation logic.
-  fakeHashMode = getEnv "FAKE_HASHES" == "1";
+  fakeHashMode = updateEvaluation.fakeHashes;
 
   sourceEntry =
     name: if hasAttr name sources then sources.${name} else throw "sources.json missing for '${name}'";

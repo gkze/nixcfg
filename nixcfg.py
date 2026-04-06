@@ -16,9 +16,9 @@ from typer.main import get_command
 
 from lib.cli import HELP_CONTEXT_SETTINGS
 from lib.github_actions.cli import app as github_actions_app
-from lib.nix.schemas._codegen import main as codegen_main
-from lib.nix.schemas._fetch import check as schema_check
-from lib.nix.schemas._fetch import fetch as fetch_schemas
+from lib.nix.schemas import check as schema_check
+from lib.nix.schemas import codegen_main
+from lib.nix.schemas import fetch as fetch_schemas
 from lib.recover.cli import app as recover_app
 from lib.schema_codegen import (
     DEFAULT_CONFIG_PATH,

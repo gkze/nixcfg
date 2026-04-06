@@ -1101,6 +1101,19 @@ def test_uv_lock_updater_rejects_empty_source_path(
         )
 
 
+def test_uv_lock_updater_expect_path_payload_validates_string_inputs() -> None:
+    """Accept string payloads and reject non-string path results."""
+    updater = _DummyUvLockUpdater(config=resolve_config())
+
+    assert (
+        str(updater._expect_path_payload("demo/path", context="workspace"))
+        == "demo/path"
+    )
+
+    with pytest.raises(TypeError, match="Expected workspace path payload"):
+        updater._expect_path_payload(3, context="workspace")
+
+
 def test_factory_helpers_return_expected_subclasses() -> None:
     """Run this test case."""
     assert flake_input_hash_updater("x", "vendorHash").hash_type == "vendorHash"

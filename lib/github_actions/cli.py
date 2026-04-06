@@ -49,7 +49,7 @@ def list_workflows(
     """Render all repository workflows with their latest known run state."""
     try:
         rows = _workflow_rows(repo=repo, server_url=server_url)
-    except (http_utils.SyncRequestError, RuntimeError, ValueError) as exc:
+    except (http_utils.RequestError, RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from None
 
     table = Table(title="GitHub Actions workflows")
@@ -128,7 +128,7 @@ def tail_workflow(
                 allow_playwright_login=allow_playwright_login,
             )
         )
-    except (http_utils.SyncRequestError, RuntimeError, ValueError) as exc:
+    except (http_utils.RequestError, RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from None
 
 

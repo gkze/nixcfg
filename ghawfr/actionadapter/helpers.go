@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gkze/ghawfr/backend"
+	"github.com/gkze/ghawfr/state"
 	"github.com/gkze/ghawfr/workflow"
 )
 
@@ -103,7 +104,7 @@ func mergeOptionalEnvironment(base workflow.EnvironmentMap, overlay workflow.Env
 func localToolCacheRoot(action backend.ActionContext) string {
 	toolCache := action.Expressions.Runner.ToolCache
 	if strings.TrimSpace(toolCache) == "" {
-		toolCache = filepath.Join(action.WorkingDirectory, ".ghawfr", "runner", "tool-cache")
+		toolCache = state.RunnerToolCacheDir(action.WorkingDirectory)
 	}
 	return toolCache
 }
@@ -118,10 +119,10 @@ func localToolCacheLocation(action backend.ActionContext, family string, version
 }
 
 func remoteToolCacheRoots(action backend.ActionContext, guestWorkspace string) (string, string) {
-	host := filepath.Join(action.WorkingDirectory, ".ghawfr", "runner", "tool-cache")
+	host := state.RunnerToolCacheDir(action.WorkingDirectory)
 	guest := action.Expressions.Runner.ToolCache
 	if strings.TrimSpace(guest) == "" {
-		guest = path.Join(guestWorkspace, ".ghawfr", "runner", "tool-cache")
+		guest = state.GuestRunnerToolCacheDir(guestWorkspace)
 	}
 	return host, guest
 }
@@ -143,7 +144,7 @@ func remoteRunnerHomeRoots(action backend.ActionContext, guestWorkspace string) 
 		guest = strings.TrimSpace(action.Expressions.Runner.Home)
 	}
 	if guest == "" {
-		guest = path.Join(guestWorkspace, ".ghawfr", "runner", "home")
+		guest = state.GuestRunnerHomeDir(guestWorkspace)
 	}
 	host, err := translateRemotePathToHost(guest, action.WorkingDirectory, guestWorkspace)
 	if err != nil {

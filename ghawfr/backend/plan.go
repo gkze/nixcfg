@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gkze/ghawfr/state"
 	"github.com/gkze/ghawfr/workflow"
 )
 
@@ -83,7 +84,7 @@ func PlanInstanceDirectory(root string, provider ProviderKind, job *workflow.Job
 		slug = sanitizePathComponent(job.ID.String())
 	}
 	suffix := shortJobHash(job)
-	return filepath.Join(root, ".ghawfr", "workers", string(provider), slug+"-"+suffix)
+	return filepath.Join(state.WorkersDir(root, string(provider)), slug+"-"+suffix)
 }
 
 func shortJobHash(job *workflow.Job) string {

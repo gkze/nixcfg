@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gkze/ghawfr/state"
 	"github.com/gkze/ghawfr/workflow"
 )
 
@@ -130,7 +131,7 @@ func resolveRemoteStepDirectory(hostWorkspace string, guestWorkspace string, wor
 }
 
 func createWorkspaceFileCommandFiles(hostWorkspace string, guestWorkspace string) (fileCommandFiles, fileCommandFiles, error) {
-	root := filepath.Join(hostWorkspace, ".ghawfr", "file-commands")
+	root := state.FileCommandsDir(hostWorkspace)
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return fileCommandFiles{}, fileCommandFiles{}, fmt.Errorf("create file command root %q: %w", root, err)
 	}

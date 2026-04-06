@@ -125,7 +125,7 @@ def _fetch_url_bytes(url: str) -> bytes:
             backoff=1.0,
             timeout=_FETCH_TIMEOUT_SECONDS,
         )
-    except http_utils.SyncRequestError as exc:
+    except http_utils.RequestError as exc:
         if exc.kind in {"network", "timeout"}:
             raise OSError(exc.detail) from exc
         if exc.kind == "status":

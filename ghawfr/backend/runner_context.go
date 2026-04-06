@@ -3,10 +3,9 @@ package backend
 import (
 	"fmt"
 	"os"
-	"path"
-	"path/filepath"
 	"runtime"
 
+	"github.com/gkze/ghawfr/state"
 	"github.com/gkze/ghawfr/workflow"
 )
 
@@ -50,14 +49,14 @@ func runnerEnvironment(context workflow.RunnerContext) workflow.EnvironmentMap {
 }
 
 func prepareRunnerFilesystem(hostWorkspace string, guestWorkspace string, includeHome bool) (runnerFilesystem, error) {
-	hostTemp := filepath.Join(hostWorkspace, ".ghawfr", "runner", "temp")
-	hostToolCache := filepath.Join(hostWorkspace, ".ghawfr", "runner", "tool-cache")
+	hostTemp := state.RunnerTempDir(hostWorkspace)
+	hostToolCache := state.RunnerToolCacheDir(hostWorkspace)
 	directories := []string{hostTemp, hostToolCache}
 	hostHome := ""
 	guestHome := ""
 	if includeHome {
-		hostHome = filepath.Join(hostWorkspace, ".ghawfr", "runner", "home")
-		guestHome = path.Join(guestWorkspace, ".ghawfr", "runner", "home")
+		hostHome = state.RunnerHomeDir(hostWorkspace)
+		guestHome = state.GuestRunnerHomeDir(guestWorkspace)
 		directories = append(directories, hostHome)
 	}
 	for _, directory := range directories {
@@ -69,8 +68,8 @@ func prepareRunnerFilesystem(hostWorkspace string, guestWorkspace string, includ
 		HostTemp:       hostTemp,
 		HostToolCache:  hostToolCache,
 		HostHome:       hostHome,
-		GuestTemp:      path.Join(guestWorkspace, ".ghawfr", "runner", "temp"),
-		GuestToolCache: path.Join(guestWorkspace, ".ghawfr", "runner", "tool-cache"),
+		GuestTemp:      state.GuestRunnerTempDir(guestWorkspace),
+		GuestToolCache: state.GuestRunnerToolCacheDir(guestWorkspace),
 		GuestHome:      guestHome,
 	}, nil
 }

@@ -2,15 +2,16 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gkze/ghawfr/actionadapter"
@@ -300,7 +301,11 @@ func runProbe(path string, target string, command string) error {
 	if err != nil {
 		return err
 	}
-	if err := qemu.WaitForSSH(launch, 30*time.Second); err != nil {
+	sshWaitTimeout, err := configuredDuration("GHAWFR_SSH_WAIT_TIMEOUT", 30*time.Second)
+	if err != nil {
+		return err
+	}
+	if err := qemu.WaitForSSH(launch, sshWaitTimeout); err != nil {
 		return err
 	}
 	output, err := qemu.RunGuestCommand(launch, command)
@@ -328,7 +333,11 @@ func runStop(path string, target string) error {
 	if err != nil {
 		return err
 	}
-	if err := qemu.StopProcess(state, 5*time.Second); err != nil {
+	stopTimeout, err := configuredDuration("GHAWFR_STOP_TIMEOUT", 5*time.Second)
+	if err != nil {
+		return err
+	}
+	if err := qemu.StopProcess(state, stopTimeout); err != nil {
 		return err
 	}
 	fmt.Printf("workflow %s\n", titleOrFallback(definition.Name, filepath.Base(path)))
@@ -338,6 +347,12 @@ func runStop(path string, target string) error {
 }
 
 func runWorkflow(path string, target string) error {
+	runContext, stopSignals := commandContext()
+	defer stopSignals()
+	return runWorkflowContext(runContext, path, target)
+}
+
+func runWorkflowContext(runContext context.Context, path string, target string) (err error) {
 	workingDirectory, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("resolve working directory: %w", err)
@@ -352,9 +367,18 @@ func runWorkflow(path string, target string) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if saveErr := run.Save(statePath); saveErr != nil {
+			err = errors.Join(err, fmt.Errorf("save run state %q: %w", statePath, saveErr))
+			return
+		}
+		if err == nil {
+			fmt.Printf("state %s\n", statePath)
+		}
+	}()
 	expressions := localExpressionContext(workingDirectory)
-	artifactStore := artifacts.NewStore(filepath.Join(workingDirectory, ".ghawfr", "artifacts"))
-	cacheStore := ghcache.NewStore(filepath.Join(workingDirectory, ".ghawfr", "cache"))
+	artifactStore := artifacts.NewStore(state.ArtifactsDir(workingDirectory))
+	cacheStore := ghcache.NewStore(state.CacheDir(workingDirectory))
 	normalizedTarget := strings.ToLower(strings.TrimSpace(target))
 	allowed := workflow.JobSet(nil)
 	if normalizedTarget != "" {
@@ -365,7 +389,7 @@ func runWorkflow(path string, target string) error {
 		return err
 	}
 	result, err := controller.RunUntilBlockedSelectedFile(
-		context.Background(),
+		runContext,
 		path,
 		allowed,
 		run,
@@ -395,10 +419,6 @@ func runWorkflow(path string, target string) error {
 			fmt.Printf("  outputs: %s\n", formatOutputMap(job.Outputs))
 		}
 	}
-	if err := run.Save(statePath); err != nil {
-		return fmt.Errorf("save run state %q: %w", statePath, err)
-	}
-	fmt.Printf("state %s\n", statePath)
 	if normalizedTarget != "" && len(result.Jobs) == 0 {
 		if run.CompletedJobs()[workflow.JobID(normalizedTarget)] {
 			fmt.Printf("target %s already completed\n", normalizedTarget)
@@ -559,13 +579,7 @@ func loadRunState(path string, sourcePath string) (*state.Run, error) {
 }
 
 func runStatePath(workingDirectory string, workflowPath string) string {
-	hash := sha256.Sum256([]byte(workflowPath))
-	base := strings.TrimSuffix(filepath.Base(workflowPath), filepath.Ext(workflowPath))
-	if base == "" {
-		base = "workflow"
-	}
-	suffix := hex.EncodeToString(hash[:8])
-	return filepath.Join(workingDirectory, ".ghawfr", "runs", base+"-"+suffix+".json")
+	return state.RunStatePath(workingDirectory, workflowPath)
 }
 
 func detectWorkspaceRoot(workingDirectory string, workflowPath string) string {
@@ -584,6 +598,31 @@ func detectWorkspaceRoot(workingDirectory string, workflowPath string) string {
 		return root
 	}
 	return workingDirectory
+}
+
+func commandContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
+
+func configuredDuration(envName string, fallback time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(envName))
+	if raw == "" {
+		return fallback, nil
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		if seconds <= 0 {
+			return 0, fmt.Errorf("%s must be greater than zero", envName)
+		}
+		return time.Duration(seconds) * time.Second, nil
+	}
+	duration, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s=%q: %w", envName, raw, err)
+	}
+	if duration <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", envName)
+	}
+	return duration, nil
 }
 
 func localExpressionContext(workingDirectory string) workflow.ExpressionContext {
@@ -606,8 +645,8 @@ func localExpressionContext(workingDirectory string) workflow.ExpressionContext 
 		Runner: workflow.RunnerContext{
 			OS:        localRunnerOS(runtime.GOOS),
 			Arch:      localRunnerArch(runtime.GOARCH),
-			Temp:      filepath.Join(workingDirectory, ".ghawfr", "runner", "temp"),
-			ToolCache: filepath.Join(workingDirectory, ".ghawfr", "runner", "tool-cache"),
+			Temp:      state.RunnerTempDir(workingDirectory),
+			ToolCache: state.RunnerToolCacheDir(workingDirectory),
 		},
 		GitHub: workflow.GitHubContext{
 			Event:      event,
