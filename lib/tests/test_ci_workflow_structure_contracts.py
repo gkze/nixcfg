@@ -97,6 +97,10 @@ def test_load_jobs_and_require_job_reject_invalid_shapes(tmp_path: Path) -> None
     with pytest.raises(TypeError, match="missing a top-level jobs mapping"):
         contracts._load_jobs(workflow)
 
+    workflow.write_text("jobs:\n  demo: nope\n", encoding="utf-8")
+    with pytest.raises(TypeError, match="Workflow job demo must be a mapping"):
+        contracts._load_jobs(workflow)
+
     with pytest.raises(RuntimeError, match="missing required job 'demo'"):
         contracts._require_job({}, job_id="demo")
 

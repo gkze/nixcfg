@@ -49,7 +49,11 @@ preview = true
 # Treat these directories as namespace package roots during resolution.
 namespace-packages = ["overlays", "packages"]
 # Include extensionless project scripts in Ruff file discovery.
-extend-include = ["home/george/bin/git-ignore", "home/george/bin/zen-folders"]
+extend-include = [
+  "home/george/bin/git-ignore",
+  "home/george/bin/zen-folders",
+  "home/george/bin/zen-profile-sync",
+]
 
 [tool.ruff.lint]
 # Start from the full Ruff rule set.
@@ -140,6 +144,7 @@ include = [
   "modules/**/*.pyi",
   "home/george/bin/git-ignore",
   "home/george/bin/zen-folders",
+  "home/george/bin/zen-profile-sync",
 ]
 
 [tool.ty.rules]

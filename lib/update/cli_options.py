@@ -3,11 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, cast
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-    from typing import Any
+from typing import Literal, TypedDict, cast
 
 UpdateSortBy = Literal[
     "name",
@@ -24,6 +20,42 @@ UpdateSortBy = Literal[
 ]
 
 UpdateTTYMode = Literal["auto", "force", "off", "full"]
+type UpdateOptionValue = str | int | float | bool | None
+
+
+class _UpdateOptionsInitKwargs(TypedDict, total=False):
+    source: str | None
+    list_targets: bool
+    no_refs: bool
+    no_sources: bool
+    no_input: bool
+    check: bool
+    validate: bool
+    schema: bool
+    sort_by: UpdateSortBy
+    json: bool
+    verbose: bool
+    quiet: bool
+    tty: UpdateTTYMode
+    zellij_guard: bool | None
+    native_only: bool
+    http_timeout: int | None
+    subprocess_timeout: int | None
+    max_nix_builds: int | None
+    log_tail_lines: int | None
+    render_interval: float | None
+    user_agent: str | None
+    retries: int | None
+    retry_backoff: float | None
+    fake_hash: str | None
+    deno_platforms: str | None
+    pinned_versions: str | None
+
+
+class UpdateOptionsKwargs(_UpdateOptionsInitKwargs, total=False):
+    """Keyword overrides accepted by update CLI compatibility helpers."""
+
+    json_output: bool
 
 
 @dataclass(frozen=True)
@@ -58,16 +90,17 @@ class UpdateOptions:
     pinned_versions: str | None = None
 
     @classmethod
-    def from_mapping(cls, values: Mapping[str, object]) -> UpdateOptions:
+    def from_mapping(cls, values: UpdateOptionsKwargs) -> UpdateOptions:
         """Build :class:`UpdateOptions` from CLI call parameters."""
-        payload: dict[str, object] = {
-            field_name: values[field_name]
+        values_map = cast("dict[str, UpdateOptionValue]", dict(values))
+        payload = {
+            field_name: values_map[field_name]
             for field_name in cls.__dataclass_fields__
-            if field_name in values
+            if field_name in values_map
         }
-        if "json_output" in values:
-            payload["json"] = values["json_output"]
-        return cls(**cast("dict[str, Any]", payload))
+        if "json_output" in values_map:
+            payload["json"] = values_map["json_output"]
+        return cls(**cast("_UpdateOptionsInitKwargs", payload))
 
 
-__all__ = ["UpdateOptions", "UpdateSortBy", "UpdateTTYMode"]
+__all__ = ["UpdateOptions", "UpdateOptionsKwargs", "UpdateSortBy", "UpdateTTYMode"]

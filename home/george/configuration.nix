@@ -26,6 +26,7 @@
     "${slib.modulesPath}/home/languages/rust.nix"
     "${slib.modulesPath}/home/stylix.nix"
     "${slib.modulesPath}/home/zsh.nix"
+    inputs.catppuccin.homeModules.catppuccin
   ];
 
   sops = {
@@ -75,9 +76,19 @@
           pinentry-program ${prog}
         '';
 
-      ".local/bin" = {
-        source = ./bin;
-        recursive = true;
+      # Keep Zen CLI entrypoints on the Nix profile path so they resolve to
+      # the packaged wrappers with their pinned Python dependencies instead of
+      # the raw repo scripts.
+      ".local/bin/code-insiders" = {
+        source = ./bin/code-insiders;
+        executable = true;
+      };
+      ".local/bin/cursor" = {
+        source = ./bin/cursor;
+        executable = true;
+      };
+      ".local/bin/git-ignore" = {
+        source = ./bin/git-ignore;
         executable = true;
       };
     };
@@ -157,6 +168,10 @@
       "datagrip"
       "wispr-flow"
     ];
+    packageSets.extraPackages = with pkgs; [
+      betterdisplay
+      rectangle
+    ];
     macApps.systemApplications = [
       {
         package = pkgs.chatgpt;
@@ -174,6 +189,7 @@
         package = pkgs.vscode-insiders;
         mode = "copy";
       }
+      { package = pkgs.netnewswire; }
       { package = pkgs.wispr-flow; }
       { package = pkgs.zoom-us; }
     ];
@@ -198,6 +214,23 @@
       };
     };
     stylix.wallpaper = ./wallpaper.jpeg;
+  };
+
+  catppuccin = lib.mkIf (config.theme.name == "catppuccin") {
+    flavor = config.theme.variant;
+    accent = config.theme.accentColor;
+
+    # Keep Stylix as the broad theming baseline, then selectively use
+    # catppuccin/nix where we were previously unmanaged or where the dedicated
+    # Catppuccin port gives us richer app-native theming.
+    bottom.enable = true;
+    eza.enable = true;
+    element-desktop.enable = true;
+    gemini-cli.enable = true;
+    vscode.profiles.default = {
+      enable = true;
+      icons.enable = true;
+    };
   };
 
   programs = {
@@ -329,8 +362,8 @@
       enable = true;
       settings = {
         misc.disable = [
-          # "brew_cask"
-          # "brew_formula"
+          "brew_cask"
+          "brew_formula"
           "home_manager"
           # "cursor"
         ];

@@ -13,10 +13,10 @@ from __future__ import annotations
 import importlib
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol, TypeGuard
+from typing import Protocol, TypeGuard, cast
 
 import yaml
 
@@ -74,6 +74,8 @@ class _ResolverLike(Protocol):
 class _RegistryLike(Protocol):
     def resolver(self) -> _ResolverLike: ...
 
+    def with_resources(self, pairs: Iterable[tuple[str, object]]) -> _RegistryLike: ...
+
 
 def _load_yaml(name: str) -> JsonObject:
     """Load a YAML schema file by base name (without .yaml extension)."""
@@ -82,7 +84,7 @@ def _load_yaml(name: str) -> JsonObject:
         return _coerce_json_object(yaml.safe_load(f), context=f"schema {path.name}")
 
 
-def _build_registry() -> object:
+def _build_registry() -> _RegistryLike:
     """Build a referencing.Registry containing all vendored schemas.
 
     Each schema is registered under its relative filename (e.g.,
@@ -92,7 +94,7 @@ def _build_registry() -> object:
     referencing = importlib.import_module("referencing")
     referencing_jsonschema = importlib.import_module("referencing.jsonschema")
 
-    resources: list[tuple[str, Any]] = []
+    resources: list[tuple[str, object]] = []
 
     for yaml_file in sorted(SCHEMAS_DIR.glob("*.yaml")):
         schema = _load_yaml(yaml_file.stem)
@@ -115,7 +117,8 @@ def _build_registry() -> object:
         if isinstance(schema_id, str) and schema_id:
             resources.append((schema_id, resource))
 
-    return referencing.Registry().with_resources(resources)
+    registry = cast("_RegistryLike", referencing.Registry())
+    return registry.with_resources(resources)
 
 
 def _walk_pointer(doc: object, fragment: str) -> object:

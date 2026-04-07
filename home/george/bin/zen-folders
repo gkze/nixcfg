@@ -53,6 +53,7 @@ import subprocess
 import sys
 import time
 import uuid as uuidlib
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, cast
@@ -62,10 +63,9 @@ import yaml
 from yaml.constructor import ConstructorError
 from yaml.resolver import BaseResolver
 
-try:
-    fcntl: Any = __import__("fcntl")
-except ImportError:  # pragma: no cover - non-POSIX fallback
-    fcntl = None
+fcntl: Any = None
+with suppress(ImportError):  # pragma: no cover - non-POSIX fallback
+    fcntl = __import__("fcntl")
 
 ZEN_APPLICATION_SUPPORT: Final = Path.home() / "Library/Application Support/zen"
 ZEN_PROFILES: Final = ZEN_APPLICATION_SUPPORT / "Profiles"
@@ -142,6 +142,14 @@ class WorkspaceSpec:
     container_tab_id: int | None = None
     has_collapsed_pinned_tabs: bool | None = None
     theme: WorkspaceThemeSpec | None = None
+
+
+@dataclass(frozen=True)
+class ZenRuntimeState:
+    """Best-effort runtime detection result for one profile."""
+
+    running: bool
+    warnings: tuple[str, ...] = ()
 
 
 def _stdout(message: str = "") -> None:
@@ -1077,27 +1085,51 @@ def zen_process_is_running() -> bool | None:
     return False
 
 
-def zen_is_running(profile: str | None) -> bool:
-    """Detect whether Zen appears to be actively using the target profile."""
+def inspect_zen_runtime(profile: str | None) -> ZenRuntimeState:
+    """Inspect runtime state and preserve any detection uncertainty."""
+    lock_paths = zen_lock_paths(profile)
     lock_state = zen_profile_lock_state(profile)
     if lock_state is not None:
-        return lock_state
+        return ZenRuntimeState(running=lock_state)
 
+    warnings = [
+        "Could not confirm whether the profile lock is active; falling back to "
+        "process inspection."
+    ]
     process_state = zen_process_is_running()
     if process_state is not None:
-        return process_state
+        return ZenRuntimeState(running=process_state, warnings=tuple(warnings))
 
-    return bool(zen_lock_paths(profile))
+    warnings.append(
+        "Could not inspect Zen processes either; treating existing profile lock "
+        f"files as {'active' if lock_paths else 'inactive'}."
+    )
+    return ZenRuntimeState(running=bool(lock_paths), warnings=tuple(warnings))
 
 
-def require_zen_closed(profile: str | None) -> None:
+def zen_is_running(profile: str | None) -> bool:
+    """Detect whether Zen appears to be actively using the target profile."""
+    return inspect_zen_runtime(profile).running
+
+
+def _print_runtime_warnings(state: ZenRuntimeState) -> None:
+    """Render runtime-detection warnings to stderr."""
+    for warning in state.warnings:
+        _stderr(f"Warning: {warning}")
+
+
+def require_zen_closed(profile: str | None) -> ZenRuntimeState:
     """Abort when Zen is currently running against the target profile."""
     path = session_file(profile)
-    if zen_is_running(profile):
+    state = inspect_zen_runtime(profile)
+    if state.running:
         msg = f"Zen is running. Quit it first. (It may overwrite {path.name} on exit.)"
+        if state.warnings:
+            msg = f"{msg} Detection details: {' '.join(state.warnings)}"
         raise ZenFoldersError(
             msg,
         )
+    return state
 
 
 def backup_session(path: Path) -> Path:
@@ -1995,6 +2027,20 @@ def apply_plan(
     _reorder_workspace_folder_blocks(session, workspace_folders)
 
 
+def reconcile_workspace(
+    session: dict,
+    config_folders: list[dict],
+    workspace_uuid: str,
+    workspace_spec: WorkspaceSpec,
+    plan: Plan,
+) -> None:
+    """Apply workspace metadata and folder reconciliation in the required order."""
+    # New tabs inherit workspace-level metadata such as container IDs, so apply
+    # those updates before creating or moving any pinned tabs.
+    apply_workspace_metadata(session, workspace_uuid, workspace_spec)
+    apply_plan(session, config_folders, workspace_uuid, plan)
+
+
 # -- Commands -----------------------------------------------------------------
 
 
@@ -2426,7 +2472,8 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
 def cmd_apply(args: argparse.Namespace) -> int:
     """Apply reconciliation plan to session file (with backup)."""
-    require_zen_closed(args.profile)
+    runtime_state = require_zen_closed(args.profile)
+    _print_runtime_warnings(runtime_state)
     path, session = load_session(args.profile)
     raw_config = load_yaml(Path(args.config))
     workspace_spec, config_folders = parse_config(raw_config)
@@ -2470,8 +2517,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     backup = backup_session(path)
     _stdout(f"Backup: {backup.name}")
 
-    apply_workspace_metadata(session, workspace_uuid, workspace_spec)
-    apply_plan(session, config_folders, workspace_uuid, plan)
+    reconcile_workspace(session, config_folders, workspace_uuid, workspace_spec, plan)
     write_session(path, session)
     _stdout("Applied successfully.")
     return 0
@@ -2504,7 +2550,9 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 def cmd_is_running(args: argparse.Namespace) -> int:
     """Return whether Zen appears to be actively using the target profile."""
-    if zen_is_running(args.profile):
+    state = inspect_zen_runtime(args.profile)
+    _print_runtime_warnings(state)
+    if state.running:
         _stdout("running")
         return 0
     _stdout("not-running")

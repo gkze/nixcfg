@@ -120,13 +120,11 @@ let
     ) servers;
 
   baseOpencodeTui = {
+    theme = config.theme.slug;
     scroll_acceleration.enabled = true;
   };
 
-  baseOpencodeSettings = {
-    theme = config.theme.slug;
-  }
-  // optionalAttrs (cfg.plugins != [ ]) {
+  baseOpencodeSettings = optionalAttrs (cfg.plugins != [ ]) {
     plugin = cfg.plugins;
   };
 

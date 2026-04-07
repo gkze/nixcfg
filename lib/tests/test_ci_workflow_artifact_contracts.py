@@ -87,6 +87,14 @@ def test_artifact_contract_helper_error_paths(tmp_path: Path) -> None:
 def test_expand_jobs_reject_invalid_shapes() -> None:
     """Reject malformed workflow job shapes with clear errors."""
     try:
+        contracts._workflow_job_map({"bad": "nope"}, context="workflow jobs")
+    except TypeError as exc:
+        assert "workflow jobs.bad must be a mapping" in str(exc)
+    else:
+        msg = "expected invalid-job-mapping failure"
+        raise AssertionError(msg)
+
+    try:
         contracts._expand_jobs({"bad": {"steps": "nope"}})
     except TypeError as exc:
         assert "does not define steps as a list" in str(exc)

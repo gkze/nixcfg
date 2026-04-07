@@ -3,22 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass
-from typing import Any, ClassVar, cast
+from typing import ClassVar
 
 from pydantic import BaseModel, ValidationError
 
+from lib import json_utils
 from lib.nix.models.flake_lock import FlakeLockNode
+
+type JsonObject = json_utils.JsonObject
+type JsonValue = json_utils.JsonValue
 
 _METADATA_KIND_KEY = "__kind__"
 _METADATA_PAYLOAD_KEY = "payload"
 
 
 def _dataclass_payload(obj: object) -> dict[str, object]:
-    return {
-        field.name: getattr(obj, field.name)
-        for field in fields(cast("Any", obj))
-        if field.init
-    }
+    if not is_dataclass(obj) or isinstance(obj, type):
+        msg = f"Expected dataclass instance, got {type(obj).__name__}"
+        raise TypeError(msg)
+    return {field.name: getattr(obj, field.name) for field in fields(obj) if field.init}
 
 
 class MappingMetadata:
@@ -124,7 +127,7 @@ class FlakeInputMetadata(MappingMetadata):
 class PlatformAPIMetadata(MappingMetadata):
     """Metadata for platform API responses and equality fields."""
 
-    platform_info: dict[str, dict[str, object]]
+    platform_info: dict[str, JsonObject]
     equality_fields: dict[str, str]
     commit: str | None = None
 
@@ -145,7 +148,7 @@ class PlatformAPIMetadata(MappingMetadata):
 class ReleasePayloadMetadata(MappingMetadata):
     """Metadata carrying one validated upstream release payload."""
 
-    release: dict[str, object]
+    release: JsonObject
 
     KIND: ClassVar[str] = "release_payload"
 
@@ -159,7 +162,7 @@ type VersionMetadata = (
     | NoMetadata
     | PlatformAPIMetadata
     | ReleasePayloadMetadata
-    | dict[str, object]
+    | JsonObject
 )
 
 
@@ -177,14 +180,14 @@ class VersionInfo:
         if metadata is None:
             return None
         if isinstance(metadata, dict):
-            metadata_map = cast("dict[str, object]", metadata)
+            metadata_map = {str(key): value for key, value in metadata.items()}
             commit = metadata_map.get("commit")
             return commit if isinstance(commit, str) else None
         commit = getattr(metadata, "commit", None)
         return commit if isinstance(commit, str) else None
 
 
-_METADATA_TYPES: dict[str, type[object]] = {
+_METADATA_TYPES: dict[str, type[MappingMetadata]] = {
     AssetURLsMetadata.KIND: AssetURLsMetadata,
     DownloadUrlMetadata.KIND: DownloadUrlMetadata,
     FlakeInputMetadata.KIND: FlakeInputMetadata,
@@ -196,7 +199,7 @@ _METADATA_TYPES: dict[str, type[object]] = {
 }
 
 
-def _json_safe_value(value: object) -> object:
+def _json_safe_value(value: object) -> JsonValue:
     if isinstance(value, BaseModel):
         return _json_safe_value(value.model_dump())
     if is_dataclass(value) and not isinstance(value, type):
@@ -212,7 +215,7 @@ def _json_safe_value(value: object) -> object:
     raise TypeError(msg)
 
 
-def serialize_metadata(metadata: object | None) -> object:
+def serialize_metadata(metadata: object | None) -> JsonValue | None:
     """Return JSON-safe serialized metadata with type markers when needed."""
     if metadata is None:
         return None
@@ -232,7 +235,9 @@ def serialize_metadata(metadata: object | None) -> object:
     return _json_safe_value(metadata)
 
 
-def _deserialize_dataclass_metadata(kind: str, payload: dict[str, object]) -> object:
+def _deserialize_dataclass_metadata(
+    kind: str, payload: dict[str, object]
+) -> MappingMetadata:
     metadata_type = _METADATA_TYPES.get(kind)
     if metadata_type is None:
         msg = f"Unknown pinned version metadata kind: {kind!r}"
@@ -250,7 +255,7 @@ def deserialize_metadata(payload: object) -> object | None:
         return None
     if not isinstance(payload, dict):
         return payload
-    payload_map = cast("dict[str, object]", payload)
+    payload_map = {str(key): value for key, value in payload.items()}
 
     kind = payload_map.get(_METADATA_KIND_KEY)
     if isinstance(kind, str):

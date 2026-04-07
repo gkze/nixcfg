@@ -8,11 +8,14 @@ import re
 from dataclasses import dataclass
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
-from typing import Any, cast
 
 import yaml
 
+from lib import json_utils
 from lib.update.paths import REPO_ROOT
+
+type WorkflowValue = json_utils.JsonValue
+type WorkflowObject = json_utils.JsonObject
 
 _DOWNLOAD_ACTION_PREFIX = "actions/download-artifact@"
 _GLOB_CHARS = frozenset("*?[")
@@ -24,13 +27,21 @@ _SOURCES_MATERIALIZER_MARKERS = (
 _UPLOAD_ACTION_PREFIX = "actions/upload-artifact@"
 
 
+def _stringify_yaml_keys(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(key): _stringify_yaml_keys(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_stringify_yaml_keys(item) for item in value]
+    return value
+
+
 @dataclass(frozen=True)
 class WorkflowJob:
     """One concrete workflow job after matrix expansion."""
 
     job_id: str
     instance_id: str
-    steps: tuple[dict[str, Any], ...]
+    steps: tuple[WorkflowObject, ...]
 
 
 @dataclass(frozen=True)
@@ -75,7 +86,24 @@ def _has_glob(path_spec: str) -> bool:
     return any(char in path_spec for char in _GLOB_CHARS)
 
 
-def _parse_path_specs(raw_value: object) -> tuple[str, ...]:
+def _workflow_object(value: object, *, context: str) -> WorkflowObject:
+    return json_utils.coerce_json_object(_stringify_yaml_keys(value), context=context)
+
+
+def _workflow_job_map(value: object, *, context: str) -> dict[str, WorkflowObject]:
+    jobs = _workflow_object(value, context=context)
+    workflow_jobs: dict[str, WorkflowObject] = {}
+    for job_id, job_data in jobs.items():
+        if not isinstance(job_data, dict):
+            msg = f"{context}.{job_id} must be a mapping"
+            raise TypeError(msg)
+        workflow_jobs[job_id] = _workflow_object(
+            job_data, context=f"{context}.{job_id}"
+        )
+    return workflow_jobs
+
+
+def _parse_path_specs(raw_value: WorkflowValue | None) -> tuple[str, ...]:
     """Split an artifact ``path`` input into normalized path specs."""
     if raw_value is None:
         return ()
@@ -161,7 +189,10 @@ def _materialized_paths_for(
     return tuple(_join_relpath(destination, path) for path in upload.stored_paths)
 
 
-def _substitute_matrix(value: object, matrix_values: dict[str, object]) -> object:
+def _substitute_matrix(
+    value: WorkflowValue,
+    matrix_values: WorkflowObject,
+) -> WorkflowValue:
     """Render simple ``${{ matrix.foo }}`` expressions in YAML values."""
     if isinstance(value, str):
         return _MATRIX_EXPR.sub(
@@ -177,7 +208,7 @@ def _substitute_matrix(value: object, matrix_values: dict[str, object]) -> objec
     return value
 
 
-def _expand_jobs(workflow_jobs: dict[str, dict[str, Any]]) -> tuple[WorkflowJob, ...]:
+def _expand_jobs(workflow_jobs: dict[str, WorkflowObject]) -> tuple[WorkflowJob, ...]:
     """Expand matrix ``include`` jobs into concrete workflow jobs."""
     jobs: list[WorkflowJob] = []
     for job_id, job_data in workflow_jobs.items():
@@ -195,11 +226,12 @@ def _expand_jobs(workflow_jobs: dict[str, dict[str, Any]]) -> tuple[WorkflowJob,
                 if not isinstance(matrix_values, dict):
                     msg = f"Unsupported matrix include entry in job {job_id}: {matrix_values!r}"
                     raise TypeError(msg)
-                matrix_context = {
-                    str(key): value for key, value in matrix_values.items()
-                }
-                steps_list: list[dict[str, Any]] = []
-                for step in raw_steps:
+                matrix_context = _workflow_object(
+                    matrix_values,
+                    context=f"workflow job {job_id} matrix.include[{index}]",
+                )
+                steps_list: list[WorkflowObject] = []
+                for step_index, step in enumerate(raw_steps, start=1):
                     if not isinstance(step, dict):
                         continue
                     substituted = _substitute_matrix(step, matrix_context)
@@ -208,10 +240,12 @@ def _expand_jobs(workflow_jobs: dict[str, dict[str, Any]]) -> tuple[WorkflowJob,
                             f"Workflow step in job {job_id} expanded to {substituted!r}"
                         )
                         raise TypeError(msg)
-                    substituted_dict = cast("dict[object, Any]", substituted)
-                    steps_list.append({
-                        str(key): value for key, value in substituted_dict.items()
-                    })
+                    steps_list.append(
+                        _workflow_object(
+                            substituted,
+                            context=f"workflow job {job_id} step {step_index}",
+                        )
+                    )
                 label = ",".join(
                     f"{key}={matrix_context[key]}" for key in sorted(matrix_context)
                 ) or str(index)
@@ -224,11 +258,15 @@ def _expand_jobs(workflow_jobs: dict[str, dict[str, Any]]) -> tuple[WorkflowJob,
                 )
             continue
 
-        steps_list: list[dict[str, Any]] = []
-        for step in raw_steps:
+        steps_list: list[WorkflowObject] = []
+        for step_index, step in enumerate(raw_steps, start=1):
             if not isinstance(step, dict):
                 continue
-            steps_list.append({str(key): value for key, value in step.items()})
+            steps_list.append(
+                _workflow_object(
+                    step, context=f"workflow job {job_id} step {step_index}"
+                )
+            )
         jobs.append(
             WorkflowJob(
                 job_id=job_id,
@@ -240,14 +278,14 @@ def _expand_jobs(workflow_jobs: dict[str, dict[str, Any]]) -> tuple[WorkflowJob,
     return tuple(jobs)
 
 
-def _step_name(step: dict[str, Any], *, fallback: str) -> str:
+def _step_name(step: WorkflowObject, *, fallback: str) -> str:
     """Return a stable, human-readable name for one workflow step."""
     raw_name = step.get("name")
     return str(raw_name).strip() if raw_name else fallback
 
 
 def _build_upload(
-    step: dict[str, Any],
+    step: WorkflowObject,
     *,
     job_id: str,
     job_instance_id: str,
@@ -285,7 +323,7 @@ def _build_upload(
 
 
 def _build_download(
-    step: dict[str, Any],
+    step: WorkflowObject,
     *,
     job_id: str,
     step_index: int,
@@ -352,7 +390,7 @@ def _parse_job_needs(raw_needs: object, *, job_id: str) -> tuple[str, ...]:
 
 
 def _build_needs_graph(
-    workflow_jobs: dict[str, dict[str, Any]],
+    workflow_jobs: dict[str, WorkflowObject],
 ) -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]]:
     """Validate job dependencies and return direct/transitive needs."""
     direct_needs: dict[str, frozenset[str]] = {}
@@ -407,7 +445,7 @@ def _render_missing_need_error(
 
 
 def _materialized_paths_from_run_step(
-    step: dict[str, Any], *, repo_root: Path
+    step: WorkflowObject, *, repo_root: Path
 ) -> tuple[str, ...]:
     """Return repo-relative paths materialized by known transformation steps."""
     run_value = step.get("run")
@@ -583,14 +621,22 @@ def validate_workflow_artifact_contracts(
     """Raise ``RuntimeError`` when artifact flow semantics are inconsistent."""
     workflow_path = Path(workflow_path)
     repo_root = Path(repo_root)
-    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    workflow = _workflow_object(
+        yaml.safe_load(workflow_path.read_text(encoding="utf-8")),
+        context=f"workflow {workflow_path}",
+    )
     jobs_data = workflow.get("jobs")
     if not isinstance(jobs_data, dict):
         msg = f"Workflow {workflow_path} does not contain a jobs mapping"
         raise TypeError(msg)
 
-    _, transitive_needs = _build_needs_graph(jobs_data)
-    jobs = _expand_jobs(jobs_data)
+    workflow_jobs = _workflow_job_map(
+        jobs_data,
+        context=f"workflow jobs {workflow_path}",
+    )
+
+    _, transitive_needs = _build_needs_graph(workflow_jobs)
+    jobs = _expand_jobs(workflow_jobs)
     uploads, errors = _collect_uploads(jobs, repo_root=repo_root)
     for job in jobs:
         errors.extend(

@@ -146,11 +146,6 @@ in
       shell = pkgs.zsh;
     };
 
-    environment.systemPackages = with pkgs; [
-      betterdisplay
-      rectangle
-    ];
-
     networking.applicationFirewall.allowSignedApp = cfg.security.firewallAllowSigned;
 
     security.pam.services.sudo_local.touchIdAuth = cfg.security.touchIdSudo;

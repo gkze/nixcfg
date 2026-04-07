@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-+RS3xCgVTLD/1LXa5gaQLDeByRH7CoW5N9GshDr50A0=",
+    "x86_64-darwin": "sha256-+RS3xCgVTLD/1LXa5gaQLDeByRH7CoW5N9GshDr50A0="
+  },
+  "urls": {
+    "aarch64-darwin": "https://netnewswire.com/NetNewsWire.zip",
+    "x86_64-darwin": "https://netnewswire.com/NetNewsWire.zip"
+  },
+  "version": "7.0.4"
+}

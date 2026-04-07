@@ -25,6 +25,8 @@ from lib.update.updaters.github_release import GitHubReleaseUpdater
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.nix.models.sources import SourceEntry
+
 
 @register_updater
 class CrushUpdater(GitHubReleaseUpdater):
@@ -60,7 +62,7 @@ class CrushUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | object | None = None,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Compute source and vendor fixed-output hashes for the release."""
         _ = (session, context)

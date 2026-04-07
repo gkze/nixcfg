@@ -526,33 +526,27 @@ app.add_typer(workflow_update_app, name="update-app")
 app.add_typer(workflow_update_targets_app, name="update-targets")
 
 
-@workflow_darwin_app.command("build")
+def _exit_with_code(code: int) -> None:
+    raise typer.Exit(code=code)
+
+
 def command_build_darwin_config(
     host: str = typer.Argument(..., help="Darwin host from matrix, e.g. argus."),
 ) -> None:
     """Build one darwin configuration by host name."""
-    raise typer.Exit(code=_cmd_build_darwin_config(host=host))
+    _exit_with_code(_cmd_build_darwin_config(host=host))
 
 
-@workflow_darwin_app.command("eval-lock-smoke")
 def command_eval_darwin_lock_smoke() -> None:
     """Evaluate lock-only-safe Darwin config expressions after a lock refresh."""
-    raise typer.Exit(code=_cmd_eval_darwin_lock_smoke())
+    _exit_with_code(_cmd_eval_darwin_lock_smoke())
 
 
-@workflow_darwin_app.command("eval-full-smoke")
 def command_eval_darwin_full_smoke() -> None:
     """Dry-run full Darwin outputs once generated artifacts are materialized."""
-    raise typer.Exit(code=_cmd_eval_darwin_full_smoke())
+    _exit_with_code(_cmd_eval_darwin_full_smoke())
 
 
-@workflow_darwin_app.command("eval-smoke")
-def command_eval_darwin_smoke_compat() -> None:
-    """Backward-compatible alias for `darwin eval-full-smoke`."""
-    raise typer.Exit(code=_cmd_eval_darwin_full_smoke())
-
-
-@workflow_darwin_app.command("free")
 def command_free_disk_space(
     *,
     force_local: Annotated[
@@ -565,28 +559,24 @@ def command_free_disk_space(
     ] = False,
 ) -> None:
     """Free disk space on Linux or macOS CI runners."""
-    raise typer.Exit(code=_cmd_free_disk_space(force_local=force_local))
+    _exit_with_code(_cmd_free_disk_space(force_local=force_local))
 
 
-@workflow_darwin_app.command("install")
 def command_install_darwin_tools() -> None:
     """Install macOS-specific tools for CI."""
-    raise typer.Exit(code=_cmd_install_darwin_tools())
+    _exit_with_code(_cmd_install_darwin_tools())
 
 
-@workflow_flake_app.command("prefetch")
 def command_prefetch_flake_inputs() -> None:
     """Pre-fetch flake inputs for CI jobs."""
-    raise typer.Exit(code=_cmd_prefetch_flake_inputs())
+    _exit_with_code(_cmd_prefetch_flake_inputs())
 
 
-@workflow_flake_app.command("update")
 def command_nix_flake_update() -> None:
     """Run `nix flake update`."""
-    raise typer.Exit(code=_cmd_nix_flake_update())
+    _exit_with_code(_cmd_nix_flake_update())
 
 
-@workflow_pr_body_app.callback(invoke_without_command=True)
 def command_generate_pr_body(
     *,
     base_ref: Annotated[
@@ -615,8 +605,8 @@ def command_generate_pr_body(
     ],
 ) -> None:
     """Generate pull request body markdown for update runs."""
-    raise typer.Exit(
-        code=_cmd_generate_pr_body(
+    _exit_with_code(
+        _cmd_generate_pr_body(
             output=output,
             workflow_url=workflow_url,
             server_url=server_url,
@@ -627,19 +617,16 @@ def command_generate_pr_body(
     )
 
 
-@workflow_update_app.callback(invoke_without_command=True)
 def command_smoke_check_update_app() -> None:
     """Smoke-check that the update app evaluates."""
-    raise typer.Exit(code=_cmd_smoke_check_update_app())
+    _exit_with_code(_cmd_smoke_check_update_app())
 
 
-@workflow_update_targets_app.callback(invoke_without_command=True)
 def command_list_update_targets() -> None:
     """List update targets discovered by the update app."""
-    raise typer.Exit(code=_cmd_list_update_targets())
+    _exit_with_code(_cmd_list_update_targets())
 
 
-@app.command("verify-artifacts")
 def command_verify_artifacts(
     *,
     workflow: Annotated[
@@ -652,10 +639,9 @@ def command_verify_artifacts(
     ] = Path(".github/workflows/update.yml"),
 ) -> None:
     """Validate artifact path contracts in one workflow file."""
-    raise typer.Exit(code=_cmd_verify_artifacts(workflow=workflow))
+    _exit_with_code(_cmd_verify_artifacts(workflow=workflow))
 
 
-@app.command("verify-structure")
 def command_verify_structure(
     *,
     workflow: Annotated[
@@ -668,10 +654,9 @@ def command_verify_structure(
     ] = Path(".github/workflows/update.yml"),
 ) -> None:
     """Validate higher-level structure contracts in one workflow file."""
-    raise typer.Exit(code=_cmd_verify_structure(workflow=workflow))
+    _exit_with_code(_cmd_verify_structure(workflow=workflow))
 
 
-@app.command("validate-bun-lock")
 def command_validate_bun_lock(
     *,
     lock_file: Annotated[
@@ -684,10 +669,9 @@ def command_validate_bun_lock(
     ] = Path("bun.lock"),
 ) -> None:
     """Validate exact-version consistency for source-package Bun overrides."""
-    raise typer.Exit(code=_cmd_validate_bun_lock(lock_file=lock_file))
+    _exit_with_code(_cmd_validate_bun_lock(lock_file=lock_file))
 
 
-@app.command("prepare-bun-lock")
 def command_prepare_bun_lock(
     *,
     workspace_root: Annotated[
@@ -716,8 +700,8 @@ def command_prepare_bun_lock(
     ] = "bun",
 ) -> None:
     """Validate a Bun lock and relock once when source overrides disagree."""
-    raise typer.Exit(
-        code=_cmd_prepare_bun_lock(
+    _exit_with_code(
+        _cmd_prepare_bun_lock(
             workspace_root=workspace_root,
             lock_file=lock_file,
             bun_executable=bun_executable,
@@ -725,117 +709,63 @@ def command_prepare_bun_lock(
     )
 
 
-@app.command("build-darwin-config")
-def command_build_darwin_config_legacy(
-    host: str = typer.Argument(..., help="Darwin host from matrix, e.g. argus."),
-) -> None:
-    """Alias for `darwin build`."""
-    raise typer.Exit(code=_cmd_build_darwin_config(host=host))
+workflow_darwin_app.command("build")(command_build_darwin_config)
+workflow_darwin_app.command("eval-lock-smoke")(command_eval_darwin_lock_smoke)
+workflow_darwin_app.command("eval-full-smoke")(command_eval_darwin_full_smoke)
+workflow_darwin_app.command(
+    "eval-smoke",
+    help="Backward-compatible alias for `darwin eval-full-smoke`.",
+)(command_eval_darwin_full_smoke)
+workflow_darwin_app.command("free")(command_free_disk_space)
+workflow_darwin_app.command("install")(command_install_darwin_tools)
 
+workflow_flake_app.command("prefetch")(command_prefetch_flake_inputs)
+workflow_flake_app.command("update")(command_nix_flake_update)
 
-@app.command("eval-darwin-lock-smoke")
-def command_eval_darwin_lock_smoke_legacy() -> None:
-    """Alias for `darwin eval-lock-smoke`."""
-    raise typer.Exit(code=_cmd_eval_darwin_lock_smoke())
+workflow_pr_body_app.callback(invoke_without_command=True)(command_generate_pr_body)
+workflow_update_app.callback(invoke_without_command=True)(
+    command_smoke_check_update_app
+)
+workflow_update_targets_app.callback(invoke_without_command=True)(
+    command_list_update_targets
+)
 
-
-@app.command("eval-darwin-full-smoke")
-def command_eval_darwin_full_smoke_legacy() -> None:
-    """Alias for `darwin eval-full-smoke`."""
-    raise typer.Exit(code=_cmd_eval_darwin_full_smoke())
-
-
-@app.command("eval-darwin-smoke")
-def command_eval_darwin_smoke_legacy() -> None:
-    """Backward-compatible alias for `darwin eval-full-smoke`."""
-    raise typer.Exit(code=_cmd_eval_darwin_full_smoke())
-
-
-@app.command("free-disk-space")
-def command_free_disk_space_legacy(
-    *,
-    force_local: Annotated[
-        bool,
-        typer.Option(
-            "-f",
-            "--force-local",
-            help="Allow destructive cleanup when not running in CI.",
-        ),
-    ] = False,
-) -> None:
-    """Legacy alias for CI runner disk cleanup."""
-    raise typer.Exit(code=_cmd_free_disk_space(force_local=force_local))
-
-
-@app.command("install-darwin-tools")
-def command_install_darwin_tools_legacy() -> None:
-    """Alias for `darwin install`."""
-    raise typer.Exit(code=_cmd_install_darwin_tools())
-
-
-@app.command("prefetch-flake-inputs")
-def command_prefetch_flake_inputs_legacy() -> None:
-    """Alias for `flake prefetch`."""
-    raise typer.Exit(code=_cmd_prefetch_flake_inputs())
-
-
-@app.command("nix-flake-update")
-def command_nix_flake_update_legacy() -> None:
-    """Alias for `flake update`."""
-    raise typer.Exit(code=_cmd_nix_flake_update())
-
-
-@app.command("generate-pr-body")
-def command_generate_pr_body_legacy(
-    *,
-    base_ref: Annotated[
-        str,
-        typer.Option("-b", "--base-ref", help="Base branch for compare."),
-    ],
-    compare_head: Annotated[
-        str,
-        typer.Option("-c", "--compare-head", help="Head branch used in compare links."),
-    ] = "update_flake_lock_action",
-    output: Annotated[
-        Path,
-        typer.Option("-o", "--output", help="Path to write PR body."),
-    ],
-    repository: Annotated[
-        str,
-        typer.Option("-r", "--repository", help="owner/repo."),
-    ],
-    server_url: Annotated[
-        str,
-        typer.Option("-s", "--server-url", help="GitHub server URL."),
-    ],
-    workflow_url: Annotated[
-        str,
-        typer.Option("-w", "--workflow-url", help="Workflow run URL."),
-    ],
-) -> None:
-    """Alias for `pr-body`."""
-    raise typer.Exit(
-        code=_cmd_generate_pr_body(
-            output=output,
-            workflow_url=workflow_url,
-            server_url=server_url,
-            repository=repository,
-            base_ref=base_ref,
-            compare_head=compare_head,
-        )
-    )
-
-
-@app.command("smoke-check-update-app")
-def command_smoke_check_update_app_legacy() -> None:
-    """Alias for `update-app`."""
-    raise typer.Exit(code=_cmd_smoke_check_update_app())
-
-
-@app.command("list-update-targets")
-def command_list_update_targets_legacy() -> None:
-    """Alias for `update-targets`."""
-    raise typer.Exit(code=_cmd_list_update_targets())
+app.command("verify-artifacts")(command_verify_artifacts)
+app.command("verify-structure")(command_verify_structure)
+app.command("validate-bun-lock")(command_validate_bun_lock)
+app.command("prepare-bun-lock")(command_prepare_bun_lock)
+app.command("build-darwin-config", help="Alias for `darwin build`.")(
+    command_build_darwin_config
+)
+app.command("eval-darwin-lock-smoke", help="Alias for `darwin eval-lock-smoke`.")(
+    command_eval_darwin_lock_smoke
+)
+app.command("eval-darwin-full-smoke", help="Alias for `darwin eval-full-smoke`.")(
+    command_eval_darwin_full_smoke
+)
+app.command(
+    "eval-darwin-smoke",
+    help="Backward-compatible alias for `darwin eval-full-smoke`.",
+)(command_eval_darwin_full_smoke)
+app.command("free-disk-space", help="Legacy alias for CI runner disk cleanup.")(
+    command_free_disk_space
+)
+app.command("install-darwin-tools", help="Alias for `darwin install`.")(
+    command_install_darwin_tools
+)
+app.command("prefetch-flake-inputs", help="Alias for `flake prefetch`.")(
+    command_prefetch_flake_inputs
+)
+app.command("nix-flake-update", help="Alias for `flake update`.")(
+    command_nix_flake_update
+)
+app.command("generate-pr-body", help="Alias for `pr-body`.")(command_generate_pr_body)
+app.command("smoke-check-update-app", help="Alias for `update-app`.")(
+    command_smoke_check_update_app
+)
+app.command("list-update-targets", help="Alias for `update-targets`.")(
+    command_list_update_targets
+)
 
 
 main = make_main(app, prog_name="workflow-steps")

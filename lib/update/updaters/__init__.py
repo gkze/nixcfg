@@ -8,7 +8,7 @@ explicit ``register_updater(...)`` calls or factory helpers, which populate
 import importlib.util
 import sys
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import lib.update.updaters.base as _updaters_base
 import lib.update.updaters.github_raw_file as _github_raw_file_module
@@ -16,7 +16,7 @@ import lib.update.updaters.github_release as _github_release_module
 import lib.update.updaters.platform_api as _platform_api_module
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters.module_manifest import UPDATER_MODULE_PATHS
-from lib.update.updaters.registry import UPDATERS, register_updater
+from lib.update.updaters.registry import UPDATERS, UpdaterClass, register_updater
 
 CargoLockGitDep = _updaters_base.CargoLockGitDep
 ChecksumProvidedUpdater = _updaters_base.ChecksumProvidedUpdater
@@ -88,9 +88,9 @@ def ensure_updaters_loaded() -> dict[str, type[Updater]]:
 
 
 def resolve_registry_alias(
-    registry_alias: dict[str, type[Any]],
-    loader: Callable[[], dict[str, type[Updater]]] | None = None,
-) -> dict[str, type[Any]]:
+    registry_alias: dict[str, UpdaterClass],
+    loader: Callable[[], dict[str, UpdaterClass]] | None = None,
+) -> dict[str, UpdaterClass]:
     """Return a registry alias or lazily load the shared updater registry."""
     if registry_alias is not UPDATERS:
         return registry_alias
@@ -113,6 +113,7 @@ __all__ = [
     "PlatformAPIUpdater",
     "UpdateContext",
     "Updater",
+    "UpdaterClass",
     "UvLockUpdater",
     "VersionInfo",
     "bun_node_modules_updater",

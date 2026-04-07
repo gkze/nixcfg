@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     import aiohttp
@@ -49,11 +49,16 @@ class CommanderUpdater(DownloadHashUpdater):
         metadata = info.metadata
         if metadata is None:
             return None
-        if isinstance(metadata, dict):
-            metadata_map = cast("dict[str, object]", metadata)
-            url = metadata_map.get("url")
-        else:
-            url = getattr(metadata, "url", None)
+        metadata_map = (
+            {str(key): value for key, value in metadata.items()}
+            if isinstance(metadata, dict)
+            else None
+        )
+        url = (
+            metadata_map.get("url")
+            if metadata_map is not None
+            else getattr(metadata, "url", None)
+        )
         return url if isinstance(url, str) else None
 
     @staticmethod

@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -188,11 +189,10 @@ func runRoute(path string, target string) error {
 	if err != nil {
 		return err
 	}
-	workingDirectory, err := os.Getwd()
+	workingDirectory, err := resolveWorkingDirectory(path)
 	if err != nil {
-		return fmt.Errorf("resolve working directory: %w", err)
+		return err
 	}
-	workingDirectory = detectWorkspaceRoot(workingDirectory, path)
 	provider, err := workflowProvider()
 	if err != nil {
 		return err
@@ -230,11 +230,10 @@ func runPrepare(path string, target string) error {
 	if err != nil {
 		return err
 	}
-	workingDirectory, err := os.Getwd()
+	workingDirectory, err := resolveWorkingDirectory(path)
 	if err != nil {
-		return fmt.Errorf("resolve working directory: %w", err)
+		return err
 	}
-	workingDirectory = detectWorkspaceRoot(workingDirectory, path)
 	provider, err := workflowProvider()
 	if err != nil {
 		return err
@@ -353,11 +352,10 @@ func runWorkflow(path string, target string) error {
 }
 
 func runWorkflowContext(runContext context.Context, path string, target string) (err error) {
-	workingDirectory, err := os.Getwd()
+	workingDirectory, err := resolveWorkingDirectory(path)
 	if err != nil {
-		return fmt.Errorf("resolve working directory: %w", err)
+		return err
 	}
-	workingDirectory = detectWorkspaceRoot(workingDirectory, path)
 	workflowPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("resolve workflow path %q: %w", path, err)
@@ -376,7 +374,10 @@ func runWorkflowContext(runContext context.Context, path string, target string) 
 			fmt.Printf("state %s\n", statePath)
 		}
 	}()
-	expressions := localExpressionContext(workingDirectory)
+	expressions, err := localExpressionContext(workingDirectory)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ghawfr: warning: %v\n", err)
+	}
 	artifactStore := artifacts.NewStore(state.ArtifactsDir(workingDirectory))
 	cacheStore := ghcache.NewStore(state.CacheDir(workingDirectory))
 	normalizedTarget := strings.ToLower(strings.TrimSpace(target))
@@ -447,11 +448,10 @@ func qemuLaunchForWorkflow(path string, target string) (*workflow.Workflow, *wor
 	if err != nil {
 		return nil, nil, backend.WorkerPlan{}, qemu.MaterializedLaunch{}, err
 	}
-	workingDirectory, err := os.Getwd()
+	workingDirectory, err := resolveWorkingDirectory(path)
 	if err != nil {
-		return nil, nil, backend.WorkerPlan{}, qemu.MaterializedLaunch{}, fmt.Errorf("resolve working directory: %w", err)
+		return nil, nil, backend.WorkerPlan{}, qemu.MaterializedLaunch{}, err
 	}
-	workingDirectory = detectWorkspaceRoot(workingDirectory, path)
 	provider, err := workflowProvider()
 	if err != nil {
 		return nil, nil, backend.WorkerPlan{}, qemu.MaterializedLaunch{}, err
@@ -582,22 +582,41 @@ func runStatePath(workingDirectory string, workflowPath string) string {
 	return state.RunStatePath(workingDirectory, workflowPath)
 }
 
-func detectWorkspaceRoot(workingDirectory string, workflowPath string) string {
+func resolveWorkingDirectory(workflowPath string) (string, error) {
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory: %w", err)
+	}
+	resolved, detectErr := detectWorkspaceRoot(workingDirectory, workflowPath)
+	if detectErr != nil {
+		fmt.Fprintf(os.Stderr, "ghawfr: warning: %v\n", detectErr)
+	}
+	return resolved, nil
+}
+
+func detectWorkspaceRoot(workingDirectory string, workflowPath string) (string, error) {
 	workflowDir := filepath.Dir(workflowPath)
+	probeErrors := []error{}
 	if filepath.IsAbs(workflowDir) {
-		if root := gitOutput(workflowDir, "rev-parse", "--show-toplevel"); root != "" {
-			return root
+		if root, err := gitOutput(workflowDir, "rev-parse", "--show-toplevel"); err == nil {
+			return root, nil
+		} else {
+			probeErrors = append(probeErrors, err)
 		}
-		return workflowDir
+		return workflowDir, errors.Join(probeErrors...)
 	}
 	candidate := filepath.Join(workingDirectory, workflowDir)
-	if root := gitOutput(candidate, "rev-parse", "--show-toplevel"); root != "" {
-		return root
+	if root, err := gitOutput(candidate, "rev-parse", "--show-toplevel"); err == nil {
+		return root, nil
+	} else {
+		probeErrors = append(probeErrors, err)
 	}
-	if root := gitOutput(workingDirectory, "rev-parse", "--show-toplevel"); root != "" {
-		return root
+	if root, err := gitOutput(workingDirectory, "rev-parse", "--show-toplevel"); err == nil {
+		return root, nil
+	} else {
+		probeErrors = append(probeErrors, err)
 	}
-	return workingDirectory
+	return workingDirectory, errors.Join(probeErrors...)
 }
 
 func commandContext() (context.Context, context.CancelFunc) {
@@ -625,11 +644,24 @@ func configuredDuration(envName string, fallback time.Duration) (time.Duration, 
 	return duration, nil
 }
 
-func localExpressionContext(workingDirectory string) workflow.ExpressionContext {
-	branch := gitOutput(workingDirectory, "rev-parse", "--abbrev-ref", "HEAD")
-	sha := gitOutput(workingDirectory, "rev-parse", "HEAD")
-	before := gitOutput(workingDirectory, "rev-parse", "HEAD^")
-	defaultBranch := detectDefaultBranch(workingDirectory)
+func localExpressionContext(workingDirectory string) (workflow.ExpressionContext, error) {
+	probeErrors := []error{}
+	branch, err := gitOutput(workingDirectory, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		probeErrors = append(probeErrors, err)
+	}
+	sha, err := gitOutput(workingDirectory, "rev-parse", "HEAD")
+	if err != nil {
+		probeErrors = append(probeErrors, err)
+	}
+	before, err := gitOutput(workingDirectory, "rev-parse", "HEAD^")
+	if err != nil {
+		before = ""
+	}
+	defaultBranch, err := detectDefaultBranch(workingDirectory)
+	if err != nil {
+		probeErrors = append(probeErrors, err)
+	}
 	ref := ""
 	if branch != "" && branch != "HEAD" {
 		ref = "refs/heads/" + branch
@@ -658,7 +690,7 @@ func localExpressionContext(workingDirectory string) workflow.ExpressionContext 
 			Repository: filepath.Base(workingDirectory),
 			Workspace:  workingDirectory,
 		},
-	}
+	}, errors.Join(probeErrors...)
 }
 
 func localSecrets() workflow.SecretMap {
@@ -680,16 +712,17 @@ func localSecrets() workflow.SecretMap {
 	return secrets
 }
 
-func detectDefaultBranch(workingDirectory string) string {
-	value := gitOutput(workingDirectory, "symbolic-ref", "refs/remotes/origin/HEAD")
-	if value != "" {
+func detectDefaultBranch(workingDirectory string) (string, error) {
+	value, err := gitOutput(workingDirectory, "symbolic-ref", "refs/remotes/origin/HEAD")
+	if err == nil {
 		parts := strings.Split(value, "/")
-		return parts[len(parts)-1]
+		return parts[len(parts)-1], nil
 	}
-	if branch := gitOutput(workingDirectory, "branch", "--show-current"); branch != "" {
-		return branch
+	branch, branchErr := gitOutput(workingDirectory, "branch", "--show-current")
+	if branchErr == nil {
+		return branch, nil
 	}
-	return "main"
+	return "main", errors.Join(err, branchErr)
 }
 
 func localRunnerOS(goos string) string {
@@ -716,14 +749,19 @@ func localRunnerArch(goarch string) string {
 	}
 }
 
-func gitOutput(workingDirectory string, args ...string) string {
+func gitOutput(workingDirectory string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = workingDirectory
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return ""
+		command := fmt.Sprintf("git %s", strings.Join(args, " "))
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return "", fmt.Errorf("%s in %q failed: %s", command, workingDirectory, message)
 	}
-	return strings.TrimSpace(string(output))
+	return strings.TrimSpace(string(output)), nil
 }
 
 func eventNames(events []workflow.Event) []string {
@@ -743,8 +781,14 @@ func formatMatrixPairs(pairs []workflow.MatrixPair) string {
 }
 
 func formatOutputMap(values workflow.OutputMap) string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 	parts := make([]string, 0, len(values))
-	for key, value := range values {
+	for _, key := range keys {
+		value := values[key]
 		parts = append(parts, fmt.Sprintf("%s=%q", key, value))
 	}
 	return strings.Join(parts, ", ")

@@ -10,8 +10,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.nix.models.sources import HashEntry
+from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance, expect_not_none
+from lib.tests._nix_ast import assert_nix_ast_equal, parse_nix_expr
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import VersionInfo
@@ -47,66 +48,40 @@ def _require_hash_entries(payload: object) -> list[HashEntry]:
     return [expect_instance(entry, HashEntry) for entry in raw]
 
 
-@pytest.fixture(scope="module")
-def chatgpt_module() -> ModuleType:
-    """Run this test case."""
-    return _load_module("overlays/chatgpt/updater.py", "chatgpt_updater_test")
+def _module_fixture(path: str, fixture_name: str) -> object:
+    @pytest.fixture(scope="module", name=fixture_name)
+    def _fixture() -> ModuleType:
+        load_name = f"{fixture_name.removesuffix('_module')}_updater_test"
+        return _load_module(path, load_name)
+
+    return _fixture
 
 
-@pytest.fixture(scope="module")
-def code_cursor_module() -> ModuleType:
-    """Run this test case."""
-    return _load_module("overlays/code-cursor/updater.py", "code_cursor_updater_test")
-
-
-@pytest.fixture(scope="module")
-def datagrip_module() -> ModuleType:
-    """Run this test case."""
-    return _load_module("overlays/datagrip/updater.py", "datagrip_updater_test")
-
-
-@pytest.fixture(scope="module")
-def google_chrome_module() -> ModuleType:
-    """Run this test case."""
-    return _load_module(
-        "overlays/google-chrome/updater.py", "google_chrome_updater_test"
-    )
-
-
-@pytest.fixture(scope="module")
-def sentry_cli_module() -> ModuleType:
-    """Run this test case."""
-    return _load_module("overlays/sentry-cli/updater.py", "sentry_cli_updater_test")
-
-
-@pytest.fixture(scope="module")
-def conductor_module() -> ModuleType:
-    """Run this test case."""
-    return _load_module("packages/conductor/updater.py", "conductor_updater_test")
-
-
-@pytest.fixture(scope="module")
-def droid_module() -> ModuleType:
-    """Run this test case."""
-    return _load_module("packages/droid/updater.py", "droid_updater_test")
-
-
-@pytest.fixture(scope="module")
-def scratch_module() -> ModuleType:
-    """Run this test case."""
-    return _load_module("packages/scratch/updater.py", "scratch_updater_test")
-
-
-@pytest.fixture(scope="module")
-def sculptor_module() -> ModuleType:
-    """Run this test case."""
-    return _load_module("packages/sculptor/updater.py", "sculptor_updater_test")
+chatgpt_module = _module_fixture("overlays/chatgpt/updater.py", "chatgpt_module")
+code_cursor_module = _module_fixture(
+    "overlays/code-cursor/updater.py", "code_cursor_module"
+)
+datagrip_module = _module_fixture("overlays/datagrip/updater.py", "datagrip_module")
+google_chrome_module = _module_fixture(
+    "overlays/google-chrome/updater.py", "google_chrome_module"
+)
+goose_v8_module = _module_fixture("overlays/goose-v8/updater.py", "goose_v8_module")
+netnewswire_module = _module_fixture(
+    "packages/netnewswire/updater.py", "netnewswire_module"
+)
+sentry_cli_module = _module_fixture(
+    "overlays/sentry-cli/updater.py", "sentry_cli_module"
+)
+conductor_module = _module_fixture("packages/conductor/updater.py", "conductor_module")
+droid_module = _module_fixture("packages/droid/updater.py", "droid_module")
+scratch_module = _module_fixture("packages/scratch/updater.py", "scratch_module")
+sculptor_module = _module_fixture("packages/sculptor/updater.py", "sculptor_module")
 
 
 def test_chatgpt_updater_paths(
     chatgpt_module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Run this test case."""
+    """Exercise ChatGPT appcast parsing and download URL selection."""
     updater = chatgpt_module.ChatGPTUpdater()
     xml = (
         b'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
@@ -178,7 +153,7 @@ def test_code_cursor_updater_paths(
     code_cursor_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Run this test case."""
+    """Exercise Code Cursor platform URL and checksum helpers."""
     updater = code_cursor_module.CodeCursorUpdater()
     assert object.__getattribute__(updater, "_api_url")("darwin-arm64").endswith(
         "platform=darwin-arm64&releaseTrack=stable"
@@ -208,7 +183,7 @@ def test_code_cursor_updater_paths(
 def test_datagrip_updater_paths(
     datagrip_module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Run this test case."""
+    """Exercise DataGrip release parsing and checksum retrieval."""
     updater = datagrip_module.DataGripUpdater()
     payload = {
         "DG": [
@@ -275,7 +250,7 @@ def test_google_chrome_updater_paths(
     google_chrome_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Run this test case."""
+    """Exercise Google Chrome release parsing edge cases."""
     updater = google_chrome_module.GoogleChromeUpdater()
     assert updater.materialize_when_current is True
     monkeypatch.setattr(
@@ -303,11 +278,128 @@ def test_google_chrome_updater_paths(
         _run(updater.fetch_latest(object()))
 
 
+def test_netnewswire_updater_paths(
+    netnewswire_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise NetNewsWire appcast parsing and download URL selection."""
+    updater = netnewswire_module.NetNewsWireUpdater()
+    xml = (
+        b'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
+        b"<channel><item>"
+        b'<enclosure url="https://example.com/NetNewsWire.zip" '
+        b'sparkle:shortVersionString="7.0.4" />'
+        b"</item></channel></rss>"
+    )
+
+    monkeypatch.setattr(
+        netnewswire_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=xml),
+    )
+    latest = _run(updater.fetch_latest(object()))
+    assert latest.version == "7.0.4"
+    assert latest.metadata["url"] == "https://example.com/NetNewsWire.zip"
+
+    assert (
+        updater.get_download_url("aarch64-darwin", latest)
+        == "https://example.com/NetNewsWire.zip"
+    )
+    monkeypatch.setattr(
+        netnewswire_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=b"<"),
+    )
+    with pytest.raises(RuntimeError, match="Invalid appcast XML"):
+        _run(updater.fetch_latest(object()))
+
+    no_item = b"<rss><channel></channel></rss>"
+    monkeypatch.setattr(
+        netnewswire_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=no_item),
+    )
+    with pytest.raises(RuntimeError, match="No items found"):
+        _run(updater.fetch_latest(object()))
+
+    no_enclosure = b"<rss><channel><item /></channel></rss>"
+    monkeypatch.setattr(
+        netnewswire_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=no_enclosure),
+    )
+    with pytest.raises(RuntimeError, match="No enclosure found"):
+        _run(updater.fetch_latest(object()))
+
+    no_version = b"<rss><channel><item><enclosure url='x'/></item></channel></rss>"
+    monkeypatch.setattr(
+        netnewswire_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=no_version),
+    )
+    with pytest.raises(RuntimeError, match="No version found in appcast enclosure"):
+        _run(updater.fetch_latest(object()))
+
+    no_url = (
+        b'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
+        b"<channel><item><enclosure sparkle:shortVersionString='7.0.4' />"
+        b"</item></channel></rss>"
+    )
+    monkeypatch.setattr(
+        netnewswire_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=no_url),
+    )
+    with pytest.raises(RuntimeError, match="No URL found"):
+        _run(updater.fetch_latest(object()))
+
+
+def test_goose_v8_updater_skips_unchanged_pinned_revision(
+    goose_v8_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unchanged pinned goose-v8 revisions should not trigger rehash churn."""
+    updater = goose_v8_module.GooseV8Updater()
+    current = SourceEntry.model_validate({
+        "version": "dbb64c20b9062b358b101e4592abb3ca8f646c2b",
+        "input": "goose-v8",
+        "hashes": [
+            {
+                "hashType": "srcHash",
+                "hash": "sha256-UtbHrrBQleMb0KMyuX+7ELJJos3la7ZPtYv9Ri+kBTw=",
+            }
+        ],
+    })
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_drv_fingerprint",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("unexpected call")),
+    )
+
+    assert (
+        _run(
+            object.__getattribute__(updater, "_is_latest")(
+                current,
+                VersionInfo(version=current.version, metadata={}),
+            )
+        )
+        is True
+    )
+    assert (
+        _run(
+            object.__getattribute__(updater, "_is_latest")(
+                current,
+                VersionInfo(version="changed", metadata={}),
+            )
+        )
+        is False
+    )
+
+
 def test_sentry_cli_updater_paths(
     sentry_cli_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Run this test case."""
+    """Exercise Sentry CLI release parsing and fixed-output hashing."""
     updater = sentry_cli_module.SentryCliUpdater()
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
@@ -318,8 +410,19 @@ def test_sentry_cli_updater_paths(
 
     src_expr = object.__getattribute__(updater, "_src_nix_expr")("v2.0.0")
     cargo_expr = object.__getattribute__(updater, "_cargo_nix_expr")("v2.0.0", HASH_A)
-    assert "fetchFromGitHub" in src_expr
-    assert "fetchCargoVendor" in cargo_expr
+    assert_nix_ast_equal(
+        src_expr,
+        object.__getattribute__(updater, "_src_nix_expression")("v2.0.0"),
+    )
+    cargo_call = expect_instance(
+        parse_nix_expr(cargo_expr), sentry_cli_module.FunctionCall
+    )
+    assert_nix_ast_equal(
+        cargo_call.name,
+        sentry_cli_module.identifier_attr_path(
+            "pkgs", "rustPlatform", "fetchCargoVendor"
+        ),
+    )
 
     monkeypatch.setattr(sentry_cli_module, "_build_nix_expr", lambda expr: expr)
 
@@ -350,7 +453,7 @@ def test_sentry_cli_updater_paths(
 def test_conductor_updater_paths(
     conductor_module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Run this test case."""
+    """Exercise Conductor filename-based version parsing."""
     updater = conductor_module.ConductorUpdater()
     monkeypatch.setattr(
         conductor_module,
@@ -379,7 +482,7 @@ def test_conductor_updater_paths(
 def test_droid_updater_paths(
     droid_module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Run this test case."""
+    """Exercise Droid version parsing, checksum lookup, and URL building."""
     updater = droid_module.DroidUpdater()
     assert object.__getattribute__(updater, "_download_url")(
         "x86_64-linux", "1.0.0"
@@ -425,7 +528,7 @@ def test_droid_updater_paths(
 def test_scratch_updater_paths(
     scratch_module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Run this test case."""
+    """Exercise Scratch flake-backed version discovery and hash handling."""
     updater = scratch_module.ScratchUpdater()
 
     monkeypatch.setattr(
@@ -477,7 +580,7 @@ def test_scratch_updater_paths(
 def test_sculptor_updater_paths(
     sculptor_module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Run this test case."""
+    """Exercise Sculptor Last-Modified parsing and fallback behavior."""
     updater = sculptor_module.SculptorUpdater()
 
     monkeypatch.setattr(

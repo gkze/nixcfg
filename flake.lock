@@ -127,6 +127,26 @@
         "type": "github"
       }
     },
+    "catppuccin": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1775213373,
+        "narHash": "sha256-wJHsijC2l/E+ovmlpPGha8pXA6RHSwHWmBV97gvkmyI=",
+        "owner": "catppuccin",
+        "repo": "nix",
+        "rev": "ba73719e673e7c2d89ac2f8df0bc0d48983e4907",
+        "type": "github"
+      },
+      "original": {
+        "owner": "catppuccin",
+        "repo": "nix",
+        "type": "github"
+      }
+    },
     "catppuccin-bat": {
       "flake": false,
       "locked": {
@@ -1687,11 +1707,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1775329397,
-        "narHash": "sha256-dIJdvaxRm1d2ZRTEFekI+GtHYyWcmaujyaxfcU9DKH4=",
+        "lastModified": 1775538785,
+        "narHash": "sha256-L5oj0Wj8VTS5rI3iLwmYBl70c1GlM4EO9mtmUHftsNg=",
         "owner": "gkze",
         "repo": "opencode",
-        "rev": "78be4ef9dc13be103abae972449eb0db251a7b10",
+        "rev": "bfd9b318ff6ff2516883c1251f7132f23886e2f8",
         "type": "github"
       },
       "original": {
@@ -1868,6 +1888,7 @@
       "inputs": {
         "axiom-cli": "axiom-cli",
         "bun2nix": "bun2nix",
+        "catppuccin": "catppuccin",
         "catppuccin-bat": "catppuccin-bat",
         "catppuccin-delta": "catppuccin-delta",
         "catppuccin-zen-browser": "catppuccin-zen-browser",

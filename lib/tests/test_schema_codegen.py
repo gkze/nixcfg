@@ -13,12 +13,29 @@ from lib.schema_codegen import runner as codegen_runner
 from lib.schema_codegen.config import DirectorySource, SchemaFormat, URLSource
 from lib.schema_codegen.runner import (
     DEFAULT_CONFIG_PATH,
+    _build_registry,
     _entrypoint_class_suffix,
+    _prepare_entrypoint_schema,
     _resolve_body_class_conflicts,
+    _resolve_target,
     generate_schema_codegen_target,
     list_schema_codegen_targets,
     load_schema_codegen_config,
 )
+
+
+def _load_generated_module(output_path: Path, *, module_name: str) -> object:
+    """Import one generated Python module from *output_path*."""
+    spec = importlib.util.spec_from_file_location(module_name, output_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module.__name__] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(module.__name__, None)
+    return module
 
 
 def test_load_schema_codegen_config_resolves_relative_paths(tmp_path: Path) -> None:
@@ -334,10 +351,56 @@ def test_generate_schema_codegen_target_from_multiple_entrypoints_yields_valid_p
     tmp_path: Path,
 ) -> None:
     """Compose multi-entrypoint outputs into syntactically valid Python."""
-    repo_root = DEFAULT_CONFIG_PATH.parent
+    schemas_dir = tmp_path / "schemas"
+    schemas_dir.mkdir()
+    (schemas_dir / "alpha.json").write_text(
+        """
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Alpha",
+  "type": "object",
+  "properties": {
+    "shared": {
+      "title": "Shared",
+      "type": "object",
+      "properties": {
+        "value": {"type": "integer"}
+      },
+      "required": ["value"]
+    }
+  },
+  "required": ["shared"]
+}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (schemas_dir / "beta.json").write_text(
+        """
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Beta",
+  "type": "object",
+  "properties": {
+    "shared": {
+      "title": "Shared",
+      "type": "object",
+      "properties": {
+        "value": {"type": "string"}
+      },
+      "required": ["value"]
+    }
+  },
+  "required": ["shared"]
+}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
     config_path = tmp_path / "schema_codegen.yaml"
     config_path.write_text(
-        f"""
+        """
 defaults:
   generator:
     input_file_type: jsonschema
@@ -351,7 +414,7 @@ defaults:
 sources:
   local:
     kind: directory
-    path: {repo_root / "schemas/codegen"}
+    path: schemas
     include:
       - "*.json"
     format: json
@@ -368,11 +431,8 @@ targets:
       - local
     registry_profile: local
     entrypoints:
-      - ./codegen.schema.json
-      - ./codegen-lock.schema.json
-    prepare:
-      dereference: inline-refs
-      merge_ref_siblings: false
+      - ./alpha.json
+      - ./beta.json
     generator:
       output: generated.py
 """.lstrip(),
@@ -383,62 +443,45 @@ targets:
         config_path=config_path,
         target_name="demo",
     )
-    rendered = output_path.read_text(encoding="utf-8")
-    spec = importlib.util.spec_from_file_location("_generated_demo", output_path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module.__name__] = module
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(module.__name__, None)
-    manifest_model = module.CodegenManifest
-    lockfile_model = module.CodegenLockfile
+    module = _load_generated_module(output_path, module_name="_generated_demo")
 
-    assert "class CodegenManifest" in rendered
-    assert "class CodegenLockfile" in rendered
-    assert "SourcesCodegenLockSchema" in rendered
-    assert lockfile_model.model_validate({
-        "version": 1,
-        "sources": {
-            "local": {
-                "kind": "directory",
-                "path": "schemas",
-                "content_sha256": "a" * 64,
-            }
-        },
-    })
-    assert manifest_model.model_validate({
-        "version": 1,
-        "sources": {
-            "local": {
-                "kind": "directory",
-                "path": "schemas",
-                "format": "json",
-            }
-        },
-        "inputs": {
-            "primary": {
-                "kind": "jsonschema",
-                "sources": ["local"],
-                "entrypoints": ["./codegen.schema.json"],
-            }
-        },
-        "generators": {
-            "python": {
-                "language": "python",
-                "tool": "datamodel-code-generator",
-            }
-        },
-        "products": {
-            "models": {
-                "inputs": ["primary"],
-                "generators": ["python"],
-                "output_template": "generated.py",
-            }
-        },
-    })
+    assert output_path == (tmp_path / "generated.py").resolve()
+    assert hasattr(module, "Alpha")
+    assert hasattr(module, "Beta")
+    assert hasattr(module, "Shared")
+
+    alpha = module.Alpha.model_validate({"shared": {"value": 1}})
+    beta = module.Beta.model_validate({"shared": {"value": "ready"}})
+    beta_shared_name = f"Shared{_entrypoint_class_suffix('./beta.json')}"
+
+    assert alpha.shared.__class__ is module.Shared
+    assert alpha.shared.value == 1
+    assert hasattr(module, beta_shared_name)
+    assert beta.shared.__class__ is getattr(module, beta_shared_name)
+    assert beta.shared.value == "ready"
+
+
+def test_prepare_repo_codegen_manifest_entrypoints_from_default_config() -> None:
+    """Resolve and inline the checked-in codegen manifest schemas."""
+    loaded = load_schema_codegen_config(config_path=DEFAULT_CONFIG_PATH)
+    resolved = _resolve_target(loaded, target_name="codegen-manifest-models")
+    registry = _build_registry(loaded, target=resolved.target)
+
+    manifest_schema = _prepare_entrypoint_schema(
+        entrypoint="./codegen.schema.json",
+        registry=registry,
+        target=resolved.target,
+    )
+    lockfile_schema = _prepare_entrypoint_schema(
+        entrypoint="./codegen-lock.schema.json",
+        registry=registry,
+        target=resolved.target,
+    )
+
+    assert manifest_schema["title"] == "CodegenManifest"
+    assert manifest_schema["type"] == "object"
+    assert lockfile_schema["title"] == "CodegenLockfile"
+    assert lockfile_schema["type"] == "object"
 
 
 def test_resolve_body_class_conflicts_renames_mismatched_duplicates() -> None:

@@ -407,6 +407,56 @@ def test_zen_is_running_uses_process_fallback_when_lock_probe_is_unknown(
     assert zen_folders.zen_is_running(None) is True
 
 
+def test_require_zen_closed_returns_runtime_warning_when_lock_probe_is_uncertain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zen_folders: ModuleType,
+) -> None:
+    """Successful fallback should preserve runtime-detection warnings for apply."""
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    (profile_dir / ".parentlock").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(zen_folders, "zen_profile_dir", lambda _profile: profile_dir)
+    monkeypatch.setattr(
+        zen_folders,
+        "session_file",
+        lambda _profile: tmp_path / "zen-sessions.jsonlz4",
+    )
+    monkeypatch.setattr(zen_folders, "_lock_probe_state", lambda _path: None)
+    monkeypatch.setattr(zen_folders, "zen_process_is_running", lambda: False)
+
+    state = zen_folders.require_zen_closed(None)
+
+    assert state.running is False
+    assert any(
+        "falling back to process inspection" in warning for warning in state.warnings
+    )
+
+
+def test_require_zen_closed_reports_detection_details_when_runtime_is_uncertain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zen_folders: ModuleType,
+) -> None:
+    """Failed runtime probes should explain why apply refuses to continue."""
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    (profile_dir / ".parentlock").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(zen_folders, "zen_profile_dir", lambda _profile: profile_dir)
+    monkeypatch.setattr(
+        zen_folders,
+        "session_file",
+        lambda _profile: tmp_path / "zen-sessions.jsonlz4",
+    )
+    monkeypatch.setattr(zen_folders, "_lock_probe_state", lambda _path: None)
+    monkeypatch.setattr(zen_folders, "zen_process_is_running", lambda: None)
+
+    with pytest.raises(zen_folders.ZenFoldersError, match="Detection details"):
+        zen_folders.require_zen_closed(None)
+
+
 def test_parse_config_supports_workspace_metadata(zen_folders: ModuleType) -> None:
     """Workspace metadata should parse cleanly without becoming a folder."""
     raw = {
@@ -521,6 +571,31 @@ def test_apply_workspace_metadata_updates_safe_fields(
         "opacity": 0.7,
         "texture": 1,
     }
+
+
+def test_reconcile_workspace_applies_metadata_before_folder_reconciliation(
+    monkeypatch: pytest.MonkeyPatch,
+    zen_folders: ModuleType,
+) -> None:
+    """Workspace metadata should be applied before tab and folder mutations."""
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        zen_folders,
+        "apply_workspace_metadata",
+        lambda *_args: calls.append("metadata"),
+    )
+    monkeypatch.setattr(zen_folders, "apply_plan", lambda *_args: calls.append("plan"))
+
+    zen_folders.reconcile_workspace(
+        session={},
+        config_folders=[],
+        workspace_uuid="ws1",
+        workspace_spec=zen_folders.WorkspaceSpec(name="Work"),
+        plan=zen_folders.Plan(),
+    )
+
+    assert calls == ["metadata", "plan"]
 
 
 def test_ensure_workspace_creation_preserves_workspace_container_for_new_tabs(

@@ -22,6 +22,7 @@ UPDATER_MODULE_PATHS = {
     "linear-cli": "packages/linear-cli/updater.py",
     "linearis": "packages/linearis/updater.py",
     "mux": "packages/mux/updater.py",
+    "netnewswire": "packages/netnewswire/updater.py",
     "nix-manipulator": "packages/nix-manipulator/updater.py",
     "opencode": "overlays/opencode/updater.py",
     "opencode-desktop": "packages/opencode-desktop/updater.py",

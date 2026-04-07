@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
 
+from lib import json_utils
 from lib.update.net import fetch_json
 from lib.update.updaters.base import (
     ChecksumProvidedUpdater,
@@ -16,6 +17,8 @@ from lib.update.updaters.base import (
     register_updater,
 )
 from lib.update.updaters.metadata import ReleasePayloadMetadata
+
+type JsonObject = json_utils.JsonObject
 
 
 @register_updater
@@ -33,37 +36,24 @@ class DataGripUpdater(ChecksumProvidedUpdater):
     }
 
     @staticmethod
-    def _release_payload(info: VersionInfo) -> dict[str, object]:
+    def _release_payload(info: VersionInfo) -> JsonObject:
         metadata = info.metadata
         if isinstance(metadata, ReleasePayloadMetadata):
-            release = metadata.release
-            normalized: dict[str, object] = {}
-            for key, value in release.items():
-                if not isinstance(key, str):
-                    msg = f"Invalid DataGrip release field key: {key!r}"
-                    raise TypeError(msg)
-                normalized[key] = value
-            return normalized
+            return metadata.release
         msg = f"Missing or invalid DataGrip release metadata: {metadata!r}"
         raise RuntimeError(msg)
 
     @staticmethod
-    def _release_downloads(release: dict[str, object]) -> dict[str, object]:
+    def _release_downloads(release: JsonObject) -> JsonObject:
         downloads = release.get("downloads")
         if isinstance(downloads, dict):
-            normalized: dict[str, object] = {}
-            for key, value in downloads.items():
-                if not isinstance(key, str):
-                    msg = f"Invalid DataGrip download key: {key!r}"
-                    raise TypeError(msg)
-                normalized[key] = value
-            return normalized
+            return downloads
         msg = f"Missing or invalid DataGrip downloads metadata: {release!r}"
         raise RuntimeError(msg)
 
     @staticmethod
     def _release_download_field(
-        downloads: dict[str, object],
+        downloads: JsonObject,
         platform_key: str,
         field: str,
     ) -> str:
@@ -71,12 +61,7 @@ class DataGripUpdater(ChecksumProvidedUpdater):
         if not isinstance(payload, dict):
             msg = f"Missing DataGrip platform payload for {platform_key}: {downloads!r}"
             raise TypeError(msg)
-        platform_payload: dict[str, object] = {}
-        for key, raw_value in payload.items():
-            if not isinstance(key, str):
-                msg = f"Invalid DataGrip platform field key: {key!r}"
-                raise TypeError(msg)
-            platform_payload[key] = raw_value
+        platform_payload = payload
         value = platform_payload.get(field)
         if isinstance(value, str) and value:
             return value
@@ -109,7 +94,13 @@ class DataGripUpdater(ChecksumProvidedUpdater):
             msg = f"Missing DataGrip version in release payload: {release}"
             raise RuntimeError(msg)
         return VersionInfo(
-            version=version, metadata=ReleasePayloadMetadata(release=release)
+            version=version,
+            metadata=ReleasePayloadMetadata(
+                release=json_utils.coerce_json_object(
+                    release,
+                    context="DataGrip release payload",
+                )
+            ),
         )
 
     async def fetch_checksums(

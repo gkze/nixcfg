@@ -140,6 +140,19 @@ def test_serialize_and_deserialize_metadata_paths() -> None:
         deserialize_metadata({"__kind__": "download_url", "payload": "bad"})
 
 
+def test_dataclass_payload_rejects_non_instances() -> None:
+    """Reject non-dataclass values and dataclass classes."""
+
+    class _NotDataclass:
+        pass
+
+    with pytest.raises(TypeError, match="Expected dataclass instance"):
+        metadata_module._dataclass_payload(_NotDataclass())
+
+    with pytest.raises(TypeError, match="Expected dataclass instance"):
+        metadata_module._dataclass_payload(DownloadUrlMetadata)
+
+
 def test_register_updater_skips_name_less_and_abstract_classes() -> None:
     """Avoid registering helper classes that are unnamed or abstract."""
 

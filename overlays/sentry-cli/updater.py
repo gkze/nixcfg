@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     import aiohttp
     from nix_manipulator.expressions.expression import NixExpression
 
+    from lib.nix.models.sources import SourceEntry
+
 from lib.nix.models.sources import HashEntry, SourceHashes
 from lib.update.events import (
     CapturedValue,
@@ -80,7 +82,7 @@ class SentryCliUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | object | None = None,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Compute ``srcHash`` and ``cargoHash`` via fixed-output builds."""
         _ = (session, context)

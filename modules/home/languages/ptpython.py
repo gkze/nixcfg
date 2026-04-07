@@ -1,7 +1,11 @@
 """Configuration for ptpython REPL."""
 
 import importlib
-from typing import Protocol
+from typing import Protocol, cast
+
+
+class _Style(Protocol):
+    """Marker protocol for ptpython style objects."""
 
 
 class _PythonInput(Protocol):
@@ -10,11 +14,11 @@ class _PythonInput(Protocol):
     enable_auto_suggest: bool
     vi_mode: bool
 
-    def install_ui_colorscheme(self, name: str, style: object) -> None: ...
+    def install_ui_colorscheme(self, name: str, style: _Style) -> None: ...
 
     def use_ui_colorscheme(self, name: str) -> None: ...
 
-    def install_code_colorscheme(self, name: str, style: object) -> None: ...
+    def install_code_colorscheme(self, name: str, style: _Style) -> None: ...
 
     def use_code_colorscheme(self, name: str) -> None: ...
 
@@ -22,10 +26,10 @@ class _PythonInput(Protocol):
 STYLE_NAME: str = "catppuccin-frappe"
 
 
-def _build_style() -> object:
+def _build_style() -> _Style:
     pygments_mod = importlib.import_module("catppuccin.extras.pygments")
     styles_mod = importlib.import_module("prompt_toolkit.styles")
-    return styles_mod.style_from_pygments_cls(pygments_mod.FrappeStyle)
+    return cast("_Style", styles_mod.style_from_pygments_cls(pygments_mod.FrappeStyle))
 
 
 def configure(repl: _PythonInput) -> None:

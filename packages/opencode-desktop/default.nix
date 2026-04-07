@@ -40,22 +40,33 @@ let
       builtins.head iconCandidates;
   appIconFileName = builtins.baseNameOf appIcon;
   appUrlSchemes = tauriConfig.plugins."deep-link".desktop.schemes or [ ];
-  appUrlTypesPlist = lib.optionalString (appUrlSchemes != [ ]) ''
-        <key>CFBundleURLTypes</key>
-        <array>
-          <dict>
-            <key>CFBundleURLSchemes</key>
-            <array>
-    ${
-      lib.concatMapStrings (scheme: "          <string>${scheme}</string>\n") appUrlSchemes
-    }        </array>
-            <key>CFBundleURLName</key>
-            <string>${appIdentifier} ${builtins.head appUrlSchemes}</string>
-            <key>CFBundleTypeRole</key>
-            <string>Editor</string>
-          </dict>
-        </array>
-  '';
+  appInfoPlist = lib.generators.toPlist { escape = true; } (
+    {
+      CFBundleDevelopmentRegion = "English";
+      CFBundleDisplayName = appName;
+      CFBundleExecutable = appBinaryName;
+      CFBundleIconFile = appIconFileName;
+      CFBundleIdentifier = appIdentifier;
+      CFBundleInfoDictionaryVersion = "6.0";
+      CFBundleName = appName;
+      CFBundlePackageType = "APPL";
+      CFBundleShortVersionString = desktopPackageVersion;
+      CFBundleVersion = desktopPackageVersion;
+      CSResourcesFileMapped = true;
+      LSMinimumSystemVersion = "10.13";
+      LSRequiresCarbon = true;
+      NSHighResolutionCapable = true;
+    }
+    // lib.optionalAttrs (appUrlSchemes != [ ]) {
+      CFBundleURLTypes = [
+        {
+          CFBundleURLSchemes = appUrlSchemes;
+          CFBundleURLName = "${appIdentifier} ${builtins.head appUrlSchemes}";
+          CFBundleTypeRole = "Editor";
+        }
+      ];
+    }
+  );
 
   patchedSrc = runCommand "${pname}-${version}-src" { } ''
     cp -r ${upstreamDesktop.src} "$out"
@@ -157,54 +168,19 @@ let
     # app bundle from the crate2nix-built binary so Home Manager still sees an
     # .app under $out/Applications.
     postInstall = lib.optionalString stdenv.hostPlatform.isDarwin ''
-            appBundle="$out/Applications/${appName}.app"
-            appContents="$appBundle/Contents"
-            appMacOS="$appContents/MacOS"
-            appResources="$appContents/Resources"
+      appBundle="$out/Applications/${appName}.app"
+      appContents="$appBundle/Contents"
+      appMacOS="$appContents/MacOS"
+      appResources="$appContents/Resources"
 
-            install -d "$appMacOS" "$appResources"
-            install -Dm755 "$out/bin/opencode-desktop" "$appMacOS/${appBinaryName}"
-            install -Dm755 ${opencode}/bin/opencode "$appMacOS/opencode-cli"
-            install -Dm644 \
-              "${patchedSrc}/packages/desktop/src-tauri/${appIcon}" \
-              "$appResources/${appIconFileName}"
+      install -d "$appMacOS" "$appResources"
+      install -Dm755 "$out/bin/opencode-desktop" "$appMacOS/${appBinaryName}"
+      install -Dm755 ${opencode}/bin/opencode "$appMacOS/opencode-cli"
+      install -Dm644 \
+        "${patchedSrc}/packages/desktop/src-tauri/${appIcon}" \
+        "$appResources/${appIconFileName}"
 
-            cat > "$appContents/Info.plist" <<EOF
-      <?xml version="1.0" encoding="UTF-8"?>
-      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-      <plist version="1.0">
-      <dict>
-        <key>CFBundleDevelopmentRegion</key>
-        <string>English</string>
-        <key>CFBundleDisplayName</key>
-        <string>${appName}</string>
-        <key>CFBundleExecutable</key>
-        <string>${appBinaryName}</string>
-        <key>CFBundleIconFile</key>
-        <string>${appIconFileName}</string>
-        <key>CFBundleIdentifier</key>
-        <string>${appIdentifier}</string>
-        <key>CFBundleInfoDictionaryVersion</key>
-        <string>6.0</string>
-        <key>CFBundleName</key>
-        <string>${appName}</string>
-        <key>CFBundlePackageType</key>
-        <string>APPL</string>
-        <key>CFBundleShortVersionString</key>
-        <string>${desktopPackageVersion}</string>
-        <key>CFBundleVersion</key>
-        <string>${desktopPackageVersion}</string>
-        <key>CSResourcesFileMapped</key>
-        <true/>
-        <key>LSMinimumSystemVersion</key>
-        <string>10.13</string>
-      ${appUrlTypesPlist}  <key>LSRequiresCarbon</key>
-        <true/>
-        <key>NSHighResolutionCapable</key>
-        <true/>
-      </dict>
-      </plist>
-      EOF
+      install -Dm644 ${pkgs.writeText "Info.plist" appInfoPlist} "$appContents/Info.plist"
     '';
 
     postFixup = lib.optionalString stdenv.hostPlatform.isLinux ''

@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 if TYPE_CHECKING:
     from rich.spinner import Spinner
 
     from lib.nix.models.sources import SourceEntry
-    from lib.update.events import CommandArgs
+    from lib.update.events import CommandArgs, StatusPayload
 
 SummaryStatus = Literal["updated", "error", "no_change"]
 
@@ -47,7 +46,6 @@ class OperationKind(StrEnum):
 
 
 OperationStatus = Literal["pending", "running", "no_change", "success", "error"]
-type StatusMatcher = Callable[[str], Any]
 
 
 _OPERATION_LABELS: dict[OperationKind, str] = {
@@ -136,13 +134,14 @@ class StatusUpdate:
     clear_message: bool = False
 
 
-def _status_payload(payload: object | None) -> dict[str, object] | None:
+def _status_payload(payload: object | None) -> StatusPayload | None:
     if not isinstance(payload, dict):
         return None
-    return {key: value for key, value in payload.items() if isinstance(key, str)}
+    filtered = {key: value for key, value in payload.items() if isinstance(key, str)}
+    return cast("StatusPayload", filtered)
 
 
-def _detail_payload(detail: object) -> dict[str, object] | None:
+def _detail_payload(detail: object) -> StatusPayload | None:
     return _status_payload(detail)
 
 

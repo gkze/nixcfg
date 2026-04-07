@@ -61,13 +61,13 @@ rec {
         title = "Buffers";
         items = [
           {
-            key = "<leader>,";
+            key = "<leader>h";
             mode = "n";
             action = ":BufferLineCyclePrev<CR>";
             desc = "Previous buffer";
           }
           {
-            key = "<leader>.";
+            key = "<leader>l";
             mode = "n";
             action = ":BufferLineCycleNext<CR>";
             desc = "Next buffer";
@@ -96,7 +96,7 @@ rec {
         title = "Tabs";
         items = [
           {
-            key = "<leader>t";
+            key = "<leader>T";
             mode = "n";
             action = ":tabnew<CR>";
             desc = "New tab";
@@ -125,7 +125,7 @@ rec {
             desc = "Find hidden files";
           }
           {
-            key = "<leader>/";
+            key = "<leader>s";
             mode = "n";
             action = ":Telescope live_grep<CR>";
             desc = "Live grep";
@@ -154,109 +154,16 @@ rec {
         title = "LSP utilities";
         items = [
           {
-            key = "<C-l>i";
+            key = "<leader>I";
             mode = "n";
             action = ":LspInfo<CR>";
             desc = "LSP info";
           }
           {
-            key = "<C-l>r";
+            key = "<leader>R";
             mode = "n";
             action = ":LspRestart<CR>";
             desc = "Restart LSP";
-          }
-        ];
-      }
-      {
-        title = "Window movement / resizing";
-        items = [
-          {
-            key = "<leader>h";
-            mode = "n";
-            action = {
-              __raw = ''require("smart-splits").move_cursor_left'';
-            };
-            desc = "Move to left split";
-          }
-          {
-            key = "<leader>j";
-            mode = "n";
-            action = {
-              __raw = ''require("smart-splits").move_cursor_down'';
-            };
-            desc = "Move to lower split";
-          }
-          {
-            key = "<leader>k";
-            mode = "n";
-            action = {
-              __raw = ''require("smart-splits").move_cursor_up'';
-            };
-            desc = "Move to upper split";
-          }
-          {
-            key = "<leader>l";
-            mode = "n";
-            action = {
-              __raw = ''require("smart-splits").move_cursor_right'';
-            };
-            desc = "Move to right split";
-          }
-          {
-            key = "<leader>H";
-            mode = "n";
-            action = {
-              __raw = ''require("smart-splits").resize_left'';
-            };
-            desc = "Resize split left";
-          }
-          {
-            key = "<leader>J";
-            mode = "n";
-            action = {
-              __raw = ''require("smart-splits").resize_down'';
-            };
-            desc = "Resize split down";
-          }
-          {
-            key = "<leader>K";
-            mode = "n";
-            action = {
-              __raw = ''require("smart-splits").resize_up'';
-            };
-            desc = "Resize split up";
-          }
-          {
-            key = "<leader>L";
-            mode = "n";
-            action = {
-              __raw = ''require("smart-splits").resize_right'';
-            };
-            desc = "Resize split right";
-          }
-          {
-            key = "<C-A-h>";
-            mode = "n";
-            action = ":Treewalker Left<CR>";
-            desc = "Treewalker left";
-          }
-          {
-            key = "<C-A-j>";
-            mode = "n";
-            action = ":Treewalker Down<CR>";
-            desc = "Treewalker down";
-          }
-          {
-            key = "<C-A-k>";
-            mode = "n";
-            action = ":Treewalker Up<CR>";
-            desc = "Treewalker up";
-          }
-          {
-            key = "<C-A-l>";
-            mode = "n";
-            action = ":Treewalker Right<CR>";
-            desc = "Treewalker right";
           }
         ];
       }
@@ -282,7 +189,7 @@ rec {
             desc = "Neo-tree filesystem";
           }
           {
-            key = "<leader>g";
+            key = "<leader>x";
             mode = "n";
             action = ":Neotree toggle git_status<CR>";
             desc = "Neo-tree git status";
@@ -317,7 +224,7 @@ rec {
         title = "Git";
         items = [
           {
-            key = "<leader>G";
+            key = "<leader>g";
             mode = "n";
             action = ":Neogit<CR>";
             desc = "Open Neogit";
@@ -329,7 +236,7 @@ rec {
             desc = "Neogit branch";
           }
           {
-            key = "<leader>d";
+            key = "<leader>G";
             mode = "n";
             action = ":DiffviewOpen<CR>";
             desc = "Open Diffview";
@@ -346,10 +253,26 @@ rec {
         title = "Problems";
         items = [
           {
-            key = "<leader>p";
+            key = "<leader>d";
             mode = "n";
             action = ":Trouble diagnostics<CR>";
             desc = "Trouble diagnostics";
+          }
+          {
+            key = "<leader>j";
+            mode = "n";
+            action = {
+              __raw = "vim.diagnostic.goto_next";
+            };
+            desc = "Next diagnostic";
+          }
+          {
+            key = "<leader>k";
+            mode = "n";
+            action = {
+              __raw = "vim.diagnostic.goto_prev";
+            };
+            desc = "Previous diagnostic";
           }
         ];
       }
@@ -357,7 +280,7 @@ rec {
         title = "Terminal and AI";
         items = [
           {
-            key = "<leader>T";
+            key = "<leader>t";
             mode = "n";
             action = ":ToggleTerm<CR>";
             desc = "Toggle terminal";
@@ -395,7 +318,7 @@ rec {
             desc = "OpenCode ask";
           }
           {
-            key = "<leader>s";
+            key = "<leader>S";
             mode = "n";
             action = {
               __raw = ''function() require("opencode").select() end'';
@@ -490,7 +413,7 @@ rec {
             desc = "Go to type definition";
           }
           {
-            key = "<C-k>";
+            key = "gs";
             mode = "n";
             action = "signature_help";
             displayAction = "vim.lsp.buf.signature_help()";

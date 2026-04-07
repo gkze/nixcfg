@@ -13,7 +13,7 @@ import inspect
 import json
 import sys
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated
 
 import aiohttp
 import typer
@@ -22,9 +22,9 @@ from pydantic import BaseModel
 from lib.update import io as update_io
 from lib.update import updaters as updater_module
 from lib.update.ci._cli import make_main, make_typer_app
-from lib.update.config import resolve_active_config
+from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.sources import load_all_sources
-from lib.update.updaters import UPDATERS, ensure_updaters_loaded
+from lib.update.updaters import UPDATERS, UpdaterClass, ensure_updaters_loaded
 from lib.update.updaters.base import Updater, VersionInfo
 from lib.update.updaters.metadata import deserialize_metadata, serialize_metadata
 
@@ -36,15 +36,15 @@ type _JsonObject = dict[str, _JsonSafe]
 DEFAULT_PINNED_VERSIONS_PATH = Path("pinned-versions.json")
 
 
-def _get_updaters() -> dict[str, type[Any]]:
+def _get_updaters() -> dict[str, UpdaterClass]:
     return updater_module.resolve_registry_alias(UPDATERS, ensure_updaters_loaded)
 
 
-def _instantiate_updater(updater_cls: type[Any], *, config: object) -> Updater:
+def _instantiate_updater(updater_cls: UpdaterClass, *, config: UpdateConfig) -> Updater:
     init_params = inspect.signature(updater_cls.__init__).parameters
     if "config" in init_params:
-        return cast("Updater", updater_cls(config=config))
-    return cast("Updater", updater_cls())
+        return updater_cls(config=config)
+    return updater_cls()
 
 
 def _make_json_safe(obj: object) -> _JsonSafe:
@@ -117,7 +117,7 @@ async def _resolve_all() -> tuple[dict[str, _JsonObject], list[str]]:
 
     async with aiohttp.ClientSession() as session:
 
-        async def _resolve_one(name: str, updater_cls: type[Any]) -> None:
+        async def _resolve_one(name: str, updater_cls: UpdaterClass) -> None:
             updater: Updater = _instantiate_updater(updater_cls, config=config)
             try:
                 outcome = await updater.fetch_latest(session)

@@ -133,6 +133,10 @@
       url = "github:axiomhq/cli/v0.15.0";
       flake = false;
     };
+    catppuccin = {
+      url = "github:catppuccin/nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     catppuccin-bat = {
       url = "github:catppuccin/bat";
       flake = false;

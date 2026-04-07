@@ -2,45 +2,40 @@
 
 from __future__ import annotations
 
-import json
 import shutil
-import subprocess
 from functools import cache
-from pathlib import Path
 from typing import Any
 
 import pytest
 
+from lib.tests._nix_eval import nix_attrset, nix_eval_json, nix_import, nix_let
+from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
 
 
 @cache
 def _catalog() -> dict[str, Any]:
-    root = Path(REPO_ROOT).resolve()
-    nix = shutil.which("nix")
-    assert nix is not None
-    expr = f"""
-let
-  data = import {root}/home/george/nvim-keymaps.nix;
-in {{
-  global = data.global;
-  lsp = data.lsp;
-  treesitterSelection = data.treesitterSelection;
-  treesitterTextobjectsMove = data.treesitterTextobjectsMove;
-  treesitterTextobjectsSelect = data.treesitterTextobjectsSelect;
-  blinkCmp = data.blinkCmp;
-  telescope = data.telescope;
-  gitlinker = data.gitlinker;
-  alpha = data.alpha;
-}}
-"""
-    result = subprocess.run(  # noqa: S603
-        [nix, "eval", "--impure", "--json", "--expr", expr],
-        check=True,
-        capture_output=True,
-        text=True,
+    expression = nix_let(
+        {"data": nix_import(REPO_ROOT / "home/george/nvim-keymaps.nix")},
+        nix_attrset({
+            "global": identifier_attr_path("data", "global"),
+            "lsp": identifier_attr_path("data", "lsp"),
+            "treesitterSelection": identifier_attr_path("data", "treesitterSelection"),
+            "treesitterTextobjectsMove": identifier_attr_path(
+                "data", "treesitterTextobjectsMove"
+            ),
+            "treesitterTextobjectsSelect": identifier_attr_path(
+                "data", "treesitterTextobjectsSelect"
+            ),
+            "blinkCmp": identifier_attr_path("data", "blinkCmp"),
+            "telescope": identifier_attr_path("data", "telescope"),
+            "gitlinker": identifier_attr_path("data", "gitlinker"),
+            "alpha": identifier_attr_path("data", "alpha"),
+        }),
     )
-    return json.loads(result.stdout)
+    catalog = nix_eval_json(expression)
+    assert isinstance(catalog, dict)
+    return catalog
 
 
 def _scope_item_count(scope: dict[str, Any]) -> int:
@@ -65,14 +60,14 @@ def test_keymap_catalog_scope_counts_match_expected_smoke_snapshot() -> None:
         "alpha": 4,
         "blinkCmp": 7,
         "gitlinker": 1,
-        "global": 55,
+        "global": 45,
         "lsp": 9,
         "telescope": 1,
         "treesitterSelection": 4,
         "treesitterTextobjectsMove": 36,
         "treesitterTextobjectsSelect": 18,
     }
-    assert sum(_scope_item_count(scope) for scope in catalog.values()) == 135
+    assert sum(_scope_item_count(scope) for scope in catalog.values()) == 125
 
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
@@ -86,8 +81,12 @@ def test_keymap_catalog_keeps_critical_navigation_and_opencode_bindings() -> Non
     assert ("global", "<leader>o", "OpenCode toggle") in entries
     assert ("global", "<leader>c", "Toggle CodeCompanion chat") in entries
     assert ("global", "<leader>e", "Neo-tree filesystem") in entries
-    assert ("global", "<leader>G", "Open Neogit") in entries
-    assert ("global", "<leader>t", "New tab") in entries
+    assert ("global", "<leader>g", "Open Neogit") in entries
+    assert ("global", "<leader>s", "Live grep") in entries
+    assert ("global", "<leader>h", "Previous buffer") in entries
+    assert ("global", "<leader>t", "Toggle terminal") in entries
+    assert ("global", "<leader>T", "New tab") in entries
     assert ("global", "<leader>q", "Close tab") in entries
     assert ("lsp", "gd", "Go to definition") in entries
+    assert ("lsp", "gs", "Signature help") in entries
     assert ("telescope", "<CR>", "Select multi or default") in entries

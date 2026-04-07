@@ -26,6 +26,8 @@ from lib.update.updaters.github_release import GitHubReleaseUpdater
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.nix.models.sources import SourceEntry
+
 
 @register_updater
 class GooseCliUpdater(GitHubReleaseUpdater):
@@ -48,7 +50,7 @@ class GooseCliUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | object | None = None,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Compute the fixed-output source hash for Goose."""
         _ = (session, context)

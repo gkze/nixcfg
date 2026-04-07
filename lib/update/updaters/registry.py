@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import TYPE_CHECKING
 
 from lib.update.updaters._sourcefile import resolve_sourcefile
 
-UPDATERS: dict[str, type[Any]] = {}
+if TYPE_CHECKING:
+    from lib.update.updaters.base import Updater
+
+type UpdaterClass = type[Updater]
+
+UPDATERS: dict[str, UpdaterClass] = {}
 
 
 def updater_sourcefile(cls: type[object]) -> str | None:
@@ -25,7 +30,7 @@ def is_test_updater_class(cls: type[object]) -> bool:
     return sourcefile is not None and "/lib/tests/" in sourcefile
 
 
-def register_updater[T](cls: type[T]) -> type[T]:
+def register_updater[T: Updater](cls: type[T]) -> type[T]:
     """Register a concrete updater class in :data:`UPDATERS`."""
     name = getattr(cls, "name", None)
     if name is None or inspect.isabstract(cls):
@@ -57,6 +62,7 @@ def register_updater[T](cls: type[T]) -> type[T]:
 
 __all__ = [
     "UPDATERS",
+    "UpdaterClass",
     "is_test_updater_class",
     "register_updater",
     "updater_sourcefile",

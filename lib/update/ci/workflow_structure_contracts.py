@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 import yaml
+
+from lib import json_utils
+
+type WorkflowValue = json_utils.JsonValue
+type WorkflowObject = json_utils.JsonObject
 
 _DARWIN_FULL_SMOKE_MARKER = "nix run .#nixcfg -- ci workflow darwin eval-full-smoke"
 _DARWIN_LOCK_SMOKE_MARKER = "nix run .#nixcfg -- ci workflow darwin eval-lock-smoke"
@@ -16,25 +21,42 @@ _SHARED_CLOSURE_MARKER = "nix run .#nixcfg -- ci cache closure"
 _EXCLUDE_REF_RE = re.compile(r"--exclude-ref\s+([^\s\\]+)")
 
 
-def _load_jobs(workflow_path: Path) -> dict[str, dict[str, Any]]:
-    payload = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
+def _stringify_yaml_keys(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(key): _stringify_yaml_keys(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_stringify_yaml_keys(item) for item in value]
+    return value
+
+
+def _workflow_object(value: object, *, context: str) -> WorkflowObject:
+    return json_utils.coerce_json_object(_stringify_yaml_keys(value), context=context)
+
+
+def _load_jobs(workflow_path: Path) -> dict[str, WorkflowObject]:
+    loaded = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
         msg = f"Workflow {workflow_path} did not parse to a mapping"
         raise TypeError(msg)
+    payload = _workflow_object(loaded, context=f"workflow {workflow_path}")
     jobs = payload.get("jobs")
     if not isinstance(jobs, dict):
         msg = f"Workflow {workflow_path} is missing a top-level jobs mapping"
         raise TypeError(msg)
-    return {
-        str(job_id): cast("dict[str, Any]", job_data)
-        for job_id, job_data in jobs.items()
-        if isinstance(job_data, dict)
-    }
+    workflow_jobs: dict[str, WorkflowObject] = {}
+    for job_id, job_data in jobs.items():
+        if not isinstance(job_data, dict):
+            msg = f"Workflow job {job_id} must be a mapping"
+            raise TypeError(msg)
+        workflow_jobs[job_id] = _workflow_object(
+            job_data, context=f"workflow job {job_id}"
+        )
+    return workflow_jobs
 
 
 def _require_job(
-    workflow_jobs: dict[str, dict[str, Any]], *, job_id: str
-) -> dict[str, Any]:
+    workflow_jobs: dict[str, WorkflowObject], *, job_id: str
+) -> WorkflowObject:
     try:
         return workflow_jobs[job_id]
     except KeyError as exc:
@@ -42,7 +64,7 @@ def _require_job(
         raise RuntimeError(msg) from exc
 
 
-def _parse_job_needs(job_data: dict[str, Any], *, job_id: str) -> tuple[str, ...]:
+def _parse_job_needs(job_data: WorkflowObject, *, job_id: str) -> tuple[str, ...]:
     raw_needs = job_data.get("needs")
     if raw_needs is None:
         return ()
@@ -54,7 +76,7 @@ def _parse_job_needs(job_data: dict[str, Any], *, job_id: str) -> tuple[str, ...
     raise TypeError(msg)
 
 
-def _job_run_steps(job_data: dict[str, Any], *, job_id: str) -> tuple[str, ...]:
+def _job_run_steps(job_data: WorkflowObject, *, job_id: str) -> tuple[str, ...]:
     raw_steps = job_data.get("steps")
     if not isinstance(raw_steps, list):
         msg = f"Job {job_id} does not define steps as a list"
@@ -70,31 +92,31 @@ def _job_run_steps(job_data: dict[str, Any], *, job_id: str) -> tuple[str, ...]:
     return tuple(runs)
 
 
-def _require_job_run(job_data: dict[str, Any], *, job_id: str, marker: str) -> None:
+def _require_job_run(job_data: WorkflowObject, *, job_id: str, marker: str) -> None:
     if not any(marker in run for run in _job_run_steps(job_data, job_id=job_id)):
         msg = f"Job {job_id} is missing required run step containing {marker!r}"
         raise RuntimeError(msg)
 
 
-def _forbid_job_run(job_data: dict[str, Any], *, job_id: str, marker: str) -> None:
+def _forbid_job_run(job_data: WorkflowObject, *, job_id: str, marker: str) -> None:
     if any(marker in run for run in _job_run_steps(job_data, job_id=job_id)):
         msg = f"Job {job_id} must not run step containing {marker!r}"
         raise RuntimeError(msg)
 
 
-def _require_job_need(job_data: dict[str, Any], *, job_id: str, need: str) -> None:
+def _require_job_need(job_data: WorkflowObject, *, job_id: str, need: str) -> None:
     if need not in _parse_job_needs(job_data, job_id=job_id):
         msg = f"{job_id} must depend on {need}"
         raise RuntimeError(msg)
 
 
-def _forbid_job_need(job_data: dict[str, Any], *, job_id: str, need: str) -> None:
+def _forbid_job_need(job_data: WorkflowObject, *, job_id: str, need: str) -> None:
     if need in _parse_job_needs(job_data, job_id=job_id):
         msg = f"{job_id} must not depend on {need}"
         raise RuntimeError(msg)
 
 
-def _darwin_heavy_targets(job_data: dict[str, Any], *, job_id: str) -> tuple[str, ...]:
+def _darwin_heavy_targets(job_data: WorkflowObject, *, job_id: str) -> tuple[str, ...]:
     strategy = job_data.get("strategy")
     if not isinstance(strategy, dict):
         msg = f"{job_id} does not define a strategy mapping"
@@ -139,7 +161,7 @@ def _darwin_heavy_targets(job_data: dict[str, Any], *, job_id: str) -> tuple[str
 
 
 def _darwin_split_targets(
-    workflow_jobs: dict[str, dict[str, Any]], *, job_ids: tuple[str, ...]
+    workflow_jobs: dict[str, WorkflowObject], *, job_ids: tuple[str, ...]
 ) -> tuple[str, ...]:
     targets: list[str] = []
     seen_targets: dict[str, str] = {}
@@ -160,7 +182,7 @@ def _darwin_split_targets(
     return tuple(targets)
 
 
-def _darwin_shared_exclude_refs(job_data: dict[str, Any]) -> tuple[str, ...]:
+def _darwin_shared_exclude_refs(job_data: WorkflowObject) -> tuple[str, ...]:
     closure_runs = [
         run
         for run in _job_run_steps(job_data, job_id="darwin-shared")
@@ -184,7 +206,7 @@ def _darwin_shared_exclude_refs(job_data: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _validate_refresh_workflow_structure_contracts(
-    workflow_jobs: dict[str, dict[str, Any]],
+    workflow_jobs: dict[str, WorkflowObject],
 ) -> None:
     darwin_lock_smoke = _require_job(workflow_jobs, job_id="darwin-lock-smoke")
     compute_hashes = _require_job(workflow_jobs, job_id="compute-hashes")
@@ -220,7 +242,7 @@ def _validate_refresh_workflow_structure_contracts(
 
 
 def _validate_certify_workflow_structure_contracts(
-    workflow_jobs: dict[str, dict[str, Any]],
+    workflow_jobs: dict[str, WorkflowObject],
 ) -> None:
     darwin_full_smoke = _require_job(workflow_jobs, job_id="darwin-full-smoke")
     darwin_priority_heavy = _require_job(workflow_jobs, job_id="darwin-priority-heavy")

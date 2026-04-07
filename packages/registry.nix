@@ -66,6 +66,7 @@ let
     codex-desktop = "darwin";
     conductor = "darwin";
     granola = "darwin";
+    netnewswire = "darwin";
     wispr-flow = "darwin";
     emdash = "emdash";
     goose-cli = "gooseAarch64Darwin";

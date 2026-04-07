@@ -40,13 +40,7 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
         if not isinstance(payload, dict):
             msg = f"Expected platform payload for {nix_plat}"
             raise TypeError(msg)
-        payload_map: dict[str, object] = {}
-        for key, value in payload.items():
-            if not isinstance(key, str):
-                msg = f"Expected string keys in platform payload for {nix_plat}"
-                raise TypeError(msg)
-            payload_map[key] = value
-        download_url = payload_map.get("downloadUrl")
+        download_url = payload.get("downloadUrl")
         if not isinstance(download_url, str):
             msg = f"Expected downloadUrl string for {nix_plat}"
             raise TypeError(msg)

@@ -22,6 +22,12 @@ lib.mkDarwinHost {
     )
   ];
   extraSystemModules = [
+    {
+      # Preserve any pre-existing app/editor settings the first time Home Manager
+      # takes over files like ~/.gemini/settings.json and VS Code Insiders
+      # settings.json.
+      home-manager.backupFileExtension = "backup";
+    }
     "${lib.modulesPath}/darwin/george/town-dock-apps.nix"
     (lib.mkSetOpencodeEnvModule "active.json")
   ];

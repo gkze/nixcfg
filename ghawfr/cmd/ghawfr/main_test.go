@@ -124,7 +124,10 @@ func TestDetectWorkspaceRootPrefersWorkflowRepository(t *testing.T) {
 			t.Fatalf("git init %q: %v\n%s", dir, err, strings.TrimSpace(string(output)))
 		}
 	}
-	got := detectWorkspaceRoot(cwd, workflowPath)
+	got, err := detectWorkspaceRoot(cwd, workflowPath)
+	if err != nil {
+		t.Fatalf("detectWorkspaceRoot: %v", err)
+	}
 	resolvedGot, err := filepath.EvalSymlinks(got)
 	if err != nil {
 		t.Fatalf("EvalSymlinks(got): %v", err)
@@ -140,7 +143,10 @@ func TestDetectWorkspaceRootPrefersWorkflowRepository(t *testing.T) {
 
 func TestLocalExpressionContextIncludesRunnerFields(t *testing.T) {
 	workspace := t.TempDir()
-	context := localExpressionContext(workspace)
+	context, err := localExpressionContext(workspace)
+	if err == nil {
+		t.Fatal("localExpressionContext error = nil, want git probe warning")
+	}
 	if context.Runner.OS == "" {
 		t.Fatal("context.Runner.OS = empty, want host runner os")
 	}
@@ -152,6 +158,13 @@ func TestLocalExpressionContextIncludesRunnerFields(t *testing.T) {
 	}
 	if got, want := context.Runner.ToolCache, filepath.Join(workspace, ".ghawfr", "runner", "tool-cache"); got != want {
 		t.Fatalf("context.Runner.ToolCache = %q, want %q", got, want)
+	}
+}
+
+func TestFormatOutputMapSortsKeys(t *testing.T) {
+	formatted := formatOutputMap(workflow.OutputMap{"z": "last", "a": "first"})
+	if got, want := formatted, `a="first", z="last"`; got != want {
+		t.Fatalf("formatOutputMap = %q, want %q", got, want)
 	}
 }
 
@@ -206,17 +219,10 @@ jobs:
 `), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
-	defer func() { _ = os.Chdir(cwd) }()
-	t.Setenv("GHAWFR_PROVIDER", "local")
+	t.Chdir(root)
+	t.Setenv("GHAWFR_PROVIDER", "smoke-local")
 
-	err = runWorkflowContext(context.Background(), workflowPath, "")
+	err := runWorkflowContext(context.Background(), workflowPath, "")
 	if err == nil {
 		t.Fatal("runWorkflowContext error = nil, want workflow error")
 	}
@@ -284,14 +290,7 @@ jobs:
 `), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
-	defer func() { _ = os.Chdir(cwd) }()
+	t.Chdir(root)
 	t.Setenv("GHAWFR_PROVIDER", "auto")
 	definition, job, plan, launch, err := qemuLaunchForWorkflow(workflowPath, "linux")
 	if err != nil {
@@ -345,10 +344,7 @@ jobs:
 			t.Fatalf("WriteFile %s: %v", name, err)
 		}
 	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
-	defer func() { _ = os.Chdir(cwd) }()
+	t.Chdir(root)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GHAWFR_PROVIDER", "auto")
 	t.Setenv("GHAWFR_WORKER_REMOTE_COMMAND", filepath.Join(binDir, "ghawfr-worker"))
@@ -394,14 +390,7 @@ jobs:
 `), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
-	defer func() { _ = os.Chdir(cwd) }()
+	t.Chdir(root)
 	t.Setenv("GHAWFR_PROVIDER", "auto")
 	if err := runPrepare(workflowPath, "linux"); err != nil {
 		t.Fatalf("runPrepare: %v", err)
@@ -490,10 +479,7 @@ jobs:
 			t.Fatalf("WriteFile %s: %v", name, err)
 		}
 	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
-	defer func() { _ = os.Chdir(cwd) }()
+	t.Chdir(root)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GHAWFR_PROVIDER", "auto")
 	t.Setenv("GHAWFR_QEMU_GUEST_WORKSPACE", root)

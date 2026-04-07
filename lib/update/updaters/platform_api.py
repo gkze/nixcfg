@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
 
+from lib import json_utils
 from lib.update import process as update_process
 from lib.update.events import (
     ValueDrain,
@@ -27,8 +28,10 @@ from lib.update.updaters.base import (
 )
 from lib.update.updaters.metadata import PlatformAPIMetadata
 
-_OBJECT_MAP_ADAPTER = TypeAdapter(dict[str, object])
-_PLATFORM_INFO_ADAPTER = TypeAdapter(dict[str, dict[str, object]])
+type JsonObject = json_utils.JsonObject
+
+_OBJECT_MAP_ADAPTER = TypeAdapter(JsonObject)
+_PLATFORM_INFO_ADAPTER = TypeAdapter(dict[str, JsonObject])
 
 
 class PlatformAPIUpdater(ChecksumProvidedUpdater):
@@ -47,7 +50,7 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
 
     def _require_platform_str_field(
         self,
-        platform_info: dict[str, dict[str, object]],
+        platform_info: dict[str, JsonObject],
         *,
         field: str,
     ) -> dict[str, str]:
@@ -68,7 +71,7 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
         if isinstance(metadata, PlatformAPIMetadata):
             return metadata
         if isinstance(metadata, dict):
-            metadata_map = cast("dict[str, object]", metadata)
+            metadata_map = {str(key): value for key, value in metadata.items()}
             platform_info_obj = metadata_map.get("platform_info")
             if not isinstance(platform_info_obj, dict):
                 msg = f"Expected platform_info mapping in {self.name} metadata"
@@ -84,9 +87,7 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
             equality_fields = {
                 key: value
                 for key, value in metadata_map.items()
-                if isinstance(key, str)
-                and key not in {"commit", "platform_info"}
-                and isinstance(value, str)
+                if key not in {"commit", "platform_info"} and isinstance(value, str)
             }
             commit_payload = metadata_map.get("commit")
             commit = commit_payload if isinstance(commit_payload, str) else None
@@ -104,7 +105,7 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
         async def _fetch_one(
             nix_plat: str,
             api_plat: str,
-        ) -> tuple[str, dict[str, object]]:
+        ) -> tuple[str, JsonObject]:
             payload = await fetch_json(
                 session,
                 self._api_url(api_plat),
@@ -122,7 +123,7 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
         results = await asyncio.gather(
             *(_fetch_one(p, k) for p, k in self.PLATFORMS.items()),
         )
-        platform_info: dict[str, dict[str, object]] = dict(results)
+        platform_info: dict[str, JsonObject] = dict(results)
         versions = self._require_platform_str_field(
             platform_info,
             field=self.VERSION_KEY,

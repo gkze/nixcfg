@@ -9,7 +9,7 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Unpack
 
 import aiohttp
 import typer
@@ -26,21 +26,30 @@ from lib.update.artifacts import GeneratedArtifact, save_generated_artifacts
 from lib.update.ci.resolve_versions import load_pinned_versions
 from lib.update.cli_inventory import (
     InventoryDependencies,
-    InventoryHandles,
-    InventoryRefTarget,
-    InventorySourceTarget,
-    InventoryTarget,
-    ListRow,
-    row_sort_value,
 )
 from lib.update.cli_inventory import (
-    build_inventory_summary as _build_inventory_summary_impl,
+    InventoryHandles as _InventoryHandles,
+)
+from lib.update.cli_inventory import (
+    InventoryRefTarget as _InventoryRefTarget,
+)
+from lib.update.cli_inventory import (
+    InventorySourceTarget as _InventorySourceTarget,
+)
+from lib.update.cli_inventory import (
+    InventoryTarget as _InventoryTarget,
+)
+from lib.update.cli_inventory import (
+    ListRow as _ListRow,
+)
+from lib.update.cli_inventory import (
+    build_inventory_summary as _build_inventory_summary,
 )
 from lib.update.cli_inventory import (
     build_update_inventory as _build_update_inventory_impl,
 )
 from lib.update.cli_inventory import (
-    classify_updater_kind as _classify_updater_kind_impl,
+    classify_updater_kind as _classify_updater_kind,
 )
 from lib.update.cli_inventory import (
     collect_flake_inputs_for_list as _collect_flake_inputs_for_list_impl,
@@ -49,7 +58,7 @@ from lib.update.cli_inventory import (
     collect_source_entries_for_list as _collect_source_entries_for_list_impl,
 )
 from lib.update.cli_inventory import (
-    flake_source_string as _flake_source_string_impl,
+    flake_source_string as _flake_source_string,
 )
 from lib.update.cli_inventory import (
     generated_artifact_paths as _generated_artifact_paths_impl,
@@ -67,12 +76,20 @@ from lib.update.cli_inventory import (
     repo_relative_path as _repo_relative_path_impl,
 )
 from lib.update.cli_inventory import (
-    source_backing_input_name as _source_backing_input_name_impl,
+    row_sort_value as _row_sort_value,
 )
 from lib.update.cli_inventory import (
-    source_hash_kinds as _source_hash_kinds_impl,
+    source_backing_input_name as _source_backing_input_name,
 )
-from lib.update.cli_options import UpdateOptions, UpdateSortBy, UpdateTTYMode
+from lib.update.cli_inventory import (
+    source_hash_kinds as _source_hash_kinds,
+)
+from lib.update.cli_options import (
+    UpdateOptions,
+    UpdateOptionsKwargs,
+    UpdateSortBy,
+    UpdateTTYMode,
+)
 from lib.update.cli_validation import (
     ValidationDependencies,
 )
@@ -116,37 +133,44 @@ from lib.update.sources import (
 )
 from lib.update.ui_consumer import ConsumeEventsOptions, consume_events
 from lib.update.ui_state import ItemMeta, OperationKind, SummaryStatus
-from lib.update.updaters import UPDATERS, ensure_updaters_loaded
+from lib.update.updaters import UPDATERS, UpdaterClass, ensure_updaters_loaded
 from lib.update.updaters.base import FlakeInputHashUpdater, Updater, VersionInfo
 
-_InventoryHandles = InventoryHandles
-_InventoryRefTarget = InventoryRefTarget
-_InventorySourceTarget = InventorySourceTarget
-_InventoryTarget = InventoryTarget
-_ListRow = ListRow
-_build_inventory_summary = _build_inventory_summary_impl
-_classify_updater_kind = _classify_updater_kind_impl
-_flake_source_string = _flake_source_string_impl
-_row_sort_value = row_sort_value
-_source_backing_input_name = _source_backing_input_name_impl
-_source_hash_kinds = _source_hash_kinds_impl
-
-_PRESERVED_INVENTORY_EXPORTS = (
-    _InventoryHandles,
-    _InventoryRefTarget,
-    _InventorySourceTarget,
-    _inventory_classification,
-    _row_sort_value,
+__all__ = (
+    "OutputOptions",
+    "ResolvedTargets",
+    "UpdateOptions",
+    "UpdateSummary",
+    "_InventoryHandles",
+    "_InventoryRefTarget",
+    "_InventorySourceTarget",
+    "_inventory_classification",
+    "_row_sort_value",
+    "app",
+    "check_required_tools",
+    "cli",
+    "run_update_command",
+    "run_updates",
 )
 
 
-def _get_updaters() -> dict[str, type[Updater]]:
+def _get_updaters() -> dict[str, UpdaterClass]:
     return updater_module.resolve_registry_alias(UPDATERS, ensure_updaters_loaded)
 
 
-def _build_update_options(values: dict[str, object]) -> UpdateOptions:
+def _build_update_options(values: UpdateOptionsKwargs) -> UpdateOptions:
     """Compatibility wrapper for shared option construction."""
     return UpdateOptions.from_mapping(values)
+
+
+def _needs_flake_edit(opts: UpdateOptions) -> bool:
+    """Return whether the current option set needs flake-edit installed."""
+    if opts.no_refs or opts.native_only:
+        return False
+    if not opts.source:
+        return True
+    ref_names = {i.name for i in get_flake_inputs_with_refs()}
+    return opts.source in ref_names
 
 
 def check_required_tools(
@@ -175,6 +199,24 @@ def check_required_tools(
     if include_flake_edit:
         tools.append("flake-edit")
     return [tool for tool in tools if shutil.which(tool) is None]
+
+
+def _handle_required_tool_check(opts: UpdateOptions) -> int | None:
+    """Validate required external tools for non-query update runs."""
+    if opts.list_targets or opts.schema or opts.validate:
+        return None
+
+    missing = check_required_tools(
+        include_flake_edit=_needs_flake_edit(opts),
+        source=opts.source,
+        needs_sources=not opts.no_sources,
+    )
+    if not missing:
+        return None
+
+    sys.stderr.write(f"Error: Required tools not found: {', '.join(missing)}\n")
+    sys.stderr.write("Please install them and ensure they are in your PATH.\n")
+    return 1
 
 
 def _resolve_full_output(*, full_output: bool | None = None) -> bool:
@@ -983,33 +1025,22 @@ async def run_updates(opts: UpdateOptions) -> int:
 def run_update_command(
     options: UpdateOptions | None = None,
     /,
-    **overrides: object,
+    **overrides: Unpack[UpdateOptionsKwargs],
 ) -> int:
     """Run the update workflow from one options object or keyword overrides."""
     if options is not None and overrides:
         msg = "run_update_command accepts either UpdateOptions or keyword overrides"
         raise TypeError(msg)
 
-    opts = options if options is not None else _build_update_options(overrides)
+    override_values: UpdateOptionsKwargs = {**overrides}
+    opts = options if options is not None else _build_update_options(override_values)
     if not isinstance(opts, UpdateOptions):
         msg = f"Expected UpdateOptions, got {type(opts)!r}"
         raise TypeError(msg)
 
-    if not (opts.list_targets or opts.schema or opts.validate):
-        needs_flake_edit = not opts.no_refs and not opts.native_only
-        if needs_flake_edit and opts.source:
-            ref_names = {i.name for i in get_flake_inputs_with_refs()}
-            needs_flake_edit = opts.source in ref_names
-
-        missing = check_required_tools(
-            include_flake_edit=needs_flake_edit,
-            source=opts.source,
-            needs_sources=not opts.no_sources,
-        )
-        if missing:
-            sys.stderr.write(f"Error: Required tools not found: {', '.join(missing)}\n")
-            sys.stderr.write("Please install them and ensure they are in your PATH.\n")
-            return 1
+    tool_check = _handle_required_tool_check(opts)
+    if tool_check is not None:
+        return tool_check
 
     return asyncio.run(run_updates(opts))
 

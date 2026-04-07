@@ -1,0 +1,416 @@
+#!/usr/bin/env python3
+"""Sync managed Zen profile assets into the live profile.
+
+This is a lightweight workflow wrapper around ``zen-folders``.
+
+- It resolves the target Zen profile via ``zen-folders profile-path``.
+- It symlinks a managed chrome tree into the live profile's ``chrome/`` dir.
+- It symlinks a managed ``user.js`` into the live profile root.
+- It optionally runs ``zen-folders apply`` when Zen is closed.
+
+Unlike the Home Manager wrapper it replaces, this CLI is path-based and can be
+used without Nix.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+DEFAULT_CONFIG_DIR: Final = Path.home() / ".config" / "zen"
+DEFAULT_CHROME_SOURCE_ENV: Final = "ZEN_CHROME_SOURCE"
+DEFAULT_FOLDERS_COMMAND: Final = "zen-folders"
+MANAGED_CHROME_MANIFEST: Final = ".zen-profile-sync-managed-chrome"
+MANAGED_USER_JS_MANIFEST: Final = ".zen-profile-sync-managed-user-js"
+
+
+class ZenProfileSyncError(RuntimeError):
+    """User-facing command error."""
+
+
+def _stderr(message: str = "") -> None:
+    sys.stderr.write(f"{message}\n")
+
+
+def _expand_path(raw: str) -> Path:
+    """Expand one user-supplied filesystem path."""
+    return Path(raw).expanduser().resolve()
+
+
+def _resolve_optional_dir(
+    explicit: str | None,
+    default: Path,
+    *,
+    label: str,
+) -> Path | None:
+    """Resolve an optional directory path with strict explicit validation."""
+    if explicit:
+        path = _expand_path(explicit)
+        if not path.exists():
+            msg = f"{label} not found: {path}"
+            raise ZenProfileSyncError(msg)
+        if not path.is_dir():
+            msg = f"{label} is not a directory: {path}"
+            raise ZenProfileSyncError(msg)
+        return path
+
+    if default.exists():
+        if not default.is_dir():
+            msg = f"{label} is not a directory: {default}"
+            raise ZenProfileSyncError(msg)
+        return default.resolve()
+    return None
+
+
+def _resolve_optional_file(
+    explicit: str | None,
+    default: Path,
+    *,
+    label: str,
+) -> Path | None:
+    """Resolve an optional file path with strict explicit validation."""
+    if explicit:
+        path = _expand_path(explicit)
+        if not path.exists():
+            msg = f"{label} not found: {path}"
+            raise ZenProfileSyncError(msg)
+        if not path.is_file():
+            msg = f"{label} is not a file: {path}"
+            raise ZenProfileSyncError(msg)
+        return path
+
+    if default.exists():
+        if not default.is_file():
+            msg = f"{label} is not a file: {default}"
+            raise ZenProfileSyncError(msg)
+        return default.resolve()
+    return None
+
+
+def _zen_folders_base_command(
+    folders_command: str,
+    profile: str | None,
+) -> list[str]:
+    """Build the shared ``zen-folders`` command prefix."""
+    command = [folders_command]
+    if profile:
+        command.extend(["--profile", profile])
+    return command
+
+
+def _run_zen_folders_capture(command: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run ``zen-folders`` and capture text output."""
+    try:
+        return subprocess.run(  # noqa: S603
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        msg = f"zen-folders command not found: {command[0]}"
+        raise ZenProfileSyncError(msg) from exc
+
+
+def resolve_profile_dir(folders_command: str, profile: str | None) -> Path | None:
+    """Resolve the target profile directory via ``zen-folders profile-path``."""
+    command = [*_zen_folders_base_command(folders_command, profile), "profile-path"]
+    result = _run_zen_folders_capture(command)
+    if result.returncode != 0:
+        output = result.stderr.strip() or result.stdout.strip() or "unknown failure"
+        if profile is None and "Unable to auto-detect a Zen profile" in output:
+            return None
+        msg = f"zen-folders profile-path failed: {output}"
+        raise ZenProfileSyncError(msg)
+    resolved = result.stdout.strip()
+    if not resolved:
+        return None
+    return Path(resolved)
+
+
+def zen_is_running(folders_command: str, profile: str | None) -> bool:
+    """Return whether Zen appears to be using the target profile."""
+    command = [*_zen_folders_base_command(folders_command, profile), "is-running"]
+    result = _run_zen_folders_capture(command)
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    output = result.stdout.strip() or result.stderr.strip() or "unknown failure"
+    msg = f"zen-folders is-running failed: {output}"
+    raise ZenProfileSyncError(msg)
+
+
+def apply_folders(
+    folders_command: str,
+    profile: str | None,
+    folders_config: Path,
+) -> None:
+    """Run ``zen-folders apply`` for the target profile and config."""
+    command = [
+        *_zen_folders_base_command(folders_command, profile),
+        "apply",
+        "-y",
+        "-c",
+        str(folders_config),
+    ]
+    try:
+        result = subprocess.run(command, check=False)  # noqa: S603
+    except FileNotFoundError as exc:
+        msg = f"zen-folders command not found: {folders_command}"
+        raise ZenProfileSyncError(msg) from exc
+    if result.returncode != 0:
+        msg = f"zen-folders apply failed with exit code {result.returncode}"
+        raise ZenProfileSyncError(msg)
+
+
+def _symlink_target_matches(destination: Path, expected_source: Path) -> bool:
+    """Return whether *destination* points at *expected_source* verbatim."""
+    if not destination.is_symlink():
+        return False
+    return str(destination.readlink()) == str(expected_source)
+
+
+def _read_managed_source(manifest_path: Path) -> Path | None:
+    """Return the recorded managed source path, if one exists."""
+    if not manifest_path.is_file():
+        return None
+    recorded = manifest_path.read_text(encoding="utf-8").strip()
+    if not recorded:
+        return None
+    return Path(recorded)
+
+
+def link_managed_file(
+    source: Path | None,
+    destination: Path,
+    *,
+    manifest_path: Path,
+) -> None:
+    """Link one managed file into place, or remove the prior managed symlink."""
+    if source is None:
+        previous_source = _read_managed_source(manifest_path)
+        if previous_source is not None and _symlink_target_matches(destination, previous_source):
+            destination.unlink()
+        if manifest_path.exists():
+            manifest_path.unlink()
+        return
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_symlink() or destination.is_file():
+        destination.unlink()
+    elif destination.exists():
+        msg = f"Destination path is not a file: {destination}"
+        raise ZenProfileSyncError(msg)
+    destination.symlink_to(source)
+    manifest_path.write_text(f"{source}\n", encoding="utf-8")
+
+
+def cleanup_managed_chrome_symlinks(profile_chrome_dir: Path, manifest_path: Path) -> None:
+    """Remove previously managed chrome symlinks recorded in the manifest."""
+    if not manifest_path.is_file():
+        return
+
+    for entry in manifest_path.read_text(encoding="utf-8").splitlines():
+        rel = entry.strip()
+        if not rel:
+            continue
+        destination = profile_chrome_dir / rel
+        if destination.is_symlink():
+            destination.unlink()
+
+
+def prune_empty_chrome_dirs(profile_chrome_dir: Path) -> None:
+    """Delete empty directories left behind after managed chrome cleanup."""
+    if not profile_chrome_dir.exists():
+        return
+
+    for root, _, _ in os.walk(profile_chrome_dir, topdown=False):
+        path = Path(root)
+        try:
+            path.rmdir()
+        except OSError:
+            continue
+
+
+def _iter_source_files(source_dir: Path) -> list[Path]:
+    """Return all source files beneath one chrome source tree."""
+    files: list[Path] = []
+    for root, _, filenames in os.walk(source_dir, followlinks=True):
+        root_path = Path(root)
+        files.extend(root_path / filename for filename in filenames)
+    files.sort(key=lambda path: path.relative_to(source_dir).as_posix())
+    return files
+
+
+def sync_chrome_tree(
+    source_dir: Path,
+    profile_chrome_dir: Path,
+    manifest_path: Path,
+) -> None:
+    """Symlink a managed chrome tree into the live profile and write a manifest."""
+    manifest_entries: list[str] = []
+    for source in _iter_source_files(source_dir):
+        rel = source.relative_to(source_dir)
+        destination = profile_chrome_dir / rel
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.is_symlink() or destination.is_file():
+            destination.unlink()
+        elif destination.exists():
+            msg = f"Chrome destination path is not a file: {destination}"
+            raise ZenProfileSyncError(msg)
+        destination.symlink_to(source)
+        manifest_entries.append(rel.as_posix())
+
+    manifest_path.write_text(
+        "".join(f"{entry}\n" for entry in manifest_entries),
+        encoding="utf-8",
+    )
+
+
+def sync_profile(args: argparse.Namespace) -> int:
+    """Synchronize one managed config set into the live Zen profile."""
+    config_dir = _expand_path(args.config_dir)
+    chrome_source = _resolve_optional_dir(
+        args.chrome_source or os.environ.get(DEFAULT_CHROME_SOURCE_ENV),
+        config_dir / "chrome",
+        label="chrome source directory",
+    )
+    user_js_source = _resolve_optional_file(
+        args.user_js_source,
+        config_dir / "user.js",
+        label="user.js source file",
+    )
+    folders_config = _resolve_optional_file(
+        args.folders_config,
+        config_dir / "folders.yaml",
+        label="folders config file",
+    )
+
+    profile_dir = resolve_profile_dir(args.folders_command, args.profile)
+    if profile_dir is None:
+        _stderr(
+            "zen-profile-sync: no Zen profile detected yet; launch Zen/Twilight "
+            "once, then rerun."
+        )
+        return 0
+
+    profile_chrome_dir = profile_dir / "chrome"
+    profile_chrome_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = profile_dir / MANAGED_CHROME_MANIFEST
+    user_js_manifest_path = profile_dir / MANAGED_USER_JS_MANIFEST
+
+    cleanup_managed_chrome_symlinks(profile_chrome_dir, manifest_path)
+    prune_empty_chrome_dirs(profile_chrome_dir)
+
+    if chrome_source is not None:
+        sync_chrome_tree(chrome_source, profile_chrome_dir, manifest_path)
+    elif manifest_path.exists():
+        manifest_path.unlink()
+
+    link_managed_file(
+        user_js_source,
+        profile_dir / "user.js",
+        manifest_path=user_js_manifest_path,
+    )
+
+    if args.apply_folders and folders_config is not None:
+        if zen_is_running(args.folders_command, args.profile):
+            _stderr(
+                "zen-profile-sync: Zen is running; synced chrome files and prefs, "
+                "skipped folder reconciliation."
+            )
+            return 0
+        apply_folders(args.folders_command, args.profile, folders_config)
+
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Create the command-line parser."""
+    parser = argparse.ArgumentParser(
+        description="Sync managed Zen profile assets into the live profile.",
+    )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help=(
+            "Profile selector passed through to zen-folders. Accepts a profile "
+            "directory name, a direct path, or a human profile name."
+        ),
+    )
+    parser.add_argument(
+        "--config-dir",
+        default=str(DEFAULT_CONFIG_DIR),
+        help=f"Managed config directory (default: {DEFAULT_CONFIG_DIR})",
+    )
+    parser.add_argument(
+        "--chrome-source",
+        default=None,
+        help=(
+            "Chrome source directory. Defaults to CONFIG_DIR/chrome when present. "
+            f"Also accepts ${DEFAULT_CHROME_SOURCE_ENV}."
+        ),
+    )
+    parser.add_argument(
+        "--user-js-source",
+        default=None,
+        help="user.js source file. Defaults to CONFIG_DIR/user.js when present.",
+    )
+    parser.add_argument(
+        "--folders-config",
+        default=None,
+        help=(
+            "Folders YAML config. Defaults to CONFIG_DIR/folders.yaml when present."
+        ),
+    )
+    parser.add_argument(
+        "--folders-command",
+        default=DEFAULT_FOLDERS_COMMAND,
+        help=(
+            "zen-folders executable or path used for profile resolution and "
+            f"folder reconciliation (default: {DEFAULT_FOLDERS_COMMAND})"
+        ),
+    )
+    apply_group = parser.add_mutually_exclusive_group()
+    apply_group.add_argument(
+        "--apply-folders",
+        dest="apply_folders",
+        action="store_true",
+        default=True,
+        help="Apply folders.yaml with zen-folders when Zen is closed (default).",
+    )
+    apply_group.add_argument(
+        "--no-apply-folders",
+        dest="apply_folders",
+        action="store_false",
+        help="Skip zen-folders apply and only sync chrome assets and user.js.",
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Parse arguments and synchronize the target profile."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return sync_profile(args)
+    except ZenProfileSyncError as exc:
+        _stderr(f"Error: {exc}")
+        return 1
+    except KeyboardInterrupt:
+        _stderr("Interrupted.")
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())
