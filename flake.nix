@@ -151,7 +151,7 @@
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.5.0";
+      url = "github:gkze/curator/v0.6.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)

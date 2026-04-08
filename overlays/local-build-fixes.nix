@@ -61,6 +61,21 @@
     };
   });
 
+  # nixpkgs' sequoia-sop currently vendors a duplicate copy of sq's
+  # manpages, which creates noisy buildEnv collisions when both are present.
+  # TODO: remove once nixpkgs stops installing the duplicated sq docs/man assets
+  # from sequoia-sop.
+  sequoia-sop = prev.sequoia-sop.overrideAttrs (old: {
+    postFixup = (old.postFixup or "") + ''
+      if [[ -d "$out/share/man" ]]; then
+        find "$out/share/man" -type f \
+          ! -path "$out/share/man/man1/sqop*.1.gz" \
+          -delete
+        find "$out/share/man" -type d -empty -delete
+      fi
+    '';
+  });
+
   sequoia-wot = prev.sequoia-wot.overrideAttrs (_: {
     doCheck = !prev.stdenv.hostPlatform.isDarwin;
   });

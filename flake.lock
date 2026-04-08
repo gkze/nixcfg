@@ -182,11 +182,11 @@
     "catppuccin-zen-browser": {
       "flake": false,
       "locked": {
-        "lastModified": 1775505643,
-        "narHash": "sha256-qcBC9aLmSmMg3npXz9mdkh9CXNSWbTMQnILq9PR9fnQ=",
+        "lastModified": 1775618157,
+        "narHash": "sha256-8odr3C0oZ/aCX+nmisAqwhcBhUj6867Vh0CGUeNbetQ=",
         "owner": "gkze",
         "repo": "zen-browser",
-        "rev": "a2326a605170c018e37e6bfb789bd970c0858d94",
+        "rev": "19b8621386b5c5a91b38bb6f763ba770f4292eb5",
         "type": "github"
       },
       "original": {
@@ -326,16 +326,16 @@
         "treefmt-nix": "treefmt-nix_2"
       },
       "locked": {
-        "lastModified": 1773292096,
-        "narHash": "sha256-oe+6zNKgA0dxRq7AkPwtx5fKifQtWxXFq1XDMAxgu/s=",
+        "lastModified": 1775618195,
+        "narHash": "sha256-pglleeS65Udi5VrXlYu6h2p4Y/yvpwEbagrrU0VNx3A=",
         "owner": "gkze",
         "repo": "curator",
-        "rev": "5d884b5696a0ab845596a0362967f09c2bf41a9b",
+        "rev": "58b44852142db257e64a6d77242c3212bcc97ee9",
         "type": "github"
       },
       "original": {
         "owner": "gkze",
-        "ref": "v0.5.0",
+        "ref": "v0.6.0",
         "repo": "curator",
         "type": "github"
       }
@@ -1707,11 +1707,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1775538785,
-        "narHash": "sha256-L5oj0Wj8VTS5rI3iLwmYBl70c1GlM4EO9mtmUHftsNg=",
+        "lastModified": 1775618516,
+        "narHash": "sha256-/2OxLCexEMNzMJWLO55UF5oseaLPKcOg7UX3yRN0bnM=",
         "owner": "gkze",
         "repo": "opencode",
-        "rev": "bfd9b318ff6ff2516883c1251f7132f23886e2f8",
+        "rev": "2dd6c54d9d43a7783892dc849479f2b2a60d8f7c",
         "type": "github"
       },
       "original": {
