@@ -139,10 +139,7 @@ def _darwin_heavy_targets(job_data: WorkflowObject, *, job_id: str) -> tuple[str
         package = entry.get("package")
         target = entry.get("target")
         if not isinstance(package, str) or not isinstance(target, str):
-            msg = (
-                f"{job_id} matrix entry must define string "
-                f"package/target fields: {entry!r}"
-            )
+            msg = f"{job_id} matrix entry must define string package/target fields: {entry!r}"
             raise TypeError(msg)
         if package in packages_seen:
             msg = f"{job_id} repeats package {package!r}"
@@ -150,10 +147,7 @@ def _darwin_heavy_targets(job_data: WorkflowObject, *, job_id: str) -> tuple[str
         packages_seen.add(package)
         target_suffix = target.rsplit(".", 1)[-1]
         if target_suffix != package:
-            msg = (
-                f"{job_id} package/target mismatch: "
-                f"package={package!r}, target={target!r}"
-            )
+            msg = f"{job_id} package/target mismatch: package={package!r}, target={target!r}"
             raise RuntimeError(msg)
         targets.append(target)
 
@@ -321,10 +315,7 @@ def validate_workflow_structure_contracts(*, workflow_path: Path) -> None:
     )
 
     if not has_refresh_jobs and not has_certify_jobs:
-        msg = (
-            f"Workflow {workflow_path} does not define refresh or certification "
-            "update jobs"
-        )
+        msg = f"Workflow {workflow_path} does not define refresh or certification update jobs"
         raise RuntimeError(msg)
 
     if has_refresh_jobs:

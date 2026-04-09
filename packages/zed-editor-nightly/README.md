@@ -27,18 +27,16 @@ Zed is a large Rust workspace with:
 - generated protobuf code
 - a macOS app bundle layout
 
-That means the package needs both crate2nix and a prepared workspace source
-tree that preserves Cargo's expectations inside `buildRustCrate`.
+That means the package needs both crate2nix and a prepared workspace source tree that preserves
+Cargo's expectations inside `buildRustCrate`.
 
 ## Current strategy
 
 - build a `patchedSrc` tree with the minimal source surgery needed for Nix
 - import checked-in `Cargo.nix` with `rootSrc = patchedSrc`
 - apply shared per-crate native/build inputs through generated common overrides
-- keep only exceptional crates (`gpui_macos`, `tree-sitter`, `webrtc-sys`,
-  `zed`, etc.) hand-written
-- reuse the upstream Zed app bundle metadata and icon while swapping in the
-  crate2nix-built binaries
+- keep only exceptional crates (`gpui_macos`, `tree-sitter`, `webrtc-sys`, `zed`, etc.) hand-written
+- reuse the upstream Zed app bundle metadata and icon while swapping in the crate2nix-built binaries
 
 ## Regenerating `Cargo.nix`
 
@@ -82,5 +80,4 @@ ZED=$(nix path-info .#packages.aarch64-darwin.zed-editor-nightly)/bin/zed
 "$ZED" --help
 ```
 
-For broader crate2nix guidance in this repo, see
-`docs/crate2nix-rust-workspaces.md`.
+For broader crate2nix guidance in this repo, see `docs/crate2nix-rust-workspaces.md`.

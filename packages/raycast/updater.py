@@ -24,7 +24,4 @@ class RaycastUpdater(DownloadingPlatformAPIUpdater):
         return f"https://releases.raycast.com/releases/latest?build={_api_platform}"
 
     def _download_url(self, _api_platform: str, info: VersionInfo) -> str:
-        return (
-            f"https://releases.raycast.com/releases/{info.version}/download"
-            f"?build={_api_platform}"
-        )
+        return f"https://releases.raycast.com/releases/{info.version}/download?build={_api_platform}"

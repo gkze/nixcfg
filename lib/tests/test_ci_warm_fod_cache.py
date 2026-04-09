@@ -80,8 +80,7 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
                     "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
                     platform="x86_64-linux",
                     url=(
-                        "https://dl.deno.land/release/v2.6.10/"
-                        "denort-x86_64-unknown-linux-gnu.zip"
+                        "https://dl.deno.land/release/v2.6.10/denort-x86_64-unknown-linux-gnu.zip"
                     ),
                 ),
             ]
@@ -245,8 +244,7 @@ def test_find_fod_targets_handles_deno_edge_cases(
                     "sha256-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD=",
                     platform="x86_64-linux",
                     url=(
-                        "https://dl.deno.land/release/v2.6.10/"
-                        "denort-x86_64-unknown-linux-gnu.zip"
+                        "https://dl.deno.land/release/v2.6.10/denort-x86_64-unknown-linux-gnu.zip"
                     ),
                 ),
             ]
@@ -293,8 +291,7 @@ def test_resolve_output_paths(monkeypatch: pytest.MonkeyPatch) -> None:
             args=["nix"],
             returncode=0,
             stdout=(
-                '[{"outputs": {"out": "/nix/store/abc"}}, '
-                '{"outputs": {"doc": "/tmp/not-store"}}]'
+                '[{"outputs": {"out": "/nix/store/abc"}}, {"outputs": {"doc": "/tmp/not-store"}}]'
             ),
             stderr="",
         )

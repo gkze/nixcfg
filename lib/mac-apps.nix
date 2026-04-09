@@ -1,9 +1,14 @@
 { lib, pkgs }:
 let
-  inherit (builtins) concatLists filter;
+  inherit (builtins)
+    concatLists
+    filter
+    readFile
+    toFile
+    toJSON
+    ;
   inherit (lib)
     attrByPath
-    concatMapStringsSep
     concatStringsSep
     escapeShellArg
     getExe
@@ -66,7 +71,11 @@ let
     if value != null then
       value
     else
-      throw "Package '${packageLabel package}' must define passthru.macApp.${attr} to be used with nixcfg.macApps.systemApplications.";
+      throw (
+        "Package '${packageLabel package}' must define "
+        + "passthru.macApp.${attr} to be used with "
+        + "nixcfg.macApps.systemApplications."
+      );
 
   applicationEntryType = types.submodule (
     { config, ... }:
@@ -88,7 +97,10 @@ let
             "copy"
             "symlink"
           ];
-          description = "Whether to copy the app bundle out of the store or symlink it into /Applications.";
+          description = ''
+            Whether to copy the app bundle out of the store or symlink it into
+            /Applications.
+          '';
         };
       };
 
@@ -99,7 +111,30 @@ let
     }
   );
 
-  quotedLines = values: concatMapStringsSep "\n" (value: "    ${escapeShellArg value}") values;
+  pythonExe =
+    let
+      python = attrByPath [ "python3" ] null pkgs;
+    in
+    if python != null then getExe python else "/usr/bin/python3";
+
+  writeText =
+    name: text:
+    let
+      writer = attrByPath [ "writeText" ] null pkgs;
+    in
+    if writer != null then writer name text else toFile name text;
+
+  macAppsHelper = writeText "nixcfg-mac-apps-helper.py" (readFile ./mac_apps_helper.py);
+
+  callMacAppsHelper =
+    command: payload:
+    let
+      payloadFile = writeText "nixcfg-mac-apps-${command}.json" (toJSON payload);
+    in
+    ''
+      ${escapeShellArg pythonExe} ${escapeShellArg (toString macAppsHelper)} \
+        ${escapeShellArg command} ${escapeShellArg (toString payloadFile)}
+    '';
 in
 {
   inherit applicationEntryType;
@@ -134,7 +169,10 @@ in
       assertion = conflicts == [ ];
       message = concatStringsSep "\n" (
         [
-          "nixcfg.macApps.systemApplications packages must not also appear in other installed package lists."
+          (
+            "nixcfg.macApps.systemApplications packages must not also appear in "
+            + "other installed package lists."
+          )
         ]
         ++ conflictLines
       );
@@ -149,56 +187,10 @@ in
     let
       uniqueManagedBundleNames = unique managedBundleNames;
     in
-    ''
-            packageListLabel=${escapeShellArg label}
-
-            managedBundleNames=(
-      ${quotedLines uniqueManagedBundleNames}
-            )
-
-            packagePaths=(
-      ${quotedLines packagePaths}
-            )
-
-            bundle_is_managed() {
-              local needle="$1"
-              local managedBundleName
-
-              for managedBundleName in "''${managedBundleNames[@]}"; do
-                if [ "$managedBundleName" = "$needle" ]; then
-                  return 0
-                fi
-              done
-
-              return 1
-            }
-
-            offendingBundles=()
-
-            for packagePath in "''${packagePaths[@]}"; do
-              if [ ! -d "$packagePath/Applications" ]; then
-                continue
-              fi
-
-              for appBundle in "$packagePath"/Applications/*.app; do
-                if [ "$appBundle" = "$packagePath/Applications/*.app" ] || [ ! -d "$appBundle" ]; then
-                  continue
-                fi
-
-                bundleName="''${appBundle##*/}"
-                if bundle_is_managed "$bundleName"; then
-                  offendingBundles+=("$bundleName <= $packagePath")
-                fi
-              done
-            done
-
-            if [ "''${#offendingBundles[@]}" -ne 0 ]; then
-              echo "Managed macOS app bundles must not be exposed through $packageListLabel." >&2
-              echo "Move those packages out of $packageListLabel so /Applications stays the only mutable app-bundle surface." >&2
-              printf ' - %s\n' "''${offendingBundles[@]}" >&2
-              exit 1
-            fi
-    '';
+    callMacAppsHelper "profile-bundle-leak-audit" {
+      inherit label packagePaths;
+      managedBundleNames = uniqueManagedBundleNames;
+    };
 
   systemApplicationsScript =
     {
@@ -210,113 +202,19 @@ in
     }:
     let
       bundleSourcePath = entry: "${entry.package}/${requiredMacAppAttr entry.package "bundleRelPath"}";
-      rsyncModeFlag = if writable then "--chmod=+w" else "--chmod=-w";
-      stateFile = "${stateDirectory}/${stateName}.txt";
-      installCommands = concatMapStringsSep "\n" (entry: ''
-        install_managed_app ${escapeShellArg entry.mode} ${escapeShellArg (bundleSourcePath entry)} ${escapeShellArg "${targetDirectory}/${entry.bundleName}"}
-      '') entries;
+      helperEntries = map (entry: {
+        inherit (entry) bundleName mode;
+        sourcePath = bundleSourcePath entry;
+      }) entries;
     in
-    ''
-            targetDirectory=${escapeShellArg targetDirectory}
-            stateDirectory=${escapeShellArg stateDirectory}
-            stateFile=${escapeShellArg stateFile}
-
-            currentApps=(
-      ${quotedLines (map (entry: entry.bundleName) entries)}
-            )
-
-            app_in_current_set() {
-              local needle="$1"
-              local app
-
-              for app in "''${currentApps[@]}"; do
-                if [ "$app" = "$needle" ]; then
-                  return 0
-                fi
-              done
-
-              return 1
-            }
-
-            app_in_other_manifests() {
-              local needle="$1"
-              local manifest
-              local managedApp
-
-              for manifest in "$stateDirectory"/*.txt; do
-                if [ "$manifest" = "$stateDirectory/*.txt" ] || [ "$manifest" = "$stateFile" ] || [ ! -f "$manifest" ]; then
-                  continue
-                fi
-
-                while IFS= read -r managedApp || [ -n "$managedApp" ]; do
-                  if [ "$managedApp" = "$needle" ]; then
-                    return 0
-                  fi
-                done < "$manifest"
-              done
-
-              return 1
-            }
-
-            install_managed_app() {
-              local mode="$1"
-              local src="$2"
-              local dst="$3"
-
-              if [ ! -d "$src" ]; then
-                echo "Expected macOS app bundle at $src" >&2
-                exit 1
-              fi
-
-              echo "setting up $dst..." >&2
-
-              if [ "$mode" = "symlink" ]; then
-                if [ -e "$dst" ] || [ -L "$dst" ]; then
-                  rm -rf -- "''${dst:?}"
-                fi
-                ln -s "$src" "$dst"
-                return
-              fi
-
-              if [ -L "$dst" ] || { [ -e "$dst" ] && [ ! -d "$dst" ]; }; then
-                rm -rf -- "''${dst:?}"
-              fi
-
-              mkdir -p "$dst"
-
-              rsyncFlags=(
-                --checksum
-                --copy-unsafe-links
-                --archive
-                --delete
-                ${rsyncModeFlag}
-                --no-group
-                --no-owner
-              )
-
-              ${getExe pkgs.rsync} "''${rsyncFlags[@]}" "$src/" "$dst"
-            }
-
-            mkdir -p "$targetDirectory" "$stateDirectory"
-
-            if [ -f "$stateFile" ]; then
-              while IFS= read -r managedApp || [ -n "$managedApp" ]; do
-                if [ -n "$managedApp" ] && ! app_in_current_set "$managedApp"; then
-                  if app_in_other_manifests "$managedApp"; then
-                    echo "keeping $targetDirectory/$managedApp because another manifest still manages it..." >&2
-                  else
-                    echo "removing stale managed app $targetDirectory/$managedApp..." >&2
-                    rm -rf -- "''${targetDirectory:?}/''${managedApp:?}"
-                  fi
-                fi
-              done < "$stateFile"
-            fi
-
-            ${installCommands}
-
-            : > "$stateFile"
-            for app in "''${currentApps[@]}"; do
-              printf '%s\n' "$app" >> "$stateFile"
-            done
-    '';
+    callMacAppsHelper "system-applications" {
+      inherit
+        stateDirectory
+        stateName
+        targetDirectory
+        writable
+        ;
+      entries = helperEntries;
+      rsyncPath = getExe pkgs.rsync;
+    };
 }

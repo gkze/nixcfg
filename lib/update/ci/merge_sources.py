@@ -159,10 +159,7 @@ def _merge_urls(
     for url_key, url_value in (incoming or {}).items():
         existing_value = merged.get(url_key)
         if existing_value is not None and existing_value != url_value:
-            msg = (
-                "Conflicting urls entry for "
-                f"{url_key!r}: {existing_value!r} vs {url_value!r}"
-            )
+            msg = f"Conflicting urls entry for {url_key!r}: {existing_value!r} vs {url_value!r}"
             raise RuntimeError(msg)
         merged[url_key] = url_value
     return merged

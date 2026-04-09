@@ -23,8 +23,8 @@ This package builds Codex with `crate2nix` from the upstream Rust workspace.
 - build a `patchedSrc` tree with the minimum source surgery needed for Nix
 - import checked-in `Cargo.nix` with `rootSrc = patchedSrc`
 - keep compatibility shims centralized in `crateOverrides`
-- fail evaluation early if the checked-in `Cargo.nix` version no longer matches
-  the upstream `codex-cli` crate version
+- fail evaluation early if the checked-in `Cargo.nix` version no longer matches the upstream
+  `codex-cli` crate version
 
 ## Regenerating `Cargo.nix`
 

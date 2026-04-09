@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -52,6 +53,11 @@ class RefreshResult:
     crate_hashes: str
 
 
+_CLEAN_SOURCE_WITH_SRC_RE = re.compile(
+    r"src = lib\.cleanSourceWith \{ filter = sourceFilter;  src = (?P<src>[^;]+); \};"
+)
+
+
 def _stabilize_generated_command_comment(
     target: Crate2NixTarget,
     refreshed: str,
@@ -77,6 +83,34 @@ def _stabilize_generated_command_comment(
     trailing_newline = refreshed.endswith("\n")
     rebuilt = "\n".join(refreshed_lines)
     return rebuilt + ("\n" if trailing_newline else "")
+
+
+def _stabilize_generated_root_src_paths(
+    refreshed: str,
+    *,
+    patched_src: Path,
+    generated_cargo: Path,
+) -> str:
+    """Rewrite generated store-path source roots back to ``${rootSrc}`` references."""
+    relative_root_src = os.path.relpath(patched_src, generated_cargo.parent).replace(
+        os.sep,
+        "/",
+    )
+    prefixes = tuple(dict.fromkeys((patched_src.as_posix(), relative_root_src)))
+
+    def _rewrite(match: re.Match[str]) -> str:
+        raw_src = match.group("src").strip()
+        candidate = raw_src.strip('"')
+        for prefix in prefixes:
+            if candidate == prefix or candidate.startswith(prefix + "/"):
+                suffix = candidate[len(prefix) :].lstrip("/")
+                normalized = '"${rootSrc}"'
+                if suffix:
+                    normalized = f'"${{rootSrc}}/{suffix}"'
+                return match.group(0).replace(raw_src, normalized)
+        return match.group(0)
+
+    return _CLEAN_SOURCE_WITH_SRC_RE.sub(_rewrite, refreshed)
 
 
 TARGETS = {
@@ -232,6 +266,11 @@ def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
 
         cargo_text, _rewrites, _added_root_src = normalize(
             generated_cargo.read_text(encoding="utf-8")
+        )
+        cargo_text = _stabilize_generated_root_src_paths(
+            cargo_text,
+            patched_src=patched_src,
+            generated_cargo=generated_cargo,
         )
         cargo_text = _stabilize_generated_command_comment(target, cargo_text)
         cargo_text = _normalize_trailing_newline(cargo_text)

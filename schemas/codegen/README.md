@@ -1,7 +1,7 @@
 # Codegen manifest schemas
 
-These JSON Schemas define a language-agnostic configuration format for
-cross-language code generation.
+These JSON Schemas define a language-agnostic configuration format for cross-language code
+generation.
 
 Files:
 
@@ -37,8 +37,8 @@ Shared cross-language golden fixtures live under:
 
 - `schemas/codegen/testdata/`
 
-The schema `$id` values currently use stable `urn:uuid:` identifiers rather
-than hosted URLs, so they do not imply a public domain or publication contract.
+The schema `$id` values currently use stable `urn:uuid:` identifiers rather than hosted URLs, so
+they do not imply a public domain or publication contract.
 
-The schemas are designed to stay language-neutral so the format can be reused if
-`ghawfr` is later extracted into its own repository.
+The schemas are designed to stay language-neutral so the format can be reused if `ghawfr` is later
+extracted into its own repository.

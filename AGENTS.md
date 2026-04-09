@@ -1,6 +1,7 @@
 # Agent Guide for `nixcfg`
 
-`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md`, not `CLAUDE.md`, and keep the symlink intact.
+`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md`, not `CLAUDE.md`, and keep the symlink
+intact.
 
 ## Start Here Every Time
 
@@ -15,26 +16,32 @@ Before changing code, do the smallest possible orientation pass:
    - `.dex/tasks.jsonl`
    - `git stash list`
    - recent Pi sessions under `~/.pi/agent/sessions/--Users-george-.config-nixcfg--/`
-   - recent OpenCode sessions in `~/.local/share/opencode/opencode.db` for worktree `/Users/george/.config/nixcfg`
+   - recent OpenCode sessions in `~/.local/share/opencode/opencode.db` for worktree
+     `/Users/george/.config/nixcfg`
 1. Prefer a narrow reproduction before a full build or full-closure apply.
-1. Before handoff, review your own diff for regressions, generated-file drift, CI/update fallout, and platform-specific breakage.
+1. Before handoff, review your own diff for regressions, generated-file drift, CI/update fallout,
+   and platform-specific breakage.
 
-Local history for this repo heavily favors root-cause analysis, workflow failure investigation, and explicit self-review passes. Match that style.
+Local history for this repo heavily favors root-cause analysis, workflow failure investigation, and
+explicit self-review passes. Match that style.
 
 ## Non-Negotiable Guardrails
 
 These are hard rules, not suggestions.
 
 - Do not use `--no-verify` with `git commit`, `git push`, or related git flows in this repo.
-- If hooks fail, fix the underlying issue or stop and ask the user. Do not bypass the hook as a shortcut.
-- If partial staging or commit-splitting makes hooks awkward, use a safer flow instead: temporary patches, an isolated worktree, or a clean commit split that still allows hooks to run normally.
-- Before push, do not rely on spot checks when repo hooks or CI define stricter gates. Run `prek run -a` or the exact relevant CI-parity commands on the final tree.
+- If hooks fail, fix the underlying issue or stop and ask the user. Do not bypass the hook as a
+  shortcut.
+- If partial staging or commit-splitting makes hooks awkward, use a safer flow instead: temporary
+  patches, an isolated worktree, or a clean commit split that still allows hooks to run normally.
+- Before push, do not rely on spot checks when repo hooks or CI define stricter gates. Run
+  `prek run -a` or the exact relevant CI-parity commands on the final tree.
 - Do not push changes while any known required local quality gate is failing.
 
 ## What This Repository Actually Is
 
-This is not just a personal dotfiles repo.
-It is a mixed Nix + Python + Go codebase with several public and semi-public surfaces:
+This is not just a personal dotfiles repo. It is a mixed Nix + Python + Go codebase with several
+public and semi-public surfaces:
 
 - a personal `nix-darwin` + Home Manager flake
 - reusable exported `darwin`, `home`, and `nixos` module sets
@@ -55,7 +62,9 @@ Important entrypoints:
 - `home/george/default.nix`
 - `nixcfg.py`
 
-The host entrypoints are intentionally thin. Shared behavior usually belongs in `modules/`, `lib/lib.nix`, `default.nix`, or `lib/exports.nix`, not in a host file, unless the change is truly machine-specific.
+The host entrypoints are intentionally thin. Shared behavior usually belongs in `modules/`,
+`lib/lib.nix`, `default.nix`, or `lib/exports.nix`, not in a host file, unless the change is truly
+machine-specific.
 
 ## Where To Look First
 
@@ -134,15 +143,16 @@ That history suggests the right default behavior:
 - review staged or final diffs explicitly before finishing
 - avoid broad rewrites when a targeted fix is available
 
-A recurring pattern: failures often surface through `argus`, but the real bug lives in `packages/`, `overlays/`, or `lib/update/`.
+A recurring pattern: failures often surface through `argus`, but the real bug lives in `packages/`,
+`overlays/`, or `lib/update/`.
 
 ## Repo Patterns You Must Preserve
 
 ### 1. `flake.nix` pins are often intentional operational workarounds
 
 `flake.nix` contains comments and pins for active upstream breakage or behavior differences.
-Examples include temporary forks, pinned revisions, and disabled integrations.
-Do not casually “clean up” those pins without checking why they were introduced.
+Examples include temporary forks, pinned revisions, and disabled integrations. Do not casually
+“clean up” those pins without checking why they were introduced.
 
 ### 2. Package discovery is structured, not ad hoc
 
@@ -151,13 +161,14 @@ Do not casually “clean up” those pins without checking why they were introdu
 - System constraints live in `packages/registry.nix`.
 - Companion `crate2nix-src.nix` entries are discovered and exported too.
 
-If you add or rename a package, check discovery and system constraints, not just the derivation itself.
+If you add or rename a package, check discovery and system constraints, not just the derivation
+itself.
 
 ### 3. Overlays are fragment-based
 
-`overlays/default.nix` auto-imports overlay fragments and combines them with helper overlays.
-Use `overlays/` when you need `final` / `prev` semantics or are overriding nixpkgs behavior.
-Use `packages/` for standalone `callPackage` derivations.
+`overlays/default.nix` auto-imports overlay fragments and combines them with helper overlays. Use
+`overlays/` when you need `final` / `prev` semantics or are overriding nixpkgs behavior. Use
+`packages/` for standalone `callPackage` derivations.
 
 ### 4. Source-backed packages use shared `selfSource` plumbing
 
@@ -167,7 +178,8 @@ The repo now centralizes sibling `sources.json` injection through:
 - `default.nix`
 - `packages/default.nix`
 
-If a package expects `selfSource`, make sure the sibling `sources.json` pattern still works through the shared helper instead of inventing a one-off path.
+If a package expects `selfSource`, make sure the sibling `sources.json` pattern still works through
+the shared helper instead of inventing a one-off path.
 
 ### 5. Darwin app packaging has a shared pattern
 
@@ -178,21 +190,23 @@ For macOS GUI apps, prefer the shared pattern built around:
 - `passthru.macApp`
 - `nixcfg.macApps.systemApplications`
 
-Do not add bespoke activation hacks for `/Applications` unless the shared pattern genuinely cannot express the need.
+Do not add bespoke activation hacks for `/Applications` unless the shared pattern genuinely cannot
+express the need.
 
 ### 6. `ghawfr/` source and `.ghawfr/` runtime state are different things
 
 - `ghawfr/` is source code and tests.
-- `.ghawfr/` is local runtime state, plans, artifacts, caches, worker state, and possibly sensitive material.
+- `.ghawfr/` is local runtime state, plans, artifacts, caches, worker state, and possibly sensitive
+  material.
 
-Do not mix them up in reviews or commits.
-If a `ghawfr` task leaves `.ghawfr/` debris around, separate source changes from runtime leftovers.
+Do not mix them up in reviews or commits. If a `ghawfr` task leaves `.ghawfr/` debris around,
+separate source changes from runtime leftovers.
 
 ### 7. `default.nix` / `lib.nix` / `lib/exports.nix` are API surfaces
 
-The repo exports constructors and module sets for downstream use.
-If you touch these files, treat them as public API and validate accordingly.
-Preserve constructor names and module export intent unless the task explicitly changes API shape.
+The repo exports constructors and module sets for downstream use. If you touch these files, treat
+them as public API and validate accordingly. Preserve constructor names and module export intent
+unless the task explicitly changes API shape.
 
 ## Investigation Rules
 
@@ -208,8 +222,8 @@ Start from one of these before doing anything expensive:
 
 ### Do not accept “build from source” as a substitute when caches should exist
 
-If the user expects cached or prebuilt outputs, investigate why a cached path, version, or hash diverged.
-Do not assume a from-source rebuild is an acceptable outcome.
+If the user expects cached or prebuilt outputs, investigate why a cached path, version, or hash
+diverged. Do not assume a from-source rebuild is an acceptable outcome.
 
 ### Preserve platform guards
 
@@ -219,8 +233,8 @@ This flake exports:
 - `aarch64-linux`
 - `x86_64-linux`
 
-Do not remove or weaken platform guards casually.
-Many recurring failures in this repo are caused by platform-specific drift.
+Do not remove or weaken platform guards casually. Many recurring failures in this repo are caused by
+platform-specific drift.
 
 ### Treat hash and generated artifact drift as first-class issues
 
@@ -233,8 +247,8 @@ Common failure classes here:
 - `npmDepsHash` / `denoDepsHash` / `vendorHash` mismatches
 - workflow artifact naming/path mismatches
 
-When touching workflow artifact contracts, update both the workflow and the verification/testing side.
-Relevant places include:
+When touching workflow artifact contracts, update both the workflow and the verification/testing
+side. Relevant places include:
 
 - `lib/update/ci/workflow_steps.py`
 - `lib/tests/test_ci_workflow_artifact_contracts.py`
@@ -242,8 +256,7 @@ Relevant places include:
 
 ### When simplifying, remove accidental complexity without breaking discovery or exports
 
-Recent history includes several simplification passes.
-Good simplifications here usually:
+Recent history includes several simplification passes. Good simplifications here usually:
 
 - deduplicate helper plumbing
 - reduce repeated let-bindings in thin derivations
@@ -265,7 +278,8 @@ Start with:
 - `nix build .#checks.aarch64-darwin.darwin-argus`
 - `nix build .#checks.aarch64-darwin.darwin-rocinante`
 
-If the failure mentions a package, switch quickly into that package or overlay instead of staring only at the host module.
+If the failure mentions a package, switch quickly into that package or overlay instead of staring
+only at the host module.
 
 ### Adding or updating a package
 
@@ -286,14 +300,15 @@ For source-backed packages, make sure the full pattern is coherent:
 
 ### Updating CI or update workflow logic
 
-Understand which phase you are touching.
-The update workflow is phase-structured: lock update, version resolution, per-platform hash computation, merge, crate2nix refresh, then downstream validation/build steps.
-Make changes phase-consciously.
+Understand which phase you are touching. The update workflow is phase-structured: lock update,
+version resolution, per-platform hash computation, merge, crate2nix refresh, then downstream
+validation/build steps. Make changes phase-consciously.
 
 ### Working on OpenCode / MCP / profile setup
 
-Use `modules/home/opencode.nix` and `modules/home/profiles.nix` as the source of truth.
-Do not scatter MCP or profile behavior across unrelated host files unless the behavior is truly host-specific.
+Use `modules/home/opencode.nix` and `modules/home/profiles.nix` as the source of truth. Do not
+scatter MCP or profile behavior across unrelated host files unless the behavior is truly
+host-specific.
 
 ### Working on Zen / Twilight
 
@@ -307,8 +322,8 @@ Remember that Zen folder reconciliation is stateful and interacts with a live br
 
 ## Validation Ladder
 
-Use the narrowest relevant checks first.
-Do not jump straight to the most expensive command unless the task needs it.
+Use the narrowest relevant checks first. Do not jump straight to the most expensive command unless
+the task needs it.
 
 ### Formatting and local hooks
 
@@ -362,12 +377,11 @@ Only use this when the task truly requires an actual local apply:
 
 If the task touches CSS or related frontend-ish repo assets, validate that too:
 
-- `nix build .#checks.x86_64-linux.css`
+- `nix build .#checks.x86_64-linux.format-web-biome`
 
 ## Commit And Review Norms
 
-Recent human-authored commits are overwhelmingly conventional-commit style.
-Prefer subjects like:
+Recent human-authored commits are overwhelmingly conventional-commit style. Prefer subjects like:
 
 - `fix(ci): ...`
 - `fix(update): ...`
@@ -378,12 +392,14 @@ Prefer subjects like:
 
 Notes:
 
-- old `nix: Update ...` and `flake.lock: Update ...` commits exist, but they are legacy/automation-shaped
+- old `nix: Update ...` and `flake.lock: Update ...` commits exist, but they are
+  older automation-shaped commits
 - commitlint is enforced
 - if the user explicitly asks you to commit, use `git commit -S`
 
-Before finishing substantial work, do a review pass against your own diff.
-OpenCode history for this repo shows very heavy use of explicit self-review subagents; emulate that discipline even when working alone.
+Before finishing substantial work, do a review pass against your own diff. OpenCode history for this
+repo shows very heavy use of explicit self-review subagents; emulate that discipline even when
+working alone.
 
 ## Generated, Sensitive, And Local-State Files
 
@@ -407,7 +423,8 @@ OpenCode history for this repo shows very heavy use of explicit self-review suba
 - `~/.local/share/opencode`
 - `.ghawfr/` runtime state
 
-Use local history for continuity, but do not surface credentials or paste sensitive local data back into the conversation.
+Use local history for continuity, but do not surface credentials or paste sensitive local data back
+into the conversation.
 
 ## Continuity Sources
 
@@ -420,7 +437,8 @@ If the user asks “where were we?”, “what is this worktree trying to do?”
 - inspect recent OpenCode sessions in `~/.local/share/opencode/opencode.db`
 - for `ghawfr` work, inspect `.ghawfr/runs/` and related runtime artifacts
 
-The local histories are genuinely useful here; this repo has a lot of long-running, iterative debugging and architecture work.
+The local histories are genuinely useful here; this repo has a lot of long-running, iterative
+debugging and architecture work.
 
 ## Usually Ignore Unless The Task Is About Them
 
@@ -435,4 +453,5 @@ These are commonly local state or generated artifacts, not source-of-truth code:
 - `.coverage*`
 - `.ghawfr/` for normal source changes
 
-Exception: inspect `.ghawfr/` when the task is specifically about local workflow-runner parity, cached run state, or generated runner artifacts.
+Exception: inspect `.ghawfr/` when the task is specifically about local workflow-runner parity,
+cached run state, or generated runner artifacts.

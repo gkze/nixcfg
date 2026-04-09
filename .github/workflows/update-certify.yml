@@ -37,14 +37,20 @@ jobs:
         id: resolve
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          TARGET_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || env.UPDATE_BRANCH }}
+          TARGET_REF: >-
+            ${{ github.event_name == 'workflow_dispatch' && inputs.ref ||
+            env.UPDATE_BRANCH }}
           WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
         run: |
           ref="${TARGET_REF}"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ] && [ "${WORKFLOW_RUN_CONCLUSION}" != "success" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ] && \
+            [ "${WORKFLOW_RUN_CONCLUSION}" != "success" ]; then
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "Refresh workflow concluded with '${WORKFLOW_RUN_CONCLUSION}'; skipping certification." >&2
+            echo \
+              "Refresh workflow concluded with '${WORKFLOW_RUN_CONCLUSION}';" \
+              "skipping certification." \
+              >&2
             exit 0
           fi
           repo_url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
@@ -67,7 +73,8 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.select-ref.outputs.ref }}
       - &setup_nix
-        uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919 # v3.17.1
+        # Determinate Nix v3.17.1
+        uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919
         with:
           extra-conf: |
             extra-substituters = https://cache.garnix.io
@@ -101,28 +108,27 @@ jobs:
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
             nix-cache-${{ runner.os }}-
-      - name: Check Nix formatting
-        run: nix fmt -- --ci
-      - name: Run core Nix checks
+      - name: Run shared fast quality checks
         run: |
-          nix build .#checks.x86_64-linux.editorconfig
-          nix build .#checks.x86_64-linux.css
-          nix build .#checks.x86_64-linux.python
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          enable-cache: true
-          ignore-nothing-to-cache: true
-      - name: Install Python dependencies
-        run: uv sync --frozen --group dev
-      - name: Verify crate2nix artifacts are fresh
-        run: nix run .#nixcfg -- ci pipeline crate2nix
-      - name: Run pytest with coverage
-        run: |-
-          uv run coverage run -m pytest
-          uv run coverage report
+          nix build .#checks.x86_64-linux.format-repo
+          nix build .#checks.x86_64-linux.lint-editorconfig
+          nix build .#checks.x86_64-linux.format-yaml-yamlfmt
+          nix build .#checks.x86_64-linux.lint-yaml-yamllint
+          nix build .#checks.x86_64-linux.format-web-biome
+          nix build .#checks.x86_64-linux.format-python-ruff
+          nix build .#checks.x86_64-linux.lint-python-ruff
+          nix build .#checks.x86_64-linux.lint-python-ty
+          nix build .#checks.x86_64-linux.lint-workflows-actionlint
+          nix build .#checks.x86_64-linux.lint-pins-pinact
+      - name: Run shared deep verification checks
+        run: |
+          nix build .#checks.x86_64-linux.test-python-pytest
+          nix build .#checks.x86_64-linux.test-ghawfr-go
+          nix build .#checks.x86_64-linux.verify-crate2nix
+          nix build .#checks.x86_64-linux.verify-workflow-artifacts-refresh
+          nix build .#checks.x86_64-linux.verify-workflow-artifacts-certify
+          nix build .#checks.x86_64-linux.verify-workflow-structure-refresh
+          nix build .#checks.x86_64-linux.verify-workflow-structure-certify
 
   darwin-full-smoke:
     needs: select-ref

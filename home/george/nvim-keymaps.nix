@@ -61,13 +61,13 @@ rec {
         title = "Buffers";
         items = [
           {
-            key = "<leader>h";
+            key = "[b";
             mode = "n";
             action = ":BufferLineCyclePrev<CR>";
             desc = "Previous buffer";
           }
           {
-            key = "<leader>l";
+            key = "]b";
             mode = "n";
             action = ":BufferLineCycleNext<CR>";
             desc = "Next buffer";
@@ -168,8 +168,40 @@ rec {
         ];
       }
       {
-        title = "Navigation panes";
+        title = "Panes and sidebars";
         items = [
+          {
+            key = "<leader>h";
+            mode = "n";
+            action = {
+              __raw = ''require("smart-splits").move_cursor_left'';
+            };
+            desc = "Focus left pane";
+          }
+          {
+            key = "<leader>j";
+            mode = "n";
+            action = {
+              __raw = ''require("smart-splits").move_cursor_down'';
+            };
+            desc = "Focus lower pane";
+          }
+          {
+            key = "<leader>k";
+            mode = "n";
+            action = {
+              __raw = ''require("smart-splits").move_cursor_up'';
+            };
+            desc = "Focus upper pane";
+          }
+          {
+            key = "<leader>l";
+            mode = "n";
+            action = {
+              __raw = ''require("smart-splits").move_cursor_right'';
+            };
+            desc = "Focus right pane";
+          }
           {
             key = "<leader>N";
             mode = "n";
@@ -250,7 +282,7 @@ rec {
         ];
       }
       {
-        title = "Problems";
+        title = "Diagnostics";
         items = [
           {
             key = "<leader>d";
@@ -259,20 +291,20 @@ rec {
             desc = "Trouble diagnostics";
           }
           {
-            key = "<leader>j";
-            mode = "n";
-            action = {
-              __raw = "vim.diagnostic.goto_next";
-            };
-            desc = "Next diagnostic";
-          }
-          {
-            key = "<leader>k";
+            key = "[d";
             mode = "n";
             action = {
               __raw = "vim.diagnostic.goto_prev";
             };
             desc = "Previous diagnostic";
+          }
+          {
+            key = "]d";
+            mode = "n";
+            action = {
+              __raw = "vim.diagnostic.goto_next";
+            };
+            desc = "Next diagnostic";
           }
         ];
       }
@@ -643,6 +675,156 @@ rec {
     mode = "x/o";
   };
 
+  treesitterTextobjectsLegend = {
+    id = "treesitter-textobjects-legend";
+    label = "Treesitter textobjects legend";
+    attrPath = [
+      "home"
+      "george"
+      "nvim-keymaps"
+      "treesitterTextobjectsLegend"
+    ];
+    kind = "cheat-sheet";
+    context = "manifest / docs only";
+    sections = [
+      {
+        title = "Navigation grammar";
+        items = [
+          {
+            key = "]s…";
+            mode = "legend";
+            action = "next start";
+            desc = "Jump to the next start boundary for the given textobject letter.";
+          }
+          {
+            key = "[s…";
+            mode = "legend";
+            action = "previous start";
+            desc = "Jump to the previous start boundary for the given textobject letter.";
+          }
+          {
+            key = "]e…";
+            mode = "legend";
+            action = "next end";
+            desc = "Jump to the next end boundary for the given textobject letter.";
+          }
+          {
+            key = "[e…";
+            mode = "legend";
+            action = "previous end";
+            desc = "Jump to the previous end boundary for the given textobject letter.";
+          }
+        ];
+      }
+      {
+        title = "Object letters";
+        items = [
+          {
+            key = "a";
+            mode = "legend";
+            action = "attribute";
+            desc = "Nav: [sa ]sa [ea ]ea.";
+          }
+          {
+            key = "b";
+            mode = "legend";
+            action = "block";
+            desc = "Nav: [sb ]sb [eb ]eb. Select: ab / ib.";
+          }
+          {
+            key = "c";
+            mode = "legend";
+            action = "call";
+            desc = "Nav: [sc ]sc [ec ]ec. Select: ac / ic.";
+          }
+          {
+            key = "f";
+            mode = "legend";
+            action = "function";
+            desc = "Nav: [sf ]sf [ef ]ef. Select: af / if.";
+          }
+          {
+            key = "h";
+            mode = "legend";
+            action = "lhs";
+            desc = "Assignment left-hand side. Nav: [sh ]sh [eh ]eh. Select: lv.";
+          }
+          {
+            key = "i";
+            mode = "legend";
+            action = "conditional / if";
+            desc = "Nav: [si ]si [ei ]ei. Select: ai / ii.";
+          }
+          {
+            key = "o";
+            mode = "legend";
+            action = "loop";
+            desc = "Uses o from loop to avoid l/left confusion. Nav: [so ]so [eo ]eo. Select: ao / io.";
+          }
+          {
+            key = "p";
+            mode = "legend";
+            action = "parameter";
+            desc = "Nav: [sp ]sp [ep ]ep. Select remains aa / ia.";
+          }
+          {
+            key = "r";
+            mode = "legend";
+            action = "rhs";
+            desc = "Assignment right-hand side. Nav: [sr ]sr [er ]er. Select: rv.";
+          }
+          {
+            key = "s";
+            mode = "legend";
+            action = "statement";
+            desc = "Nav: [ss ]ss [es ]es.";
+          }
+          {
+            key = "t";
+            mode = "legend";
+            action = "class / type";
+            desc = "Nav uses t for type: [st ]st [et ]et. Selection remains aC / iC.";
+          }
+          {
+            key = "v";
+            mode = "legend";
+            action = "assignment";
+            desc = "Nav: [sv ]sv [ev ]ev. Select: av / iv.";
+          }
+        ];
+      }
+      {
+        title = "Selection vs navigation differences";
+        items = [
+          {
+            key = "parameter";
+            mode = "legend";
+            action = "select aa / ia; nav p";
+            desc = "Selection keeps aa / ia to avoid conflicting with Vim paragraph objects; navigation uses p in [sp ]sp [ep ]ep.";
+          }
+          {
+            key = "class";
+            mode = "legend";
+            action = "select aC / iC; nav t";
+            desc = "Selection uses uppercase C because ac / ic are already call; navigation uses t for type in [st ]st [et ]et.";
+          }
+          {
+            key = "loop";
+            mode = "legend";
+            action = "select ao / io; nav o";
+            desc = "Both selection and navigation use o for loop to avoid l feeling like a directional key.";
+          }
+          {
+            key = "lhs / rhs";
+            mode = "legend";
+            action = "select lv / rv; nav h / r";
+            desc = "Selection keeps lv / rv under assignment, while navigation uses h for left-hand side and r for right-hand side.";
+          }
+        ];
+      }
+    ];
+  };
+
   treesitterTextobjectsMove = {
     id = "treesitter-textobjects-move";
     label = "Treesitter textobjects move";
@@ -660,57 +842,69 @@ rec {
       {
         title = "gotoNextStart";
         items = [
-          (mkMapItem "]]" "@class.outer" "Next class outer")
-          (mkMapItem "]a" "@attribute.outer" "Next attribute outer")
-          (mkMapItem "]b" "@block.outer" "Next block outer")
-          (mkMapItem "]c" "@call.outer" "Next call outer")
-          (mkMapItem "]f" "@function.outer" "Next function outer")
-          (mkMapItem "]i" "@conditional.outer" "Next conditional outer")
-          (mkMapItem "]p" "@parameter.outer" "Next parameter outer")
-          (mkMapItem "]s" "@statement.outer" "Next statement outer")
-          (mkMapItem "]v" "@assignment.outer" "Next assignment outer")
+          (mkMapItem "]sa" "@attribute.outer" "Next attribute start")
+          (mkMapItem "]sb" "@block.outer" "Next block start")
+          (mkMapItem "]sc" "@call.outer" "Next call start")
+          (mkMapItem "]sf" "@function.outer" "Next function start")
+          (mkMapItem "]sh" "@assignment.lhs" "Next assignment lhs start")
+          (mkMapItem "]si" "@conditional.outer" "Next conditional start")
+          (mkMapItem "]so" "@loop.outer" "Next loop start")
+          (mkMapItem "]sp" "@parameter.outer" "Next parameter start")
+          (mkMapItem "]sr" "@assignment.rhs" "Next assignment rhs start")
+          (mkMapItem "]ss" "@statement.outer" "Next statement start")
+          (mkMapItem "]st" "@class.outer" "Next class start")
+          (mkMapItem "]sv" "@assignment.outer" "Next assignment start")
         ];
       }
       {
         title = "gotoNextEnd";
         items = [
-          (mkMapItem "]A" "@attribute.inner" "Next attribute inner")
-          (mkMapItem "]B" "@block.outer" "Next block outer")
-          (mkMapItem "]C" "@call.outer" "Next call outer")
-          (mkMapItem "]F" "@function.outer" "Next function outer")
-          (mkMapItem "]I" "@conditional.outer" "Next conditional outer")
-          (mkMapItem "]P" "@parameter.outer" "Next parameter outer")
-          (mkMapItem "]S" "@statement.outer" "Next statement outer")
-          (mkMapItem "]V" "@assignment.outer" "Next assignment outer")
-          (mkMapItem "][" "@class.outer" "Next class outer")
+          (mkMapItem "]ea" "@attribute.outer" "Next attribute end")
+          (mkMapItem "]eb" "@block.outer" "Next block end")
+          (mkMapItem "]ec" "@call.outer" "Next call end")
+          (mkMapItem "]ef" "@function.outer" "Next function end")
+          (mkMapItem "]eh" "@assignment.lhs" "Next assignment lhs end")
+          (mkMapItem "]ei" "@conditional.outer" "Next conditional end")
+          (mkMapItem "]eo" "@loop.outer" "Next loop end")
+          (mkMapItem "]ep" "@parameter.outer" "Next parameter end")
+          (mkMapItem "]er" "@assignment.rhs" "Next assignment rhs end")
+          (mkMapItem "]es" "@statement.outer" "Next statement end")
+          (mkMapItem "]et" "@class.outer" "Next class end")
+          (mkMapItem "]ev" "@assignment.outer" "Next assignment end")
         ];
       }
       {
         title = "gotoPreviousStart";
         items = [
-          (mkMapItem "[[" "@class.outer" "Previous class outer")
-          (mkMapItem "[a" "@attribute.outer" "Previous attribute outer")
-          (mkMapItem "[b" "@block.outer" "Previous block outer")
-          (mkMapItem "[c" "@call.outer" "Previous call outer")
-          (mkMapItem "[f" "@function.outer" "Previous function outer")
-          (mkMapItem "[i" "@conditional.outer" "Previous conditional outer")
-          (mkMapItem "[p" "@parameter.outer" "Previous parameter outer")
-          (mkMapItem "[s" "@statement.outer" "Previous statement outer")
-          (mkMapItem "[v" "@assignment.outer" "Previous assignment outer")
+          (mkMapItem "[sa" "@attribute.outer" "Previous attribute start")
+          (mkMapItem "[sb" "@block.outer" "Previous block start")
+          (mkMapItem "[sc" "@call.outer" "Previous call start")
+          (mkMapItem "[sf" "@function.outer" "Previous function start")
+          (mkMapItem "[sh" "@assignment.lhs" "Previous assignment lhs start")
+          (mkMapItem "[si" "@conditional.outer" "Previous conditional start")
+          (mkMapItem "[so" "@loop.outer" "Previous loop start")
+          (mkMapItem "[sp" "@parameter.outer" "Previous parameter start")
+          (mkMapItem "[sr" "@assignment.rhs" "Previous assignment rhs start")
+          (mkMapItem "[ss" "@statement.outer" "Previous statement start")
+          (mkMapItem "[st" "@class.outer" "Previous class start")
+          (mkMapItem "[sv" "@assignment.outer" "Previous assignment start")
         ];
       }
       {
         title = "gotoPreviousEnd";
         items = [
-          (mkMapItem "[A" "@attribute.outer" "Previous attribute outer")
-          (mkMapItem "[B" "@block.outer" "Previous block outer")
-          (mkMapItem "[C" "@call.outer" "Previous call outer")
-          (mkMapItem "[F" "@function.outer" "Previous function outer")
-          (mkMapItem "[I" "@conditional.outer" "Previous conditional outer")
-          (mkMapItem "[P" "@parameter.outer" "Previous parameter outer")
-          (mkMapItem "[S" "@statement.outer" "Previous statement outer")
-          (mkMapItem "[V" "@assignment.outer" "Previous assignment outer")
-          (mkMapItem "[]" "@class.outer" "Previous class outer")
+          (mkMapItem "[ea" "@attribute.outer" "Previous attribute end")
+          (mkMapItem "[eb" "@block.outer" "Previous block end")
+          (mkMapItem "[ec" "@call.outer" "Previous call end")
+          (mkMapItem "[ef" "@function.outer" "Previous function end")
+          (mkMapItem "[eh" "@assignment.lhs" "Previous assignment lhs end")
+          (mkMapItem "[ei" "@conditional.outer" "Previous conditional end")
+          (mkMapItem "[eo" "@loop.outer" "Previous loop end")
+          (mkMapItem "[ep" "@parameter.outer" "Previous parameter end")
+          (mkMapItem "[er" "@assignment.rhs" "Previous assignment rhs end")
+          (mkMapItem "[es" "@statement.outer" "Previous statement end")
+          (mkMapItem "[et" "@class.outer" "Previous class end")
+          (mkMapItem "[ev" "@assignment.outer" "Previous assignment end")
         ];
       }
     ];
@@ -740,7 +934,7 @@ rec {
           (mkTextobjectSelectItem "ac" "@call.outer" "Select call outer")
           (mkTextobjectSelectItem "af" "@function.outer" "Select function outer")
           (mkTextobjectSelectItem "ai" "@conditional.outer" "Select conditional outer")
-          (mkTextobjectSelectItem "al" "@loop.outer" "Select loop outer")
+          (mkTextobjectSelectItem "ao" "@loop.outer" "Select loop outer")
           (mkTextobjectSelectItem "av" "@assignment.outer" "Select assignment outer")
           (mkTextobjectSelectItem "iC" "@class.inner" "Select class inner")
           (mkTextobjectSelectItem "ia" "@parameter.inner" "Select parameter inner")
@@ -748,7 +942,7 @@ rec {
           (mkTextobjectSelectItem "ic" "@call.inner" "Select call inner")
           (mkTextobjectSelectItem "if" "@function.inner" "Select function inner")
           (mkTextobjectSelectItem "ii" "@conditional.inner" "Select conditional inner")
-          (mkTextobjectSelectItem "il" "@loop.inner" "Select loop inner")
+          (mkTextobjectSelectItem "io" "@loop.inner" "Select loop inner")
           (mkTextobjectSelectItem "iv" "@assignment.inner" "Select assignment inner")
           (mkTextobjectSelectItem "lv" "@assignment.lhs" "Select assignment lhs")
           (mkTextobjectSelectItem "rv" "@assignment.rhs" "Select assignment rhs")

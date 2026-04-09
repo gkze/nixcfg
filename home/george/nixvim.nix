@@ -145,6 +145,7 @@ let
   pickerScopes = [
     keymapData.global
     keymapData.lsp
+    keymapData.treesitterTextobjectsLegend
     keymapData.treesitterSelection
     keymapData.treesitterTextobjectsMove
     keymapData.treesitterTextobjectsSelect

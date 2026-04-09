@@ -28,7 +28,11 @@ func (w RemoteExecWorker) Capabilities() CapabilitySet {
 
 // RunJob executes one materialized workflow job with run steps delegated to the
 // configured guest/remote transport.
-func (w RemoteExecWorker) RunJob(ctx context.Context, job *workflow.Job, options RunOptions) (*JobResult, error) {
+func (w RemoteExecWorker) RunJob(
+	ctx context.Context,
+	job *workflow.Job,
+	options RunOptions,
+) (*JobResult, error) {
 	if job == nil {
 		return nil, fmt.Errorf("job is nil")
 	}
@@ -58,7 +62,13 @@ func (w RemoteExecWorker) RunJob(ctx context.Context, job *workflow.Job, options
 	return executeJob(ctx, job, options, w.ActionHandlers, w.runRemoteStep)
 }
 
-func (w RemoteExecWorker) runRemoteStep(ctx context.Context, job *workflow.Job, step workflow.Step, workspace string, expr workflow.ExpressionContext) (StepResult, error) {
+func (w RemoteExecWorker) runRemoteStep(
+	ctx context.Context,
+	job *workflow.Job,
+	step workflow.Step,
+	workspace string,
+	expr workflow.ExpressionContext,
+) (StepResult, error) {
 	remoteExpr := expr
 	remoteExpr.GitHub.Workspace = w.GuestWorkspace
 	remoteExpr.Env = translateWorkspaceEnvironment(expr.Env, workspace, w.GuestWorkspace)
@@ -79,11 +89,20 @@ func (w RemoteExecWorker) runRemoteStep(ctx context.Context, job *workflow.Job, 
 		return StepResult{ID: step.ID}, err
 	}
 	defer hostFiles.cleanup()
-	guestStepDirectory, err := resolveRemoteStepDirectory(workspace, w.GuestWorkspace, workingDirectory)
+	guestStepDirectory, err := resolveRemoteStepDirectory(
+		workspace,
+		w.GuestWorkspace,
+		workingDirectory,
+	)
 	if err != nil {
 		return StepResult{ID: step.ID}, err
 	}
-	result, err := w.Commands.ExecCommand(ctx, guestStepDirectory, buildCommandEnvironmentValues(remoteExpr.Env, w.GuestWorkspace, guestFiles), command)
+	result, err := w.Commands.ExecCommand(
+		ctx,
+		guestStepDirectory,
+		buildCommandEnvironmentValues(remoteExpr.Env, w.GuestWorkspace, guestFiles),
+		command,
+	)
 	outputs, outputErr := readKeyValueFile(hostFiles.Output, "GITHUB_OUTPUT")
 	if outputErr != nil {
 		return StepResult{ID: step.ID}, outputErr
@@ -100,21 +119,47 @@ func (w RemoteExecWorker) runRemoteStep(ctx context.Context, job *workflow.Job, 
 	if summaryErr != nil {
 		return StepResult{ID: step.ID}, summaryErr
 	}
-	stepResult := StepResult{ID: step.ID, Outputs: outputs, Environment: workflow.EnvironmentMap(environmentValues), PathEntries: pathEntries, Summary: summary}
+	stepResult := StepResult{
+		ID:          step.ID,
+		Outputs:     outputs,
+		Environment: workflow.EnvironmentMap(environmentValues),
+		PathEntries: pathEntries,
+		Summary:     summary,
+	}
 	if err != nil {
-		return stepResult, fmt.Errorf("run step %q in job %q through remote worker: %w", step.ID, job.ID, err)
+		return stepResult, fmt.Errorf(
+			"run step %q in job %q through remote worker: %w",
+			step.ID,
+			job.ID,
+			err,
+		)
 	}
 	if result.ExitCode != 0 {
 		combined := strings.TrimSpace(result.Stdout + result.Stderr)
 		if combined != "" {
-			return stepResult, fmt.Errorf("run step %q in job %q exited with code %d\n%s", step.ID, job.ID, result.ExitCode, combined)
+			return stepResult, fmt.Errorf(
+				"run step %q in job %q exited with code %d\n%s",
+				step.ID,
+				job.ID,
+				result.ExitCode,
+				combined,
+			)
 		}
-		return stepResult, fmt.Errorf("run step %q in job %q exited with code %d", step.ID, job.ID, result.ExitCode)
+		return stepResult, fmt.Errorf(
+			"run step %q in job %q exited with code %d",
+			step.ID,
+			job.ID,
+			result.ExitCode,
+		)
 	}
 	return stepResult, nil
 }
 
-func resolveRemoteStepDirectory(hostWorkspace string, guestWorkspace string, workingDirectory string) (string, error) {
+func resolveRemoteStepDirectory(
+	hostWorkspace string,
+	guestWorkspace string,
+	workingDirectory string,
+) (string, error) {
 	trimmed := strings.TrimSpace(workingDirectory)
 	if trimmed == "" {
 		return guestWorkspace, nil
@@ -124,20 +169,35 @@ func resolveRemoteStepDirectory(hostWorkspace string, guestWorkspace string, wor
 		if cleaned == guestWorkspace || strings.HasPrefix(cleaned, guestWorkspace+"/") {
 			return cleaned, nil
 		}
-		return "", fmt.Errorf("absolute remote working directory %q is outside guest workspace %q", trimmed, guestWorkspace)
+		return "", fmt.Errorf(
+			"absolute remote working directory %q is outside guest workspace %q",
+			trimmed,
+			guestWorkspace,
+		)
 	}
 	hostStepDirectory := resolveStepDirectory(hostWorkspace, workingDirectory)
 	return translateWorkspacePath(hostWorkspace, guestWorkspace, hostStepDirectory)
 }
 
-func createWorkspaceFileCommandFiles(hostWorkspace string, guestWorkspace string) (fileCommandFiles, fileCommandFiles, error) {
+func createWorkspaceFileCommandFiles(
+	hostWorkspace string,
+	guestWorkspace string,
+) (fileCommandFiles, fileCommandFiles, error) {
 	root := state.FileCommandsDir(hostWorkspace)
 	if err := os.MkdirAll(root, 0o755); err != nil {
-		return fileCommandFiles{}, fileCommandFiles{}, fmt.Errorf("create file command root %q: %w", root, err)
+		return fileCommandFiles{}, fileCommandFiles{}, fmt.Errorf(
+			"create file command root %q: %w",
+			root,
+			err,
+		)
 	}
 	directory, err := os.MkdirTemp(root, "run-")
 	if err != nil {
-		return fileCommandFiles{}, fileCommandFiles{}, fmt.Errorf("create file command dir under %q: %w", root, err)
+		return fileCommandFiles{}, fileCommandFiles{}, fmt.Errorf(
+			"create file command dir under %q: %w",
+			root,
+			err,
+		)
 	}
 	create := func(name string) (string, error) {
 		path := filepath.Join(directory, name)
@@ -175,7 +235,11 @@ func createWorkspaceFileCommandFiles(hostWorkspace string, guestWorkspace string
 	return host, guest, nil
 }
 
-func translateWorkspacePath(hostWorkspace string, guestWorkspace string, hostPath string) (string, error) {
+func translateWorkspacePath(
+	hostWorkspace string,
+	guestWorkspace string,
+	hostPath string,
+) (string, error) {
 	workspace, err := filepath.Abs(hostWorkspace)
 	if err != nil {
 		return "", fmt.Errorf("resolve host workspace %q: %w", hostWorkspace, err)
@@ -197,7 +261,11 @@ func translateWorkspacePath(hostWorkspace string, guestWorkspace string, hostPat
 	return path.Join(guestWorkspace, filepath.ToSlash(rel)), nil
 }
 
-func translateWorkspaceEnvironment(values workflow.EnvironmentMap, hostWorkspace string, guestWorkspace string) workflow.EnvironmentMap {
+func translateWorkspaceEnvironment(
+	values workflow.EnvironmentMap,
+	hostWorkspace string,
+	guestWorkspace string,
+) workflow.EnvironmentMap {
 	if len(values) == 0 || hostWorkspace == guestWorkspace {
 		return values.Clone()
 	}

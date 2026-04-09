@@ -26,6 +26,7 @@ from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib import mac_apps_helper
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
@@ -271,19 +272,57 @@ def _mac_app_metadata_attrset(
     })
 
 
-def test_copy_mode_replaces_symlinked_application_destinations() -> None:
+def test_copy_mode_replaces_symlinked_application_destinations(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     """Copy-mode installs should replace old symlink targets before rsync."""
-    fragment = _mac_apps_source_fragment(
-        '              if [ -L "$dst" ] || { [ -e "$dst" ] && [ ! -d "$dst" ]; }; then\n',
-        '              mkdir -p "$dst"\n',
+    source_bundle = tmp_path / "source" / "Example.app"
+    target_directory = tmp_path / "Applications"
+    old_target = tmp_path / "old-target"
+    destination = target_directory / "Example.app"
+    source_bundle.mkdir(parents=True)
+    target_directory.mkdir()
+    old_target.mkdir()
+    destination.symlink_to(old_target)
+
+    captured: dict[str, Path | bool | str] = {}
+
+    def _fake_rsync_copy(
+        src: Path,
+        dst: Path,
+        *,
+        rsync_path: str,
+        writable: bool,
+    ) -> None:
+        captured["src"] = src
+        captured["dst"] = dst
+        captured["rsync_path"] = rsync_path
+        captured["writable"] = writable
+        assert dst.exists()
+        assert dst.is_dir()
+        assert not dst.is_symlink()
+
+    monkeypatch.setattr(mac_apps_helper, "_rsync_copy", _fake_rsync_copy)
+
+    mac_apps_helper._install_managed_app(
+        bundle_name="Example.app",
+        mode="copy",
+        source_path=str(source_bundle),
+        target_directory=target_directory,
+        rsync_path="/usr/bin/rsync",
+        writable=False,
     )
 
-    assert fragment.value == (
-        "\n"
-        'if [ -L "$dst" ] || { [ -e "$dst" ] && [ ! -d "$dst" ]; }; then\n'
-        "  rm -rf -- \"''${dst:?}\"\n"
-        "fi\n"
-    )
+    assert captured == {
+        "src": source_bundle,
+        "dst": destination,
+        "rsync_path": "/usr/bin/rsync",
+        "writable": False,
+    }
+    assert destination.exists()
+    assert destination.is_dir()
+    assert not destination.is_symlink()
 
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")

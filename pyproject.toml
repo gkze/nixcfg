@@ -48,8 +48,17 @@ codegen = ["datamodel-code-generator[http]>=0.54.0", "referencing>=0.37.0"]
 preview = true
 # Treat these directories as namespace package roots during resolution.
 namespace-packages = ["overlays", "packages"]
-# Include extensionless project scripts in Ruff file discovery.
+# Explicitly include all extensionless Python entrypoints in Ruff discovery.
 extend-include = [
+  "home/george/bin/git-ignore",
+  "home/george/bin/zen-folders",
+  "home/george/bin/zen-profile-sync",
+]
+
+[tool.ruff.format]
+# Ruff 0.15.x can de-parenthesize multi-exception handlers on these scripts into
+# invalid Python 2-era syntax; keep them linted and typed, but do not format them.
+exclude = [
   "home/george/bin/git-ignore",
   "home/george/bin/zen-folders",
   "home/george/bin/zen-profile-sync",
@@ -131,7 +140,7 @@ py-modules = ["nixcfg"]
 include = ["lib*"]
 
 [tool.ty.src]
-# Restrict Ty analysis to maintained source trees and extensionless scripts.
+# Restrict Ty analysis to maintained source trees and explicit extensionless Python entrypoints.
 include = [
   "nixcfg.py",
   "lib/**/*.py",

@@ -200,11 +200,7 @@ class TestHashMismatchError:
 
     def test_no_drv_path_still_extracts_hash(self) -> None:
         """Run this test case."""
-        stderr = (
-            "some other error context\n"
-            "  specified: sha256-OLD=\n"
-            "     got:    sha256-NEW=\n"
-        )
+        stderr = "some other error context\n  specified: sha256-OLD=\n     got:    sha256-NEW=\n"
         err = HashMismatchError.from_output(
             stderr, object.__getattribute__(self, "_make_result")(stderr)
         )

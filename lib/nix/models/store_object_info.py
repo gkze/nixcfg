@@ -100,8 +100,7 @@ class ImpureStoreObjectInfo(StoreObjectInfo):
     ultimate: bool = Field(
         default=False,
         description=(
-            "Whether this object is trusted because it was built locally "
-            "rather than substituted."
+            "Whether this object is trusted because it was built locally rather than substituted."
         ),
     )
     """``True`` if the object was built locally (not substituted)."""

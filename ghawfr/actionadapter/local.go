@@ -17,7 +17,10 @@ import (
 // NewLocal returns a generic local worker wired with the curated action
 // adapters from this package.
 func NewLocal(runnerLabels []string) backend.Local {
-	return backend.Local{RunnerLabels: append([]string(nil), runnerLabels...), ActionHandlers: LocalHandlers()}
+	return backend.Local{
+		RunnerLabels:   append([]string(nil), runnerLabels...),
+		ActionHandlers: LocalHandlers(),
+	}
 }
 
 // NewHostLocal returns a host-scoped local worker wired with curated action
@@ -29,21 +32,40 @@ func NewHostLocal() backend.Local {
 // LocalHandlers returns the curated local action-handler registry.
 func LocalHandlers() map[string]backend.ActionHandler {
 	return map[string]backend.ActionHandler{
-		"actions/checkout":                          backend.ActionHandlerFunc(handleCheckoutAction),
-		"determinatesystems/determinate-nix-action": backend.ActionHandlerFunc(handleDeterminateNixAction),
-		"cachix/cachix-action":                      backend.ActionHandlerFunc(handleCachixAction),
-		"actions/cache":                             backend.ActionHandlerFunc(handleCacheAction),
-		"actions/cache/restore":                     backend.ActionHandlerFunc(handleCacheRestoreAction),
-		"actions/cache/save":                        backend.ActionHandlerFunc(handleCacheSaveAction),
-		"actions/upload-artifact":                   backend.ActionHandlerFunc(handleUploadArtifactAction),
-		"actions/download-artifact":                 backend.ActionHandlerFunc(handleDownloadArtifactAction),
-		"actions/setup-python":                      backend.ActionHandlerFunc(handleSetupPythonAction),
-		"astral-sh/setup-uv":                        backend.ActionHandlerFunc(handleSetupUVAction),
-		"peter-evans/create-pull-request":           backend.ActionHandlerFunc(handleCreatePullRequestAction),
+		"actions/checkout": backend.ActionHandlerFunc(
+			handleCheckoutAction,
+		),
+		"determinatesystems/determinate-nix-action": backend.ActionHandlerFunc(
+			handleDeterminateNixAction,
+		),
+		"cachix/cachix-action": backend.ActionHandlerFunc(handleCachixAction),
+		"actions/cache":        backend.ActionHandlerFunc(handleCacheAction),
+		"actions/cache/restore": backend.ActionHandlerFunc(
+			handleCacheRestoreAction,
+		),
+		"actions/cache/save": backend.ActionHandlerFunc(
+			handleCacheSaveAction,
+		),
+		"actions/upload-artifact": backend.ActionHandlerFunc(
+			handleUploadArtifactAction,
+		),
+		"actions/download-artifact": backend.ActionHandlerFunc(
+			handleDownloadArtifactAction,
+		),
+		"actions/setup-python": backend.ActionHandlerFunc(
+			handleSetupPythonAction,
+		),
+		"astral-sh/setup-uv": backend.ActionHandlerFunc(handleSetupUVAction),
+		"peter-evans/create-pull-request": backend.ActionHandlerFunc(
+			handleCreatePullRequestAction,
+		),
 	}
 }
 
-func handleCheckoutAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func handleCheckoutAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	workspace := action.WorkingDirectory
 	pathValue, err := resolveActionInput(action, "path")
 	if err != nil {
@@ -53,12 +75,21 @@ func handleCheckoutAction(_ context.Context, action backend.ActionContext) (back
 		workspace = resolveWorkspacePath(action.WorkingDirectory, pathValue)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, ".git")); err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("checkout workspace %q is not a git repository: %w", workspace, err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"checkout workspace %q is not a git repository: %w",
+				workspace,
+				err,
+			)
 	}
 	return backend.StepResult{ID: action.Step.ID}, nil
 }
 
-func handleDeterminateNixAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func handleDeterminateNixAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	result, err := localToolSetupResult(action, "nix", "nix", "system", nil)
 	result.ID = action.Step.ID
 	if err != nil {
@@ -67,14 +98,22 @@ func handleDeterminateNixAction(_ context.Context, action backend.ActionContext)
 	return result, nil
 }
 
-func handleCachixAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func handleCachixAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	name, err := resolveActionInput(action, "name")
 	if err != nil {
 		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve cachix name: %w", err)
 	}
 	authToken, err := resolveActionInput(action, "authToken")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve cachix auth token: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"resolve cachix auth token: %w",
+				err,
+			)
 	}
 	environment := workflow.EnvironmentMap{}
 	if strings.TrimSpace(name) != "" {
@@ -91,7 +130,10 @@ func handleCachixAction(_ context.Context, action backend.ActionContext) (backen
 	return result, nil
 }
 
-func handleCacheAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func handleCacheAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	paths, err := resolveLocalCachePaths(action)
 	if err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
@@ -113,7 +155,11 @@ func handleCacheAction(_ context.Context, action backend.ActionContext) (backend
 			return result, fmt.Errorf("cache %q matched no entry", key)
 		}
 	} else {
-		result.Outputs = workflow.OutputMap{"cache-hit": strconv.FormatBool(strings.TrimSpace(matchedKey) == strings.TrimSpace(key))}
+		result.Outputs = workflow.OutputMap{
+			"cache-hit": strconv.FormatBool(
+				strings.TrimSpace(matchedKey) == strings.TrimSpace(key),
+			),
+		}
 		if !lookupOnly {
 			if _, err := action.Cache.Restore(key, restoreKeys); err != nil {
 				return result, fmt.Errorf("restore cache %q: %w", key, err)
@@ -122,23 +168,28 @@ func handleCacheAction(_ context.Context, action backend.ActionContext) (backend
 	}
 	cacheKey := key
 	cachePaths := append([]string(nil), paths...)
-	result.Post = backend.PostStepFunc(func(ctx context.Context, status backend.JobStatus) (backend.StepResult, error) {
-		post := backend.StepResult{ID: action.Step.ID}
-		if status != backend.JobStatusSuccess {
+	result.Post = backend.PostStepFunc(
+		func(ctx context.Context, status backend.JobStatus) (backend.StepResult, error) {
+			post := backend.StepResult{ID: action.Step.ID}
+			if status != backend.JobStatusSuccess {
+				return post, nil
+			}
+			if strings.TrimSpace(matchedKey) == strings.TrimSpace(cacheKey) {
+				return post, nil
+			}
+			if err := action.Cache.Save(cacheKey, action.WorkingDirectory, cachePaths); err != nil {
+				return post, fmt.Errorf("save cache %q: %w", cacheKey, err)
+			}
 			return post, nil
-		}
-		if strings.TrimSpace(matchedKey) == strings.TrimSpace(cacheKey) {
-			return post, nil
-		}
-		if err := action.Cache.Save(cacheKey, action.WorkingDirectory, cachePaths); err != nil {
-			return post, fmt.Errorf("save cache %q: %w", cacheKey, err)
-		}
-		return post, nil
-	})
+		},
+	)
 	return result, nil
 }
 
-func handleCacheRestoreAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func handleCacheRestoreAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	if _, err := resolveLocalCachePaths(action); err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
 	}
@@ -163,7 +214,9 @@ func handleCacheRestoreAction(_ context.Context, action backend.ActionContext) (
 		}
 		return result, nil
 	}
-	result.Outputs["cache-hit"] = strconv.FormatBool(strings.TrimSpace(matchedKey) == strings.TrimSpace(key))
+	result.Outputs["cache-hit"] = strconv.FormatBool(
+		strings.TrimSpace(matchedKey) == strings.TrimSpace(key),
+	)
 	result.Outputs["cache-matched-key"] = matchedKey
 	if lookupOnly {
 		return result, nil
@@ -174,7 +227,10 @@ func handleCacheRestoreAction(_ context.Context, action backend.ActionContext) (
 	return result, nil
 }
 
-func handleCacheSaveAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func handleCacheSaveAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	paths, err := resolveLocalCachePaths(action)
 	if err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
@@ -219,7 +275,9 @@ func resolveLocalCacheKey(action backend.ActionContext) (string, error) {
 	return key, nil
 }
 
-func resolveLocalCacheRestoreInputs(action backend.ActionContext) (string, []string, bool, bool, error) {
+func resolveLocalCacheRestoreInputs(
+	action backend.ActionContext,
+) (string, []string, bool, bool, error) {
 	key, err := resolveLocalCacheKey(action)
 	if err != nil {
 		return "", nil, false, false, err
@@ -247,9 +305,16 @@ func resolveLocalCacheRestoreInputs(action backend.ActionContext) (string, []str
 	return key, splitMultilineValue(restoreKeysValue), lookupOnly, failOnMiss, nil
 }
 
-func handleUploadArtifactAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func handleUploadArtifactAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	if action.Artifacts == nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("upload-artifact requires an artifact store")
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"upload-artifact requires an artifact store",
+			)
 	}
 	name, err := resolveActionInput(action, "name")
 	if err != nil {
@@ -261,7 +326,12 @@ func handleUploadArtifactAction(_ context.Context, action backend.ActionContext)
 	}
 	ifNoFilesFound, err := resolveActionInput(action, "if-no-files-found")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve if-no-files-found: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"resolve if-no-files-found: %w",
+				err,
+			)
 	}
 	paths := splitMultilineValue(pathsValue)
 	if len(paths) == 0 && strings.TrimSpace(pathsValue) != "" {
@@ -273,9 +343,16 @@ func handleUploadArtifactAction(_ context.Context, action backend.ActionContext)
 	return backend.StepResult{ID: action.Step.ID}, nil
 }
 
-func handleDownloadArtifactAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func handleDownloadArtifactAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	if action.Artifacts == nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("download-artifact requires an artifact store")
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"download-artifact requires an artifact store",
+			)
 	}
 	name, err := resolveActionInput(action, "name")
 	if err != nil {
@@ -290,7 +367,13 @@ func handleDownloadArtifactAction(_ context.Context, action backend.ActionContex
 		destination = resolveWorkspacePath(action.WorkingDirectory, pathValue)
 	}
 	if err := os.MkdirAll(destination, 0o755); err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("create artifact destination %q: %w", destination, err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"create artifact destination %q: %w",
+				destination,
+				err,
+			)
 	}
 	if err := action.Artifacts.Restore(name, destination); err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
@@ -298,8 +381,16 @@ func handleDownloadArtifactAction(_ context.Context, action backend.ActionContex
 	return backend.StepResult{ID: action.Step.ID}, nil
 }
 
-func handleSetupPythonAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
-	if err := rejectUnsupportedInputs(action, "setup-python", "python-version", "update-environment"); err != nil {
+func handleSetupPythonAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
+	if err := rejectUnsupportedInputs(
+		action,
+		"setup-python",
+		"python-version",
+		"update-environment",
+	); err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
 	}
 	versionValue, err := resolveActionInput(action, "python-version")
@@ -309,26 +400,52 @@ func handleSetupPythonAction(_ context.Context, action backend.ActionContext) (b
 	requestedVersions := resolveRequestedVersions(versionValue)
 	updateEnvironmentValue, err := resolveActionInput(action, "update-environment")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve update-environment: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"resolve update-environment: %w",
+				err,
+			)
 	}
 	updateEnvironment, err := parseBooleanInput(updateEnvironmentValue, true)
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("parse update-environment: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"parse update-environment: %w",
+				err,
+			)
 	}
 	executablePath, err := localLookPath(action.WorkingDirectory, action.Env, "python3")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("setup-python requires python3 on PATH: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"setup-python requires python3 on PATH: %w",
+				err,
+			)
 	}
 	detected := localToolVersion(action.Env, executablePath, "--version")
 	matchedVersion, err := matchingRequestedVersion(requestedVersions, detected)
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("setup-python requested one of [%s]: %w", strings.Join(requestedVersions, ", "), err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"setup-python requested one of [%s]: %w",
+				strings.Join(requestedVersions, ", "),
+				err,
+			)
 	}
 	aliasVersion := matchedVersion
 	if aliasVersion == "" {
 		aliasVersion = detected
 	}
-	alias, err := localToolCacheAlias(action, "Python", aliasVersion, installRootForExecutable(executablePath))
+	alias, err := localToolCacheAlias(
+		action,
+		"Python",
+		aliasVersion,
+		installRootForExecutable(executablePath),
+	)
 	if err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
 	}
@@ -347,7 +464,10 @@ func handleSetupPythonAction(_ context.Context, action backend.ActionContext) (b
 	return result, nil
 }
 
-func handleCreatePullRequestAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func handleCreatePullRequestAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	if err := rejectUnsupportedInputs(action, "create-pull-request",
 		"sign-commits",
 		"branch",
@@ -364,19 +484,36 @@ func handleCreatePullRequestAction(_ context.Context, action backend.ActionConte
 	return backend.StepResult{ID: action.Step.ID}, nil
 }
 
-func handleSetupUVAction(ctx context.Context, action backend.ActionContext) (backend.StepResult, error) {
-	if err := rejectUnsupportedInputs(action, "setup-uv", "activate-environment", "working-directory", "venv-path"); err != nil {
+func handleSetupUVAction(
+	ctx context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
+	if err := rejectUnsupportedInputs(
+		action,
+		"setup-uv",
+		"activate-environment",
+		"working-directory",
+		"venv-path",
+	); err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
 	}
 	installation, err := localToolInstallationInfo(action, "uv", "uv", "system")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("setup-uv requires uv on PATH: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"setup-uv requires uv on PATH: %w",
+				err,
+			)
 	}
 	hostCache, _, cacheErr := localToolCacheDirectory(action, "uv-cache")
 	if cacheErr != nil {
 		return backend.StepResult{ID: action.Step.ID}, cacheErr
 	}
-	result := backend.StepResult{ID: action.Step.ID, PathEntries: []string{installation.Alias.HostBin}}
+	result := backend.StepResult{
+		ID:          action.Step.ID,
+		PathEntries: []string{installation.Alias.HostBin},
+	}
 	result.Environment = workflow.EnvironmentMap{
 		"UV_CACHE_DIR": hostCache,
 	}
@@ -384,26 +521,49 @@ func handleSetupUVAction(ctx context.Context, action backend.ActionContext) (bac
 		"cache-hit":        "false",
 		"python-cache-hit": "false",
 		"python-version":   localToolVersion(action.Env, "python3", "--version"),
-		"uv-path":          localToolExecutableOutputPath(installation.Alias, installation.ExecutablePath),
-		"uv-version":       localToolVersion(action.Env, installation.ExecutablePath, "--version"),
+		"uv-path": localToolExecutableOutputPath(
+			installation.Alias,
+			installation.ExecutablePath,
+		),
+		"uv-version": localToolVersion(action.Env, installation.ExecutablePath, "--version"),
 	}
-	if uvxPath := optionalSiblingExecutablePath(action.WorkingDirectory, action.Env, installation.ExecutablePath, "uvx"); uvxPath != "" {
+	if uvxPath := optionalSiblingExecutablePath(
+		action.WorkingDirectory,
+		action.Env,
+		installation.ExecutablePath,
+		"uvx",
+	); uvxPath != "" {
 		result.Outputs["uvx-path"] = localToolExecutableOutputPath(installation.Alias, uvxPath)
 	}
 	activateValue, err := resolveActionInput(action, "activate-environment")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve activate-environment: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"resolve activate-environment: %w",
+				err,
+			)
 	}
 	activate, err := parseBooleanInput(activateValue, false)
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("parse activate-environment: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"parse activate-environment: %w",
+				err,
+			)
 	}
 	if !activate {
 		return result, nil
 	}
 	workingDirectoryValue, err := resolveActionInput(action, "working-directory")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve working-directory: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"resolve working-directory: %w",
+				err,
+			)
 	}
 	workingDirectory := resolveWorkspacePath(action.WorkingDirectory, workingDirectoryValue)
 	venvValue, err := resolveActionInput(action, "venv-path")
@@ -421,13 +581,32 @@ func handleSetupUVAction(ctx context.Context, action backend.ActionContext) (bac
 	if err != nil {
 		message := strings.TrimSpace(string(output))
 		if message != "" {
-			return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("create uv environment %q: %w\n%s", venvPath, err, message)
+			return backend.StepResult{
+					ID: action.Step.ID,
+				}, fmt.Errorf(
+					"create uv environment %q: %w\n%s",
+					venvPath,
+					err,
+					message,
+				)
 		}
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("create uv environment %q: %w", venvPath, err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"create uv environment %q: %w",
+				venvPath,
+				err,
+			)
 	}
 	venvBin := filepath.Join(venvPath, venvBinDirectoryName(action.Expressions.Runner.OS))
 	if _, err := os.Stat(venvBin); err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("uv venv did not create %q: %w", venvBin, err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"uv venv did not create %q: %w",
+				venvBin,
+				err,
+			)
 	}
 	result.PathEntries = append([]string{venvBin}, result.PathEntries...)
 	result.Environment["VIRTUAL_ENV"] = venvPath
@@ -435,12 +614,27 @@ func handleSetupUVAction(ctx context.Context, action backend.ActionContext) (bac
 	return result, nil
 }
 
-func localToolCacheAlias(action backend.ActionContext, family string, version string, targetRoot string) (toolCacheAlias, error) {
+func localToolCacheAlias(
+	action backend.ActionContext,
+	family string,
+	version string,
+	targetRoot string,
+) (toolCacheAlias, error) {
 	root := localToolCacheRoot(action)
-	return materializeToolCacheAlias(root, root, family, version, action.Expressions.Runner.Arch, targetRoot)
+	return materializeToolCacheAlias(
+		root,
+		root,
+		family,
+		version,
+		action.Expressions.Runner.Arch,
+		targetRoot,
+	)
 }
 
-func localToolCacheDirectory(action backend.ActionContext, components ...string) (string, string, error) {
+func localToolCacheDirectory(
+	action backend.ActionContext,
+	components ...string,
+) (string, string, error) {
 	root := localToolCacheRoot(action)
 	return materializeToolCacheDirectory(root, root, components...)
 }

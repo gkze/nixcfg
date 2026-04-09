@@ -10,10 +10,8 @@
     nativeBuildInputs =
       (old.nativeBuildInputs or [ ])
       ++ (with final; [
-        findutils
-        jq
-        moreutils
         bun
+        python3
       ]);
     # IMPORTANT: Keep this postPatch in place unless upstream removes
     # versionCheckHook/packageManager strictness. Removing it can reintroduce
@@ -21,12 +19,10 @@
     postPatch = (old.postPatch or "") + ''
       # Keep packageManager in sync with the Bun provided by nixpkgs so
       # versionCheckHook accepts the runtime Bun used in the build.
-      bunVersion=$(bun -v | tr -d '\n')
-      find . -name 'package.json' -exec sh -c '
-        if jq -e ".packageManager" "$1" >/dev/null 2>&1; then
-          jq --arg bunVersion "'"$bunVersion"'" ".packageManager = (\"bun@\" + \$bunVersion)" "$1" | sponge "$1"
-        fi
-      ' _ {} \;
+      bunVersion="$(bun -v | tr -d '\n')"
+      ${final.lib.getExe final.python3} ${./sync_package_manager_bun_version.py} \
+        . \
+        "$bunVersion"
 
       # Some package sources omit .github, but build scripts read this.
       # Prefer the authoritative team list from the flake input when present.
@@ -43,13 +39,7 @@
     # resolves it from packages/opencode/node_modules/. Symlink it so
     # fs.realpathSync can find parser.worker.js at build time.
     preBuild = ''
-      if [ -d node_modules/@opentui ] && [ ! -d packages/opencode/node_modules/@opentui ]; then
-        chmod u+w packages/opencode/node_modules
-        mkdir -p packages/opencode/node_modules/@opentui
-        for pkg in node_modules/@opentui/*; do
-          ln -s "../../../../$pkg" "packages/opencode/node_modules/@opentui/$(basename "$pkg")"
-        done
-      fi
+      ${final.stdenv.shell} ${./link-hoisted-opentui-packages.sh}
     '';
     node_modules = old.node_modules.overrideAttrs (nodeOld: {
       outputHash = slib.sourceHashForPlatform "opencode" "nodeModulesHash" system;

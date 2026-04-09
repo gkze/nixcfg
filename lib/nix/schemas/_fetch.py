@@ -139,10 +139,7 @@ def _https_get(url: str, headers: dict[str, str] | None = None) -> bytes:
             msg = f"Timed out fetching {url} after {exc.attempts} attempt(s)"
             raise RuntimeError(msg) from exc
         if exc.kind == "network":
-            msg = (
-                f"Network error fetching {url} after {exc.attempts} attempt(s): "
-                f"{exc.detail}"
-            )
+            msg = f"Network error fetching {url} after {exc.attempts} attempt(s): {exc.detail}"
             raise RuntimeError(msg) from exc
         if exc.kind == "status":
             msg = f"HTTP {exc.status} fetching {url}"

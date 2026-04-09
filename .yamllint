@@ -1,10 +1,21 @@
 # vi: ft=yaml
 ---
 extends: default
+ignore: |
+  .direnv/**
+  .ghawfr/**
+  .pre-commit-config.yaml
+  .venv/**
+  node_modules/**
+  result*/**
+  lib/nix/schemas/*.yaml
 rules:
   comments: disable
   comments-indentation: disable
-  line-length: disable
+  line-length:
+    max: 100
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
   truthy:
     allowed-values: ["true", "false", "on", "off"]
     check-keys: false

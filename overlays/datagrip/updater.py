@@ -65,10 +65,7 @@ class DataGripUpdater(ChecksumProvidedUpdater):
         value = platform_payload.get(field)
         if isinstance(value, str) and value:
             return value
-        msg = (
-            "Missing DataGrip download field "
-            f"{field!r} for {platform_key}: {platform_payload!r}"
-        )
+        msg = f"Missing DataGrip download field {field!r} for {platform_key}: {platform_payload!r}"
         raise RuntimeError(msg)
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:

@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from lib.update import updaters as updater_module
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import UPDATERS, UvLockUpdater, ensure_updaters_loaded
+from lib.update.updaters import UvLockUpdater
 
 
 def _uv2nix_package_dirs() -> list[Path]:
@@ -23,9 +24,23 @@ def _uv2nix_package_dirs() -> list[Path]:
     return result
 
 
+def _fresh_loaded_updaters() -> dict[str, type[object]]:
+    """Return a fully reloaded updater registry independent of prior test state."""
+    original = dict(updater_module.UPDATERS)
+    original_complete = updater_module._DISCOVERY_STATE["complete"]
+    try:
+        updater_module.UPDATERS.clear()
+        updater_module._DISCOVERY_STATE["complete"] = False
+        return dict(updater_module.ensure_updaters_loaded())
+    finally:
+        updater_module.UPDATERS.clear()
+        updater_module.UPDATERS.update(original)
+        updater_module._DISCOVERY_STATE["complete"] = original_complete
+
+
 def test_mk_uv2nix_packages_use_checked_in_uv_lock_and_updater() -> None:
     """Every ``mkUv2nixPackage`` package should use the checked-in uv workflow."""
-    ensure_updaters_loaded()
+    updaters = _fresh_loaded_updaters()
 
     package_dirs = _uv2nix_package_dirs()
     assert package_dirs
@@ -40,7 +55,7 @@ def test_mk_uv2nix_packages_use_checked_in_uv_lock_and_updater() -> None:
         assert updater_py.is_file(), f"{name} is missing updater.py"
         assert sources_json.is_file(), f"{name} is missing sources.json"
 
-        updater_cls = UPDATERS.get(name)
+        updater_cls = updaters.get(name)
         assert updater_cls is not None, f"{name} is missing updater registration"
         assert issubclass(updater_cls, UvLockUpdater), (
             f"{name} must register a UvLockUpdater"

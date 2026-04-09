@@ -10,6 +10,7 @@ from lib.update.ci.build_shared_closure import app as build_shared_closure_app
 from lib.update.ci.crate2nix import app as crate2nix_app
 from lib.update.ci.dedup_cargo_lock import app as dedup_cargo_lock_app
 from lib.update.ci.flake_lock_diff import app as flake_lock_diff_app
+from lib.update.ci.merge_probe import app as merge_probe_app
 from lib.update.ci.merge_sources import app as merge_sources_app
 from lib.update.ci.profile_generations import app as profile_generations_app
 from lib.update.ci.resolve_versions import app as resolve_versions_app
@@ -55,6 +56,7 @@ diff_app.add_typer(sources_json_diff_app, name="sources")
 
 pipeline_app.add_typer(dedup_cargo_lock_app, name="cargo-lock")
 pipeline_app.add_typer(crate2nix_app, name="crate2nix")
+pipeline_app.add_typer(merge_probe_app, name="merge-probe")
 pipeline_app.add_typer(merge_sources_app, name="sources")
 pipeline_app.add_typer(test_pipeline_app, name="test")
 pipeline_app.add_typer(resolve_versions_app, name="versions")

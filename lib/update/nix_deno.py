@@ -245,10 +245,7 @@ async def compute_deno_deps_hash(
     current_platform = get_current_nix_platform()
     platforms = hash_build_platforms_for(config)
     if current_platform not in platforms:
-        msg = (
-            f"Current platform {current_platform} not in supported platforms: "
-            f"{platforms}"
-        )
+        msg = f"Current platform {current_platform} not in supported platforms: {platforms}"
         raise RuntimeError(msg)
 
     pkg_sources_path = sources_file_for(source)

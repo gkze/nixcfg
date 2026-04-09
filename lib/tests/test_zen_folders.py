@@ -66,6 +66,15 @@ def zen_folders() -> ModuleType:
     return _load_zen_folders_module()
 
 
+def test_zen_folders_script_parses_under_python3() -> None:
+    """Catch syntax regressions before activation tries to execute the script."""
+    compile(
+        ZEN_FOLDERS_PATH.read_text(encoding="utf-8"),
+        str(ZEN_FOLDERS_PATH),
+        "exec",
+    )
+
+
 def _base_session() -> dict:
     return {
         "tabs": [],

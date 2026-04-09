@@ -199,7 +199,9 @@ def link_managed_file(
     """Link one managed file into place, or remove the prior managed symlink."""
     if source is None:
         previous_source = _read_managed_source(manifest_path)
-        if previous_source is not None and _symlink_target_matches(destination, previous_source):
+        if previous_source is not None and _symlink_target_matches(
+            destination, previous_source
+        ):
             destination.unlink()
         if manifest_path.exists():
             manifest_path.unlink()
@@ -215,7 +217,9 @@ def link_managed_file(
     manifest_path.write_text(f"{source}\n", encoding="utf-8")
 
 
-def cleanup_managed_chrome_symlinks(profile_chrome_dir: Path, manifest_path: Path) -> None:
+def cleanup_managed_chrome_symlinks(
+    profile_chrome_dir: Path, manifest_path: Path
+) -> None:
     """Remove previously managed chrome symlinks recorded in the manifest."""
     if not manifest_path.is_file():
         return
@@ -369,9 +373,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--folders-config",
         default=None,
-        help=(
-            "Folders YAML config. Defaults to CONFIG_DIR/folders.yaml when present."
-        ),
+        help=("Folders YAML config. Defaults to CONFIG_DIR/folders.yaml when present."),
     )
     parser.add_argument(
         "--folders-command",

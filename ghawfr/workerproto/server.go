@@ -62,7 +62,7 @@ func handleExec(request *ExecRequest) (*ExecResponse, error) {
 	if request.Command == "" {
 		return nil, fmt.Errorf("exec command is empty")
 	}
-	cmd := exec.Command("sh", "-lc", request.Command)
+	cmd := exec.Command("sh", "-c", request.Command)
 	if request.WorkingDirectory != "" {
 		cmd.Dir = request.WorkingDirectory
 	}

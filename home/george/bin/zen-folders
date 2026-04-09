@@ -211,7 +211,7 @@ def _load_profiles_ini() -> configparser.RawConfigParser | None:
     try:
         with PROFILES_INI.open(encoding="utf-8") as handle:
             parser.read_file(handle)
-    except OSError, configparser.Error:
+    except (OSError, configparser.Error):
         return None
     return parser
 
@@ -1073,7 +1073,7 @@ def zen_process_is_running() -> bool | None:
             capture_output=True,
             text=True,
         )
-    except FileNotFoundError, subprocess.SubprocessError, OSError:
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
         return None
 
     for line in result.stdout.splitlines():
@@ -2507,7 +2507,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     if not args.yes:
         try:
             answer = input("Apply? [y/N] ").strip().lower()
-        except EOFError, KeyboardInterrupt:
+        except (EOFError, KeyboardInterrupt):
             _stdout("\nAborted.")
             return 1
         if answer not in ("y", "yes"):

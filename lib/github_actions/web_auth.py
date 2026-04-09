@@ -255,10 +255,7 @@ async def _cookies_from_playwright(
     try:
         playwright_module = importlib.import_module("playwright.async_api")
     except ImportError as exc:
-        msg = (
-            "Playwright is not installed; install `playwright` to use "
-            "--allow-playwright-login"
-        )
+        msg = "Playwright is not installed; install `playwright` to use --allow-playwright-login"
         raise RuntimeError(msg) from exc
 
     async_playwright = playwright_module.async_playwright

@@ -58,10 +58,7 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
         for platform, info in platform_info.items():
             value = info.get(field)
             if not isinstance(value, str):
-                msg = (
-                    f"Expected string field {field!r} in "
-                    f"{self.name}:{platform}, got {value!r}"
-                )
+                msg = f"Expected string field {field!r} in {self.name}:{platform}, got {value!r}"
                 raise TypeError(msg)
             values[platform] = value
         return values

@@ -28,7 +28,8 @@ jobs:
         with:
           persist-credentials: false
       - &setup_nix
-        uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919 # v3.17.1
+        # Determinate Nix v3.17.1
+        uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919
         with:
           extra-conf: |
             extra-substituters = https://cache.garnix.io
@@ -442,13 +443,16 @@ jobs:
           path: .
       - *cache_nix
       - name: Generate PR body
+        # yamllint disable rule:line-length
         run: |
           nix run .#nixcfg -- ci workflow generate-pr-body \
             --output /tmp/pr-body.md \
-            --workflow-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --workflow-url \
+              "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --server-url "${{ github.server_url }}" \
             --repository "${{ github.repository }}" \
             --base-ref "${{ github.base_ref || github.event.repository.default_branch }}"
+        # yamllint enable rule:line-length
 
       - uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
         id: cpr

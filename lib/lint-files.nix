@@ -1,10 +1,12 @@
 {
   ruff = {
-    regex = "(\\.(py|pyi)$|home/[^/]+/bin/git-ignore)";
+    regex = "(\\.(py|pyi)$|home/[^/]+/bin/(git-ignore|zen-folders|zen-profile-sync))";
+    # Keep extensionless Python entrypoints in Ruff discovery via pyproject.toml,
+    # but do not feed them through treefmt's Ruff formatter until the upstream
+    # multi-exception formatting regression is fixed.
     globs = [
       "*.py"
       "*.pyi"
-      "home/*/bin/git-ignore"
     ];
   };
 
@@ -29,11 +31,29 @@
     ];
   };
 
+  biome = {
+    regex = "\\.(cjs|css|js|mjs)$";
+    globs = [
+      "*.css"
+      "*.js"
+      "*.cjs"
+      "*.mjs"
+    ];
+    excludeGlobs = [
+      ".direnv/**"
+      ".venv/**"
+      "node_modules/**"
+      "result/**"
+    ];
+  };
+
   shell = {
-    regex = "(\\.envrc|misc/zsh-plugins/.*\\.zsh)";
+    regex = "(\\.envrc|.*\\.(bash|sh|zsh))";
     globs = [
       ".envrc"
-      "misc/zsh-plugins/*.zsh"
+      "*.sh"
+      "*.bash"
+      "*.zsh"
     ];
     excludeRegex = [ "misc/zsh-plugins/go\\.plugin\\.zsh" ];
     excludeGlobs = [ "misc/zsh-plugins/go.plugin.zsh" ];

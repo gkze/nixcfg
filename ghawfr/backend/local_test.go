@@ -13,6 +13,35 @@ import (
 	"github.com/gkze/ghawfr/workflow"
 )
 
+const (
+	localUVWithVenvScript = `#!/usr/bin/env sh
+if [ "${1:-}" = '--version' ]; then
+  echo 'uv 0.6.5'
+  exit 0
+fi
+if [ "${1:-}" = 'venv' ]; then
+  mkdir -p "${3}/bin"
+  exit 0
+fi
+exit 0
+`
+	localUVVersionScript = `#!/usr/bin/env sh
+if [ "${1:-}" = '--version' ]; then
+  echo 'uv 0.6.5'
+  exit 0
+fi
+exit 0
+`
+	localEnvPathSetupCommand = `test -z "${FOO:-}"
+mkdir -p "$GITHUB_WORKSPACE/.bin"
+printf '#!/usr/bin/env bash
+echo tool
+' > "$GITHUB_WORKSPACE/.bin/mytool"
+chmod +x "$GITHUB_WORKSPACE/.bin/mytool"
+echo 'FOO=bar' >> "$GITHUB_ENV"
+echo "$GITHUB_WORKSPACE/.bin" >> "$GITHUB_PATH"`
+)
+
 func TestLocalRunJobUploadsAndDownloadsArtifactsAcrossJobs(t *testing.T) {
 	workspace := t.TempDir()
 	store := artifacts.NewStore(filepath.Join(workspace, ".ghawfr", "artifacts"))
@@ -26,12 +55,20 @@ func TestLocalRunJobUploadsAndDownloadsArtifactsAcrossJobs(t *testing.T) {
 		Steps: []workflow.Step{{
 			Kind: workflow.StepKindAction,
 			Action: &workflow.ActionStep{
-				Uses:   "actions/upload-artifact@v6",
-				Inputs: workflow.ActionInputMap{"name": "flake-lock", "path": "flake.lock", "if-no-files-found": "error"},
+				Uses: "actions/upload-artifact@v6",
+				Inputs: workflow.ActionInputMap{
+					"name":              "flake-lock",
+					"path":              "flake.lock",
+					"if-no-files-found": "error",
+				},
 			},
 		}},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), upload, backend.RunOptions{WorkingDirectory: workspace, Artifacts: store}); err != nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		upload,
+		backend.RunOptions{WorkingDirectory: workspace, Artifacts: store},
+	); err != nil {
 		t.Fatalf("upload RunJob: %v", err)
 	}
 	if err := os.Remove(filepath.Join(workspace, "flake.lock")); err != nil {
@@ -49,7 +86,11 @@ func TestLocalRunJobUploadsAndDownloadsArtifactsAcrossJobs(t *testing.T) {
 			},
 		}},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), download, backend.RunOptions{WorkingDirectory: workspace, Artifacts: store}); err != nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		download,
+		backend.RunOptions{WorkingDirectory: workspace, Artifacts: store},
+	); err != nil {
 		t.Fatalf("download RunJob: %v", err)
 	}
 	if got, want := mustReadFile(t, filepath.Join(workspace, "flake.lock")), "lock"; got != want {
@@ -66,19 +107,47 @@ func TestLocalRunJobSupportsMinimalCISetupActions(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll bin: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(binDir, "cachix"), []byte("#!/usr/bin/env sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(binDir, "cachix"),
+		[]byte("#!/usr/bin/env sh\nexit 0\n"),
+		0o755,
+	); err != nil {
 		t.Fatalf("WriteFile cachix: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(binDir, "python3"), []byte("#!/usr/bin/env sh\necho 'Python 3.14.2'\n"), 0o755); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(binDir, "python3"),
+		[]byte("#!/usr/bin/env sh\necho 'Python 3.14.2'\n"),
+		0o755,
+	); err != nil {
 		t.Fatalf("WriteFile python3: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(binDir, "uv"), []byte("#!/usr/bin/env sh\nif [ \"${1:-}\" = '--version' ]; then\n  echo 'uv 0.6.5'\n  exit 0\nfi\nif [ \"${1:-}\" = 'venv' ]; then\n  mkdir -p \"${3}/bin\"\n  exit 0\nfi\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(binDir, "uv"),
+		[]byte(localUVWithVenvScript),
+		0o755,
+	); err != nil {
 		t.Fatalf("WriteFile uv: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(binDir, "uvx"), []byte("#!/usr/bin/env sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(binDir, "uvx"),
+		[]byte("#!/usr/bin/env sh\nexit 0\n"),
+		0o755,
+	); err != nil {
 		t.Fatalf("WriteFile uvx: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	pythonToolRoot := filepath.Join(
+		workspace,
+		".ghawfr",
+		"runner",
+		"tool-cache",
+		"Python",
+		"3.14",
+	)
+	uvToolRoot := filepath.Join(workspace, ".ghawfr", "runner", "tool-cache", "uv", "system")
+	uvCacheDir := filepath.Join(workspace, ".ghawfr", "runner", "tool-cache", "uv-cache")
+	venvPath := filepath.Join(workspace, ".venv")
+	venvBin := filepath.Join(venvPath, "bin")
 	job := &workflow.Job{
 		ID:        "quality",
 		LogicalID: "quality",
@@ -96,8 +165,11 @@ func TestLocalRunJobSupportsMinimalCISetupActions(t *testing.T) {
 			{
 				Kind: workflow.StepKindAction,
 				Action: &workflow.ActionStep{
-					Uses:   "cachix/cachix-action@v16",
-					Inputs: workflow.ActionInputMap{"name": "${{ env.CACHIX_NAME }}", "authToken": "${{ secrets.CACHIX_AUTH_TOKEN }}"},
+					Uses: "cachix/cachix-action@v16",
+					Inputs: workflow.ActionInputMap{
+						"name":      "${{ env.CACHIX_NAME }}",
+						"authToken": "${{ secrets.CACHIX_AUTH_TOKEN }}",
+					},
 				},
 			},
 			{
@@ -119,8 +191,11 @@ func TestLocalRunJobSupportsMinimalCISetupActions(t *testing.T) {
 			{
 				Kind: workflow.StepKindAction,
 				Action: &workflow.ActionStep{
-					Uses:   "actions/cache@v5",
-					Inputs: workflow.ActionInputMap{"path": ".cache/nix", "key": "nix-${{ env.CACHIX_NAME }}"},
+					Uses: "actions/cache@v5",
+					Inputs: workflow.ActionInputMap{
+						"path": ".cache/nix",
+						"key":  "nix-${{ env.CACHIX_NAME }}",
+					},
 				},
 			},
 			{
@@ -131,24 +206,30 @@ func TestLocalRunJobSupportsMinimalCISetupActions(t *testing.T) {
 					"test \"$CACHIX_NAME\" = \"gkze\"\n" +
 					"test \"${{ steps.py.outputs.python-version }}\" = \"3.14\"\n" +
 					"test \"${{ steps.py.outputs.cache-hit }}\" = \"false\"\n" +
-					"case \"${{ steps.py.outputs.python-path }}\" in \"" + filepath.Join(workspace, ".ghawfr", "runner", "tool-cache", "Python", "3.14") + "\"/*/bin/python3) true ;; *) false ;; esac\n" +
+					"case \"${{ steps.py.outputs.python-path }}\" in \"" +
+					pythonToolRoot +
+					"\"/*/bin/python3) true ;; *) false ;; esac\n" +
 					"test \"${{ steps.uv.outputs.cache-hit }}\" = \"false\"\n" +
 					"test \"${{ steps.uv.outputs.python-cache-hit }}\" = \"false\"\n" +
 					"test -n \"${{ steps.uv.outputs.uv-version }}\"\n" +
-					"case \"${{ steps.uv.outputs.uv-path }}\" in \"" + filepath.Join(workspace, ".ghawfr", "runner", "tool-cache", "uv", "system") + "\"/*/bin/uv) true ;; *) false ;; esac\n" +
-					"test \"${{ steps.uv.outputs.venv }}\" = \"" + filepath.Join(workspace, ".venv") + "\"\n" +
-					"test \"$UV_CACHE_DIR\" = \"" + filepath.Join(workspace, ".ghawfr", "runner", "tool-cache", "uv-cache") + "\"\n" +
-					"test \"$VIRTUAL_ENV\" = \"" + filepath.Join(workspace, ".venv") + "\"\n" +
-					"case \"$pythonLocation\" in \"" + filepath.Join(workspace, ".ghawfr", "runner", "tool-cache", "Python", "3.14") + "\"/*) true ;; *) false ;; esac\n" +
-					"case \"$PATH\" in \"" + filepath.Join(workspace, ".venv", "bin") + "\":*) true ;; *) false ;; esac\n" +
-					"case \":$PATH:\" in *:\"" + filepath.Join(workspace, ".ghawfr", "runner", "tool-cache", "uv", "system") + "\"/*/bin:*) true ;; *) false ;; esac"},
+					"case \"${{ steps.uv.outputs.uv-path }}\" in \"" +
+					uvToolRoot +
+					"\"/*/bin/uv) true ;; *) false ;; esac\n" +
+					"test \"${{ steps.uv.outputs.venv }}\" = \"" + venvPath + "\"\n" +
+					"test \"$UV_CACHE_DIR\" = \"" + uvCacheDir + "\"\n" +
+					"test \"$VIRTUAL_ENV\" = \"" + venvPath + "\"\n" +
+					"case \"$pythonLocation\" in \"" + pythonToolRoot + "\"/*) true ;; *) false ;; esac\n" +
+					"case \"$PATH\" in \"" + venvBin + "\":*) true ;; *) false ;; esac\n" +
+					"case \":$PATH:\" in *:\"" + uvToolRoot + "\"/*/bin:*) true ;; *) false ;; esac"},
 			},
 		},
 	}
 
 	result, err := actionadapter.NewLocal(nil).RunJob(context.Background(), job, backend.RunOptions{
 		WorkingDirectory: workspace,
-		Expressions:      workflow.ExpressionContext{Secrets: workflow.SecretMap{"CACHIX_AUTH_TOKEN": "token"}},
+		Expressions: workflow.ExpressionContext{
+			Secrets: workflow.SecretMap{"CACHIX_AUTH_TOKEN": "token"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
@@ -171,7 +252,11 @@ func TestLocalRunJobSetupPythonRespectsUpdateEnvironmentFalse(t *testing.T) {
 		t.Fatalf("mkdir bin: %v", err)
 	}
 	pythonPath := filepath.Join(binDir, "python3")
-	if err := os.WriteFile(pythonPath, []byte("#!/usr/bin/env sh\necho 'Python 3.14.2'\n"), 0o755); err != nil {
+	if err := os.WriteFile(
+		pythonPath,
+		[]byte("#!/usr/bin/env sh\necho 'Python 3.14.2'\n"),
+		0o755,
+	); err != nil {
 		t.Fatalf("write python3: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -183,12 +268,16 @@ func TestLocalRunJobSetupPythonRespectsUpdateEnvironmentFalse(t *testing.T) {
 			ID:   "py",
 			Kind: workflow.StepKindAction,
 			Action: &workflow.ActionStep{
-				Uses:   "actions/setup-python@v6",
-				Inputs: workflow.ActionInputMap{"python-version": "3.14", "update-environment": "false"},
+				Uses: "actions/setup-python@v6",
+				Inputs: workflow.ActionInputMap{
+					"python-version":     "3.14",
+					"update-environment": "false",
+				},
 			},
 		}},
 	}
-	result, err := actionadapter.NewLocal(nil).RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
+	result, err := actionadapter.NewLocal(nil).
+		RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
@@ -214,7 +303,11 @@ func TestLocalRunJobSetupPythonSupportsMultilineVersionFallback(t *testing.T) {
 		t.Fatalf("mkdir bin: %v", err)
 	}
 	pythonPath := filepath.Join(binDir, "python3")
-	if err := os.WriteFile(pythonPath, []byte("#!/usr/bin/env sh\necho 'Python 3.14.2'\n"), 0o755); err != nil {
+	if err := os.WriteFile(
+		pythonPath,
+		[]byte("#!/usr/bin/env sh\necho 'Python 3.14.2'\n"),
+		0o755,
+	); err != nil {
 		t.Fatalf("write python3: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -231,7 +324,8 @@ func TestLocalRunJobSetupPythonSupportsMultilineVersionFallback(t *testing.T) {
 			},
 		}},
 	}
-	result, err := actionadapter.NewLocal(nil).RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
+	result, err := actionadapter.NewLocal(nil).
+		RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
@@ -254,8 +348,14 @@ func TestLocalRunJobSetupPythonFailsWhenWorkflowPathExplicitlyEmpty(t *testing.T
 			},
 		}},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: t.TempDir()}); err == nil {
-		t.Fatal("RunJob error = nil, want setup-python failure when workflow PATH is explicitly empty")
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		job,
+		backend.RunOptions{WorkingDirectory: t.TempDir()},
+	); err == nil {
+		t.Fatal(
+			"RunJob error = nil, want setup-python failure when workflow PATH is explicitly empty",
+		)
 	}
 }
 
@@ -266,7 +366,11 @@ func TestLocalRunJobSetupPythonFailsOnVersionMismatch(t *testing.T) {
 		t.Fatalf("mkdir bin: %v", err)
 	}
 	pythonPath := filepath.Join(binDir, "python3")
-	if err := os.WriteFile(pythonPath, []byte("#!/usr/bin/env sh\necho 'Python 3.13.1'\n"), 0o755); err != nil {
+	if err := os.WriteFile(
+		pythonPath,
+		[]byte("#!/usr/bin/env sh\necho 'Python 3.13.1'\n"),
+		0o755,
+	); err != nil {
 		t.Fatalf("write python3: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -282,7 +386,11 @@ func TestLocalRunJobSetupPythonFailsOnVersionMismatch(t *testing.T) {
 			},
 		}},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace}); err == nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		job,
+		backend.RunOptions{WorkingDirectory: workspace},
+	); err == nil {
 		t.Fatal("RunJob error = nil, want python version mismatch failure")
 	}
 }
@@ -300,7 +408,11 @@ func TestLocalRunJobSetupUVRejectsUnsupportedVersionInputs(t *testing.T) {
 			},
 		}},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: t.TempDir()}); err == nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		job,
+		backend.RunOptions{WorkingDirectory: t.TempDir()},
+	); err == nil {
 		t.Fatal("RunJob error = nil, want unsupported setup-uv input failure")
 	}
 }
@@ -326,7 +438,8 @@ func TestLocalRunJobSupportsCreatePullRequestAction(t *testing.T) {
 			},
 		}},
 	}
-	result, err := actionadapter.NewLocal(nil).RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
+	result, err := actionadapter.NewLocal(nil).
+		RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
@@ -344,13 +457,25 @@ func TestLocalRunJobSetupActionsUseWorkflowShapedPath(t *testing.T) {
 			t.Fatalf("mkdir %q: %v", path, err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(pyRoot, "bin", "python3"), []byte("#!/usr/bin/env sh\necho 'Python 3.14.7'\n"), 0o755); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(pyRoot, "bin", "python3"),
+		[]byte("#!/usr/bin/env sh\necho 'Python 3.14.7'\n"),
+		0o755,
+	); err != nil {
 		t.Fatalf("write python3: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(uvRoot, "bin", "uv"), []byte("#!/usr/bin/env sh\nif [ \"${1:-}\" = '--version' ]; then\n  echo 'uv 0.6.5'\n  exit 0\nfi\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(uvRoot, "bin", "uv"),
+		[]byte(localUVVersionScript),
+		0o755,
+	); err != nil {
 		t.Fatalf("write uv: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(uvRoot, "bin", "uvx"), []byte("#!/usr/bin/env sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(uvRoot, "bin", "uvx"),
+		[]byte("#!/usr/bin/env sh\nexit 0\n"),
+		0o755,
+	); err != nil {
 		t.Fatalf("write uvx: %v", err)
 	}
 	job := &workflow.Job{
@@ -361,13 +486,18 @@ func TestLocalRunJobSetupActionsUseWorkflowShapedPath(t *testing.T) {
 			{
 				ID:   "path",
 				Kind: workflow.StepKindRun,
-				Run: &workflow.RunStep{Command: "echo '" + filepath.Join(pyRoot, "bin") + "' >> \"$GITHUB_PATH\"\n" +
-					"echo '" + filepath.Join(uvRoot, "bin") + "' >> \"$GITHUB_PATH\""},
+				Run: &workflow.RunStep{
+					Command: "echo '" + filepath.Join(pyRoot, "bin") + "' >> \"$GITHUB_PATH\"\n" +
+						"echo '" + filepath.Join(uvRoot, "bin") + "' >> \"$GITHUB_PATH\"",
+				},
 			},
 			{
-				ID:     "py",
-				Kind:   workflow.StepKindAction,
-				Action: &workflow.ActionStep{Uses: "actions/setup-python@v6", Inputs: workflow.ActionInputMap{"python-version": "3.14"}},
+				ID:   "py",
+				Kind: workflow.StepKindAction,
+				Action: &workflow.ActionStep{
+					Uses:   "actions/setup-python@v6",
+					Inputs: workflow.ActionInputMap{"python-version": "3.14"},
+				},
 			},
 			{
 				ID:     "uv",
@@ -376,12 +506,15 @@ func TestLocalRunJobSetupActionsUseWorkflowShapedPath(t *testing.T) {
 			},
 			{
 				Kind: workflow.StepKindRun,
-				Run: &workflow.RunStep{Command: "test \"${{ steps.py.outputs.python-version }}\" = 3.14\n" +
-					"test \"${{ steps.uv.outputs.uv-version }}\" = 0.6.5"},
+				Run: &workflow.RunStep{
+					Command: "test \"${{ steps.py.outputs.python-version }}\" = 3.14\n" +
+						"test \"${{ steps.uv.outputs.uv-version }}\" = 0.6.5",
+				},
 			},
 		},
 	}
-	result, err := actionadapter.NewLocal(nil).RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
+	result, err := actionadapter.NewLocal(nil).
+		RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
@@ -405,7 +538,8 @@ func TestLocalRunJobProvidesRunnerTempAndToolCache(t *testing.T) {
 				"test \"$AGENT_TOOLSDIRECTORY\" = \"${{ runner.tool_cache }}\""},
 		}},
 	}
-	result, err := actionadapter.NewLocal(nil).RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
+	result, err := actionadapter.NewLocal(nil).
+		RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
@@ -431,7 +565,9 @@ func TestLocalRunJobAppliesGithubEnvAndPathToLaterSteps(t *testing.T) {
 			{
 				ID:   "setup",
 				Kind: workflow.StepKindRun,
-				Run:  &workflow.RunStep{Command: "test -z \"${FOO:-}\"\nmkdir -p \"$GITHUB_WORKSPACE/.bin\"\nprintf '#!/usr/bin/env bash\necho tool\n' > \"$GITHUB_WORKSPACE/.bin/mytool\"\nchmod +x \"$GITHUB_WORKSPACE/.bin/mytool\"\necho 'FOO=bar' >> \"$GITHUB_ENV\"\necho \"$GITHUB_WORKSPACE/.bin\" >> \"$GITHUB_PATH\""},
+				Run: &workflow.RunStep{
+					Command: localEnvPathSetupCommand,
+				},
 			},
 			{
 				ID:   "verify",
@@ -441,7 +577,8 @@ func TestLocalRunJobAppliesGithubEnvAndPathToLaterSteps(t *testing.T) {
 		},
 	}
 
-	result, err := actionadapter.NewLocal(nil).RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
+	result, err := actionadapter.NewLocal(nil).
+		RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
@@ -467,11 +604,27 @@ func TestLocalRunJobCapturesStepAndJobOutputs(t *testing.T) {
 		ID:        "seed-cache",
 		LogicalID: "seed-cache",
 		Steps: []workflow.Step{
-			{ID: "cache", Kind: workflow.StepKindAction, Action: &workflow.ActionStep{Uses: "actions/cache@v5", Inputs: workflow.ActionInputMap{"path": "~/.cache/demo", "key": "demo-v1"}}},
-			{Kind: workflow.StepKindRun, Run: &workflow.RunStep{Command: "mkdir -p \"$HOME/.cache/demo\"\nprintf one > \"$HOME/.cache/demo/value.txt\""}},
+			{
+				ID:   "cache",
+				Kind: workflow.StepKindAction,
+				Action: &workflow.ActionStep{
+					Uses:   "actions/cache@v5",
+					Inputs: workflow.ActionInputMap{"path": "~/.cache/demo", "key": "demo-v1"},
+				},
+			},
+			{
+				Kind: workflow.StepKindRun,
+				Run: &workflow.RunStep{
+					Command: "mkdir -p \"$HOME/.cache/demo\"\nprintf one > \"$HOME/.cache/demo/value.txt\"",
+				},
+			},
 		},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), seed, backend.RunOptions{WorkingDirectory: workspace, Cache: store}); err != nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		seed,
+		backend.RunOptions{WorkingDirectory: workspace, Cache: store},
+	); err != nil {
 		t.Fatalf("seed RunJob: %v", err)
 	}
 	if err := os.RemoveAll(cacheRoot); err != nil {
@@ -482,13 +635,33 @@ func TestLocalRunJobCapturesStepAndJobOutputs(t *testing.T) {
 		ID:        "fallback-cache",
 		LogicalID: "fallback-cache",
 		Steps: []workflow.Step{
-			{ID: "cache", Kind: workflow.StepKindAction, Action: &workflow.ActionStep{Uses: "actions/cache@v5", Inputs: workflow.ActionInputMap{"path": "~/.cache/demo", "key": "demo-v2", "restore-keys": "demo-"}}},
-			{Kind: workflow.StepKindRun, Run: &workflow.RunStep{Command: "test \"${{ steps.cache.outputs.cache-hit }}\" = false\n" +
-				"test \"$(cat \"$HOME/.cache/demo/value.txt\")\" = one\n" +
-				"printf two > \"$HOME/.cache/demo/value.txt\""}},
+			{
+				ID:   "cache",
+				Kind: workflow.StepKindAction,
+				Action: &workflow.ActionStep{
+					Uses: "actions/cache@v5",
+					Inputs: workflow.ActionInputMap{
+						"path":         "~/.cache/demo",
+						"key":          "demo-v2",
+						"restore-keys": "demo-",
+					},
+				},
+			},
+			{
+				Kind: workflow.StepKindRun,
+				Run: &workflow.RunStep{
+					Command: "test \"${{ steps.cache.outputs.cache-hit }}\" = false\n" +
+						"test \"$(cat \"$HOME/.cache/demo/value.txt\")\" = one\n" +
+						"printf two > \"$HOME/.cache/demo/value.txt\"",
+				},
+			},
 		},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), fallback, backend.RunOptions{WorkingDirectory: workspace, Cache: store}); err != nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		fallback,
+		backend.RunOptions{WorkingDirectory: workspace, Cache: store},
+	); err != nil {
 		t.Fatalf("fallback RunJob: %v", err)
 	}
 	if err := os.RemoveAll(cacheRoot); err != nil {
@@ -499,12 +672,32 @@ func TestLocalRunJobCapturesStepAndJobOutputs(t *testing.T) {
 		ID:        "restore-cache",
 		LogicalID: "restore-cache",
 		Steps: []workflow.Step{
-			{ID: "cache", Kind: workflow.StepKindAction, Action: &workflow.ActionStep{Uses: "actions/cache@v5", Inputs: workflow.ActionInputMap{"path": "~/.cache/demo", "key": "demo-v2", "restore-keys": "demo-"}}},
-			{Kind: workflow.StepKindRun, Run: &workflow.RunStep{Command: "test \"${{ steps.cache.outputs.cache-hit }}\" = true\n" +
-				"test \"$(cat \"$HOME/.cache/demo/value.txt\")\" = two"}},
+			{
+				ID:   "cache",
+				Kind: workflow.StepKindAction,
+				Action: &workflow.ActionStep{
+					Uses: "actions/cache@v5",
+					Inputs: workflow.ActionInputMap{
+						"path":         "~/.cache/demo",
+						"key":          "demo-v2",
+						"restore-keys": "demo-",
+					},
+				},
+			},
+			{
+				Kind: workflow.StepKindRun,
+				Run: &workflow.RunStep{
+					Command: "test \"${{ steps.cache.outputs.cache-hit }}\" = true\n" +
+						"test \"$(cat \"$HOME/.cache/demo/value.txt\")\" = two",
+				},
+			},
 		},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), restore, backend.RunOptions{WorkingDirectory: workspace, Cache: store}); err != nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		restore,
+		backend.RunOptions{WorkingDirectory: workspace, Cache: store},
+	); err != nil {
 		t.Fatalf("restore RunJob: %v", err)
 	}
 }
@@ -522,11 +715,27 @@ func TestLocalRunJobSupportsCacheLookupOnly(t *testing.T) {
 		ID:        "seed-lookup-cache",
 		LogicalID: "seed-lookup-cache",
 		Steps: []workflow.Step{
-			{ID: "cache", Kind: workflow.StepKindAction, Action: &workflow.ActionStep{Uses: "actions/cache@v5", Inputs: workflow.ActionInputMap{"path": "~/.cache/demo", "key": "lookup-v1"}}},
-			{Kind: workflow.StepKindRun, Run: &workflow.RunStep{Command: "mkdir -p \"$HOME/.cache/demo\"\nprintf one > \"$HOME/.cache/demo/value.txt\""}},
+			{
+				ID:   "cache",
+				Kind: workflow.StepKindAction,
+				Action: &workflow.ActionStep{
+					Uses:   "actions/cache@v5",
+					Inputs: workflow.ActionInputMap{"path": "~/.cache/demo", "key": "lookup-v1"},
+				},
+			},
+			{
+				Kind: workflow.StepKindRun,
+				Run: &workflow.RunStep{
+					Command: "mkdir -p \"$HOME/.cache/demo\"\nprintf one > \"$HOME/.cache/demo/value.txt\"",
+				},
+			},
 		},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), seed, backend.RunOptions{WorkingDirectory: workspace, Cache: store}); err != nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		seed,
+		backend.RunOptions{WorkingDirectory: workspace, Cache: store},
+	); err != nil {
 		t.Fatalf("seed RunJob: %v", err)
 	}
 	if err := os.RemoveAll(cacheRoot); err != nil {
@@ -536,12 +745,32 @@ func TestLocalRunJobSupportsCacheLookupOnly(t *testing.T) {
 		ID:        "lookup-cache",
 		LogicalID: "lookup-cache",
 		Steps: []workflow.Step{
-			{ID: "cache", Kind: workflow.StepKindAction, Action: &workflow.ActionStep{Uses: "actions/cache@v5", Inputs: workflow.ActionInputMap{"path": "~/.cache/demo", "key": "lookup-v1", "lookup-only": "true"}}},
-			{Kind: workflow.StepKindRun, Run: &workflow.RunStep{Command: "test \"${{ steps.cache.outputs.cache-hit }}\" = true\n" +
-				"test ! -e \"$HOME/.cache/demo/value.txt\""}},
+			{
+				ID:   "cache",
+				Kind: workflow.StepKindAction,
+				Action: &workflow.ActionStep{
+					Uses: "actions/cache@v5",
+					Inputs: workflow.ActionInputMap{
+						"path":        "~/.cache/demo",
+						"key":         "lookup-v1",
+						"lookup-only": "true",
+					},
+				},
+			},
+			{
+				Kind: workflow.StepKindRun,
+				Run: &workflow.RunStep{
+					Command: "test \"${{ steps.cache.outputs.cache-hit }}\" = true\n" +
+						"test ! -e \"$HOME/.cache/demo/value.txt\"",
+				},
+			},
 		},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), lookup, backend.RunOptions{WorkingDirectory: workspace, Cache: store}); err != nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		lookup,
+		backend.RunOptions{WorkingDirectory: workspace, Cache: store},
+	); err != nil {
 		t.Fatalf("lookup RunJob: %v", err)
 	}
 }
@@ -567,7 +796,11 @@ func TestLocalRunJobFailsOnCacheMissWhenConfigured(t *testing.T) {
 			}},
 		}},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace, Cache: store}); err == nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		job,
+		backend.RunOptions{WorkingDirectory: workspace, Cache: store},
+	); err == nil {
 		t.Fatal("RunJob error = nil, want cache miss failure")
 	}
 }
@@ -586,11 +819,26 @@ func TestLocalRunJobSupportsCacheRestoreAndSaveActions(t *testing.T) {
 		ID:        "save-cache",
 		LogicalID: "save-cache",
 		Steps: []workflow.Step{
-			{Kind: workflow.StepKindRun, Run: &workflow.RunStep{Command: "mkdir -p \"$HOME/.cache/demo\"\nprintf one > \"$HOME/.cache/demo/value.txt\""}},
-			{Kind: workflow.StepKindAction, Action: &workflow.ActionStep{Uses: "actions/cache/save@v4", Inputs: workflow.ActionInputMap{"path": "~/.cache/demo", "key": "split-v1"}}},
+			{
+				Kind: workflow.StepKindRun,
+				Run: &workflow.RunStep{
+					Command: "mkdir -p \"$HOME/.cache/demo\"\nprintf one > \"$HOME/.cache/demo/value.txt\"",
+				},
+			},
+			{
+				Kind: workflow.StepKindAction,
+				Action: &workflow.ActionStep{
+					Uses:   "actions/cache/save@v4",
+					Inputs: workflow.ActionInputMap{"path": "~/.cache/demo", "key": "split-v1"},
+				},
+			},
 		},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), save, backend.RunOptions{WorkingDirectory: workspace, Cache: store}); err != nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		save,
+		backend.RunOptions{WorkingDirectory: workspace, Cache: store},
+	); err != nil {
 		t.Fatalf("save RunJob: %v", err)
 	}
 	if err := os.RemoveAll(cacheRoot); err != nil {
@@ -601,16 +849,45 @@ func TestLocalRunJobSupportsCacheRestoreAndSaveActions(t *testing.T) {
 		ID:        "restore-save-cache",
 		LogicalID: "restore-save-cache",
 		Steps: []workflow.Step{
-			{ID: "restore", Kind: workflow.StepKindAction, Action: &workflow.ActionStep{Uses: "actions/cache/restore@v4", Inputs: workflow.ActionInputMap{"path": "~/.cache/demo", "key": "split-v2", "restore-keys": "split-"}}},
-			{Kind: workflow.StepKindRun, Run: &workflow.RunStep{Command: "test \"${{ steps.restore.outputs.cache-primary-key }}\" = split-v2\n" +
-				"test \"${{ steps.restore.outputs.cache-matched-key }}\" = split-v1\n" +
-				"test \"${{ steps.restore.outputs.cache-hit }}\" = false\n" +
-				"test \"$(cat \"$HOME/.cache/demo/value.txt\")\" = one\n" +
-				"printf two > \"$HOME/.cache/demo/value.txt\""}},
-			{Kind: workflow.StepKindAction, Action: &workflow.ActionStep{Uses: "actions/cache/save@v4", Inputs: workflow.ActionInputMap{"path": "~/.cache/demo", "key": "${{ steps.restore.outputs.cache-primary-key }}"}}},
+			{
+				ID:   "restore",
+				Kind: workflow.StepKindAction,
+				Action: &workflow.ActionStep{
+					Uses: "actions/cache/restore@v4",
+					Inputs: workflow.ActionInputMap{
+						"path":         "~/.cache/demo",
+						"key":          "split-v2",
+						"restore-keys": "split-",
+					},
+				},
+			},
+			{
+				Kind: workflow.StepKindRun,
+				Run: &workflow.RunStep{
+					Command: "test \"${{ steps.restore.outputs.cache-primary-key }}\" = split-v2\n" +
+						"test \"${{ steps.restore.outputs.cache-matched-key }}\" = split-v1\n" +
+						"test \"${{ steps.restore.outputs.cache-hit }}\" = false\n" +
+						"test \"$(cat \"$HOME/.cache/demo/value.txt\")\" = one\n" +
+						"printf two > \"$HOME/.cache/demo/value.txt\"",
+				},
+			},
+			{
+				Kind: workflow.StepKindAction,
+				Action: &workflow.ActionStep{
+					Uses: "actions/cache/save@v4",
+					Inputs: workflow.ActionInputMap{
+						"path": "~/.cache/demo",
+						"key":  "${{ steps.restore.outputs.cache-primary-key }}",
+					},
+				},
+			},
 		},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), fallback, backend.RunOptions{WorkingDirectory: workspace, Cache: store}); err != nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		fallback,
+		backend.RunOptions{WorkingDirectory: workspace, Cache: store},
+	); err != nil {
 		t.Fatalf("fallback RunJob: %v", err)
 	}
 	if err := os.RemoveAll(cacheRoot); err != nil {
@@ -621,14 +898,34 @@ func TestLocalRunJobSupportsCacheRestoreAndSaveActions(t *testing.T) {
 		ID:        "restore-cache",
 		LogicalID: "restore-cache",
 		Steps: []workflow.Step{
-			{ID: "restore", Kind: workflow.StepKindAction, Action: &workflow.ActionStep{Uses: "actions/cache/restore@v4", Inputs: workflow.ActionInputMap{"path": "~/.cache/demo", "key": "split-v2", "restore-keys": "split-"}}},
-			{Kind: workflow.StepKindRun, Run: &workflow.RunStep{Command: "test \"${{ steps.restore.outputs.cache-primary-key }}\" = split-v2\n" +
-				"test \"${{ steps.restore.outputs.cache-matched-key }}\" = split-v2\n" +
-				"test \"${{ steps.restore.outputs.cache-hit }}\" = true\n" +
-				"test \"$(cat \"$HOME/.cache/demo/value.txt\")\" = two"}},
+			{
+				ID:   "restore",
+				Kind: workflow.StepKindAction,
+				Action: &workflow.ActionStep{
+					Uses: "actions/cache/restore@v4",
+					Inputs: workflow.ActionInputMap{
+						"path":         "~/.cache/demo",
+						"key":          "split-v2",
+						"restore-keys": "split-",
+					},
+				},
+			},
+			{
+				Kind: workflow.StepKindRun,
+				Run: &workflow.RunStep{
+					Command: "test \"${{ steps.restore.outputs.cache-primary-key }}\" = split-v2\n" +
+						"test \"${{ steps.restore.outputs.cache-matched-key }}\" = split-v2\n" +
+						"test \"${{ steps.restore.outputs.cache-hit }}\" = true\n" +
+						"test \"$(cat \"$HOME/.cache/demo/value.txt\")\" = two",
+				},
+			},
 		},
 	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(context.Background(), restore, backend.RunOptions{WorkingDirectory: workspace, Cache: store}); err != nil {
+	if _, err := actionadapter.NewLocal(nil).RunJob(
+		context.Background(),
+		restore,
+		backend.RunOptions{WorkingDirectory: workspace, Cache: store},
+	); err != nil {
 		t.Fatalf("restore RunJob: %v", err)
 	}
 }

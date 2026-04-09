@@ -1707,11 +1707,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1775618516,
-        "narHash": "sha256-/2OxLCexEMNzMJWLO55UF5oseaLPKcOg7UX3yRN0bnM=",
+        "lastModified": 1775670490,
+        "narHash": "sha256-lXzn74MXnd0LRzgajzzk1BnGsCsAH1hEBL12QRdyfQY=",
         "owner": "gkze",
         "repo": "opencode",
-        "rev": "2dd6c54d9d43a7783892dc849479f2b2a60d8f7c",
+        "rev": "688c892703b77853d57b2c710feb3a16b09e5490",
         "type": "github"
       },
       "original": {

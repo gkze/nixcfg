@@ -60,14 +60,14 @@ def test_keymap_catalog_scope_counts_match_expected_smoke_snapshot() -> None:
         "alpha": 4,
         "blinkCmp": 7,
         "gitlinker": 1,
-        "global": 45,
+        "global": 49,
         "lsp": 9,
         "telescope": 1,
         "treesitterSelection": 4,
-        "treesitterTextobjectsMove": 36,
+        "treesitterTextobjectsMove": 48,
         "treesitterTextobjectsSelect": 18,
     }
-    assert sum(_scope_item_count(scope) for scope in catalog.values()) == 125
+    assert sum(_scope_item_count(scope) for scope in catalog.values()) == 141
 
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
@@ -83,7 +83,8 @@ def test_keymap_catalog_keeps_critical_navigation_and_opencode_bindings() -> Non
     assert ("global", "<leader>e", "Neo-tree filesystem") in entries
     assert ("global", "<leader>g", "Open Neogit") in entries
     assert ("global", "<leader>s", "Live grep") in entries
-    assert ("global", "<leader>h", "Previous buffer") in entries
+    assert ("global", "[b", "Previous buffer") in entries
+    assert ("global", "<leader>h", "Focus left pane") in entries
     assert ("global", "<leader>t", "Toggle terminal") in entries
     assert ("global", "<leader>T", "New tab") in entries
     assert ("global", "<leader>q", "Close tab") in entries

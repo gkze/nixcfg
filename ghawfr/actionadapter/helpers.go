@@ -87,7 +87,10 @@ func cloneOptionalEnvironment(values workflow.EnvironmentMap) workflow.Environme
 	return values.Clone()
 }
 
-func mergeOptionalEnvironment(base workflow.EnvironmentMap, overlay workflow.EnvironmentMap) workflow.EnvironmentMap {
+func mergeOptionalEnvironment(
+	base workflow.EnvironmentMap,
+	overlay workflow.EnvironmentMap,
+) workflow.EnvironmentMap {
 	if len(base) == 0 && len(overlay) == 0 {
 		return nil
 	}
@@ -127,7 +130,12 @@ func remoteToolCacheRoots(action backend.ActionContext, guestWorkspace string) (
 	return host, guest
 }
 
-func remoteToolCacheLocation(action backend.ActionContext, guestWorkspace string, family string, version string) string {
+func remoteToolCacheLocation(
+	action backend.ActionContext,
+	guestWorkspace string,
+	family string,
+	version string,
+) string {
 	_, guest := remoteToolCacheRoots(action, guestWorkspace)
 	return path.Join(
 		guest,
@@ -137,8 +145,15 @@ func remoteToolCacheLocation(action backend.ActionContext, guestWorkspace string
 	)
 }
 
-func remoteRunnerHomeRoots(action backend.ActionContext, guestWorkspace string) (string, string, error) {
-	translatedEnv := translateWorkspaceEnvironment(action.Env, action.WorkingDirectory, guestWorkspace)
+func remoteRunnerHomeRoots(
+	action backend.ActionContext,
+	guestWorkspace string,
+) (string, string, error) {
+	translatedEnv := translateWorkspaceEnvironment(
+		action.Env,
+		action.WorkingDirectory,
+		guestWorkspace,
+	)
 	guest := strings.TrimSpace(translatedEnv["HOME"])
 	if guest == "" {
 		guest = strings.TrimSpace(action.Expressions.Runner.Home)
@@ -176,7 +191,13 @@ func venvBinDirectoryName(runnerOS string) string {
 	return "bin"
 }
 
-func resolveRemotePathWithBase(baseGuestDirectory string, rawPath string, hostWorkspace string, guestWorkspace string, guestHome string) (string, error) {
+func resolveRemotePathWithBase(
+	baseGuestDirectory string,
+	rawPath string,
+	hostWorkspace string,
+	guestWorkspace string,
+	guestHome string,
+) (string, error) {
 	trimmed := strings.TrimSpace(rawPath)
 	if trimmed == "" || trimmed == "." {
 		return baseGuestDirectory, nil
@@ -187,12 +208,14 @@ func resolveRemotePathWithBase(baseGuestDirectory string, rawPath string, hostWo
 		}
 		return expanded, nil
 	}
-	if filepath.IsAbs(trimmed) || strings.HasPrefix(trimmed, guestWorkspace+"/") || trimmed == guestWorkspace {
+	if filepath.IsAbs(trimmed) || strings.HasPrefix(trimmed, guestWorkspace+"/") ||
+		trimmed == guestWorkspace {
 		return resolveRemoteActionPath(trimmed, hostWorkspace, guestWorkspace)
 	}
 	joined := path.Join(baseGuestDirectory, filepath.ToSlash(trimmed))
 	allowedRoot := strings.TrimSpace(guestWorkspace)
-	if guestHome != "" && (baseGuestDirectory == guestHome || strings.HasPrefix(baseGuestDirectory, guestHome+"/")) {
+	if guestHome != "" &&
+		(baseGuestDirectory == guestHome || strings.HasPrefix(baseGuestDirectory, guestHome+"/")) {
 		allowedRoot = guestHome
 	}
 	if allowedRoot == "" {
@@ -204,7 +227,11 @@ func resolveRemotePathWithBase(baseGuestDirectory string, rawPath string, hostWo
 	return "", fmt.Errorf("path %q escapes guest root %q", rawPath, allowedRoot)
 }
 
-func translateWorkspaceEnvironment(values workflow.EnvironmentMap, hostWorkspace string, guestWorkspace string) workflow.EnvironmentMap {
+func translateWorkspaceEnvironment(
+	values workflow.EnvironmentMap,
+	hostWorkspace string,
+	guestWorkspace string,
+) workflow.EnvironmentMap {
 	if len(values) == 0 || hostWorkspace == guestWorkspace {
 		return values.Clone()
 	}
@@ -222,7 +249,11 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
-func remoteMkdirCommand(rawPath string, hostWorkspace string, guestWorkspace string) (string, error) {
+func remoteMkdirCommand(
+	rawPath string,
+	hostWorkspace string,
+	guestWorkspace string,
+) (string, error) {
 	expression, err := remotePathShellExpression(rawPath, hostWorkspace, guestWorkspace)
 	if err != nil {
 		return "", err
@@ -230,7 +261,11 @@ func remoteMkdirCommand(rawPath string, hostWorkspace string, guestWorkspace str
 	return "mkdir -p -- " + expression, nil
 }
 
-func remotePathShellExpression(rawPath string, hostWorkspace string, guestWorkspace string) (string, error) {
+func remotePathShellExpression(
+	rawPath string,
+	hostWorkspace string,
+	guestWorkspace string,
+) (string, error) {
 	trimmed := strings.TrimSpace(rawPath)
 	if trimmed == "" {
 		return "", fmt.Errorf("path is empty")
@@ -249,7 +284,11 @@ func remotePathShellExpression(rawPath string, hostWorkspace string, guestWorksp
 	return shellQuote(resolved), nil
 }
 
-func resolveRemoteActionPath(rawPath string, hostWorkspace string, guestWorkspace string) (string, error) {
+func resolveRemoteActionPath(
+	rawPath string,
+	hostWorkspace string,
+	guestWorkspace string,
+) (string, error) {
 	trimmed := strings.TrimSpace(rawPath)
 	if trimmed == "" {
 		return "", fmt.Errorf("path is empty")
@@ -267,13 +306,19 @@ func resolveRemoteActionPath(rawPath string, hostWorkspace string, guestWorkspac
 	return joinWithinGuestWorkspace(guestWorkspace, filepath.ToSlash(trimmed))
 }
 
-func translateRemotePathToHost(rawPath string, hostWorkspace string, guestWorkspace string) (string, error) {
+func translateRemotePathToHost(
+	rawPath string,
+	hostWorkspace string,
+	guestWorkspace string,
+) (string, error) {
 	trimmed := strings.TrimSpace(rawPath)
 	if trimmed == "" || trimmed == "." {
 		return hostWorkspace, nil
 	}
 	if trimmed == "~" || strings.HasPrefix(trimmed, "~/") {
-		return "", fmt.Errorf("home-relative guest paths are not supported for host-managed artifact or checkout actions")
+		return "", fmt.Errorf(
+			"home-relative guest paths are not supported for host-managed artifact or checkout actions",
+		)
 	}
 	if filepath.IsAbs(trimmed) {
 		if trimmed == guestWorkspace {
@@ -284,7 +329,11 @@ func translateRemotePathToHost(rawPath string, hostWorkspace string, guestWorksp
 			rel := strings.TrimPrefix(trimmed, prefix)
 			return joinWithinHostWorkspace(hostWorkspace, filepath.FromSlash(rel))
 		}
-		return "", fmt.Errorf("guest absolute path %q is outside guest workspace %q", trimmed, guestWorkspace)
+		return "", fmt.Errorf(
+			"guest absolute path %q is outside guest workspace %q",
+			trimmed,
+			guestWorkspace,
+		)
 	}
 	return joinWithinHostWorkspace(hostWorkspace, filepath.FromSlash(trimmed))
 }
@@ -323,7 +372,11 @@ func joinWithinHostWorkspace(hostWorkspace string, value string) (string, error)
 	return joined, nil
 }
 
-func tryTranslateAbsoluteWorkspacePath(value string, hostWorkspace string, guestWorkspace string) (string, error) {
+func tryTranslateAbsoluteWorkspacePath(
+	value string,
+	hostWorkspace string,
+	guestWorkspace string,
+) (string, error) {
 	workspace, err := filepath.Abs(hostWorkspace)
 	if err != nil {
 		return "", fmt.Errorf("resolve host workspace %q: %w", hostWorkspace, err)

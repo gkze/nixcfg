@@ -451,8 +451,7 @@ def test_hash_diff_lines_covers_entry_keys_duplicates_and_none_inputs() -> None:
         "-> sha256-bjX1hF6IhFhRz9fNE2j7KnSxjQKf7bn74QRR48E0hVI="
     ) in changed
     assert (
-        "aarch64-darwin :: <none> -> "
-        "sha256-u9PE8j5SVfQ+SxG1A5f8A94slq8Nh5S08Y0dWxlI/kI="
+        "aarch64-darwin :: <none> -> sha256-u9PE8j5SVfQ+SxG1A5f8A94slq8Nh5S08Y0dWxlI/kI="
     ) in changed
     added_only = hash_diff_lines(None, new_entry)
     assert any(line.startswith("sha256 :: <none>") for line in added_only)

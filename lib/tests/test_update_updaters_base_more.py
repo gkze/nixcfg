@@ -11,10 +11,11 @@ import pytest
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance, expect_not_none
+from lib.update import updaters as updater_module
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import resolve_config
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
-from lib.update.updaters import UPDATERS, ensure_updaters_loaded
+from lib.update.updaters import UPDATERS
 from lib.update.updaters import flake_backed as flake_backed_module
 from lib.update.updaters.base import (
     ChecksumProvidedUpdater,
@@ -1127,10 +1128,30 @@ def test_factory_helpers_return_expected_subclasses() -> None:
     assert deno_manifest_updater("x").__name__.endswith("Updater")
 
 
+def _fresh_loaded_updaters() -> dict[str, type[object]]:
+    """Return a fully reloaded updater registry independent of prior test state."""
+    original = dict(updater_module.UPDATERS)
+    original_complete = updater_module._DISCOVERY_STATE["complete"]
+    try:
+        updater_module.UPDATERS.clear()
+        updater_module._DISCOVERY_STATE["complete"] = False
+        return dict(updater_module.ensure_updaters_loaded())
+    finally:
+        updater_module.UPDATERS.clear()
+        updater_module.UPDATERS.update(original)
+        updater_module._DISCOVERY_STATE["complete"] = original_complete
+
+
 def test_emdash_uses_platform_specific_npm_hashes() -> None:
     """Ensure emdash tracks npmDepsHash per platform in CI."""
-    ensure_updaters_loaded()
-    updater = UPDATERS["emdash"]
+    updater = _fresh_loaded_updaters()["emdash"]
+    assert getattr(updater, "hash_type", None) == "npmDepsHash"
+    assert getattr(updater, "platform_specific", False) is True
+
+
+def test_linearis_uses_platform_specific_npm_hashes() -> None:
+    """Ensure linearis tracks npmDepsHash per platform in CI."""
+    updater = _fresh_loaded_updaters()["linearis"]
     assert getattr(updater, "hash_type", None) == "npmDepsHash"
     assert getattr(updater, "platform_specific", False) is True
 

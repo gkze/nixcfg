@@ -2,10 +2,16 @@
 ---
 line_ending: lf
 exclude:
+  - .direnv/**
+  - .ghawfr/**
   - .pre-commit-config.yaml
+  - .venv/**
+  - node_modules/**
+  - result*/**
 formatter:
   type: basic
   indent: 2
   include_document_start: true
+  max_line_length: 100
   trim_trailing_whitespace: true
   eof_newline: true

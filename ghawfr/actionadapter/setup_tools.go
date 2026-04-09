@@ -27,7 +27,12 @@ type remoteToolInstallation struct {
 	Alias          toolCacheAlias
 }
 
-func localToolInstallationInfo(action backend.ActionContext, tool string, family string, version string) (localToolInstallation, error) {
+func localToolInstallationInfo(
+	action backend.ActionContext,
+	tool string,
+	family string,
+	version string,
+) (localToolInstallation, error) {
 	executablePath, err := localLookPath(action.WorkingDirectory, action.Env, tool)
 	if err != nil {
 		return localToolInstallation{}, err
@@ -40,7 +45,14 @@ func localToolInstallationInfo(action backend.ActionContext, tool string, family
 	return localToolInstallation{ExecutablePath: executablePath, Alias: alias}, nil
 }
 
-func remoteToolInstallationInfo(ctx context.Context, handlers remoteHandlers, action backend.ActionContext, tool string, family string, version string) (remoteToolInstallation, error) {
+func remoteToolInstallationInfo(
+	ctx context.Context,
+	handlers remoteHandlers,
+	action backend.ActionContext,
+	tool string,
+	family string,
+	version string,
+) (remoteToolInstallation, error) {
 	executablePath, err := handlers.lookupRemoteTool(ctx, action, tool)
 	if err != nil {
 		return remoteToolInstallation{}, err
@@ -53,7 +65,13 @@ func remoteToolInstallationInfo(ctx context.Context, handlers remoteHandlers, ac
 	return remoteToolInstallation{ExecutablePath: executablePath, Alias: alias}, nil
 }
 
-func localToolSetupResult(action backend.ActionContext, tool string, family string, version string, environment workflow.EnvironmentMap) (backend.StepResult, error) {
+func localToolSetupResult(
+	action backend.ActionContext,
+	tool string,
+	family string,
+	version string,
+	environment workflow.EnvironmentMap,
+) (backend.StepResult, error) {
 	installation, err := localToolInstallationInfo(action, tool, family, version)
 	if err != nil {
 		return backend.StepResult{Environment: cloneOptionalEnvironment(environment)}, err
@@ -63,7 +81,14 @@ func localToolSetupResult(action backend.ActionContext, tool string, family stri
 	return result, nil
 }
 
-func (r remoteHandlers) remoteToolSetupResult(ctx context.Context, action backend.ActionContext, tool string, family string, version string, environment workflow.EnvironmentMap) (backend.StepResult, error) {
+func (r remoteHandlers) remoteToolSetupResult(
+	ctx context.Context,
+	action backend.ActionContext,
+	tool string,
+	family string,
+	version string,
+	environment workflow.EnvironmentMap,
+) (backend.StepResult, error) {
 	installation, err := remoteToolInstallationInfo(ctx, r, action, tool, family, version)
 	if err != nil {
 		return backend.StepResult{Environment: cloneOptionalEnvironment(environment)}, err
@@ -113,7 +138,11 @@ func matchingRequestedVersion(requested []string, detected string) (string, erro
 	return "", fmt.Errorf("found %q", detected)
 }
 
-func rejectUnsupportedInputs(action backend.ActionContext, actionName string, supportedKeys ...string) error {
+func rejectUnsupportedInputs(
+	action backend.ActionContext,
+	actionName string,
+	supportedKeys ...string,
+) error {
 	allowed := make(map[string]struct{}, len(supportedKeys))
 	for _, key := range supportedKeys {
 		allowed[key] = struct{}{}
@@ -138,7 +167,11 @@ func commandEnvironmentSlice(values workflow.EnvironmentMap) []string {
 	return env
 }
 
-func localToolVersion(environment workflow.EnvironmentMap, executable string, args ...string) string {
+func localToolVersion(
+	environment workflow.EnvironmentMap,
+	executable string,
+	args ...string,
+) string {
 	cmd := exec.Command(executable, args...)
 	cmd.Env = commandEnvironmentSlice(environment)
 	output, err := cmd.CombinedOutput()
@@ -148,7 +181,12 @@ func localToolVersion(environment workflow.EnvironmentMap, executable string, ar
 	return extractVersionString(output)
 }
 
-func (r remoteHandlers) remoteToolVersion(ctx context.Context, action backend.ActionContext, executable string, args ...string) string {
+func (r remoteHandlers) remoteToolVersion(
+	ctx context.Context,
+	action backend.ActionContext,
+	executable string,
+	args ...string,
+) string {
 	if strings.TrimSpace(executable) == "" {
 		return ""
 	}
@@ -157,7 +195,12 @@ func (r remoteHandlers) remoteToolVersion(ctx context.Context, action backend.Ac
 	for _, arg := range args {
 		parts = append(parts, shellQuote(arg))
 	}
-	output, err := r.execRemoteActionOutput(ctx, r.remoteActionExpressions(action).Env, strings.Join(parts, " "), filepath.Base(executable)+" version")
+	output, err := r.execRemoteActionOutput(
+		ctx,
+		r.remoteActionExpressions(action).Env,
+		strings.Join(parts, " "),
+		filepath.Base(executable)+" version",
+	)
 	if err != nil {
 		return ""
 	}
@@ -188,7 +231,12 @@ func remoteToolExecutableOutputPath(alias toolCacheAlias, executablePath string)
 	return path.Join(alias.GuestBin, name)
 }
 
-func optionalSiblingExecutablePath(workingDirectory string, environment workflow.EnvironmentMap, baseExecutable string, siblingName string) string {
+func optionalSiblingExecutablePath(
+	workingDirectory string,
+	environment workflow.EnvironmentMap,
+	baseExecutable string,
+	siblingName string,
+) string {
 	baseExecutable = strings.TrimSpace(baseExecutable)
 	siblingName = strings.TrimSpace(siblingName)
 	if baseExecutable == "" || siblingName == "" {
@@ -205,7 +253,11 @@ func optionalSiblingExecutablePath(workingDirectory string, environment workflow
 	return ""
 }
 
-func localLookPath(workingDirectory string, environment workflow.EnvironmentMap, file string) (string, error) {
+func localLookPath(
+	workingDirectory string,
+	environment workflow.EnvironmentMap,
+	file string,
+) (string, error) {
 	file = strings.TrimSpace(file)
 	if file == "" {
 		return "", exec.ErrNotFound

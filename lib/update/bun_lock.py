@@ -428,10 +428,7 @@ def _run_bun_lockfile_refresh(workspace_dir: Path, bun_executable: str) -> None:
         details = (
             completed.stderr.strip() or completed.stdout.strip() or "command failed"
         )
-        msg = (
-            f"Failed to regenerate bun.lock in {workspace_dir} with {bun_executable}:\n"
-            f"{details}"
-        )
+        msg = f"Failed to regenerate bun.lock in {workspace_dir} with {bun_executable}:\n{details}"
         raise RuntimeError(msg)
 
 

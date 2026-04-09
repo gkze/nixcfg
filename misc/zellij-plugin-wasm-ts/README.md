@@ -1,6 +1,7 @@
 # Zellij WASM plugin spike: Bun + TypeScript + AssemblyScript
 
-This directory is a spike for building Zellij plugins from a Bun-managed TypeScript-ish codebase without forking Zellij.
+This directory is a spike for building Zellij plugins from a Bun-managed TypeScript-ish codebase
+without forking Zellij.
 
 ## What this proves
 
@@ -141,8 +142,10 @@ nix shell nixpkgs#protobuf -c bun run codegen
 - [`asconfig.json`](./asconfig.json) — AssemblyScript config using `@assemblyscript/wasi-shim`
 - [`assembly/index.ts`](./assembly/index.ts) — minimal Zellij-compatible plugin skeleton
 - [`scripts/inspect-wasm.ts`](./scripts/inspect-wasm.ts) — ABI smoke test for Wasm imports/exports
-- [`scripts/codegen.ts`](./scripts/codegen.ts) — generates host TS + AssemblyScript bindings from `.proto`
-- [`scripts/sync-zellij-protos.ts`](./scripts/sync-zellij-protos.ts) — refreshes vendored `.proto` files from a local Zellij checkout
+- [`scripts/codegen.ts`](./scripts/codegen.ts) — generates host TS + AssemblyScript bindings from
+  `.proto`
+- [`scripts/sync-zellij-protos.ts`](./scripts/sync-zellij-protos.ts) — refreshes vendored `.proto`
+  files from a local Zellij checkout
 
 ## Why AssemblyScript?
 
@@ -153,4 +156,5 @@ Because it is the most direct route to “Bun + TypeScript + Wasm” for Zellij:
 - `@assemblyscript/wasi-shim` gives us WASI-compatible output with `_start`
 - custom imports can be declared for `zellij.host_run_plugin_command`
 
-That keeps the final artifact compatible with Zellij's loader while keeping most of the authoring experience in the TS family.
+That keeps the final artifact compatible with Zellij's loader while keeping most of the authoring
+experience in the TS family.

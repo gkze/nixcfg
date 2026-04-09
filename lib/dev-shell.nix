@@ -5,148 +5,142 @@
 }:
 pkgs:
 let
-  qualityPriority = 10;
-  pythonQualityCheck = pkgs.writeShellScript "quality-python" ''
-    set -euo pipefail
-    ${lib.getExe pkgs.uv} run ruff check --config pyproject.toml .
-    ${lib.getExe pkgs.uv} run ty check .
-  '';
-  pytestQualityCheck = pkgs.writeShellScript "quality-pytest" ''
-    set -euo pipefail
-    ${lib.getExe pkgs.uv} run coverage run -m pytest
-    ${lib.getExe pkgs.uv} run coverage report
-  '';
-  ghawfrGoQualityCheck = pkgs.writeShellScript "quality-ghawfr-go" ''
-    set -euo pipefail
-    cd ghawfr
-    ${lib.getExe pkgs.go} test ./...
-  '';
-  yamllintQualityCheck = pkgs.writeShellScript "quality-yamllint" ''
-    set -euo pipefail
-    ${lib.getExe pkgs.git} ls-files -z -- '*.yml' '*.yaml' \
-      | ${lib.getExe' pkgs.findutils "xargs"} -0 -r ${lib.getExe pkgs.yamllint} -c .yamllint
-  '';
-  cssQualityCheck = pkgs.writeShellScript "quality-css" ''
-    set -euo pipefail
-    ${lib.getExe pkgs.git} ls-files -z -- '*.css' \
-      | ${lib.getExe' pkgs.findutils "xargs"} -0 -r ${lib.getExe pkgs.biome} check \
-          --config-path biome.jsonc \
-          --error-on-warnings \
-          --max-diagnostics=none
-  '';
+  hookPriority = 10;
 
   pre-commit-check = gitHooks.lib.${pkgs.system}.run {
     inherit src;
     package = pkgs.prek;
     hooks = {
-      quality-format = {
+      format-repo = {
         enable = true;
-        name = "quality-format";
-        entry = "${lib.getExe pkgs.nix} fmt -- --ci";
+        name = "format-repo";
+        package = pkgs.nix;
+        entry = "nix fmt -- --ci";
         pass_filenames = false;
         always_run = true;
-        priority = qualityPriority;
+        priority = hookPriority;
+        stages = [ "manual" ];
       };
 
-      quality-editorconfig = {
+      lint-editorconfig = {
         enable = true;
-        name = "quality-editorconfig";
-        entry = lib.getExe pkgs."editorconfig-checker";
+        name = "lint-editorconfig";
+        package = pkgs."editorconfig-checker";
+        entry = "editorconfig-checker -exclude ^\\.pre-commit-config\\.yaml$";
         pass_filenames = false;
         always_run = true;
-        priority = qualityPriority;
+        priority = hookPriority;
       };
 
-      quality-python = {
+      format-yaml-yamlfmt = {
         enable = true;
-        name = "quality-python";
-        entry = "${pythonQualityCheck}";
+        name = "format-yaml-yamlfmt";
+        package = pkgs.yamlfmt;
+        entry = "yamlfmt -lint -gitignore_excludes -conf .yamlfmt .";
         pass_filenames = false;
         always_run = true;
-        priority = qualityPriority;
+        priority = hookPriority;
       };
 
-      quality-pytest = {
+      lint-yaml-yamllint = {
         enable = true;
-        name = "quality-pytest";
-        entry = "${pytestQualityCheck}";
+        name = "lint-yaml-yamllint";
+        package = pkgs.yamllint;
+        entry = "yamllint -c .yamllint .";
         pass_filenames = false;
         always_run = true;
-        priority = qualityPriority;
-        stages = [
-          "pre-commit"
-          "manual"
-        ];
+        priority = hookPriority;
       };
 
-      quality-ghawfr-go = {
+      format-web-biome = {
         enable = true;
-        name = "quality-ghawfr-go";
-        entry = "${ghawfrGoQualityCheck}";
+        name = "format-web-biome";
+        package = pkgs.biome;
+        entry = "biome check --config-path biome.jsonc --diagnostic-level=error .";
         pass_filenames = false;
         always_run = true;
-        priority = qualityPriority;
-        stages = [
-          "pre-commit"
-          "manual"
-        ];
+        priority = hookPriority;
       };
 
-      commitlint = {
+      format-python-ruff = {
         enable = true;
-        entry = "${lib.getExe pkgs.commitlint} --edit";
+        name = "format-python-ruff";
+        package = pkgs.ruff;
+        entry = "ruff format --check --config pyproject.toml .";
+        pass_filenames = false;
+        always_run = true;
+        priority = hookPriority;
+      };
+
+      lint-python-ruff = {
+        enable = true;
+        name = "lint-python-ruff";
+        package = pkgs.ruff;
+        entry = "ruff check --config pyproject.toml .";
+        pass_filenames = false;
+        always_run = true;
+        priority = hookPriority;
+      };
+
+      lint-python-ty = {
+        enable = true;
+        name = "lint-python-ty";
+        package = pkgs.ty;
+        entry = "ty check .";
+        pass_filenames = false;
+        always_run = true;
+        priority = hookPriority;
+      };
+
+      lint-workflows-actionlint = {
+        enable = true;
+        name = "lint-workflows-actionlint";
+        package = pkgs.actionlint;
+        entry = "actionlint";
+        pass_filenames = false;
+        always_run = true;
+        priority = hookPriority;
+      };
+
+      lint-pins-pinact = {
+        enable = true;
+        name = "lint-pins-pinact";
+        package = pkgs.pinact;
+        entry = "pinact run --check";
+        pass_filenames = false;
+        always_run = true;
+        priority = hookPriority;
+      };
+
+      commit-message-commitlint = {
+        enable = true;
+        name = "commit-message-commitlint";
+        package = pkgs.commitlint;
+        entry = "commitlint --edit";
         pass_filenames = true;
         always_run = true;
-        priority = qualityPriority;
+        priority = hookPriority;
         stages = [ "commit-msg" ];
-      };
-
-      quality-actionlint = {
-        enable = true;
-        name = "quality-actionlint";
-        entry = "${lib.getExe pkgs.actionlint}";
-        pass_filenames = false;
-        always_run = true;
-        priority = qualityPriority;
-      };
-
-      quality-pinact = {
-        enable = true;
-        name = "quality-pinact";
-        entry = "${lib.getExe pkgs.pinact} run --check";
-        pass_filenames = false;
-        always_run = true;
-        priority = qualityPriority;
-      };
-
-      quality-yamllint = {
-        enable = true;
-        name = "quality-yamllint";
-        entry = "${yamllintQualityCheck}";
-        pass_filenames = false;
-        always_run = true;
-        priority = qualityPriority;
-      };
-
-      quality-css = {
-        enable = true;
-        name = "quality-css";
-        entry = "${cssQualityCheck}";
-        pass_filenames = false;
-        always_run = true;
-        priority = qualityPriority;
       };
 
       check-merge-conflicts = {
         enable = true;
+        id = "guard-merge-conflicts";
+        name = "guard-merge-conflicts";
         priority = 0;
       };
+
       end-of-file-fixer = {
         enable = true;
+        id = "fix-end-of-file";
+        name = "fix-end-of-file";
         priority = 1;
       };
+
       trim-trailing-whitespace = {
         enable = true;
+        id = "fix-trailing-whitespace";
+        name = "fix-trailing-whitespace";
         priority = 2;
         stages = [
           "pre-commit"

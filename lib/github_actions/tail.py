@@ -409,10 +409,7 @@ class GitHubActionsTailer:
                     if str(exc).startswith("Ambiguous job name"):
                         raise RuntimeError(str(exc)) from exc
                     if self.api_client.get_workflow_run(run.id).status == "completed":
-                        msg = (
-                            f"Job {requested_job_name!r} never appeared before the "
-                            "run completed"
-                        )
+                        msg = f"Job {requested_job_name!r} never appeared before the run completed"
                         raise RuntimeError(msg) from None
                     await self._sleep()
                     continue
@@ -796,10 +793,7 @@ def _payload_is_json(payload: bytes, *, headers: dict[str, str]) -> bool:
 
 def _non_json_payload_error(*, url: str, headers: dict[str, str]) -> RuntimeError:
     content_type = headers.get("content-type", "<missing>")
-    msg = (
-        f"Expected GitHub Actions JSON response from {url}, got content-type "
-        f"{content_type!r}"
-    )
+    msg = f"Expected GitHub Actions JSON response from {url}, got content-type {content_type!r}"
     return RuntimeError(msg)
 
 

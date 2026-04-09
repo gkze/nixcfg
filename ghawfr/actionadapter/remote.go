@@ -20,7 +20,11 @@ type remoteHandlers struct {
 
 // NewRemoteExec returns a generic remote-exec worker wired with the curated
 // action adapters from this package.
-func NewRemoteExec(runnerLabels []string, guestWorkspace string, commands backend.CommandTransport) backend.RemoteExecWorker {
+func NewRemoteExec(
+	runnerLabels []string,
+	guestWorkspace string,
+	commands backend.CommandTransport,
+) backend.RemoteExecWorker {
 	return backend.RemoteExecWorker{
 		RunnerLabels:   append([]string(nil), runnerLabels...),
 		GuestWorkspace: guestWorkspace,
@@ -30,42 +34,89 @@ func NewRemoteExec(runnerLabels []string, guestWorkspace string, commands backen
 }
 
 // RemoteHandlers returns the curated remote action-handler registry.
-func RemoteHandlers(guestWorkspace string, commands backend.CommandTransport) map[string]backend.ActionHandler {
+func RemoteHandlers(
+	guestWorkspace string,
+	commands backend.CommandTransport,
+) map[string]backend.ActionHandler {
 	adapter := remoteHandlers{guestWorkspace: guestWorkspace, commands: commands}
 	return map[string]backend.ActionHandler{
-		"actions/checkout":                          backend.ActionHandlerFunc(adapter.handleCheckoutAction),
-		"determinatesystems/determinate-nix-action": backend.ActionHandlerFunc(adapter.handleDeterminateNixAction),
-		"cachix/cachix-action":                      backend.ActionHandlerFunc(adapter.handleCachixAction),
-		"actions/cache":                             backend.ActionHandlerFunc(adapter.handleCacheAction),
-		"actions/cache/restore":                     backend.ActionHandlerFunc(adapter.handleCacheRestoreAction),
-		"actions/cache/save":                        backend.ActionHandlerFunc(adapter.handleCacheSaveAction),
-		"actions/upload-artifact":                   backend.ActionHandlerFunc(adapter.handleUploadArtifactAction),
-		"actions/download-artifact":                 backend.ActionHandlerFunc(adapter.handleDownloadArtifactAction),
-		"actions/setup-python":                      backend.ActionHandlerFunc(adapter.handleSetupPythonAction),
-		"astral-sh/setup-uv":                        backend.ActionHandlerFunc(adapter.handleSetupUVAction),
-		"peter-evans/create-pull-request":           backend.ActionHandlerFunc(adapter.handleCreatePullRequestAction),
+		"actions/checkout": backend.ActionHandlerFunc(
+			adapter.handleCheckoutAction,
+		),
+		"determinatesystems/determinate-nix-action": backend.ActionHandlerFunc(
+			adapter.handleDeterminateNixAction,
+		),
+		"cachix/cachix-action": backend.ActionHandlerFunc(
+			adapter.handleCachixAction,
+		),
+		"actions/cache": backend.ActionHandlerFunc(
+			adapter.handleCacheAction,
+		),
+		"actions/cache/restore": backend.ActionHandlerFunc(
+			adapter.handleCacheRestoreAction,
+		),
+		"actions/cache/save": backend.ActionHandlerFunc(
+			adapter.handleCacheSaveAction,
+		),
+		"actions/upload-artifact": backend.ActionHandlerFunc(
+			adapter.handleUploadArtifactAction,
+		),
+		"actions/download-artifact": backend.ActionHandlerFunc(
+			adapter.handleDownloadArtifactAction,
+		),
+		"actions/setup-python": backend.ActionHandlerFunc(
+			adapter.handleSetupPythonAction,
+		),
+		"astral-sh/setup-uv": backend.ActionHandlerFunc(
+			adapter.handleSetupUVAction,
+		),
+		"peter-evans/create-pull-request": backend.ActionHandlerFunc(
+			adapter.handleCreatePullRequestAction,
+		),
 	}
 }
 
-func (r remoteHandlers) handleCheckoutAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func (r remoteHandlers) handleCheckoutAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	pathValue, err := r.resolveRemoteActionInput(action, "path")
 	if err != nil {
 		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve checkout path: %w", err)
 	}
 	workspace := action.WorkingDirectory
 	if strings.TrimSpace(pathValue) != "" {
-		workspace, err = translateRemotePathToHost(pathValue, action.WorkingDirectory, r.guestWorkspace)
+		workspace, err = translateRemotePathToHost(
+			pathValue,
+			action.WorkingDirectory,
+			r.guestWorkspace,
+		)
 		if err != nil {
-			return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("translate checkout path %q: %w", pathValue, err)
+			return backend.StepResult{
+					ID: action.Step.ID,
+				}, fmt.Errorf(
+					"translate checkout path %q: %w",
+					pathValue,
+					err,
+				)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(workspace, ".git")); err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("checkout workspace %q is not a git repository: %w", workspace, err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"checkout workspace %q is not a git repository: %w",
+				workspace,
+				err,
+			)
 	}
 	return backend.StepResult{ID: action.Step.ID}, nil
 }
 
-func (r remoteHandlers) handleDeterminateNixAction(ctx context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func (r remoteHandlers) handleDeterminateNixAction(
+	ctx context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	result, err := r.remoteToolSetupResult(ctx, action, "nix", "nix", "system", nil)
 	result.ID = action.Step.ID
 	if err != nil {
@@ -74,14 +125,22 @@ func (r remoteHandlers) handleDeterminateNixAction(ctx context.Context, action b
 	return result, nil
 }
 
-func (r remoteHandlers) handleCachixAction(ctx context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func (r remoteHandlers) handleCachixAction(
+	ctx context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	name, err := r.resolveRemoteActionInput(action, "name")
 	if err != nil {
 		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve cachix name: %w", err)
 	}
 	authToken, err := r.resolveRemoteActionInput(action, "authToken")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve cachix auth token: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"resolve cachix auth token: %w",
+				err,
+			)
 	}
 	environment := workflow.EnvironmentMap{}
 	if strings.TrimSpace(name) != "" {
@@ -98,7 +157,10 @@ func (r remoteHandlers) handleCachixAction(ctx context.Context, action backend.A
 	return result, nil
 }
 
-func (r remoteHandlers) handleCacheAction(ctx context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func (r remoteHandlers) handleCacheAction(
+	ctx context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	_, hostSpecs, err := r.resolveRemoteCachePaths(ctx, action)
 	if err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
@@ -120,7 +182,11 @@ func (r remoteHandlers) handleCacheAction(ctx context.Context, action backend.Ac
 			return result, fmt.Errorf("cache %q matched no entry", key)
 		}
 	} else {
-		result.Outputs = workflow.OutputMap{"cache-hit": strconv.FormatBool(strings.TrimSpace(matchedKey) == strings.TrimSpace(key))}
+		result.Outputs = workflow.OutputMap{
+			"cache-hit": strconv.FormatBool(
+				strings.TrimSpace(matchedKey) == strings.TrimSpace(key),
+			),
+		}
 		if !lookupOnly {
 			if _, err := action.Cache.Restore(key, restoreKeys); err != nil {
 				return result, fmt.Errorf("restore cache %q: %w", key, err)
@@ -129,23 +195,28 @@ func (r remoteHandlers) handleCacheAction(ctx context.Context, action backend.Ac
 	}
 	cacheKey := key
 	cachePaths := append([]string(nil), hostSpecs...)
-	result.Post = backend.PostStepFunc(func(ctx context.Context, status backend.JobStatus) (backend.StepResult, error) {
-		post := backend.StepResult{ID: action.Step.ID}
-		if status != backend.JobStatusSuccess {
+	result.Post = backend.PostStepFunc(
+		func(ctx context.Context, status backend.JobStatus) (backend.StepResult, error) {
+			post := backend.StepResult{ID: action.Step.ID}
+			if status != backend.JobStatusSuccess {
+				return post, nil
+			}
+			if strings.TrimSpace(matchedKey) == strings.TrimSpace(cacheKey) {
+				return post, nil
+			}
+			if err := action.Cache.Save(cacheKey, action.WorkingDirectory, cachePaths); err != nil {
+				return post, fmt.Errorf("save cache %q: %w", cacheKey, err)
+			}
 			return post, nil
-		}
-		if strings.TrimSpace(matchedKey) == strings.TrimSpace(cacheKey) {
-			return post, nil
-		}
-		if err := action.Cache.Save(cacheKey, action.WorkingDirectory, cachePaths); err != nil {
-			return post, fmt.Errorf("save cache %q: %w", cacheKey, err)
-		}
-		return post, nil
-	})
+		},
+	)
 	return result, nil
 }
 
-func (r remoteHandlers) handleCacheRestoreAction(ctx context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func (r remoteHandlers) handleCacheRestoreAction(
+	ctx context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	if _, _, err := r.resolveRemoteCachePaths(ctx, action); err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
 	}
@@ -170,7 +241,9 @@ func (r remoteHandlers) handleCacheRestoreAction(ctx context.Context, action bac
 		}
 		return result, nil
 	}
-	result.Outputs["cache-hit"] = strconv.FormatBool(strings.TrimSpace(matchedKey) == strings.TrimSpace(key))
+	result.Outputs["cache-hit"] = strconv.FormatBool(
+		strings.TrimSpace(matchedKey) == strings.TrimSpace(key),
+	)
 	result.Outputs["cache-matched-key"] = matchedKey
 	if lookupOnly {
 		return result, nil
@@ -181,7 +254,10 @@ func (r remoteHandlers) handleCacheRestoreAction(ctx context.Context, action bac
 	return result, nil
 }
 
-func (r remoteHandlers) handleCacheSaveAction(ctx context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func (r remoteHandlers) handleCacheSaveAction(
+	ctx context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	_, hostSpecs, err := r.resolveRemoteCachePaths(ctx, action)
 	if err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
@@ -200,7 +276,10 @@ func (r remoteHandlers) handleCacheSaveAction(ctx context.Context, action backen
 	return result, nil
 }
 
-func (r remoteHandlers) resolveRemoteCachePaths(ctx context.Context, action backend.ActionContext) ([]string, []string, error) {
+func (r remoteHandlers) resolveRemoteCachePaths(
+	ctx context.Context,
+	action backend.ActionContext,
+) ([]string, []string, error) {
 	pathValue, err := r.resolveRemoteActionInput(action, "path")
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve cache path: %w", err)
@@ -234,7 +313,9 @@ func (r remoteHandlers) resolveRemoteCacheKey(action backend.ActionContext) (str
 	return key, nil
 }
 
-func (r remoteHandlers) resolveRemoteCacheRestoreInputs(action backend.ActionContext) (string, []string, bool, bool, error) {
+func (r remoteHandlers) resolveRemoteCacheRestoreInputs(
+	action backend.ActionContext,
+) (string, []string, bool, bool, error) {
 	key, err := r.resolveRemoteCacheKey(action)
 	if err != nil {
 		return "", nil, false, false, err
@@ -262,9 +343,16 @@ func (r remoteHandlers) resolveRemoteCacheRestoreInputs(action backend.ActionCon
 	return key, splitMultilineValue(restoreKeysValue), lookupOnly, failOnMiss, nil
 }
 
-func (r remoteHandlers) handleUploadArtifactAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func (r remoteHandlers) handleUploadArtifactAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	if action.Artifacts == nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("upload-artifact requires an artifact store")
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"upload-artifact requires an artifact store",
+			)
 	}
 	name, err := r.resolveRemoteActionInput(action, "name")
 	if err != nil {
@@ -276,28 +364,51 @@ func (r remoteHandlers) handleUploadArtifactAction(_ context.Context, action bac
 	}
 	ifNoFilesFound, err := r.resolveRemoteActionInput(action, "if-no-files-found")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve if-no-files-found: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"resolve if-no-files-found: %w",
+				err,
+			)
 	}
 	translated := make([]string, 0)
 	for _, rawPath := range splitMultilineValue(pathsValue) {
 		value, err := translateRemotePathToHost(rawPath, action.WorkingDirectory, r.guestWorkspace)
 		if err != nil {
-			return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("translate artifact path %q: %w", rawPath, err)
+			return backend.StepResult{
+					ID: action.Step.ID,
+				}, fmt.Errorf(
+					"translate artifact path %q: %w",
+					rawPath,
+					err,
+				)
 		}
 		if relative, ok := pathWithinWorkspace(action.WorkingDirectory, value); ok {
 			value = relative
 		}
 		translated = append(translated, value)
 	}
-	if err := action.Artifacts.Save(name, action.WorkingDirectory, translated, ifNoFilesFound); err != nil {
+	if err := action.Artifacts.Save(
+		name,
+		action.WorkingDirectory,
+		translated,
+		ifNoFilesFound,
+	); err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
 	}
 	return backend.StepResult{ID: action.Step.ID}, nil
 }
 
-func (r remoteHandlers) handleDownloadArtifactAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func (r remoteHandlers) handleDownloadArtifactAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	if action.Artifacts == nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("download-artifact requires an artifact store")
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"download-artifact requires an artifact store",
+			)
 	}
 	name, err := r.resolveRemoteActionInput(action, "name")
 	if err != nil {
@@ -309,13 +420,29 @@ func (r remoteHandlers) handleDownloadArtifactAction(_ context.Context, action b
 	}
 	destination := action.WorkingDirectory
 	if strings.TrimSpace(pathValue) != "" {
-		destination, err = translateRemotePathToHost(pathValue, action.WorkingDirectory, r.guestWorkspace)
+		destination, err = translateRemotePathToHost(
+			pathValue,
+			action.WorkingDirectory,
+			r.guestWorkspace,
+		)
 		if err != nil {
-			return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("translate artifact destination %q: %w", pathValue, err)
+			return backend.StepResult{
+					ID: action.Step.ID,
+				}, fmt.Errorf(
+					"translate artifact destination %q: %w",
+					pathValue,
+					err,
+				)
 		}
 	}
 	if err := os.MkdirAll(destination, 0o755); err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("create artifact destination %q: %w", destination, err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"create artifact destination %q: %w",
+				destination,
+				err,
+			)
 	}
 	if err := action.Artifacts.Restore(name, destination); err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
@@ -323,7 +450,10 @@ func (r remoteHandlers) handleDownloadArtifactAction(_ context.Context, action b
 	return backend.StepResult{ID: action.Step.ID}, nil
 }
 
-func (r remoteHandlers) handleCreatePullRequestAction(_ context.Context, action backend.ActionContext) (backend.StepResult, error) {
+func (r remoteHandlers) handleCreatePullRequestAction(
+	_ context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
 	if err := rejectUnsupportedInputs(action, "create-pull-request",
 		"sign-commits",
 		"branch",
@@ -340,8 +470,16 @@ func (r remoteHandlers) handleCreatePullRequestAction(_ context.Context, action 
 	return backend.StepResult{ID: action.Step.ID}, nil
 }
 
-func (r remoteHandlers) handleSetupPythonAction(ctx context.Context, action backend.ActionContext) (backend.StepResult, error) {
-	if err := rejectUnsupportedInputs(action, "setup-python", "python-version", "update-environment"); err != nil {
+func (r remoteHandlers) handleSetupPythonAction(
+	ctx context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
+	if err := rejectUnsupportedInputs(
+		action,
+		"setup-python",
+		"python-version",
+		"update-environment",
+	); err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
 	}
 	versionValue, err := r.resolveRemoteActionInput(action, "python-version")
@@ -351,26 +489,52 @@ func (r remoteHandlers) handleSetupPythonAction(ctx context.Context, action back
 	requestedVersions := resolveRequestedVersions(versionValue)
 	updateEnvironmentValue, err := r.resolveRemoteActionInput(action, "update-environment")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve update-environment: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"resolve update-environment: %w",
+				err,
+			)
 	}
 	updateEnvironment, err := parseBooleanInput(updateEnvironmentValue, true)
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("parse update-environment: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"parse update-environment: %w",
+				err,
+			)
 	}
 	executablePath, err := r.lookupRemoteTool(ctx, action, "python3")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("setup-python requires python3 in guest PATH: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"setup-python requires python3 in guest PATH: %w",
+				err,
+			)
 	}
 	detected := r.remoteToolVersion(ctx, action, executablePath, "--version")
 	matchedVersion, err := matchingRequestedVersion(requestedVersions, detected)
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("setup-python requested one of [%s]: %w", strings.Join(requestedVersions, ", "), err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"setup-python requested one of [%s]: %w",
+				strings.Join(requestedVersions, ", "),
+				err,
+			)
 	}
 	aliasVersion := matchedVersion
 	if aliasVersion == "" {
 		aliasVersion = detected
 	}
-	alias, err := r.remoteToolCacheAlias(action, "Python", aliasVersion, installRootForExecutable(executablePath))
+	alias, err := r.remoteToolCacheAlias(
+		action,
+		"Python",
+		aliasVersion,
+		installRootForExecutable(executablePath),
+	)
 	if err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
 	}
@@ -378,7 +542,12 @@ func (r remoteHandlers) handleSetupPythonAction(ctx context.Context, action back
 	if updateEnvironment {
 		result.PathEntries = []string{alias.GuestBin}
 		result.Environment = workflow.EnvironmentMap{
-			"pythonLocation": remoteToolCacheLocation(action, r.guestWorkspace, "Python", aliasVersion),
+			"pythonLocation": remoteToolCacheLocation(
+				action,
+				r.guestWorkspace,
+				"Python",
+				aliasVersion,
+			),
 		}
 	}
 	result.Outputs = workflow.OutputMap{
@@ -389,19 +558,36 @@ func (r remoteHandlers) handleSetupPythonAction(ctx context.Context, action back
 	return result, nil
 }
 
-func (r remoteHandlers) handleSetupUVAction(ctx context.Context, action backend.ActionContext) (backend.StepResult, error) {
-	if err := rejectUnsupportedInputs(action, "setup-uv", "activate-environment", "working-directory", "venv-path"); err != nil {
+func (r remoteHandlers) handleSetupUVAction(
+	ctx context.Context,
+	action backend.ActionContext,
+) (backend.StepResult, error) {
+	if err := rejectUnsupportedInputs(
+		action,
+		"setup-uv",
+		"activate-environment",
+		"working-directory",
+		"venv-path",
+	); err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
 	}
 	installation, err := remoteToolInstallationInfo(ctx, r, action, "uv", "uv", "system")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("setup-uv requires uv in guest PATH: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"setup-uv requires uv in guest PATH: %w",
+				err,
+			)
 	}
 	_, guestCache, cacheErr := r.remoteToolCacheDirectory(action, "uv-cache")
 	if cacheErr != nil {
 		return backend.StepResult{ID: action.Step.ID}, cacheErr
 	}
-	result := backend.StepResult{ID: action.Step.ID, PathEntries: []string{installation.Alias.GuestBin}}
+	result := backend.StepResult{
+		ID:          action.Step.ID,
+		PathEntries: []string{installation.Alias.GuestBin},
+	}
 	result.Environment = workflow.EnvironmentMap{
 		"UV_CACHE_DIR": guestCache,
 	}
@@ -409,19 +595,37 @@ func (r remoteHandlers) handleSetupUVAction(ctx context.Context, action backend.
 		"cache-hit":        "false",
 		"python-cache-hit": "false",
 		"python-version":   r.remoteToolVersion(ctx, action, "python3", "--version"),
-		"uv-path":          remoteToolExecutableOutputPath(installation.Alias, installation.ExecutablePath),
-		"uv-version":       r.remoteToolVersion(ctx, action, installation.ExecutablePath, "--version"),
+		"uv-path": remoteToolExecutableOutputPath(
+			installation.Alias,
+			installation.ExecutablePath,
+		),
+		"uv-version": r.remoteToolVersion(
+			ctx,
+			action,
+			installation.ExecutablePath,
+			"--version",
+		),
 	}
 	if uvxPath, err := r.lookupRemoteTool(ctx, action, "uvx"); err == nil {
 		result.Outputs["uvx-path"] = remoteToolExecutableOutputPath(installation.Alias, uvxPath)
 	}
 	activateValue, err := r.resolveRemoteActionInput(action, "activate-environment")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve activate-environment: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"resolve activate-environment: %w",
+				err,
+			)
 	}
 	activate, err := parseBooleanInput(activateValue, false)
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("parse activate-environment: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"parse activate-environment: %w",
+				err,
+			)
 	}
 	if !activate {
 		return result, nil
@@ -455,7 +659,8 @@ func (r remoteHandlers) handleSetupUVAction(ctx context.Context, action backend.
 			return nil
 		}
 		if strings.TrimSpace(guestHome) == "" {
-			if err := ensureGuestHome(); err != nil && !pathWithinGuestRoot(r.guestWorkspace, cleaned) {
+			if err := ensureGuestHome(); err != nil &&
+				!pathWithinGuestRoot(r.guestWorkspace, cleaned) {
 				return fmt.Errorf("resolve guest home: %w", err)
 			}
 		}
@@ -466,7 +671,12 @@ func (r remoteHandlers) handleSetupUVAction(ctx context.Context, action backend.
 	}
 	workingDirectoryValue, err := r.resolveRemoteActionInput(action, "working-directory")
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve working-directory: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"resolve working-directory: %w",
+				err,
+			)
 	}
 	if isRemoteHomeRelativePath(workingDirectoryValue) {
 		if err := ensureGuestHome(); err != nil {
@@ -476,12 +686,29 @@ func (r remoteHandlers) handleSetupUVAction(ctx context.Context, action backend.
 	if err := ensureGuestAbsolutePathAllowed("working-directory", workingDirectoryValue); err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
 	}
-	guestWorkingDirectory, err := resolveRemotePathWithBase(r.guestWorkspace, workingDirectoryValue, action.WorkingDirectory, r.guestWorkspace, guestHome)
+	guestWorkingDirectory, err := resolveRemotePathWithBase(
+		r.guestWorkspace,
+		workingDirectoryValue,
+		action.WorkingDirectory,
+		r.guestWorkspace,
+		guestHome,
+	)
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve guest working-directory: %w", err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"resolve guest working-directory: %w",
+				err,
+			)
 	}
 	if !pathWithinAnyGuestRoot(guestWorkingDirectory, allowedRoots()...) {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("guest working-directory %q escapes allowed roots %v", guestWorkingDirectory, allowedRoots())
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"guest working-directory %q escapes allowed roots %v",
+				guestWorkingDirectory,
+				allowedRoots(),
+			)
 	}
 	venvValue, err := r.resolveRemoteActionInput(action, "venv-path")
 	if err != nil {
@@ -491,28 +718,77 @@ func (r remoteHandlers) handleSetupUVAction(ctx context.Context, action backend.
 	if strings.TrimSpace(venvValue) != "" {
 		if isRemoteHomeRelativePath(venvValue) && strings.TrimSpace(guestHome) == "" {
 			if err := ensureGuestHome(); err != nil {
-				return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve guest home: %w", err)
+				return backend.StepResult{
+						ID: action.Step.ID,
+					}, fmt.Errorf(
+						"resolve guest home: %w",
+						err,
+					)
 			}
 		}
 		if err := ensureGuestAbsolutePathAllowed("venv-path", venvValue); err != nil {
 			return backend.StepResult{ID: action.Step.ID}, err
 		}
-		guestVenvPath, err = resolveRemotePathWithBase(guestWorkingDirectory, venvValue, action.WorkingDirectory, r.guestWorkspace, guestHome)
+		guestVenvPath, err = resolveRemotePathWithBase(
+			guestWorkingDirectory,
+			venvValue,
+			action.WorkingDirectory,
+			r.guestWorkspace,
+			guestHome,
+		)
 		if err != nil {
-			return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("resolve guest venv-path: %w", err)
+			return backend.StepResult{
+					ID: action.Step.ID,
+				}, fmt.Errorf(
+					"resolve guest venv-path: %w",
+					err,
+				)
 		}
 	}
-	hostVenvPath, err := translateRemotePathToHost(guestVenvPath, action.WorkingDirectory, r.guestWorkspace)
+	hostVenvPath, err := translateRemotePathToHost(
+		guestVenvPath,
+		action.WorkingDirectory,
+		r.guestWorkspace,
+	)
 	if err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("translate guest venv-path %q to host workspace: %w", guestVenvPath, err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"translate guest venv-path %q to host workspace: %w",
+				guestVenvPath,
+				err,
+			)
 	}
-	command := strings.Join([]string{shellQuote(installation.ExecutablePath), "venv", "--clear", shellQuote(guestVenvPath)}, " ")
-	if err := r.execRemoteActionCommandInDir(ctx, guestWorkingDirectory, mergeOptionalEnvironment(r.remoteActionExpressions(action).Env, result.Environment), command, "create uv environment"); err != nil {
+	command := strings.Join(
+		[]string{
+			shellQuote(installation.ExecutablePath),
+			"venv",
+			"--clear",
+			shellQuote(guestVenvPath),
+		},
+		" ",
+	)
+	if err := r.execRemoteActionCommandInDir(
+		ctx,
+		guestWorkingDirectory,
+		mergeOptionalEnvironment(
+			r.remoteActionExpressions(action).Env,
+			result.Environment,
+		),
+		command,
+		"create uv environment",
+	); err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
 	}
 	venvBin := venvBinDirectoryName(action.Expressions.Runner.OS)
 	if _, err := os.Stat(filepath.Join(hostVenvPath, venvBin)); err != nil {
-		return backend.StepResult{ID: action.Step.ID}, fmt.Errorf("uv venv did not create %q: %w", filepath.Join(hostVenvPath, venvBin), err)
+		return backend.StepResult{
+				ID: action.Step.ID,
+			}, fmt.Errorf(
+				"uv venv did not create %q: %w",
+				filepath.Join(hostVenvPath, venvBin),
+				err,
+			)
 	}
 	result.PathEntries = append([]string{path.Join(guestVenvPath, venvBin)}, result.PathEntries...)
 	result.Environment["VIRTUAL_ENV"] = guestVenvPath
@@ -520,7 +796,10 @@ func (r remoteHandlers) handleSetupUVAction(ctx context.Context, action backend.
 	return result, nil
 }
 
-func (r remoteHandlers) remoteCacheHostPathSpecs(action backend.ActionContext, paths []string) ([]string, error) {
+func (r remoteHandlers) remoteCacheHostPathSpecs(
+	action backend.ActionContext,
+	paths []string,
+) ([]string, error) {
 	guestHome := ""
 	specs := make([]string, 0, len(paths))
 	for _, rawPath := range paths {
@@ -540,9 +819,18 @@ func (r remoteHandlers) remoteCacheHostPathSpecs(action backend.ActionContext, p
 			}
 			expanded, _ := expandRemoteHomePath(value, guestHome)
 			var err error
-			translated, err = translateRemotePathToHost(expanded, action.WorkingDirectory, r.guestWorkspace)
+			translated, err = translateRemotePathToHost(
+				expanded,
+				action.WorkingDirectory,
+				r.guestWorkspace,
+			)
 			if err != nil {
-				return nil, fmt.Errorf("remote cache path %q is not persistable via HOME %q: %w", value, guestHome, err)
+				return nil, fmt.Errorf(
+					"remote cache path %q is not persistable via HOME %q: %w",
+					value,
+					guestHome,
+					err,
+				)
 			}
 		} else {
 			var err error
@@ -562,14 +850,23 @@ func (r remoteHandlers) remoteCacheHostPathSpecs(action backend.ActionContext, p
 	return specs, nil
 }
 
-func (r remoteHandlers) remoteActionExpressions(action backend.ActionContext) workflow.ExpressionContext {
+func (r remoteHandlers) remoteActionExpressions(
+	action backend.ActionContext,
+) workflow.ExpressionContext {
 	remoteExpr := action.Expressions
 	remoteExpr.GitHub.Workspace = r.guestWorkspace
-	remoteExpr.Env = translateWorkspaceEnvironment(action.Env, action.WorkingDirectory, r.guestWorkspace)
+	remoteExpr.Env = translateWorkspaceEnvironment(
+		action.Env,
+		action.WorkingDirectory,
+		r.guestWorkspace,
+	)
 	return remoteExpr
 }
 
-func (r remoteHandlers) resolveRemoteActionInput(action backend.ActionContext, key string) (string, error) {
+func (r remoteHandlers) resolveRemoteActionInput(
+	action backend.ActionContext,
+	key string,
+) (string, error) {
 	value, ok := action.Inputs[key]
 	if !ok {
 		return "", nil
@@ -577,20 +874,48 @@ func (r remoteHandlers) resolveRemoteActionInput(action backend.ActionContext, k
 	return workflow.InterpolateString(action.Job, value, r.remoteActionExpressions(action))
 }
 
-func (r remoteHandlers) execRemoteActionCommand(ctx context.Context, environment workflow.EnvironmentMap, command string, description string) error {
+func (r remoteHandlers) execRemoteActionCommand(
+	ctx context.Context,
+	environment workflow.EnvironmentMap,
+	command string,
+	description string,
+) error {
 	return r.execRemoteActionCommandInDir(ctx, r.guestWorkspace, environment, command, description)
 }
 
-func (r remoteHandlers) execRemoteActionCommandInDir(ctx context.Context, workingDirectory string, environment workflow.EnvironmentMap, command string, description string) error {
-	_, err := r.execRemoteActionOutputInDir(ctx, workingDirectory, environment, command, description)
+func (r remoteHandlers) execRemoteActionCommandInDir(
+	ctx context.Context,
+	workingDirectory string,
+	environment workflow.EnvironmentMap,
+	command string,
+	description string,
+) error {
+	_, err := r.execRemoteActionOutputInDir(
+		ctx,
+		workingDirectory,
+		environment,
+		command,
+		description,
+	)
 	return err
 }
 
-func (r remoteHandlers) execRemoteActionOutput(ctx context.Context, environment workflow.EnvironmentMap, command string, description string) (string, error) {
+func (r remoteHandlers) execRemoteActionOutput(
+	ctx context.Context,
+	environment workflow.EnvironmentMap,
+	command string,
+	description string,
+) (string, error) {
 	return r.execRemoteActionOutputInDir(ctx, r.guestWorkspace, environment, command, description)
 }
 
-func (r remoteHandlers) execRemoteActionOutputInDir(ctx context.Context, workingDirectory string, environment workflow.EnvironmentMap, command string, description string) (string, error) {
+func (r remoteHandlers) execRemoteActionOutputInDir(
+	ctx context.Context,
+	workingDirectory string,
+	environment workflow.EnvironmentMap,
+	command string,
+	description string,
+) (string, error) {
 	result, err := r.commands.ExecCommand(ctx, workingDirectory, environment, command)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", description, err)
@@ -622,20 +947,44 @@ func normalizeRemoteToolPath(workingDirectory string, rawPath string) (string, e
 	return path.Clean(path.Join(workingDirectory, trimmed)), nil
 }
 
-func (r remoteHandlers) lookupRemoteTool(ctx context.Context, action backend.ActionContext, tool string) (string, error) {
-	value, err := r.execRemoteActionOutput(ctx, r.remoteActionExpressions(action).Env, "command -v "+tool, tool+" lookup")
+func (r remoteHandlers) lookupRemoteTool(
+	ctx context.Context,
+	action backend.ActionContext,
+	tool string,
+) (string, error) {
+	value, err := r.execRemoteActionOutput(
+		ctx,
+		r.remoteActionExpressions(action).Env,
+		"command -v "+tool,
+		tool+" lookup",
+	)
 	if err != nil {
 		return "", err
 	}
 	return normalizeRemoteToolPath(r.guestWorkspace, value)
 }
 
-func (r remoteHandlers) remoteToolCacheAlias(action backend.ActionContext, family string, version string, targetRoot string) (toolCacheAlias, error) {
+func (r remoteHandlers) remoteToolCacheAlias(
+	action backend.ActionContext,
+	family string,
+	version string,
+	targetRoot string,
+) (toolCacheAlias, error) {
 	hostRoot, guestRoot := remoteToolCacheRoots(action, r.guestWorkspace)
-	return materializeToolCacheAlias(hostRoot, guestRoot, family, version, action.Expressions.Runner.Arch, targetRoot)
+	return materializeToolCacheAlias(
+		hostRoot,
+		guestRoot,
+		family,
+		version,
+		action.Expressions.Runner.Arch,
+		targetRoot,
+	)
 }
 
-func (r remoteHandlers) remoteToolCacheDirectory(action backend.ActionContext, components ...string) (string, string, error) {
+func (r remoteHandlers) remoteToolCacheDirectory(
+	action backend.ActionContext,
+	components ...string,
+) (string, string, error) {
 	hostRoot, guestRoot := remoteToolCacheRoots(action, r.guestWorkspace)
 	return materializeToolCacheDirectory(hostRoot, guestRoot, components...)
 }

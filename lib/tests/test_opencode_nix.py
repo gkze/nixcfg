@@ -288,6 +288,7 @@ def test_active_profile_json_includes_shared_settings_and_profile_overrides() ->
         "--autoConnect",
         "--channel=stable",
     ]
+    assert active["mcp"]["chrome-devtools"]["enabled"] is False
     assert active["mcp"]["macos-automator"]["command"] == [
         "bunx",
         "--bun",
@@ -295,3 +296,33 @@ def test_active_profile_json_includes_shared_settings_and_profile_overrides() ->
     ]
     assert active["mcp"]["macos-automator"]["enabled"] is True
     assert active["mcp"]["next-devtools"]["enabled"] is False
+
+
+@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
+def test_profile_mcp_command_override_preserves_disabled_shared_server_default() -> (
+    None
+):
+    """Profile command overrides should not implicitly enable shared disabled servers."""
+    active = _eval_opencode_json(
+        nix_attrset({
+            "activeProfile": "work",
+            "profiles.work": {
+                "mcpServers.chrome-devtools.command": [
+                    "npx",
+                    "-y",
+                    "chrome-devtools-mcp@latest",
+                    "--autoConnect",
+                    "--channel=stable",
+                ],
+            },
+        })
+    )
+
+    assert active["mcp"]["chrome-devtools"]["command"] == [
+        "npx",
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--autoConnect",
+        "--channel=stable",
+    ]
+    assert active["mcp"]["chrome-devtools"]["enabled"] is False

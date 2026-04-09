@@ -6,6 +6,7 @@ import asyncio
 import dataclasses
 import json
 import platform
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from nix_manipulator.expressions.binary import BinaryExpression
@@ -412,7 +413,10 @@ def _build_nix_expr(body: str | NixExpression) -> str:
 
 
 def _build_overlay_expression(
-    source: str, *, system: str | None = None
+    source: str,
+    *,
+    system: str | None = None,
+    repo_root: str | None = None,
 ) -> NixExpression:
     """Build a Nix expression that evaluates an overlay package.
 
@@ -428,7 +432,8 @@ def _build_overlay_expression(
     parameter correctly resolves to ``pkgs // overlay final pkgs`` without
     hitting the aliases.nix ``with self`` trap.
     """
-    flake_url = f"git+file://{get_repo_file('.')}?dirty=1"
+    repo_path = get_repo_file(".") if repo_root is None else Path(repo_root).resolve()
+    flake_url = f"git+file://{repo_path}?dirty=1"
     system_expr: NixExpression = (
         _select_attrs(Identifier(name="builtins"), "currentSystem")
         if system is None
@@ -495,8 +500,19 @@ def _build_overlay_expression(
     )
 
 
-def _build_overlay_expr(source: str, *, system: str | None = None) -> str:
-    return compact_nix_expr(_build_overlay_expression(source, system=system).rebuild())
+def _build_overlay_expr(
+    source: str,
+    *,
+    system: str | None = None,
+    repo_root: str | None = None,
+) -> str:
+    return compact_nix_expr(
+        _build_overlay_expression(
+            source,
+            system=system,
+            repo_root=repo_root,
+        ).rebuild()
+    )
 
 
 async def compute_overlay_hash(
@@ -504,6 +520,7 @@ async def compute_overlay_hash(
     *,
     system: str | None = None,
     config: UpdateConfig | None = None,
+    repo_root: str | None = None,
 ) -> EventStream:
     """Compute a hash by building the overlay package with ``FAKE_HASHES=1``.
 
@@ -514,7 +531,7 @@ async def compute_overlay_hash(
 
     The overlay definition in ``overlays/default.nix`` is the single source of truth.
     """
-    expr = _build_overlay_expr(source, system=system)
+    expr = _build_overlay_expr(source, system=system, repo_root=repo_root)
     async for event in compute_fixed_output_hash(
         source,
         expr,
@@ -529,6 +546,7 @@ async def compute_drv_fingerprint(
     *,
     system: str | None = None,
     config: UpdateConfig | None = None,
+    repo_root: str | None = None,
 ) -> str:
     """Compute a stable derivation fingerprint for staleness detection.
 
@@ -544,7 +562,7 @@ async def compute_drv_fingerprint(
     negatives and zero false positives.
     """
     config = resolve_active_config(config)
-    expr = _build_overlay_expr(source, system=system)
+    expr = _build_overlay_expr(source, system=system, repo_root=repo_root)
     expr = compact_nix_expr(expr)
     args = ["nix", "derivation", "show", "--quiet", "--impure", "--expr", expr]
 

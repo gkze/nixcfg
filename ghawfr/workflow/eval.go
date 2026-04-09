@@ -50,7 +50,10 @@ func InterpolateString(job *Job, input string, context ExpressionContext) (strin
 	if input == "" || !actionlint.ContainsExpression(input) {
 		return input, nil
 	}
-	result, err := newExpressionEvaluator(job, context).evaluateAny(input, actexpr.DefaultStatusCheckNone)
+	result, err := newExpressionEvaluator(
+		job,
+		context,
+	).evaluateAny(input, actexpr.DefaultStatusCheckNone)
 	if err != nil {
 		return "", err
 	}
@@ -62,7 +65,10 @@ func EvaluateCondition(job *Job, input string, context ExpressionContext) (bool,
 	if strings.TrimSpace(input) == "" {
 		return true, nil
 	}
-	result, err := newExpressionEvaluator(job, context).evaluateAny(input, actexpr.DefaultStatusCheckNone)
+	result, err := newExpressionEvaluator(
+		job,
+		context,
+	).evaluateAny(input, actexpr.DefaultStatusCheckNone)
 	if err != nil {
 		return false, err
 	}
@@ -70,12 +76,20 @@ func EvaluateCondition(job *Job, input string, context ExpressionContext) (bool,
 }
 
 // InterpolateEnvironment resolves expressions inside one environment map.
-func InterpolateEnvironment(job *Job, values EnvironmentMap, context ExpressionContext) (EnvironmentMap, error) {
+func InterpolateEnvironment(
+	job *Job,
+	values EnvironmentMap,
+	context ExpressionContext,
+) (EnvironmentMap, error) {
 	return interpolateStringMap(job, values, context)
 }
 
 // InterpolateActionInputs resolves expressions inside one action input map.
-func InterpolateActionInputs(job *Job, values ActionInputMap, context ExpressionContext) (ActionInputMap, error) {
+func InterpolateActionInputs(
+	job *Job,
+	values ActionInputMap,
+	context ExpressionContext,
+) (ActionInputMap, error) {
 	return interpolateStringMap(job, values, context)
 }
 
@@ -118,7 +132,11 @@ func ResolveJobOutputs(job *Job, context ExpressionContext) (OutputMap, error) {
 	return outputs, nil
 }
 
-func interpolateStringMap[M ~map[string]string](job *Job, values M, context ExpressionContext) (M, error) {
+func interpolateStringMap[M ~map[string]string](
+	job *Job,
+	values M,
+	context ExpressionContext,
+) (M, error) {
 	if len(values) == 0 {
 		var zero M
 		return zero, nil
@@ -143,7 +161,10 @@ func (e expressionEvaluator) evaluateExpression(input string) (Value, error) {
 	return anyToValue(result), nil
 }
 
-func (e expressionEvaluator) evaluateAny(input string, status actexpr.DefaultStatusCheck) (any, error) {
+func (e expressionEvaluator) evaluateAny(
+	input string,
+	status actexpr.DefaultStatusCheck,
+) (any, error) {
 	expr, err := rewriteSubExpression(input, false)
 	if err != nil {
 		return nil, err
@@ -160,7 +181,8 @@ func (e expressionEvaluator) evaluateValue(value Value) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
-			if item.Kind == ValueKindScalar && isExpressionAssigned(item.Scalar) && evaluated.Kind == ValueKindArray {
+			if item.Kind == ValueKindScalar && isExpressionAssigned(item.Scalar) &&
+				evaluated.Kind == ValueKindArray {
 				items = append(items, cloneValues(evaluated.Array)...)
 				continue
 			}
@@ -176,7 +198,10 @@ func (e expressionEvaluator) evaluateValue(value Value) (Value, error) {
 			}
 			if isInsertDirective(key) {
 				if evaluatedValue.Kind != ValueKindObject {
-					return Value{}, fmt.Errorf("insert directive expects object value, got %s", evaluatedValue.Kind)
+					return Value{}, fmt.Errorf(
+						"insert directive expects object value, got %s",
+						evaluatedValue.Kind,
+					)
 				}
 				for childKey, childValue := range evaluatedValue.Object {
 					object[canonicalID(childKey)] = childValue
@@ -273,7 +298,8 @@ func (e expressionEvaluator) resolveMatrixRow(row MatrixRow) (MatrixRow, error) 
 		if err != nil {
 			return MatrixRow{}, err
 		}
-		if value.Kind == ValueKindScalar && isExpressionAssigned(value.Scalar) && evaluated.Kind == ValueKindArray {
+		if value.Kind == ValueKindScalar && isExpressionAssigned(value.Scalar) &&
+			evaluated.Kind == ValueKindArray {
 			items = append(items, cloneValues(evaluated.Array)...)
 			continue
 		}
@@ -283,7 +309,9 @@ func (e expressionEvaluator) resolveMatrixRow(row MatrixRow) (MatrixRow, error) 
 	return resolved, nil
 }
 
-func (e expressionEvaluator) resolveMatrixCombinations(combinations []MatrixCombination) ([]MatrixCombination, error) {
+func (e expressionEvaluator) resolveMatrixCombinations(
+	combinations []MatrixCombination,
+) ([]MatrixCombination, error) {
 	resolved := make([]MatrixCombination, 0, len(combinations))
 	for _, combination := range combinations {
 		if combination.Expression != "" {
@@ -306,7 +334,10 @@ func (e expressionEvaluator) resolveMatrixCombinations(combinations []MatrixComb
 			}
 			values[key] = evaluated
 		}
-		resolved = append(resolved, MatrixCombination{Values: values, Keys: sortedMatrixKeys(values)})
+		resolved = append(
+			resolved,
+			MatrixCombination{Values: values, Keys: sortedMatrixKeys(values)},
+		)
 	}
 	return resolved, nil
 }
@@ -331,7 +362,10 @@ func matrixFromValue(value Value) (*Matrix, error) {
 			}
 			matrix.Exclude = combinations
 		default:
-			matrix.Rows = append(matrix.Rows, MatrixRow{Name: key, Values: rowValuesFromValue(value.Object[key])})
+			matrix.Rows = append(
+				matrix.Rows,
+				MatrixRow{Name: key, Values: rowValuesFromValue(value.Object[key])},
+			)
 		}
 	}
 	sort.Slice(matrix.Rows, func(i, j int) bool {
@@ -343,18 +377,29 @@ func matrixFromValue(value Value) (*Matrix, error) {
 func matrixCombinationsFromValue(value Value) ([]MatrixCombination, error) {
 	switch value.Kind {
 	case ValueKindObject:
-		return []MatrixCombination{{Values: cloneMatrixValues(value.Object), Keys: value.ObjectKeys()}}, nil
+		return []MatrixCombination{
+			{Values: cloneMatrixValues(value.Object), Keys: value.ObjectKeys()},
+		}, nil
 	case ValueKindArray:
 		combinations := make([]MatrixCombination, 0, len(value.Array))
 		for _, item := range value.Array {
 			if item.Kind != ValueKindObject {
-				return nil, fmt.Errorf("matrix combination array items must be objects, got %s", item.Kind)
+				return nil, fmt.Errorf(
+					"matrix combination array items must be objects, got %s",
+					item.Kind,
+				)
 			}
-			combinations = append(combinations, MatrixCombination{Values: cloneMatrixValues(item.Object), Keys: item.ObjectKeys()})
+			combinations = append(
+				combinations,
+				MatrixCombination{Values: cloneMatrixValues(item.Object), Keys: item.ObjectKeys()},
+			)
 		}
 		return combinations, nil
 	default:
-		return nil, fmt.Errorf("matrix combinations must resolve to an object or array, got %s", value.Kind)
+		return nil, fmt.Errorf(
+			"matrix combinations must resolve to an object or array, got %s",
+			value.Kind,
+		)
 	}
 }
 
@@ -484,7 +529,10 @@ func toActNeeds(needs NeedContextMap) map[string]actexpr.Needs {
 	}
 	converted := make(map[string]actexpr.Needs, len(needs))
 	for key, need := range needs {
-		converted[key.String()] = actexpr.Needs{Outputs: map[string]string(need.Outputs.Clone()), Result: need.Result}
+		converted[key.String()] = actexpr.Needs{
+			Outputs: map[string]string(need.Outputs.Clone()),
+			Result:  need.Result,
+		}
 	}
 	return converted
 }
@@ -540,7 +588,8 @@ func isInsertDirective(input string) bool {
 
 func isExpressionAssigned(input string) bool {
 	trimmed := strings.TrimSpace(input)
-	return strings.HasPrefix(trimmed, "${{") && strings.HasSuffix(trimmed, "}}") && strings.Count(trimmed, "${{") == 1
+	return strings.HasPrefix(trimmed, "${{") && strings.HasSuffix(trimmed, "}}") &&
+		strings.Count(trimmed, "${{") == 1
 }
 
 func valueContainsExpression(value Value) bool {
@@ -618,7 +667,11 @@ func rewriteSubExpression(input string, forceFormat bool) (string, error) {
 	if len(results) == 1 && formatOut == "{0}" && !forceFormat {
 		return input, nil
 	}
-	return fmt.Sprintf("format('%s', %s)", strings.ReplaceAll(formatOut, "'", "''"), strings.Join(results, ", ")), nil
+	return fmt.Sprintf(
+		"format('%s', %s)",
+		strings.ReplaceAll(formatOut, "'", "''"),
+		strings.Join(results, ", "),
+	), nil
 }
 
 func escapeFormatString(input string) string {

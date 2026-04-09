@@ -273,9 +273,7 @@ def _render_summary_diff(
             continue
         if _is_json_value(old_value) and _is_json_value(new_value):
             lines.append(
-                "changed "
-                f"{path_str}: {_format_value(old_value)} -> "
-                f"{_format_value(new_value)}",
+                f"changed {path_str}: {_format_value(old_value)} -> {_format_value(new_value)}",
             )
 
     return "\n".join(lines).strip()

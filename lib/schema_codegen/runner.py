@@ -367,10 +367,7 @@ def _build_registry(
             for uri in uris:
                 existing = seen_uris.get(uri)
                 if existing is not None and existing != document.label:
-                    msg = (
-                        f"Registry alias {uri!r} collides between "
-                        f"{existing} and {document.label}"
-                    )
+                    msg = f"Registry alias {uri!r} collides between {existing} and {document.label}"
                     raise RuntimeError(msg)
                 seen_uris[uri] = document.label
                 resources.append((uri, resource))

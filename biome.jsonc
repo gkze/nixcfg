@@ -1,9 +1,20 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.2/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.4.9/schema.json",
 
-  // Keep Biome narrowly focused on repo-managed CSS for now.
+  // Keep Biome narrowly focused on repo-managed web assets.
   "files": {
-    "ignoreUnknown": true
+    "ignoreUnknown": true,
+    "includes": [
+      "**/*.css",
+      "**/*.js",
+      "**/*.cjs",
+      "**/*.mjs",
+      "!**/.direnv",
+      "!**/.ghawfr",
+      "!**/.venv",
+      "!**/node_modules",
+      "!**/result*"
+    ]
   },
 
   // Biome's VCS auto-discovery gets confused by this repo living under
@@ -14,18 +25,31 @@
     "useIgnoreFile": false
   },
 
-  "css": {
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineEnding": "lf",
+    "lineWidth": 100
+  },
+
+  "javascript": {
     "formatter": {
-      "enabled": true,
-      "indentStyle": "space",
-      "indentWidth": 2,
-      "lineEnding": "lf"
+      "enabled": true
     },
     "linter": {
       "enabled": true
     }
   },
 
-  // No repo-managed CSS currently needs custom Biome overrides.
+  "css": {
+    "formatter": {
+      "enabled": true
+    },
+    "linter": {
+      "enabled": true
+    }
+  },
+
+  // No repo-managed CSS or JavaScript currently needs custom Biome overrides.
   "overrides": []
 }

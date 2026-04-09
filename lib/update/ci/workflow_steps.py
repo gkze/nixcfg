@@ -141,8 +141,7 @@ def _cmd_free_disk_space(*, force_local: bool = False) -> int:
     running_in_ci = os.environ.get("CI", "").lower() in {"1", "true", "yes"}
     if not running_in_ci and not force_local:
         sys.stderr.write(
-            "Refusing to run free-disk-space outside CI. "
-            "Re-run with --force-local to override.\n"
+            "Refusing to run free-disk-space outside CI. Re-run with --force-local to override.\n"
         )
         return 2
 

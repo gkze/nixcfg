@@ -17,12 +17,7 @@ def rewrite_constr_type_hints(code: str) -> str:
         line_start = match.string.rfind("\n", 0, match.start()) + 1
         indent = match.string[line_start : match.start()]
         inner = f"{indent}    "
-        return (
-            "Annotated[\n"
-            f"{inner}str,\n"
-            f"{inner}StringConstraints(pattern={literal}),\n"
-            f"{indent}]"
-        )
+        return f"Annotated[\n{inner}str,\n{inner}StringConstraints(pattern={literal}),\n{indent}]"
 
     return _CONSTR_PATTERN.sub(_replace, code)
 

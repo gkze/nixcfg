@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -97,6 +98,56 @@ def test_stabilize_generated_command_comment_leaves_unrelated_text_unchanged() -
     assert (
         crate2nix._stabilize_generated_command_comment(target, refreshed) == refreshed
     )
+
+
+def test_stabilize_generated_root_src_paths_rewrites_relative_store_paths() -> None:
+    """Store-relative crate source paths should normalize back to ``${rootSrc}``."""
+    patched_src = Path("/nix/store/demo-src")
+    generated_cargo = Path("/tmp/build/Cargo.nix")
+    relative_src = os.path.relpath(
+        patched_src / "crates/demo",
+        generated_cargo.parent,
+    ).replace(os.sep, "/")
+    refreshed = (
+        "        src = lib.cleanSourceWith { filter = sourceFilter;  "
+        f"src = {relative_src}; }};\n"
+    )
+
+    stabilized = crate2nix._stabilize_generated_root_src_paths(
+        refreshed,
+        patched_src=patched_src,
+        generated_cargo=generated_cargo,
+    )
+
+    assert (
+        "src = lib.cleanSourceWith { filter = sourceFilter;  "
+        'src = "${rootSrc}/crates/demo"; };\n' in stabilized
+    )
+
+
+def test_stabilize_generated_root_src_paths_handles_root_and_unrelated_paths() -> None:
+    """Exact root paths normalize, while unrelated paths are left alone."""
+    patched_src = Path("/nix/store/demo-src")
+    generated_cargo = Path("/tmp/build/Cargo.nix")
+    root_relative = os.path.relpath(patched_src, generated_cargo.parent).replace(
+        os.sep,
+        "/",
+    )
+    refreshed = (
+        "        src = lib.cleanSourceWith { filter = sourceFilter;  "
+        f"src = {root_relative}; }};\n"
+        "        src = lib.cleanSourceWith { filter = sourceFilter;  "
+        "src = ../vendor/demo; };\n"
+    )
+
+    stabilized = crate2nix._stabilize_generated_root_src_paths(
+        refreshed,
+        patched_src=patched_src,
+        generated_cargo=generated_cargo,
+    )
+
+    assert 'src = "${rootSrc}"; };' in stabilized
+    assert "src = ../vendor/demo; };" in stabilized
 
 
 def test_resolve_targets_skips_unsupported_platforms(monkeypatch) -> None:

@@ -271,10 +271,7 @@ async def _async_main(
     if public_cache_only and (
         substituters is not None or extra_substituters is not None
     ):
-        msg = (
-            "--substituters/--extra-substituters cannot be combined with "
-            "--public-cache-only"
-        )
+        msg = "--substituters/--extra-substituters cannot be combined with --public-cache-only"
         raise RuntimeError(msg)
 
     home_profile_path = home_profile or _default_home_profile()

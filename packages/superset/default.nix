@@ -12,7 +12,6 @@
   fetchurl,
   libarchive,
   python3,
-  writeShellScriptBin,
   makeWrapper,
   zig_0_15,
   ...
@@ -23,6 +22,9 @@ let
   version = slib.getFlakeVersion "superset";
   pname = "superset";
   upstreamSrc = inputs.superset;
+  updateBunLockTemplate = ./update_bun_lock.py;
+  extractBunPackageHelper = ./extract_bun_package.py;
+  patchBindingGypHelper = ./patch_node_addon_api_binding_gyp.py;
   supportedPlatforms = [
     "aarch64-darwin"
     "x86_64-linux"
@@ -32,37 +34,26 @@ let
     url = info.urls."x86_64-linux";
     hash = info.hashes."x86_64-linux";
   };
-  updateScript = writeShellScriptBin "update-superset-bun-lock" ''
-    set -euo pipefail
-
-    if [ ! -f flake.nix ] || [ ! -d packages/superset ]; then
-      echo "run this script from the nixcfg repository root" >&2
-      exit 1
-    fi
-
-    repo_root="$(pwd)"
-    tmpdir="$(mktemp -d)"
-    trap 'rm -rf "$tmpdir"' EXIT
-
-    cp -R ${upstreamSrc}/. "$tmpdir"
-    chmod -R u+w "$tmpdir"
-
-    nix run "path:$repo_root#nixcfg" -- ci workflow prepare-bun-lock \
-      --workspace-root "$tmpdir" \
-      --lock-file "$tmpdir/bun.lock" \
-      --bun-executable "${lib.getExe bun}"
-
-    (
-      cd "$tmpdir"
-      nix run "${inputs.bun2nix}#bun2nix" -- \
-        --lock-file bun.lock \
-        --copy-prefix ./ \
-        --output-file "$tmpdir/bun.nix"
-    )
-
-    cp "$tmpdir/bun.lock" "$repo_root/packages/superset/bun.lock"
-    cp "$tmpdir/bun.nix" "$repo_root/packages/superset/bun.nix"
-  '';
+  updateScript = pkgs.writeTextFile {
+    name = "update-superset-bun-lock";
+    destination = "/bin/update-superset-bun-lock";
+    executable = true;
+    text =
+      "#!${lib.getExe python3}\n"
+      +
+        builtins.replaceStrings
+          [
+            "@UPSTREAM_SRC@"
+            "@BUN@"
+            "@BUN2NIX_FLAKE@"
+          ]
+          [
+            (toString upstreamSrc)
+            (lib.getExe bun)
+            (toString inputs.bun2nix)
+          ]
+          (builtins.readFile updateBunLockTemplate);
+  };
   invalidBunNixErr = ''
     packages/superset/bun.nix failed to evaluate.
 
@@ -78,63 +69,6 @@ let
       match = builtins.match "https?://([^/]+).*" url;
     in
     if match != null then builtins.elemAt match 0 else null;
-  extractBunPackage = writeShellScriptBin "extract-bun-package" ''
-    throw_usage() {
-      echo "Missing required flags"
-      echo "Usage: --package <pkg> --out <out>"
-      exit 1
-    }
-
-    pkg=""
-    out=""
-
-    while [ "$#" -gt 0 ]; do
-      case "$1" in
-        --package)
-          shift
-          pkg="$1"
-          ;;
-        --out)
-          shift
-          out="$1"
-          ;;
-        --package=*)
-          pkg="''${1#--package=}"
-          ;;
-        --out=*)
-          out="''${1#--out=}"
-          ;;
-        -*)
-          echo "Unknown option: $1"
-          throw_usage
-          ;;
-        *)
-          echo "Unexpected positional arg: $1"
-          throw_usage
-          ;;
-      esac
-      shift
-    done
-
-    if [ -z "$pkg" ] || [ -z "$out" ]; then
-      throw_usage
-    fi
-
-    mkdir -p "$out"
-
-    if [[ "$pkg" = *.tgz ]]; then
-      ${lib.getExe' libarchive "bsdtar"} --extract \
-        --file "$pkg" \
-        --directory "$out" \
-        --strip-components=1 \
-        --no-same-owner \
-        --no-same-permissions
-    else
-      cp -r "$pkg/." "$out"
-    fi
-
-    chmod -R u+rwx "$out"
-  '';
   bunWithFakeNode = stdenvNoCC.mkDerivation {
     name = "bun-with-fake-node";
     dontUnpack = true;
@@ -219,7 +153,8 @@ let
           extractPhase = ''
             runHook preExtract
 
-            "${lib.getExe extractBunPackage}" \
+            ${lib.getExe python3} ${extractBunPackageHelper} \
+              --bsdtar ${lib.escapeShellArg (lib.getExe' libarchive "bsdtar")} \
               --package "${pkg}" \
               --out "$out/share/bun-packages/${name}"
 
@@ -241,7 +176,9 @@ let
               --out "$out/share/bun-cache" \
               --name "${name}" \
               --package "$out/share/bun-packages/${name}" \
-              ${lib.optionalString (registryHost != null) ''--registry "${registryHost}"''}
+              ${lib.optionalString (registryHost != null) ''
+                --registry "${registryHost}"
+              ''}
 
             runHook postCacheEntry
           '';
@@ -334,27 +271,8 @@ else
 
       bun run --cwd apps/desktop copy:native-modules
 
-      python3 - <<'PY'
-      from pathlib import Path
-
-      old = '"<!@(node -p \\\"require(\'node-addon-api\').include\\\")"'
-      new = '"../../node-addon-api"'
-      patched = []
-
-      for path in Path("apps/desktop/node_modules").rglob("binding.gyp"):
-          text = path.read_text()
-          if old not in text:
-              continue
-          path.write_text(text.replace(old, new))
-          patched.append(path)
-
-      if patched:
-          print("patched node-addon-api include paths in:")
-          for path in patched:
-              print(f"  {path}")
-      else:
-          print("no binding.gyp files needed node-addon-api include patching")
-      PY
+      ${lib.getExe python3} ${patchBindingGypHelper} \
+        apps/desktop/node_modules
 
       bun run --cwd apps/desktop generate:icons
       bun run --cwd apps/desktop compile:app
@@ -389,7 +307,8 @@ else
       cp -R "$appBundle" "$out/Applications/Superset.app"
 
       mkdir -p "$out/bin"
-      ln -s "$out/Applications/Superset.app/Contents/MacOS/Superset" "$out/bin/superset"
+      ln -s "$out/Applications/Superset.app/Contents/MacOS/Superset" \
+        "$out/bin/superset"
 
       runHook postInstall
     '';

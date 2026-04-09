@@ -173,7 +173,7 @@ in
       type = types.attrsOf mcpServerType;
       default = {
         chrome-devtools = {
-          enable = true;
+          enable = false;
           type = "local";
           command = [
             "npx"
