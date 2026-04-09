@@ -583,13 +583,28 @@
               pkgs,
               ...
             }:
-            pkgs.runCommand "check-lint-pins-pinact" { } ''
-              export HOME="$TMPDIR"
-              cp -a ${./.} src
-              cd src
-              ${lib.getExe pkgs.pinact} run --check
-              touch $out
-            '';
+            let
+              certFile = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+            in
+            pkgs.runCommand "check-lint-pins-pinact"
+              {
+                nativeBuildInputs = [ pkgs.cacert ];
+                __noChroot = true;
+                allowSubstitutes = false;
+                preferLocalBuild = true;
+              }
+              ''
+                export HOME="$TMPDIR"
+                export CURL_CA_BUNDLE="${certFile}"
+                export GIT_SSL_CAINFO="${certFile}"
+                export NIX_SSL_CERT_FILE="${certFile}"
+                export REQUESTS_CA_BUNDLE="${certFile}"
+                export SSL_CERT_FILE="${certFile}"
+                cp -a ${./.} src
+                cd src
+                ${lib.getExe pkgs.pinact} run --check
+                touch $out
+              '';
 
           checks."test-python-pytest" =
             {
@@ -599,6 +614,7 @@
             let
               nixcfgPkg = mkNixcfgPackage pkgs;
               certFile = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+              nixConfig = "experimental-features = nix-command flakes";
             in
             pkgs.runCommand "check-test-python-pytest"
               {
@@ -613,6 +629,7 @@
                 export COVERAGE_FILE="$TMPDIR/.coverage"
                 export CURL_CA_BUNDLE="${certFile}"
                 export GIT_SSL_CAINFO="${certFile}"
+                export NIX_CONFIG="${nixConfig}"
                 export NIX_SSL_CERT_FILE="${certFile}"
                 export REQUESTS_CA_BUNDLE="${certFile}"
                 export SSL_CERT_FILE="${certFile}"
@@ -631,7 +648,7 @@
               ...
             }:
             let
-              sdkRoot = "${pkgs.apple-sdk}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
+              sdkRoot = if pkgs.stdenv.isDarwin then "${pkgs.apple-sdk}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" else "";
             in
             pkgs.runCommand "check-test-ghawfr-go"
               {
@@ -668,6 +685,7 @@
             let
               nixcfgPkg = mkNixcfgPackage pkgs;
               certFile = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+              nixConfig = "experimental-features = nix-command flakes";
             in
             pkgs.runCommand "check-verify-crate2nix"
               {
@@ -681,6 +699,7 @@
                 export HOME="$TMPDIR"
                 export CURL_CA_BUNDLE="${certFile}"
                 export GIT_SSL_CAINFO="${certFile}"
+                export NIX_CONFIG="${nixConfig}"
                 export NIX_SSL_CERT_FILE="${certFile}"
                 export REQUESTS_CA_BUNDLE="${certFile}"
                 export SSL_CERT_FILE="${certFile}"
