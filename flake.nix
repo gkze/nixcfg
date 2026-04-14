@@ -338,6 +338,10 @@
 
           flakelight.editorconfig = false;
 
+          # Export the standalone Home Manager config manually below without
+          # letting flakelight wire it into per-system checks.
+          disabledModules = [ "homeConfigurations.nix" ];
+
           nixpkgs.config = nixpkgsConfig;
 
           apps.nixcfg =

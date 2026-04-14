@@ -18,6 +18,7 @@ def test_standalone_home_output_is_exported_outside_flakelight_home_checks() -> 
     """Avoid wiring the standalone home activation package into shared flake checks."""
     source = _flake_text()
 
+    assert 'disabledModules = [ "homeConfigurations.nix" ];' in source
     assert (
         'homeConfigurations.george = mkStandaloneHomeConfiguration "george" (' in source
     )
