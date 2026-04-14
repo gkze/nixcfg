@@ -192,7 +192,7 @@
         # optional apps just to evaluate unrelated checks.
         heavyOptional.enable = lib.mkDefault false;
         cloud.enable = lib.mkDefault false;
-        inherit (managedMacAppProjection) excludePackagesByName;
+        excludePackagesByName = managedMacAppProjection.excludePackagesByName;
         extraPackages = with pkgs; [
           betterdisplay
           rectangle
