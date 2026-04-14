@@ -460,7 +460,11 @@
         ui.pane_frames.hide_session_name = true;
       };
     };
-    zed-editor = {
+    zed-editor = lib.mkIf (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) {
+      # Linux CI evaluates the standalone Darwin Home Manager config as a
+      # cross-system package set. Keep the heavyweight nightly package out of
+      # that path so quality-gate evals do not try to realize Darwin-only Zed
+      # sources on Linux builders.
       enable = true;
       package = pkgs.zed-editor-nightly;
       userSettings = {
