@@ -175,14 +175,17 @@ let
     {
       name = "heavyOptional";
       description = "large optional apps/tools that are expensive to keep in every host closure";
-      packages = [
-        goose-cli
-        lumen
-        czkawka
-        mux
-        scratch
-        superset
-      ];
+      packages =
+        lib.optionals (stdenv.isDarwin && stdenv.hostPlatform.isAarch64) [
+          goose-cli
+        ]
+        ++ [
+          lumen
+          czkawka
+          mux
+          scratch
+          superset
+        ];
     }
   ];
 
