@@ -37,7 +37,15 @@ def test_mapping_metadata_helpers_and_version_info_commit_paths() -> None:
         "node": node,
         "commit": "abc123",
     }
+    assert metadata_module.metadata_get(flake_metadata, "commit") == "abc123"
     assert metadata_module.metadata_get_str(flake_metadata, "commit") == "abc123"
+
+    class _AttrMetadata:
+        commit = "ghi789"
+
+    assert metadata_module.metadata_get(_AttrMetadata(), "commit") == "ghi789"
+    assert metadata_module.metadata_get_str(_AttrMetadata(), "commit") == "ghi789"
+    assert metadata_module.metadata_get(_AttrMetadata(), "missing") is None
 
     platform_metadata = PlatformAPIMetadata(
         platform_info={"x86_64-linux": {"sha256hash": "x"}},
