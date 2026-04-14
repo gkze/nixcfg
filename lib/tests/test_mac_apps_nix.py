@@ -958,6 +958,14 @@ def test_george_config_manages_mutable_gui_apps_via_system_applications() -> Non
         AttributeSet,
     )
     assert_nix_ast_equal(
+        expect_binding(package_sets.values, "heavyOptional").value,
+        "{ enable = lib.mkDefault false; }",
+    )
+    assert_nix_ast_equal(
+        expect_binding(package_sets.values, "cloud").value,
+        "{ enable = lib.mkDefault false; }",
+    )
+    assert_nix_ast_equal(
         expect_binding(package_sets.values, "excludePackagesByName").value,
         "managedMacAppProjection.excludePackagesByName",
     )

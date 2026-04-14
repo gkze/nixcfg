@@ -188,11 +188,18 @@
         python.enable = true;
         rust.enable = true;
       };
-      packageSets.excludePackagesByName = managedMacAppProjection.excludePackagesByName;
-      packageSets.extraPackages = with pkgs; [
-        betterdisplay
-        rectangle
-      ];
+      packageSets = {
+        # Keep the standalone Home Manager config aligned with the Darwin host
+        # closures so Linux CI never needs to realize heavyweight Darwin-only
+        # optional apps just to evaluate unrelated checks.
+        heavyOptional.enable = lib.mkDefault false;
+        cloud.enable = lib.mkDefault false;
+        excludePackagesByName = managedMacAppProjection.excludePackagesByName;
+        extraPackages = with pkgs; [
+          betterdisplay
+          rectangle
+        ];
+      };
       macApps.systemApplications = managedMacAppProjection.systemApplications;
       git = {
         signingKey = userMeta.gpg.keys.signing;
