@@ -361,10 +361,13 @@ let
 
     buildInputs = (attrs.buildInputs or [ ]) ++ commonBuildInputs;
 
+    # Keep font discovery pointed at the raw flake input so cross-platform
+    # evaluation does not need to realize the Darwin-only patched workspace
+    # source derivation just to inspect the bundled fonts.
     FONTCONFIG_FILE = makeFontsConf {
       fontDirectories = [
-        "${patchedSrc}/assets/fonts/lilex"
-        "${patchedSrc}/assets/fonts/ibm-plex-sans"
+        "${src}/assets/fonts/lilex"
+        "${src}/assets/fonts/ibm-plex-sans"
       ];
     };
     LK_CUSTOM_WEBRTC = livekitLibwebrtc;

@@ -69,6 +69,12 @@ def superset_module() -> ModuleType:
 
 
 @pytest.fixture(scope="module")
+def crush_module() -> ModuleType:
+    """Load the crush updater module."""
+    return _load_module("overlays/crush/updater.py", "crush_updater_test")
+
+
+@pytest.fixture(scope="module")
 def mux_module() -> ModuleType:
     """Load the mux updater module."""
     return _load_module("packages/mux/updater.py", "mux_updater_test")
@@ -499,3 +505,93 @@ def test_superset_release_url_format(superset_module: ModuleType) -> None:
     )
     with pytest.raises(RuntimeError, match="Unsupported platform"):
         updater.get_download_url("aarch64-linux", VersionInfo("1.2.3", {}))
+
+
+def test_crush_prefers_newest_release_compatible_with_repo_go_floor(
+    crush_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scan far enough back to find the newest release the current Go can build."""
+    updater = crush_module.CrushUpdater()
+    monkeypatch.setattr(
+        updater,
+        "_resolve_supported_go_version",
+        lambda: asyncio.sleep(0, result=(1, 26, 1)),
+    )
+
+    captured_kwargs: dict[str, object] = {}
+
+    async def _fake_fetch_releases(
+        *_a: object, **kwargs: object
+    ) -> list[dict[str, object]]:
+        captured_kwargs.update(kwargs)
+        return [
+            *[
+                {"tag_name": f"v0.{minor}.0", "draft": False, "prerelease": False}
+                for minor in range(67, 56, -1)
+            ],
+            {"tag_name": "v0.56.0", "draft": False, "prerelease": False},
+        ]
+
+    monkeypatch.setattr(
+        crush_module, "fetch_github_api_paginated", _fake_fetch_releases
+    )
+    monkeypatch.setattr(
+        crush_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(
+            0,
+            result=(
+                b"module github.com/charmbracelet/crush\n\ngo 1.26.1\n"
+                if "v0.56.0" in _a[1]
+                else b"module github.com/charmbracelet/crush\n\ngo 1.27.0\n"
+            ),
+        ),
+    )
+
+    latest = _run(updater.fetch_latest(object()))
+    assert latest.version == "0.56.0"
+    assert latest.metadata.tag == "v0.56.0"
+    assert captured_kwargs["per_page"] == 100
+    assert "item_limit" not in captured_kwargs
+
+
+def test_crush_falls_back_to_current_pin_when_no_release_is_compatible(
+    crush_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve the current crush pin until nixpkgs can build newer releases."""
+    updater = crush_module.CrushUpdater()
+    monkeypatch.setattr(
+        updater,
+        "_resolve_supported_go_version",
+        lambda: asyncio.sleep(0, result=(1, 26, 1)),
+    )
+    monkeypatch.setattr(
+        crush_module,
+        "fetch_github_api_paginated",
+        lambda *_a, **_k: asyncio.sleep(
+            0,
+            result=[
+                {"tag_name": "v0.57.0", "draft": False, "prerelease": False},
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        crush_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(
+            0,
+            result=b"module github.com/charmbracelet/crush\n\ngo 1.26.2\n",
+        ),
+    )
+    monkeypatch.setattr(crush_module, "package_dir_for", lambda _n: Path("/tmp/crush"))
+    monkeypatch.setattr(
+        crush_module.update_sources,
+        "load_source_entry",
+        lambda _p: SourceEntry.model_validate({"version": "0.55.0", "hashes": []}),
+    )
+
+    latest = _run(updater.fetch_latest(object()))
+    assert latest.version == "0.55.0"
+    assert latest.metadata.tag == "v0.55.0"
