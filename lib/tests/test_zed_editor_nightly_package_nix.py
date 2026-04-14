@@ -32,9 +32,12 @@ def test_zed_fontconfig_uses_raw_source_paths() -> None:
     assert '"${patchedSrc}/assets/fonts/ibm-plex-sans"' not in source
 
 
-def test_home_config_gates_zed_when_host_cannot_execute_target() -> None:
+def test_home_config_probes_zed_before_enabling_editor_module() -> None:
     """Skip Zed in cross-system CI evals of the standalone Darwin home config."""
     source = _home_configuration_text()
 
-    assert "zed-editor = lib.mkIf" in source
-    assert "pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform" in source
+    assert (
+        "zedPackageEval = builtins.tryEval (toString pkgs.zed-editor-nightly);"
+        in source
+    )
+    assert "if zedPackageEval.success then" in source

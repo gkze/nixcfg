@@ -11,13 +11,11 @@
 }:
 {
   imports = [
-    (
-      {
+    {
         darwin = ./darwin.nix;
         linux = ./nixos.nix;
       }
       .${slib.kernel system}
-    )
     outputs.homeModules.nixcfgLanguageBun
     outputs.homeModules.nixcfgGit
     outputs.homeModules.nixcfgLanguageGo
@@ -194,7 +192,7 @@
         # optional apps just to evaluate unrelated checks.
         heavyOptional.enable = lib.mkDefault false;
         cloud.enable = lib.mkDefault false;
-        excludePackagesByName = managedMacAppProjection.excludePackagesByName;
+        inherit (managedMacAppProjection) excludePackagesByName;
         extraPackages = with pkgs; [
           betterdisplay
           rectangle
@@ -460,86 +458,93 @@
         ui.pane_frames.hide_session_name = true;
       };
     };
-    zed-editor = lib.mkIf (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) {
-      # Linux CI evaluates the standalone Darwin Home Manager config as a
-      # cross-system package set. Keep the heavyweight nightly package out of
-      # that path so quality-gate evals do not try to realize Darwin-only Zed
-      # sources on Linux builders.
-      enable = true;
-      package = pkgs.zed-editor-nightly;
-      userSettings = {
-        agent_servers = {
-          qwen-code.type = "registry";
-          mistral-vibe.type = "registry";
-          factory-droid.type = "registry";
-          github-copilot.type = "registry";
-          auggie.type = "registry";
-          opencode.type = "registry";
-        };
-        agent = {
-          default_model = {
-            model = "claude-opus-4-5-20251101";
-            provider = "anthropic";
-          };
-          dock = "right";
-          inline_assistant_model = {
-            model = "claude-opus-4-5-20251101";
-            provider = "anthropic";
-          };
-          model_parameters = [ ];
-        };
-        buffer_font_family = config.fonts.monospace.name;
-        buffer_font_size = 12.0;
-        font_family = config.fonts.monospace.name;
-        context_servers = {
-          browser-tools-context-server = {
-            enabled = true;
-            remote = false;
-            settings = { };
-          };
-          mcp-server-github = {
-            enabled = true;
-            settings = { }; # Token injected by activation script
-          };
-        };
-        file_types = {
-          "Shell Script" = [ ".envrc" ];
-        };
-        format_on_save = "on";
-        icon_theme = config.theme.displayNameAccented;
-        minimap.show = "always";
-        outline_panel.dock = "right";
-        show_whitespaces = "all";
-        theme = {
-          dark = config.theme.displayNameAccented;
-          light = "One Light";
-          mode = "system";
-        };
-        ui_font_family = config.fonts.sansSerif.name;
-        ui_font_size = 15.0;
-        vim_mode = true;
-        wrap_guides = [
-          80
-          100
-        ];
-      };
-      userKeymaps = [
+    zed-editor =
+      let
+        zedPackageEval = builtins.tryEval (toString pkgs.zed-editor-nightly);
+      in
+      if zedPackageEval.success then
         {
-          context = "Terminal";
-          bindings = {
-            "shift-enter" = [
-              "terminal::SendText"
-              "\u001b\r"
+          # Linux CI evaluates the standalone Darwin Home Manager config while
+          # building x86_64-linux quality-gate derivations. Probe the package
+          # first and skip the Zed config when the Darwin-only package graph
+          # cannot be realized in that context.
+          enable = true;
+          package = pkgs.zed-editor-nightly;
+          userSettings = {
+            agent_servers = {
+              qwen-code.type = "registry";
+              mistral-vibe.type = "registry";
+              factory-droid.type = "registry";
+              github-copilot.type = "registry";
+              auggie.type = "registry";
+              opencode.type = "registry";
+            };
+            agent = {
+              default_model = {
+                model = "claude-opus-4-5-20251101";
+                provider = "anthropic";
+              };
+              dock = "right";
+              inline_assistant_model = {
+                model = "claude-opus-4-5-20251101";
+                provider = "anthropic";
+              };
+              model_parameters = [ ];
+            };
+            buffer_font_family = config.fonts.monospace.name;
+            buffer_font_size = 12.0;
+            font_family = config.fonts.monospace.name;
+            context_servers = {
+              browser-tools-context-server = {
+                enabled = true;
+                remote = false;
+                settings = { };
+              };
+              mcp-server-github = {
+                enabled = true;
+                settings = { }; # Token injected by activation script
+              };
+            };
+            file_types = {
+              "Shell Script" = [ ".envrc" ];
+            };
+            format_on_save = "on";
+            icon_theme = config.theme.displayNameAccented;
+            minimap.show = "always";
+            outline_panel.dock = "right";
+            show_whitespaces = "all";
+            theme = {
+              dark = config.theme.displayNameAccented;
+              light = "One Light";
+              mode = "system";
+            };
+            ui_font_family = config.fonts.sansSerif.name;
+            ui_font_size = 15.0;
+            vim_mode = true;
+            wrap_guides = [
+              80
+              100
             ];
           };
+          userKeymaps = [
+            {
+              context = "Terminal";
+              bindings = {
+                "shift-enter" = [
+                  "terminal::SendText"
+                  "\u001b\r"
+                ];
+              };
+            }
+            {
+              bindings = {
+                "alt-~" = "terminal_panel::ToggleFocus";
+              };
+            }
+          ];
         }
-        {
-          bindings = {
-            "alt-~" = "terminal_panel::ToggleFocus";
-          };
-        }
-      ];
-    };
+      else
+        { };
     zoxide = {
       enable = true;
       enableNushellIntegration = true;
