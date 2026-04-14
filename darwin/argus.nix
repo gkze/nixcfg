@@ -7,6 +7,7 @@ lib.mkDarwinHost {
   work = true;
   brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
   extraHomeModules = [
+    ../home/george/zed.nix
     "${lib.modulesPath}/home/darwin-closure-priority.nix"
     (
       { pkgs, ... }:
