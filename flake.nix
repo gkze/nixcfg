@@ -352,8 +352,6 @@
 
           imports = [ flakelight-darwin.flakelightModules.default ];
 
-          homeConfigurations.george = import ./home/george { outputs = self; };
-
           # Public module API for consuming this repo as a framework.
           inherit (exports)
             darwinModules
@@ -691,12 +689,34 @@
           resolvedSystem = prev.system or (final.system or "x86_64-linux");
         in
         baseOutputs.overlays.default final (prev // { system = resolvedSystem; });
+      mkStandaloneHomeConfiguration =
+        name: cfg:
+        inputs.home-manager.lib.homeManagerConfiguration (
+          (builtins.removeAttrs cfg [ "system" ])
+          // {
+            extraSpecialArgs = {
+              inherit inputs;
+              inputs' = builtins.mapAttrs (_: flakelight.selectAttr cfg.system) inputs;
+            }
+            // (cfg.extraSpecialArgs or { });
+            modules = [
+              ({ lib, ... }: {
+                home.username = lib.mkDefault (builtins.head (builtins.match "([^@]*)(@.*)?" name));
+              })
+            ] ++ (cfg.modules or [ ]);
+            pkgs = baseOutputs.legacyPackages.${cfg.system};
+          }
+        );
     in
     (builtins.removeAttrs baseOutputs [
       "checks"
       "legacyPackages"
     ])
     // {
+      homeConfigurations.george = mkStandaloneHomeConfiguration "george" (
+        import ./home/george { outputs = self; }
+      );
+
       checks = builtins.mapAttrs (
         _: systemChecks: builtins.removeAttrs systemChecks [ "formatting" ]
       ) baseOutputs.checks;
