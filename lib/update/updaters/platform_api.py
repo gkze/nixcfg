@@ -26,7 +26,11 @@ from lib.update.updaters.base import (
     VersionInfo,
     _verify_platform_versions,
 )
-from lib.update.updaters.metadata import PlatformAPIMetadata
+from lib.update.updaters.metadata import (
+    PlatformAPIMetadata,
+    metadata_as_mapping,
+    metadata_get_str,
+)
 
 type JsonObject = json_utils.JsonObject
 
@@ -68,7 +72,10 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
         if isinstance(metadata, PlatformAPIMetadata):
             return metadata
         if isinstance(metadata, dict):
-            metadata_map = {str(key): value for key, value in metadata.items()}
+            metadata_map = metadata_as_mapping(
+                metadata,
+                context=f"{self.name} metadata",
+            )
             platform_info_obj = metadata_map.get("platform_info")
             if not isinstance(platform_info_obj, dict):
                 msg = f"Expected platform_info mapping in {self.name} metadata"
@@ -86,12 +93,10 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
                 for key, value in metadata_map.items()
                 if key not in {"commit", "platform_info"} and isinstance(value, str)
             }
-            commit_payload = metadata_map.get("commit")
-            commit = commit_payload if isinstance(commit_payload, str) else None
             return PlatformAPIMetadata(
                 platform_info=platform_info,
                 equality_fields=equality_fields,
-                commit=commit,
+                commit=metadata_get_str(metadata_map, "commit"),
             )
         msg = f"Expected platform_info mapping in {self.name} metadata"
         raise TypeError(msg)

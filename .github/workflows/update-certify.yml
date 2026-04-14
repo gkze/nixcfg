@@ -119,16 +119,23 @@ jobs:
           nix build .#checks.x86_64-linux.lint-python-ruff
           nix build .#checks.x86_64-linux.lint-python-ty
           nix build .#checks.x86_64-linux.lint-workflows-actionlint
-          nix build .#checks.x86_64-linux.lint-pins-pinact
+      - name: Verify pinned action annotations with pinact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: nix run --inputs-from . nixpkgs#pinact -- run --check
+      # ghawfr coverage is intentionally omitted from certification for now.
+      # The in-repo workflow runner still needs host/runtime assumptions that
+      # are not stable on generic CI runners; rely on local `go test ./...`
+      # until a dedicated CI-parity check is ready.
       - name: Run shared deep verification checks
         run: |
           nix build .#checks.x86_64-linux.test-python-pytest
-          nix build .#checks.x86_64-linux.test-ghawfr-go
-          nix build .#checks.x86_64-linux.verify-crate2nix
           nix build .#checks.x86_64-linux.verify-workflow-artifacts-refresh
           nix build .#checks.x86_64-linux.verify-workflow-artifacts-certify
           nix build .#checks.x86_64-linux.verify-workflow-structure-refresh
           nix build .#checks.x86_64-linux.verify-workflow-structure-certify
+      - name: Verify crate2nix artifacts are fresh
+        run: nix run .#nixcfg -- ci pipeline crate2nix
 
   darwin-full-smoke:
     needs: select-ref

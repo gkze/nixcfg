@@ -31,20 +31,10 @@ let
         substituteInPlace "$out/core/src/tools/js_repl/mod.rs" \
           --replace-fail '../../../../node-version.txt' '../../../node-version.txt'
 
-        ${pythonForSourcePrep}/bin/python3 - <<'PY'
-        import os
-        from pathlib import Path
-        import tomlkit
-
-        lock_file = Path(os.environ["out"]) / "Cargo.lock"
-        lock_doc = tomlkit.parse(lock_file.read_text())
-
-        for package in lock_doc.get("package", []):
-            if package.get("version") == "0.0.0" and "source" not in package:
-                package["version"] = "${version}"
-
-        lock_file.write_text(tomlkit.dumps(lock_doc))
-        PY
+        ${pythonForSourcePrep}/bin/python3 \
+          ${./patch_cargo_lock_version.py} \
+          "$out/Cargo.lock" \
+          ${lib.escapeShellArg version}
       '';
 
   cargoNix = import ./Cargo.nix {

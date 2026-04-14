@@ -22,41 +22,45 @@ def test_get_updater_accepts_shared_flake_hash_source() -> None:
     assert updater.platform_specific is False
 
 
-def test_get_updater_rejects_platform_specific_source() -> None:
-    """Platform-specific sources should be rejected by the probe."""
+def test_get_updater_rejects_non_flake_or_platform_specific_sources() -> None:
+    """Platform-specific and non-flake sources should be rejected by the probe."""
     with pytest.raises(RuntimeError, match="already platform-specific"):
         merge_probe._get_updater("emdash")
 
-    with pytest.raises(RuntimeError, match="already platform-specific"):
+    with pytest.raises(TypeError, match="is not a flake-backed hash updater"):
         merge_probe._get_updater("linearis")
 
 
 def test_entry_with_hash_preserves_existing_metadata() -> None:
     """Replacing the hash should keep the rest of the source metadata."""
     entry = SourceEntry.model_validate({
-        "hashes": [{"hashType": "npmDepsHash", "hash": "sha256-old="}],
-        "version": "main",
-        "input": "linearis",
-        "urls": {"src": "https://example.test/src.tar.gz"},
+        "hashes": [
+            {
+                "hashType": "sha256",
+                "hash": "sha256-old=",
+                "url": "https://example.test/src.tar.gz",
+            }
+        ],
+        "version": "2026.4.4",
         "commit": "0123456789abcdef0123456789abcdef01234567",
         "drvHash": "drv-demo",
     })
 
     updated = merge_probe._entry_with_hash(
         entry,
-        hash_type="npmDepsHash",
+        hash_type="sha256",
         hash_value="sha256-newhashnewhashnewhashnewhashnewhashnew=",
     )
 
-    assert updated.version == "main"
-    assert updated.input == "linearis"
-    assert updated.urls == {"src": "https://example.test/src.tar.gz"}
+    assert updated.version == "2026.4.4"
+    assert updated.input is None
+    assert updated.urls is None
     assert updated.commit == "0123456789abcdef0123456789abcdef01234567"
     assert updated.drv_hash == "drv-demo"
     assert updated.to_dict()["hashes"] == [
         {
             "hash": "sha256-newhashnewhashnewhashnewhashnewhashnew=",
-            "hashType": "npmDepsHash",
+            "hashType": "sha256",
         }
     ]
 

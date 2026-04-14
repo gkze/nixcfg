@@ -102,6 +102,9 @@ explicit-preview-rules = true
   "TRY003",
   "TRY004",
 ]
+# SchemaStore's workflow schema generates very long prose docstrings and a few
+# legacy typing constructs that are valid at runtime but noisy under Ruff.
+"lib/github_actions/models/_generated.py" = ["D205", "D404", "E501", "UP007"]
 
 [tool.ruff.lint.isort]
 # Classify these imports as first-party for stable import ordering.
@@ -167,6 +170,14 @@ include = ["lib/**/_generated.py"]
 [tool.ty.overrides.rules]
 # Ignore a generated-code pattern that is valid at runtime but noisy for static typing.
 invalid-type-form = "ignore"
+
+[[tool.ty.overrides]]
+# SchemaStore's GitHub workflow models carry generated enum defaults that are
+# valid at runtime but noisy for strict static typing.
+include = ["lib/github_actions/models/_generated.py"]
+
+[tool.ty.overrides.rules]
+all = "ignore"
 
 [[tool.ty.overrides]]
 # Ignore type-checking diagnostics in test modules.

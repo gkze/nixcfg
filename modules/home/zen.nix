@@ -21,18 +21,17 @@ let
       pyyaml
     ]
   );
-  zenProfileSync = pkgs.writeShellApplication {
-    name = "zen-profile-sync";
-    text = ''
-      exec ${lib.getExe zenPython} ${lib.escapeShellArg ../../home/george/bin/zen-profile-sync} "$@"
-    '';
-  };
-  zenFolders = pkgs.writeShellApplication {
-    name = "zen-folders";
-    text = ''
-      exec ${lib.getExe zenPython} ${lib.escapeShellArg ../../home/george/bin/zen-folders} "$@"
-    '';
-  };
+  mkZenWrapper = name: script:
+    pkgs.writeShellApplication {
+      inherit name;
+      text = ''
+        exec ${lib.getExe zenPython} ${lib.escapeShellArg script} "$@"
+      '';
+    };
+  zenProfileSync =
+    mkZenWrapper "zen-profile-sync" ../../home/george/bin/zen-profile-sync;
+  zenFolders =
+    mkZenWrapper "zen-folders" ../../home/george/bin/zen-folders;
 in
 {
   options.nixcfg.zen = {

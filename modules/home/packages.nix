@@ -5,10 +5,201 @@
   ...
 }:
 let
-  inherit (builtins) elem filter;
-  inherit (lib) any;
+  inherit (builtins)
+    elem
+    filter
+    getAttr
+    listToAttrs
+    map
+    ;
+  inherit (lib) any nameValuePair;
 
   cfg = config.nixcfg.packageSets;
+
+  # Package-set metadata and package membership live together here so the
+  # option schema and resulting home.packages list stay in sync.
+  packageSetTable = with pkgs; [
+    {
+      name = "core";
+      description = "core utilities (coreutils, curl, gnused, etc.)";
+      packages = [
+        coreutils-full
+        curl
+        curlie
+        file
+        gawk
+        gnused
+        gnutar
+        moreutils
+        rsync
+        tree
+        xz
+      ];
+    }
+    {
+      name = "nixTooling";
+      description = "Nix development tools (cachix, nil, nixfmt, etc.)";
+      packages = [
+        cachix
+        nil
+        nix-output-monitor
+        nix-tree
+        nixfmt
+      ];
+    }
+    {
+      name = "gitExtensions";
+      description = "Git extensions (git-bug, git-who, gita, glab)";
+      packages = [
+        git-bug
+        git-who
+        gita
+        glab
+      ];
+    }
+    {
+      name = "dataProcessing";
+      description = "data processing and query tools (crush, csvlens, jq, yq, etc.)";
+      packages = [
+        crush
+        csvlens
+        dasel
+        jnv
+        jo
+        mdq
+        trdsql
+        xan
+        xq-xml
+        yq-go
+      ];
+    }
+    {
+      name = "security";
+      description = "PGP and security tools (sequoia suite)";
+      packages = [
+        sequoia-chameleon-gnupg
+        sequoia-sq
+        sequoia-sqop
+        sequoia-sqv
+        sequoia-wot
+      ];
+    }
+    {
+      name = "monitoring";
+      description = "system monitoring and diagnostics (dua, dust, procs, etc.)";
+      packages = [
+        dua
+        duf
+        dust
+        gping
+        killport
+        procs
+        tokei
+        viddy
+      ];
+    }
+    {
+      name = "cliTools";
+      description = "CLI tools and productivity (ast-grep, httpie, sentry-cli, etc.)";
+      packages = [
+        amp-cli
+        ast-grep
+        axiom-cli
+        biome
+        curator
+        droid
+        ffmpeg
+        gmailctl
+        gogcli
+        graphviz
+        grex
+        httpie
+        hermes-agent
+        linear-cli
+        sculptor
+        sd
+        sentry-cli
+        taplo
+        toad
+        worktrunk
+        yt-dlp
+      ];
+    }
+    {
+      name = "guiApps";
+      description = "GUI applications (code-cursor, slack, spotify, etc.)";
+      packages =
+        [
+          code-cursor
+          dbeaver-bin
+          emdash
+          jetbrains.datagrip
+          hoppscotch
+          config.fonts.monospace.package
+          opencode-desktop
+          postman
+          red-reddit-cli
+          slack
+          spacedrive
+          spotify
+        ]
+        ++ lib.optionals stdenv.isLinux [ wl-clipboard ]
+        ++ lib.optionals stdenv.isDarwin [
+          appcleaner
+          chatgpt
+          commander
+          codex-desktop
+          conductor
+          container
+          cyberduck
+          google-chrome
+          granola
+          iina
+          mas
+          notion-app
+          raycast
+          rapidapi
+          sloth-app
+          wispr-flow
+        ];
+    }
+    {
+      name = "cloud";
+      description = "cloud and infrastructure tools (mountpoint-s3)";
+      packages = [
+        mountpoint-s3
+      ];
+    }
+    # Keep these out of the default host closures so cache-warming
+    # priority and day-to-day installed packages stay aligned.
+    {
+      name = "heavyOptional";
+      description = "large optional apps/tools that are expensive to keep in every host closure";
+      packages = [
+        goose-cli
+        lumen
+        czkawka
+        mux
+        scratch
+        superset
+      ];
+    }
+  ];
+
+  packageSetOptions = listToAttrs (
+    map
+      (
+        { name, description, ... }:
+        nameValuePair name {
+          enable = lib.mkEnableOption description // {
+            default = true;
+          };
+        }
+      )
+      packageSetTable
+  );
+
+  packageSetEnabled = packageSet: (getAttr packageSet.name cfg).enable;
 
   isExcluded =
     pkg:
@@ -21,214 +212,27 @@ let
     any (name: name != null && elem name cfg.excludePackagesByName) pkgNames;
 in
 {
-  options.nixcfg.packageSets = {
-    extraPackages = lib.mkOption {
-      type = lib.types.listOf lib.types.package;
-      default = [ ];
-      description = "Additional packages appended after all enabled package sets.";
-    };
+  options.nixcfg.packageSets =
+    {
+      extraPackages = lib.mkOption {
+        type = lib.types.listOf lib.types.package;
+        default = [ ];
+        description = "Additional packages appended after all enabled package sets.";
+      };
 
-    excludePackagesByName = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
-      description = "Package pname/name values to remove from enabled package sets.";
-    };
-
-    core = {
-      enable = lib.mkEnableOption "core utilities (coreutils, curl, gnused, etc.)" // {
-        default = true;
+      excludePackagesByName = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = "Package pname/name values to remove from enabled package sets.";
       };
-    };
-    nixTooling = {
-      enable = lib.mkEnableOption "Nix development tools (cachix, nil, nixfmt, etc.)" // {
-        default = true;
-      };
-    };
-    gitExtensions = {
-      enable = lib.mkEnableOption "Git extensions (git-bug, git-who, gita, glab)" // {
-        default = true;
-      };
-    };
-    dataProcessing = {
-      enable = lib.mkEnableOption "data processing and query tools (crush, csvlens, jq, yq, etc.)" // {
-        default = true;
-      };
-    };
-    security = {
-      enable = lib.mkEnableOption "PGP and security tools (sequoia suite)" // {
-        default = true;
-      };
-    };
-    monitoring = {
-      enable = lib.mkEnableOption "system monitoring and diagnostics (dua, dust, procs, etc.)" // {
-        default = true;
-      };
-    };
-    cliTools = {
-      enable = lib.mkEnableOption "CLI tools and productivity (ast-grep, httpie, sentry-cli, etc.)" // {
-        default = true;
-      };
-    };
-    guiApps = {
-      enable = lib.mkEnableOption "GUI applications (code-cursor, slack, spotify, etc.)" // {
-        default = true;
-      };
-    };
-    cloud = {
-      enable = lib.mkEnableOption "cloud and infrastructure tools (mountpoint-s3)" // {
-        default = true;
-      };
-    };
-    heavyOptional = {
-      enable =
-        lib.mkEnableOption "large optional apps/tools that are expensive to keep in every host closure"
-        // {
-          default = true;
-        };
-    };
-  };
+    }
+    // packageSetOptions;
 
   config.home.packages =
     let
-      selected =
-        with pkgs;
-        lib.concatLists [
-          (lib.optionals cfg.core.enable [
-            coreutils-full
-            curl
-            curlie
-            file
-            gawk
-            gnused
-            gnutar
-            moreutils
-            rsync
-            tree
-            xz
-          ])
-
-          (lib.optionals cfg.nixTooling.enable [
-            cachix
-            nil
-            nix-output-monitor
-            nix-tree
-            nixfmt
-          ])
-
-          (lib.optionals cfg.gitExtensions.enable [
-            git-bug
-            git-who
-            gita
-            glab
-          ])
-
-          (lib.optionals cfg.dataProcessing.enable [
-            crush
-            csvlens
-            dasel
-            jnv
-            jo
-            mdq
-            trdsql
-            xan
-            xq-xml
-            yq-go
-          ])
-
-          (lib.optionals cfg.security.enable [
-            sequoia-chameleon-gnupg
-            sequoia-sq
-            sequoia-sqop
-            sequoia-sqv
-            sequoia-wot
-          ])
-
-          (lib.optionals cfg.monitoring.enable [
-            dua
-            duf
-            dust
-            gping
-            killport
-            procs
-            tokei
-            viddy
-          ])
-
-          (lib.optionals cfg.cliTools.enable [
-            amp-cli
-            ast-grep
-            axiom-cli
-            biome
-            curator
-            droid
-            ffmpeg
-            gmailctl
-            gogcli
-            graphviz
-            grex
-            httpie
-            hermes-agent
-            linear-cli
-            sculptor
-            sd
-            sentry-cli
-            taplo
-            toad
-            worktrunk
-            yt-dlp
-          ])
-
-          (lib.optionals cfg.guiApps.enable (
-            [
-              code-cursor
-              dbeaver-bin
-              emdash
-              jetbrains.datagrip
-              hoppscotch
-              config.fonts.monospace.package
-              opencode-desktop
-              postman
-              red-reddit-cli
-              slack
-              spacedrive
-              spotify
-            ]
-            ++ lib.optionals stdenv.isLinux [ wl-clipboard ]
-            ++ lib.optionals stdenv.isDarwin [
-              appcleaner
-              chatgpt
-              commander
-              codex-desktop
-              conductor
-              container
-              cyberduck
-              google-chrome
-              granola
-              iina
-              mas
-              notion-app
-              raycast
-              rapidapi
-              sloth-app
-              wispr-flow
-            ]
-          ))
-
-          (lib.optionals cfg.cloud.enable [
-            mountpoint-s3
-          ])
-
-          # Keep these out of the default host closures so cache-warming
-          # priority and day-to-day installed packages stay aligned.
-          (lib.optionals cfg.heavyOptional.enable [
-            goose-cli
-            lumen
-            czkawka
-            mux
-            scratch
-            superset
-          ])
-        ];
+      selected = lib.concatLists (
+        map (packageSet: lib.optionals (packageSetEnabled packageSet) packageSet.packages) packageSetTable
+      );
     in
     (filter (pkg: !(isExcluded pkg)) selected) ++ cfg.extraPackages;
 }

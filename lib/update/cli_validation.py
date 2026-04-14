@@ -57,23 +57,6 @@ def handle_validate_request(
     return 0
 
 
-def _handle_validate_request(
-    opts: UpdateOptions,
-    out: OutputOptions,
-    *,
-    load_sources: Callable[[], SourcesFile],
-    validate_source_discovery_consistency: Callable[[], None],
-) -> int | None:
-    return handle_validate_request(
-        opts,
-        out,
-        dependencies=ValidationDependencies(
-            load_sources=load_sources,
-            validate_source_discovery_consistency=validate_source_discovery_consistency,
-        ),
-    )
-
-
 def validate_list_sort_option(opts: UpdateOptions, out: OutputOptions) -> int | None:
     """Reject ``--sort`` unless inventory output was explicitly requested."""
     if opts.list_targets or opts.sort_by == "name":
@@ -86,14 +69,8 @@ def validate_list_sort_option(opts: UpdateOptions, out: OutputOptions) -> int | 
     return 1
 
 
-def _validate_list_sort_option(opts: UpdateOptions, out: OutputOptions) -> int | None:
-    return validate_list_sort_option(opts, out)
-
-
 __all__ = [
     "ValidationDependencies",
-    "_handle_validate_request",
-    "_validate_list_sort_option",
     "handle_validate_request",
     "validate_list_sort_option",
 ]

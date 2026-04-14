@@ -1,31 +1,42 @@
 {
-  buildNpmPackage,
-  inputs,
+  fetchurl,
+  makeWrapper,
+  nodejs,
   outputs,
   lib,
-  stdenv,
+  stdenvNoCC,
   ...
 }:
 let
   pname = "linearis";
-  slib = outputs.lib;
-  inherit (stdenv.hostPlatform) system;
-  npmDepsHash =
-    let
-      perPlatformHash = builtins.tryEval (slib.sourceHashForPlatform pname "npmDepsHash" system);
-    in
-    if perPlatformHash.success then perPlatformHash.value else slib.sourceHash pname "npmDepsHash";
+  version = (outputs.lib.sourceEntry pname).version;
+  src = fetchurl {
+    url = outputs.lib.sourceUrl pname "sha256";
+    hash = outputs.lib.sourceHash pname "sha256";
+  };
 in
-buildNpmPackage rec {
-  inherit pname npmDepsHash;
+stdenvNoCC.mkDerivation {
+  inherit pname version src;
 
-  version = "unstable-${inputs.linearis.shortRev or (builtins.substring 0 8 inputs.linearis.rev)}";
-  src = inputs.linearis;
+  nativeBuildInputs = [ makeWrapper ];
+  dontUnpack = true;
+
+  installPhase = ''
+    runHook preInstall
+
+    mkdir -p "$out/libexec/${pname}" "$out/bin"
+    tar -xzf "$src" --strip-components=1 -C "$out/libexec/${pname}"
+    makeWrapper ${lib.getExe nodejs} "$out/bin/${pname}" \
+      --add-flags "$out/libexec/${pname}/dist/main.js"
+
+    runHook postInstall
+  '';
 
   meta = {
     description = "CLI tool for Linear.app with JSON output and smart ID resolution";
     homepage = "https://github.com/czottmann/linearis";
     license = lib.licenses.mit;
     mainProgram = pname;
+    platforms = lib.platforms.unix;
   };
 }

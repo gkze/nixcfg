@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import sys
 from pathlib import Path
 
 import pytest
 
+from lib.import_utils import load_module_from_path
 from lib.schema_codegen import runner as codegen_runner
-from lib.schema_codegen.config import DirectorySource, SchemaFormat, URLSource
+from lib.schema_codegen.config import (
+    DereferenceMode,
+    DirectorySource,
+    SchemaFormat,
+    URLSource,
+)
 from lib.schema_codegen.runner import (
     DEFAULT_CONFIG_PATH,
     _build_registry,
@@ -26,16 +31,11 @@ from lib.schema_codegen.runner import (
 
 def _load_generated_module(output_path: Path, *, module_name: str) -> object:
     """Import one generated Python module from *output_path*."""
-    spec = importlib.util.spec_from_file_location(module_name, output_path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module.__name__] = module
+    module = load_module_from_path(output_path, module_name)
     try:
-        spec.loader.exec_module(module)
+        return module
     finally:
         sys.modules.pop(module.__name__, None)
-    return module
 
 
 def test_load_schema_codegen_config_resolves_relative_paths(tmp_path: Path) -> None:
@@ -347,6 +347,106 @@ targets:
     assert "name:" in rendered
 
 
+def test_generate_schema_codegen_target_from_url_source_with_recursive_refs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Generate models from a recursive URL-backed schema without inline refs."""
+    config_path = tmp_path / "schema_codegen.yaml"
+    config_path.write_text(
+        """
+defaults:
+  generator:
+    input_file_type: jsonschema
+    output_model_type: pydantic_v2.BaseModel
+    target_python_version: "3.14"
+    use_annotated: true
+    field_constraints: true
+    formatters:
+      - ruff-format
+      - ruff-check
+sources:
+  remote:
+    kind: url
+    uri: https://json.schemastore.org/github-workflow.json
+    format: json
+registry_profiles:
+  remote:
+    aliases:
+      - source-uri
+    resource:
+      mode: from-contents
+targets:
+  github-actions:
+    sources:
+      - remote
+    registry_profile: remote
+    entrypoints:
+      - https://json.schemastore.org/github-workflow.json
+    prepare:
+      dereference: none
+    generator:
+      output: workflow_models.py
+      class_name: GitHubWorkflow
+      reuse_model: true
+      collapse_reuse_models: true
+      use_type_alias: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "lib.schema_codegen.runner._read_url_source",
+        lambda _source: json.dumps({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "$id": "https://json.schemastore.org/github-workflow.json",
+            "type": "object",
+            "properties": {
+                "jobs": {
+                    "type": "object",
+                    "additionalProperties": {"$ref": "#/definitions/configuration"},
+                }
+            },
+            "definitions": {
+                "configuration": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/configuration"
+                            },
+                        },
+                        {
+                            "type": "array",
+                            "items": {"$ref": "#/definitions/configuration"},
+                        },
+                    ]
+                }
+            },
+        }),
+    )
+
+    output_path = generate_schema_codegen_target(
+        config_path=config_path,
+        target_name="github-actions",
+    )
+    rendered = output_path.read_text(encoding="utf-8")
+    module = _load_generated_module(output_path, module_name="_generated_workflow")
+
+    assert output_path == (tmp_path / "workflow_models.py").resolve()
+    assert "type Configuration =" in rendered
+    assert "class GitHubWorkflow" in rendered
+
+    workflow = module.GitHubWorkflow.model_validate({"jobs": {"build": "ready"}})
+    assert workflow.jobs == {"build": "ready"}
+
+    nested_workflow = module.GitHubWorkflow.model_validate({
+        "jobs": {"build": {"sub": ["ready"]}}
+    })
+    assert nested_workflow.jobs == {"build": {"sub": ["ready"]}}
+
+
 def test_generate_schema_codegen_target_from_multiple_entrypoints_yields_valid_python(
     tmp_path: Path,
 ) -> None:
@@ -459,6 +559,20 @@ targets:
     assert hasattr(module, beta_shared_name)
     assert beta.shared.__class__ is getattr(module, beta_shared_name)
     assert beta.shared.value == "ready"
+
+
+def test_repo_github_actions_target_uses_safe_recursive_codegen_settings() -> None:
+    """Keep the checked-in GitHub Actions target on recursive-safe settings."""
+    loaded = load_schema_codegen_config(config_path=DEFAULT_CONFIG_PATH)
+    target = loaded.config.targets["github-actions"]
+    generator = target.generator.model_dump()
+
+    assert target.prepare.dereference is DereferenceMode.NONE
+    assert target.prepare.python_transforms == ()
+    assert generator.get("class_name") == "GitHubWorkflow"
+    assert generator.get("reuse_model") is True
+    assert generator.get("collapse_reuse_models") is True
+    assert generator.get("use_type_alias") is True
 
 
 def test_prepare_repo_codegen_manifest_entrypoints_from_default_config() -> None:

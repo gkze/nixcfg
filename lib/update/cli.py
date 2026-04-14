@@ -9,80 +9,29 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Unpack
+from typing import Annotated, Unpack
 
 import aiohttp
 import typer
 from rich.console import Console
 
-from lib.update import updaters as updater_module
-
-if TYPE_CHECKING:
-    from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
-
 from lib.cli import HELP_CONTEXT_SETTINGS
 from lib.nix.models.sources import SourceEntry, SourcesFile
+from lib.update import updaters as updater_module
 from lib.update.artifacts import GeneratedArtifact, save_generated_artifacts
 from lib.update.ci.resolve_versions import load_pinned_versions
 from lib.update.cli_inventory import (
     InventoryDependencies,
+    _classify_updater_kind,
+    _generated_artifact_paths,
+    _InventoryTarget,
+    _repo_relative_path,
+    _source_backing_input_name,
+    _source_hash_kinds,
+    build_update_inventory,
 )
 from lib.update.cli_inventory import (
-    InventoryHandles as _InventoryHandles,
-)
-from lib.update.cli_inventory import (
-    InventoryRefTarget as _InventoryRefTarget,
-)
-from lib.update.cli_inventory import (
-    InventorySourceTarget as _InventorySourceTarget,
-)
-from lib.update.cli_inventory import (
-    InventoryTarget as _InventoryTarget,
-)
-from lib.update.cli_inventory import (
-    ListRow as _ListRow,
-)
-from lib.update.cli_inventory import (
-    build_inventory_summary as _build_inventory_summary,
-)
-from lib.update.cli_inventory import (
-    build_update_inventory as _build_update_inventory_impl,
-)
-from lib.update.cli_inventory import (
-    classify_updater_kind as _classify_updater_kind,
-)
-from lib.update.cli_inventory import (
-    collect_flake_inputs_for_list as _collect_flake_inputs_for_list_impl,
-)
-from lib.update.cli_inventory import (
-    collect_source_entries_for_list as _collect_source_entries_for_list_impl,
-)
-from lib.update.cli_inventory import (
-    flake_source_string as _flake_source_string,
-)
-from lib.update.cli_inventory import (
-    generated_artifact_paths as _generated_artifact_paths_impl,
-)
-from lib.update.cli_inventory import (
-    handle_list_targets_request as _handle_list_targets_request_impl,
-)
-from lib.update.cli_inventory import (
-    inventory_classification as _inventory_classification,
-)
-from lib.update.cli_inventory import (
-    inventory_sort_value as _inventory_sort_value,
-)
-from lib.update.cli_inventory import (
-    repo_relative_path as _repo_relative_path_impl,
-)
-from lib.update.cli_inventory import (
-    row_sort_value as _row_sort_value,
-)
-from lib.update.cli_inventory import (
-    source_backing_input_name as _source_backing_input_name,
-)
-from lib.update.cli_inventory import (
-    source_hash_kinds as _source_hash_kinds,
+    _handle_list_targets_request as _handle_list_targets_request_impl,
 )
 from lib.update.cli_options import (
     UpdateOptions,
@@ -92,12 +41,8 @@ from lib.update.cli_options import (
 )
 from lib.update.cli_validation import (
     ValidationDependencies,
-)
-from lib.update.cli_validation import (
-    handle_validate_request as _handle_validate_request_impl,
-)
-from lib.update.cli_validation import (
-    validate_list_sort_option as _validate_list_sort_option_impl,
+    handle_validate_request,
+    validate_list_sort_option,
 )
 from lib.update.config import (
     UpdateConfig,
@@ -108,7 +53,6 @@ from lib.update.config import (
 from lib.update.constants import ALL_TOOLS, NIX_BUILD_FAILURE_TAIL_LINES, REQUIRED_TOOLS
 from lib.update.events import UpdateEvent
 from lib.update.flake import (
-    get_flake_input_version,
     load_flake_lock,
     resolve_root_input_node,
     update_flake_input,
@@ -141,11 +85,6 @@ __all__ = (
     "ResolvedTargets",
     "UpdateOptions",
     "UpdateSummary",
-    "_InventoryHandles",
-    "_InventoryRefTarget",
-    "_InventorySourceTarget",
-    "_inventory_classification",
-    "_row_sort_value",
     "app",
     "check_required_tools",
     "cli",
@@ -604,27 +543,21 @@ def _handle_schema_request(opts: UpdateOptions) -> int | None:
     return 0
 
 
-def _resolve_root_input_node(
-    lock: FlakeLock,
-    input_name: str,
-) -> tuple[FlakeLockNode | None, str | None]:
-    return resolve_root_input_node(lock, input_name)
-
-
-def _repo_relative_path(path: Path | None) -> str | None:
-    return _repo_relative_path_impl(path, repo_root=get_repo_root)
-
-
-def _generated_artifact_paths(name: str, updater_cls: type[Updater]) -> tuple[str, ...]:
-    return _generated_artifact_paths_impl(
-        name,
-        updater_cls,
-        package_dir_for=package_dir_for,
-        repo_relative_path=_repo_relative_path,
-    )
-
-
 def _inventory_dependencies() -> InventoryDependencies:
+    def repo_relative_path(path: Path | None) -> str | None:
+        return _repo_relative_path(path, repo_root=get_repo_root)
+
+    def generated_artifact_paths(
+        name: str,
+        updater_cls: type[Updater],
+    ) -> tuple[str, ...]:
+        return _generated_artifact_paths(
+            name,
+            updater_cls,
+            package_dir_for=package_dir_for,
+            repo_relative_path=repo_relative_path,
+        )
+
     return InventoryDependencies(
         load_sources=load_all_sources,
         source_path_map=package_file_map,
@@ -632,41 +565,23 @@ def _inventory_dependencies() -> InventoryDependencies:
         load_lock=load_flake_lock,
         get_updaters=_get_updaters,
         source_file_for=sources_file_for,
-        resolve_root_input_node=_resolve_root_input_node,
+        resolve_root_input_node=resolve_root_input_node,
         source_backing_input_name=_source_backing_input_name,
-        generated_artifact_paths=_generated_artifact_paths,
+        generated_artifact_paths=generated_artifact_paths,
         source_hash_kinds=_source_hash_kinds,
         classify_updater_kind=_classify_updater_kind,
-        repo_relative_path=_repo_relative_path,
+        repo_relative_path=repo_relative_path,
     )
 
 
 def _build_update_inventory() -> list[_InventoryTarget]:
-    return _build_update_inventory_impl(dependencies=_inventory_dependencies())
-
-
-def _collect_flake_inputs_for_list() -> list[_ListRow]:
-    return _collect_flake_inputs_for_list_impl(
-        load_lock=load_flake_lock,
-        resolve_root_input_node=_resolve_root_input_node,
-        flake_source_string=_flake_source_string,
-        get_flake_input_version=get_flake_input_version,
-    )
-
-
-def _collect_source_entries_for_list() -> list[_ListRow]:
-    return _collect_source_entries_for_list_impl(
-        load_sources=load_all_sources,
-        source_path_map=package_file_map,
-    )
+    return build_update_inventory(dependencies=_inventory_dependencies())
 
 
 def _handle_list_targets_request(opts: UpdateOptions) -> int | None:
     return _handle_list_targets_request_impl(
         opts,
-        build_update_inventory=_build_update_inventory,
-        inventory_sort_value=_inventory_sort_value,
-        build_inventory_summary=_build_inventory_summary,
+        dependencies=_inventory_dependencies(),
     )
 
 
@@ -678,15 +593,11 @@ def _validation_dependencies() -> ValidationDependencies:
 
 
 def _handle_validate_request(opts: UpdateOptions, out: OutputOptions) -> int | None:
-    return _handle_validate_request_impl(
+    return handle_validate_request(
         opts,
         out,
         dependencies=_validation_dependencies(),
     )
-
-
-def _validate_list_sort_option(opts: UpdateOptions, out: OutputOptions) -> int | None:
-    return _validate_list_sort_option_impl(opts, out)
 
 
 def _resolve_tty_settings(
@@ -873,7 +784,7 @@ class _RunPlan:
 
 
 def _handle_preflight_requests(opts: UpdateOptions, out: OutputOptions) -> int | None:
-    sort_validation = _validate_list_sort_option(opts, out)
+    sort_validation = validate_list_sort_option(opts, out)
     if sort_validation is not None:
         return sort_validation
 

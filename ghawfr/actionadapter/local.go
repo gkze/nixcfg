@@ -31,35 +31,23 @@ func NewHostLocal() backend.Local {
 
 // LocalHandlers returns the curated local action-handler registry.
 func LocalHandlers() map[string]backend.ActionHandler {
-	return map[string]backend.ActionHandler{
-		"actions/checkout": backend.ActionHandlerFunc(
-			handleCheckoutAction,
-		),
-		"determinatesystems/determinate-nix-action": backend.ActionHandlerFunc(
-			handleDeterminateNixAction,
-		),
-		"cachix/cachix-action": backend.ActionHandlerFunc(handleCachixAction),
-		"actions/cache":        backend.ActionHandlerFunc(handleCacheAction),
-		"actions/cache/restore": backend.ActionHandlerFunc(
-			handleCacheRestoreAction,
-		),
-		"actions/cache/save": backend.ActionHandlerFunc(
-			handleCacheSaveAction,
-		),
-		"actions/upload-artifact": backend.ActionHandlerFunc(
-			handleUploadArtifactAction,
-		),
-		"actions/download-artifact": backend.ActionHandlerFunc(
+	return buildCuratedActionHandlers(curatedActionHandlerSet{
+		checkout:       backend.ActionHandlerFunc(handleCheckoutAction),
+		determinateNix: backend.ActionHandlerFunc(handleDeterminateNixAction),
+		cachix:         backend.ActionHandlerFunc(handleCachixAction),
+		cache:          backend.ActionHandlerFunc(handleCacheAction),
+		cacheRestore:   backend.ActionHandlerFunc(handleCacheRestoreAction),
+		cacheSave:      backend.ActionHandlerFunc(handleCacheSaveAction),
+		uploadArtifact: backend.ActionHandlerFunc(handleUploadArtifactAction),
+		downloadArtifact: backend.ActionHandlerFunc(
 			handleDownloadArtifactAction,
 		),
-		"actions/setup-python": backend.ActionHandlerFunc(
-			handleSetupPythonAction,
+		setupPython: backend.ActionHandlerFunc(handleSetupPythonAction),
+		setupUV:     backend.ActionHandlerFunc(handleSetupUVAction),
+		createPullRequest: backend.ActionHandlerFunc(
+			handleAcceptedCreatePullRequestAction,
 		),
-		"astral-sh/setup-uv": backend.ActionHandlerFunc(handleSetupUVAction),
-		"peter-evans/create-pull-request": backend.ActionHandlerFunc(
-			handleCreatePullRequestAction,
-		),
-	}
+	})
 }
 
 func handleCheckoutAction(
@@ -462,26 +450,6 @@ func handleSetupPythonAction(
 		"python-path":    localToolExecutableOutputPath(alias, executablePath),
 	}
 	return result, nil
-}
-
-func handleCreatePullRequestAction(
-	_ context.Context,
-	action backend.ActionContext,
-) (backend.StepResult, error) {
-	if err := rejectUnsupportedInputs(action, "create-pull-request",
-		"sign-commits",
-		"branch",
-		"delete-branch",
-		"title",
-		"commit-message",
-		"body",
-		"body-path",
-		"base",
-		"token",
-	); err != nil {
-		return backend.StepResult{ID: action.Step.ID}, err
-	}
-	return backend.StepResult{ID: action.Step.ID}, nil
 }
 
 func handleSetupUVAction(

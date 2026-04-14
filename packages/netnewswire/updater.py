@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 from lib.update.net import fetch_url
 from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
-from lib.update.updaters.metadata import DownloadUrlMetadata
+from lib.update.updaters.metadata import DownloadUrlMetadata, require_metadata_str
 
 _SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 _SPARKLE_VERSION_ATTR = f"{{{_SPARKLE_NS}}}shortVersionString"
@@ -86,8 +86,12 @@ class NetNewsWireUpdater(DownloadHashUpdater):
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         """Return the appcast-provided download URL for Darwin builds."""
         _ = platform
-        metadata = info.metadata
-        if isinstance(metadata, DownloadUrlMetadata):
-            return metadata.url
-        msg = f"Missing NetNewsWire download URL in metadata: {metadata!r}"
-        raise RuntimeError(msg)
+        try:
+            return require_metadata_str(
+                info.metadata,
+                "url",
+                context="NetNewsWire metadata",
+            )
+        except TypeError as exc:
+            msg = f"Missing NetNewsWire download URL in metadata: {info.metadata!r}"
+            raise RuntimeError(msg) from exc

@@ -97,6 +97,18 @@ func Ready(definition *workflow.Workflow, executed workflow.JobSet, completed wo
 	if err != nil {
 		return nil, err
 	}
+	return ReadyFromPlan(definition, plan, executed, completed)
+}
+
+// ReadyFromPlan returns jobs in plan order whose dependencies are satisfied by
+// completed and which are not already present in executed.
+func ReadyFromPlan(definition *workflow.Workflow, plan *Plan, executed workflow.JobSet, completed workflow.JobSet) (workflow.JobIDs, error) {
+	if definition == nil {
+		return nil, fmt.Errorf("workflow is nil")
+	}
+	if plan == nil {
+		return nil, fmt.Errorf("plan is nil")
+	}
 	ready := make(workflow.JobIDs, 0, len(plan.Order))
 	for _, jobID := range plan.Order {
 		if executed[jobID] {

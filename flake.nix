@@ -187,10 +187,6 @@
       url = "github:schpet/linear-cli/v1.11.1";
       flake = false;
     };
-    linearis = {
-      url = "github:czottmann/linearis/main";
-      flake = false;
-    };
     macfuse = {
       url = "github:macfuse/library";
       flake = false;
@@ -304,6 +300,32 @@
               inherit (self) inputs;
               outputs = self;
             };
+          mkRepoCheck =
+            {
+              name,
+              runCommandAttrs ? { },
+              repoWritable ? false,
+              workdir ? "src",
+              setup ? "",
+              command,
+            }:
+            {
+              lib,
+              pkgs,
+              ...
+            }@context:
+            let
+              resolve = value: if builtins.isFunction value then value context else value;
+            in
+            pkgs.runCommand name (resolve runCommandAttrs) ''
+              export HOME="$TMPDIR"
+              ${resolve setup}
+              cp -a ${./.} src
+              ${lib.optionalString repoWritable "chmod -R u+w src"}
+              cd ${workdir}
+              ${resolve command}
+              touch $out
+            '';
         in
         {
           inherit inputs;
@@ -457,322 +479,208 @@
             ''
           );
 
-          checks."lint-editorconfig" =
-            {
-              lib,
-              pkgs,
-              ...
-            }:
-            pkgs.runCommand "check-lint-editorconfig" { } ''
-              export HOME="$TMPDIR"
-              cp -a ${./.} src
-              cd src
-              ${lib.getExe pkgs."editorconfig-checker"} -exclude '^\.pre-commit-config\.yaml$'
-              touch $out
-            '';
-
-          checks."format-yaml-yamlfmt" =
-            {
-              lib,
-              pkgs,
-              ...
-            }:
-            pkgs.runCommand "check-format-yaml-yamlfmt" { } ''
-              export HOME="$TMPDIR"
-              cp -a ${./.} src
-              cd src
-              ${lib.getExe pkgs.yamlfmt} -lint -gitignore_excludes -conf .yamlfmt .
-              touch $out
-            '';
-
-          checks."lint-yaml-yamllint" =
-            {
-              lib,
-              pkgs,
-              ...
-            }:
-            pkgs.runCommand "check-lint-yaml-yamllint" { } ''
-              export HOME="$TMPDIR"
-              cp -a ${./.} src
-              cd src
-              ${lib.getExe pkgs.yamllint} -c .yamllint .
-              touch $out
-            '';
-
-          checks."format-web-biome" =
-            {
-              lib,
-              pkgs,
-              ...
-            }:
-            pkgs.runCommand "check-format-web-biome" { } ''
-              export HOME="$TMPDIR"
-              cp -a ${./.} src
-              cd src
-              ${lib.getExe pkgs.biome} check --config-path biome.jsonc --diagnostic-level=error .
-              touch $out
-            '';
-
-          checks."format-python-ruff" =
-            {
-              lib,
-              pkgs,
-              ...
-            }:
-            pkgs.runCommand "check-format-python-ruff" { } ''
-              export HOME="$TMPDIR"
-              export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
-              cp -a ${./.} src
-              cd src
-              ${lib.getExe pkgs.ruff} format --check --config pyproject.toml .
-              touch $out
-            '';
-
-          checks."lint-python-ruff" =
-            {
-              lib,
-              pkgs,
-              ...
-            }:
-            pkgs.runCommand "check-lint-python-ruff" { } ''
-              export HOME="$TMPDIR"
-              export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
-              cp -a ${./.} src
-              cd src
-              ${lib.getExe pkgs.ruff} check --config pyproject.toml .
-              touch $out
-            '';
-
-          checks."lint-python-ty" =
-            {
-              lib,
-              pkgs,
-              ...
-            }:
-            let
-              nixcfgPkg = mkNixcfgPackage pkgs;
-              tyPythonFlag = if nixcfgPkg != null then " --python ${nixcfgPkg}/bin/python" else "";
-            in
-            pkgs.runCommand "check-lint-python-ty" { } ''
-              export HOME="$TMPDIR"
-              cp -a ${./.} src
-              cd src
-              ${lib.getExe pkgs.ty} check${tyPythonFlag} .
-              touch $out
-            '';
-
-          checks."lint-workflows-actionlint" =
-            {
-              lib,
-              pkgs,
-              ...
-            }:
-            pkgs.runCommand "check-lint-workflows-actionlint" { } ''
-              export HOME="$TMPDIR"
-              cp -a ${./.} src
-              chmod -R u+w src
-              cd src
-              ${lib.getExe pkgs.git} init -q .
-              ${lib.getExe pkgs.actionlint}
-              touch $out
-            '';
-
-          checks."lint-pins-pinact" =
-            {
-              lib,
-              pkgs,
-              ...
-            }:
-            let
-              certFile = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-            in
-            pkgs.runCommand "check-lint-pins-pinact"
+          checks."lint-editorconfig" = mkRepoCheck {
+            name = "check-lint-editorconfig";
+            command =
               {
-                nativeBuildInputs = [ pkgs.cacert ];
-                __noChroot = true;
-                allowSubstitutes = false;
-                preferLocalBuild = true;
-              }
+                lib,
+                pkgs,
+                ...
+              }:
               ''
-                export HOME="$TMPDIR"
-                export CURL_CA_BUNDLE="${certFile}"
-                export GIT_SSL_CAINFO="${certFile}"
-                export NIX_SSL_CERT_FILE="${certFile}"
-                export REQUESTS_CA_BUNDLE="${certFile}"
-                export SSL_CERT_FILE="${certFile}"
-                cp -a ${./.} src
-                cd src
-                ${lib.getExe pkgs.pinact} run --check
-                touch $out
+                ${lib.getExe pkgs."editorconfig-checker"} -exclude '^\.pre-commit-config\.yaml$'
               '';
+          };
 
-          checks."test-python-pytest" =
-            {
-              pkgs,
-              ...
-            }:
-            let
-              nixcfgPkg = mkNixcfgPackage pkgs;
-              certFile = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-              nixConfig = "experimental-features = nix-command flakes";
-            in
-            pkgs.runCommand "check-test-python-pytest"
+          checks."format-yaml-yamlfmt" = mkRepoCheck {
+            name = "check-format-yaml-yamlfmt";
+            command =
+              {
+                lib,
+                pkgs,
+                ...
+              }:
+              ''
+                ${lib.getExe pkgs.yamlfmt} -lint -gitignore_excludes -conf .yamlfmt .
+              '';
+          };
+
+          checks."lint-yaml-yamllint" = mkRepoCheck {
+            name = "check-lint-yaml-yamllint";
+            command =
+              {
+                lib,
+                pkgs,
+                ...
+              }:
+              ''
+                ${lib.getExe pkgs.yamllint} -c .yamllint .
+              '';
+          };
+
+          checks."format-web-biome" = mkRepoCheck {
+            name = "check-format-web-biome";
+            command =
+              {
+                lib,
+                pkgs,
+                ...
+              }:
+              ''
+                ${lib.getExe pkgs.biome} check --config-path biome.jsonc --diagnostic-level=error .
+              '';
+          };
+
+          checks."format-python-ruff" = mkRepoCheck {
+            name = "check-format-python-ruff";
+            setup = ''
+              export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
+            '';
+            command =
+              {
+                lib,
+                pkgs,
+                ...
+              }:
+              ''
+                ${lib.getExe pkgs.ruff} format --check --config pyproject.toml .
+              '';
+          };
+
+          checks."lint-python-ruff" = mkRepoCheck {
+            name = "check-lint-python-ruff";
+            setup = ''
+              export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
+            '';
+            command =
+              {
+                lib,
+                pkgs,
+                ...
+              }:
+              ''
+                ${lib.getExe pkgs.ruff} check --config pyproject.toml .
+              '';
+          };
+
+          checks."lint-python-ty" = mkRepoCheck {
+            name = "check-lint-python-ty";
+            command =
+              {
+                lib,
+                pkgs,
+                ...
+              }:
+              let
+                nixcfgPkg = mkNixcfgPackage pkgs;
+                tyPythonFlag = if nixcfgPkg != null then " --python ${nixcfgPkg}/bin/python" else "";
+              in
+              ''
+                ${lib.getExe pkgs.ty} check${tyPythonFlag} .
+              '';
+          };
+
+          checks."lint-workflows-actionlint" = mkRepoCheck {
+            name = "check-lint-workflows-actionlint";
+            repoWritable = true;
+            command =
+              {
+                lib,
+                pkgs,
+                ...
+              }:
+              ''
+                ${lib.getExe pkgs.git} init -q .
+                ${lib.getExe pkgs.actionlint}
+              '';
+          };
+
+          checks."test-python-pytest" = mkRepoCheck {
+            name = "check-test-python-pytest";
+            repoWritable = true;
+            runCommandAttrs =
+              { pkgs, ... }:
               {
                 nativeBuildInputs = [
                   pkgs.cacert
                   pkgs.git
                   pkgs.nix
                 ];
-              }
+              };
+            setup =
+              { pkgs, ... }:
+              let
+                certFile = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+                nixConfig = "experimental-features = nix-command flakes";
+              in
               ''
-                export HOME="$TMPDIR"
                 export COVERAGE_FILE="$TMPDIR/.coverage"
                 export CURL_CA_BUNDLE="${certFile}"
                 export GIT_SSL_CAINFO="${certFile}"
                 export NIX_CONFIG="${nixConfig}"
+                export NIXCFG_NIXPKGS_PATH="${inputs.nixpkgs}"
                 export NIX_SSL_CERT_FILE="${certFile}"
                 export REQUESTS_CA_BUNDLE="${certFile}"
                 export SSL_CERT_FILE="${certFile}"
-                cp -a ${./.} src
-                chmod -R u+w src
-                cd src
+              '';
+            command =
+              { pkgs, ... }:
+              let
+                nixcfgPkg = mkNixcfgPackage pkgs;
+              in
+              ''
                 ${nixcfgPkg}/bin/coverage run -m pytest
                 ${nixcfgPkg}/bin/coverage report
-                touch $out
               '';
+          };
 
-          checks."test-ghawfr-go" =
-            {
-              lib,
-              pkgs,
-              ...
-            }:
-            let
-              sdkRoot = if pkgs.stdenv.isDarwin then "${pkgs.apple-sdk}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" else "";
-            in
-            pkgs.runCommand "check-test-ghawfr-go"
-              {
-                nativeBuildInputs = [
-                  pkgs.bash
-                  pkgs.clang
-                  pkgs.git
-                  pkgs.go
-                  pkgs.nix
-                ]
-                ++ lib.optionals pkgs.stdenv.isDarwin [ pkgs.apple-sdk ];
-              }
+          checks."verify-workflow-artifacts-refresh" = mkRepoCheck {
+            name = "check-verify-workflow-artifacts-refresh";
+            command =
+              { pkgs, ... }:
+              let
+                nixcfgPkg = mkNixcfgPackage pkgs;
+              in
               ''
-                export HOME="$TMPDIR"
-                export GOCACHE="$TMPDIR/.cache/go-build"
-                export GOMODCACHE="$TMPDIR/.cache/go/pkg/mod"
-                if [ "${lib.boolToString pkgs.stdenv.isDarwin}" = "true" ]; then
-                  export SDKROOT="${sdkRoot}"
-                  export CGO_CFLAGS="-isysroot $SDKROOT"
-                  export CGO_LDFLAGS="-isysroot $SDKROOT"
-                fi
-                cp -a ${./.} src
-                chmod -R u+w src
-                cd src/ghawfr
-                ${lib.getExe' pkgs.go "go"} test ./...
-                touch $out
+                ${nixcfgPkg}/bin/nixcfg ci workflow verify-artifacts
               '';
+          };
 
-          checks."verify-crate2nix" =
-            {
-              pkgs,
-              ...
-            }:
-            let
-              nixcfgPkg = mkNixcfgPackage pkgs;
-              certFile = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-              nixConfig = "experimental-features = nix-command flakes";
-            in
-            pkgs.runCommand "check-verify-crate2nix"
-              {
-                nativeBuildInputs = [
-                  pkgs.cacert
-                  pkgs.git
-                  pkgs.nix
-                ];
-              }
+          checks."verify-workflow-artifacts-certify" = mkRepoCheck {
+            name = "check-verify-workflow-artifacts-certify";
+            command =
+              { pkgs, ... }:
+              let
+                nixcfgPkg = mkNixcfgPackage pkgs;
+              in
               ''
-                export HOME="$TMPDIR"
-                export CURL_CA_BUNDLE="${certFile}"
-                export GIT_SSL_CAINFO="${certFile}"
-                export NIX_CONFIG="${nixConfig}"
-                export NIX_SSL_CERT_FILE="${certFile}"
-                export REQUESTS_CA_BUNDLE="${certFile}"
-                export SSL_CERT_FILE="${certFile}"
-                cp -a ${./.} src
-                chmod -R u+w src
-                cd src
-                ${nixcfgPkg}/bin/nixcfg ci pipeline crate2nix
-                touch $out
+                ${nixcfgPkg}/bin/nixcfg ci workflow verify-artifacts --workflow .github/workflows/update-certify.yml
               '';
+          };
 
-          checks."verify-workflow-artifacts-refresh" =
-            {
-              pkgs,
-              ...
-            }:
-            let
-              nixcfgPkg = mkNixcfgPackage pkgs;
-            in
-            pkgs.runCommand "check-verify-workflow-artifacts-refresh" { } ''
-              export HOME="$TMPDIR"
-              cp -a ${./.} src
-              cd src
-              ${nixcfgPkg}/bin/nixcfg ci workflow verify-artifacts
-              touch $out
-            '';
+          checks."verify-workflow-structure-refresh" = mkRepoCheck {
+            name = "check-verify-workflow-structure-refresh";
+            command =
+              { pkgs, ... }:
+              let
+                nixcfgPkg = mkNixcfgPackage pkgs;
+              in
+              ''
+                ${nixcfgPkg}/bin/nixcfg ci workflow verify-structure
+              '';
+          };
 
-          checks."verify-workflow-artifacts-certify" =
-            {
-              pkgs,
-              ...
-            }:
-            let
-              nixcfgPkg = mkNixcfgPackage pkgs;
-            in
-            pkgs.runCommand "check-verify-workflow-artifacts-certify" { } ''
-              export HOME="$TMPDIR"
-              cp -a ${./.} src
-              cd src
-              ${nixcfgPkg}/bin/nixcfg ci workflow verify-artifacts --workflow .github/workflows/update-certify.yml
-              touch $out
-            '';
-
-          checks."verify-workflow-structure-refresh" =
-            {
-              pkgs,
-              ...
-            }:
-            let
-              nixcfgPkg = mkNixcfgPackage pkgs;
-            in
-            pkgs.runCommand "check-verify-workflow-structure-refresh" { } ''
-              export HOME="$TMPDIR"
-              cp -a ${./.} src
-              cd src
-              ${nixcfgPkg}/bin/nixcfg ci workflow verify-structure
-              touch $out
-            '';
-
-          checks."verify-workflow-structure-certify" =
-            {
-              pkgs,
-              ...
-            }:
-            let
-              nixcfgPkg = mkNixcfgPackage pkgs;
-            in
-            pkgs.runCommand "check-verify-workflow-structure-certify" { } ''
-              export HOME="$TMPDIR"
-              cp -a ${./.} src
-              cd src
-              ${nixcfgPkg}/bin/nixcfg ci workflow verify-structure --workflow .github/workflows/update-certify.yml
-              touch $out
-            '';
+          checks."verify-workflow-structure-certify" = mkRepoCheck {
+            name = "check-verify-workflow-structure-certify";
+            command =
+              { pkgs, ... }:
+              let
+                nixcfgPkg = mkNixcfgPackage pkgs;
+              in
+              ''
+                ${nixcfgPkg}/bin/nixcfg ci workflow verify-structure --workflow .github/workflows/update-certify.yml
+              '';
+          };
 
         }
       );

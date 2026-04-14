@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 import textwrap
+from contextlib import redirect_stderr
 from functools import cache
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -272,6 +273,127 @@ def _mac_app_metadata_attrset(
     })
 
 
+def _managed_mac_app_routing_table() -> NixList:
+    """Build George's canonical managed macOS app routing table."""
+    return NixList(
+        value=[
+            AttributeSet(
+                values=[
+                    Binding(
+                        name="excludePackageName",
+                        value=StringPrimitive(value="chatgpt"),
+                    ),
+                    Binding(
+                        name="package",
+                        value=identifier_attr_path("pkgs", "chatgpt"),
+                    ),
+                    Binding(name="mode", value=StringPrimitive(value="copy")),
+                ]
+            ),
+            AttributeSet(
+                values=[
+                    Binding(
+                        name="excludePackageName",
+                        value=StringPrimitive(value="cursor"),
+                    ),
+                    Binding(
+                        name="package",
+                        value=identifier_attr_path("pkgs", "code-cursor"),
+                    ),
+                    Binding(name="mode", value=StringPrimitive(value="copy")),
+                ]
+            ),
+            AttributeSet(
+                values=[
+                    Binding(
+                        name="excludePackageName",
+                        value=StringPrimitive(value="datagrip"),
+                    ),
+                    Binding(
+                        name="package",
+                        value=identifier_attr_path("pkgs", "jetbrains", "datagrip"),
+                    ),
+                    Binding(name="mode", value=StringPrimitive(value="copy")),
+                ]
+            ),
+            AttributeSet(
+                values=[
+                    Binding(
+                        name="package",
+                        value=identifier_attr_path("pkgs", "vscode-insiders"),
+                    ),
+                    Binding(name="mode", value=StringPrimitive(value="copy")),
+                ]
+            ),
+            AttributeSet(
+                values=[
+                    Binding(
+                        name="package",
+                        value=identifier_attr_path("pkgs", "netnewswire"),
+                    )
+                ]
+            ),
+            AttributeSet(
+                values=[
+                    Binding(
+                        name="excludePackageName",
+                        value=StringPrimitive(value="wispr-flow"),
+                    ),
+                    Binding(
+                        name="package",
+                        value=identifier_attr_path("pkgs", "wispr-flow"),
+                    ),
+                ]
+            ),
+            AttributeSet(
+                values=[
+                    Binding(
+                        name="package",
+                        value=identifier_attr_path("pkgs", "zoom-us"),
+                    )
+                ]
+            ),
+        ]
+    )
+
+
+@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
+def test_managed_mac_app_routing_projection_helper_splits_exclusions_from_apps() -> (
+    None
+):
+    """The shared helper should derive package exclusions and system apps together."""
+    projection = json.loads(
+        _mac_apps_eval(
+            FunctionCall(
+                name=identifier_attr_path("builtins", "toJSON"),
+                argument=Parenthesis(
+                    value=FunctionCall(
+                        name=identifier_attr_path(
+                            "macApps", "managedMacAppRoutingProjection"
+                        ),
+                        argument=nix_list([
+                            nix_attrset({
+                                "excludePackageName": "chatgpt",
+                                "package": "chatgpt-package",
+                                "mode": "copy",
+                            }),
+                            nix_attrset({"package": "zoom-package"}),
+                        ]),
+                    )
+                ),
+            )
+        )
+    )
+
+    assert projection == {
+        "excludePackagesByName": ["chatgpt"],
+        "systemApplications": [
+            {"package": "chatgpt-package", "mode": "copy"},
+            {"package": "zoom-package"},
+        ],
+    }
+
+
 def test_copy_mode_replaces_symlinked_application_destinations(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -347,14 +469,31 @@ def test_manifest_cleanup_checks_other_mac_app_managers_first(tmp_path: Path) ->
         state_directory=str(state_directory),
         target_directory=str(target_directory),
     )
-    result = subprocess.run(  # noqa: S603
-        ["/bin/bash", "-c", f"set -euo pipefail\n{script}"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    assert "nixcfg-mac-apps-helper.py" in script
+    assert "system-applications" in script
+    assert "nixcfg-mac-apps-system-applications.json" in script
 
-    assert result.returncode == 0
+    stderr = StringIO()
+    with redirect_stderr(stderr):
+        mac_apps_helper._system_applications({
+            "entries": [
+                {
+                    "bundleName": "Fake.app",
+                    "mode": "symlink",
+                    "sourcePath": str(fake_bundle),
+                }
+            ],
+            "rsyncPath": _rsync_path(),
+            "stateDirectory": str(state_directory),
+            "stateName": "test-manager",
+            "targetDirectory": str(target_directory),
+            "writable": False,
+        })
+
+    assert stderr.getvalue() == (
+        f"keeping {stale_app} because another manifest still manages it...\n"
+        f"setting up {target_directory / 'Fake.app'}...\n"
+    )
     assert stale_app.is_dir()
     assert (target_directory / "Fake.app").is_symlink()
     assert (target_directory / "Fake.app").resolve() == fake_bundle.resolve()
@@ -604,19 +743,24 @@ def test_profile_bundle_leak_audit_script_reports_managed_bundle_exposure(
         managed_bundle_names=("Cursor.app",),
         package_paths=(str(managed_package),),
     )
-    result = subprocess.run(  # noqa: S603
-        ["/bin/bash", "-c", f"set -euo pipefail\n{script}"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    assert "nixcfg-mac-apps-helper.py" in script
+    assert "profile-bundle-leak-audit" in script
+    assert "nixcfg-mac-apps-profile-bundle-leak-audit.json" in script
 
-    assert result.returncode == 1
+    stderr = StringIO()
+    with redirect_stderr(stderr), pytest.raises(SystemExit) as exc:
+        mac_apps_helper._profile_bundle_leak_audit({
+            "label": "home.packages",
+            "managedBundleNames": ["Cursor.app"],
+            "packagePaths": [str(managed_package)],
+        })
+
+    assert exc.value.code == 1
     assert (
         "Managed macOS app bundles must not be exposed through home.packages."
-        in result.stderr
+        in stderr.getvalue()
     )
-    assert f" - Cursor.app <= {managed_package}" in result.stderr
+    assert f" - Cursor.app <= {managed_package}" in stderr.getvalue()
 
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
@@ -631,15 +775,19 @@ def test_profile_bundle_leak_audit_script_ignores_unmanaged_bundle_exposure(
         managed_bundle_names=("Cursor.app",),
         package_paths=(str(unrelated_package),),
     )
-    result = subprocess.run(  # noqa: S603
-        ["/bin/bash", "-c", f"set -euo pipefail\n{script}"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    assert "nixcfg-mac-apps-helper.py" in script
+    assert "profile-bundle-leak-audit" in script
+    assert "nixcfg-mac-apps-profile-bundle-leak-audit.json" in script
 
-    assert result.returncode == 0
-    assert result.stderr == ""
+    stderr = StringIO()
+    with redirect_stderr(stderr):
+        mac_apps_helper._profile_bundle_leak_audit({
+            "label": "home.packages",
+            "managedBundleNames": ["Cursor.app"],
+            "packagePaths": [str(unrelated_package)],
+        })
+
+    assert stderr.getvalue() == ""
 
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
@@ -788,9 +936,22 @@ def test_netnewswire_package_exposes_copy_mode_mac_app_metadata() -> None:
 
 
 def test_george_config_manages_mutable_gui_apps_via_system_applications() -> None:
-    """George's config should route the known-problem mutable app bundles via /Applications."""
+    """George's config should single-source managed macOS app routing."""
     root = _module_output("home/george/configuration.nix")
     nixcfg = expect_instance(expect_binding(root.values, "nixcfg").value, AttributeSet)
+
+    assert_nix_ast_equal(
+        expect_scope_binding(nixcfg, "macAppHelpers").value,
+        "import ../../lib/mac-apps.nix { inherit lib pkgs; }",
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(nixcfg, "managedMacAppRouting").value,
+        _managed_mac_app_routing_table(),
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(nixcfg, "managedMacAppProjection").value,
+        "macAppHelpers.managedMacAppRoutingProjection managedMacAppRouting",
+    )
 
     package_sets = expect_instance(
         expect_binding(nixcfg.values, "packageSets").value,
@@ -798,14 +959,7 @@ def test_george_config_manages_mutable_gui_apps_via_system_applications() -> Non
     )
     assert_nix_ast_equal(
         expect_binding(package_sets.values, "excludePackagesByName").value,
-        NixList(
-            value=[
-                StringPrimitive(value="chatgpt"),
-                StringPrimitive(value="cursor"),
-                StringPrimitive(value="datagrip"),
-                StringPrimitive(value="wispr-flow"),
-            ]
-        ),
+        "managedMacAppProjection.excludePackagesByName",
     )
 
     mac_apps = expect_instance(
@@ -814,70 +968,7 @@ def test_george_config_manages_mutable_gui_apps_via_system_applications() -> Non
     )
     assert_nix_ast_equal(
         expect_binding(mac_apps.values, "systemApplications").value,
-        NixList(
-            value=[
-                AttributeSet(
-                    values=[
-                        Binding(
-                            name="package",
-                            value=identifier_attr_path("pkgs", "chatgpt"),
-                        ),
-                        Binding(name="mode", value=StringPrimitive(value="copy")),
-                    ]
-                ),
-                AttributeSet(
-                    values=[
-                        Binding(
-                            name="package",
-                            value=identifier_attr_path("pkgs", "code-cursor"),
-                        ),
-                        Binding(name="mode", value=StringPrimitive(value="copy")),
-                    ]
-                ),
-                AttributeSet(
-                    values=[
-                        Binding(
-                            name="package",
-                            value=identifier_attr_path("pkgs", "jetbrains", "datagrip"),
-                        ),
-                        Binding(name="mode", value=StringPrimitive(value="copy")),
-                    ]
-                ),
-                AttributeSet(
-                    values=[
-                        Binding(
-                            name="package",
-                            value=identifier_attr_path("pkgs", "vscode-insiders"),
-                        ),
-                        Binding(name="mode", value=StringPrimitive(value="copy")),
-                    ]
-                ),
-                AttributeSet(
-                    values=[
-                        Binding(
-                            name="package",
-                            value=identifier_attr_path("pkgs", "netnewswire"),
-                        )
-                    ]
-                ),
-                AttributeSet(
-                    values=[
-                        Binding(
-                            name="package",
-                            value=identifier_attr_path("pkgs", "wispr-flow"),
-                        )
-                    ]
-                ),
-                AttributeSet(
-                    values=[
-                        Binding(
-                            name="package",
-                            value=identifier_attr_path("pkgs", "zoom-us"),
-                        )
-                    ]
-                ),
-            ]
-        ),
+        "managedMacAppProjection.systemApplications",
     )
 
     programs = expect_instance(
@@ -1117,24 +1208,15 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
     )
 
 
-def test_george_bin_wrappers_target_only_managed_app_copies() -> None:
-    """CLI wrappers should only target the managed /Applications bundles."""
-    cursor_wrapper = (REPO_ROOT / "home/george/bin/cursor").read_text(encoding="utf-8")
-    code_insiders_wrapper = (REPO_ROOT / "home/george/bin/code-insiders").read_text(
+def test_george_config_does_not_install_repo_managed_editor_cli_wrappers() -> None:
+    """Editor app copies should no longer be accompanied by repo-managed CLI wrappers."""
+    configuration = (REPO_ROOT / "home/george/configuration.nix").read_text(
         encoding="utf-8"
     )
 
-    assert (
-        '"/Applications/Cursor.app/Contents/Resources/app/bin/cursor"' in cursor_wrapper
-    )
-    assert "$HOME/Applications/Home Manager Apps/Cursor.app" not in cursor_wrapper
-    assert 'exec "$candidate" "$@"' in cursor_wrapper
-    assert (
-        '"/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code"'
-        in code_insiders_wrapper
-    )
-    assert (
-        "$HOME/Applications/Home Manager Apps/Visual Studio Code - Insiders.app"
-        not in code_insiders_wrapper
-    )
-    assert 'exec "$candidate" "$@"' in code_insiders_wrapper
+    assert '".local/libexec/nixcfg-managed-app-cli-wrapper"' not in configuration
+    assert '".local/bin/code-insiders"' not in configuration
+    assert '".local/bin/cursor"' not in configuration
+    assert not (REPO_ROOT / "home/george/bin/_managed-app-cli-wrapper").exists()
+    assert not (REPO_ROOT / "home/george/bin/code-insiders").exists()
+    assert not (REPO_ROOT / "home/george/bin/cursor").exists()

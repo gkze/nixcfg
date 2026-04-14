@@ -9,7 +9,7 @@ import sys
 import tempfile
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import (
@@ -38,7 +38,12 @@ from lib.update.updaters.core import (
     _coerce_context,
     _emit_single_hash_entry,
 )
-from lib.update.updaters.metadata import FlakeInputMetadata, VersionInfo
+from lib.update.updaters.metadata import (
+    FlakeInputMetadata,
+    VersionInfo,
+    metadata_as_mapping,
+    metadata_get,
+)
 
 if TYPE_CHECKING:
     import aiohttp
@@ -82,8 +87,10 @@ class FlakeInputUpdater(Updater):
         if isinstance(metadata, FlakeInputMetadata):
             return metadata.node
         if isinstance(metadata, dict):
-            metadata_map = cast("dict[str, object]", metadata)
-            node = metadata_map.get("node")
+            node = metadata_get(
+                metadata_as_mapping(metadata, context=f"{self.name} metadata"),
+                "node",
+            )
             if node is None:
                 return _base_module().get_flake_input_node(self._input)
             if isinstance(node, FlakeLockNode):

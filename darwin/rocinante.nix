@@ -16,6 +16,6 @@ lib.mkDarwinHost {
       home-manager.backupFileExtension = "backup";
     }
     "${lib.modulesPath}/darwin/george/dock-apps.nix"
-    (lib.mkSetOpencodeEnvModule "active.json")
+    (lib.mkSetOpencodeEnvModule "personal.json")
   ];
 }

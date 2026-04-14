@@ -1,22 +1,20 @@
 { config, lib, ... }:
 let
   inherit (lib)
-    mkEnableOption
     mkIf
     mkOption
     types
     ;
 
   cfg = config.profiles.work;
+  workProfileSkeleton = import ../_profiles-work-skeleton.nix {
+    enableDescription = "work profile — adds work Homebrew casks and Mac App Store apps";
+  };
 in
 {
-  imports = [
-    (lib.mkAliasOptionModule [ "nixcfg" "profiles" "work" ] [ "profiles" "work" ])
-  ];
+  imports = [ workProfileSkeleton ];
 
   options.profiles.work = {
-    enable = mkEnableOption "work profile — adds work Homebrew casks and Mac App Store apps";
-
     darwin = {
       casks = mkOption {
         type = types.listOf types.str;

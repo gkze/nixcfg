@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import aiohttp
@@ -22,7 +22,7 @@ from lib.update.net import (
 )
 from lib.update.process import compute_url_hashes
 from lib.update.updaters.base import HashEntryUpdater, UpdateContext, VersionInfo
-from lib.update.updaters.metadata import GitHubRawFileMetadata
+from lib.update.updaters.metadata import GitHubRawFileMetadata, require_metadata_str
 from lib.update.updaters.registry import register_updater
 
 
@@ -80,17 +80,16 @@ class GitHubRawFileUpdater(HashEntryUpdater):
     ) -> EventStream:
         """Compute a sha256 hash entry for the resolved raw file URL."""
         _ = (session, context)
-        metadata = info.metadata
-        if isinstance(metadata, dict):
-            metadata_map = cast("dict[str, object]", metadata)
-            metadata = GitHubRawFileMetadata(
-                rev=str(metadata_map.get("rev", "")),
-                branch=str(metadata_map.get("branch", "")),
+        try:
+            rev = require_metadata_str(
+                info.metadata,
+                "rev",
+                context=f"{self.name} metadata",
             )
-        if not isinstance(metadata, GitHubRawFileMetadata) or not metadata.rev:
+        except TypeError as exc:
             msg = f"Expected string revision metadata for {self.name}"
-            raise TypeError(msg)
-        url = github_raw_url(self.owner, self.repo, metadata.rev, self.path)
+            raise TypeError(msg) from exc
+        url = github_raw_url(self.owner, self.repo, rev, self.path)
         async for item in capture_stream_value(
             compute_url_hashes(self.name, [url]),
             error="Missing hash output",

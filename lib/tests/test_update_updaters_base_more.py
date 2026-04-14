@@ -1149,11 +1149,11 @@ def test_emdash_uses_platform_specific_npm_hashes() -> None:
     assert getattr(updater, "platform_specific", False) is True
 
 
-def test_linearis_uses_platform_specific_npm_hashes() -> None:
-    """Ensure linearis tracks npmDepsHash per platform in CI."""
+def test_linearis_tracks_the_published_npm_tarball() -> None:
+    """Ensure linearis hashes the published npm tarball, not a flake input."""
     updater = _fresh_loaded_updaters()["linearis"]
-    assert getattr(updater, "hash_type", None) == "npmDepsHash"
-    assert getattr(updater, "platform_specific", False) is True
+    assert issubclass(updater, HashEntryUpdater)
+    assert not issubclass(updater, FlakeInputHashUpdater)
 
 
 async def _collect_events(stream: EventStream) -> list[UpdateEvent]:

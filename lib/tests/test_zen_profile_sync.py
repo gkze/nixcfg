@@ -2,67 +2,25 @@
 
 from __future__ import annotations
 
-import getpass
-import importlib.machinery
-import importlib.util
 import subprocess
-import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.update.paths import REPO_ROOT
+from lib.tests._zen_tooling import load_zen_script_module, resolve_zen_script_path
 
 if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
 
 
-def _resolve_zen_profile_sync_path() -> Path:
-    preferred = REPO_ROOT / f"home/{getpass.getuser()}/bin/zen-profile-sync"
-    if preferred.is_file():
-        return preferred
-
-    candidates = sorted((REPO_ROOT / "home").glob("*/bin/zen-profile-sync"))
-    if len(candidates) == 1:
-        return candidates[0]
-
-    if candidates:
-        candidate_paths = ", ".join(
-            str(path.relative_to(REPO_ROOT)) for path in candidates
-        )
-        msg = (
-            f"Unable to resolve zen-profile-sync for user {getpass.getuser()!r}; "
-            f"candidates: {candidate_paths}"
-        )
-        raise RuntimeError(msg)
-
-    msg = "Unable to locate zen-profile-sync under home/*/bin/zen-profile-sync"
-    raise RuntimeError(msg)
-
-
-ZEN_PROFILE_SYNC_PATH = _resolve_zen_profile_sync_path()
-
-
-def _load_zen_profile_sync_module() -> ModuleType:
-    loader = importlib.machinery.SourceFileLoader(
-        "zen_profile_sync_script",
-        str(ZEN_PROFILE_SYNC_PATH),
-    )
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    if spec is None or spec.loader is None:
-        msg = "failed to load zen-profile-sync module spec"
-        raise RuntimeError(msg)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[loader.name] = module
-    loader.exec_module(module)
-    return module
+ZEN_PROFILE_SYNC_PATH = resolve_zen_script_path("zen-profile-sync")
 
 
 @pytest.fixture(scope="module")
 def zen_profile_sync() -> ModuleType:
     """Load the zen-profile-sync script as a module for direct function testing."""
-    return _load_zen_profile_sync_module()
+    return load_zen_script_module("zen-profile-sync", "zen_profile_sync_script")
 
 
 def test_sync_profile_applies_default_managed_files_when_closed(
@@ -244,8 +202,8 @@ def test_resolve_profile_dir_raises_for_explicit_profile_failure(
     """Explicit profile lookup failures should surface the zen-folders error."""
     monkeypatch.setattr(
         zen_profile_sync,
-        "_run_zen_folders_capture",
-        lambda _command: subprocess.CompletedProcess(
+        "_run_zen_folders",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
             args=["zen-folders", "--profile", "bad", "profile-path"],
             returncode=1,
             stdout="",
@@ -267,8 +225,8 @@ def test_resolve_profile_dir_returns_none_for_auto_detect_miss(
     """Auto-detect misses should still behave like the first-run no-profile case."""
     monkeypatch.setattr(
         zen_profile_sync,
-        "_run_zen_folders_capture",
-        lambda _command: subprocess.CompletedProcess(
+        "_run_zen_folders",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
             args=["zen-folders", "profile-path"],
             returncode=1,
             stdout="",
@@ -289,8 +247,8 @@ def test_resolve_profile_dir_raises_for_unexpected_auto_detect_failure(
     """Unexpected auto-detect failures should surface instead of being ignored."""
     monkeypatch.setattr(
         zen_profile_sync,
-        "_run_zen_folders_capture",
-        lambda _command: subprocess.CompletedProcess(
+        "_run_zen_folders",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
             args=["zen-folders", "profile-path"],
             returncode=1,
             stdout="",

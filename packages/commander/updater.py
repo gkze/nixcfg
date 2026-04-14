@@ -10,7 +10,11 @@ if TYPE_CHECKING:
 
 from lib.update.net import fetch_headers, fetch_url
 from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
-from lib.update.updaters.metadata import NO_METADATA, DownloadUrlMetadata
+from lib.update.updaters.metadata import (
+    NO_METADATA,
+    DownloadUrlMetadata,
+    metadata_get_str,
+)
 
 _MARKDOWN_CHANGELOG_VERSION_RE = re.compile(
     r"^##\s+([0-9]+(?:\.[0-9]+)+)\s+-\s+", re.MULTILINE
@@ -46,20 +50,7 @@ class CommanderUpdater(DownloadHashUpdater):
 
     @staticmethod
     def _download_url_from_metadata(info: VersionInfo) -> str | None:
-        metadata = info.metadata
-        if metadata is None:
-            return None
-        metadata_map = (
-            {str(key): value for key, value in metadata.items()}
-            if isinstance(metadata, dict)
-            else None
-        )
-        url = (
-            metadata_map.get("url")
-            if metadata_map is not None
-            else getattr(metadata, "url", None)
-        )
-        return url if isinstance(url, str) else None
+        return metadata_get_str(info.metadata, "url", context="Commander metadata")
 
     @staticmethod
     def _is_missing_release_error(exc: RuntimeError) -> bool:

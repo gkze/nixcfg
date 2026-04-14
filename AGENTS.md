@@ -118,7 +118,7 @@ machine-specific.
 - `modules/home/zen.nix`
 - `home/george/bin/zen-folders`
 - `home/george/zen/`
-- `.opencode/skills/zen-folders/SKILL.md`
+- `home/george/bin/zen-profile-sync`
 
 ### `ghawfr` work
 
@@ -287,8 +287,8 @@ Check these first:
 
 - `packages/registry.nix`
 - similar existing packages in `packages/` or `overlays/`
-- `.opencode/commands/add-package.md`
-- `.opencode/skills/nix-add-package/SKILL.md`
+- `packages/default.nix`
+- `lib/package-self-source.nix` for sibling `sources.json` / `selfSource` plumbing
 
 For source-backed packages, make sure the full pattern is coherent:
 
@@ -312,11 +312,12 @@ host-specific.
 
 ### Working on Zen / Twilight
 
-Use the dedicated module and skill:
+Use the dedicated module and repo-managed Zen tooling:
 
 - `modules/home/zen.nix`
 - `home/george/bin/zen-folders`
-- `.opencode/skills/zen-folders/SKILL.md`
+- `home/george/bin/zen-profile-sync`
+- `home/george/zen-folders.yaml`
 
 Remember that Zen folder reconciliation is stateful and interacts with a live browser profile.
 

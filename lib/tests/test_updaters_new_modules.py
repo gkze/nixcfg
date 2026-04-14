@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.machinery
-import importlib.util
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
@@ -22,14 +21,7 @@ if TYPE_CHECKING:
 
 
 def _load_module(path: str, name: str) -> ModuleType:
-    loader = importlib.machinery.SourceFileLoader(name, str(REPO_ROOT / path))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    if spec is None or spec.loader is None:
-        msg = f"failed to load module at {path}"
-        raise RuntimeError(msg)
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
+    return load_module_from_path(REPO_ROOT / path, name)
 
 
 def _run[T](coro: Coroutine[object, object, T]) -> T:

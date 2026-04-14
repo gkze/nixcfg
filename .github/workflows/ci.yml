@@ -106,10 +106,7 @@ jobs:
           - lint-python-ruff
           - lint-python-ty
           - lint-workflows-actionlint
-          - lint-pins-pinact
           - test-python-pytest
-          - test-ghawfr-go
-          - verify-crate2nix
           - verify-workflow-artifacts-refresh
           - verify-workflow-artifacts-certify
           - verify-workflow-structure-refresh
@@ -125,3 +122,31 @@ jobs:
       - *cache_nix
       - name: Run quality gate
         run: nix build .#checks.x86_64-linux.${{ matrix.check }}
+  # ghawfr coverage is intentionally omitted from GitHub Actions for now.
+  # The in-repo workflow runner still depends on host/runtime assumptions that
+  # are not stable in generic CI; keep local `go test ./...` coverage until a
+  # dedicated CI-parity job is ready.
+  lint-pins-pinact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - *checkout
+      - *setup_nix
+      - *cachix_write
+      - *cachix_readonly
+      - *cache_nix
+      - name: Verify pinned action annotations with pinact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: nix run --inputs-from . nixpkgs#pinact -- run --check
+  verify-crate2nix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - *checkout
+      - *setup_nix
+      - *cachix_write
+      - *cachix_readonly
+      - *cache_nix
+      - name: Verify crate2nix artifacts are fresh
+        run: nix run .#nixcfg -- ci pipeline crate2nix

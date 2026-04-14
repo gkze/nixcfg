@@ -39,41 +39,23 @@ func RemoteHandlers(
 	commands backend.CommandTransport,
 ) map[string]backend.ActionHandler {
 	adapter := remoteHandlers{guestWorkspace: guestWorkspace, commands: commands}
-	return map[string]backend.ActionHandler{
-		"actions/checkout": backend.ActionHandlerFunc(
-			adapter.handleCheckoutAction,
-		),
-		"determinatesystems/determinate-nix-action": backend.ActionHandlerFunc(
-			adapter.handleDeterminateNixAction,
-		),
-		"cachix/cachix-action": backend.ActionHandlerFunc(
-			adapter.handleCachixAction,
-		),
-		"actions/cache": backend.ActionHandlerFunc(
-			adapter.handleCacheAction,
-		),
-		"actions/cache/restore": backend.ActionHandlerFunc(
-			adapter.handleCacheRestoreAction,
-		),
-		"actions/cache/save": backend.ActionHandlerFunc(
-			adapter.handleCacheSaveAction,
-		),
-		"actions/upload-artifact": backend.ActionHandlerFunc(
-			adapter.handleUploadArtifactAction,
-		),
-		"actions/download-artifact": backend.ActionHandlerFunc(
+	return buildCuratedActionHandlers(curatedActionHandlerSet{
+		checkout:       backend.ActionHandlerFunc(adapter.handleCheckoutAction),
+		determinateNix: backend.ActionHandlerFunc(adapter.handleDeterminateNixAction),
+		cachix:         backend.ActionHandlerFunc(adapter.handleCachixAction),
+		cache:          backend.ActionHandlerFunc(adapter.handleCacheAction),
+		cacheRestore:   backend.ActionHandlerFunc(adapter.handleCacheRestoreAction),
+		cacheSave:      backend.ActionHandlerFunc(adapter.handleCacheSaveAction),
+		uploadArtifact: backend.ActionHandlerFunc(adapter.handleUploadArtifactAction),
+		downloadArtifact: backend.ActionHandlerFunc(
 			adapter.handleDownloadArtifactAction,
 		),
-		"actions/setup-python": backend.ActionHandlerFunc(
-			adapter.handleSetupPythonAction,
+		setupPython: backend.ActionHandlerFunc(adapter.handleSetupPythonAction),
+		setupUV:     backend.ActionHandlerFunc(adapter.handleSetupUVAction),
+		createPullRequest: backend.ActionHandlerFunc(
+			handleAcceptedCreatePullRequestAction,
 		),
-		"astral-sh/setup-uv": backend.ActionHandlerFunc(
-			adapter.handleSetupUVAction,
-		),
-		"peter-evans/create-pull-request": backend.ActionHandlerFunc(
-			adapter.handleCreatePullRequestAction,
-		),
-	}
+	})
 }
 
 func (r remoteHandlers) handleCheckoutAction(
@@ -445,26 +427,6 @@ func (r remoteHandlers) handleDownloadArtifactAction(
 			)
 	}
 	if err := action.Artifacts.Restore(name, destination); err != nil {
-		return backend.StepResult{ID: action.Step.ID}, err
-	}
-	return backend.StepResult{ID: action.Step.ID}, nil
-}
-
-func (r remoteHandlers) handleCreatePullRequestAction(
-	_ context.Context,
-	action backend.ActionContext,
-) (backend.StepResult, error) {
-	if err := rejectUnsupportedInputs(action, "create-pull-request",
-		"sign-commits",
-		"branch",
-		"delete-branch",
-		"title",
-		"commit-message",
-		"body",
-		"body-path",
-		"base",
-		"token",
-	); err != nil {
 		return backend.StepResult{ID: action.Step.ID}, err
 	}
 	return backend.StepResult{ID: action.Step.ID}, nil

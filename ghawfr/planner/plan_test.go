@@ -69,7 +69,7 @@ jobs:
 	}
 }
 
-func TestReadyReturnsJobsWhoseDependenciesAreSatisfied(t *testing.T) {
+func TestReadyFromPlanReturnsJobsWhoseDependenciesAreSatisfied(t *testing.T) {
 	definition := &workflow.Workflow{
 		Jobs: workflow.JobMap{
 			"lint":  {ID: "lint"},
@@ -79,28 +79,51 @@ func TestReadyReturnsJobsWhoseDependenciesAreSatisfied(t *testing.T) {
 		JobOrder: workflow.JobIDs{"lint", "build", "test"},
 	}
 
-	ready, err := Ready(definition, workflow.JobSet{}, workflow.JobSet{})
+	plan, err := Build(definition)
 	if err != nil {
-		t.Fatalf("Ready(empty): %v", err)
+		t.Fatalf("Build: %v", err)
+	}
+
+	ready, err := ReadyFromPlan(definition, plan, workflow.JobSet{}, workflow.JobSet{})
+	if err != nil {
+		t.Fatalf("ReadyFromPlan(empty): %v", err)
 	}
 	if got, want := ready.Join(","), "lint,build"; got != want {
-		t.Fatalf("Ready(empty) = %q, want %q", got, want)
+		t.Fatalf("ReadyFromPlan(empty) = %q, want %q", got, want)
 	}
 
-	ready, err = Ready(definition, workflow.JobSet{"lint": true}, workflow.JobSet{"lint": true})
+	ready, err = ReadyFromPlan(definition, plan, workflow.JobSet{"lint": true}, workflow.JobSet{"lint": true})
 	if err != nil {
-		t.Fatalf("Ready(lint): %v", err)
+		t.Fatalf("ReadyFromPlan(lint): %v", err)
 	}
 	if got, want := ready.Join(","), "build"; got != want {
-		t.Fatalf("Ready(lint) = %q, want %q", got, want)
+		t.Fatalf("ReadyFromPlan(lint) = %q, want %q", got, want)
 	}
 
-	ready, err = Ready(definition, workflow.JobSet{"lint": true, "build": true}, workflow.JobSet{"lint": true, "build": true})
+	ready, err = ReadyFromPlan(definition, plan, workflow.JobSet{"lint": true, "build": true}, workflow.JobSet{"lint": true, "build": true})
 	if err != nil {
-		t.Fatalf("Ready(lint,build): %v", err)
+		t.Fatalf("ReadyFromPlan(lint,build): %v", err)
 	}
 	if got, want := ready.Join(","), "test"; got != want {
-		t.Fatalf("Ready(lint,build) = %q, want %q", got, want)
+		t.Fatalf("ReadyFromPlan(lint,build) = %q, want %q", got, want)
+	}
+}
+
+func TestReadyBuildsPlanAndDelegatesToReadyFromPlan(t *testing.T) {
+	definition := &workflow.Workflow{
+		Jobs: workflow.JobMap{
+			"lint":  {ID: "lint"},
+			"build": {ID: "build", Needs: workflow.JobIDs{"lint"}},
+		},
+		JobOrder: workflow.JobIDs{"lint", "build"},
+	}
+
+	ready, err := Ready(definition, workflow.JobSet{"lint": true}, workflow.JobSet{"lint": true})
+	if err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	if got, want := ready.Join(","), "build"; got != want {
+		t.Fatalf("Ready = %q, want %q", got, want)
 	}
 }
 

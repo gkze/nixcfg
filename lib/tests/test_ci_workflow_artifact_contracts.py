@@ -48,25 +48,6 @@ def test_artifact_contract_helper_error_paths(tmp_path: Path) -> None:
         msg = "expected absolute-path failure"
         raise AssertionError(msg)
 
-    assert contracts._parse_job_needs(None, job_id="demo") == ()
-    assert contracts._parse_job_needs("build", job_id="demo") == ("build",)
-
-    try:
-        contracts._parse_job_needs(1, job_id="demo")
-    except TypeError as exc:
-        assert "unsupported needs value" in str(exc)
-    else:
-        msg = "expected invalid-needs failure"
-        raise AssertionError(msg)
-
-    try:
-        contracts._parse_job_needs(["build", 1], job_id="demo")
-    except TypeError as exc:
-        assert "non-string need" in str(exc)
-    else:
-        msg = "expected non-string need failure"
-        raise AssertionError(msg)
-
     _write_file(tmp_path / "packages/demo/sources.json")
     _write_file(tmp_path / "overlays/demo/sources.json")
     assert contracts._resolve_spec_paths(tmp_path, "packages") == (
@@ -86,14 +67,6 @@ def test_artifact_contract_helper_error_paths(tmp_path: Path) -> None:
 
 def test_expand_jobs_reject_invalid_shapes() -> None:
     """Reject malformed workflow job shapes with clear errors."""
-    try:
-        contracts._workflow_job_map({"bad": "nope"}, context="workflow jobs")
-    except TypeError as exc:
-        assert "workflow jobs.bad must be a mapping" in str(exc)
-    else:
-        msg = "expected invalid-job-mapping failure"
-        raise AssertionError(msg)
-
     try:
         contracts._expand_jobs({"bad": {"steps": "nope"}})
     except TypeError as exc:
@@ -116,6 +89,8 @@ def test_expand_jobs_reject_invalid_shapes() -> None:
         raise AssertionError(msg)
 
     assert contracts._expand_jobs({"ok": {"steps": ["skip-me"]}})[0].steps == ()
+    assert contracts._expand_jobs({"none": {"steps": None}})[0].steps == ()
+    assert contracts._expand_jobs({"reusable": {"uses": "./demo.yml"}})[0].steps == ()
 
 
 def test_expand_jobs_reject_invalid_matrix_substitutions() -> None:
@@ -326,6 +301,7 @@ def test_validate_workflow_artifact_contracts_rejects_invalid_top_level_shapes(
     workflow_path.write_text(
         textwrap.dedent("""
         name: demo
+        on: workflow_dispatch
         jobs: []
         """),
         encoding="utf-8",
@@ -369,8 +345,10 @@ def test_validate_workflow_artifact_contracts_detects_path_re_rooting(
     workflow_path = tmp_path / "workflow.yml"
     workflow_path.write_text(
         """
+on: workflow_dispatch
 jobs:
   crate2nix-darwin:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/upload-artifact@v6
         with:
@@ -382,6 +360,7 @@ jobs:
             packages/opencode-desktop/crate-hashes.json
   merge-generated:
     needs: crate2nix-darwin
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v7
         with:
@@ -427,8 +406,10 @@ def test_validate_workflow_artifact_contracts_accepts_explicit_re_rooting(
     workflow_path = tmp_path / "workflow.yml"
     workflow_path.write_text(
         """
+on: workflow_dispatch
 jobs:
   crate2nix-darwin:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/upload-artifact@v6
         with:
@@ -440,6 +421,7 @@ jobs:
             packages/opencode-desktop/crate-hashes.json
   merge-generated:
     needs: crate2nix-darwin
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v7
         with:
@@ -471,14 +453,17 @@ def test_validate_workflow_artifact_contracts_detects_missing_job_needs(
     workflow_path = tmp_path / "workflow.yml"
     workflow_path.write_text(
         """
+on: workflow_dispatch
 jobs:
   producer:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/upload-artifact@v6
         with:
           name: foo
           path: foo.txt
   consumer:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v7
         with:
@@ -512,8 +497,10 @@ def test_validate_workflow_artifact_contracts_allows_transitive_needs(
     workflow_path = tmp_path / "workflow.yml"
     workflow_path.write_text(
         """
+on: workflow_dispatch
 jobs:
   producer:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/upload-artifact@v6
         with:
@@ -521,10 +508,12 @@ jobs:
           path: foo.txt
   middle:
     needs: producer
+    runs-on: ubuntu-latest
     steps:
-      - run: true
+      - run: "true"
   consumer:
     needs: middle
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v7
         with:
@@ -546,15 +535,18 @@ def test_validate_workflow_artifact_contracts_rejects_cyclic_needs(
     workflow_path = tmp_path / "workflow.yml"
     workflow_path.write_text(
         """
+on: workflow_dispatch
 jobs:
   alpha:
     needs: beta
+    runs-on: ubuntu-latest
     steps:
-      - run: true
+      - run: "true"
   beta:
     needs: alpha
+    runs-on: ubuntu-latest
     steps:
-      - run: true
+      - run: "true"
 """.lstrip(),
         encoding="utf-8",
     )

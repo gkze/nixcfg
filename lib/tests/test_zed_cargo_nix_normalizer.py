@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 from types import ModuleType
+
+from lib.import_utils import load_module_from_path
 
 
 def _load_normalizer_module() -> ModuleType:
@@ -14,13 +15,7 @@ def _load_normalizer_module() -> ModuleType:
         / "zed-editor-nightly"
         / "normalize_cargo_nix.py"
     )
-    spec = importlib.util.spec_from_file_location("_zed_normalizer", module_path)
-    if spec is None or spec.loader is None:
-        msg = f"Could not load normalizer module from {module_path}"
-        raise RuntimeError(msg)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(module_path, "_zed_normalizer")
 
 
 def test_normalize_is_noop_for_checked_in_zed_cargo_nix() -> None:

@@ -447,43 +447,6 @@ def build_update_inventory(
     return targets
 
 
-def _build_update_inventory(
-    *,
-    load_sources: Callable[[], SourcesFile],
-    source_path_map: Callable[[str], dict[str, Path]],
-    list_ref_inputs: Callable[[], list[FlakeInputRef]],
-    load_lock: Callable[[], FlakeLock],
-    get_updaters: Callable[[], dict[str, type[Updater]]],
-    source_file_for: Callable[[str], Path | None],
-    resolve_root_input_node: Callable[
-        [FlakeLock, str], tuple[FlakeLockNode | None, str | None]
-    ],
-    source_backing_input_name: Callable[
-        [str, type[Updater] | None, SourceEntry | None], str | None
-    ],
-    generated_artifact_paths: Callable[[str, type[Updater]], tuple[str, ...]],
-    source_hash_kinds: Callable[[SourceEntry | None], tuple[str, ...]],
-    classify_updater_kind: Callable[[type[Updater]], str],
-    repo_relative_path: Callable[[Path | None], str | None],
-) -> list[_InventoryTarget]:
-    return build_update_inventory(
-        dependencies=InventoryDependencies(
-            load_sources=load_sources,
-            source_path_map=source_path_map,
-            list_ref_inputs=list_ref_inputs,
-            load_lock=load_lock,
-            get_updaters=get_updaters,
-            source_file_for=source_file_for,
-            resolve_root_input_node=resolve_root_input_node,
-            source_backing_input_name=source_backing_input_name,
-            generated_artifact_paths=generated_artifact_paths,
-            source_hash_kinds=source_hash_kinds,
-            classify_updater_kind=classify_updater_kind,
-            repo_relative_path=repo_relative_path,
-        )
-    )
-
-
 def _inventory_sort_value(target: _InventoryTarget, sort_by: str) -> str:
     if sort_by in {"type", "classification"}:
         return target.classification
@@ -598,23 +561,21 @@ def _render_inventory_table(targets: list[_InventoryTarget]) -> None:
 def _handle_list_targets_request(
     opts: UpdateOptions,
     *,
-    build_update_inventory: Callable[[], list[_InventoryTarget]],
-    inventory_sort_value: Callable[[_InventoryTarget, str], str],
-    build_inventory_summary: Callable[[list[_InventoryTarget]], dict[str, object]],
+    dependencies: InventoryDependencies,
 ) -> int | None:
     if not opts.list_targets:
         return None
 
-    targets = build_update_inventory()
+    targets = build_update_inventory(dependencies=dependencies)
     targets.sort(
-        key=lambda target: (inventory_sort_value(target, opts.sort_by), target.name)
+        key=lambda target: (_inventory_sort_value(target, opts.sort_by), target.name)
     )
 
     if opts.json:
         payload = {
             "schemaVersion": 1,
             "kind": "nixcfg-update-inventory",
-            "summary": build_inventory_summary(targets),
+            "summary": _build_inventory_summary(targets),
             "targets": [target.to_dict() for target in targets],
         }
         sys.stdout.write(f"{json.dumps(payload)}\n")
@@ -622,65 +583,3 @@ def _handle_list_targets_request(
 
     _render_inventory_table(targets)
     return 0
-
-
-InventoryHandles = _InventoryHandles
-InventoryRefTarget = _InventoryRefTarget
-InventorySourceTarget = _InventorySourceTarget
-InventoryTarget = _InventoryTarget
-ListRow = _ListRow
-build_inventory_summary = _build_inventory_summary
-classify_updater_kind = _classify_updater_kind
-collect_flake_inputs_for_list = _collect_flake_inputs_for_list
-collect_source_entries_for_list = _collect_source_entries_for_list
-flake_source_string = _flake_source_string
-generated_artifact_paths = _generated_artifact_paths
-handle_list_targets_request = _handle_list_targets_request
-inventory_classification = _inventory_classification
-inventory_sort_value = _inventory_sort_value
-repo_relative_path = _repo_relative_path
-row_sort_value = _row_sort_value
-source_backing_input_name = _source_backing_input_name
-source_hash_kinds = _source_hash_kinds
-
-__all__ = [
-    "InventoryDependencies",
-    "InventoryHandles",
-    "InventoryRefTarget",
-    "InventorySourceTarget",
-    "InventoryTarget",
-    "ListRow",
-    "_InventoryHandles",
-    "_InventoryRefTarget",
-    "_InventorySourceTarget",
-    "_InventoryTarget",
-    "_ListRow",
-    "_build_inventory_summary",
-    "_build_update_inventory",
-    "_classify_updater_kind",
-    "_collect_flake_inputs_for_list",
-    "_collect_source_entries_for_list",
-    "_flake_source_string",
-    "_generated_artifact_paths",
-    "_handle_list_targets_request",
-    "_inventory_classification",
-    "_inventory_sort_value",
-    "_repo_relative_path",
-    "_row_sort_value",
-    "_source_backing_input_name",
-    "_source_hash_kinds",
-    "build_inventory_summary",
-    "build_update_inventory",
-    "classify_updater_kind",
-    "collect_flake_inputs_for_list",
-    "collect_source_entries_for_list",
-    "flake_source_string",
-    "generated_artifact_paths",
-    "handle_list_targets_request",
-    "inventory_classification",
-    "inventory_sort_value",
-    "repo_relative_path",
-    "row_sort_value",
-    "source_backing_input_name",
-    "source_hash_kinds",
-]

@@ -44,7 +44,7 @@ func BuildSnapshot(sourcePath string, data []byte, state RunState, options workf
 	if err != nil {
 		return nil, err
 	}
-	ready, err := planner.Ready(definition, cloneCompleted(state.ExecutedJobs), cloneCompleted(state.CompletedJobs))
+	ready, err := planner.ReadyFromPlan(definition, plan, state.ExecutedJobs, state.CompletedJobs)
 	if err != nil {
 		return nil, err
 	}
@@ -96,17 +96,6 @@ func mergeNeeds(base, overlay workflow.NeedContextMap) workflow.NeedContextMap {
 		merged[key] = workflow.NeedContext{Outputs: value.Outputs.Clone(), Result: value.Result}
 	}
 	return merged
-}
-
-func cloneCompleted(completed workflow.JobSet) workflow.JobSet {
-	if len(completed) == 0 {
-		return nil
-	}
-	clone := make(workflow.JobSet, len(completed))
-	for key, value := range completed {
-		clone[key] = value
-	}
-	return clone
 }
 
 func snapshotJobSet(snapshot *Snapshot) map[workflow.JobID]struct{} {

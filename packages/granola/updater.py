@@ -12,8 +12,7 @@ if TYPE_CHECKING:
 from lib import json_utils
 from lib.update.net import fetch_url
 from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
-
-type JsonObject = json_utils.JsonObject
+from lib.update.updaters.metadata import require_metadata_str
 
 
 @register_updater
@@ -28,26 +27,14 @@ class GranolaUpdater(DownloadHashUpdater):
         "x86_64-darwin": "darwin",
     }
 
-    @staticmethod
-    def _require_str(payload: JsonObject, field: str) -> str:
-        value = payload.get(field)
-        if isinstance(value, str):
-            return value
-        msg = f"Expected string field {field!r} in Granola feed"
-        raise RuntimeError(msg)
-
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         """Return the versioned universal zip URL for ``platform``."""
         _ = platform
-        metadata = info.metadata
-        if not isinstance(metadata, dict):
-            msg = "Expected mapping metadata for Granola"
-            raise TypeError(msg)
-        metadata_map = {str(key): value for key, value in metadata.items()}
-        path = metadata_map.get("path")
-        if not isinstance(path, str):
-            msg = "Expected string path metadata for Granola"
-            raise TypeError(msg)
+        path = require_metadata_str(
+            info.metadata,
+            "path",
+            context="Granola metadata",
+        )
         return f"{self.DOWNLOAD_BASE_URL}/{info.version}/{path}"
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
@@ -63,7 +50,20 @@ class GranolaUpdater(DownloadHashUpdater):
             loaded,
             context="Granola updater feed",
         )
-        version = self._require_str(data, "version")
-        path = self._require_str(data, "path")
-        sha512 = self._require_str(data, "sha512")
+        payload_map = json_utils.as_object_dict(data, context="Granola feed")
+        version = json_utils.get_required_str(
+            payload_map,
+            "version",
+            context="Granola feed",
+        )
+        path = json_utils.get_required_str(
+            payload_map,
+            "path",
+            context="Granola feed",
+        )
+        sha512 = json_utils.get_required_str(
+            payload_map,
+            "sha512",
+            context="Granola feed",
+        )
         return VersionInfo(version=version, metadata={"path": path, "sha512": sha512})

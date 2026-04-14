@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,6 +13,7 @@ from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.import_utils import load_module_from_path
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.update.flake import nixpkgs_expression
 from lib.update.nix_expr import identifier_attr_path
@@ -28,13 +28,7 @@ def _load_sentry_cli_updater_module() -> ModuleType:
     module_path = (
         Path(__file__).resolve().parents[2] / "overlays" / "sentry-cli" / "updater.py"
     )
-    spec = importlib.util.spec_from_file_location("_sentry_cli_updater", module_path)
-    if spec is None or spec.loader is None:
-        msg = f"Could not load sentry-cli updater module from {module_path}"
-        raise RuntimeError(msg)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(module_path, "_sentry_cli_updater")
 
 
 def test_scratch_npm_expr_is_parseable() -> None:

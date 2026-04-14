@@ -164,10 +164,9 @@ def test_mux_derivation_encodes_the_hermetic_darwin_packaging_contract() -> None
     assert_nix_ast_equal(optional_string.name, "lib.optionalString")
     assert_nix_ast_equal(optional_string.argument, "stdenv.hostPlatform.isDarwin")
     post_patch_script = expect_instance(post_patch.argument, IndentedString)
-    assert 'build["electronDist"] = "${electronDist}"' in post_patch_script.value
-    assert 'mac["target"] = "dir"' in post_patch_script.value
-    assert 'mac["hardenedRuntime"] = False' in post_patch_script.value
-    assert 'mac["notarize"] = False' in post_patch_script.value
+    assert "patch_package_json.py" in post_patch_script.value
+    assert "package.json" in post_patch_script.value
+    assert "lib.escapeShellArg (toString electronDist)" in post_patch_script.value
 
     build_phase = expect_instance(
         expect_binding(derivation_args.values, "buildPhase").value,

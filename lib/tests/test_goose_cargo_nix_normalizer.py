@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 from types import ModuleType
 
+from lib.import_utils import load_module_from_path
 from lib.tests._nix_ast import assert_nix_ast_equal
 
 
@@ -16,13 +16,7 @@ def _load_normalizer_module() -> ModuleType:
         / "goose-cli"
         / "normalize_cargo_nix.py"
     )
-    spec = importlib.util.spec_from_file_location("_goose_normalizer", module_path)
-    if spec is None or spec.loader is None:
-        msg = f"Could not load normalizer module from {module_path}"
-        raise RuntimeError(msg)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(module_path, "_goose_normalizer")
 
 
 def test_normalize_adds_root_src_and_rewrites_local_source_paths() -> None:

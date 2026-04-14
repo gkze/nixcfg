@@ -14,6 +14,7 @@ import typer
 if TYPE_CHECKING:
     from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
 
+import lib.update.cli as update_cli_module
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourcesFile
 from lib.update import cli_inventory as cli_inventory_module
 from lib.update import cli_validation as cli_validation_module
@@ -23,49 +24,50 @@ from lib.update.cli import (
     ResolvedTargets,
     UpdateOptions,
     UpdateSummary,
-    _build_inventory_summary,
     _build_item_meta,
     _build_run_plan,
     _build_update_inventory,
     _build_update_options,
-    _classify_updater_kind,
-    _collect_flake_inputs_for_list,
-    _collect_source_entries_for_list,
     _emit_summary,
     _execute_run_plan,
-    _flake_source_string,
-    _generated_artifact_paths,
     _get_updaters,
     _handle_list_targets_request,
     _handle_preflight_requests,
     _handle_schema_request,
     _handle_validate_request,
-    _inventory_classification,
-    _inventory_sort_value,
-    _InventoryHandles,
-    _InventoryRefTarget,
-    _InventorySourceTarget,
-    _InventoryTarget,
     _is_tty,
-    _ListRow,
     _load_pinned_versions,
     _load_sources_for_run,
     _merge_source_updates,
     _persist_generated_artifacts,
     _persist_materialized_updates,
     _persist_source_updates,
-    _repo_relative_path,
     _resolve_full_output,
-    _resolve_root_input_node,
     _resolve_runtime_config,
     _resolve_tty_settings,
-    _row_sort_value,
-    _source_backing_input_name,
-    _source_hash_kinds,
     check_required_tools,
     cli,
     run_update_command,
     run_updates,
+)
+from lib.update.cli_inventory import (
+    _build_inventory_summary,
+    _classify_updater_kind,
+    _collect_flake_inputs_for_list,
+    _collect_source_entries_for_list,
+    _flake_source_string,
+    _generated_artifact_paths,
+    _inventory_classification,
+    _inventory_sort_value,
+    _InventoryHandles,
+    _InventoryRefTarget,
+    _InventorySourceTarget,
+    _InventoryTarget,
+    _ListRow,
+    _repo_relative_path,
+    _row_sort_value,
+    _source_backing_input_name,
+    _source_hash_kinds,
 )
 from lib.update.events import UpdateEvent
 from lib.update.paths import REPO_ROOT
@@ -271,7 +273,10 @@ def test_preflight_handlers_schema_list_validate(
             generated_artifacts=(),
         ),
     ]
-    monkeypatch.setattr("lib.update.cli._build_update_inventory", lambda: inventory)
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.build_update_inventory",
+        lambda *, dependencies: inventory,
+    )
     list_code = _handle_list_targets_request(
         UpdateOptions(list_targets=True, json=True)
     )
@@ -327,7 +332,7 @@ def test_handle_preflight_requests_checks_schema_list_then_validate(
     calls: list[str] = []
 
     monkeypatch.setattr(
-        "lib.update.cli._validate_list_sort_option",
+        "lib.update.cli.validate_list_sort_option",
         lambda _opts, _out: calls.append("sort") or None,
     )
     monkeypatch.setattr(
@@ -386,25 +391,25 @@ def test_list_helpers_resolve_root_and_source_string() -> None:
             }
 
     lock = _Lock()
-    direct_node, direct_follows = _resolve_root_input_node(
+    direct_node, direct_follows = update_cli_module.resolve_root_input_node(
         cast("FlakeLock", lock), "direct"
     )
     assert direct_node is lock.nodes["node-a"]
     assert direct_follows is None
 
-    follows_node, follows_path = _resolve_root_input_node(
+    follows_node, follows_path = update_cli_module.resolve_root_input_node(
         cast("FlakeLock", lock), "follows"
     )
     assert follows_node is lock.nodes["node-b"]
     assert follows_path == "wrapper/nixpkgs"
 
-    missing_node, missing_path = _resolve_root_input_node(
+    missing_node, missing_path = update_cli_module.resolve_root_input_node(
         cast("FlakeLock", lock), "missing"
     )
     assert missing_node is None
     assert missing_path is None
 
-    unresolved_node, unresolved_path = _resolve_root_input_node(
+    unresolved_node, unresolved_path = update_cli_module.resolve_root_input_node(
         cast("FlakeLock", lock), "unresolved"
     )
     assert unresolved_node is None
@@ -480,7 +485,7 @@ def test_list_helpers_resolve_root_and_source_string() -> None:
     assert _flake_source_string(None, None) == "<unknown>"
 
 
-def test_collect_flake_inputs_for_list(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_collect_flake_inputs_for_list() -> None:
     """Collect table rows for flake inputs with ref fallback behavior."""
 
     class _Lock:
@@ -577,10 +582,11 @@ def test_collect_flake_inputs_for_list(monkeypatch: pytest.MonkeyPatch) -> None:
             _ = input_name
             return None
 
-    monkeypatch.setattr("lib.update.cli.load_flake_lock", _Lock)
-    monkeypatch.setattr(
-        "lib.update.cli.get_flake_input_version",
-        lambda node: (
+    rows = _collect_flake_inputs_for_list(
+        load_lock=_Lock,
+        resolve_root_input_node=update_cli_module.resolve_root_input_node,
+        flake_source_string=_flake_source_string,
+        get_flake_input_version=lambda node: (
             "unknown"
             if node is not None and getattr(node.locked, "rev", None) == "rev4"
             else "inferred-version"
@@ -588,8 +594,6 @@ def test_collect_flake_inputs_for_list(monkeypatch: pytest.MonkeyPatch) -> None:
             else "unknown"
         ),
     )
-
-    rows = _collect_flake_inputs_for_list()
     by_name = {row.name: row for row in rows}
 
     assert by_name["with-ref"].item_type == "flake"
@@ -601,11 +605,10 @@ def test_collect_flake_inputs_for_list(monkeypatch: pytest.MonkeyPatch) -> None:
     assert by_name["missing-node"].ref is None
 
 
-def test_collect_source_entries_for_list(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_collect_source_entries_for_list() -> None:
     """Collect table rows for sources.json entries and source paths."""
-    monkeypatch.setattr(
-        "lib.update.cli.load_all_sources",
-        lambda: SourcesFile(
+    rows = _collect_source_entries_for_list(
+        load_sources=lambda: SourcesFile(
             entries={
                 "inside": SourceEntry(
                     version="1.0.0",
@@ -624,17 +627,12 @@ def test_collect_source_entries_for_list(monkeypatch: pytest.MonkeyPatch) -> Non
                 "no-url": SourceEntry(version="3.0.0", hashes={}),
             }
         ),
-    )
-    monkeypatch.setattr(
-        "lib.update.cli.package_file_map",
-        lambda _filename: {
+        source_path_map=lambda _filename: {
             "inside": REPO_ROOT / "packages" / "inside" / "sources.json",
             "outside": Path("/tmp/outside/sources.json"),
             "no-url": REPO_ROOT / "overlays" / "no-url" / "sources.json",
         },
     )
-
-    rows = _collect_source_entries_for_list()
     by_name = {row.name: row for row in rows}
 
     assert by_name["inside"].item_type == "sources.json"
@@ -664,9 +662,7 @@ def test_row_sort_value_variants() -> None:
     assert _row_sort_value(row, "rev") == "a" * 40
 
 
-def test_inventory_helpers_and_sorting(  # noqa: PLR0915
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_inventory_helpers_and_sorting() -> None:  # noqa: PLR0915
     """Cover inventory helper branches, labels, and sort aliases."""
 
     class _FlakeHash(FlakeInputHashUpdater):
@@ -741,23 +737,52 @@ def test_inventory_helpers_and_sorting(  # noqa: PLR0915
     assert _classify_updater_kind(_HashEntry) == "custom-hash"
     assert _classify_updater_kind(_Custom) == "custom-hash"
 
-    monkeypatch.setattr(
-        "lib.update.cli.package_dir_for",
-        lambda name: None if name == "missing" else REPO_ROOT / "packages" / name,
+    def repo_relative_path(path: Path | None) -> str | None:
+        return _repo_relative_path(
+            path,
+            repo_root=lambda: Path(REPO_ROOT),
+        )
+
+    assert _generated_artifact_paths(
+        "deno",
+        _Deno,
+        package_dir_for=lambda name: (
+            None if name == "missing" else REPO_ROOT / "packages" / name
+        ),
+        repo_relative_path=repo_relative_path,
+    ) == ("packages/deno/deno-deps.json",)
+    assert (
+        _generated_artifact_paths(
+            "missing",
+            _Deno,
+            package_dir_for=lambda name: (
+                None if name == "missing" else REPO_ROOT / "packages" / name
+            ),
+            repo_relative_path=repo_relative_path,
+        )
+        == ()
     )
-    assert _generated_artifact_paths("deno", _Deno) == ("packages/deno/deno-deps.json",)
-    assert _generated_artifact_paths("missing", _Deno) == ()
-    assert _generated_artifact_paths("custom", _Custom) == ()
+    assert (
+        _generated_artifact_paths(
+            "custom",
+            _Custom,
+            package_dir_for=lambda name: (
+                None if name == "missing" else REPO_ROOT / "packages" / name
+            ),
+            repo_relative_path=repo_relative_path,
+        )
+        == ()
+    )
 
     assert (
-        _repo_relative_path(REPO_ROOT / "packages" / "demo" / "sources.json")
+        repo_relative_path(REPO_ROOT / "packages" / "demo" / "sources.json")
         == "packages/demo/sources.json"
     )
     assert (
-        _repo_relative_path(Path("/tmp/outside/sources.json"))
+        repo_relative_path(Path("/tmp/outside/sources.json"))
         == "/tmp/outside/sources.json"
     )
-    assert _repo_relative_path(None) is None
+    assert repo_relative_path(None) is None
 
     assert (
         _inventory_classification(
@@ -993,9 +1018,7 @@ def test_inventory_helpers_and_sorting(  # noqa: PLR0915
     )
 
 
-def test_build_update_inventory_uses_logical_targets(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_build_update_inventory_uses_logical_targets() -> None:
     """Build logical inventory entries from updater/ref metadata."""
 
     class _BothUpdater(FlakeInputHashUpdater):
@@ -1009,66 +1032,21 @@ def test_build_update_inventory_uses_logical_targets(
     class _DenoUpdater(DenoManifestUpdater):
         name = "deno"
 
-    monkeypatch.setattr(
-        "lib.update.cli.UPDATERS",
-        {
-            "both": _BothUpdater,
-            "desktop": _DesktopUpdater,
-            "deno": _DenoUpdater,
-        },
-    )
-    monkeypatch.setattr(
-        "lib.update.cli.load_all_sources",
-        lambda: SourcesFile(
-            entries={
-                "both": SourceEntry(
-                    version="v1.0.0",
-                    hashes=[HashEntry.create("vendorHash", "sha256-ghi=")],
-                ),
-                "desktop": SourceEntry(
-                    hashes=[HashEntry.create("sha256", "sha256-jkl=")],
-                    commit="b" * 40,
-                ),
-                "deno": SourceEntry(
-                    version="v2.0.0",
-                    hashes={"x86_64-linux": "sha256-mno="},
-                ),
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        "lib.update.cli.package_file_map",
-        lambda _filename: {
-            "both": REPO_ROOT / "packages" / "both" / "sources.json",
-            "desktop": REPO_ROOT / "packages" / "desktop" / "sources.json",
-        },
-    )
-    monkeypatch.setattr(
-        "lib.update.cli.sources_file_for",
-        lambda name: REPO_ROOT / "packages" / name / "sources.json",
-    )
-    monkeypatch.setattr(
-        "lib.update.cli.package_dir_for",
-        lambda name: REPO_ROOT / "packages" / name,
-    )
-    monkeypatch.setattr(
-        "lib.update.cli.get_flake_inputs_with_refs",
-        lambda: [
-            FlakeInputRef(
-                name="both",
-                owner="o",
-                repo="r",
-                ref="v1.0.0",
-                input_type="github",
+    sources = SourcesFile(
+        entries={
+            "both": SourceEntry(
+                version="v1.0.0",
+                hashes=[HashEntry.create("vendorHash", "sha256-ghi=")],
             ),
-            FlakeInputRef(
-                name="ref-only",
-                owner="o",
-                repo="r",
-                ref="v3.0.0",
-                input_type="github",
+            "desktop": SourceEntry(
+                hashes=[HashEntry.create("sha256", "sha256-jkl=")],
+                commit="b" * 40,
             ),
-        ],
+            "deno": SourceEntry(
+                version="v2.0.0",
+                hashes={"x86_64-linux": "sha256-mno="},
+            ),
+        }
     )
 
     class _Lock:
@@ -1084,9 +1062,59 @@ def test_build_update_inventory_uses_logical_targets(
             _ = input_name
             return None
 
-    monkeypatch.setattr("lib.update.cli.load_flake_lock", _Lock)
+    def repo_relative_path(path: Path | None) -> str | None:
+        return _repo_relative_path(
+            path,
+            repo_root=lambda: Path(REPO_ROOT),
+        )
 
-    targets = _build_update_inventory()
+    targets = cli_inventory_module.build_update_inventory(
+        dependencies=cli_inventory_module.InventoryDependencies(
+            load_sources=lambda: sources,
+            source_path_map=lambda _filename: {
+                "both": REPO_ROOT / "packages" / "both" / "sources.json",
+                "desktop": REPO_ROOT / "packages" / "desktop" / "sources.json",
+            },
+            list_ref_inputs=lambda: [
+                FlakeInputRef(
+                    name="both",
+                    owner="o",
+                    repo="r",
+                    ref="v1.0.0",
+                    input_type="github",
+                ),
+                FlakeInputRef(
+                    name="ref-only",
+                    owner="o",
+                    repo="r",
+                    ref="v3.0.0",
+                    input_type="github",
+                ),
+            ],
+            load_lock=_Lock,
+            get_updaters=lambda: {
+                "both": _BothUpdater,
+                "desktop": _DesktopUpdater,
+                "deno": _DenoUpdater,
+            },
+            source_file_for=lambda name: REPO_ROOT / "packages" / name / "sources.json",
+            resolve_root_input_node=update_cli_module.resolve_root_input_node,
+            source_backing_input_name=_source_backing_input_name,
+            generated_artifact_paths=lambda name, updater_cls: (
+                _generated_artifact_paths(
+                    name,
+                    updater_cls,
+                    package_dir_for=lambda package_name: (
+                        REPO_ROOT / "packages" / package_name
+                    ),
+                    repo_relative_path=repo_relative_path,
+                )
+            ),
+            source_hash_kinds=_source_hash_kinds,
+            classify_updater_kind=_classify_updater_kind,
+            repo_relative_path=repo_relative_path,
+        )
+    )
     by_name = {target.name: target for target in targets}
 
     assert [target.name for target in targets] == [
@@ -1124,10 +1152,10 @@ def test_build_update_inventory_uses_logical_targets(
     assert by_name["ref-only"].ref_target.locked_rev is None
 
 
-def test_inventory_wrapper_builds_dependency_bundle(
+def test_build_update_inventory_wrapper_builds_dependency_bundle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Wrap raw inventory collaborators into one dependency bundle."""
+    """Build the inventory through the shared dependency-bundle API."""
     captured: dict[str, object] = {}
 
     def _fake_build_update_inventory(*, dependencies: object) -> list[object]:
@@ -1135,90 +1163,59 @@ def test_inventory_wrapper_builds_dependency_bundle(
         return ["wrapped"]
 
     monkeypatch.setattr(
-        cli_inventory_module,
-        "build_update_inventory",
+        "lib.update.cli.build_update_inventory",
         _fake_build_update_inventory,
     )
 
-    def load_sources() -> SourcesFile:
-        return cast("SourcesFile", object())
+    assert _build_update_inventory() == ["wrapped"]
+    monkeypatch.setattr(
+        "lib.update.cli.package_dir_for",
+        lambda name: REPO_ROOT / "packages" / name,
+    )
 
-    def source_path_map(_name: str) -> dict[str, Path]:
-        return {}
-
-    def list_ref_inputs() -> list[FlakeInputRef]:
-        return []
-
-    def load_lock() -> FlakeLock:
-        return cast("FlakeLock", object())
-
-    def get_updaters() -> dict[str, type[Updater]]:
-        return {}
-
-    def source_file_for(_name: str) -> Path | None:
-        return None
-
-    def resolve_root_input_node(
-        _lock: FlakeLock, _name: str
-    ) -> tuple[FlakeLockNode | None, str | None]:
-        return (None, None)
-
-    def source_backing_input_name(
-        _name: str,
-        _updater: type[Updater] | None,
-        _entry: SourceEntry | None,
-    ) -> str | None:
-        return None
-
-    def generated_artifact_paths(
-        _name: str, _updater: type[Updater]
-    ) -> tuple[str, ...]:
-        return ()
-
-    def source_hash_kinds(_entry: SourceEntry | None) -> tuple[str, ...]:
-        return ()
-
-    def classify_updater_kind(_updater: type[Updater]) -> str:
-        return "demo"
-
-    def repo_relative_path(_path: Path | None) -> str | None:
-        return None
-
-    assert cli_inventory_module._build_update_inventory(
-        load_sources=load_sources,
-        source_path_map=source_path_map,
-        list_ref_inputs=list_ref_inputs,
-        load_lock=load_lock,
-        get_updaters=get_updaters,
-        source_file_for=source_file_for,
-        resolve_root_input_node=resolve_root_input_node,
-        source_backing_input_name=source_backing_input_name,
-        generated_artifact_paths=generated_artifact_paths,
-        source_hash_kinds=source_hash_kinds,
-        classify_updater_kind=classify_updater_kind,
-        repo_relative_path=repo_relative_path,
-    ) == ["wrapped"]
+    class _DenoUpdater(DenoManifestUpdater):
+        name = "demo"
 
     dependencies = captured["dependencies"]
     assert isinstance(dependencies, cli_inventory_module.InventoryDependencies)
-    assert dependencies.load_sources is load_sources
-    assert dependencies.source_path_map is source_path_map
-    assert dependencies.list_ref_inputs is list_ref_inputs
-    assert dependencies.load_lock is load_lock
-    assert dependencies.get_updaters is get_updaters
-    assert dependencies.source_file_for is source_file_for
-    assert dependencies.resolve_root_input_node is resolve_root_input_node
-    assert dependencies.source_backing_input_name is source_backing_input_name
-    assert dependencies.generated_artifact_paths is generated_artifact_paths
-    assert dependencies.source_hash_kinds is source_hash_kinds
-    assert dependencies.classify_updater_kind is classify_updater_kind
-    assert dependencies.repo_relative_path is repo_relative_path
+    assert dependencies.load_sources is update_cli_module.load_all_sources
+    assert dependencies.source_path_map is update_cli_module.package_file_map
+    assert dependencies.list_ref_inputs is update_cli_module.get_flake_inputs_with_refs
+    assert dependencies.load_lock is update_cli_module.load_flake_lock
+    assert dependencies.get_updaters is update_cli_module._get_updaters
+    assert dependencies.source_file_for is update_cli_module.sources_file_for
+    assert (
+        dependencies.resolve_root_input_node
+        is update_cli_module.resolve_root_input_node
+    )
+    assert (
+        dependencies.source_backing_input_name
+        is cli_inventory_module._source_backing_input_name
+    )
+    assert dependencies.source_hash_kinds is cli_inventory_module._source_hash_kinds
+    assert (
+        dependencies.classify_updater_kind
+        is cli_inventory_module._classify_updater_kind
+    )
+    assert (
+        dependencies.repo_relative_path(
+            REPO_ROOT / "packages" / "demo" / "sources.json"
+        )
+        == "packages/demo/sources.json"
+    )
+    assert (
+        dependencies.repo_relative_path(Path("/tmp/outside/sources.json"))
+        == "/tmp/outside/sources.json"
+    )
+    assert dependencies.generated_artifact_paths("demo", _DenoUpdater) == (
+        "packages/demo/deno-deps.json",
+    )
 
 
-def test_validation_wrappers_delegate_to_shared_helpers(
+def test_handle_validate_request_wrapper_builds_dependency_bundle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Forward validation requests through the shared helper wrappers."""
+    """Forward validation through the shared dependency-bundle API."""
     captured: dict[str, object] = {}
 
     def _fake_handle_validate_request(
@@ -1233,43 +1230,24 @@ def test_validation_wrappers_delegate_to_shared_helpers(
         return 7
 
     monkeypatch.setattr(
-        cli_validation_module,
-        "handle_validate_request",
+        "lib.update.cli.handle_validate_request",
         _fake_handle_validate_request,
     )
 
     opts = UpdateOptions(validate=True)
     out = OutputOptions(json_output=True)
 
-    def load_sources() -> SourcesFile:
-        return cast("SourcesFile", object())
-
-    def validate() -> None:
-        return None
-
-    assert (
-        cli_validation_module._handle_validate_request(
-            opts,
-            out,
-            load_sources=load_sources,
-            validate_source_discovery_consistency=validate,
-        )
-        == 7
-    )
+    assert _handle_validate_request(opts, out) == 7
 
     dependencies = captured["dependencies"]
     assert captured["opts"] is opts
     assert captured["out"] is out
     assert isinstance(dependencies, cli_validation_module.ValidationDependencies)
-    assert dependencies.load_sources is load_sources
-    assert dependencies.validate_source_discovery_consistency is validate
-
-    monkeypatch.setattr(
-        cli_validation_module,
-        "validate_list_sort_option",
-        lambda _opts, _out: 9,
+    assert dependencies.load_sources is update_cli_module.load_all_sources
+    assert (
+        dependencies.validate_source_discovery_consistency
+        is update_cli_module.validate_source_discovery_consistency
     )
-    assert cli_validation_module._validate_list_sort_option(opts, out) == 9
 
 
 def test_runtime_config_and_tty_settings(monkeypatch: pytest.MonkeyPatch) -> None:

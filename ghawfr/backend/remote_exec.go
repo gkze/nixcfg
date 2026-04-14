@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/gkze/ghawfr/internal/guestpath"
 	"github.com/gkze/ghawfr/state"
 	"github.com/gkze/ghawfr/workflow"
 )
@@ -160,23 +160,7 @@ func resolveRemoteStepDirectory(
 	guestWorkspace string,
 	workingDirectory string,
 ) (string, error) {
-	trimmed := strings.TrimSpace(workingDirectory)
-	if trimmed == "" {
-		return guestWorkspace, nil
-	}
-	if filepath.IsAbs(trimmed) {
-		cleaned := path.Clean(trimmed)
-		if cleaned == guestWorkspace || strings.HasPrefix(cleaned, guestWorkspace+"/") {
-			return cleaned, nil
-		}
-		return "", fmt.Errorf(
-			"absolute remote working directory %q is outside guest workspace %q",
-			trimmed,
-			guestWorkspace,
-		)
-	}
-	hostStepDirectory := resolveStepDirectory(hostWorkspace, workingDirectory)
-	return translateWorkspacePath(hostWorkspace, guestWorkspace, hostStepDirectory)
+	return guestpath.ResolveStepDirectory(hostWorkspace, guestWorkspace, workingDirectory)
 }
 
 func createWorkspaceFileCommandFiles(
@@ -240,25 +224,7 @@ func translateWorkspacePath(
 	guestWorkspace string,
 	hostPath string,
 ) (string, error) {
-	workspace, err := filepath.Abs(hostWorkspace)
-	if err != nil {
-		return "", fmt.Errorf("resolve host workspace %q: %w", hostWorkspace, err)
-	}
-	value, err := filepath.Abs(hostPath)
-	if err != nil {
-		return "", fmt.Errorf("resolve host path %q: %w", hostPath, err)
-	}
-	rel, err := filepath.Rel(workspace, value)
-	if err != nil {
-		return "", fmt.Errorf("rel path from %q to %q: %w", workspace, value, err)
-	}
-	if rel == "." {
-		return guestWorkspace, nil
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("host path %q is outside workspace %q", value, workspace)
-	}
-	return path.Join(guestWorkspace, filepath.ToSlash(rel)), nil
+	return guestpath.TranslateHostPath(hostWorkspace, guestWorkspace, hostPath)
 }
 
 func translateWorkspaceEnvironment(
@@ -266,14 +232,7 @@ func translateWorkspaceEnvironment(
 	hostWorkspace string,
 	guestWorkspace string,
 ) workflow.EnvironmentMap {
-	if len(values) == 0 || hostWorkspace == guestWorkspace {
-		return values.Clone()
-	}
-	translated := values.Clone()
-	for key, value := range translated {
-		translated[key] = strings.ReplaceAll(value, hostWorkspace, guestWorkspace)
-	}
-	return translated
+	return guestpath.TranslateEnvironment(values, hostWorkspace, guestWorkspace)
 }
 
 func wrapRemoteShellCommand(shell string, command string) (string, error) {
@@ -290,8 +249,5 @@ func wrapRemoteShellCommand(shell string, command string) (string, error) {
 }
 
 func shellQuote(value string) string {
-	if value == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+	return guestpath.ShellQuote(value)
 }

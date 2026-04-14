@@ -260,40 +260,12 @@ func TestLocalRunJobSetupPythonRespectsUpdateEnvironmentFalse(t *testing.T) {
 		t.Fatalf("write python3: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	job := &workflow.Job{
-		ID:        "setup-python-no-env",
-		LogicalID: "setup-python-no-env",
-		RunsOn:    workflow.Runner{Labels: []string{"ubuntu-24.04"}},
-		Steps: []workflow.Step{{
-			ID:   "py",
-			Kind: workflow.StepKindAction,
-			Action: &workflow.ActionStep{
-				Uses: "actions/setup-python@v6",
-				Inputs: workflow.ActionInputMap{
-					"python-version":     "3.14",
-					"update-environment": "false",
-				},
-			},
-		}},
-	}
-	result, err := actionadapter.NewLocal(nil).
-		RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
-	if err != nil {
-		t.Fatalf("RunJob: %v", err)
-	}
-	if got, want := len(result.Steps), 1; got != want {
-		t.Fatalf("len(result.Steps) = %d, want %d", got, want)
-	}
-	step := result.Steps[0]
-	if len(step.PathEntries) != 0 {
-		t.Fatalf("PathEntries = %#v, want none", step.PathEntries)
-	}
-	if len(step.Environment) != 0 {
-		t.Fatalf("Environment = %#v, want none", step.Environment)
-	}
-	if got, want := step.Outputs["python-version"], "3.14"; got != want {
-		t.Fatalf("python-version output = %q, want %q", got, want)
-	}
+
+	runSetupPythonUpdateEnvironmentFalseConformance(
+		t,
+		actionadapter.NewLocal(nil).RunJob,
+		backend.RunOptions{WorkingDirectory: workspace},
+	)
 }
 
 func TestLocalRunJobSetupPythonSupportsMultilineVersionFallback(t *testing.T) {
@@ -311,27 +283,12 @@ func TestLocalRunJobSetupPythonSupportsMultilineVersionFallback(t *testing.T) {
 		t.Fatalf("write python3: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	job := &workflow.Job{
-		ID:        "setup-python-fallback",
-		LogicalID: "setup-python-fallback",
-		RunsOn:    workflow.Runner{Labels: []string{"ubuntu-24.04"}},
-		Steps: []workflow.Step{{
-			ID:   "py",
-			Kind: workflow.StepKindAction,
-			Action: &workflow.ActionStep{
-				Uses:   "actions/setup-python@v6",
-				Inputs: workflow.ActionInputMap{"python-version": "3.15\n3.14"},
-			},
-		}},
-	}
-	result, err := actionadapter.NewLocal(nil).
-		RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
-	if err != nil {
-		t.Fatalf("RunJob: %v", err)
-	}
-	if got, want := result.Steps[0].Outputs["python-version"], "3.14"; got != want {
-		t.Fatalf("python-version output = %q, want %q", got, want)
-	}
+
+	runSetupPythonMultilineFallbackConformance(
+		t,
+		actionadapter.NewLocal(nil).RunJob,
+		backend.RunOptions{WorkingDirectory: workspace},
+	)
 }
 
 func TestLocalRunJobSetupPythonFailsWhenWorkflowPathExplicitlyEmpty(t *testing.T) {
@@ -374,78 +331,30 @@ func TestLocalRunJobSetupPythonFailsOnVersionMismatch(t *testing.T) {
 		t.Fatalf("write python3: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	job := &workflow.Job{
-		ID:        "setup-python-mismatch",
-		LogicalID: "setup-python-mismatch",
-		RunsOn:    workflow.Runner{Labels: []string{"ubuntu-24.04"}},
-		Steps: []workflow.Step{{
-			Kind: workflow.StepKindAction,
-			Action: &workflow.ActionStep{
-				Uses:   "actions/setup-python@v6",
-				Inputs: workflow.ActionInputMap{"python-version": "3.14"},
-			},
-		}},
-	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(
-		context.Background(),
-		job,
+
+	runSetupPythonVersionMismatchConformance(
+		t,
+		actionadapter.NewLocal(nil).RunJob,
 		backend.RunOptions{WorkingDirectory: workspace},
-	); err == nil {
-		t.Fatal("RunJob error = nil, want python version mismatch failure")
-	}
+	)
 }
 
 func TestLocalRunJobSetupUVRejectsUnsupportedVersionInputs(t *testing.T) {
-	job := &workflow.Job{
-		ID:        "setup-uv-unsupported",
-		LogicalID: "setup-uv-unsupported",
-		RunsOn:    workflow.Runner{Labels: []string{"ubuntu-24.04"}},
-		Steps: []workflow.Step{{
-			Kind: workflow.StepKindAction,
-			Action: &workflow.ActionStep{
-				Uses:   "astral-sh/setup-uv@v6",
-				Inputs: workflow.ActionInputMap{"version": "0.6.0"},
-			},
-		}},
-	}
-	if _, err := actionadapter.NewLocal(nil).RunJob(
-		context.Background(),
-		job,
+	runSetupUVUnsupportedVersionInputConformance(
+		t,
+		actionadapter.NewLocal(nil).RunJob,
 		backend.RunOptions{WorkingDirectory: t.TempDir()},
-	); err == nil {
-		t.Fatal("RunJob error = nil, want unsupported setup-uv input failure")
-	}
+	)
 }
 
 func TestLocalRunJobSupportsCreatePullRequestAction(t *testing.T) {
 	workspace := t.TempDir()
-	job := &workflow.Job{
-		ID:        "create-pr",
-		LogicalID: "create-pr",
-		RunsOn:    workflow.Runner{Labels: []string{"ubuntu-24.04"}},
-		Steps: []workflow.Step{{
-			Kind: workflow.StepKindAction,
-			Action: &workflow.ActionStep{
-				Uses: "peter-evans/create-pull-request@v8",
-				Inputs: workflow.ActionInputMap{
-					"sign-commits":   "true",
-					"branch":         "update_flake_lock_action",
-					"delete-branch":  "true",
-					"title":          "chore: update",
-					"commit-message": "chore: update",
-					"body-path":      "/tmp/pr-body.md",
-				},
-			},
-		}},
-	}
-	result, err := actionadapter.NewLocal(nil).
-		RunJob(context.Background(), job, backend.RunOptions{WorkingDirectory: workspace})
-	if err != nil {
-		t.Fatalf("RunJob: %v", err)
-	}
-	if got, want := result.Result, backend.JobStatusSuccess; got != want {
-		t.Fatalf("result.Result = %q, want %q", got, want)
-	}
+
+	runCreatePullRequestSuccessConformance(
+		t,
+		actionadapter.NewLocal(nil).RunJob,
+		backend.RunOptions{WorkingDirectory: workspace},
+	)
 }
 
 func TestLocalRunJobSetupActionsUseWorkflowShapedPath(t *testing.T) {

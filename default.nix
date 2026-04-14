@@ -10,7 +10,9 @@ let
   nixcfgPath = file: nixcfgDir + "/${file}";
 
   exports = import (nixcfgPath "exports.nix") { inherit src; };
-  packageRegistry = import (src + "/packages/registry.nix") { inherit src; };
+  basePackageMaterialization = import (nixcfgPath "package-materialization.nix") {
+    inherit src;
+  };
 
   initialLib = lib;
   initialPkgsFor = pkgsFor;
@@ -42,6 +44,14 @@ let
     else
       throw "default.nix: mkPackages needs `outputsArg.lib` (or import default.nix with `lib` and `pkgsFor`).";
 
+  mkPackageMaterialization =
+    outputsArg:
+    import (nixcfgPath "package-materialization.nix") {
+      inherit src;
+      inherit (outputsArg) lib;
+      outputs = outputsArg;
+    };
+
   mkLibImpl =
     {
       lib,
@@ -59,17 +69,9 @@ let
     };
 
   self = rec {
-    api = {
-      version = exports.apiVersion;
-      inherit (exports)
-        constructorNames
-        moduleSets
-        ;
-    };
-
-    apiVersion = api.version;
-
     inherit (exports)
+      api
+      apiVersion
       constructorNames
       darwinModules
       homeModules
@@ -79,8 +81,7 @@ let
 
     modules = moduleSets;
 
-    inherit (packageRegistry) packagePaths;
-    packageNames = builtins.attrNames packagePaths;
+    inherit (basePackageMaterialization) packageNames packagePaths;
 
     lintFiles = import (nixcfgPath "lint-files.nix");
 
@@ -133,22 +134,16 @@ let
       }:
       let
         resolvedOutputs = resolveOutputsWithLib outputsArg;
-        packageSelfSource = import (nixcfgPath "package-self-source.nix") {
-          inherit (resolvedOutputs) lib;
-          outputs = resolvedOutputs;
-        };
+        packageMaterialization = mkPackageMaterialization resolvedOutputs;
       in
-      builtins.mapAttrs (
-        name: path:
-        pkgs.callPackage path (
-          {
-            inputs = inputsArg;
-            outputs = resolvedOutputs;
-          }
-          // packageSelfSource.callPackageArgs name
-          // extraPackageArgs
-        )
-      ) (packageRegistry.forSystem system);
+      packageMaterialization.callPackagesForSystem {
+        inherit
+          extraPackageArgs
+          pkgs
+          system
+          ;
+        inputs = inputsArg;
+      };
 
     mkLib =
       {
@@ -186,7 +181,7 @@ let
           builtins.map (name: {
             inherit name;
             value = builtins.getAttr name self.lib;
-          }) exports.constructorNames
+          }) self.constructorNames
         );
   };
 in

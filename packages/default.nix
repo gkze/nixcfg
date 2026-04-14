@@ -1,39 +1,25 @@
-# Override flakelight's auto-import to filter out darwin-only packages on
-# non-darwin systems.  Without this, `nix flake check --all-systems` fails
-# because nixpkgs' check-meta asserts on meta.platforms mismatches.
+# Override flakelight's auto-import to centralize package discovery and
+# per-system filtering in `packages/registry.nix`. Without this,
+# `nix flake check --all-systems` fails because nixpkgs' check-meta asserts on
+# meta.platforms mismatches.
 #
-# When `packages/default.nix` exists, flakelight imports it directly instead
-# of auto-importing the directory contents.  flakelight.importDir excludes
-# default.nix, so there is no recursion.
+# When `packages/default.nix` exists, flakelight imports it directly instead of
+# auto-importing the directory contents, so this file is where flake package
+# outputs are materialized from the shared registry.
 {
   system ? null,
-  flakelight,
   lib,
   outputs,
   ...
 }:
 let
-  discovery = import ../lib/discovery.nix;
-  registry = import ./registry.nix { src = ../.; };
-  packageSelfSource = import ../lib/package-self-source.nix { inherit lib outputs; };
-
-  imported = builtins.mapAttrs packageSelfSource.injectIntoFunction (flakelight.importDir ./.);
-  crate2nixSourceEntries = discovery.discoverCompanionEntries {
-    root = ./.;
-    directories = builtins.attrNames imported;
-    fileName = "crate2nix-src.nix";
+  packageMaterialization = import ../lib/package-materialization.nix {
+    src = ../.;
+    inherit lib outputs;
   };
-  all =
-    imported
-    // builtins.mapAttrs (
-      name: path: packageSelfSource.injectIntoFunction name (import path)
-    ) crate2nixSourceEntries.entries;
+
   systemEval = builtins.tryEval system;
   resolvedSystem =
     if systemEval.success && systemEval.value != null then systemEval.value else "x86_64-linux";
-  unsupported = builtins.attrNames all;
-  supported = builtins.attrNames (registry.forSystem resolvedSystem);
 in
-removeAttrs all (
-  builtins.filter (name: !(builtins.elem name supported)) unsupported ++ registry.helperEntries
-)
+packageMaterialization.packageFunctionsForSystem resolvedSystem

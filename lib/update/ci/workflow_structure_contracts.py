@@ -8,134 +8,68 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-import yaml
+    from lib.update.ci._workflow_yaml import WorkflowObject
 
-from lib import json_utils
-
-type WorkflowValue = json_utils.JsonValue
-type WorkflowObject = json_utils.JsonObject
+from lib.update.ci._workflow_analysis import (
+    WorkflowAnalysis,
+    WorkflowJobAnalysis,
+    analyze_workflow_job,
+    load_workflow_analysis,
+)
 
 _DARWIN_FULL_SMOKE_MARKER = "nix run .#nixcfg -- ci workflow darwin eval-full-smoke"
 _DARWIN_LOCK_SMOKE_MARKER = "nix run .#nixcfg -- ci workflow darwin eval-lock-smoke"
 _SHARED_CLOSURE_MARKER = "nix run .#nixcfg -- ci cache closure"
 _EXCLUDE_REF_RE = re.compile(r"--exclude-ref\s+([^\s\\]+)")
+_STRUCTURE_INVALID_NEEDS_VALUE_MESSAGE = (
+    "Job {job_id} defines unsupported needs {raw_needs!r}"
+)
+_STRUCTURE_INVALID_NEEDS_ITEM_MESSAGE = (
+    "Job {job_id} defines unsupported needs {need!r}"
+)
+_REFRESH_WORKFLOW_JOB_IDS = ("darwin-lock-smoke", "compute-hashes")
+_CERTIFY_WORKFLOW_SENTINEL_JOB_IDS = (
+    "darwin-full-smoke",
+    "darwin-priority-heavy",
+    "darwin-extra-heavy",
+    "darwin-shared",
+)
 
 
-def _stringify_yaml_keys(value: object) -> object:
-    if isinstance(value, dict):
-        return {str(key): _stringify_yaml_keys(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_stringify_yaml_keys(item) for item in value]
-    return value
+def _coerce_job_analysis(
+    job_id: str,
+    job_data: WorkflowObject | WorkflowJobAnalysis,
+) -> WorkflowJobAnalysis:
+    """Normalize one raw or pre-analyzed workflow job."""
+    if isinstance(job_data, WorkflowJobAnalysis):
+        return job_data
+    return analyze_workflow_job(
+        job_id,
+        job_data,
+        invalid_needs_value_message=_STRUCTURE_INVALID_NEEDS_VALUE_MESSAGE,
+        invalid_needs_item_message=_STRUCTURE_INVALID_NEEDS_ITEM_MESSAGE,
+    )
 
 
-def _workflow_object(value: object, *, context: str) -> WorkflowObject:
-    return json_utils.coerce_json_object(_stringify_yaml_keys(value), context=context)
+def _coerce_workflow_analysis(
+    workflow_jobs: dict[str, WorkflowObject] | dict[str, WorkflowJobAnalysis],
+) -> WorkflowAnalysis:
+    """Normalize one workflow job mapping for structure validation."""
+    return WorkflowAnalysis.from_jobs(
+        workflow_jobs,
+        invalid_needs_value_message=_STRUCTURE_INVALID_NEEDS_VALUE_MESSAGE,
+        invalid_needs_item_message=_STRUCTURE_INVALID_NEEDS_ITEM_MESSAGE,
+    )
 
 
-def _load_jobs(workflow_path: Path) -> dict[str, WorkflowObject]:
-    loaded = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-    if not isinstance(loaded, dict):
-        msg = f"Workflow {workflow_path} did not parse to a mapping"
-        raise TypeError(msg)
-    payload = _workflow_object(loaded, context=f"workflow {workflow_path}")
-    jobs = payload.get("jobs")
-    if not isinstance(jobs, dict):
-        msg = f"Workflow {workflow_path} is missing a top-level jobs mapping"
-        raise TypeError(msg)
-    workflow_jobs: dict[str, WorkflowObject] = {}
-    for job_id, job_data in jobs.items():
-        if not isinstance(job_data, dict):
-            msg = f"Workflow job {job_id} must be a mapping"
-            raise TypeError(msg)
-        workflow_jobs[job_id] = _workflow_object(
-            job_data, context=f"workflow job {job_id}"
-        )
-    return workflow_jobs
-
-
-def _require_job(
-    workflow_jobs: dict[str, WorkflowObject], *, job_id: str
-) -> WorkflowObject:
-    try:
-        return workflow_jobs[job_id]
-    except KeyError as exc:
-        msg = f"Workflow is missing required job {job_id!r}"
-        raise RuntimeError(msg) from exc
-
-
-def _parse_job_needs(job_data: WorkflowObject, *, job_id: str) -> tuple[str, ...]:
-    raw_needs = job_data.get("needs")
-    if raw_needs is None:
-        return ()
-    if isinstance(raw_needs, str):
-        return (raw_needs,)
-    if isinstance(raw_needs, list) and all(isinstance(need, str) for need in raw_needs):
-        return tuple(raw_needs)
-    msg = f"Job {job_id} defines unsupported needs {raw_needs!r}"
-    raise TypeError(msg)
-
-
-def _job_run_steps(job_data: WorkflowObject, *, job_id: str) -> tuple[str, ...]:
-    raw_steps = job_data.get("steps")
-    if not isinstance(raw_steps, list):
-        msg = f"Job {job_id} does not define steps as a list"
-        raise TypeError(msg)
-
-    runs: list[str] = []
-    for step in raw_steps:
-        if not isinstance(step, dict):
-            continue
-        run = step.get("run")
-        if isinstance(run, str):
-            runs.append(run)
-    return tuple(runs)
-
-
-def _require_job_run(job_data: WorkflowObject, *, job_id: str, marker: str) -> None:
-    if not any(marker in run for run in _job_run_steps(job_data, job_id=job_id)):
-        msg = f"Job {job_id} is missing required run step containing {marker!r}"
-        raise RuntimeError(msg)
-
-
-def _forbid_job_run(job_data: WorkflowObject, *, job_id: str, marker: str) -> None:
-    if any(marker in run for run in _job_run_steps(job_data, job_id=job_id)):
-        msg = f"Job {job_id} must not run step containing {marker!r}"
-        raise RuntimeError(msg)
-
-
-def _require_job_need(job_data: WorkflowObject, *, job_id: str, need: str) -> None:
-    if need not in _parse_job_needs(job_data, job_id=job_id):
-        msg = f"{job_id} must depend on {need}"
-        raise RuntimeError(msg)
-
-
-def _forbid_job_need(job_data: WorkflowObject, *, job_id: str, need: str) -> None:
-    if need in _parse_job_needs(job_data, job_id=job_id):
-        msg = f"{job_id} must not depend on {need}"
-        raise RuntimeError(msg)
-
-
-def _darwin_heavy_targets(job_data: WorkflowObject, *, job_id: str) -> tuple[str, ...]:
-    strategy = job_data.get("strategy")
-    if not isinstance(strategy, dict):
-        msg = f"{job_id} does not define a strategy mapping"
-        raise TypeError(msg)
-    matrix = strategy.get("matrix")
-    if not isinstance(matrix, dict):
-        msg = f"{job_id} does not define a matrix mapping"
-        raise TypeError(msg)
-    include = matrix.get("include")
-    if not isinstance(include, list) or not include:
-        msg = f"{job_id} matrix.include must be a non-empty list"
-        raise TypeError(msg)
+def _darwin_heavy_targets(
+    job_data: WorkflowObject | WorkflowJobAnalysis, *, job_id: str
+) -> tuple[str, ...]:
+    include = _coerce_job_analysis(job_id, job_data).require_matrix_include()
 
     targets: list[str] = []
     packages_seen: set[str] = set()
     for entry in include:
-        if not isinstance(entry, dict):
-            msg = f"Unsupported {job_id} matrix entry: {entry!r}"
-            raise TypeError(msg)
         package = entry.get("package")
         target = entry.get("target")
         if not isinstance(package, str) or not isinstance(target, str):
@@ -155,13 +89,16 @@ def _darwin_heavy_targets(job_data: WorkflowObject, *, job_id: str) -> tuple[str
 
 
 def _darwin_split_targets(
-    workflow_jobs: dict[str, WorkflowObject], *, job_ids: tuple[str, ...]
+    workflow_jobs: dict[str, WorkflowObject] | dict[str, WorkflowJobAnalysis],
+    *,
+    job_ids: tuple[str, ...],
 ) -> tuple[str, ...]:
     targets: list[str] = []
     seen_targets: dict[str, str] = {}
+    workflow = _coerce_workflow_analysis(workflow_jobs)
     for job_id in job_ids:
         for target in _darwin_heavy_targets(
-            _require_job(workflow_jobs, job_id=job_id),
+            workflow.require_job(job_id=job_id),
             job_id=job_id,
         ):
             previous_job = seen_targets.get(target)
@@ -176,10 +113,12 @@ def _darwin_split_targets(
     return tuple(targets)
 
 
-def _darwin_shared_exclude_refs(job_data: WorkflowObject) -> tuple[str, ...]:
+def _darwin_shared_exclude_refs(
+    job_data: WorkflowObject | WorkflowJobAnalysis,
+) -> tuple[str, ...]:
     closure_runs = [
         run
-        for run in _job_run_steps(job_data, job_id="darwin-shared")
+        for run in _coerce_job_analysis("darwin-shared", job_data).run_strings
         if _SHARED_CLOSURE_MARKER in run
     ]
     if not closure_runs:
@@ -199,87 +138,69 @@ def _darwin_shared_exclude_refs(job_data: WorkflowObject) -> tuple[str, ...]:
     return tuple(refs)
 
 
-def _validate_refresh_workflow_structure_contracts(
-    workflow_jobs: dict[str, WorkflowObject],
-) -> None:
-    darwin_lock_smoke = _require_job(workflow_jobs, job_id="darwin-lock-smoke")
-    compute_hashes = _require_job(workflow_jobs, job_id="compute-hashes")
-
-    _require_job_run(
-        darwin_lock_smoke,
-        job_id="darwin-lock-smoke",
-        marker=_DARWIN_LOCK_SMOKE_MARKER,
-    )
-    _forbid_job_run(
-        darwin_lock_smoke,
-        job_id="darwin-lock-smoke",
-        marker=_DARWIN_FULL_SMOKE_MARKER,
+def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -> None:
+    darwin_lock_smoke, compute_hashes = workflow.require_jobs(
+        *_REFRESH_WORKFLOW_JOB_IDS
     )
 
-    if "update-lock" not in _parse_job_needs(
-        darwin_lock_smoke, job_id="darwin-lock-smoke"
-    ):
-        msg = "darwin-lock-smoke must depend on update-lock"
-        raise RuntimeError(msg)
-    if "merge-generated" in _parse_job_needs(
-        darwin_lock_smoke,
-        job_id="darwin-lock-smoke",
-    ):
-        msg = "darwin-lock-smoke must stay in the lock-only phase"
-        raise RuntimeError(msg)
-    if "darwin-lock-smoke" not in _parse_job_needs(
-        compute_hashes,
-        job_id="compute-hashes",
-    ):
-        msg = "compute-hashes must depend on darwin-lock-smoke"
-        raise RuntimeError(msg)
+    darwin_lock_smoke.require_run_marker(_DARWIN_LOCK_SMOKE_MARKER)
+    darwin_lock_smoke.forbid_run_marker(_DARWIN_FULL_SMOKE_MARKER)
+    darwin_lock_smoke.require_need(
+        "update-lock",
+        missing_need_message="darwin-lock-smoke must depend on update-lock",
+    )
+    darwin_lock_smoke.forbid_need(
+        "merge-generated",
+        forbidden_need_message="darwin-lock-smoke must stay in the lock-only phase",
+    )
+    compute_hashes.require_need(
+        "darwin-lock-smoke",
+        missing_need_message="compute-hashes must depend on darwin-lock-smoke",
+    )
 
 
-def _validate_certify_workflow_structure_contracts(
-    workflow_jobs: dict[str, WorkflowObject],
-) -> None:
-    darwin_full_smoke = _require_job(workflow_jobs, job_id="darwin-full-smoke")
-    darwin_priority_heavy = _require_job(workflow_jobs, job_id="darwin-priority-heavy")
-    darwin_extra_heavy = _require_job(workflow_jobs, job_id="darwin-extra-heavy")
-    darwin_shared = _require_job(workflow_jobs, job_id="darwin-shared")
-    darwin_argus = _require_job(workflow_jobs, job_id="darwin-argus")
-    darwin_rocinante = _require_job(workflow_jobs, job_id="darwin-rocinante")
-    linux_x86_64 = _require_job(workflow_jobs, job_id="linux-x86_64")
-
-    _require_job_run(
+def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -> None:
+    (
         darwin_full_smoke,
-        job_id="darwin-full-smoke",
-        marker=_DARWIN_FULL_SMOKE_MARKER,
+        darwin_priority_heavy,
+        darwin_extra_heavy,
+        darwin_shared,
+        darwin_argus,
+        darwin_rocinante,
+        linux_x86_64,
+    ) = workflow.require_jobs(
+        "darwin-full-smoke",
+        "darwin-priority-heavy",
+        "darwin-extra-heavy",
+        "darwin-shared",
+        "darwin-argus",
+        "darwin-rocinante",
+        "linux-x86_64",
     )
 
-    for job_id, job_data in (
-        ("darwin-priority-heavy", darwin_priority_heavy),
-        ("darwin-extra-heavy", darwin_extra_heavy),
-        ("darwin-shared", darwin_shared),
-    ):
-        _require_job_need(job_data, job_id=job_id, need="darwin-full-smoke")
+    darwin_full_smoke.require_run_marker(_DARWIN_FULL_SMOKE_MARKER)
 
-    for job_id, job_data in (
-        ("darwin-priority-heavy", darwin_priority_heavy),
-        ("darwin-extra-heavy", darwin_extra_heavy),
-        ("darwin-shared", darwin_shared),
-        ("darwin-argus", darwin_argus),
-        ("darwin-rocinante", darwin_rocinante),
-        ("linux-x86_64", linux_x86_64),
-    ):
-        _forbid_job_need(job_data, job_id=job_id, need="quality-gates")
+    for job in (darwin_priority_heavy, darwin_extra_heavy, darwin_shared):
+        job.require_need("darwin-full-smoke")
 
-    for job_id, job_data in (
-        ("darwin-argus", darwin_argus),
-        ("darwin-rocinante", darwin_rocinante),
+    for job in (
+        darwin_priority_heavy,
+        darwin_extra_heavy,
+        darwin_shared,
+        darwin_argus,
+        darwin_rocinante,
+        linux_x86_64,
     ):
-        _require_job_need(job_data, job_id=job_id, need="darwin-shared")
-        _require_job_need(job_data, job_id=job_id, need="darwin-priority-heavy")
-        _forbid_job_need(job_data, job_id=job_id, need="darwin-extra-heavy")
+        job.forbid_need("quality-gates")
+
+    for job in (darwin_argus, darwin_rocinante):
+        job.require_need("darwin-shared")
+        job.require_need("darwin-priority-heavy")
+        job.forbid_need("darwin-extra-heavy")
 
     heavy_targets = set(
         _darwin_split_targets(
-            workflow_jobs,
+            workflow.jobs,
             job_ids=("darwin-priority-heavy", "darwin-extra-heavy"),
         )
     )
@@ -299,29 +220,24 @@ def _validate_certify_workflow_structure_contracts(
 
 def validate_workflow_structure_contracts(*, workflow_path: Path) -> None:
     """Validate refresh/certification structure contracts in one workflow file."""
-    jobs = _load_jobs(workflow_path)
+    workflow = load_workflow_analysis(
+        workflow_path,
+        invalid_job_message="Workflow job {job_id} must be a mapping",
+        invalid_needs_value_message=_STRUCTURE_INVALID_NEEDS_VALUE_MESSAGE,
+        invalid_needs_item_message=_STRUCTURE_INVALID_NEEDS_ITEM_MESSAGE,
+    )
 
-    has_refresh_jobs = any(
-        job_id in jobs for job_id in ("darwin-lock-smoke", "compute-hashes")
-    )
-    has_certify_jobs = any(
-        job_id in jobs
-        for job_id in (
-            "darwin-full-smoke",
-            "darwin-priority-heavy",
-            "darwin-extra-heavy",
-            "darwin-shared",
-        )
-    )
+    has_refresh_jobs = workflow.has_any_job(_REFRESH_WORKFLOW_JOB_IDS)
+    has_certify_jobs = workflow.has_any_job(_CERTIFY_WORKFLOW_SENTINEL_JOB_IDS)
 
     if not has_refresh_jobs and not has_certify_jobs:
         msg = f"Workflow {workflow_path} does not define refresh or certification update jobs"
         raise RuntimeError(msg)
 
     if has_refresh_jobs:
-        _validate_refresh_workflow_structure_contracts(jobs)
+        _validate_refresh_workflow_structure_contracts(workflow)
     if has_certify_jobs:
-        _validate_certify_workflow_structure_contracts(jobs)
+        _validate_certify_workflow_structure_contracts(workflow)
 
 
 __all__ = ["validate_workflow_structure_contracts"]

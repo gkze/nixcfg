@@ -6,16 +6,15 @@ import os
 import posixpath
 import re
 from dataclasses import dataclass
-from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 
-import yaml
-
-from lib import json_utils
+from lib.update.ci._workflow_analysis import (
+    WorkflowAnalysis,
+    WorkflowJobAnalysis,
+    load_workflow_analysis,
+)
+from lib.update.ci._workflow_yaml import WorkflowObject, WorkflowValue, workflow_object
 from lib.update.paths import REPO_ROOT
-
-type WorkflowValue = json_utils.JsonValue
-type WorkflowObject = json_utils.JsonObject
 
 _DOWNLOAD_ACTION_PREFIX = "actions/download-artifact@"
 _GLOB_CHARS = frozenset("*?[")
@@ -25,14 +24,6 @@ _SOURCES_MATERIALIZER_MARKERS = (
     "nix run path:.#nixcfg -- ci pipeline sources",
 )
 _UPLOAD_ACTION_PREFIX = "actions/upload-artifact@"
-
-
-def _stringify_yaml_keys(value: object) -> object:
-    if isinstance(value, dict):
-        return {str(key): _stringify_yaml_keys(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_stringify_yaml_keys(item) for item in value]
-    return value
 
 
 @dataclass(frozen=True)
@@ -84,23 +75,6 @@ def _join_relpath(base: str, child: str) -> str:
 def _has_glob(path_spec: str) -> bool:
     """Return whether *path_spec* contains glob syntax."""
     return any(char in path_spec for char in _GLOB_CHARS)
-
-
-def _workflow_object(value: object, *, context: str) -> WorkflowObject:
-    return json_utils.coerce_json_object(_stringify_yaml_keys(value), context=context)
-
-
-def _workflow_job_map(value: object, *, context: str) -> dict[str, WorkflowObject]:
-    jobs = _workflow_object(value, context=context)
-    workflow_jobs: dict[str, WorkflowObject] = {}
-    for job_id, job_data in jobs.items():
-        if not isinstance(job_data, dict):
-            msg = f"{context}.{job_id} must be a mapping"
-            raise TypeError(msg)
-        workflow_jobs[job_id] = _workflow_object(
-            job_data, context=f"{context}.{job_id}"
-        )
-    return workflow_jobs
 
 
 def _parse_path_specs(raw_value: WorkflowValue | None) -> tuple[str, ...]:
@@ -208,32 +182,16 @@ def _substitute_matrix(
     return value
 
 
-def _expand_jobs(workflow_jobs: dict[str, WorkflowObject]) -> tuple[WorkflowJob, ...]:
+def _expand_jobs(
+    workflow_jobs: dict[str, WorkflowObject] | dict[str, WorkflowJobAnalysis],
+) -> tuple[WorkflowJob, ...]:
     """Expand matrix ``include`` jobs into concrete workflow jobs."""
     jobs: list[WorkflowJob] = []
-    for job_id, job_data in workflow_jobs.items():
-        raw_steps = job_data.get("steps", ())
-        if not isinstance(raw_steps, list):
-            msg = f"Job {job_id} does not define steps as a list"
-            raise TypeError(msg)
-
-        strategy = job_data.get("strategy")
-        matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
-        include = matrix.get("include") if isinstance(matrix, dict) else None
-
-        if isinstance(include, list) and include:
-            for index, matrix_values in enumerate(include, start=1):
-                if not isinstance(matrix_values, dict):
-                    msg = f"Unsupported matrix include entry in job {job_id}: {matrix_values!r}"
-                    raise TypeError(msg)
-                matrix_context = _workflow_object(
-                    matrix_values,
-                    context=f"workflow job {job_id} matrix.include[{index}]",
-                )
+    for job_id, job in WorkflowAnalysis.from_jobs(workflow_jobs).jobs.items():
+        if matrix_include := job.optional_matrix_include():
+            for index, matrix_context in enumerate(matrix_include, start=1):
                 steps_list: list[WorkflowObject] = []
-                for step_index, step in enumerate(raw_steps, start=1):
-                    if not isinstance(step, dict):
-                        continue
+                for step_index, step in enumerate(job.steps, start=1):
                     substituted = _substitute_matrix(step, matrix_context)
                     if not isinstance(substituted, dict):
                         msg = (
@@ -241,7 +199,7 @@ def _expand_jobs(workflow_jobs: dict[str, WorkflowObject]) -> tuple[WorkflowJob,
                         )
                         raise TypeError(msg)
                     steps_list.append(
-                        _workflow_object(
+                        workflow_object(
                             substituted,
                             context=f"workflow job {job_id} step {step_index}",
                         )
@@ -258,20 +216,11 @@ def _expand_jobs(workflow_jobs: dict[str, WorkflowObject]) -> tuple[WorkflowJob,
                 )
             continue
 
-        steps_list: list[WorkflowObject] = []
-        for step_index, step in enumerate(raw_steps, start=1):
-            if not isinstance(step, dict):
-                continue
-            steps_list.append(
-                _workflow_object(
-                    step, context=f"workflow job {job_id} step {step_index}"
-                )
-            )
         jobs.append(
             WorkflowJob(
                 job_id=job_id,
                 instance_id=job_id,
-                steps=tuple(steps_list),
+                steps=job.steps,
             )
         )
 
@@ -370,60 +319,11 @@ def _render_missing_path_error(
     )
 
 
-def _parse_job_needs(raw_needs: object, *, job_id: str) -> tuple[str, ...]:
-    """Return normalized job dependencies from one workflow job."""
-    if raw_needs is None:
-        return ()
-    if isinstance(raw_needs, str):
-        return (raw_needs,)
-    if not isinstance(raw_needs, list):
-        msg = f"Job {job_id} defines unsupported needs value: {raw_needs!r}"
-        raise TypeError(msg)
-
-    parsed: list[str] = []
-    for need in raw_needs:
-        if not isinstance(need, str):
-            msg = f"Job {job_id} contains non-string need: {need!r}"
-            raise TypeError(msg)
-        parsed.append(need)
-    return tuple(parsed)
-
-
 def _build_needs_graph(
-    workflow_jobs: dict[str, WorkflowObject],
+    workflow_jobs: dict[str, WorkflowObject] | dict[str, WorkflowJobAnalysis],
 ) -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]]:
     """Validate job dependencies and return direct/transitive needs."""
-    direct_needs: dict[str, frozenset[str]] = {}
-    errors: list[str] = []
-
-    for job_id, job_data in workflow_jobs.items():
-        needs = frozenset(_parse_job_needs(job_data.get("needs"), job_id=job_id))
-        missing = sorted(need for need in needs if need not in workflow_jobs)
-        if missing:
-            rendered = ", ".join(f"`{need}`" for need in missing)
-            errors.append(f"Job `{job_id}` references unknown needs: {rendered}")
-        direct_needs[job_id] = needs
-
-    if errors:
-        raise RuntimeError("\n".join(errors))
-
-    dependency_graph = {job_id: set(needs) for job_id, needs in direct_needs.items()}
-    try:
-        topo_order = tuple(TopologicalSorter(dependency_graph).static_order())
-    except CycleError as exc:
-        cycle_nodes = exc.args[1] if len(exc.args) > 1 else ()
-        rendered_cycle = " -> ".join(str(node) for node in cycle_nodes)
-        msg = f"Workflow job needs contain a cycle: {rendered_cycle}"
-        raise RuntimeError(msg) from exc
-
-    transitive_needs: dict[str, frozenset[str]] = {}
-    for job_id in topo_order:
-        ancestors = set(direct_needs[job_id])
-        for need in direct_needs[job_id]:
-            ancestors.update(transitive_needs[need])
-        transitive_needs[job_id] = frozenset(ancestors)
-
-    return direct_needs, transitive_needs
+    return WorkflowAnalysis.from_jobs(workflow_jobs).needs_graph()
 
 
 def _render_missing_need_error(
@@ -621,22 +521,14 @@ def validate_workflow_artifact_contracts(
     """Raise ``RuntimeError`` when artifact flow semantics are inconsistent."""
     workflow_path = Path(workflow_path)
     repo_root = Path(repo_root)
-    workflow = _workflow_object(
-        yaml.safe_load(workflow_path.read_text(encoding="utf-8")),
-        context=f"workflow {workflow_path}",
-    )
-    jobs_data = workflow.get("jobs")
-    if not isinstance(jobs_data, dict):
-        msg = f"Workflow {workflow_path} does not contain a jobs mapping"
-        raise TypeError(msg)
-
-    workflow_jobs = _workflow_job_map(
-        jobs_data,
+    workflow = load_workflow_analysis(
+        workflow_path,
         context=f"workflow jobs {workflow_path}",
+        missing_jobs_message="Workflow {workflow_path} does not contain a jobs mapping",
     )
 
-    _, transitive_needs = _build_needs_graph(workflow_jobs)
-    jobs = _expand_jobs(workflow_jobs)
+    _, transitive_needs = workflow.needs_graph()
+    jobs = _expand_jobs(workflow.jobs)
     uploads, errors = _collect_uploads(jobs, repo_root=repo_root)
     for job in jobs:
         errors.extend(

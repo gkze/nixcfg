@@ -21,9 +21,11 @@ def _write_workflow(path: Path, content: str) -> Path:
 
 def _valid_refresh_workflow_text() -> str:
     return """
+        on: workflow_dispatch
         jobs:
           darwin-lock-smoke:
             needs: update-lock
+            runs-on: ubuntu-latest
             steps:
               - run: nix run .#nixcfg -- ci workflow darwin eval-lock-smoke
           compute-hashes:
@@ -31,20 +33,23 @@ def _valid_refresh_workflow_text() -> str:
               - update-lock
               - darwin-lock-smoke
               - resolve-versions
-            steps: []
+            runs-on: ubuntu-latest
     """
 
 
 def _valid_certify_workflow_text() -> str:
     return """
+        on: workflow_dispatch
         jobs:
           darwin-full-smoke:
+            runs-on: ubuntu-latest
             steps:
               - run: nix run .#nixcfg -- ci workflow darwin eval-full-smoke
           darwin-priority-heavy:
             needs:
               - darwin-full-smoke
               - warm-fod-cache-darwin
+            runs-on: ubuntu-latest
             strategy:
               matrix:
                 include:
@@ -54,16 +59,17 @@ def _valid_certify_workflow_text() -> str:
             needs:
               - darwin-full-smoke
               - warm-fod-cache-darwin
+            runs-on: ubuntu-latest
             strategy:
               matrix:
                 include:
                   - package: beta
                     target: .#pkgs.aarch64-darwin.beta
-            steps: []
           darwin-shared:
             needs:
               - darwin-full-smoke
               - warm-fod-cache-darwin
+            runs-on: ubuntu-latest
             steps:
               - run: |
                   nix run .#nixcfg -- ci cache closure \
@@ -73,75 +79,17 @@ def _valid_certify_workflow_text() -> str:
             needs:
               - darwin-priority-heavy
               - darwin-shared
-            steps: []
+            runs-on: ubuntu-latest
           darwin-rocinante:
             needs:
               - darwin-priority-heavy
               - darwin-shared
-            steps: []
+            runs-on: ubuntu-latest
           linux-x86_64:
             needs:
               - warm-fod-cache-x86_64-linux
-            steps: []
+            runs-on: ubuntu-latest
     """
-
-
-def test_load_jobs_and_require_job_reject_invalid_shapes(tmp_path: Path) -> None:
-    """Reject malformed workflow payloads and missing required jobs."""
-    workflow = tmp_path / "workflow.yml"
-    workflow.write_text("[]\n", encoding="utf-8")
-    with pytest.raises(TypeError, match="did not parse to a mapping"):
-        contracts._load_jobs(workflow)
-
-    workflow.write_text("name: demo\n", encoding="utf-8")
-    with pytest.raises(TypeError, match="missing a top-level jobs mapping"):
-        contracts._load_jobs(workflow)
-
-    workflow.write_text("jobs:\n  demo: nope\n", encoding="utf-8")
-    with pytest.raises(TypeError, match="Workflow job demo must be a mapping"):
-        contracts._load_jobs(workflow)
-
-    with pytest.raises(RuntimeError, match="missing required job 'demo'"):
-        contracts._require_job({}, job_id="demo")
-
-
-def test_parse_job_needs_and_job_run_steps_cover_shapes() -> None:
-    """Parse supported needs forms and collect runnable shell steps."""
-    assert contracts._parse_job_needs({}, job_id="demo") == ()
-    assert contracts._parse_job_needs({"needs": "build"}, job_id="demo") == ("build",)
-    assert contracts._parse_job_needs({"needs": ["build", "test"]}, job_id="demo") == (
-        "build",
-        "test",
-    )
-    with pytest.raises(TypeError, match="unsupported needs"):
-        contracts._parse_job_needs({"needs": ["build", 1]}, job_id="demo")
-
-    with pytest.raises(TypeError, match="does not define steps as a list"):
-        contracts._job_run_steps({}, job_id="demo")
-
-    assert contracts._job_run_steps(
-        {
-            "steps": [
-                {"run": "echo hi"},
-                {"uses": "actions/checkout@v4"},
-                "skip-me",
-                {"run": "echo bye"},
-            ]
-        },
-        job_id="demo",
-    ) == ("echo hi", "echo bye")
-
-
-def test_require_and_forbid_job_run_cover_success_and_failure_paths() -> None:
-    """Detect required and forbidden run markers clearly."""
-    job = {"steps": [{"run": "echo hi"}, {"run": "echo bye"}]}
-    contracts._require_job_run(job, job_id="demo", marker="echo hi")
-    contracts._forbid_job_run(job, job_id="demo", marker="nix build")
-
-    with pytest.raises(RuntimeError, match="missing required run step"):
-        contracts._require_job_run(job, job_id="demo", marker="nix build")
-    with pytest.raises(RuntimeError, match="must not run step"):
-        contracts._forbid_job_run(job, job_id="demo", marker="echo hi")
 
 
 def test_darwin_heavy_targets_cover_success_and_error_paths() -> None:
@@ -276,7 +224,9 @@ def test_darwin_split_targets_reject_duplicate_targets_across_jobs() -> None:
 
 def test_darwin_shared_exclude_refs_cover_success_and_error_paths() -> None:
     """Validate shared-closure exclude parsing and duplicate detection."""
-    with pytest.raises(TypeError, match="steps as a list"):
+    with pytest.raises(
+        RuntimeError, match="missing the shared Darwin closure build step"
+    ):
         contracts._darwin_shared_exclude_refs({})
 
     with pytest.raises(
@@ -620,10 +570,12 @@ def test_validate_workflow_structure_contracts_rejects_unknown_workflow_kind(
     workflow = _write_workflow(
         tmp_path / "workflow.yml",
         """
+        on: workflow_dispatch
         jobs:
           demo:
+            runs-on: ubuntu-latest
             steps:
-              - run: true
+              - run: "true"
         """,
     )
     with pytest.raises(RuntimeError, match="does not define refresh or certification"):

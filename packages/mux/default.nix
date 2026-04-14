@@ -133,21 +133,10 @@ stdenv.mkDerivation {
   '';
 
   postPatch = lib.optionalString stdenv.hostPlatform.isDarwin ''
-    python3 - <<'PY'
-    import json
-    from pathlib import Path
-
-    path = Path("package.json")
-    data = json.loads(path.read_text())
-    build = data.setdefault("build", {})
-    build["electronDist"] = "${electronDist}"
-
-    mac = build.setdefault("mac", {})
-    mac["target"] = "dir"
-    mac["hardenedRuntime"] = False
-    mac["notarize"] = False
-    path.write_text(json.dumps(data, indent=2) + "\n")
-    PY
+    ${lib.getExe python3} \
+      ${./patch_package_json.py} \
+      package.json \
+      ${lib.escapeShellArg (toString electronDist)}
   '';
 
   nativeBuildInputs = [

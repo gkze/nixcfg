@@ -33,6 +33,11 @@ def test_mapping_metadata_helpers_and_version_info_commit_paths() -> None:
     assert flake_metadata["node"] is node
     assert flake_metadata.get("commit") == "abc123"
     assert "node" in flake_metadata
+    assert metadata_module.metadata_as_mapping(flake_metadata, context="flake") == {
+        "node": node,
+        "commit": "abc123",
+    }
+    assert metadata_module.metadata_get_str(flake_metadata, "commit") == "abc123"
 
     platform_metadata = PlatformAPIMetadata(
         platform_info={"x86_64-linux": {"sha256hash": "x"}},
@@ -40,6 +45,17 @@ def test_mapping_metadata_helpers_and_version_info_commit_paths() -> None:
     )
     assert platform_metadata["build"] == "2026-03-01"
     assert "commit" not in platform_metadata
+
+    assert (
+        metadata_module.require_metadata_str(
+            {"url": "https://example.test"},
+            "url",
+            context="download metadata",
+        )
+        == "https://example.test"
+    )
+    with pytest.raises(TypeError, match="Expected mapping metadata"):
+        metadata_module.metadata_as_mapping(1, context="bad metadata")
 
     assert VersionInfo(version="1", metadata=None).commit is None
     assert VersionInfo(version="1", metadata=flake_metadata).commit == "abc123"

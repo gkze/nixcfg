@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import functools
+import os
 import shlex
 from typing import TYPE_CHECKING
 
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.commands.flake import nix_flake_lock_update
@@ -136,13 +138,22 @@ def flake_fetch_expr(node: FlakeLockNode) -> str:
 
 
 def nixpkgs_expression() -> NixExpression:
-    """Build a nixpkgs import expression from the pinned flake input."""
-    node_name = get_root_input_name("nixpkgs")
-    node = get_flake_input_node(node_name)
-    fetch_tree = flake_fetch_expression(node)
+    """Build a nixpkgs import expression from a local path or pinned flake input."""
+    nixpkgs_path = os.environ.get("NIXCFG_NIXPKGS_PATH", "").strip()
+    fetch_tree: NixExpression = (
+        NixPath(path=nixpkgs_path)
+        if nixpkgs_path
+        else flake_fetch_expression(
+            get_flake_input_node(get_root_input_name("nixpkgs"))
+        )
+    )
     import_fetch_tree = FunctionCall(
         name=Identifier(name="import"),
-        argument=Parenthesis(value=fetch_tree),
+        argument=(
+            fetch_tree
+            if isinstance(fetch_tree, NixPath)
+            else Parenthesis(value=fetch_tree)
+        ),
     )
     return FunctionCall(
         name=import_fetch_tree,

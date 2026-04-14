@@ -78,9 +78,15 @@ let
       cp -r "${bun}/." "$out"
       chmod u+w "$out/bin"
 
-      for node_binary in node npm npx; do
+      for node_binary in node npm bunx; do
         ln -s "$out/bin/bun" "$out/bin/$node_binary"
       done
+
+      cat > "$out/bin/npx" <<EOF
+      #!${stdenv.shell}
+      exec "$out/bin/bunx" "\$@"
+      EOF
+      chmod +x "$out/bin/npx"
     '';
   };
   bunCacheEntryCreator = stdenvNoCC.mkDerivation {

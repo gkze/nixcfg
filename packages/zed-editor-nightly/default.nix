@@ -430,109 +430,28 @@ let
         fi
       '';
       postPatch = (attrs.postPatch or "") + ''
-        python3 - <<'PY'
-        from pathlib import Path
-
-        path = Path("binding_rust/build.rs")
-        text = path.read_text()
-        old = (
-            "        config\n"
-            '            .define("TREE_SITTER_FEATURE_WASM", "")\n'
-            '            .define("static_assert(...)", "")\n'
-            '            .include(env::var("DEP_WASMTIME_C_API_INCLUDE").unwrap());\n'
-        )
-        new = (
-            "        config\n"
-            '            .define("TREE_SITTER_FEATURE_WASM", "")\n'
-            '            .define("static_assert(...)", "");\n'
-            '        if let Ok(include) = env::var("DEP_WASMTIME_C_API_INCLUDE") {\n'
-            '            for include in include.split_whitespace() {\n'
-            "                config.include(include);\n"
-            "            }\n"
-            "        }\n"
-        )
-
-        assert old in text, "tree-sitter patch target not found"
-        path.write_text(text.replace(old, new, 1))
-        PY
+        ${lib.getExe python3} \
+          ${./patch_tree_sitter_build_rs.py} \
+          binding_rust/build.rs
       '';
     };
 
   zedOverride = attrs: {
     buildInputs = (attrs.buildInputs or [ ]) ++ [ git ];
     installPhase = ''
-            runHook preInstall
+      runHook preInstall
 
-            app_path="$out/Applications/Zed Nightly.app"
-            iconset_dir="$TMPDIR/Zed Nightly.iconset"
+      ${pkgs.stdenv.shell} ${./install_zed_nightly_app.sh} \
+        "$out" \
+        "$TMPDIR" \
+        ${lib.escapeShellArg appVersion} \
+        ${lib.escapeShellArg (toString patchedSrc)} \
+        ${lib.escapeShellArg "${imagemagick}/bin/magick"} \
+        ${lib.escapeShellArg "${libicns}/bin/png2icns"} \
+        ${lib.escapeShellArg "${git}/bin/git"} \
+        ${lib.escapeShellArg "${cliDrv}/bin/cli"}
 
-            mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources" "$out/bin"
-
-      cat > "$app_path/Contents/Info.plist" <<EOF
-      <?xml version="1.0" encoding="UTF-8"?>
-      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
-      <plist version="1.0">
-      <dict>
-        <key>CFBundleDevelopmentRegion</key>
-        <string>English</string>
-        <key>CFBundleDisplayName</key>
-        <string>Zed Nightly</string>
-        <key>CFBundleExecutable</key>
-        <string>zed</string>
-        <key>CFBundleIconFile</key>
-        <string>Zed Nightly</string>
-        <key>CFBundleIdentifier</key>
-        <string>dev.zed.Zed-Nightly</string>
-        <key>CFBundleInfoDictionaryVersion</key>
-        <string>6.0</string>
-        <key>CFBundleName</key>
-        <string>Zed Nightly</string>
-        <key>CFBundlePackageType</key>
-        <string>APPL</string>
-        <key>CFBundleShortVersionString</key>
-        <string>${appVersion}</string>
-        <key>CFBundleVersion</key>
-        <string>${appVersion}</string>
-        <key>CFBundleURLTypes</key>
-        <array>
-          <dict>
-            <key>CFBundleTypeRole</key>
-            <string>Editor</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-              <string>zed</string>
-            </array>
-          </dict>
-        </array>
-        <key>LSApplicationCategoryType</key>
-        <string>public.app-category.developer-tools</string>
-        <key>LSMinimumSystemVersion</key>
-        <string>10.15.7</string>
-        <key>NSHighResolutionCapable</key>
-        <true/>
-      $(cat "${patchedSrc}/crates/zed/resources/info/SupportedPlatforms.plist")
-      $(cat "${patchedSrc}/crates/zed/resources/info/Permissions.plist")
-      $(cat "${patchedSrc}/crates/zed/resources/info/DocumentTypes.plist")
-      </dict>
-      </plist>
-      EOF
-
-            mkdir -p "$iconset_dir"
-            for size in 16 32 64 128 256; do
-              "${imagemagick}/bin/magick" "${patchedSrc}/crates/zed/resources/app-icon-nightly.png" \
-                -resize "''${size}x''${size}" "$iconset_dir/''${size}.png"
-            done
-            cp "${patchedSrc}/crates/zed/resources/app-icon-nightly.png" "$iconset_dir/512.png"
-            cp "${patchedSrc}/crates/zed/resources/app-icon-nightly@2x.png" "$iconset_dir/1024.png"
-            "${libicns}/bin/png2icns" "$app_path/Contents/Resources/Zed Nightly.icns" "$iconset_dir"/*.png >/dev/null
-            cp "${patchedSrc}/crates/zed/resources/Document.icns" "$app_path/Contents/Resources/Document.icns"
-
-            cp "$PWD/target/bin/zed" "$app_path/Contents/MacOS/zed"
-            ln -s ${git}/bin/git "$app_path/Contents/MacOS/git"
-            cp ${cliDrv}/bin/cli "$app_path/Contents/MacOS/cli"
-            ln -s "$out/Applications/Zed Nightly.app/Contents/MacOS/cli" "$out/bin/zed"
-
-            runHook postInstall
+      runHook postInstall
     '';
   };
 

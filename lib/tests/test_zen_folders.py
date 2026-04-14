@@ -3,67 +3,25 @@
 from __future__ import annotations
 
 import argparse
-import getpass
-import importlib.machinery
-import importlib.util
-import sys
 from typing import TYPE_CHECKING
 
 import pytest
 import yaml
 
-from lib.update.paths import REPO_ROOT
+from lib.tests._zen_tooling import load_zen_script_module, resolve_zen_script_path
 
 if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
 
 
-def _resolve_zen_folders_path() -> Path:
-    preferred = REPO_ROOT / f"home/{getpass.getuser()}/bin/zen-folders"
-    if preferred.is_file():
-        return preferred
-
-    candidates = sorted((REPO_ROOT / "home").glob("*/bin/zen-folders"))
-    if len(candidates) == 1:
-        return candidates[0]
-
-    if candidates:
-        candidate_paths = ", ".join(
-            str(path.relative_to(REPO_ROOT)) for path in candidates
-        )
-        msg = (
-            f"Unable to resolve zen-folders for user {getpass.getuser()!r}; "
-            f"candidates: {candidate_paths}"
-        )
-        raise RuntimeError(msg)
-
-    msg = "Unable to locate zen-folders under home/*/bin/zen-folders"
-    raise RuntimeError(msg)
-
-
-ZEN_FOLDERS_PATH = _resolve_zen_folders_path()
-
-
-def _load_zen_folders_module() -> ModuleType:
-    loader = importlib.machinery.SourceFileLoader(
-        "zen_folders_script",
-        str(ZEN_FOLDERS_PATH),
-    )
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    if spec is None or spec.loader is None:
-        msg = "failed to load zen-folders module spec"
-        raise RuntimeError(msg)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[loader.name] = module
-    loader.exec_module(module)
-    return module
+ZEN_FOLDERS_PATH = resolve_zen_script_path("zen-folders")
 
 
 @pytest.fixture(scope="module")
 def zen_folders() -> ModuleType:
     """Load the zen-folders script as a module for direct function testing."""
-    return _load_zen_folders_module()
+    return load_zen_script_module("zen-folders", "zen_folders_script")
 
 
 def test_zen_folders_script_parses_under_python3() -> None:

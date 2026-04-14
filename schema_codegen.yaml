@@ -88,13 +88,14 @@ targets:
     entrypoints:
       - https://json.schemastore.org/github-workflow.json
     prepare:
-      dereference: inline-refs
+      dereference: none
       merge_ref_siblings: false
-      python_transforms:
-        - rewrite-constr-annotations
-        - normalize-pydantic-imports
     generator:
       output: lib/github_actions/models/_generated.py
+      class_name: GitHubWorkflow
+      reuse_model: true
+      collapse_reuse_models: true
+      use_type_alias: true
   nix-models:
     sources:
       - nix-vendored-schemas

@@ -489,6 +489,76 @@ def test_command_routing_for_new_and_legacy_aliases(
     )
 
 
+def test_registered_command_metadata_preserves_cli_surface() -> None:
+    """Keep command names, alias help text, and mounted groups stable."""
+    assert [(command.name, command.help) for command in ws.app.registered_commands] == [
+        ("verify-artifacts", None),
+        ("verify-structure", None),
+        ("validate-bun-lock", None),
+        ("prepare-bun-lock", None),
+        ("build-darwin-config", "Alias for `darwin build`."),
+        ("eval-darwin-lock-smoke", "Alias for `darwin eval-lock-smoke`."),
+        ("eval-darwin-full-smoke", "Alias for `darwin eval-full-smoke`."),
+        (
+            "eval-darwin-smoke",
+            "Backward-compatible alias for `darwin eval-full-smoke`.",
+        ),
+        ("free-disk-space", "Legacy alias for CI runner disk cleanup."),
+        ("install-darwin-tools", "Alias for `darwin install`."),
+        ("prefetch-flake-inputs", "Alias for `flake prefetch`."),
+        ("nix-flake-update", "Alias for `flake update`."),
+        ("generate-pr-body", "Alias for `pr-body`."),
+        ("smoke-check-update-app", "Alias for `update-app`."),
+        ("list-update-targets", "Alias for `update-targets`."),
+    ]
+    assert [
+        (group.name, group.typer_instance.info.help)
+        for group in ws.app.registered_groups
+    ] == [
+        ("darwin", "Darwin workflow steps."),
+        ("flake", "Flake-related workflow steps."),
+        ("pr-body", "Pull request body generation workflow step."),
+        ("update-app", "Update app smoke-check workflow step."),
+        ("update-targets", "Update target listing workflow step."),
+    ]
+    assert [
+        (command.name, command.help)
+        for command in ws.workflow_darwin_app.registered_commands
+    ] == [
+        ("build", None),
+        ("eval-lock-smoke", None),
+        ("eval-full-smoke", None),
+        ("eval-smoke", "Backward-compatible alias for `darwin eval-full-smoke`."),
+        ("free", None),
+        ("install", None),
+    ]
+    assert [
+        (command.name, command.help)
+        for command in ws.workflow_flake_app.registered_commands
+    ] == [("prefetch", None), ("update", None)]
+    assert ws.workflow_pr_body_app.registered_callback is not None
+    assert (
+        ws.workflow_pr_body_app.registered_callback.callback
+        is ws.command_generate_pr_body
+    )
+    assert ws.workflow_pr_body_app.registered_callback.invoke_without_command is True
+    assert ws.workflow_update_app.registered_callback is not None
+    assert (
+        ws.workflow_update_app.registered_callback.callback
+        is ws.command_smoke_check_update_app
+    )
+    assert ws.workflow_update_app.registered_callback.invoke_without_command is True
+    assert ws.workflow_update_targets_app.registered_callback is not None
+    assert (
+        ws.workflow_update_targets_app.registered_callback.callback
+        is ws.command_list_update_targets
+    )
+    assert (
+        ws.workflow_update_targets_app.registered_callback.invoke_without_command
+        is True
+    )
+
+
 def test_cmd_verify_artifacts_reports_validation_failures(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

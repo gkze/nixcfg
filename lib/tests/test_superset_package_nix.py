@@ -17,19 +17,30 @@ from lib.update.paths import REPO_ROOT
 
 
 @cache
+def _superset_package_text() -> str:
+    """Return Superset's package expression source text."""
+    return Path(REPO_ROOT / "packages/superset/default.nix").read_text(encoding="utf-8")
+
+
+@cache
 def _superset_darwin_derivation() -> FunctionCall:
     """Parse Superset's package expression and return the Darwin derivation."""
     root = expect_instance(
-        parse_nix_expr(
-            Path(REPO_ROOT / "packages/superset/default.nix").read_text(
-                encoding="utf-8"
-            )
-        ),
+        parse_nix_expr(_superset_package_text()),
         FunctionDefinition,
     )
     platform_switch = expect_instance(root.output, IfExpression)
     assert_nix_ast_equal(platform_switch.condition, "stdenv.hostPlatform.isLinux")
     return expect_instance(platform_switch.alternative, FunctionCall)
+
+
+def test_superset_fake_node_shim_routes_npx_through_bunx() -> None:
+    """Superset's Bun shim should provide a real bunx entrypoint for npx calls."""
+    source = _superset_package_text()
+
+    assert "for node_binary in node npm bunx; do" in source
+    assert 'cat > "$out/bin/npx" <<EOF' in source
+    assert 'exec "$out/bin/bunx" "\\$@"' in source
 
 
 def test_superset_darwin_build_phase_uses_explicit_unsigned_packaging_flags() -> None:

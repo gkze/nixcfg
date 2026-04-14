@@ -94,35 +94,47 @@ def _resolve_optional_file(
     return None
 
 
-def _zen_folders_base_command(
+def _zen_folders_command(
     folders_command: str,
     profile: str | None,
+    *args: str,
 ) -> list[str]:
-    """Build the shared ``zen-folders`` command prefix."""
+    """Build one ``zen-folders`` command, including the optional profile."""
     command = [folders_command]
     if profile:
         command.extend(["--profile", profile])
+    command.extend(args)
     return command
 
 
-def _run_zen_folders_capture(command: list[str]) -> subprocess.CompletedProcess[str]:
-    """Run ``zen-folders`` and capture text output."""
+def _run_zen_folders(
+    folders_command: str,
+    profile: str | None,
+    *args: str,
+    capture_output: bool,
+) -> subprocess.CompletedProcess[str]:
+    """Run ``zen-folders`` with consistent error handling."""
+    command = _zen_folders_command(folders_command, profile, *args)
     try:
         return subprocess.run(  # noqa: S603
             command,
             check=False,
-            capture_output=True,
+            capture_output=capture_output,
             text=True,
         )
     except FileNotFoundError as exc:
-        msg = f"zen-folders command not found: {command[0]}"
+        msg = f"zen-folders command not found: {folders_command}"
         raise ZenProfileSyncError(msg) from exc
 
 
 def resolve_profile_dir(folders_command: str, profile: str | None) -> Path | None:
     """Resolve the target profile directory via ``zen-folders profile-path``."""
-    command = [*_zen_folders_base_command(folders_command, profile), "profile-path"]
-    result = _run_zen_folders_capture(command)
+    result = _run_zen_folders(
+        folders_command,
+        profile,
+        "profile-path",
+        capture_output=True,
+    )
     if result.returncode != 0:
         output = result.stderr.strip() or result.stdout.strip() or "unknown failure"
         if profile is None and "Unable to auto-detect a Zen profile" in output:
@@ -137,8 +149,12 @@ def resolve_profile_dir(folders_command: str, profile: str | None) -> Path | Non
 
 def zen_is_running(folders_command: str, profile: str | None) -> bool:
     """Return whether Zen appears to be using the target profile."""
-    command = [*_zen_folders_base_command(folders_command, profile), "is-running"]
-    result = _run_zen_folders_capture(command)
+    result = _run_zen_folders(
+        folders_command,
+        profile,
+        "is-running",
+        capture_output=True,
+    )
     if result.stderr:
         sys.stderr.write(result.stderr)
     if result.returncode == 0:
@@ -156,18 +172,15 @@ def apply_folders(
     folders_config: Path,
 ) -> None:
     """Run ``zen-folders apply`` for the target profile and config."""
-    command = [
-        *_zen_folders_base_command(folders_command, profile),
+    result = _run_zen_folders(
+        folders_command,
+        profile,
         "apply",
         "-y",
         "-c",
         str(folders_config),
-    ]
-    try:
-        result = subprocess.run(command, check=False)  # noqa: S603
-    except FileNotFoundError as exc:
-        msg = f"zen-folders command not found: {folders_command}"
-        raise ZenProfileSyncError(msg) from exc
+        capture_output=False,
+    )
     if result.returncode != 0:
         msg = f"zen-folders apply failed with exit code {result.returncode}"
         raise ZenProfileSyncError(msg)

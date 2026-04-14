@@ -2,13 +2,28 @@
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from lib.update.ci import crate2nix
+
+
+def _nix_eval_json(*, expr: str) -> object:
+    """Evaluate a Nix expression and decode its JSON result."""
+    nix = shutil.which("nix")
+    assert nix is not None
+    result = subprocess.run(  # noqa: S603
+        [nix, "eval", "--impure", "--json", "--expr", expr],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
 
 
 def test_normalize_json_text_sorts_keys_and_adds_newline() -> None:
@@ -173,32 +188,130 @@ def test_targets_use_dedicated_source_installables() -> None:
     }
 
 
+@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_crate2nix_source_installables_are_wired_through_package_registry() -> None:
-    """Package registry wiring should include crate2nix companion sources."""
-    packages_root = crate2nix.REPO_ROOT / "packages"
+    """Package registry contracts should expose and filter crate2nix sources correctly."""
+    packages_root = (crate2nix.REPO_ROOT / "packages").resolve()
     companion_entries = {
         f"{path.parent.name}-crate2nix-src"
         for path in packages_root.glob("*/crate2nix-src.nix")
     }
-
-    assert {
+    expected_companions = {
         "codex-crate2nix-src",
         "goose-cli-crate2nix-src",
         "opencode-desktop-crate2nix-src",
         "zed-editor-nightly-crate2nix-src",
-    } <= companion_entries
-    registry = (packages_root / "registry.nix").read_text(encoding="utf-8")
-    assert 'fileName = "crate2nix-src.nix";' in registry
-    assert "packagePaths = discoveredPackagePaths // companionPackagePaths;" in registry
-    assert (
-        "forSystem = system: builtins.removeAttrs packagePaths (unsupportedForSystem system);"
-        in registry
+    }
+
+    assert expected_companions <= companion_entries
+
+    root = Path(crate2nix.REPO_ROOT).resolve()
+    payload = _nix_eval_json(
+        expr=f"""
+let
+  root = {root};
+  registry = import (root + "/packages/registry.nix") {{ src = root; }};
+  names = attrs: builtins.sort builtins.lessThan (builtins.attrNames attrs);
+  linux = registry.forSystem "x86_64-linux";
+  darwin = registry.forSystem "aarch64-darwin";
+  linuxAarch64 = registry.forSystem "aarch64-linux";
+in {{
+  packageNames = names registry.packagePaths;
+  helperEntries = registry.helperEntries;
+  darwinOnly = registry.darwinOnly;
+  sculptorSystems = registry.sculptorSystems;
+  selectedPaths = {{
+    codex = toString registry.packagePaths.codex-crate2nix-src;
+    goose = toString registry.packagePaths.goose-cli-crate2nix-src;
+    opencode = toString registry.packagePaths.opencode-desktop-crate2nix-src;
+    zed = toString registry.packagePaths.zed-editor-nightly-crate2nix-src;
+  }};
+  presence = {{
+    gooseCli = {{
+      linux = builtins.hasAttr "goose-cli" linux;
+      darwin = builtins.hasAttr "goose-cli" darwin;
+      linuxAarch64 = builtins.hasAttr "goose-cli" linuxAarch64;
+    }};
+    gooseCliCrate2nixSrc = {{
+      linux = builtins.hasAttr "goose-cli-crate2nix-src" linux;
+      darwin = builtins.hasAttr "goose-cli-crate2nix-src" darwin;
+      linuxAarch64 = builtins.hasAttr "goose-cli-crate2nix-src" linuxAarch64;
+    }};
+    codexCrate2nixSrc = {{
+      linux = builtins.hasAttr "codex-crate2nix-src" linux;
+      darwin = builtins.hasAttr "codex-crate2nix-src" darwin;
+      linuxAarch64 = builtins.hasAttr "codex-crate2nix-src" linuxAarch64;
+    }};
+    opencodeDesktopCrate2nixSrc = {{
+      linux = builtins.hasAttr "opencode-desktop-crate2nix-src" linux;
+      darwin = builtins.hasAttr "opencode-desktop-crate2nix-src" darwin;
+      linuxAarch64 = builtins.hasAttr "opencode-desktop-crate2nix-src" linuxAarch64;
+    }};
+    zedEditorNightlyCrate2nixSrc = {{
+      linux = builtins.hasAttr "zed-editor-nightly-crate2nix-src" linux;
+      darwin = builtins.hasAttr "zed-editor-nightly-crate2nix-src" darwin;
+      linuxAarch64 = builtins.hasAttr "zed-editor-nightly-crate2nix-src" linuxAarch64;
+    }};
+    sculptor = {{
+      linux = builtins.hasAttr "sculptor" linux;
+      darwin = builtins.hasAttr "sculptor" darwin;
+      linuxAarch64 = builtins.hasAttr "sculptor" linuxAarch64;
+    }};
+  }};
+}}
+"""
     )
-    assert "groupConstraintPredicates = {" in registry
-    assert 'darwin = system: builtins.match ".*-darwin" system != null;' in registry
-    assert 'goose-cli-crate2nix-src = "gooseAarch64Darwin";' not in registry
-    assert 'opencode-desktop-crate2nix-src = "darwin";' in registry
-    assert 'zed-editor-nightly-crate2nix-src = "darwin";' in registry
+    assert isinstance(payload, dict)
+
+    assert expected_companions <= set(payload["packageNames"])
+    assert payload["selectedPaths"] == {
+        "codex": str(packages_root / "codex/crate2nix-src.nix"),
+        "goose": str(packages_root / "goose-cli/crate2nix-src.nix"),
+        "opencode": str(packages_root / "opencode-desktop/crate2nix-src.nix"),
+        "zed": str(packages_root / "zed-editor-nightly/crate2nix-src.nix"),
+    }
+    assert payload["helperEntries"] == [
+        "go-cli-wrapper",
+        "openchamber-bun",
+        "registry",
+    ]
+    assert payload["darwinOnly"] == sorted([
+        "commander",
+        "codex-desktop",
+        "conductor",
+        "granola",
+        "netnewswire",
+        "opencode-desktop-crate2nix-src",
+        "raycast",
+        "wispr-flow",
+        "zed-editor-nightly",
+        "zed-editor-nightly-crate2nix-src",
+    ])
+    assert payload["sculptorSystems"] == ["aarch64-darwin", "x86_64-linux"]
+    assert payload["presence"] == {
+        "gooseCli": {"linux": False, "darwin": True, "linuxAarch64": False},
+        "gooseCliCrate2nixSrc": {
+            "linux": True,
+            "darwin": True,
+            "linuxAarch64": True,
+        },
+        "codexCrate2nixSrc": {
+            "linux": True,
+            "darwin": True,
+            "linuxAarch64": True,
+        },
+        "opencodeDesktopCrate2nixSrc": {
+            "linux": False,
+            "darwin": True,
+            "linuxAarch64": False,
+        },
+        "zedEditorNightlyCrate2nixSrc": {
+            "linux": False,
+            "darwin": True,
+            "linuxAarch64": False,
+        },
+        "sculptor": {"linux": True, "darwin": True, "linuxAarch64": False},
+    }
 
 
 def test_run_writes_refreshed_files(monkeypatch, tmp_path: Path) -> None:
@@ -307,9 +420,11 @@ def test_load_normalizer_handles_success_and_type_errors(tmp_path: Path) -> None
 
 
 def test_load_normalizer_rejects_missing_spec(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail clearly when importlib cannot build a module spec."""
+    """Fail clearly when the normalizer helper module cannot be loaded."""
     monkeypatch.setattr(
-        crate2nix.importlib.util, "spec_from_file_location", lambda *_a, **_k: None
+        crate2nix,
+        "load_module_from_path",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     with pytest.raises(RuntimeError, match="Could not load normalizer"):
         crate2nix._load_normalizer(Path("missing.py"))

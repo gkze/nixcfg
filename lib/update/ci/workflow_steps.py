@@ -11,7 +11,10 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import typer
 
@@ -249,24 +252,35 @@ def _cmd_list_update_targets() -> int:
     )
 
 
-def _cmd_verify_artifacts(*, workflow: Path) -> int:
+def _cmd_verify_workflow_contracts(
+    *,
+    workflow: Path,
+    validator: Callable[..., None],
+    description: str,
+) -> int:
     try:
-        validate_workflow_artifact_contracts(workflow_path=workflow)
+        validator(workflow_path=workflow)
     except (RuntimeError, TypeError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 1
-    sys.stdout.write(f"Verified workflow artifact contracts for {workflow}\n")
+    sys.stdout.write(f"Verified {description} for {workflow}\n")
     return 0
+
+
+def _cmd_verify_artifacts(*, workflow: Path) -> int:
+    return _cmd_verify_workflow_contracts(
+        workflow=workflow,
+        validator=validate_workflow_artifact_contracts,
+        description="workflow artifact contracts",
+    )
 
 
 def _cmd_verify_structure(*, workflow: Path) -> int:
-    try:
-        validate_workflow_structure_contracts(workflow_path=workflow)
-    except (RuntimeError, TypeError) as exc:
-        sys.stderr.write(f"{exc}\n")
-        return 1
-    sys.stdout.write(f"Verified workflow structure contracts for {workflow}\n")
-    return 0
+    return _cmd_verify_workflow_contracts(
+        workflow=workflow,
+        validator=validate_workflow_structure_contracts,
+        description="workflow structure contracts",
+    )
 
 
 def _cmd_validate_bun_lock(*, lock_file: Path) -> int:
@@ -518,6 +532,7 @@ workflow_update_targets_app = make_typer_app(
     no_args_is_help=False,
 )
 
+
 app.add_typer(workflow_darwin_app, name="darwin")
 app.add_typer(workflow_flake_app, name="flake")
 app.add_typer(workflow_pr_body_app, name="pr-body")
@@ -736,19 +751,22 @@ app.command("prepare-bun-lock")(command_prepare_bun_lock)
 app.command("build-darwin-config", help="Alias for `darwin build`.")(
     command_build_darwin_config
 )
-app.command("eval-darwin-lock-smoke", help="Alias for `darwin eval-lock-smoke`.")(
-    command_eval_darwin_lock_smoke
-)
-app.command("eval-darwin-full-smoke", help="Alias for `darwin eval-full-smoke`.")(
-    command_eval_darwin_full_smoke
-)
+app.command(
+    "eval-darwin-lock-smoke",
+    help="Alias for `darwin eval-lock-smoke`.",
+)(command_eval_darwin_lock_smoke)
+app.command(
+    "eval-darwin-full-smoke",
+    help="Alias for `darwin eval-full-smoke`.",
+)(command_eval_darwin_full_smoke)
 app.command(
     "eval-darwin-smoke",
     help="Backward-compatible alias for `darwin eval-full-smoke`.",
 )(command_eval_darwin_full_smoke)
-app.command("free-disk-space", help="Legacy alias for CI runner disk cleanup.")(
-    command_free_disk_space
-)
+app.command(
+    "free-disk-space",
+    help="Legacy alias for CI runner disk cleanup.",
+)(command_free_disk_space)
 app.command("install-darwin-tools", help="Alias for `darwin install`.")(
     command_install_darwin_tools
 )

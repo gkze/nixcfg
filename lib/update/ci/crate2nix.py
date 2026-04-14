@@ -8,7 +8,6 @@ files back into the repository.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import platform
@@ -22,6 +21,7 @@ from typing import Annotated, Protocol, cast
 
 import typer
 
+from lib.import_utils import load_module_from_path
 from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.paths import REPO_ROOT
 
@@ -170,14 +170,14 @@ def _normalize_trailing_newline(text: str) -> str:
 
 def _load_normalizer(path: Path) -> _Normalizer:
     module_path = (REPO_ROOT / path).resolve()
-    spec = importlib.util.spec_from_file_location(
-        f"_crate2nix_normalizer_{path.stem}", module_path
-    )
-    if spec is None or spec.loader is None:
+    try:
+        module = load_module_from_path(
+            module_path,
+            f"_crate2nix_normalizer_{path.stem}",
+        )
+    except RuntimeError as exc:
         msg = f"Could not load normalizer from {module_path}"
-        raise RuntimeError(msg)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+        raise RuntimeError(msg) from exc
     normalize_obj = getattr(module, "normalize", None)
     if not callable(normalize_obj):
         msg = f"Normalizer module {module_path} does not expose normalize()"

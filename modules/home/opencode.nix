@@ -3,18 +3,16 @@ let
   inherit (lib)
     concatLists
     mapAttrs
-    mapAttrs'
     mapAttrsToList
     mkEnableOption
     mkIf
     mkOption
-    nameValuePair
     optionalAttrs
-    recursiveUpdate
     types
     ;
 
   cfg = config.nixcfg.opencode;
+  opencodeMcpLib = import ../../lib/opencode-mcp.nix { inherit lib; };
 
   mcpServerType = types.submodule {
     freeformType = types.attrsOf types.anything;
@@ -56,15 +54,15 @@ let
   profileType = types.submodule {
     options = {
       mcpServers = mkOption {
-        type = types.attrsOf (types.attrsOf types.anything);
+        type = opencodeMcpLib.sparseMcpServerOverrideMapType;
         default = { };
-        description = "Per-profile MCP server overrides merged over nixcfg.opencode.mcpServers.";
+        description = "Per-profile MCP server overrides layered over nixcfg.opencode.mcpServers.";
       };
 
       settings = mkOption {
         type = types.attrsOf types.anything;
         default = { };
-        description = "Additional top-level settings merged over the shared OpenCode config.";
+        description = "Additional top-level runtime settings layered over the shared OpenCode config.";
       };
     };
   };
@@ -95,9 +93,33 @@ let
     // optionalAttrs (url != null) { inherit url; }
     // optionalAttrs (environment != { }) { inherit environment; };
 
-  renderMcpServers = servers: mapAttrs (_: mkServerConfig) servers;
+  # Keep overlays sparse for shared/global servers, but preserve the historical
+  # disabled-by-default behavior for profile-only servers added outside the
+  # shared global config.
+  mkSparseServerOverride =
+    name: server:
+    let
+      extras = removeAttrs server [
+        "enable"
+        "enabled"
+      ];
+      enabled =
+        if server ? enabled then
+          server.enabled
+        else if server ? enable then
+          server.enable
+        else if builtins.hasAttr name cfg.mcpServers then
+          null
+        else
+          false;
+    in
+    extras // optionalAttrs (enabled != null) { inherit enabled; };
 
-  mergeProfileMcpServers = profileMcpServers: recursiveUpdate cfg.mcpServers profileMcpServers;
+  renderMcpServers = servers: mapAttrs (_: mkServerConfig) servers;
+  renderSparseMcpServerOverrides = servers: mapAttrs mkSparseServerOverride servers;
+
+  mergeProfileMcpServers = profileMcpServers:
+    opencodeMcpLib.resolveSparseMcpServerOverrides cfg.mcpServers profileMcpServers;
 
   mkServerAssertions =
     optionPath: servers:
@@ -133,21 +155,25 @@ let
     mcpServers = { };
   };
 
-  mkProfileConfig =
+  mkProfileOverlayConfig =
     profile:
-    let
-      mergedSettings = recursiveUpdate (
-        baseOpencodeSettings // { tui = baseOpencodeTui; }
-      ) profile.settings;
-      mergedMcpServers = mergeProfileMcpServers profile.mcpServers;
-    in
-    mergedSettings
+    profile.settings
     // {
       "$schema" = profile.settings."$schema" or "https://opencode.ai/config.json";
-      mcp = renderMcpServers mergedMcpServers;
+    }
+    // optionalAttrs (profile.mcpServers != { }) {
+      mcp = renderSparseMcpServerOverrides profile.mcpServers;
     };
 
-  activeProfileConfig = cfg.profiles.${cfg.activeProfile} or emptyProfile;
+  selectedProfileConfig = cfg.profiles.${cfg.activeProfile} or emptyProfile;
+  selectedProfilePath = "${config.home.homeDirectory}/.config/opencode/${cfg.activeProfile}.json";
+  staleProfileJsonPaths =
+    map (fileName: "${config.home.homeDirectory}/.config/opencode/${fileName}") (
+      (builtins.map (profileName: "${profileName}.json") (
+        builtins.filter (profileName: profileName != cfg.activeProfile) (builtins.attrNames cfg.profiles)
+      ))
+      ++ [ "active.json" ]
+    );
 in
 {
   options.nixcfg.opencode = {
@@ -158,7 +184,7 @@ in
     activeProfile = mkOption {
       type = types.str;
       default = "personal";
-      description = "Named OpenCode profile materialized to opencode/active.json for GUI launches.";
+      description = "Named OpenCode profile materialized to opencode/<name>.json and selected via OPENCODE_CONFIG.";
     };
 
     profiles = mkOption {
@@ -166,7 +192,7 @@ in
       default = {
         personal = { };
       };
-      description = "Named OpenCode profile overrides materialized to opencode/<name>.json.";
+      description = "Named OpenCode profile overrides layered over the shared global config.";
     };
 
     mcpServers = mkOption {
@@ -176,8 +202,8 @@ in
           enable = false;
           type = "local";
           command = [
-            "npx"
-            "-y"
+            "bunx"
+            "--bun"
             "chrome-devtools-mcp@latest"
             "--autoConnect"
             "--channel=stable"
@@ -231,6 +257,15 @@ in
       ) cfg.profiles
     );
 
+    home = {
+      activation.removeStaleOpencodeProfiles = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        ${builtins.concatStringsSep "\n        " (
+          map (path: "run rm -f ${lib.escapeShellArg path}") staleProfileJsonPaths
+        )}
+      '';
+      sessionVariables.OPENCODE_CONFIG = selectedProfilePath;
+    };
+
     programs.opencode = {
       enable = true;
       settings = baseOpencodeSettings // {
@@ -239,15 +274,8 @@ in
       tui = baseOpencodeTui;
     };
 
-    xdg.configFile =
-      mapAttrs' (
-        profileName: profile:
-        nameValuePair "opencode/${profileName}.json" {
-          text = builtins.toJSON (mkProfileConfig profile);
-        }
-      ) cfg.profiles
-      // {
-        "opencode/active.json".text = builtins.toJSON (mkProfileConfig activeProfileConfig);
-      };
+    xdg.configFile."opencode/${cfg.activeProfile}.json".text = builtins.toJSON (
+      mkProfileOverlayConfig selectedProfileConfig
+    );
   };
 }

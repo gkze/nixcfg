@@ -1,22 +1,10 @@
 {
-  "drvHash": "7zy1wa2ld7w6xgp0nfw2jp1f4rp0dap2",
   "hashes": [
     {
-      "hash": "sha256-PUXLphH82leQLHj5+BIxezKSpRiK/S9WevzK0duwo28=",
-      "hashType": "npmDepsHash",
-      "platform": "aarch64-darwin"
-    },
-    {
-      "hash": "sha256-PUXLphH82leQLHj5+BIxezKSpRiK/S9WevzK0duwo28=",
-      "hashType": "npmDepsHash",
-      "platform": "aarch64-linux"
-    },
-    {
-      "hash": "sha256-PUXLphH82leQLHj5+BIxezKSpRiK/S9WevzK0duwo28=",
-      "hashType": "npmDepsHash",
-      "platform": "x86_64-linux"
+      "hash": "sha256-D6yvarPhHdVJ0No3WIPXtt68B+CeyrA0XTs43Mmnk5Y=",
+      "hashType": "sha256",
+      "url": "https://registry.npmjs.org/linearis/-/linearis-2026.4.4.tgz"
     }
   ],
-  "input": "linearis",
-  "version": "main"
+  "version": "2026.4.4"
 }

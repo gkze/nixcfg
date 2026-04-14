@@ -111,11 +111,18 @@ let
     }
   );
 
+  managedMacAppRoutingProjection = managedMacAppRouting: {
+    excludePackagesByName = builtins.catAttrs "excludePackageName" managedMacAppRouting;
+    systemApplications = map (
+      entry: builtins.removeAttrs entry [ "excludePackageName" ]
+    ) managedMacAppRouting;
+  };
+
   pythonExe =
     let
       python = attrByPath [ "python3" ] null pkgs;
     in
-    if python != null then getExe python else "/usr/bin/python3";
+    if python != null then getExe python else "python3";
 
   writeText =
     name: text:
@@ -137,7 +144,7 @@ let
     '';
 in
 {
-  inherit applicationEntryType;
+  inherit applicationEntryType managedMacAppRoutingProjection;
 
   systemApplicationsOption = mkOption {
     type = types.listOf applicationEntryType;

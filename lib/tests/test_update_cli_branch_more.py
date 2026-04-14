@@ -22,10 +22,6 @@ from lib.update.cli import (
     _execute_run_plan,
     _handle_list_targets_request,
     _handle_validate_request,
-    _InventoryHandles,
-    _InventoryRefTarget,
-    _InventorySourceTarget,
-    _InventoryTarget,
     _is_tty,
     _persist_source_updates,
     _run_ref_phase,
@@ -35,6 +31,12 @@ from lib.update.cli import (
     _SourceTaskContext,
     _update_source_task,
     run_update_command,
+)
+from lib.update.cli_inventory import (
+    _InventoryHandles,
+    _InventoryRefTarget,
+    _InventorySourceTarget,
+    _InventoryTarget,
 )
 from lib.update.config import resolve_config
 from lib.update.events import UpdateEvent
@@ -154,8 +156,8 @@ def test_list_and_validate_non_json_paths(
 ) -> None:
     """Exercise non-JSON list/validate printing branches and early returns."""
     monkeypatch.setattr(
-        "lib.update.cli._build_update_inventory",
-        lambda: [
+        "lib.update.cli_inventory.build_update_inventory",
+        lambda *, dependencies: [
             _InventoryTarget(
                 name="inp",
                 handles=_InventoryHandles(
@@ -265,8 +267,8 @@ def test_build_item_meta_without_sources_and_list_targets_without_refs(
     assert order == ["src"]
 
     monkeypatch.setattr(
-        "lib.update.cli._build_update_inventory",
-        lambda: [
+        "lib.update.cli_inventory.build_update_inventory",
+        lambda *, dependencies: [
             _InventoryTarget(
                 name="src",
                 handles=_InventoryHandles(

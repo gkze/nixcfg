@@ -11,12 +11,14 @@ from lib.update.cli import (
     UpdateOptions,
     UpdateSummary,
     _emit_summary,
+    _merge_source_updates,
+    run_updates,
+)
+from lib.update.cli_inventory import (
     _InventoryHandles,
     _InventoryRefTarget,
     _InventorySourceTarget,
     _InventoryTarget,
-    _merge_source_updates,
-    run_updates,
 )
 
 
@@ -96,8 +98,8 @@ def test_run_updates_list_json_outputs_sources_and_inputs(
 ) -> None:
     """Emit machine-readable inventory payload for list mode."""
     monkeypatch.setattr(
-        "lib.update.cli._build_update_inventory",
-        lambda: [
+        "lib.update.cli_inventory.build_update_inventory",
+        lambda *, dependencies: [
             _InventoryTarget(
                 name="tool",
                 handles=_InventoryHandles(

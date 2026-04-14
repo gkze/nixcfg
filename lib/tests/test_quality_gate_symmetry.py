@@ -25,7 +25,7 @@ _FAST_HOOKS = (
 )
 _MANUAL_HOOKS = ("format-repo",)
 _COMMIT_MSG_HOOKS = ("commit-message-commitlint",)
-_SHARED_CHECKS = (
+_SHARED_FLAKE_CHECKS = (
     "format-repo",
     "lint-editorconfig",
     "format-yaml-yamlfmt",
@@ -35,10 +35,7 @@ _SHARED_CHECKS = (
     "lint-python-ruff",
     "lint-python-ty",
     "lint-workflows-actionlint",
-    "lint-pins-pinact",
     "test-python-pytest",
-    "test-ghawfr-go",
-    "verify-crate2nix",
     "verify-workflow-artifacts-refresh",
     "verify-workflow-artifacts-certify",
     "verify-workflow-structure-refresh",
@@ -112,16 +109,36 @@ def test_dev_shell_manual_and_commit_msg_hooks_stay_stage_scoped() -> None:
     assert 'stages = [ "commit-msg" ];' in _hook_block("commit-message-commitlint")
 
 
+def _workflow_body(path: str) -> str:
+    return _read(REPO_ROOT / path)
+
+
 def test_flake_quality_check_names_match_shared_surface_names() -> None:
-    """Expose the shared quality/test gate names directly as flake checks."""
-    assert _flake_check_names() == tuple(sorted(_SHARED_CHECKS))
+    """Expose the shared flake-friendly quality/test gate names directly as checks."""
+    assert _flake_check_names() == tuple(sorted(_SHARED_FLAKE_CHECKS))
 
 
 def test_ci_quality_matrix_matches_shared_check_names() -> None:
     """Keep CI quality matrix names identical to the shared flake check IDs."""
-    assert _ci_matrix_checks() == _SHARED_CHECKS
+    assert _ci_matrix_checks() == _SHARED_FLAKE_CHECKS
 
 
 def test_update_certify_quality_job_matches_shared_check_names() -> None:
-    """Keep certification quality gates aligned with the CI and flake check IDs."""
-    assert _certify_quality_checks() == _SHARED_CHECKS
+    """Keep certification flake-check gates aligned with the CI matrix and flake checks."""
+    assert _certify_quality_checks() == _SHARED_FLAKE_CHECKS
+
+
+def test_ci_runs_runner_only_pinact_and_crate2nix_verification_explicitly() -> None:
+    """Keep pinact and crate2nix verification outside sandboxed flake checks in CI."""
+    workflow = _workflow_body(".github/workflows/ci.yml")
+    assert "nix run --inputs-from . nixpkgs#pinact -- run --check" in workflow
+    assert "nix run .#nixcfg -- ci pipeline crate2nix" in workflow
+
+
+def test_update_certify_runs_runner_only_pinact_and_crate2nix_verification_explicitly() -> (
+    None
+):
+    """Keep certification pinact and crate2nix verification outside flake checks."""
+    workflow = _workflow_body(".github/workflows/update-certify.yml")
+    assert "nix run --inputs-from . nixpkgs#pinact -- run --check" in workflow
+    assert "nix run .#nixcfg -- ci pipeline crate2nix" in workflow

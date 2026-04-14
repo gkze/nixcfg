@@ -176,15 +176,60 @@ class VersionInfo:
     @property
     def commit(self) -> str | None:
         """Return commit-like equality metadata when present."""
-        metadata = self.metadata
-        if metadata is None:
-            return None
-        if isinstance(metadata, dict):
-            metadata_map = {str(key): value for key, value in metadata.items()}
-            commit = metadata_map.get("commit")
-            return commit if isinstance(commit, str) else None
-        commit = getattr(metadata, "commit", None)
-        return commit if isinstance(commit, str) else None
+        return metadata_get_str(self.metadata, "commit")
+
+
+def metadata_as_mapping(metadata: object | None, *, context: str) -> dict[str, object]:
+    """Return metadata as a ``dict[str, object]`` compatibility mapping."""
+    if isinstance(metadata, MappingMetadata):
+        return metadata.to_dict()
+    try:
+        return json_utils.as_object_dict(metadata, context=context)
+    except TypeError as exc:
+        msg = f"Expected mapping metadata for {context}"
+        raise TypeError(msg) from exc
+
+
+def metadata_get(
+    metadata: object | None,
+    key: str,
+    *,
+    context: str = "metadata",
+) -> object | None:
+    """Return one metadata field from a mapping or typed metadata object."""
+    if metadata is None:
+        return None
+    if isinstance(metadata, MappingMetadata):
+        return metadata.get(key)
+    if isinstance(metadata, dict):
+        return metadata_as_mapping(metadata, context=context).get(key)
+    return getattr(metadata, key, None)
+
+
+def metadata_get_str(
+    metadata: object | None,
+    key: str,
+    *,
+    context: str = "metadata",
+) -> str | None:
+    """Return one metadata field as ``str`` when present and well typed."""
+    value = metadata_get(metadata, key, context=context)
+    return value if isinstance(value, str) else None
+
+
+def require_metadata_str(
+    metadata: object | None,
+    key: str,
+    *,
+    context: str,
+    allow_empty: bool = False,
+) -> str:
+    """Return one required string metadata field or raise ``TypeError``."""
+    value = metadata_get_str(metadata, key, context=context)
+    if value is None or (not allow_empty and not value):
+        msg = f"Expected string field {key!r} in {context}"
+        raise TypeError(msg)
+    return value
 
 
 _METADATA_TYPES: dict[str, type[MappingMetadata]] = {
@@ -287,5 +332,9 @@ __all__ = [
     "VersionInfo",
     "VersionMetadata",
     "deserialize_metadata",
+    "metadata_as_mapping",
+    "metadata_get",
+    "metadata_get_str",
+    "require_metadata_str",
     "serialize_metadata",
 ]

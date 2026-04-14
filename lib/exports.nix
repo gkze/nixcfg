@@ -3,6 +3,14 @@
 }:
 let
   modulesRoot = src + "/modules";
+  apiVersion = 1;
+  constructorNames = [
+    "mkSystem"
+    "mkDarwinHost"
+    "mkHome"
+    "mkHomeModules"
+    "mkSetOpencodeEnvModule"
+  ];
 
   moduleSets = {
     nixosModules = {
@@ -37,19 +45,13 @@ let
       nixcfgLanguageRust = modulesRoot + "/home/languages/rust.nix";
     };
   };
+  api = {
+    version = apiVersion;
+    inherit constructorNames moduleSets;
+  };
 in
 {
-  apiVersion = 1;
-
-  constructorNames = [
-    "mkSystem"
-    "mkDarwinHost"
-    "mkHome"
-    "mkHomeModules"
-    "mkSetOpencodeEnvModule"
-  ];
-
-  inherit moduleSets;
+  inherit api apiVersion constructorNames moduleSets;
   inherit (moduleSets)
     darwinModules
     homeModules

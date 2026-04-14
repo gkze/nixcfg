@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 from types import ModuleType
 
+from lib.import_utils import load_module_from_path
 from lib.tests._nix_ast import assert_nix_ast_equal
 
 
@@ -16,15 +16,7 @@ def _load_normalizer_module() -> ModuleType:
         / "opencode-desktop"
         / "normalize_cargo_nix.py"
     )
-    spec = importlib.util.spec_from_file_location(
-        "_opencode_desktop_normalizer", module_path
-    )
-    if spec is None or spec.loader is None:
-        msg = f"Could not load normalizer module from {module_path}"
-        raise RuntimeError(msg)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(module_path, "_opencode_desktop_normalizer")
 
 
 def test_normalize_rewrites_store_paths_with_src_suffix() -> None:

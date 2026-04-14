@@ -1,6 +1,7 @@
 {
   config,
   inputs,
+  outputs,
   lib,
   pkgs,
   slib,
@@ -10,22 +11,24 @@
 }:
 {
   imports = [
-    {
-      darwin = ./darwin.nix;
-      linux = ./nixos.nix;
-    }
-    .${slib.kernel system}
-    "${slib.modulesPath}/home/languages/bun.nix"
-    "${slib.modulesPath}/home/git.nix"
-    "${slib.modulesPath}/home/languages/go.nix"
+    (
+      {
+        darwin = ./darwin.nix;
+        linux = ./nixos.nix;
+      }
+      .${slib.kernel system}
+    )
+    outputs.homeModules.nixcfgLanguageBun
+    outputs.homeModules.nixcfgGit
+    outputs.homeModules.nixcfgLanguageGo
     ./nixvim.nix
-    "${slib.modulesPath}/home/opencode.nix"
-    "${slib.modulesPath}/home/packages.nix"
-    "${slib.modulesPath}/home/zen.nix"
-    "${slib.modulesPath}/home/languages/python.nix"
-    "${slib.modulesPath}/home/languages/rust.nix"
-    "${slib.modulesPath}/home/stylix.nix"
-    "${slib.modulesPath}/home/zsh.nix"
+    outputs.homeModules.nixcfgOpencode
+    outputs.homeModules.nixcfgPackages
+    outputs.homeModules.nixcfgZen
+    outputs.homeModules.nixcfgLanguagePython
+    outputs.homeModules.nixcfgLanguageRust
+    outputs.homeModules.nixcfgStylix
+    outputs.homeModules.nixcfgZsh
     inputs.catppuccin.homeModules.catppuccin
   ];
 
@@ -76,17 +79,6 @@
           pinentry-program ${prog}
         '';
 
-      # Keep Zen CLI entrypoints on the Nix profile path so they resolve to
-      # the packaged wrappers with their pinned Python dependencies instead of
-      # the raw repo scripts.
-      ".local/bin/code-insiders" = {
-        source = ./bin/code-insiders;
-        executable = true;
-      };
-      ".local/bin/cursor" = {
-        source = ./bin/cursor;
-        executable = true;
-      };
       ".local/bin/git-ignore" = {
         source = ./bin/git-ignore;
         executable = true;
@@ -122,99 +114,108 @@
       };
   };
 
-  nixcfg = {
-    zen =
-      let
-        capitalize =
-          s:
-          (lib.toUpper (builtins.substring 0 1 s)) + (builtins.substring 1 (builtins.stringLength s - 1) s);
-        themeDir =
-          inputs.catppuccin-zen-browser
-          + "/themes/${capitalize config.theme.variant}/${capitalize config.theme.accentColor}";
-        logoName = "zen-logo-${config.theme.variant}.svg";
-      in
-      {
-        enable = true;
-        profile = "Default (twilight)";
-        # Follow the forked Catppuccin branch pinned in flake.lock.
-        chromeSource =
-          assert builtins.pathExists (themeDir + "/userChrome.css");
-          assert builtins.pathExists (themeDir + "/userContent.css");
-          assert builtins.pathExists (themeDir + "/${logoName}");
-          pkgs.runCommand "zen-catppuccin-theme-${config.theme.variant}-${config.theme.accentColor}" { } ''
-            mkdir -p "$out"
-            ln -s "${themeDir}/userChrome.css" "$out/userChrome.css"
-            ln -s "${themeDir}/userContent.css" "$out/userContent.css"
-            ln -s "${themeDir}/${logoName}" "$out/${logoName}"
-          '';
-        userJsSource = ./zen/user.js;
-        foldersSource = ./zen/folders.yaml;
-      };
+  nixcfg =
+    let
+      macAppHelpers = import ../../lib/mac-apps.nix { inherit lib pkgs; };
 
-    languages = {
-      bun.enable = true;
-      go.enable = true;
-      python.enable = true;
-      rust.enable = true;
-    };
-    # Keep the known-problem mutable macOS app bundles managed from /Applications only so
-    # Launch Services has one canonical bundle to touch and old store paths do not pick up
-    # App Management metadata that blocks garbage collection. This list is intentionally
-    # targeted to the apps that have already shown the GC/xattr failure mode or whose
-    # embedded CLIs should resolve through the copied /Applications bundle.
-    packageSets.excludePackagesByName = [
-      "chatgpt"
-      "cursor"
-      "datagrip"
-      "wispr-flow"
-    ];
-    packageSets.extraPackages = with pkgs; [
-      betterdisplay
-      rectangle
-    ];
-    macApps.systemApplications = [
-      {
-        package = pkgs.chatgpt;
-        mode = "copy";
-      }
-      {
-        package = pkgs.code-cursor;
-        mode = "copy";
-      }
-      {
-        package = pkgs.jetbrains.datagrip;
-        mode = "copy";
-      }
-      {
-        package = pkgs.vscode-insiders;
-        mode = "copy";
-      }
-      { package = pkgs.netnewswire; }
-      { package = pkgs.wispr-flow; }
-      { package = pkgs.zoom-us; }
-    ];
-    git = {
-      signingKey = userMeta.gpg.keys.signing;
-      identities = {
-        personal = {
-          name = userMeta.name.user.github;
-          email = userMeta.emails.personal;
-          conditions = [
-            "gitdir:${config.xdg.configHome}/nixcfg/**"
-            "gitdir:~/${slib.srcDirBase system}/github.com/**"
-          ];
+      # Keep the known-problem mutable macOS app bundles managed from /Applications
+      # only so Launch Services has one canonical bundle to touch and old store
+      # paths do not pick up App Management metadata that blocks garbage
+      # collection. `excludePackageName` marks the entries that also need to stay
+      # out of the GUI package set. VS Code Insiders still routes through
+      # /Applications, but keeps its dedicated programs.vscode handling.
+      managedMacAppRouting = [
+        {
+          excludePackageName = "chatgpt";
+          package = pkgs.chatgpt;
+          mode = "copy";
+        }
+        {
+          excludePackageName = "cursor";
+          package = pkgs.code-cursor;
+          mode = "copy";
+        }
+        {
+          excludePackageName = "datagrip";
+          package = pkgs.jetbrains.datagrip;
+          mode = "copy";
+        }
+        {
+          package = pkgs.vscode-insiders;
+          mode = "copy";
+        }
+        { package = pkgs.netnewswire; }
+        {
+          excludePackageName = "wispr-flow";
+          package = pkgs.wispr-flow;
+        }
+        { package = pkgs.zoom-us; }
+      ];
+      managedMacAppProjection = macAppHelpers.managedMacAppRoutingProjection managedMacAppRouting;
+    in
+    {
+      zen =
+        let
+          capitalize =
+            s:
+            (lib.toUpper (builtins.substring 0 1 s)) + (builtins.substring 1 (builtins.stringLength s - 1) s);
+          themeDir =
+            inputs.catppuccin-zen-browser
+            + "/themes/${capitalize config.theme.variant}/${capitalize config.theme.accentColor}";
+          logoName = "zen-logo-${config.theme.variant}.svg";
+        in
+        {
+          enable = true;
+          profile = "Default (twilight)";
+          # Follow the forked Catppuccin branch pinned in flake.lock.
+          chromeSource =
+            assert builtins.pathExists (themeDir + "/userChrome.css");
+            assert builtins.pathExists (themeDir + "/userContent.css");
+            assert builtins.pathExists (themeDir + "/${logoName}");
+            pkgs.runCommand "zen-catppuccin-theme-${config.theme.variant}-${config.theme.accentColor}" { } ''
+              mkdir -p "$out"
+              ln -s "${themeDir}/userChrome.css" "$out/userChrome.css"
+              ln -s "${themeDir}/userContent.css" "$out/userContent.css"
+              ln -s "${themeDir}/${logoName}" "$out/${logoName}"
+            '';
+          userJsSource = ./zen/user.js;
+          foldersSource = ./zen/folders.yaml;
         };
-        work = {
-          name = userMeta.name.user.github;
-          email = userMeta.emails.town;
-          conditions = [
-            "gitdir:~/${slib.srcDirBase system}/github.com/townco/**"
-          ];
+
+      languages = {
+        bun.enable = true;
+        go.enable = true;
+        python.enable = true;
+        rust.enable = true;
+      };
+      packageSets.excludePackagesByName = managedMacAppProjection.excludePackagesByName;
+      packageSets.extraPackages = with pkgs; [
+        betterdisplay
+        rectangle
+      ];
+      macApps.systemApplications = managedMacAppProjection.systemApplications;
+      git = {
+        signingKey = userMeta.gpg.keys.signing;
+        identities = {
+          personal = {
+            name = userMeta.name.user.github;
+            email = userMeta.emails.personal;
+            conditions = [
+              "gitdir:${config.xdg.configHome}/nixcfg/**"
+              "gitdir:~/${slib.srcDirBase system}/github.com/**"
+            ];
+          };
+          work = {
+            name = userMeta.name.user.github;
+            email = userMeta.emails.town;
+            conditions = [
+              "gitdir:~/${slib.srcDirBase system}/github.com/townco/**"
+            ];
+          };
         };
       };
+      stylix.wallpaper = ./wallpaper.jpeg;
     };
-    stylix.wallpaper = ./wallpaper.jpeg;
-  };
 
   catppuccin = lib.mkIf (config.theme.name == "catppuccin") {
     flavor = config.theme.variant;
