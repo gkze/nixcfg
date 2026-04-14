@@ -718,7 +718,10 @@
       );
 
       checks = builtins.mapAttrs (
-        _: systemChecks: builtins.removeAttrs systemChecks [ "formatting" ]
+        _: systemChecks:
+        inputs.nixpkgs.lib.filterAttrs (
+          name: _: name != "formatting" && !(inputs.nixpkgs.lib.hasPrefix "home-" name)
+        ) systemChecks
       ) baseOutputs.checks;
       pkgs = baseOutputs.legacyPackages;
       interactivePkgs = baseOutputs.legacyPackages;

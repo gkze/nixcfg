@@ -25,3 +25,4 @@ def test_standalone_home_output_is_exported_outside_flakelight_home_checks() -> 
         "homeConfigurations.george = import ./home/george { outputs = self; };"
         not in source
     )
+    assert '!(inputs.nixpkgs.lib.hasPrefix "home-" name)' in source
