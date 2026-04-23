@@ -504,6 +504,7 @@ rec {
       homeManagerExtraSpecialArgs ? { },
       extraSystemModules ? [ ],
       enableRosettaBuilder ? !isCI,
+      rosettaBuilderMemory ? null,
     }:
     mkSystem {
       inherit
@@ -527,10 +528,15 @@ rec {
         # and GitHub Actions macOS runners lack a Linux builder.
       ]
       ++ optionals (brewAppsModule != null) [ brewAppsModule ]
-      ++ optionals enableRosettaBuilder [
-        inputs.nix-rosetta-builder.darwinModules.default
-        { nix-rosetta-builder.onDemand = true; }
-      ]
+      ++ optionals enableRosettaBuilder (
+        [
+          inputs.nix-rosetta-builder.darwinModules.default
+          { nix-rosetta-builder.onDemand = true; }
+        ]
+        ++ optionals (rosettaBuilderMemory != null) [
+          { nix-rosetta-builder.memory = rosettaBuilderMemory; }
+        ]
+      )
       ++ optionals work [ { profiles.work.enable = true; } ]
       ++ toList extraSystemModules;
     };

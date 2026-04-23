@@ -722,6 +722,7 @@ def test_darwin_hosts_select_the_materialized_opencode_profile_files() -> None:
         {
           user = "george";
           work = true;
+          rosettaBuilderMemory = "16GiB";
           brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
           extraHomeModules = [
             "${lib.modulesPath}/home/darwin-closure-priority.nix"
@@ -738,7 +739,6 @@ def test_darwin_hosts_select_the_materialized_opencode_profile_files() -> None:
           extraSystemModules = [
             {
               home-manager.backupFileExtension = "backup";
-              nix-rosetta-builder.memory = "16GiB";
             }
             "${lib.modulesPath}/darwin/george/town-dock-apps.nix"
             (lib.mkSetOpencodeEnvModule "work.json")
