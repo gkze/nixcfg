@@ -72,8 +72,7 @@
     '';
     activation.materializeVscodeSettings =
       let
-        vscodeSettingsHomeFileKey =
-          "${config.home.homeDirectory}/Library/Application Support/${config.programs.vscode.nameShort}/User/settings.json";
+        vscodeSettingsHomeFileKey = "${config.home.homeDirectory}/Library/Application Support/${config.programs.vscode.nameShort}/User/settings.json";
         vscodeSettingsRelativePath = lib.removePrefix "${config.home.homeDirectory}/" vscodeSettingsHomeFileKey;
         vscodeSettingsSource = lib.attrByPath [
           "home"
@@ -174,7 +173,8 @@
     file = {
       # Keep the Nix-generated VS Code settings content, but materialize it as a
       # normal file so the editor can mutate it between switches.
-      "${config.home.homeDirectory}/Library/Application Support/${config.programs.vscode.nameShort}/User/settings.json".enable = false;
+      "${config.home.homeDirectory}/Library/Application Support/${config.programs.vscode.nameShort}/User/settings.json".enable =
+        false;
 
       "${config.programs.gpg.homedir}/gpg-agent.conf".text =
         let

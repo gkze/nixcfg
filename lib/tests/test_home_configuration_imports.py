@@ -111,9 +111,12 @@ def test_george_home_configuration_disables_direct_vscode_settings_symlink() -> 
         AttributeSet,
     )
     files = expect_instance(expect_binding(home.values, "file").value, AttributeSet)
-
-    assert (
+    settings_key = (
         '"${config.home.homeDirectory}/Library/Application Support/'
-        '${config.programs.vscode.nameShort}/User/settings.json".enable = false;'
-        in str(files)
+        '${config.programs.vscode.nameShort}/User/settings.json"'
     )
+    settings_entry = expect_instance(
+        expect_binding(files.values, settings_key).value,
+        AttributeSet,
+    )
+    assert_nix_ast_equal(expect_binding(settings_entry.values, "enable").value, "false")

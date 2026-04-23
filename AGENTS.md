@@ -401,8 +401,7 @@ Hard rules for this setup:
 If you think the chrome theme is broken, the first diagnostic is almost always one of:
 
 1. Uncommitted regression in `flake.nix` / `flake.lock` / `home/george/configuration.nix` that
-   reverted the fork-sourcing. Run `git diff HEAD -- flake.nix flake.lock
-   home/george/configuration.nix home/george/zen/` first.
+   reverted the fork-sourcing. Run `git diff HEAD -- flake.nix flake.lock home/george/configuration.nix home/george/zen/` first.
 1. Missing `ui.systemUsesDarkTheme` pref in `home/george/zen/user.js`.
 1. Drift between the fork branch and current Zen internals — fix in the fork, not here.
 
