@@ -27,14 +27,22 @@ def flake_input_hash_updater(
     input_name: str | None = None,
     module: str | None = None,
     platform_specific: bool = False,
+    supported_platforms: tuple[str, ...] | None = None,
 ) -> type[FlakeInputHashUpdater]:
-    """Create and register a flake-input-backed hash updater."""
+    """Create and register a flake-input-backed hash updater.
+
+    If ``supported_platforms`` is provided, the updater short-circuits on
+    unsupported platforms and preserves existing hashes, so per-platform CI
+    runners can skip packages whose system constraint excludes them without
+    tripping over missing flake attributes.
+    """
     attrs: dict[str, object] = {
         "__module__": _resolve_module_name(module),
         "name": name,
         "input_name": input_name,
         "hash_type": hash_type,
         "platform_specific": platform_specific,
+        "supported_platforms": supported_platforms,
     }
     return register_updater(type(f"{name}Updater", (FlakeInputHashUpdater,), attrs))
 
@@ -91,6 +99,7 @@ def bun_node_modules_updater(
     *,
     input_name: str | None = None,
     module: str | None = None,
+    supported_platforms: tuple[str, ...] | None = None,
 ) -> type[FlakeInputHashUpdater]:
     """Shorthand for platform-specific Bun ``nodeModulesHash`` updaters."""
     return flake_input_hash_updater(
@@ -99,6 +108,7 @@ def bun_node_modules_updater(
         input_name=input_name,
         module=module,
         platform_specific=True,
+        supported_platforms=supported_platforms,
     )
 
 

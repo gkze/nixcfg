@@ -222,7 +222,7 @@ def test_stabilize_generated_root_src_paths_handles_root_and_unrelated_paths() -
 
 def test_resolve_targets_skips_unsupported_platforms(monkeypatch) -> None:
     """Default target selection should skip platform-specific packages."""
-    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "x86_64-linux")
 
     runnable, skipped = crate2nix._resolve_targets(())
 
@@ -232,6 +232,23 @@ def test_resolve_targets_skips_unsupported_platforms(monkeypatch) -> None:
         "zed-editor-nightly",
     ]
     assert skipped == ["opencode-desktop"]
+
+
+def test_resolve_targets_skips_aarch64_linux_for_all_current_targets(
+    monkeypatch,
+) -> None:
+    """aarch64-linux must skip every currently registered target (registry-gated)."""
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "aarch64-linux")
+
+    runnable, skipped = crate2nix._resolve_targets(())
+
+    assert runnable == []
+    assert sorted(skipped) == [
+        "codex",
+        "goose-cli",
+        "opencode-desktop",
+        "zed-editor-nightly",
+    ]
 
 
 def test_stream_crate2nix_artifact_updates_emits_changed_artifacts(
@@ -332,7 +349,7 @@ def test_stream_crate2nix_artifact_updates_reports_up_to_date(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Emit an up-to-date status when regenerated artifacts are unchanged."""
-    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "x86_64-linux")
 
     async def _to_thread(_func, _name: str) -> tuple[()]:
         return ()
@@ -589,16 +606,16 @@ def test_run_fails_when_drift_is_detected(monkeypatch, tmp_path: Path) -> None:
     assert (demo_dir / "Cargo.nix").read_text(encoding="utf-8") == "old cargo\n"
 
 
-def test_current_platform_normalizes_known_systems(
+def test_current_platform_delegates_to_nix_platform_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Map platform.system() values to crate2nix platform names."""
-    monkeypatch.setattr(crate2nix.platform, "system", lambda: "Darwin")
-    assert crate2nix._current_platform() == "darwin"
-    monkeypatch.setattr(crate2nix.platform, "system", lambda: "Linux")
-    assert crate2nix._current_platform() == "linux"
-    monkeypatch.setattr(crate2nix.platform, "system", lambda: "Plan9")
-    assert crate2nix._current_platform() == "plan9"
+    """Route crate2nix platform selection through the shared Nix helper."""
+    monkeypatch.setattr(crate2nix, "get_current_nix_platform", lambda: "aarch64-darwin")
+    assert crate2nix._current_platform() == "aarch64-darwin"
+    monkeypatch.setattr(crate2nix, "get_current_nix_platform", lambda: "x86_64-linux")
+    assert crate2nix._current_platform() == "x86_64-linux"
+    monkeypatch.setattr(crate2nix, "get_current_nix_platform", lambda: "aarch64-linux")
+    assert crate2nix._current_platform() == "aarch64-linux"
 
 
 def test_load_normalizer_handles_success_and_type_errors(tmp_path: Path) -> None:

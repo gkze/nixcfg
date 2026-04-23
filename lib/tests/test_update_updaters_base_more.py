@@ -827,6 +827,78 @@ def test_platform_specific_fetch_hashes_reports_missing_non_native_preserve(
     )
 
 
+def test_supported_platforms_skips_on_unsupported_current_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Updaters with a supported_platforms gate should preserve existing hashes."""
+
+    class _DarwinOnlyFlake(_DummyFlakeInput):
+        platform_specific = True
+        supported_platforms = ("aarch64-darwin",)
+
+    async def _compute_overlay_hash(
+        source_name: str,
+        *,
+        system: str | None,
+        config: object,
+    ) -> EventStream:
+        _ = (source_name, system, config)
+        raise AssertionError(
+            "compute_overlay_hash must not run on unsupported platforms"
+        )
+        yield  # pragma: no cover - keep type as async generator
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_overlay_hash",
+        _compute_overlay_hash,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_current_nix_platform",
+        lambda: "x86_64-linux",
+    )
+
+    existing_hash = "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M="
+    updater = _DarwinOnlyFlake(
+        config=resolve_config(deno_deps_platforms=("aarch64-darwin", "x86_64-linux"))
+    )
+    object.__setattr__(
+        updater,
+        "_current_entry",
+        SourceEntry(
+            hashes=HashCollection(
+                entries=[
+                    HashEntry.create(
+                        "sha256",
+                        existing_hash,
+                        platform="aarch64-darwin",
+                    ),
+                ]
+            ),
+        ),
+    )
+
+    info = VersionInfo(version="1.0.0", metadata={})
+    events = asyncio.run(
+        _with_session(
+            lambda session: _collect_events(updater.fetch_hashes(info, session)),
+        )
+    )
+
+    status_payloads = [
+        event.payload for event in events if event.kind == UpdateEventKind.STATUS
+    ]
+    assert any(
+        isinstance(payload, dict) and payload.get("status") == "unsupported_platform"
+        for payload in status_payloads
+    )
+    value_events = [event for event in events if event.kind == UpdateEventKind.VALUE]
+    assert len(value_events) == 1
+    preserved = _require_hash_entries(value_events[0].payload)
+    assert [(entry.platform, entry.hash) for entry in preserved] == [
+        ("aarch64-darwin", existing_hash),
+    ]
+
+
 def test_deno_deps_hash_updater_paths() -> None:
     """Run this test case."""
     updater = _DummyDenoDeps()

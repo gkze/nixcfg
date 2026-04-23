@@ -145,6 +145,13 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
     hash_type: HashType
     platform_specific: bool = False
     native_only: bool = False
+    # Tuple of Nix system strings (e.g. ``"aarch64-darwin"``) this updater may
+    # evaluate against. ``None`` means "all platforms" (the default). When set,
+    # ``fetch_hashes`` short-circuits on unsupported platforms and preserves
+    # any existing sources.json hashes. Mirror whatever system constraint the
+    # companion package has in ``packages/registry.nix`` so per-platform CI
+    # runners skip darwin-only / linux-only packages cleanly.
+    supported_platforms: ClassVar[tuple[str, ...] | None] = None
     required_tools: ClassVar[tuple[str, ...]] = ("nix",)
 
     def build_result(
@@ -278,8 +285,26 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         """Compute flake-backed hashes for one or more target platforms."""
         context = _coerce_context(context)
         _ = session
+        current_platform = _base_module().get_current_nix_platform()
+        if (
+            self.supported_platforms is not None
+            and current_platform not in self.supported_platforms
+        ):
+            existing_hashes = self._existing_platform_hashes(context)
+            entries = [
+                HashEntry.create(self.hash_type, hash_val, platform=platform)
+                for platform, hash_val in sorted(existing_hashes.items())
+            ]
+            yield UpdateEvent.status(
+                self.name,
+                f"Unsupported platform {current_platform}, preserving existing hashes",
+                operation="compute_hash",
+                status="unsupported_platform",
+                detail=current_platform,
+            )
+            yield UpdateEvent.value(self.name, entries)
+            return
         if self.platform_specific:
-            current_platform = _base_module().get_current_nix_platform()
             error = f"Missing {self.hash_type} output"
             platform_hashes: dict[str, str] = {}
             existing_hashes = self._existing_platform_hashes(context)

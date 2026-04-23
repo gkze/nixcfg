@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import platform
 import re
 import subprocess
 import sys
@@ -17,6 +16,7 @@ from typing import Protocol, cast
 from lib.import_utils import load_module_from_path
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, UpdateEvent
+from lib.update.nix import get_current_nix_platform
 from lib.update.paths import REPO_ROOT
 
 _NORMALIZER_RESULT_SIZE = 3
@@ -107,6 +107,11 @@ def _stabilize_generated_root_src_paths(
     return _CLEAN_SOURCE_WITH_SRC_RE.sub(_rewrite, refreshed)
 
 
+# Keep these tuples in sync with the system constraints declared in
+# packages/registry.nix for each target's `*-crate2nix-src` companion. The
+# compute-hashes job fans out across aarch64-darwin, x86_64-linux, and
+# aarch64-linux runners, and will fail if a target attempts to build its
+# crate2nix source on a platform the flake does not expose.
 TARGETS = {
     "codex": Crate2NixTarget(
         name="codex",
@@ -114,7 +119,7 @@ TARGETS = {
         cargo_nix=Path("packages/codex/Cargo.nix"),
         crate_hashes=Path("packages/codex/crate-hashes.json"),
         normalizer_path=Path("packages/codex/normalize_cargo_nix.py"),
-        supported_platforms=("linux", "darwin"),
+        supported_platforms=("aarch64-darwin", "x86_64-linux"),
     ),
     "goose-cli": Crate2NixTarget(
         name="goose-cli",
@@ -122,7 +127,7 @@ TARGETS = {
         cargo_nix=Path("overlays/goose-cli/Cargo.nix"),
         crate_hashes=Path("overlays/goose-cli/crate-hashes.json"),
         normalizer_path=Path("overlays/goose-cli/normalize_cargo_nix.py"),
-        supported_platforms=("linux", "darwin"),
+        supported_platforms=("aarch64-darwin", "x86_64-linux"),
     ),
     "zed-editor-nightly": Crate2NixTarget(
         name="zed-editor-nightly",
@@ -130,7 +135,7 @@ TARGETS = {
         cargo_nix=Path("packages/zed-editor-nightly/Cargo.nix"),
         crate_hashes=Path("packages/zed-editor-nightly/crate-hashes.json"),
         normalizer_path=Path("packages/zed-editor-nightly/normalize_cargo_nix.py"),
-        supported_platforms=("linux", "darwin"),
+        supported_platforms=("aarch64-darwin", "x86_64-linux"),
     ),
     "opencode-desktop": Crate2NixTarget(
         name="opencode-desktop",
@@ -138,19 +143,14 @@ TARGETS = {
         cargo_nix=Path("packages/opencode-desktop/Cargo.nix"),
         crate_hashes=Path("packages/opencode-desktop/crate-hashes.json"),
         normalizer_path=Path("packages/opencode-desktop/normalize_cargo_nix.py"),
-        supported_platforms=("darwin",),
+        supported_platforms=("aarch64-darwin", "x86_64-darwin"),
         cargo_manifest_relpath=Path("packages/desktop/src-tauri/Cargo.toml"),
     ),
 }
 
 
 def _current_platform() -> str:
-    system = platform.system()
-    if system == "Darwin":
-        return "darwin"
-    if system == "Linux":
-        return "linux"
-    return system.lower()
+    return get_current_nix_platform()
 
 
 def _normalize_json_text(text: str) -> str:
