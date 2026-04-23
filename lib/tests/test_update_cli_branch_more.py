@@ -425,6 +425,45 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
     assert len({task_map_id for _name, task_map_id in calls}) == 1
 
 
+def test_run_sources_phase_serializes_when_max_nix_builds_is_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run source updates sequentially when nix builds are already serialized."""
+    active = 0
+    max_active = 0
+
+    async def _update_source(_name: str, *, context: _SourceTaskContext) -> None:
+        nonlocal active, max_active
+        _ = context
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+
+    monkeypatch.setattr("lib.update.cli._update_source_task", _update_source)
+
+    _run(
+        _run_sources_phase(
+            context=_SourcesPhaseContext(
+                source_names=["demo", "other"],
+                sources=SourcesFile(
+                    entries={
+                        "demo": SourceEntry(hashes={}),
+                        "other": SourceEntry(hashes={}),
+                    }
+                ),
+                queue=asyncio.Queue(),
+                update_input=False,
+                native_only=False,
+                config=resolve_config(max_nix_builds=1),
+                pinned={},
+            )
+        )
+    )
+
+    assert max_active == 1
+
+
 def test_update_source_task_dedupes_shared_input_refreshes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

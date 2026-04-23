@@ -753,23 +753,29 @@ async def _run_sources_phase(
     async with aiohttp.ClientSession() as session:
         update_input_lock = asyncio.Lock()
         update_input_tasks: dict[str, asyncio.Task[None]] = {}
+
+        def _source_task_context(name: str) -> _SourceTaskContext:
+            return _SourceTaskContext(
+                sources=context.sources,
+                update_input=context.update_input,
+                native_only=context.native_only,
+                session=session,
+                update_input_lock=update_input_lock,
+                update_input_tasks=update_input_tasks,
+                queue=context.queue,
+                config=context.config,
+                pinned_version=context.pinned.get(name),
+            )
+
+        if context.config.max_nix_builds == 1:
+            for name in context.source_names:
+                await _update_source_task(name, context=_source_task_context(name))
+            return
+
         async with asyncio.TaskGroup() as group:
             for name in context.source_names:
                 group.create_task(
-                    _update_source_task(
-                        name,
-                        context=_SourceTaskContext(
-                            sources=context.sources,
-                            update_input=context.update_input,
-                            native_only=context.native_only,
-                            session=session,
-                            update_input_lock=update_input_lock,
-                            update_input_tasks=update_input_tasks,
-                            queue=context.queue,
-                            config=context.config,
-                            pinned_version=context.pinned.get(name),
-                        ),
-                    )
+                    _update_source_task(name, context=_source_task_context(name))
                 )
 
 
