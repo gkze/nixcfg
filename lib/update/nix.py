@@ -615,10 +615,19 @@ async def compute_drv_fingerprint(
     hash.  This gives us maximally precise staleness detection: zero false
     negatives and zero false positives.
     """
+    expr = _build_overlay_expr(source, system=system, repo_root=repo_root)
+    return await compute_expr_drv_fingerprint(source, expr, config=config)
+
+
+async def compute_expr_drv_fingerprint(
+    source: str,
+    expr: str,
+    *,
+    config: UpdateConfig | None = None,
+) -> str:
+    """Compute a stable derivation fingerprint for an arbitrary Nix expression."""
     config = resolve_active_config(config)
-    expr = _build_drv_path_expr(
-        _build_overlay_expr(source, system=system, repo_root=repo_root)
-    )
+    expr = _build_drv_path_expr(expr)
     args = ["nix", "eval", "--quiet", "--raw", "--impure", "--expr", expr]
 
     result_drain = ValueDrain()
@@ -669,6 +678,7 @@ __all__ = [
     "_emit_sri_hash_from_build_result",
     "_run_fixed_output_build",
     "compute_drv_fingerprint",
+    "compute_expr_drv_fingerprint",
     "compute_fixed_output_hash",
     "compute_overlay_hash",
     "get_current_nix_platform",
