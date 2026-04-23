@@ -129,6 +129,15 @@ class Updater(ABC):
     materialize_when_current: ClassVar[bool] = False
     shows_materialize_artifacts_phase: ClassVar[bool] = False
     generated_artifact_files: ClassVar[tuple[str, ...]] = ()
+    # Optional tuple of Nix system strings (for example ``"aarch64-darwin"``)
+    # this updater may run on. ``None`` means "all platforms" (the default).
+    # When set, ``update_stream`` short-circuits on other platforms before
+    # hitting the network or the Nix store; per-platform compute-hashes CI
+    # runners can use this to skip packages whose system constraints in
+    # ``packages/registry.nix`` exclude them, or whose remote source registry
+    # rejects the matrix runner's IP (as crates.io currently does for some
+    # GitHub Actions Linux runners).
+    supported_platforms: ClassVar[tuple[str, ...] | None] = None
 
     def __init__(self, *, config: UpdateConfig | None = None) -> None:
         """Create an updater bound to active config values."""
@@ -207,6 +216,18 @@ class Updater(ABC):
         pinned_version: VersionInfo | None = None,
     ) -> EventStream:
         """Run fetch/check/hash/update flow and emit update events."""
+        if self.supported_platforms is not None:
+            current_platform = _base_module().get_current_nix_platform()
+            if current_platform not in self.supported_platforms:
+                yield UpdateEvent.status(
+                    self.name,
+                    f"Unsupported platform {current_platform}, skipping update",
+                    operation="check_version",
+                    status="unsupported_platform",
+                    detail=current_platform,
+                )
+                yield UpdateEvent.result(self.name)
+                return
         context = UpdateContext(current=current)
         if pinned_version is not None:
             yield UpdateEvent.status(

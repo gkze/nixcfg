@@ -36,6 +36,15 @@ class SentryCliUpdater(GitHubReleaseUpdater):
     GITHUB_REPO = "sentry-cli"
     TAG_PREFIX = ""
     XCARCHIVE_FILTER = "find $out -name '*.xcarchive' -type d -exec rm -rf {} +"
+    # Restrict the hash computation to darwin runners. The cargoHash
+    # materializes by invoking ``rustPlatform.fetchCargoVendor``, whose
+    # upstream Python helper has to download every Cargo dependency from
+    # ``https://crates.io/api/v1/...``. That endpoint currently returns
+    # HTTP 403 for the GitHub Actions Linux runner IP pool (reproduced on
+    # both ubuntu-24.04 and ubuntu-24.04-arm), but succeeds from macos-15.
+    # The resulting hash is platform-independent, so computing it only on
+    # darwin and letting merge-sources propagate the entry is sufficient.
+    supported_platforms = ("aarch64-darwin", "x86_64-darwin")
 
     def _src_nix_expression(
         self,

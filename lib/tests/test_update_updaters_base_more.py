@@ -369,6 +369,93 @@ def test_updater_is_latest_and_update_stream_paths() -> None:
     )
 
 
+def test_updater_skips_update_stream_on_unsupported_current_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``supported_platforms`` should short-circuit update_stream before fetch."""
+
+    class _DarwinOnlyUpdater(_DummyFlakeInput):
+        supported_platforms = ("aarch64-darwin",)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_current_nix_platform",
+        lambda: "x86_64-linux",
+    )
+
+    async def _fail_fetch_latest(_self: object, _session: object) -> VersionInfo:
+        raise AssertionError("fetch_latest must not run on unsupported platforms")
+
+    monkeypatch.setattr(_DarwinOnlyUpdater, "fetch_latest", _fail_fetch_latest)
+    updater = _DarwinOnlyUpdater()
+
+    async def _collect() -> list[UpdateEvent]:
+        async with aiohttp.ClientSession() as session:
+            return [
+                event
+                async for event in updater.update_stream(
+                    SourceEntry(
+                        hashes=HashCollection(
+                            entries=[
+                                HashEntry.create(
+                                    "sha256",
+                                    HASH_A,
+                                    platform="aarch64-darwin",
+                                )
+                            ]
+                        )
+                    ),
+                    session,
+                )
+            ]
+
+    events = asyncio.run(_collect())
+    assert [event.kind for event in events] == [
+        UpdateEventKind.STATUS,
+        UpdateEventKind.RESULT,
+    ]
+    status_payload = events[0].payload
+    assert isinstance(status_payload, dict)
+    assert status_payload.get("status") == "unsupported_platform"
+    assert status_payload.get("detail") == "x86_64-linux"
+    assert not any(event.kind == UpdateEventKind.VALUE for event in events)
+
+
+def test_updater_supported_platforms_allows_native_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the current platform is supported, update_stream proceeds normally."""
+
+    class _DarwinOnlyUpdater(_DummyFlakeInput):
+        supported_platforms = ("aarch64-darwin",)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    async def _fetch_latest(_self: object, _session: object) -> VersionInfo:
+        return VersionInfo(version="1.0.0", metadata={})
+
+    monkeypatch.setattr(_DarwinOnlyUpdater, "fetch_latest", _fetch_latest)
+    updater = _DarwinOnlyUpdater()
+
+    async def _collect() -> list[UpdateEvent]:
+        async with aiohttp.ClientSession() as session:
+            return [event async for event in updater.update_stream(None, session)]
+
+    events = asyncio.run(_collect())
+    assert not any(
+        isinstance(event.payload, dict)
+        and event.payload.get("status") == "unsupported_platform"
+        for event in events
+    )
+    assert any(
+        event.kind == UpdateEventKind.STATUS
+        and event.message == "Latest version: 1.0.0"
+        for event in events
+    )
+
+
 def test_updater_materializes_artifacts_when_current() -> None:
     """Artifact-emitting updaters should still run when source metadata is current."""
     updater = _DummyArtifactUpdater(latest="1.0.0")
