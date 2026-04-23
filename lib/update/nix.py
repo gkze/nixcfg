@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import json
 import platform
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -454,6 +453,19 @@ def _build_nix_expr(body: str | NixExpression) -> str:
     return compact_nix_expr(expression.rebuild())
 
 
+def _build_drv_path_expr(body: str | NixExpression) -> str:
+    expression = LetExpression(
+        local_variables=[
+            Binding(
+                name="drv",
+                value=parse(body).expr if isinstance(body, str) else body,
+            ),
+        ],
+        value=_select_attrs(Identifier(name="drv"), "drvPath"),
+    )
+    return compact_nix_expr(expression.rebuild())
+
+
 def _build_overlay_expression(
     source: str,
     *,
@@ -593,9 +605,9 @@ async def compute_drv_fingerprint(
     """Compute a stable derivation fingerprint for staleness detection.
 
     Evaluates the package with ``FAKE_HASHES=1`` and extracts the ``.drv``
-    store-path hash using ``nix derivation show``.  Because the fake hash is
-    a constant sentinel, the ``.drv`` path is a pure function of the build
-    input closure (source, toolchain, build script, stdenv, etc.).
+    store-path hash using ``nix eval --raw <expr>.drvPath``. Because the fake
+    hash is a constant sentinel, the ``.drv`` path is a pure function of the
+    build input closure (source, toolchain, build script, stdenv, etc.).
 
     Any change to *any* transitive build input — a nixpkgs bump, a Deno
     version change, a source force-push, a build-script edit — changes the
@@ -604,9 +616,10 @@ async def compute_drv_fingerprint(
     negatives and zero false positives.
     """
     config = resolve_active_config(config)
-    expr = _build_overlay_expr(source, system=system, repo_root=repo_root)
-    expr = compact_nix_expr(expr)
-    args = ["nix", "derivation", "show", "--quiet", "--impure", "--expr", expr]
+    expr = _build_drv_path_expr(
+        _build_overlay_expr(source, system=system, repo_root=repo_root)
+    )
+    args = ["nix", "eval", "--quiet", "--raw", "--impure", "--expr", expr]
 
     result_drain = ValueDrain()
     async for _event in drain_value_events(
@@ -614,7 +627,7 @@ async def compute_drv_fingerprint(
             args,
             options=RunCommandOptions(
                 source=source,
-                error="nix derivation show did not return output",
+                error="nix eval did not return output",
                 env={"FAKE_HASHES": "1"},
                 config=config,
             ),
@@ -623,31 +636,21 @@ async def compute_drv_fingerprint(
         parse=expect_command_result,
     ):
         pass  # discard streaming events during fingerprint eval
-    result = require_value(result_drain, "nix derivation show did not return output")
+    result = require_value(result_drain, "nix eval did not return output")
     if result.returncode != 0:
-        msg = f"nix derivation show failed:\n{result.stderr}"
+        msg = f"nix eval failed:\n{result.stderr}"
         raise RuntimeError(msg)
 
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        msg = f"Failed to parse nix derivation show output: {exc}"
-        raise RuntimeError(msg) from exc
-
-    # New Nix versions (2.20+) wrap derivations under a "derivations" key;
-    # older versions use the .drv path directly as a top-level key.
-    if "derivations" in data and isinstance(data["derivations"], dict):
-        drv_path = next(iter(data["derivations"]))
-    else:
-        drv_path = next(iter(data))
-    drv_path = str(drv_path)
+    drv_path = result.stdout.strip()
+    if not drv_path:
+        msg = "nix eval returned empty drvPath"
+        raise RuntimeError(msg)
 
     # The .drv key is "<hash>-<name>.drv" (Nix 2.20+) or the full
-    # "/nix/store/<hash>-<name>.drv" (older).  Strip the store prefix if
-    # present so the fingerprint is just the Nix hash portion regardless
-    # of Nix version.  A Nix version change that alters the derivation
-    # hash algorithm would change the fingerprint, conservatively
-    # triggering recomputation — the correct behaviour.
+    # "/nix/store/<hash>-<name>.drv". Strip the store prefix if present so the
+    # fingerprint is just the Nix hash portion. A Nix version change that
+    # alters the derivation hash algorithm would change the fingerprint,
+    # conservatively triggering recomputation — the correct behaviour.
     if "/" in drv_path:
         drv_path = drv_path.rsplit("/", 1)[-1]
     return drv_path.split("-", 1)[0]

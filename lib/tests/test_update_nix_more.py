@@ -248,7 +248,7 @@ def test_compute_overlay_hash_passes_fake_hash_env(
 
 
 def test_compute_drv_fingerprint_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Extract stable drv fingerprint and report eval/parsing failures."""
+    """Extract stable drv fingerprints and report eval failures."""
 
     async def _run_command_success(
         *_args: object, **_kwargs: object
@@ -256,7 +256,7 @@ def test_compute_drv_fingerprint_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         result = CommandResult(
             args=["nix"],
             returncode=0,
-            stdout='{"derivations": {"/nix/store/abc123-demo.drv": {}}}',
+            stdout="/nix/store/abc123-demo.drv\n",
             stderr="",
         )
         yield UpdateEvent(
@@ -274,7 +274,7 @@ def test_compute_drv_fingerprint_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         result = CommandResult(
             args=["nix"],
             returncode=0,
-            stdout='{"/nix/store/def456-demo.drv": {}}',
+            stdout="def456-demo.drv",
             stderr="",
         )
         yield UpdateEvent(
@@ -295,20 +295,20 @@ def test_compute_drv_fingerprint_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         yield UpdateEvent.value("demo", result)
 
     monkeypatch.setattr("lib.update.nix.run_command", _run_command_nonzero)
-    with pytest.raises(RuntimeError, match="nix derivation show failed"):
+    with pytest.raises(RuntimeError, match="nix eval failed"):
         _run_async(compute_drv_fingerprint("demo"))
 
-    async def _run_command_bad_json(
+    async def _run_command_empty_stdout(
         *_args: object, **_kwargs: object
     ) -> AsyncIterator[UpdateEvent]:
-        result = CommandResult(args=["nix"], returncode=0, stdout="{", stderr="")
+        result = CommandResult(args=["nix"], returncode=0, stdout="", stderr="")
         yield UpdateEvent(
             kind=UpdateEventKind.COMMAND_END, source="demo", payload=result
         )
         yield UpdateEvent.value("demo", result)
 
-    monkeypatch.setattr("lib.update.nix.run_command", _run_command_bad_json)
-    with pytest.raises(RuntimeError, match="Failed to parse"):
+    monkeypatch.setattr("lib.update.nix.run_command", _run_command_empty_stdout)
+    with pytest.raises(RuntimeError, match="empty drvPath"):
         _run_async(compute_drv_fingerprint("demo"))
 
 

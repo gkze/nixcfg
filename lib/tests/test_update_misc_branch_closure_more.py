@@ -71,7 +71,7 @@ def test_events_expect_source_hashes_rejects_mixed_list() -> None:
 def test_compute_drv_fingerprint_without_store_prefix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Parse old/new derivation shapes when key has no slash."""
+    """Accept raw drvPath output without a store-path prefix."""
     from lib.update.nix import compute_drv_fingerprint
 
     async def _run_command(
@@ -80,7 +80,7 @@ def test_compute_drv_fingerprint_without_store_prefix(
         result = CommandResult(
             args=["nix"],
             returncode=0,
-            stdout='{"derivations": {"abc123-demo.drv": {}}}',
+            stdout="abc123-demo.drv",
             stderr="",
         )
         yield UpdateEvent(
