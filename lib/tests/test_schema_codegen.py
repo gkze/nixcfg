@@ -17,12 +17,12 @@ from lib.schema_codegen.config import (
     URLSource,
 )
 from lib.schema_codegen.runner import (
-    DEFAULT_CONFIG_PATH,
     _build_registry,
     _entrypoint_class_suffix,
     _prepare_entrypoint_schema,
     _resolve_body_class_conflicts,
     _resolve_target,
+    default_config_path,
     generate_schema_codegen_target,
     list_schema_codegen_targets,
     load_schema_codegen_config,
@@ -83,7 +83,7 @@ targets:
 
 def test_list_schema_codegen_targets_reads_repo_config() -> None:
     """Load the checked-in config and expose the initial targets."""
-    summaries = list_schema_codegen_targets(config_path=DEFAULT_CONFIG_PATH)
+    summaries = list_schema_codegen_targets(config_path=default_config_path())
 
     assert [summary.name for summary in summaries] == [
         "codegen-manifest-models",
@@ -563,7 +563,7 @@ targets:
 
 def test_repo_github_actions_target_uses_safe_recursive_codegen_settings() -> None:
     """Keep the checked-in GitHub Actions target on recursive-safe settings."""
-    loaded = load_schema_codegen_config(config_path=DEFAULT_CONFIG_PATH)
+    loaded = load_schema_codegen_config(config_path=default_config_path())
     target = loaded.config.targets["github-actions"]
     generator = target.generator.model_dump()
 
@@ -577,7 +577,7 @@ def test_repo_github_actions_target_uses_safe_recursive_codegen_settings() -> No
 
 def test_prepare_repo_codegen_manifest_entrypoints_from_default_config() -> None:
     """Resolve and inline the checked-in codegen manifest schemas."""
-    loaded = load_schema_codegen_config(config_path=DEFAULT_CONFIG_PATH)
+    loaded = load_schema_codegen_config(config_path=default_config_path())
     resolved = _resolve_target(loaded, target_name="codegen-manifest-models")
     registry = _build_registry(loaded, target=resolved.target)
 
@@ -712,7 +712,7 @@ targets:
 
 def test_codegen_manifest_schemas_use_stable_urn_ids_and_optional_metadata() -> None:
     """Keep unpublished schema IDs non-hosted and metadata fields optional."""
-    repo_root = DEFAULT_CONFIG_PATH.parent
+    repo_root = default_config_path().parent
     manifest_schema = json.loads(
         (repo_root / "schemas/codegen/codegen.schema.json").read_text(encoding="utf-8")
     )

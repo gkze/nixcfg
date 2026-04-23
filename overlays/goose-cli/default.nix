@@ -21,7 +21,22 @@ let
   );
   v8ManifestVersion =
     (builtins.fromTOML (builtins.readFile "${rustyV8Src}/Cargo.toml")).package.version;
-  clangResourceVersion = "22";
+
+  prebuiltV8 =
+    if prev.stdenv.hostPlatform.isLinux then
+      slib.mkRustyV8PrebuiltArtifacts {
+        pkgs = prev;
+        name = "goose-cli-v8";
+        releaseVersion = v8ManifestVersion;
+        archiveHash =
+          slib.sourceHashForPlatform "goose-v8" "rustyV8ArchiveHash"
+            prev.stdenv.hostPlatform.system;
+        bindingHash =
+          slib.sourceHashForPlatform "goose-v8" "rustyV8BindingHash"
+            prev.stdenv.hostPlatform.system;
+      }
+    else
+      null;
 
   rustyV8Src = prev.fetchgit {
     url = "https://github.com/jh-block/rusty_v8.git";
@@ -30,174 +45,17 @@ let
     inherit (v8HashEntry) hash;
   };
 
-  chromiumToolchainBundle = prev.runCommand "goose-cli-v8-toolchain-${v8Source.version}" { } ''
-    rust_toolchain=$out/third_party/rust-toolchain
-    llvm_bundle=$out/third_party/llvm-build/Release+Asserts
-    llvm_bin=$llvm_bundle/bin
-
-    mkdir -p $rust_toolchain
-    printf '%s\n' '${prev.rustc.version}' > $rust_toolchain/VERSION
-
-    mkdir -p $rust_toolchain/bin
-    ln -sf ${prev.rust-bindgen}/bin/bindgen $rust_toolchain/bin/bindgen
-    ln -sf ${prev.rustc}/bin/rustc $rust_toolchain/bin/rustc
-    ln -sf ${prev.cargo}/bin/cargo $rust_toolchain/bin/cargo
-    ln -sf ${prev.rustfmt}/bin/rustfmt $rust_toolchain/bin/rustfmt
-
-    mkdir -p $rust_toolchain/lib/rustlib/src/rust
-    ln -sf ${prev.rustPlatform.rustLibSrc} \
-      $rust_toolchain/lib/rustlib/src/rust/library
-
-    mkdir -p $llvm_bin
-    ln -sf ${prev.llvmPackages.clang}/bin/clang $llvm_bin/clang
-    ln -sf ${prev.llvmPackages.clang}/bin/clang++ $llvm_bin/clang++
-    for tool in \
-      llvm-ar \
-      llvm-cxxfilt \
-      llvm-install-name-tool \
-      llvm-libtool-darwin \
-      llvm-nm \
-      llvm-objcopy \
-      llvm-objdump \
-      llvm-strip
-    do
-      ln -sf ${prev.llvmPackages.llvm}/bin/$tool $llvm_bin/$tool
-    done
-
-    mkdir -p $llvm_bundle/lib/clang
-    ln -sf ${prev.llvmPackages.clang}/resource-root \
-      $llvm_bundle/lib/clang/${clangResourceVersion}
-  '';
-
-  patchedV8Src =
-    prev.runCommand "goose-cli-v8-${v8Source.version}-src"
-      {
-        nativeBuildInputs = [
-          prev.patch
-          prev.python3
-        ];
-      }
-      ''
-        cp -r ${rustyV8Src} $out
-        chmod -R u+w $out
-
-        patch -d $out -p1 < ${./rusty-v8-nix.patch}
-
-        python ${./patch_allocator_build.py} \
-          $out/build/rust/allocator/BUILD.gn
-        python ${./patch_whole_archive.py} \
-          $out/build/toolchain/whole_archive.py
-
-        # The Rust host-build-tools toolchain (proc-macros, build scripts,
-        # bytecode generators) has its own toolchain_args block, so patch it
-        # explicitly to stay off lld and fatal linker warnings as well.
-        python ${./patch_apple_toolchain_host_build_tools.py} \
-          $out/build/toolchain/apple/toolchain.gni
-
-        python - <<PY
-        from pathlib import Path
-
-        path = Path("$out/build.rs")
-        text = path.read_text()
-
-        old_envs = '    "RUSTY_V8_SRC_BINDING_PATH",\n'
-        new_envs = '    "RUSTY_V8_SRC_BINDING_PATH",\n    "RUSTY_V8_PREBUILT_GN_OUT",\n'
-        if old_envs not in text:
-            raise SystemExit("expected RUSTY_V8_SRC_BINDING_PATH env list entry not found")
-        text = text.replace(old_envs, new_envs, 1)
-
-        old_prebuilt = '  print_prebuilt_src_binding_path();\n\n  download_static_lib_binaries();\n'
-        new_prebuilt = """  if let Ok(prebuilt_gn_out) = env::var(\"RUSTY_V8_PREBUILT_GN_OUT\") {\n    let prebuilt_gn_out = PathBuf::from(prebuilt_gn_out);\n    let local_gn_out = build_dir().join(\"gn_out\");\n    fs::create_dir_all(&local_gn_out).unwrap();\n    fs::copy(prebuilt_gn_out.join(\"project.json\"), local_gn_out.join(\"project.json\")).unwrap();\n    if let Ok(args_gn) = fs::read(prebuilt_gn_out.join(\"args.gn\")) {\n      fs::write(local_gn_out.join(\"args.gn\"), args_gn).unwrap();\n    }\n    build_binding();\n  } else {\n    print_prebuilt_src_binding_path();\n  }\n\n  download_static_lib_binaries();\n"""
-        if old_prebuilt not in text:
-            raise SystemExit("expected prebuilt V8 branch not found")
-        text = text.replace(old_prebuilt, new_prebuilt, 1)
-
-        path.write_text(text)
-        PY
-
-        mkdir -p $out/third_party
-        rm -rf $out/third_party/rust-toolchain $out/third_party/llvm-build
-        ln -s ${chromiumToolchainBundle}/third_party/rust-toolchain \
-          $out/third_party/rust-toolchain
-        ln -s ${chromiumToolchainBundle}/third_party/llvm-build \
-          $out/third_party/llvm-build
-      '';
-
-  v8GnArgs = ''
-    is_debug=false
-    use_custom_libcxx=true
-    v8_enable_sandbox=false
-    v8_enable_pointer_compression=false
-    v8_enable_v8_checks=false
-    host_cpu="arm64"
-    target_cpu="arm64"
-    mac_sdk_min="14.4"
-    mac_deployment_target="14.0"
-    mac_min_system_version="14.0"
-    rust_bindgen_root="//third_party/rust-toolchain"
-    rust_sysroot_absolute="${prev.rustc}"
-    rustc_version="${prev.rustc.version}"
-    treat_warnings_as_errors=false
-    fatal_linker_warnings=false
-    use_lld=false
-    clang_base_path="${patchedV8Src}/third_party/llvm-build/Release+Asserts"
-  '';
-
-  v8NativeDrv =
-    if prev.stdenv.hostPlatform.isDarwin then
-      prev.stdenv.mkDerivation {
-        name = "goose-cli-v8-native-${v8Source.version}";
-        src = patchedV8Src;
-        nativeBuildInputs = [
-          prev.gn
-          prev.ninja
-          prev.python3
-          prev.xcodebuild
-        ];
-
-        dontConfigure = true;
-        dontFixup = true;
-
-        env = {
-          CLANG_BASE_PATH = "${patchedV8Src}/third_party/llvm-build/Release+Asserts";
-          GN = "${prev.gn}/bin/gn";
-          GN_ARGS = v8GnArgs;
-          NINJA = "${prev.ninja}/bin/ninja";
-          NIX_CC_WRAPPER_SUPPRESS_TARGET_WARNING = "1";
-          PYTHONDONTWRITEBYTECODE = "1";
-          PYTHON = "${prev.python3}/bin/python3";
-          RUSTC_BOOTSTRAP = "1";
-        };
-
-        buildPhase = ''
-          runHook preBuild
-
-          export HOME="$TMPDIR/home"
-          mkdir -p "$HOME"
-          export DEPOT_TOOLS_WIN_TOOLCHAIN=0
-
-          gn_out="$TMPDIR/gn-out"
-
-          "$GN" --root="$PWD" --script-executable="$PYTHON" gen "$gn_out" \
-            --ide=json --args="$GN_ARGS"
-
-          "$NINJA" -C "$gn_out" rusty_v8
-
-          mkdir -p "$out/lib" "$out/share/gn_out"
-          cp "$gn_out/obj/librusty_v8.a" "$out/lib/"
-          cp "$gn_out/project.json" "$out/share/gn_out/project.json"
-          cp "$gn_out/args.gn" "$out/share/gn_out/args.gn"
-
-          runHook postBuild
-        '';
-
-        installPhase = ''
-          runHook preInstall
-          runHook postInstall
-        '';
-      }
-    else
-      null;
+  v8Build = slib.mkRustyV8Build {
+    pkgs = prev;
+    name = "goose-cli-v8";
+    inherit (v8Source) version;
+    inherit rustyV8Src;
+    extraPatches = [ ./rusty-v8-goose-rename.patch ];
+    prebuiltArtifacts = prebuiltV8;
+  };
+  patchedV8Src = v8Build.patchedSrc;
+  v8NativeDrv = v8Build.nativeDrv;
+  inherit (v8Build) chromiumToolchainBundle;
 
   cargoNixFn = import ./Cargo.nix;
   cargoNixGooseVersion = (cargoNixFn { pkgs = prev; }).internal.crates."goose-cli".version;
@@ -384,6 +242,7 @@ let
     nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [
       prev.cmake
       prev.pkg-config
+      prev.rustPlatform.bindgenHook
     ];
 
     # buildRustCrate doesn't currently export CARGO_CFG_TARGET_FEATURE even
@@ -391,6 +250,7 @@ let
     # var only to opt into extra x86 GGML toggles, so an empty string is a safe
     # fallback on our darwin/aarch64 builds.
     CARGO_CFG_TARGET_FEATURE = "";
+    CMAKE_BUILD_PARALLEL_LEVEL = "1";
     LIBCLANG_PATH = "${prev.lib.getLib prev.llvmPackages.libclang}/lib";
   };
 
@@ -411,25 +271,8 @@ let
       CARGO_PKG_VERSION = attrs.version;
     };
 
-  # V8 is the most bespoke part of the package: source build via GN/Ninja,
-  # darwin SDK knobs, bindgen/libclang wiring, and a suppressed cc-wrapper
-  # target-triple warning while we keep using the known-good wrapped clang.
-  v8GooseOverride =
-    attrs:
-    {
-      src = patchedV8Src;
-    }
-    // prev.lib.optionalAttrs prev.stdenv.hostPlatform.isDarwin {
-      nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [
-        prev.python3
-        prev.xcodebuild
-      ];
-
-      LIBCLANG_PATH = "${prev.lib.getLib prev.llvmPackages.libclang}/lib";
-      PYTHON = "${prev.python3}/bin/python3";
-      RUSTY_V8_ARCHIVE = "${v8NativeDrv}/lib/librusty_v8.a";
-      RUSTY_V8_PREBUILT_GN_OUT = "${v8NativeDrv}/share/gn_out";
-    };
+  # V8 crate override: delegates to the shared rusty-v8 builder.
+  v8GooseOverride = v8Build.mkCrateOverride;
 
   # Keep all build-system compatibility shims in one place so version bumps can
   # be audited crate-by-crate.
@@ -521,6 +364,7 @@ in
           patchedSrc
           patchedV8Src
           chromiumToolchainBundle
+          v8Build
           ;
         gooseCliDrv = gooseCliDrvChecked;
         inherit v8NativeDrv;
@@ -531,7 +375,10 @@ in
         homepage = "https://github.com/block/goose";
         license = prev.lib.licenses.asl20;
         mainProgram = "goose";
-        platforms = [ "aarch64-darwin" ];
+        platforms = [
+          "aarch64-darwin"
+          "x86_64-linux"
+        ];
       };
     };
 }

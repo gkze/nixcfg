@@ -1,0 +1,22 @@
+add_newline = false
+
+[aws]
+disabled = true
+
+[bun]
+disabled = true
+
+[gcloud]
+disabled = true
+
+[line_break]
+disabled = true
+
+[nix_shell]
+disabled = true
+
+[nodejs]
+disabled = true
+
+[python]
+disabled = true

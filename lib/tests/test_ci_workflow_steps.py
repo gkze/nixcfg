@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -164,3 +165,73 @@ def test_free_disk_space_force_local_runs_cleanup(
 
     assert exit_code == 0
     assert any(cmd[:2] == ["df", "-h"] for cmd in commands)
+
+
+def test_snapshot_flake_input_writes_locked_payload(tmp_path: Path) -> None:
+    """Snapshot one flake.lock input into a stable JSON file."""
+    lock_file = tmp_path / "flake.lock"
+    output = tmp_path / "superset-lock.json"
+    lock_file.write_text(
+        '{"nodes":{"superset":{"locked":{"rev":"abc123","type":"github"}}}}\n',
+        encoding="utf-8",
+    )
+
+    exit_code = workflow_steps._cmd_snapshot_flake_input(
+        node="superset",
+        lock_file=lock_file,
+        output=output,
+    )
+
+    assert exit_code == 0
+    assert json.loads(output.read_text(encoding="utf-8")) == {
+        "rev": "abc123",
+        "type": "github",
+    }
+
+
+def test_compare_flake_input_appends_github_output(tmp_path: Path) -> None:
+    """Record changed=true/false in the GitHub output file."""
+    before = tmp_path / "before.json"
+    lock_file = tmp_path / "flake.lock"
+    github_output = tmp_path / "github-output.txt"
+    before.write_text('{"rev":"abc123"}\n', encoding="utf-8")
+    lock_file.write_text(
+        '{"nodes":{"superset":{"locked":{"rev":"def456"}}}}\n',
+        encoding="utf-8",
+    )
+
+    exit_code = workflow_steps._cmd_compare_flake_input(
+        node="superset",
+        before=before,
+        lock_file=lock_file,
+        github_output=github_output,
+        output_name="changed",
+    )
+
+    assert exit_code == 0
+    assert github_output.read_text(encoding="utf-8") == "changed=true\n"
+
+
+def test_compare_flake_input_without_github_output_still_reports_status(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Skip GitHub output writes when no output file is requested."""
+    before = tmp_path / "before.json"
+    lock_file = tmp_path / "flake.lock"
+    before.write_text('{"rev":"abc123"}\n', encoding="utf-8")
+    lock_file.write_text(
+        '{"nodes":{"superset":{"locked":{"rev":"abc123"}}}}\n',
+        encoding="utf-8",
+    )
+
+    exit_code = workflow_steps._cmd_compare_flake_input(
+        node="superset",
+        before=before,
+        lock_file=lock_file,
+        github_output=None,
+        output_name="changed",
+    )
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == "flake.lock input 'superset' changed: false\n"

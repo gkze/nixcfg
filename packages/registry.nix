@@ -50,8 +50,17 @@ let
     registry = {
       helper = true;
     };
+    "t3code-workspace" = {
+      helper = true;
+    };
     commander = {
       constraint = "darwin";
+    };
+    codex = {
+      constraint = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
     };
     "codex-desktop" = {
       constraint = "darwin";
@@ -76,10 +85,29 @@ let
       ];
     };
     "goose-cli" = {
-      constraint = [ "aarch64-darwin" ];
+      constraint = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
     };
     "opencode-desktop-crate2nix-src" = {
       constraint = "darwin";
+    };
+    "opencode-desktop-electron" = {
+      constraint = [
+        "aarch64-darwin"
+        "x86_64-darwin"
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
+    };
+    "opencode-desktop-electron-dev" = {
+      constraint = [
+        "aarch64-darwin"
+        "x86_64-darwin"
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
     };
     raycast = {
       constraint = "darwin";
@@ -87,6 +115,7 @@ let
     sculptor = {
       constraint = [
         "aarch64-darwin"
+        "x86_64-darwin"
         "x86_64-linux"
       ];
     };
@@ -96,27 +125,39 @@ let
         "x86_64-linux"
       ];
     };
+    t3code = {
+      constraint = [ "aarch64-darwin" ];
+    };
+    "t3code-desktop" = {
+      constraint = [ "aarch64-darwin" ];
+    };
     "zed-editor-nightly" = {
-      constraint = "darwin";
+      constraint = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
     };
     "zed-editor-nightly-crate2nix-src" = {
-      constraint = "darwin";
+      constraint = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
     };
   };
 
-  packageMetadata =
-    builtins.listToAttrs (
-      builtins.map (name: {
-        inherit name;
-        value =
-          {
-            helper = false;
-            constraint = null;
-          }
-          // (if builtins.hasAttr name basePackageMetadata then basePackageMetadata.${name} else { })
-          // (if builtins.hasAttr name packageMetadataOverrides then packageMetadataOverrides.${name} else { });
-      }) (builtins.attrNames (basePackageMetadata // packageMetadataOverrides))
-    );
+  packageMetadata = builtins.listToAttrs (
+    builtins.map (name: {
+      inherit name;
+      value = {
+        helper = false;
+        constraint = null;
+      }
+      // (if builtins.hasAttr name basePackageMetadata then basePackageMetadata.${name} else { })
+      // (
+        if builtins.hasAttr name packageMetadataOverrides then packageMetadataOverrides.${name} else { }
+      );
+    }) (builtins.attrNames (basePackageMetadata // packageMetadataOverrides))
+  );
 
   supportsSystem =
     constraint: system:
@@ -131,9 +172,7 @@ let
 
   packageNamesMatching =
     predicate:
-    builtins.filter (name: predicate packageMetadata.${name}) (
-      builtins.attrNames packageMetadata
-    );
+    builtins.filter (name: predicate packageMetadata.${name}) (builtins.attrNames packageMetadata);
 
   packagePathsMatching =
     predicate:
@@ -141,14 +180,7 @@ let
       builtins.map (name: {
         inherit name;
         value = packageMetadata.${name}.path;
-      }) (
-        packageNamesMatching (
-          meta:
-          meta ? path
-          && !meta.helper
-          && predicate meta
-        )
-      )
+      }) (packageNamesMatching (meta: meta ? path && !meta.helper && predicate meta))
     );
 
   packagePaths = packagePathsMatching (_meta: true);

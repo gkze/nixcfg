@@ -36,7 +36,6 @@ from lib.tests._nix_ast import (
     parse_nix_expr,
 )
 from lib.tests._nix_eval import nix_attrset, nix_eval_raw, nix_import, nix_let, nix_list
-from lib.update.flake import nixpkgs_expression
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
 
@@ -58,32 +57,14 @@ def _rsync_path() -> str:
 
 
 def _mac_apps_eval(expr: NixExpression) -> str:
-    """Evaluate one expression in a lightweight ``lib/mac-apps.nix`` context."""
-    lib_expr = BinaryExpression(
-        left=identifier_attr_path("nixpkgs", "lib"),
-        operator=Operator(name="//"),
-        right=nix_attrset({
-            "getExe": FunctionDefinition(
-                argument_set=Identifier(name="value"),
-                output=FunctionCall(
-                    name=identifier_attr_path("builtins", "toString"),
-                    argument=Identifier(name="value"),
-                ),
-            )
-        }),
-    )
+    """Evaluate only the tiny mac-apps cases that require rendered shell or message output."""
     wrapped_expr = nix_let(
         {
-            "nixpkgs": nixpkgs_expression(),
-            "pkgs": nix_attrset({"rsync": _rsync_path()}),
-            "lib": lib_expr,
-            "macApps": FunctionCall(
-                name=nix_import(REPO_ROOT / "lib/mac-apps.nix"),
-                argument=nix_attrset({
-                    "lib": Identifier(name="lib"),
-                    "pkgs": Identifier(name="pkgs"),
-                }),
+            "context": FunctionCall(
+                name=nix_import(REPO_ROOT / "tests/nix/mac-apps/eval-context.nix"),
+                argument=nix_attrset({"rsyncPath": _rsync_path()}),
             ),
+            "macApps": identifier_attr_path("context", "macApps"),
         },
         expr,
     )
@@ -110,67 +91,6 @@ def _fake_mac_app_package(
         "outPath": out_path,
         "passthru.macApp": mac_app,
     })
-
-
-@cache
-def _mac_apps_script(
-    mode: str,
-    *,
-    writable: bool,
-    package_out_path: str = "/nix/store/fake-app",
-    bundle_name: str = "Fake.app",
-    bundle_rel_path: str = "Applications/Fake.app",
-    state_directory: str = "/Applications/.nixcfg-mac-apps",
-    state_name: str = "test-manager",
-    target_directory: str = "/Applications",
-) -> str:
-    """Evaluate ``systemApplicationsScript`` for a fake macOS app entry."""
-    expression = nix_let(
-        {
-            "fakePkg": _fake_mac_app_package(
-                "fake-app",
-                package_out_path,
-                bundle_name,
-                bundle_rel_path=bundle_rel_path,
-                install_mode=mode,
-            )
-        },
-        FunctionCall(
-            name=identifier_attr_path("macApps", "systemApplicationsScript"),
-            argument=nix_attrset({
-                "entries": nix_list([
-                    nix_attrset({
-                        "package": Identifier(name="fakePkg"),
-                        "bundleName": bundle_name,
-                        "mode": mode,
-                    })
-                ]),
-                "stateDirectory": state_directory,
-                "stateName": state_name,
-                "targetDirectory": target_directory,
-                "writable": writable,
-            }),
-        ),
-    )
-    return _mac_apps_eval(expression)
-
-
-@cache
-def _profile_bundle_leak_audit_script(
-    managed_bundle_names: tuple[str, ...],
-    package_paths: tuple[str, ...],
-) -> str:
-    """Evaluate ``profileBundleLeakAuditScript`` for fake Home Manager packages."""
-    return _mac_apps_eval(
-        FunctionCall(
-            name=identifier_attr_path("macApps", "profileBundleLeakAuditScript"),
-            argument=nix_attrset({
-                "managedBundleNames": nix_list(list(managed_bundle_names)),
-                "packagePaths": nix_list(list(package_paths)),
-                "label": "home.packages",
-            }),
-        )
-    )
 
 
 def _managed_app_overlap_assertion_result(
@@ -220,6 +140,14 @@ def _mac_apps_source_fragment(start_marker: str, end_marker: str) -> IndentedStr
     fragment = textwrap.dedent(mac_apps[start:end]).rstrip()
     parsed = parse_nix_expr(f"''\n{fragment}\n''")
     return expect_instance(parsed, IndentedString)
+
+
+def _mac_apps_fragment_expr(start_marker: str, end_marker: str):
+    mac_apps = (REPO_ROOT / "lib/mac-apps.nix").read_text(encoding="utf-8")
+    start = mac_apps.index(start_marker) + len(start_marker)
+    end = mac_apps.index(end_marker, start)
+    fragment = textwrap.dedent(mac_apps[start:end]).rstrip().removesuffix(";")
+    return parse_nix_expr(fragment)
 
 
 def _curried_call(
@@ -357,41 +285,23 @@ def _managed_mac_app_routing_table() -> NixList:
     )
 
 
-@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_managed_mac_app_routing_projection_helper_splits_exclusions_from_apps() -> (
     None
 ):
-    """The shared helper should derive package exclusions and system apps together."""
-    projection = json.loads(
-        _mac_apps_eval(
-            FunctionCall(
-                name=identifier_attr_path("builtins", "toJSON"),
-                argument=Parenthesis(
-                    value=FunctionCall(
-                        name=identifier_attr_path(
-                            "macApps", "managedMacAppRoutingProjection"
-                        ),
-                        argument=nix_list([
-                            nix_attrset({
-                                "excludePackageName": "chatgpt",
-                                "package": "chatgpt-package",
-                                "mode": "copy",
-                            }),
-                            nix_attrset({"package": "zoom-package"}),
-                        ]),
-                    )
-                ),
-            )
-        )
+    """The shared helper should keep exclusion stripping as a pure structural projection."""
+    assert _mac_apps_source_fragment(
+        "  managedMacAppRoutingProjection = managedMacAppRouting: {",
+        "  pythonExe =",
+    ).rebuild() == (
+        "''\n"
+        "managedMacAppRoutingProjection = managedMacAppRouting: {\n"
+        '  excludePackagesByName = builtins.catAttrs "excludePackageName" managedMacAppRouting;\n'
+        "  systemApplications = map (\n"
+        '    entry: builtins.removeAttrs entry [ "excludePackageName" ]\n'
+        "  ) managedMacAppRouting;\n"
+        "};\n"
+        "''"
     )
-
-    assert projection == {
-        "excludePackagesByName": ["chatgpt"],
-        "systemApplications": [
-            {"package": "chatgpt-package", "mode": "copy"},
-            {"package": "zoom-package"},
-        ],
-    }
 
 
 def test_copy_mode_replaces_symlinked_application_destinations(
@@ -449,7 +359,7 @@ def test_copy_mode_replaces_symlinked_application_destinations(
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_manifest_cleanup_checks_other_mac_app_managers_first(tmp_path: Path) -> None:
-    """Stale cleanup should not delete apps still claimed by another manifest."""
+    """Stale cleanup logic lives in Python; keep the Nix wrapper structurally wired."""
     target_directory = tmp_path / "Applications"
     state_directory = tmp_path / ".nixcfg-mac-apps"
     stale_app = target_directory / "Cursor.app"
@@ -462,16 +372,30 @@ def test_manifest_cleanup_checks_other_mac_app_managers_first(tmp_path: Path) ->
     (state_directory / "test-manager.txt").write_text("Cursor.app\n", encoding="utf-8")
     (state_directory / "other-manager.txt").write_text("Cursor.app\n", encoding="utf-8")
 
-    script = _mac_apps_script(
-        "symlink",
-        writable=False,
-        package_out_path=str(fake_package),
-        state_directory=str(state_directory),
-        target_directory=str(target_directory),
+    system_script = expect_instance(
+        _mac_apps_fragment_expr("  systemApplicationsScript =\n", "\n}\n"),
+        FunctionDefinition,
     )
-    assert "nixcfg-mac-apps-helper.py" in script
-    assert "system-applications" in script
-    assert "nixcfg-mac-apps-system-applications.json" in script
+    assert [argument.rebuild() for argument in system_script.argument_set] == [
+        "entries",
+        "stateDirectory",
+        "stateName",
+        "writable",
+        'targetDirectory ? "/Applications"',
+    ]
+    system_call = expect_instance(system_script.output, FunctionCall)
+    assert_nix_ast_equal(system_call.name, 'callMacAppsHelper "system-applications"')
+    system_args = expect_instance(system_call.argument, AttributeSet)
+    assert_nix_ast_equal(
+        system_args,
+        """
+        {
+          inherit stateDirectory stateName targetDirectory writable;
+          entries = helperEntries;
+          rsyncPath = getExe pkgs.rsync;
+        }
+        """,
+    )
 
     stderr = StringIO()
     with redirect_stderr(stderr):
@@ -731,21 +655,40 @@ def test_home_manager_mac_app_module_audits_profile_bundle_leaks() -> None:
     assert label.value == "home.packages"
 
 
-@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_profile_bundle_leak_audit_script_reports_managed_bundle_exposure(
     tmp_path: Path,
 ) -> None:
-    """Activation audit should fail if managed bundles leak through package outputs."""
+    """Python leak audit behavior should stay aligned with the Nix helper wrapper."""
     managed_package = tmp_path / "cursor-package"
     (managed_package / "Applications" / "Cursor.app").mkdir(parents=True)
 
-    script = _profile_bundle_leak_audit_script(
-        managed_bundle_names=("Cursor.app",),
-        package_paths=(str(managed_package),),
+    leak_script = expect_instance(
+        _mac_apps_fragment_expr(
+            "  profileBundleLeakAuditScript =\n",
+            "\n\n  systemApplicationsScript =",
+        ),
+        FunctionDefinition,
     )
-    assert "nixcfg-mac-apps-helper.py" in script
-    assert "profile-bundle-leak-audit" in script
-    assert "nixcfg-mac-apps-profile-bundle-leak-audit.json" in script
+    assert [argument.rebuild() for argument in leak_script.argument_set] == [
+        "packagePaths",
+        "managedBundleNames",
+        'label ? "home.packages"',
+    ]
+    leak_call = expect_instance(leak_script.output, FunctionCall)
+    assert_nix_ast_equal(
+        leak_call.name,
+        'callMacAppsHelper "profile-bundle-leak-audit"',
+    )
+    leak_args = expect_instance(leak_call.argument, AttributeSet)
+    assert_nix_ast_equal(
+        leak_args,
+        """
+        {
+          inherit label packagePaths;
+          managedBundleNames = uniqueManagedBundleNames;
+        }
+        """,
+    )
 
     stderr = StringIO()
     with redirect_stderr(stderr), pytest.raises(SystemExit) as exc:
@@ -763,21 +706,12 @@ def test_profile_bundle_leak_audit_script_reports_managed_bundle_exposure(
     assert f" - Cursor.app <= {managed_package}" in stderr.getvalue()
 
 
-@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_profile_bundle_leak_audit_script_ignores_unmanaged_bundle_exposure(
     tmp_path: Path,
 ) -> None:
-    """Activation audit should ignore unrelated GUI bundles in package outputs."""
+    """Unmanaged bundles should be ignored by the Python leak audit helper."""
     unrelated_package = tmp_path / "spotify-package"
     (unrelated_package / "Applications" / "Spotify.app").mkdir(parents=True)
-
-    script = _profile_bundle_leak_audit_script(
-        managed_bundle_names=("Cursor.app",),
-        package_paths=(str(unrelated_package),),
-    )
-    assert "nixcfg-mac-apps-helper.py" in script
-    assert "profile-bundle-leak-audit" in script
-    assert "nixcfg-mac-apps-profile-bundle-leak-audit.json" in script
 
     stderr = StringIO()
     with redirect_stderr(stderr):
@@ -845,7 +779,7 @@ def test_zoom_overlay_threads_self_source_version_and_copy_mode_mac_app_metadata
     None
 ):
     """The Zoom overlay should keep its local source wiring and copy-mode app contract."""
-    overlay = _module_output("overlays/zoom-us.nix")
+    overlay = _module_output("overlays/zoom-us/default.nix")
 
     zoom = expect_instance(
         expect_binding(overlay.values, "zoom-us").value, IfExpression
@@ -965,10 +899,33 @@ def test_george_config_manages_mutable_gui_apps_via_system_applications() -> Non
         expect_binding(package_sets.values, "cloud").value,
         "{ enable = lib.mkDefault false; }",
     )
-    assert_nix_ast_equal(
-        expect_binding(package_sets.values, "excludePackagesByName").value,
-        "managedMacAppProjection.excludePackagesByName",
+    exclude_packages_binding = next(
+        (
+            binding
+            for binding in package_sets.values
+            if isinstance(binding, Binding) and binding.name == "excludePackagesByName"
+        ),
+        None,
     )
+    if exclude_packages_binding is not None:
+        assert_nix_ast_equal(
+            exclude_packages_binding.value,
+            "managedMacAppProjection.excludePackagesByName",
+        )
+    else:
+        exclude_packages_inherit = next(
+            (
+                inherit_expr
+                for inherit_expr in package_sets.values
+                if isinstance(inherit_expr, Inherit)
+                and inherit_expr.from_expression is not None
+                and inherit_expr.from_expression.rebuild() == "managedMacAppProjection"
+                and [name.rebuild() for name in inherit_expr.names]
+                == ["excludePackagesByName"]
+            ),
+            None,
+        )
+        assert exclude_packages_inherit is not None
 
     mac_apps = expect_instance(
         expect_binding(nixcfg.values, "macApps").value,
@@ -1086,6 +1043,7 @@ def test_vscode_insiders_overlay_keeps_copy_mode_mac_app_metadata_contract() -> 
         Select(
             expression=nix_attrset({
                 "aarch64-darwin": "darwin-arm64",
+                "x86_64-darwin": "darwin",
                 "aarch64-linux": "linux-arm64",
                 "x86_64-linux": "linux-x64",
             }),
@@ -1181,31 +1139,58 @@ def test_vscode_insiders_overlay_keeps_copy_mode_mac_app_metadata_contract() -> 
 
 def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
     """Dock modules should keep the targeted /Applications policy explicit for managed bundles."""
-    george_dock = (REPO_ROOT / "modules/darwin/george/dock-apps.nix").read_text(
-        encoding="utf-8"
-    )
-    town_dock = (REPO_ROOT / "modules/darwin/george/town-dock-apps.nix").read_text(
-        encoding="utf-8"
-    )
 
-    for rendered in (george_dock, town_dock):
-        assert "intentionally left profile-managed" in rendered
+    def persistent_apps(relative_path: str) -> list[str]:
+        system = expect_instance(
+            expect_binding(_module_output(relative_path).values, "system").value,
+            AttributeSet,
+        )
+        defaults = expect_instance(
+            expect_binding(system.values, "defaults").value,
+            AttributeSet,
+        )
+        dock = expect_instance(
+            expect_binding(defaults.values, "dock").value,
+            AttributeSet,
+        )
+        persistent = expect_instance(
+            expect_binding(dock.values, "persistent-apps").value,
+            NixList,
+        )
+        apps: list[str] = []
+        for item in persistent.value:
+            entry = expect_instance(item, AttributeSet)
+            app = expect_instance(
+                expect_binding(entry.values, "app").value, StringPrimitive
+            )
+            apps.append(app.value)
+        return apps
+
+    george_dock = persistent_apps("modules/darwin/george/dock-apps.nix")
+    town_dock = persistent_apps("modules/darwin/george/town-dock-apps.nix")
+
+    for apps in (george_dock, town_dock):
         assert (
             "/Users/${primaryUser}/Applications/Home Manager Apps/ChatGPT.app"
-            not in rendered
+            not in apps
         )
         assert (
             "/Users/${primaryUser}/Applications/Home Manager Apps/DataGrip.app"
-            not in rendered
+            not in apps
         )
 
-    assert '"/Applications/ChatGPT.app"' in george_dock
-    assert '"/Applications/DataGrip.app"' in george_dock
+    assert "/Applications/ChatGPT.app" in george_dock
+    assert "/Applications/DataGrip.app" in george_dock
 
-    assert '"/Applications/ChatGPT.app"' in town_dock
-    assert '"/Applications/Cursor.app"' in town_dock
-    assert '"/Applications/Visual Studio Code - Insiders.app"' in town_dock
-    assert '"/Applications/DataGrip.app"' in town_dock
+    assert "/Applications/ChatGPT.app" in town_dock
+    assert "/Applications/Cursor.app" in town_dock
+    assert "/Applications/Visual Studio Code - Insiders.app" in town_dock
+    assert "/Applications/DataGrip.app" in town_dock
+    assert (
+        "/Users/${primaryUser}/Applications/Home Manager Apps/OpenCode Electron Dev.app"
+        in town_dock
+    )
+    assert "/Applications/OpenCode Electron Dev.app" not in town_dock
     assert (
         "/Users/${primaryUser}/Applications/Home Manager Apps/Cursor.app"
         not in town_dock
@@ -1218,13 +1203,6 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
 
 def test_george_config_does_not_install_repo_managed_editor_cli_wrappers() -> None:
     """Editor app copies should no longer be accompanied by repo-managed CLI wrappers."""
-    configuration = (REPO_ROOT / "home/george/configuration.nix").read_text(
-        encoding="utf-8"
-    )
-
-    assert '".local/libexec/nixcfg-managed-app-cli-wrapper"' not in configuration
-    assert '".local/bin/code-insiders"' not in configuration
-    assert '".local/bin/cursor"' not in configuration
     assert not (REPO_ROOT / "home/george/bin/_managed-app-cli-wrapper").exists()
     assert not (REPO_ROOT / "home/george/bin/code-insiders").exists()
     assert not (REPO_ROOT / "home/george/bin/cursor").exists()

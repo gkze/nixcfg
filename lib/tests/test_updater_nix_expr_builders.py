@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from nix_manipulator.expressions.binary import BinaryExpression
@@ -25,9 +24,7 @@ if TYPE_CHECKING:
 
 
 def _load_sentry_cli_updater_module() -> ModuleType:
-    module_path = (
-        Path(__file__).resolve().parents[2] / "overlays" / "sentry-cli" / "updater.py"
-    )
+    module_path = REPO_ROOT / "overlays" / "sentry-cli" / "updater.py"
     return load_module_from_path(module_path, "_sentry_cli_updater")
 
 

@@ -187,3 +187,157 @@ def test_run_hash_recovery_rejects_stage_without_apply(
     rc = rh.run_hash_recovery(stage=True)
     assert rc == 1
     assert "--stage requires --apply" in capsys.readouterr().err
+
+
+def test_plan_hash_recovery_to_dict_and_managed_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Normalise managed paths and include plan dict rendering."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "flake.lock").write_text('{"nodes": {}}\n', encoding="utf-8")
+    _write_source(repo_root, "packages/demo/sources.json", {"version": "same"})
+
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    _write_markers(snapshot)
+    (snapshot / "flake.lock").write_text('{"nodes": {}}\n', encoding="utf-8")
+    _write_source(snapshot, "packages/demo/sources.json", {"version": "same"})
+
+    async def _plan_snapshot(_generation: str) -> SnapshotPlan:
+        return SnapshotPlan(
+            generation="/run/current-system",
+            resolved_target="/nix/store/current-system",
+            deriver="/nix/store/demo.drv",
+            snapshot=str(snapshot),
+        )
+
+    monkeypatch.setattr(rh, "plan_snapshot_recovery", _plan_snapshot)
+
+    assert rh._managed_relative_paths(repo_root) == {
+        "flake.lock",
+        "packages/demo/sources.json",
+    }
+    plan = asyncio.run(rh.plan_hash_recovery(repo_root=repo_root))
+    assert plan.to_dict()["write_paths"] == ()
+
+
+def test_apply_hash_recovery_skips_missing_removals_without_staging(
+    tmp_path: Path,
+) -> None:
+    """Do not stage or fail when a scheduled removal is already absent."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "flake.lock").write_text('{"nodes": {"new": true}}\n', encoding="utf-8")
+
+    plan = rh.HashRecoveryPlan(
+        generation="/run/current-system",
+        resolved_target="/nix/store/current-system",
+        deriver="/nix/store/demo.drv",
+        snapshot=str(snapshot),
+        repo_root=str(repo_root),
+        write_paths=("flake.lock",),
+        remove_paths=("overlays/missing/sources.json",),
+    )
+
+    assert rh.apply_hash_recovery(plan) == ("flake.lock",)
+    assert '"new": true' in (repo_root / "flake.lock").read_text(encoding="utf-8")
+
+
+def test_render_plain_covers_empty_restore_and_apply_remove_branches() -> None:
+    """Render the remaining plain-text summary branches for hash recovery."""
+    empty_plan = rh.HashRecoveryPlan(
+        generation="/run/current-system",
+        resolved_target="/nix/store/current-system",
+        deriver="/nix/store/demo.drv",
+        snapshot="/nix/store/demo-source",
+        repo_root="/repo",
+        write_paths=(),
+        remove_paths=(),
+    )
+
+    plain = rh._render_plain(empty_plan, apply=False, stage=False, sync=False)
+    assert "Will restore: none" in plain
+
+    remove_plan = rh.HashRecoveryPlan(
+        generation="/run/current-system",
+        resolved_target="/nix/store/current-system",
+        deriver="/nix/store/demo.drv",
+        snapshot="/nix/store/demo-source",
+        repo_root="/repo",
+        write_paths=(),
+        remove_paths=("packages/demo/sources.json",),
+    )
+
+    applied = rh._render_plain(
+        remove_plan,
+        apply=True,
+        stage=False,
+        sync=True,
+        changed_paths=("packages/demo/sources.json",),
+    )
+    assert "Removed (1):" in applied
+    assert "  packages/demo/sources.json" in applied
+    assert "Applied changes: 1" in applied
+    assert "Staged changes: yes" not in applied
+
+
+def test_run_hash_recovery_supports_plain_json_and_error_output(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Render planning, applied, and failure results through the CLI boundary."""
+    plan = rh.HashRecoveryPlan(
+        generation="/run/current-system",
+        resolved_target="/nix/store/current-system",
+        deriver="/nix/store/demo.drv",
+        snapshot="/nix/store/demo-source",
+        repo_root="/repo",
+        write_paths=("flake.lock",),
+        remove_paths=(),
+    )
+
+    seen_sync: list[bool] = []
+
+    async def _plan(_generation: str, *, sync: bool = False) -> rh.HashRecoveryPlan:
+        seen_sync.append(sync)
+        return plan
+
+    monkeypatch.setattr(rh, "plan_hash_recovery", _plan)
+    monkeypatch.setattr(
+        rh, "apply_hash_recovery", lambda _plan, *, stage=False: ("flake.lock",)
+    )
+
+    assert rh.run_hash_recovery(sync=True) == 0
+    plain = capsys.readouterr().out
+    assert "Will restore (1):" in plain
+    assert "Will remove: none" in plain
+    assert seen_sync == [True]
+
+    assert rh.run_hash_recovery(apply=True, stage=True, json_output=True) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["success"] is True
+    assert payload["apply"] is True
+    assert payload["stage"] is True
+    assert payload["sync"] is False
+    assert payload["changed_paths"] == ["flake.lock"]
+    assert payload["plan"]["write_paths"] == ["flake.lock"]
+    assert payload["plan"]["remove_paths"] == []
+    assert payload["plan"]["snapshot"] == plan.snapshot
+    assert seen_sync == [True, False]
+
+    async def _boom(_generation: str, *, sync: bool = False) -> rh.HashRecoveryPlan:
+        del sync
+        raise RuntimeError("hash planning failed")
+
+    monkeypatch.setattr(rh, "plan_hash_recovery", _boom)
+
+    assert rh.run_hash_recovery(json_output=True) == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "success": False,
+        "error": "hash planning failed",
+    }

@@ -16,7 +16,7 @@ def resolve_sourcefile(cls: type[object], *, inspect_module: object) -> str | No
     inspect_like = cast("_InspectLike", inspect_module)
     try:
         return inspect_like.getsourcefile(cls)
-    except OSError, TypeError:
+    except (OSError, TypeError):
         module = inspect_like.getmodule(cls)
         module_file = getattr(module, "__file__", None)
         return module_file if isinstance(module_file, str) else None

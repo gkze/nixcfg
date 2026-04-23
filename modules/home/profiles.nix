@@ -27,10 +27,17 @@ let
       extraHeaders ? [ ],
     }:
     pkgs.writeShellScript name ''
-      TOKEN="$(${tokenCommand})"
+      set -euo pipefail
+
+      token="$(${tokenCommand})"
+      if [ -z "$token" ]; then
+        echo ${lib.escapeShellArg "${name}: token lookup returned empty output"} >&2
+        exit 1
+      fi
+
       args=(
         "${url}"
-        --header "Authorization: Bearer $TOKEN"
+        --header "Authorization: Bearer $token"
       )
       ${lib.concatMapStringsSep "\n      " (
         header: "args+=(--header ${lib.escapeShellArg header})"
@@ -104,7 +111,8 @@ let
       type = "local";
       command = [ "${github-mcp-wrapper}" ];
     };
-  } // lib.optionalAttrs pkgs.stdenv.isDarwin (
+  }
+  // lib.optionalAttrs pkgs.stdenv.isDarwin (
     let
       # Render MCP wrapper that reads API key from macOS Keychain and calls the
       # remote server. Keep this Darwin-only because `security` is not portable.
@@ -115,7 +123,15 @@ let
       };
 
       slack-mcp-wrapper = pkgs.writeShellScript "slack-mcp" ''
-        export SLACK_MCP_XOXP_TOKEN="$(security find-generic-password -s "slack-mcp-token" -a "$USER" -w)"
+        set -euo pipefail
+
+        token="$(security find-generic-password -s "slack-mcp-token" -a "$USER" -w)"
+        if [ -z "$token" ]; then
+          echo "slack-mcp: token lookup returned empty output" >&2
+          exit 1
+        fi
+
+        export SLACK_MCP_XOXP_TOKEN="$token"
         export SLACK_MCP_ADD_MESSAGE_TOOL=true
         exec ${bunxExe} --bun slack-mcp-server@latest --transport stdio
       '';

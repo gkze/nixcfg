@@ -4,22 +4,31 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import textwrap
 from functools import cache
 from pathlib import Path
 from typing import Any
 
 import pytest
 from nix_manipulator.expressions.binary import BinaryExpression
+from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
-from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
+from lib.tests._nix_ast import (
+    assert_nix_ast_equal,
+    expect_binding,
+    expect_scope_binding,
+    parse_nix_expr,
+)
 from lib.tests._nix_eval import (
     nix_attrset,
     nix_eval_json,
@@ -27,7 +36,14 @@ from lib.tests._nix_eval import (
     nix_let,
     nix_list,
 )
-from lib.update.flake import nixpkgs_expression
+from lib.tests._shell_ast import (
+    command_texts,
+    indented_string_body,
+    iter_nodes,
+    node_text,
+    parse_shell,
+)
+from lib.update.flake import nixpkgs_lib_expression
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
 
@@ -75,6 +91,71 @@ def _opencode_options_attrset() -> AttributeSet:
     return expect_instance(
         expect_binding(nixcfg.values, "opencode").value, AttributeSet
     )
+
+
+@cache
+def _profiles_module_source() -> str:
+    """Read the work profiles module once for source-level assertions."""
+    return Path(REPO_ROOT / "modules/home/profiles.nix").read_text(encoding="utf-8")
+
+
+def _profiles_fragment_expr(start_marker: str, end_marker: str):
+    source = _profiles_module_source()
+    start = source.index(start_marker) + len(start_marker)
+    end = source.index(end_marker, start)
+    fragment = textwrap.dedent(source[start:end]).rstrip().removesuffix(";")
+    return parse_nix_expr(fragment)
+
+
+@cache
+def _mk_mcp_remote_wrapper_expr() -> FunctionDefinition:
+    return expect_instance(
+        _profiles_fragment_expr(
+            "  mkMcpRemoteWrapper =\n",
+            "\n\n  # GitHub MCP wrapper",
+        ),
+        FunctionDefinition,
+    )
+
+
+@cache
+def _slack_mcp_wrapper_expr() -> FunctionCall:
+    script = expect_instance(
+        _profiles_fragment_expr(
+            '      slack-mcp-wrapper = pkgs.writeShellScript "slack-mcp" ',
+            "\n    in",
+        ),
+        IndentedString,
+    )
+    return FunctionCall(
+        name=FunctionCall(
+            name=identifier_attr_path("pkgs", "writeShellScript"),
+            argument=StringPrimitive(value="slack-mcp"),
+        ),
+        argument=script,
+    )
+
+
+@cache
+def _default_opencode_mcp_expr() -> BinaryExpression:
+    source = _profiles_module_source()
+    start = source.index("  defaultOpencodeMcp = ") + len("  defaultOpencodeMcp = ")
+    end = source.index("in\n{", start)
+    fragment = source[start:end].rstrip().removesuffix(";")
+    return expect_instance(parse_nix_expr(fragment), BinaryExpression)
+
+
+@cache
+def _mk_mcp_remote_wrapper_shell():
+    call = expect_instance(_mk_mcp_remote_wrapper_expr().output, FunctionCall)
+    script = expect_instance(call.argument, IndentedString)
+    return parse_shell(indented_string_body(script.rebuild()))
+
+
+@cache
+def _slack_mcp_wrapper_shell():
+    script = expect_instance(_slack_mcp_wrapper_expr().argument, IndentedString)
+    return parse_shell(indented_string_body(script.rebuild()))
 
 
 def _mk_option(
@@ -165,6 +246,107 @@ def _profile_json_text(
     )
 
 
+def _curried_lambda(arguments: tuple[str, ...], output: object) -> FunctionDefinition:
+    """Build a curried Nix lambda from simple positional argument names."""
+    expression = output
+    for argument in reversed(arguments):
+        expression = FunctionDefinition(
+            argument_set=Identifier(name=argument),
+            output=expression,
+        )
+    assert isinstance(expression, FunctionDefinition)
+    return expression
+
+
+@cache
+def _stub_work_profile_pkgs(*, is_darwin: bool = True) -> AttributeSet:
+    """Return the lightweight ``pkgs`` surface needed by ``modules/home/profiles.nix``."""
+    return nix_attrset({
+        "lib": {
+            "getExe'": _curried_lambda(
+                ("pkg", "exeName"),
+                BinaryExpression(
+                    left=BinaryExpression(
+                        left=FunctionCall(
+                            name=identifier_attr_path("builtins", "toString"),
+                            argument=Identifier(name="pkg"),
+                        ),
+                        operator=Operator(name="+"),
+                        right=StringPrimitive(value="/"),
+                    ),
+                    operator=Operator(name="+"),
+                    right=Identifier(name="exeName"),
+                ),
+            )
+        },
+        "bun": "/nix/store/fake-bun",
+        "stdenv.isDarwin": is_darwin,
+        "writeShellScript": _curried_lambda(
+            ("name", "text"),
+            BinaryExpression(
+                left=StringPrimitive(value="/nix/store/"),
+                operator=Operator(name="+"),
+                right=Identifier(name="name"),
+            ),
+        ),
+        "_1password-cli": "/nix/store/1password-cli",
+        "google-cloud-sdk": "/nix/store/google-cloud-sdk",
+        "linear-cli": "/nix/store/linear-cli",
+        "linearis": "/nix/store/linearis",
+        "runCommand": _curried_lambda(
+            ("name", "attrs", "script"),
+            BinaryExpression(
+                left=StringPrimitive(value="/nix/store/"),
+                operator=Operator(name="+"),
+                right=Identifier(name="name"),
+            ),
+        ),
+    })
+
+
+def _eval_opencode_value(
+    profile_config: AttributeSet,
+    value: object,
+    *,
+    extra_module_paths: tuple[Path, ...] = (),
+    extra_options: dict[str, object] | None = None,
+    extra_config: dict[str, object] | None = None,
+    special_args: AttributeSet | None = None,
+    pkgs_expr: AttributeSet | None = None,
+) -> object:
+    """Evaluate only the module semantics that AST checks cannot prove.
+
+    This helper is intentionally reserved for sparse override merging and module
+    type-validation behavior that depends on ``lib.evalModules`` rather than the
+    source AST alone.
+    """
+    module_args: dict[str, object] = {
+        "modules": nix_list([
+            Parenthesis(value=nix_import(REPO_ROOT / "modules/home/opencode.nix")),
+            *[Parenthesis(value=nix_import(path)) for path in extra_module_paths],
+            nix_attrset({
+                "options": _opencode_eval_options(extra_options=extra_options),
+                "config.nixcfg.opencode": profile_config,
+                **(extra_config or {}),
+            }),
+        ])
+    }
+    if special_args is not None:
+        module_args["specialArgs"] = special_args
+
+    bindings: dict[str, object] = {
+        "lib": nixpkgs_lib_expression(),
+        "result": FunctionCall(
+            name=identifier_attr_path("lib", "evalModules"),
+            argument=nix_attrset(module_args),
+        ),
+    }
+    if pkgs_expr is not None:
+        bindings["pkgs"] = pkgs_expr
+
+    return nix_eval_json(nix_let(bindings, value))
+
+
 def _eval_opencode_json(
     profile_config: AttributeSet,
     *,
@@ -173,33 +355,13 @@ def _eval_opencode_json(
     extra_options: dict[str, object] | None = None,
     extra_config: dict[str, object] | None = None,
     special_args: AttributeSet | None = None,
+    pkgs_expr: AttributeSet | None = None,
     unsafe_discard_string_context: bool = False,
 ) -> dict[str, Any]:
     """Evaluate the module and return the parsed selected profile overlay."""
     result_config_file = identifier_attr_path("result", "config", "xdg", "configFile")
-    module_args: dict[str, object] = {
-        "modules": nix_list([
-            Parenthesis(value=nix_import(REPO_ROOT / "modules/home/opencode.nix")),
-            *[Parenthesis(value=nix_import(path)) for path in extra_module_paths],
-            nix_attrset({
-                "options": _opencode_eval_options(extra_options=extra_options),
-                "config.nixcfg.opencode": profile_config,
-                **(extra_config or {}),
-            }),
-        ])
-    }
-    if special_args is not None:
-        module_args["specialArgs"] = special_args
-
-    expression = nix_let(
-        {
-            "pkgs": nixpkgs_expression(),
-            "lib": identifier_attr_path("pkgs", "lib"),
-            "result": FunctionCall(
-                name=identifier_attr_path("lib", "evalModules"),
-                argument=nix_attrset(module_args),
-            ),
-        },
+    payload = _eval_opencode_value(
+        profile_config,
         FunctionCall(
             name=identifier_attr_path("builtins", "fromJSON"),
             argument=_profile_json_text(
@@ -208,90 +370,12 @@ def _eval_opencode_json(
                 unsafe_discard_string_context=unsafe_discard_string_context,
             ),
         ),
+        extra_module_paths=extra_module_paths,
+        extra_options=extra_options,
+        extra_config=extra_config,
+        special_args=special_args,
+        pkgs_expr=pkgs_expr,
     )
-    payload = nix_eval_json(expression)
-    assert isinstance(payload, dict)
-    return payload
-
-
-def _eval_config_file_names(
-    profile_config: AttributeSet,
-    *,
-    extra_module_paths: tuple[Path, ...] = (),
-    extra_options: dict[str, object] | None = None,
-    extra_config: dict[str, object] | None = None,
-    special_args: AttributeSet | None = None,
-) -> list[str]:
-    """Evaluate the module and return materialized OpenCode config file names."""
-    module_args: dict[str, object] = {
-        "modules": nix_list([
-            Parenthesis(value=nix_import(REPO_ROOT / "modules/home/opencode.nix")),
-            *[Parenthesis(value=nix_import(path)) for path in extra_module_paths],
-            nix_attrset({
-                "options": _opencode_eval_options(extra_options=extra_options),
-                "config.nixcfg.opencode": profile_config,
-                **(extra_config or {}),
-            }),
-        ])
-    }
-    if special_args is not None:
-        module_args["specialArgs"] = special_args
-
-    expression = nix_let(
-        {
-            "pkgs": nixpkgs_expression(),
-            "lib": identifier_attr_path("pkgs", "lib"),
-            "result": FunctionCall(
-                name=identifier_attr_path("lib", "evalModules"),
-                argument=nix_attrset(module_args),
-            ),
-        },
-        FunctionCall(
-            name=identifier_attr_path("builtins", "attrNames"),
-            argument=identifier_attr_path("result", "config", "xdg", "configFile"),
-        ),
-    )
-    payload = nix_eval_json(expression)
-    assert isinstance(payload, list)
-    assert all(isinstance(item, str) for item in payload)
-    return payload
-
-
-def _eval_session_variables(
-    profile_config: AttributeSet,
-    *,
-    extra_module_paths: tuple[Path, ...] = (),
-    extra_options: dict[str, object] | None = None,
-    extra_config: dict[str, object] | None = None,
-    special_args: AttributeSet | None = None,
-) -> dict[str, Any]:
-    """Evaluate the module and return the resolved home session variables."""
-    module_args: dict[str, object] = {
-        "modules": nix_list([
-            Parenthesis(value=nix_import(REPO_ROOT / "modules/home/opencode.nix")),
-            *[Parenthesis(value=nix_import(path)) for path in extra_module_paths],
-            nix_attrset({
-                "options": _opencode_eval_options(extra_options=extra_options),
-                "config.nixcfg.opencode": profile_config,
-                **(extra_config or {}),
-            }),
-        ])
-    }
-    if special_args is not None:
-        module_args["specialArgs"] = special_args
-
-    expression = nix_let(
-        {
-            "pkgs": nixpkgs_expression(),
-            "lib": identifier_attr_path("pkgs", "lib"),
-            "result": FunctionCall(
-                name=identifier_attr_path("lib", "evalModules"),
-                argument=nix_attrset(module_args),
-            ),
-        },
-        identifier_attr_path("result", "config", "home", "sessionVariables"),
-    )
-    payload = nix_eval_json(expression)
     assert isinstance(payload, dict)
     return payload
 
@@ -349,6 +433,7 @@ def _work_profile_eval_kwargs(
             }
         },
         "special_args": nix_attrset({"pkgs": Identifier(name="pkgs")}),
+        "pkgs_expr": _stub_work_profile_pkgs(),
     }
 
 
@@ -365,20 +450,6 @@ def _eval_work_profile_json(
             profile_config=profile_config,
             work_config=work_config,
         ),
-    )
-
-
-def _eval_work_config_file_names(
-    *,
-    profile_config: AttributeSet | None = None,
-    work_config: dict[str, object] | None = None,
-) -> list[str]:
-    """Evaluate and return the materialized config files for the work profile."""
-    return _eval_config_file_names(
-        **_work_profile_eval_kwargs(
-            profile_config=profile_config,
-            work_config=work_config,
-        )
     )
 
 
@@ -408,8 +479,8 @@ def test_program_settings_keep_shared_base_config_in_the_module_ast() -> None:
     )
 
 
-def test_default_chrome_devtools_mcp_command_uses_bunx() -> None:
-    """The shared Chrome DevTools MCP definition should launch through bunx."""
+def test_default_chrome_devtools_mcp_command_uses_npx() -> None:
+    """The shared Chrome DevTools MCP definition should launch through npx."""
     options = _opencode_options_attrset()
     mcp_servers = expect_instance(
         expect_binding(options.values, "mcpServers").value,
@@ -428,8 +499,8 @@ def test_default_chrome_devtools_mcp_command_uses_bunx() -> None:
     assert_nix_ast_equal(
         expect_binding(chrome_devtools.values, "command").value,
         nix_list([
-            "bunx",
-            "--bun",
+            "npx",
+            "-y",
             "chrome-devtools-mcp@latest",
             "--autoConnect",
             "--channel=stable",
@@ -437,55 +508,98 @@ def test_default_chrome_devtools_mcp_command_uses_bunx() -> None:
     )
 
 
-@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_selected_profile_materializes_only_one_overlay_file() -> None:
-    """Only the active profile overlay should be materialized under ``xdg.configFile``."""
-    config_files = _eval_config_file_names(
-        nix_attrset({
-            "activeProfile": "personal",
-            "profiles.personal": {},
-        })
+    """The module should materialize exactly ``opencode/${cfg.activeProfile}.json``."""
+    xdg = expect_instance(
+        expect_binding(_opencode_config_attrset().values, "xdg").value,
+        AttributeSet,
+    )
+    config_file = expect_instance(
+        expect_binding(xdg.values, "configFile").value,
+        AttributeSet,
+    )
+    profile_json = expect_instance(
+        expect_binding(
+            config_file.values, '"opencode/${cfg.activeProfile}.json"'
+        ).value,
+        AttributeSet,
     )
 
-    assert config_files == ["opencode/personal.json"]
+    assert_nix_ast_equal(
+        expect_binding(profile_json.values, "text").value,
+        "builtins.toJSON (mkProfileOverlayConfig selectedProfileConfig)",
+    )
 
 
-@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_work_profile_materializes_only_one_overlay_file() -> None:
-    """The work profile should materialize exactly one selected overlay file."""
-    config_files = _eval_work_config_file_names()
+    """The work profile module should select the shared dynamic profile path."""
+    source = _profiles_module_source()
+    start = source.index("    nixcfg.opencode = {\n") + len("    nixcfg.opencode = ")
+    end = source.index("    };\n", start) + len("    }")
+    opencode = expect_instance(parse_nix_expr(source[start:end]), AttributeSet)
 
-    assert config_files == ["opencode/work.json"]
+    assert_nix_ast_equal(
+        expect_binding(opencode.values, "activeProfile").value,
+        'lib.mkDefault "work"',
+    )
+    profiles = expect_instance(
+        expect_binding(opencode.values, "profiles").value, AttributeSet
+    )
+    work = expect_instance(expect_binding(profiles.values, "work").value, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(work.values, "mcpServers").value,
+        "cfg.opencodeMcp",
+    )
 
 
-@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_selected_profile_sets_shell_env_var_to_the_same_profile_path() -> None:
-    """Shell sessions should export the selected profile path directly."""
-    session_variables = _eval_session_variables(
-        nix_attrset({
-            "activeProfile": "personal",
-            "profiles.personal": {},
-        })
+    """Shell sessions should export the shared selected profile path binding."""
+    home = expect_instance(
+        expect_binding(_opencode_config_attrset().values, "home").value,
+        AttributeSet,
+    )
+    session_variables = expect_instance(
+        expect_binding(home.values, "sessionVariables").value,
+        AttributeSet,
+    )
+
+    assert_nix_ast_equal(
+        expect_scope_binding(_opencode_module_output(), "selectedProfilePath").value,
+        '"${config.home.homeDirectory}/.config/opencode/${cfg.activeProfile}.json"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(session_variables.values, "OPENCODE_CONFIG").value,
+        "selectedProfilePath",
+    )
+
+
+def test_selected_profile_json_is_a_thin_overlay_when_no_overrides_exist() -> None:
+    """An empty profile should still render only the schema and optional MCP overrides."""
+    assert_nix_ast_equal(
+        expect_scope_binding(_opencode_module_output(), "emptyProfile").value,
+        """
+        {
+          settings = { };
+          mcpServers = { };
+        }
+        """,
     )
 
     assert (
-        session_variables["OPENCODE_CONFIG"]
-        == "/Users/test/.config/opencode/personal.json"
+        str(
+            expect_scope_binding(
+                _opencode_module_output(), "mkProfileOverlayConfig"
+            ).value
+        )
+        == """profile:
+profile.settings
+// {
+  \"$schema\" = profile.settings.\"$schema\" or \"https://opencode.ai/config.json\";
+}
+// optionalAttrs (profile.mcpServers != { }) {
+  mcp = renderSparseMcpServerOverrides profile.mcpServers;
+}"""
     )
-
-
-@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
-def test_selected_profile_json_is_a_thin_overlay_when_no_overrides_exist() -> None:
-    """An empty profile should materialize to a schema-only overlay."""
-    profile = _eval_opencode_json(
-        nix_attrset({
-            "activeProfile": "personal",
-            "profiles.personal": {},
-        }),
-        profile_name="personal",
-    )
-
-    assert profile == {"$schema": "https://opencode.ai/config.json"}
 
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
@@ -533,53 +647,165 @@ def test_selected_profile_json_preserves_freeform_mcp_extras() -> None:
 
 
 def test_work_profile_darwin_only_wrappers_stay_platform_guarded() -> None:
-    """Darwin Keychain-backed MCP wrappers should stay behind a Darwin guard."""
-    profiles_module = (REPO_ROOT / "modules/home/profiles.nix").read_text(
-        encoding="utf-8"
+    """Darwin Keychain-backed wrappers should stay behind ``pkgs.stdenv.isDarwin``."""
+    optional_attrs = expect_instance(_default_opencode_mcp_expr().right, FunctionCall)
+    assert_nix_ast_equal(optional_attrs.name, "lib.optionalAttrs pkgs.stdenv.isDarwin")
+
+    remote_wrapper_commands = command_texts(_mk_mcp_remote_wrapper_shell())
+    assert "set -euo pipefail" in remote_wrapper_commands
+    assert '[ -z "$token" ]' in command_texts(_mk_mcp_remote_wrapper_shell())
+    assert any("mcp-remote@latest" in text for text in remote_wrapper_commands)
+
+    slack_wrapper_commands = command_texts(_slack_mcp_wrapper_shell())
+    assert "set -euo pipefail" in slack_wrapper_commands
+    assert 'export SLACK_MCP_XOXP_TOKEN="$token"' in slack_wrapper_commands
+    assert "export SLACK_MCP_ADD_MESSAGE_TOOL=true" in slack_wrapper_commands
+    assert any(
+        "slack-mcp-server@latest --transport stdio" in text
+        for text in slack_wrapper_commands
     )
 
-    assert "} // lib.optionalAttrs pkgs.stdenv.isDarwin (" in profiles_module
-    guarded_section = profiles_module.split(
-        "} // lib.optionalAttrs pkgs.stdenv.isDarwin (", 1
-    )[1]
-    assert "slack = {" in guarded_section
-    assert "render = {" in guarded_section
-    assert "security find-generic-password" in guarded_section
-    assert "security find-internet-password" in guarded_section
+
+def test_work_profile_wrapper_scripts_fail_fast_on_missing_tokens() -> None:
+    """Remote MCP wrappers should stop immediately when credential lookup fails."""
+    remote_shell = _mk_mcp_remote_wrapper_shell()
+    slack_shell = _slack_mcp_wrapper_shell()
+    remote_wrapper_commands = command_texts(remote_shell)
+    slack_wrapper_commands = command_texts(slack_shell)
+    remote_assignments = [
+        node_text(node, remote_shell.sanitized)
+        for node in iter_nodes(remote_shell.tree.root_node, "variable_assignment")
+    ]
+    slack_assignments = [
+        node_text(node, slack_shell.sanitized)
+        for node in iter_nodes(slack_shell.tree.root_node, "variable_assignment")
+    ]
+    remote_redirects = [
+        node_text(node, remote_shell.sanitized)
+        for node in iter_nodes(remote_shell.tree.root_node, "redirected_statement")
+    ]
+    slack_redirects = [
+        node_text(node, slack_shell.sanitized)
+        for node in iter_nodes(slack_shell.tree.root_node, "redirected_statement")
+    ]
+
+    assert 'token="$(__NIX_INTERP__)"' in remote_assignments
+    assert '[ -z "$token" ]' in remote_wrapper_commands
+    assert "echo __NIX_INTERP__ >&2" in remote_redirects
+    assert "exit 1" in remote_wrapper_commands
+
+    assert (
+        'token="$(security find-generic-password -s "slack-mcp-token" -a "$USER" -w)"'
+        in slack_assignments
+    )
+    assert '[ -z "$token" ]' in slack_wrapper_commands
+    assert 'echo "slack-mcp: token lookup returned empty output" >&2' in slack_redirects
+    assert "exit 1" in slack_wrapper_commands
 
 
 def test_darwin_hosts_select_the_materialized_opencode_profile_files() -> None:
     """Host launchd wiring should point at the profile files the module materializes."""
-    argus = (REPO_ROOT / "darwin/argus.nix").read_text(encoding="utf-8")
-    rocinante = (REPO_ROOT / "darwin/rocinante.nix").read_text(encoding="utf-8")
+    argus = expect_instance(
+        parse_nix_expr((REPO_ROOT / "darwin/argus.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    rocinante = expect_instance(
+        parse_nix_expr(
+            (REPO_ROOT / "darwin/rocinante.nix").read_text(encoding="utf-8")
+        ),
+        FunctionDefinition,
+    )
 
-    assert '(lib.mkSetOpencodeEnvModule "work.json")' in argus
-    assert '(lib.mkSetOpencodeEnvModule "personal.json")' in rocinante
-    assert 'mkSetOpencodeEnvModule "active.json"' not in argus
-    assert 'mkSetOpencodeEnvModule "active.json"' not in rocinante
+    assert_nix_ast_equal(
+        expect_instance(argus.output, FunctionCall).argument,
+        """
+        {
+          user = "george";
+          work = true;
+          brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
+          extraHomeModules = [
+            "${lib.modulesPath}/home/darwin-closure-priority.nix"
+            (
+              { pkgs, ... }:
+              {
+                nixcfg.packageSets.extraPackages = [
+                  pkgs.goose-cli
+                  pkgs.gws
+                ];
+              }
+            )
+          ];
+          extraSystemModules = [
+            {
+              home-manager.backupFileExtension = "backup";
+              nix-rosetta-builder.memory = "16GiB";
+            }
+            "${lib.modulesPath}/darwin/george/town-dock-apps.nix"
+            (lib.mkSetOpencodeEnvModule "work.json")
+          ];
+        }
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_instance(rocinante.output, FunctionCall).argument,
+        """
+        {
+          user = "george";
+          brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
+          extraHomeModules = [
+            "${lib.modulesPath}/home/darwin-closure-priority.nix"
+          ];
+          extraSystemModules = [
+            {
+              home-manager.backupFileExtension = "backup";
+            }
+            "${lib.modulesPath}/darwin/george/dock-apps.nix"
+            (lib.mkSetOpencodeEnvModule "personal.json")
+          ];
+        }
+        """,
+    )
 
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_work_profile_overlay_keeps_shared_defaults_in_global_config() -> None:
-    """The work overlay should contain work additions without duplicating shared base MCPs."""
-    profile = _eval_work_profile_json()
+    """The work defaults should add work MCPs without shadowing shared global ones."""
+    defaults = expect_instance(_default_opencode_mcp_expr().left, AttributeSet)
+    axiom = expect_instance(
+        expect_binding(defaults.values, "axiom").value, AttributeSet
+    )
+    convex = expect_instance(
+        expect_binding(defaults.values, "convex").value, AttributeSet
+    )
 
-    assert profile["mcp"]["axiom"] == {
-        "enabled": False,
-        "type": "remote",
-        "url": "https://mcp.axiom.co/mcp",
+    assert_nix_ast_equal(
+        axiom,
+        '{ type = "remote"; url = "https://mcp.axiom.co/mcp"; }',
+    )
+    assert_nix_ast_equal(
+        convex,
+        """
+        {
+          type = "local";
+          command = [
+            "bunx"
+            "--bun"
+            "convex@latest"
+            "mcp"
+            "start"
+          ];
+        }
+        """,
+    )
+
+    assert "chrome-devtools" not in {
+        binding.name for binding in defaults.values if isinstance(binding, Binding)
     }
-    assert profile["mcp"]["convex"] == {
-        "command": ["bunx", "--bun", "convex@latest", "mcp", "start"],
-        "enabled": False,
-        "type": "local",
-    }
-    assert "chrome-devtools" not in profile["mcp"]
 
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_work_profile_sparse_mcp_overrides_stay_sparse() -> None:
-    """Work MCP overrides should only emit the fields that differ from global config."""
+    """Work MCP override sparsity depends on module merge semantics, so keep a tiny eval."""
     profile = _eval_work_profile_json(
         work_config={"opencodeMcp.chrome-devtools.enable": True}
     )
@@ -589,7 +815,7 @@ def test_work_profile_sparse_mcp_overrides_stay_sparse() -> None:
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_profile_mcp_override_invalid_shape_is_rejected() -> None:
-    """Profile MCP overrides should reject invalid typed sparse override shapes."""
+    """Type errors come from ``evalModules`` validation, so this stays as a minimal eval."""
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
         _eval_opencode_json(
             nix_attrset({
@@ -608,7 +834,7 @@ def test_profile_mcp_override_invalid_shape_is_rejected() -> None:
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_work_profile_mcp_override_invalid_shape_is_rejected() -> None:
-    """Work MCP overrides should reuse the same sparse override validation."""
+    """Type errors come from ``evalModules`` validation, so this stays as a minimal eval."""
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
         _eval_work_profile_json(
             work_config={"opencodeMcp.chrome-devtools.command": "bunx"}

@@ -1,0 +1,19 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-ABlfRtfkxyOCs8dpsSBx3UMYYRz9rUAb7N6CpQgZdMU=",
+      "hashType": "srcHash"
+    },
+    {
+      "hash": "sha256-5ktNmeSuKTouhGJEqJuAF4uhA4LBP7WRwfppaPUpEVM=",
+      "hashType": "rustyV8ArchiveHash",
+      "platform": "x86_64-linux"
+    },
+    {
+      "hash": "sha256-CfiQDO2Cl8IpJGx6ULLg7CPFTQpVTzaWGcwphj843Ro=",
+      "hashType": "rustyV8BindingHash",
+      "platform": "x86_64-linux"
+    }
+  ],
+  "version": "v146.4.0"
+}

@@ -31,6 +31,7 @@ class DataGripUpdater(ChecksumProvidedUpdater):
 
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "macM1",
+        "x86_64-darwin": "mac",
         "aarch64-linux": "linuxARM64",
         "x86_64-linux": "linux",
     }

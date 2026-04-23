@@ -23,8 +23,27 @@
   zlib,
   zstd,
   apple-sdk_15,
+  alsa-lib,
   darwinMinVersionHook,
+  envsubst,
+  glib,
+  libdrm,
+  libgbm,
+  libglvnd,
+  libva,
+  libxcomposite,
+  libxdamage,
+  libxext,
+  libxfixes,
+  libxkbcommon,
+  libxrandr,
+  libx11,
+  libxcb,
+  makeWrapper,
+  nodejs_22,
   python3,
+  vulkan-loader,
+  wayland,
   crate2nixSourceOnly ? false,
   ...
 }:
@@ -187,7 +206,23 @@ let
         expected ${appVersion}; regenerate Cargo.nix
       '';
 
-  livekitLibwebrtc = pkgs.callPackage "${src}/nix/livekit-libwebrtc/package.nix" { };
+  livekitLibwebrtc =
+    let
+      upstreamLivekitLibwebrtc = pkgs.callPackage "${src}/nix/livekit-libwebrtc/package.nix" { };
+    in
+    if pkgs.stdenv.hostPlatform.isLinux then
+      upstreamLivekitLibwebrtc.overrideAttrs (old: {
+        gnFlags = builtins.filter (flag: flag != "rtc_use_pipewire=true") (old.gnFlags or [ ]) ++ [
+          "rtc_use_pipewire=false"
+        ];
+        # Keep Linux CI/builder runs stable here; parallel livekit-libwebrtc
+        # builds have been flaky enough in practice that serialized ninja is the
+        # safer default until the underlying failure mode is better understood.
+        ninjaFlags = [ "-j1" ] ++ (old.ninjaFlags or [ ]);
+      })
+    else
+      upstreamLivekitLibwebrtc;
+  gpuLib = vulkan-loader;
 
   commonNativeBuildInputs = [
     cmake
@@ -196,8 +231,8 @@ let
     pkg-config
     protobuf
     rustPlatform.bindgenHook
-    xcodebuild
-  ];
+  ]
+  ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ xcodebuild ];
 
   commonBuildInputs = [
     fontconfig
@@ -207,154 +242,37 @@ let
     sqlite
     zlib
     zstd
+  ]
+  ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+    alsa-lib
+    glib
+    gpuLib
+    libdrm
+    libgbm
+    libglvnd
+    libva
+    libxcomposite
+    libxdamage
+    libxext
+    libxfixes
+    libxkbcommon
+    libxrandr
+    libx11
+    libxcb
+  ]
+  ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
     apple-sdk_15
     (darwinMinVersionHook "10.15")
   ];
 
-  commonCrates = [
-    "acp_thread"
-    "acp_tools"
-    "action_log"
-    "activity_indicator"
-    "agent"
-    "agent_servers"
-    "agent_settings"
-    "agent_ui"
-    "askpass"
-    "assets"
-    "audio"
-    "auto_update"
-    "auto_update_helper"
-    "auto_update_ui"
-    "breadcrumbs"
-    "call"
-    "channel"
-    "cli"
-    "client"
-    "collections"
-    "collab_ui"
-    "command_palette"
-    "component"
-    "component_preview"
-    "copilot"
-    "copilot_ui"
-    "crashes"
-    "csv_preview"
-    "dap_adapters"
-    "db"
-    "debug_adapter_extension"
-    "debugger_tools"
-    "debugger_ui"
-    "dev_container"
-    "diagnostics"
-    "edit_prediction"
-    "edit_prediction_ui"
-    "editor"
-    "encoding_selector"
-    "extension"
-    "extension_host"
-    "extensions_ui"
-    "feature_flags"
-    "feedback"
-    "file_finder"
-    "fs"
-    "git"
-    "git_graph"
-    "git_hosting_providers"
-    "git_ui"
-    "go_to_line"
-    "gpui"
-    "gpui_macros"
-    "gpui_platform"
-    "gpui_tokio"
-    "gpui_util"
-    "gpui_wgpu"
-    "http_client"
-    "image_viewer"
-    "inspector_ui"
-    "install_cli"
-    "journal"
-    "keymap_editor"
-    "language"
-    "language_extension"
-    "language_model"
-    "language_models"
-    "language_onboarding"
-    "language_selector"
-    "language_tools"
-    "languages"
-    "line_ending_selector"
-    "livekit_api"
-    "markdown"
-    "markdown_preview"
-    "media"
-    "menu"
-    "migrator"
-    "miniprofiler_ui"
-    "nc"
-    "net"
-    "node_runtime"
-    "notifications"
-    "onboarding"
-    "outline"
-    "outline_panel"
-    "paths"
-    "picker"
-    "perf"
-    "platform_title_bar"
-    "prettier"
-    "project"
-    "project_panel"
-    "project_symbols"
-    "prompt_store"
-    "proto"
-    "recent_projects"
-    "release_channel"
-    "remote"
-    "remote_connection"
-    "repl"
-    "reqwest_client"
-    "rope"
-    "search"
-    "scheduler"
-    "session"
-    "sum_tree"
-    "settings"
-    "settings_profile_selector"
-    "settings_ui"
-    "snippet_provider"
-    "snippets_ui"
-    "svg_preview"
-    "system_specs"
-    "tab_switcher"
-    "task"
-    "tasks_ui"
-    "telemetry"
-    "telemetry_events"
-    "terminal_view"
-    "theme"
-    "theme_extension"
-    "theme_selector"
-    "theme_settings"
-    "time_format"
-    "title_bar"
-    "toolchain_selector"
-    "ui"
-    "ui_prompt"
-    "util"
-    "util_macros"
-    "vim"
-    "vim_mode_setting"
-    "watch"
-    "web_search"
-    "web_search_providers"
-    "which_key"
-    "workspace"
-    "zed_actions"
-    "zed_env_vars"
-    "zlog"
-    "ztracing"
-  ];
+  commonCrates =
+    if pkgs.stdenv.hostPlatform.isLinux then
+      # Linux builds compile external -sys crates (for X11/Wayland/GLib/etc.) as
+      # standalone crate2nix derivations, so they need the shared pkg-config and
+      # system library inputs as well.
+      builtins.attrNames cargoNix.internal.crates
+    else
+      builtins.attrNames cargoNix.workspaceMembers;
 
   commonOverride = attrs: {
     nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ commonNativeBuildInputs;
@@ -371,12 +289,20 @@ let
       ];
     };
     LK_CUSTOM_WEBRTC = livekitLibwebrtc;
+    NIX_LDFLAGS = lib.optionalString pkgs.stdenv.hostPlatform.isLinux "-rpath ${
+      lib.makeLibraryPath [
+        gpuLib
+        wayland
+        libva
+      ]
+    }";
     NIX_OUTPATH_USED_AS_RANDOM_SEED = "norebuilds";
     PROTOC = "${protobuf}/bin/protoc";
     RELEASE_VERSION = version;
     ZED_COMMIT_SHA = inputs.zed.rev or "";
     ZED_UPDATE_EXPLANATION = "Zed has been installed using Nix. Auto-updates have thus been disabled.";
     ZSTD_SYS_USE_PKG_CONFIG = true;
+    dontPatchELF = pkgs.stdenv.hostPlatform.isLinux;
   };
 
   gpuiMacosOverride = attrs: {
@@ -408,9 +334,26 @@ let
     '';
   };
 
+  # tooling/perf exposes both a lib target and an internal binary, but Zed only
+  # needs the library via util_macros. Building the perf binary in the crate2nix
+  # dependency graph creates an unnecessary out↔lib multi-output reference cycle
+  # on Linux builders, so suppress it here.
+  perfOverride = _attrs: {
+    crateBin = [ ];
+  };
+
   rav1eOverride = _attrs: {
     CARGO_ENCODED_RUSTFLAGS = "";
   };
+
+  rmcpOverride =
+    attrs:
+    assert attrs ? crateName;
+    assert attrs ? version;
+    {
+      CARGO_CRATE_NAME = attrs.crateName;
+      CARGO_PKG_VERSION = attrs.version;
+    };
 
   wasmtimeCApiImplOverride = attrs: {
     nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [ cmake ];
@@ -439,23 +382,64 @@ let
       '';
     };
 
+  zedLinuxInstallPhase = ''
+    runHook preInstall
+
+    mkdir -p "$out/bin" "$out/libexec"
+    cp "$PWD/target/bin/zed" "$out/libexec/zed-editor"
+    cp "${cliDrv}/bin/cli" "$out/bin/zed"
+    ln -s "$out/bin/zed" "$out/bin/zeditor"
+
+    install -D "${patchedSrc}/crates/zed/resources/app-icon-nightly@2x.png" \
+      "$out/share/icons/hicolor/1024x1024@2x/apps/zed.png"
+    install -D "${patchedSrc}/crates/zed/resources/app-icon-nightly.png" \
+      "$out/share/icons/hicolor/512x512/apps/zed.png"
+
+    (
+      export DO_STARTUP_NOTIFY="true"
+      export APP_CLI="zed"
+      export APP_ICON="zed"
+      export APP_NAME="Zed Nightly"
+      export APP_ARGS="%U"
+      mkdir -p "$out/share/applications"
+      ${lib.getExe envsubst} < "${patchedSrc}/crates/zed/resources/zed.desktop.in" > \
+        "$out/share/applications/dev.zed.Zed-Nightly.desktop"
+      chmod +x "$out/share/applications/dev.zed.Zed-Nightly.desktop"
+    )
+
+    wrapProgram "$out/libexec/zed-editor" --suffix PATH : ${lib.makeBinPath [ nodejs_22 ]}
+
+    runHook postInstall
+  '';
+
   zedOverride = attrs: {
-    buildInputs = (attrs.buildInputs or [ ]) ++ [ git ];
-    installPhase = ''
-      runHook preInstall
+    nativeBuildInputs =
+      (attrs.nativeBuildInputs or [ ])
+      ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+        envsubst
+        makeWrapper
+      ];
+    buildInputs = (attrs.buildInputs or [ ]) ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ git ];
+    installPhase =
+      if pkgs.stdenv.hostPlatform.isDarwin then
+        ''
+          runHook preInstall
 
-      ${pkgs.stdenv.shell} ${./install_zed_nightly_app.sh} \
-        "$out" \
-        "$TMPDIR" \
-        ${lib.escapeShellArg appVersion} \
-        ${lib.escapeShellArg (toString patchedSrc)} \
-        ${lib.escapeShellArg "${imagemagick}/bin/magick"} \
-        ${lib.escapeShellArg "${libicns}/bin/png2icns"} \
-        ${lib.escapeShellArg "${git}/bin/git"} \
-        ${lib.escapeShellArg "${cliDrv}/bin/cli"}
+          ${pkgs.stdenv.shell} ${./install_zed_nightly_app.sh} \
+            "$out" \
+            "$TMPDIR" \
+            ${lib.escapeShellArg appVersion} \
+            ${lib.escapeShellArg (toString patchedSrc)} \
+            ${lib.escapeShellArg "${imagemagick}/bin/magick"} \
+            ${lib.escapeShellArg "${libicns}/bin/png2icns"} \
+            ${lib.escapeShellArg "${git}/bin/git"} \
+            ${lib.escapeShellArg "${cliDrv}/bin/cli"} \
+            "$PWD/target/bin/zed"
 
-      runHook postInstall
-    '';
+          runHook postInstall
+        ''
+      else
+        zedLinuxInstallPhase;
   };
 
   commonCrateOverrides = lib.genAttrs commonCrates (_: commonOverride);
@@ -465,8 +449,13 @@ let
     // commonCrateOverrides
     // {
       documented = documentedOverride;
+      "av-scenechange" = _attrs: {
+        CARGO_ENCODED_RUSTFLAGS = "";
+      };
       gpui_macos = attrs: (commonOverride attrs) // (gpuiMacosOverride attrs);
+      perf = attrs: (commonOverride attrs) // (perfOverride attrs);
       rav1e = rav1eOverride;
+      rmcp = attrs: (commonOverride attrs) // (rmcpOverride attrs);
       tree-sitter = treeSitterOverride;
       wasmtime-c-api-impl = wasmtimeCApiImplOverride;
       webrtc-sys = attrs: (commonOverride attrs) // (webrtcSysOverride attrs);
@@ -488,15 +477,26 @@ let
   };
   zedDrvChecked = zedDrv.overrideAttrs (old: {
     doInstallCheck = true;
-    installCheckPhase = (old.installCheckPhase or "") + ''
-      runHook preInstallCheck
-
-      test -x "$out/Applications/Zed Nightly.app/Contents/MacOS/zed"
-      test -L "$out/bin/zed"
-      $out/bin/zed --help >/dev/null
-
-      runHook postInstallCheck
-    '';
+    installCheckPhase =
+      (old.installCheckPhase or "")
+      + ''
+        runHook preInstallCheck
+      ''
+      + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+        test -x "$out/Applications/Zed Nightly.app/Contents/MacOS/zed"
+        test -L "$out/bin/zed"
+        $out/bin/zed --help >/dev/null
+      ''
+      + lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+        test -x "$out/libexec/zed-editor"
+        test -x "$out/bin/zed"
+        test -L "$out/bin/zeditor"
+        test -f "$out/share/applications/dev.zed.Zed-Nightly.desktop"
+        $out/bin/zed --help >/dev/null
+      ''
+      + ''
+        runHook postInstallCheck
+      '';
   });
   guardedZedDrv =
     assert cargoNixVersionCheck;
@@ -520,6 +520,13 @@ else
       changelog = "https://zed.dev/releases/preview";
       license = lib.licenses.gpl3Only;
       mainProgram = "zed";
-      platforms = lib.platforms.darwin;
+      # Keep the exported surface constrained to the repo's currently validated
+      # primary Darwin/Linux outputs. The package expression still carries both
+      # platform branches so additional architectures can be re-enabled once
+      # corresponding builds are proven.
+      platforms = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
     };
   }

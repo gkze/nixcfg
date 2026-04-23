@@ -51,7 +51,12 @@ let
   };
 in
 {
-  inherit api apiVersion constructorNames moduleSets;
+  inherit
+    api
+    apiVersion
+    constructorNames
+    moduleSets
+    ;
   inherit (moduleSets)
     darwinModules
     homeModules

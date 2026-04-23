@@ -104,7 +104,13 @@ class GitHubWebCookieProvider:
         ):
             try:
                 raw_cookies = await _fetch_cdp_cookies(ws_url)
-            except aiohttp.ClientError, OSError, RuntimeError, TypeError, ValueError:
+            except (
+                aiohttp.ClientError,
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+            ):
                 continue
             resolved = build_github_cookies(raw_cookies, host=host)
             if resolved is not None:

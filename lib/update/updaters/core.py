@@ -127,6 +127,8 @@ class Updater(ABC):
     config: UpdateConfig
     required_tools: ClassVar[tuple[str, ...]] = ("nix",)
     materialize_when_current: ClassVar[bool] = False
+    shows_materialize_artifacts_phase: ClassVar[bool] = False
+    generated_artifact_files: ClassVar[tuple[str, ...]] = ()
 
     def __init__(self, *, config: UpdateConfig | None = None) -> None:
         """Create an updater bound to active config values."""

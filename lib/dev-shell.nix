@@ -2,10 +2,34 @@
   src ? ../.,
   lib,
   gitHooks,
+  lintFiles,
 }:
 pkgs:
 let
   hookPriority = 10;
+  pythonScriptFindPredicates = lib.concatMapStringsSep " " (
+    path: "-o -path './${path}'"
+  ) lintFiles.python.pythonScriptPaths;
+
+  # pyupgrade currently tops out at --py314-plus, but these repo helpers still
+  # need to parse under nixpkgs' generic python3 (3.13 today), so keep the
+  # floor aligned to the real minimum runtime.
+  pythonPyupgradeCheck = pkgs.writeShellScriptBin "check-python-pyupgrade" ''
+    set -euo pipefail
+
+    find . \
+      \( -path './.direnv' -o -path './.git' -o -path './.pytest_cache' -o -path './.ruff_cache' -o -path './.venv' -o -path './node_modules' -o -path './result' -o -name '_generated.py' \) -prune -o \
+      -type f \
+      \( -name '*.py' -o -name '*.pyi' ${pythonScriptFindPredicates} \) \
+      -print0 \
+      | ${pkgs.findutils}/bin/xargs -0 -r ${lib.getExe pkgs.python3} -m lib.fix_python_multi_except --pyupgrade-exe ${lib.getExe pkgs.pyupgrade} --pyupgrade-arg=--py313-plus
+  '';
+
+  pythonCompileCheck = pkgs.writeShellScriptBin "check-python-compile" ''
+    set -euo pipefail
+
+    ${lib.getExe pkgs.python3} ${./check_python_compile.py} ${lib.escapeShellArgs lintFiles.python.compilePaths}
+  '';
 
   pre-commit-check = gitHooks.lib.${pkgs.system}.run {
     inherit src;
@@ -62,11 +86,31 @@ let
         priority = hookPriority;
       };
 
+      format-python-pyupgrade = {
+        enable = true;
+        name = "format-python-pyupgrade";
+        package = pythonPyupgradeCheck;
+        entry = "${pythonPyupgradeCheck}/bin/check-python-pyupgrade";
+        pass_filenames = false;
+        always_run = true;
+        priority = hookPriority;
+      };
+
       format-python-ruff = {
         enable = true;
         name = "format-python-ruff";
         package = pkgs.ruff;
         entry = "ruff format --check --config pyproject.toml .";
+        pass_filenames = false;
+        always_run = true;
+        priority = hookPriority;
+      };
+
+      lint-python-compile = {
+        enable = true;
+        name = "lint-python-compile";
+        package = pythonCompileCheck;
+        entry = "${pythonCompileCheck}/bin/check-python-compile";
         pass_filenames = false;
         always_run = true;
         priority = hookPriority;
@@ -166,6 +210,7 @@ pkgs.devshell.mkShell {
       nurl
       pinact
       prek
+      pyupgrade
       sops
       taplo
       uv

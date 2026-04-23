@@ -1,8 +1,11 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
-const defaultSource = "/tmp/pi-github-repos/zellij-org/zellij/zellij-utils/src/plugin_api";
-const sourceDir = Bun.argv[2] ?? defaultSource;
+const sourceDir = Bun.argv[2] ?? process.env.ZELLIJ_PROTO_SOURCE;
+
+if (!sourceDir) {
+  throw new Error("usage: bun sync-zellij-protos.ts <source-dir> (or set ZELLIJ_PROTO_SOURCE)");
+}
 const destDir = new URL("../proto/", import.meta.url);
 
 await mkdir(destDir, { recursive: true });
@@ -21,7 +24,9 @@ for (const entry of entries) {
 }
 
 const manifestPath = new URL("source.json", destDir);
-const previousManifest = await Bun.file(manifestPath).json().catch(() => ({}));
+const previousManifest = await Bun.file(manifestPath)
+  .json()
+  .catch(() => ({}));
 await writeFile(
   manifestPath,
   `${JSON.stringify({ ...previousManifest, sourceDir, syncedAt: new Date().toISOString() }, null, 2)}\n`,

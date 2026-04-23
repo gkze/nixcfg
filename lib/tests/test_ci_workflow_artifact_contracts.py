@@ -318,6 +318,25 @@ def test_validate_workflow_artifact_contracts_rejects_invalid_top_level_shapes(
         raise AssertionError(msg)
 
 
+def test_validate_workflow_artifact_contracts_defaults_workflow_path_from_repo_root(
+    tmp_path: Path,
+) -> None:
+    """Default workflow lookup should stay rooted at the caller-provided repo path."""
+    workflow_path = tmp_path / ".github/workflows/update.yml"
+    workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    workflow_path.write_text(
+        textwrap.dedent("""
+        name: demo
+        on: workflow_dispatch
+        jobs: []
+        """),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TypeError, match="does not contain a jobs mapping"):
+        validate_workflow_artifact_contracts(repo_root=tmp_path)
+
+
 def test_build_needs_graph_rejects_unknown_needs() -> None:
     """Reject jobs that depend on undeclared producers."""
     try:

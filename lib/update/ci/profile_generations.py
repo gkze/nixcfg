@@ -364,7 +364,7 @@ def run(
                 verbosity=verbosity,
             )
         )
-    except NixCommandError, RuntimeError:
+    except (NixCommandError, RuntimeError):
         log.exception("Generation profiling failed")
         return 1
 

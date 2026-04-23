@@ -17,13 +17,16 @@ from lib.schema_codegen.config import (
     SchemaCodegenConfig,
     URLSource,
 )
-from lib.update.paths import REPO_ROOT
+from lib.update.paths import get_repo_root
 
 from . import _prepare, _render
 
-DEFAULT_CONFIG_PATH = REPO_ROOT / "schema_codegen.yaml"
-
 type ProgressReporter = Callable[[str], None]
+
+
+def default_config_path() -> Path:
+    """Return the checked-in schema codegen config path."""
+    return get_repo_root() / "schema_codegen.yaml"
 
 
 @dataclass(frozen=True)
@@ -88,12 +91,12 @@ def _resolve_config_paths(config: SchemaCodegenConfig, *, base_dir: Path) -> Non
 
 def load_schema_codegen_config(
     *,
-    config_path: Path = DEFAULT_CONFIG_PATH,
+    config_path: Path | None = None,
 ) -> LoadedSchemaCodegenConfig:
     """Load and validate the declarative schema codegen config file."""
     resolved_path = (
-        config_path
-        if config_path == DEFAULT_CONFIG_PATH
+        default_config_path()
+        if config_path is None
         else config_path.expanduser().resolve()
     )
     payload = yaml.safe_load(resolved_path.read_text(encoding="utf-8"))
@@ -104,7 +107,7 @@ def load_schema_codegen_config(
 
 def list_schema_codegen_targets(
     *,
-    config_path: Path = DEFAULT_CONFIG_PATH,
+    config_path: Path | None = None,
 ) -> tuple[SchemaTargetSummary, ...]:
     """Return configured targets sorted by name."""
     loaded = load_schema_codegen_config(config_path=config_path)
@@ -165,7 +168,7 @@ _resolve_body_class_conflicts = _render.resolve_body_class_conflicts
 
 def generate_schema_codegen_target(
     *,
-    config_path: Path = DEFAULT_CONFIG_PATH,
+    config_path: Path | None = None,
     progress: ProgressReporter | None = None,
     target_name: str,
 ) -> Path:

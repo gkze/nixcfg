@@ -55,6 +55,7 @@ from lib.update.cli_inventory import (
     _classify_updater_kind,
     _collect_flake_inputs_for_list,
     _collect_source_entries_for_list,
+    _crate2nix_generated_artifact_paths,
     _flake_source_string,
     _generated_artifact_paths,
     _inventory_classification,
@@ -72,11 +73,13 @@ from lib.update.cli_inventory import (
 from lib.update.events import UpdateEvent
 from lib.update.paths import REPO_ROOT
 from lib.update.refs import FlakeInputRef
+from lib.update.ui_state import OperationKind
 from lib.update.updaters.base import (
     ChecksumProvidedUpdater,
     DenoManifestUpdater,
     DownloadHashUpdater,
     FlakeInputHashUpdater,
+    FlakeInputMetadataUpdater,
     FlakeInputUpdater,
     HashEntryUpdater,
     Updater,
@@ -179,7 +182,11 @@ def test_update_summary_and_emit_summary(capsys: pytest.CaptureFixture[str]) -> 
 
 def test_resolved_targets_and_item_meta(monkeypatch: pytest.MonkeyPatch) -> None:
     """Resolve source/input selections and derive UI item metadata."""
-    monkeypatch.setattr("lib.update.cli.UPDATERS", {"src": object})
+
+    class _SrcUpdater:
+        shows_materialize_artifacts_phase = True
+
+    monkeypatch.setattr("lib.update.cli.UPDATERS", {"src": _SrcUpdater})
     monkeypatch.setattr(
         "lib.update.cli.get_flake_inputs_with_refs",
         lambda: [SimpleNamespace(name="inp", owner="o", repo="r", ref="v1")],
@@ -191,12 +198,58 @@ def test_resolved_targets_and_item_meta(monkeypatch: pytest.MonkeyPatch) -> None
     sources = SourcesFile(entries={"src": SourceEntry(hashes={}, input="inp")})
     meta, order = _build_item_meta(resolved, sources)
     assert "src" in meta
+    assert meta["src"].op_order == (
+        OperationKind.CHECK_VERSION,
+        OperationKind.REFRESH_LOCK,
+        OperationKind.MATERIALIZE_ARTIFACTS,
+        OperationKind.COMPUTE_HASH,
+    )
     assert order == sorted(order)
 
     source_updates = {"src": SourceEntry(hashes={"x86_64-linux": "sha256-1"})}
     existing = {"src": SourceEntry(hashes={"aarch64-darwin": "sha256-2"})}
     merged = _merge_source_updates(existing, source_updates, native_only=True)
     assert "src" in merged
+
+
+def test_resolved_targets_expand_flake_input_to_backing_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Selecting a flake input should also select sources backed by that input."""
+
+    class _OpencodeUpdater(FlakeInputUpdater):
+        pass
+
+    class _DesktopUpdater(FlakeInputUpdater):
+        input_name = "opencode"
+
+    class _ElectronUpdater(FlakeInputUpdater):
+        input_name = "opencode"
+
+    monkeypatch.setattr(
+        "lib.update.cli.UPDATERS",
+        {
+            "opencode": _OpencodeUpdater,
+            "opencode-desktop": _DesktopUpdater,
+            "opencode-desktop-electron": _ElectronUpdater,
+            "other": object,
+        },
+    )
+    monkeypatch.setattr("lib.update.cli.get_flake_inputs_with_refs", list)
+
+    resolved = ResolvedTargets.from_options(UpdateOptions(source="opencode"))
+    assert resolved.ref_inputs == []
+    assert resolved.source_names == [
+        "opencode",
+        "opencode-desktop",
+        "opencode-desktop-electron",
+    ]
+
+    resolved_no_refs = ResolvedTargets.from_options(
+        UpdateOptions(source="opencode", no_refs=True)
+    )
+    assert resolved_no_refs.ref_inputs == []
+    assert resolved_no_refs.source_names == resolved.source_names
 
 
 def test_preflight_handlers_schema_list_validate(
@@ -696,6 +749,10 @@ def test_inventory_helpers_and_sorting() -> None:  # noqa: PLR0915
     class _Custom(Updater):
         name = "custom"
 
+    class _CustomArtifact(Updater):
+        name = "custom-artifact"
+        generated_artifact_files = ("generated.nix",)
+
     def _handles(
         *,
         ref_update: bool,
@@ -770,6 +827,36 @@ def test_inventory_helpers_and_sorting() -> None:  # noqa: PLR0915
                 None if name == "missing" else REPO_ROOT / "packages" / name
             ),
             repo_relative_path=repo_relative_path,
+        )
+        == ()
+    )
+    assert (
+        _generated_artifact_paths(
+            "duplicate-name",
+            _Custom,
+            package_dir_for=lambda _name: (_ for _ in ()).throw(
+                RuntimeError("Duplicate package directories")
+            ),
+            repo_relative_path=repo_relative_path,
+        )
+        == ()
+    )
+    assert _generated_artifact_paths(
+        "custom-artifact",
+        _CustomArtifact,
+        package_dir_for=lambda name: (
+            None if name == "missing" else REPO_ROOT / "packages" / name
+        ),
+        repo_relative_path=repo_relative_path,
+    ) == ("packages/custom-artifact/generated.nix",)
+    assert (
+        _generated_artifact_paths(
+            "custom-artifact",
+            _CustomArtifact,
+            package_dir_for=lambda name: (
+                None if name == "missing" else REPO_ROOT / "packages" / name
+            ),
+            repo_relative_path=lambda _path: None,
         )
         == ()
     )
@@ -1209,6 +1296,172 @@ def test_build_update_inventory_wrapper_builds_dependency_bundle(
     )
     assert dependencies.generated_artifact_paths("demo", _DenoUpdater) == (
         "packages/demo/deno-deps.json",
+    )
+
+
+def test_generated_artifact_paths_include_crate2nix_outputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Surface crate2nix outputs alongside updater-declared generated artifacts."""
+
+    class _DenoUpdater(DenoManifestUpdater):
+        name = "demo"
+
+    fake_module = SimpleNamespace(
+        TARGETS={
+            "demo": SimpleNamespace(
+                cargo_nix=Path("packages/demo/Cargo.nix"),
+                crate_hashes=Path("packages/demo/crate-hashes.json"),
+            )
+        }
+    )
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.importlib.import_module",
+        lambda name: fake_module if name == "lib.update.crate2nix" else None,
+    )
+
+    assert _crate2nix_generated_artifact_paths("demo") == (
+        "packages/demo/Cargo.nix",
+        "packages/demo/crate-hashes.json",
+    )
+
+    assert _generated_artifact_paths(
+        "demo",
+        _DenoUpdater,
+        package_dir_for=lambda _name: REPO_ROOT / "packages" / "demo",
+        repo_relative_path=lambda path: (
+            None if path is None else str(path.relative_to(REPO_ROOT))
+        ),
+    ) == (
+        "packages/demo/deno-deps.json",
+        "packages/demo/Cargo.nix",
+        "packages/demo/crate-hashes.json",
+    )
+
+
+def test_generated_artifact_paths_fall_back_when_manifest_or_crate2nix_import_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep crate2nix-only outputs when manifest resolution or import loading fails."""
+
+    class _DenoUpdater(DenoManifestUpdater):
+        name = "demo"
+
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.importlib.import_module",
+        lambda _name: (_ for _ in ()).throw(ImportError),
+    )
+    assert _crate2nix_generated_artifact_paths("demo") == ()
+
+    fake_module = SimpleNamespace(
+        TARGETS={
+            "demo": SimpleNamespace(
+                cargo_nix=Path("packages/demo/Cargo.nix"),
+                crate_hashes=Path("packages/demo/crate-hashes.json"),
+            )
+        }
+    )
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.importlib.import_module",
+        lambda name: fake_module if name == "lib.update.crate2nix" else None,
+    )
+
+    assert _generated_artifact_paths(
+        "demo",
+        _DenoUpdater,
+        package_dir_for=lambda _name: REPO_ROOT / "packages" / "demo",
+        repo_relative_path=lambda _path: None,
+    ) == (
+        "packages/demo/Cargo.nix",
+        "packages/demo/crate-hashes.json",
+    )
+
+
+def test_build_item_meta_appends_materialize_artifacts_when_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Schedule artifact materialization in both mixed and source-only flows."""
+
+    class _ArtifactOnlyUpdater:
+        emits_crate2nix_artifacts = True
+        shows_materialize_artifacts_phase = True
+
+    class _BothUpdater(FlakeInputMetadataUpdater):
+        name = "both-src"
+        emits_crate2nix_artifacts = True
+        shows_materialize_artifacts_phase = True
+        input_name = "both-input"
+
+    class _MetadataUpdater(FlakeInputMetadataUpdater):
+        name = "meta-src"
+        emits_crate2nix_artifacts = True
+        shows_materialize_artifacts_phase = True
+        input_name = "flake-src"
+
+    monkeypatch.setattr(
+        "lib.update.cli.UPDATERS",
+        {
+            "artifact-src": _ArtifactOnlyUpdater,
+            "both-src": _BothUpdater,
+            "meta-src": _MetadataUpdater,
+        },
+    )
+
+    resolved = ResolvedTargets(
+        all_source_names={"artifact-src", "both-src", "meta-src"},
+        all_ref_inputs=[
+            FlakeInputRef(
+                name="both-src",
+                owner="owner",
+                repo="repo",
+                ref="v1.0.0",
+                input_type="github",
+            )
+        ],
+        all_ref_names={"both-src"},
+        all_known_names={"artifact-src", "both-src", "meta-src"},
+        do_refs=True,
+        do_sources=True,
+        do_input_refresh=True,
+        dry_run=False,
+        native_only=False,
+        ref_inputs=[
+            FlakeInputRef(
+                name="both-src",
+                owner="owner",
+                repo="repo",
+                ref="v1.0.0",
+                input_type="github",
+            )
+        ],
+        source_names=["artifact-src", "both-src", "meta-src"],
+    )
+    sources = SourcesFile(
+        entries={
+            "both-src": SourceEntry(hashes={}, input="both-input"),
+            "meta-src": SourceEntry(hashes={}, input="flake-src"),
+        }
+    )
+
+    meta, _order = _build_item_meta(resolved, sources)
+
+    assert meta["artifact-src"].op_order == (
+        OperationKind.CHECK_VERSION,
+        OperationKind.MATERIALIZE_ARTIFACTS,
+        OperationKind.COMPUTE_HASH,
+    )
+    assert meta["both-src"].op_order == (
+        OperationKind.CHECK_VERSION,
+        OperationKind.UPDATE_REF,
+        OperationKind.REFRESH_LOCK,
+        OperationKind.MATERIALIZE_ARTIFACTS,
+        OperationKind.COMPUTE_HASH,
+    )
+    assert meta["meta-src"].op_order == (
+        OperationKind.CHECK_VERSION,
+        OperationKind.REFRESH_LOCK,
+        OperationKind.MATERIALIZE_ARTIFACTS,
+        OperationKind.COMPUTE_HASH,
     )
 
 

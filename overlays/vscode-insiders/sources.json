@@ -3,11 +3,13 @@
   "hashes": {
     "aarch64-darwin": "sha256-K1j742EQb7SJtDHStWxBT142H3dhNwCOYnBveu4hY1I=",
     "aarch64-linux": "sha256-PFM+LLav8P6AHmCZDGbVrY51ImomT9Nyif7hSbhqZ/s=",
+    "x86_64-darwin": "sha256-z/sBftmh2O5Y9BitisGzVFpiMldT8g/+nACKdJucDdc=",
     "x86_64-linux": "sha256-8tFoAeuSv/emhgN+l3bNhiu2nmo8epoG3pDXrB8FTms="
   },
   "urls": {
     "aarch64-darwin": "https://update.code.visualstudio.com/1.115.0-insider/darwin-arm64/insider",
     "aarch64-linux": "https://update.code.visualstudio.com/1.115.0-insider/linux-arm64/insider",
+    "x86_64-darwin": "https://update.code.visualstudio.com/1.115.0-insider/darwin/insider",
     "x86_64-linux": "https://update.code.visualstudio.com/1.115.0-insider/linux-x64/insider"
   },
   "version": "1.115.0-insider"

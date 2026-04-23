@@ -4,22 +4,52 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+def _bootstrap_repo_import_path() -> None:
+    """Add the repository root to ``sys.path`` for direct script execution."""
+    if env_root := os.environ.get("REPO_ROOT"):
+        sys.path.insert(0, str(Path(env_root).expanduser().resolve()))
+        return
+
+    candidates: list[Path] = []
+    cwd = Path.cwd().resolve()
+    candidates.extend((cwd, *cwd.parents))
+
+    script_path = Path(__file__).resolve()
+    for candidate in (script_path.parent, *script_path.parents):
+        if candidate not in candidates:
+            candidates.append(candidate)
+
+    for candidate in candidates:
+        if (candidate / ".root").is_file():
+            sys.path.insert(0, str(candidate))
+            return
+
+    msg = f"Could not find repo root for {script_path}"
+    raise RuntimeError(msg)
 
 
-sys.path.insert(0, str(_repo_root()))
+_bootstrap_repo_import_path()
 
 from lib.cargo_nix_normalizer import normalize as normalize_cargo_nix  # noqa: E402
+from lib.update.paths import get_repo_root  # noqa: E402
 
 _STORE_SOURCE_PATTERN = re.compile(
     r'(?P<needle>"?(?:\.\./)+nix/store/[^/]+/(?P<suffix>[^";]+)"?)'
 )
+
+
+def _resolve_path(path_text: str) -> Path:
+    """Resolve one CLI path against the repository root."""
+    path = Path(path_text).expanduser()
+    if path.is_absolute():
+        return path
+    return get_repo_root() / path
 
 
 def normalize(text: str) -> tuple[str, int, bool]:
@@ -36,11 +66,13 @@ def main() -> int:
     """Normalize a Cargo.nix file in place and report what changed."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "path", nargs="?", default="packages/opencode-desktop/Cargo.nix"
+        "path",
+        nargs="?",
+        default=str(get_repo_root() / "packages/opencode-desktop/Cargo.nix"),
     )
     args = parser.parse_args()
 
-    path = Path(args.path)
+    path = _resolve_path(args.path)
     original = path.read_text()
     normalized, path_rewrites, added_root_src = normalize(original)
 

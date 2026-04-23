@@ -147,11 +147,11 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.114.0";
+      url = "github:openai/codex/rust-v0.122.0";
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.6.0";
+      url = "github:gkze/curator/v0.7.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
@@ -201,6 +201,10 @@
     };
     mountpoint-s3 = {
       url = "github:awslabs/mountpoint-s3";
+      flake = false;
+    };
+    t3code = {
+      url = "github:pingdotgg/t3code/main";
       flake = false;
     };
     pantsbuild-tap = {
@@ -289,10 +293,19 @@
         let
           exports = import ./lib/exports.nix { src = ./.; };
           lintFiles = import ./lib/lint-files.nix;
+          inherit (lintFiles.python)
+            compilePaths
+            pyupgradePaths
+            pythonScriptPaths
+            ruffMutationExcludes
+            ;
+          pythonScriptFindPredicates = lib.concatMapStringsSep " " (
+            path: "-o -path './${path}'"
+          ) pythonScriptPaths;
           mkDevShell = import ./lib/dev-shell.nix {
             src = ./.;
             gitHooks = git-hooks;
-            inherit lib;
+            inherit lib lintFiles;
           };
           mkNixcfgPackage =
             pkgs:
@@ -373,6 +386,38 @@
             pkgs:
             with treefmt-nix.lib;
             let
+              textHygieneScript = pkgs.writeText "format-text.py" ''
+                import sys
+                from pathlib import Path
+
+
+                def normalize_text(text: str, *, trim_trailing_whitespace: bool) -> str:
+                    normalized_lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+                    if trim_trailing_whitespace:
+                        normalized_lines = [line.rstrip(" \t") for line in normalized_lines]
+                    while normalized_lines and normalized_lines[-1] == "":
+                        normalized_lines.pop()
+                    if not normalized_lines:
+                        return ""
+                    return "\n".join(normalized_lines) + "\n"
+
+
+                def format_path(path: Path) -> None:
+                    with path.open(encoding="utf-8", newline=None) as file:
+                        original = file.read()
+                    normalized = normalize_text(
+                        original,
+                        trim_trailing_whitespace=path.suffix != ".patch",
+                    )
+                    if normalized == original:
+                        return
+                    with path.open("w", encoding="utf-8", newline="") as file:
+                        file.write(normalized)
+
+
+                for raw_path in sys.argv[1:]:
+                    format_path(Path(raw_path))
+              '';
               inherit
                 (evalModule pkgs {
                   projectRootFile = "flake.nix";
@@ -383,10 +428,12 @@
                     ruff-check = {
                       enable = true;
                       includes = lintFiles.ruff.globs;
+                      excludes = ruffMutationExcludes;
                     };
                     ruff-format = {
                       enable = true;
                       includes = lintFiles.ruff.globs;
+                      excludes = ruffMutationExcludes;
                     };
                     shellcheck = {
                       enable = true;
@@ -398,7 +445,10 @@
                       includes = lintFiles.shell.globs;
                       excludes = lintFiles.shell.excludeGlobs;
                     };
-                    yamlfmt.enable = true;
+                    yamlfmt = {
+                      enable = true;
+                      includes = lintFiles.yaml.globs;
+                    };
                     taplo = {
                       enable = true;
                       includes = lintFiles.toml.globs;
@@ -410,6 +460,25 @@
                   settings = {
                     excludes = lintFiles.nix.excludeGlobs;
                     formatter = {
+                      # pyupgrade currently tops out at --py314-plus, but these
+                      # repo helpers still need to parse under nixpkgs'
+                      # generic python3 (3.13 today), so keep the formatter floor
+                      # aligned to the real minimum runtime. Normalize invalid
+                      # multi-except rewrites first so pyupgrade and compile
+                      # checks converge on valid Python 3 syntax.
+                      python-pyupgrade = {
+                        command = lib.getExe pkgs.python3;
+                        options = [
+                          "-m"
+                          "lib.fix_python_multi_except"
+                          "--pyupgrade-exe"
+                          (lib.getExe pkgs.pyupgrade)
+                          "--pyupgrade-arg=--py313-plus"
+                          "--pyupgrade-arg=--exit-zero-even-if-changed"
+                        ];
+                        includes = pyupgradePaths;
+                        excludes = [ "**/_generated.py" ];
+                      };
                       ruff-check.options = [
                         "--config"
                         "pyproject.toml"
@@ -448,7 +517,7 @@
                       gofmt = {
                         command = lib.getExe' pkgs.go "gofmt";
                         options = [ "-w" ];
-                        includes = [ "*.go" ];
+                        includes = lintFiles.go.globs;
                       };
                       "markdown-table-formatter" = {
                         command = lib.getExe' (pkgs.python3.withPackages (
@@ -457,7 +526,12 @@
                             mdformat-tables
                           ]
                         )) "mdformat";
-                        includes = [ "*.md" ];
+                        includes = lintFiles.markdown.globs;
+                      };
+                      "text-hygiene" = {
+                        command = lib.getExe pkgs.python3;
+                        options = [ (toString textHygieneScript) ];
+                        includes = lintFiles.text.globs;
                       };
                     };
                   };
@@ -533,6 +607,36 @@
               '';
           };
 
+          checks."format-python-pyupgrade" = mkRepoCheck {
+            name = "check-format-python-pyupgrade";
+            repoWritable = true;
+            command =
+              { lib, pkgs, ... }:
+              ''
+                ${lib.getExe pkgs.git} init -q .
+                ${lib.getExe pkgs.git} add -A
+                find . \
+                  \( -path './.direnv' -o -path './.git' -o -path './.pytest_cache' -o -path './.ruff_cache' -o -path './.venv' -o -path './node_modules' -o -path './result' -o -name '_generated.py' \) -prune -o \
+                  -type f \
+                  \( -name '*.py' -o -name '*.pyi' ${pythonScriptFindPredicates} \) \
+                  -print0 \
+                  | ${pkgs.findutils}/bin/xargs -0 -r ${lib.getExe pkgs.python3} -m lib.fix_python_multi_except --pyupgrade-exe ${lib.getExe pkgs.pyupgrade} --pyupgrade-arg=--py313-plus
+                ${lib.getExe pkgs.git} diff --exit-code -- .
+              '';
+          };
+
+          checks."lint-python-compile" = mkRepoCheck {
+            name = "check-lint-python-compile";
+            command =
+              { lib, pkgs, ... }:
+              let
+                compileTargets = lib.escapeShellArgs compilePaths;
+              in
+              ''
+                ${lib.getExe pkgs.python3} ${./lib/check_python_compile.py} ${compileTargets}
+              '';
+          };
+
           checks."format-python-ruff" = mkRepoCheck {
             name = "check-format-python-ruff";
             setup = ''
@@ -596,6 +700,20 @@
                 ${lib.getExe pkgs.actionlint}
               '';
           };
+
+          checks."test-nix-default-api" =
+            { pkgs, ... }:
+            assert import ./tests/nix/default-api/default-api.nix { src = ./.; };
+            pkgs.runCommand "check-test-nix-default-api" { } ''
+              touch $out
+            '';
+
+          checks."test-nix-opencode-desktop-electron" =
+            { pkgs, ... }:
+            assert import ./packages/opencode-desktop-electron/tests.nix { inherit self; };
+            pkgs.runCommand "check-test-nix-opencode-desktop-electron" { } ''
+              touch $out
+            '';
 
           checks."test-python-pytest" = mkRepoCheck {
             name = "check-test-python-pytest";
@@ -704,10 +822,14 @@
             }
             // (cfg.extraSpecialArgs or { });
             modules = [
-              ({ lib, ... }: {
-                home.username = lib.mkDefault (builtins.head (builtins.match "([^@]*)(@.*)?" name));
-              })
-            ] ++ (cfg.modules or [ ]);
+              (
+                { lib, ... }:
+                {
+                  home.username = lib.mkDefault (builtins.head (builtins.match "([^@]*)(@.*)?" name));
+                }
+              )
+            ]
+            ++ (cfg.modules or [ ]);
             pkgs = baseOutputs.legacyPackages.${cfg.system};
           }
         );

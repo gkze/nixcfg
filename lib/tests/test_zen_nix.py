@@ -9,10 +9,16 @@ from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.list import NixList
+from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
-from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
+from lib.tests._nix_ast import (
+    assert_nix_ast_equal,
+    expect_binding,
+    expect_scope_binding,
+    parse_nix_expr,
+)
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
 
@@ -64,43 +70,58 @@ def _zen_options_attrset() -> AttributeSet:
     return expect_instance(expect_binding(nixcfg.values, "zen").value, AttributeSet)
 
 
-def test_zen_module_installs_both_wrappers() -> None:
-    """Zen should install both packaged wrappers so shell and activation agree."""
+def test_zen_module_installs_only_zentool() -> None:
+    """Zen should install only the packaged zentool entrypoint."""
     home = expect_instance(
         expect_binding(_zen_config_attrset().values, "home").value,
         AttributeSet,
     )
     assert_nix_ast_equal(
         expect_binding(home.values, "packages").value,
-        NixList(
-            value=[
-                Identifier(name="zenProfileSync"),
-                Identifier(name="zenFolders"),
-            ]
+        NixList(value=[Identifier(name="zenTool")]),
+    )
+
+
+def test_zen_module_defaults_tool_command_to_packaged_zentool() -> None:
+    """The default tool command should stay aligned with the packaged wrapper."""
+    options = _zen_options_attrset()
+
+    option = expect_instance(
+        expect_binding(options.values, "toolCommand").value,
+        FunctionCall,
+    )
+    argument = expect_instance(option.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(argument.values, "default").value,
+        FunctionCall(
+            name=identifier_attr_path("lib", "getExe"),
+            argument=Identifier(name="zenTool"),
         ),
     )
 
 
-def test_zen_module_defaults_command_options_to_packaged_wrappers() -> None:
-    """Default command options should stay aligned with the packaged wrappers."""
-    options = _zen_options_attrset()
+def test_zen_module_python_runtime_includes_schema_sync_dependencies() -> None:
+    """The packaged zentool runtime should include its import-time deps."""
+    zen_python = expect_scope_binding(_zen_module_output(), "zenPython")
+    with_packages = expect_instance(zen_python.value, FunctionCall)
+    argument = expect_instance(with_packages.argument, Parenthesis)
+    package_lambda = expect_instance(argument.value, FunctionDefinition)
 
-    for option_name, wrapper_name in (
-        ("profileSyncCommand", "zenProfileSync"),
-        ("foldersCommand", "zenFolders"),
-    ):
-        option = expect_instance(
-            expect_binding(options.values, option_name).value,
-            FunctionCall,
-        )
-        argument = expect_instance(option.argument, AttributeSet)
-        assert_nix_ast_equal(
-            expect_binding(argument.values, "default").value,
-            FunctionCall(
-                name=identifier_attr_path("lib", "getExe"),
-                argument=Identifier(name=wrapper_name),
-            ),
-        )
+    assert_nix_ast_equal(
+        with_packages.name,
+        identifier_attr_path("pkgs", "python3", "withPackages"),
+    )
+    assert_nix_ast_equal(
+        package_lambda.output,
+        """
+with ps; [
+  deepdiff
+  lz4
+  pydantic
+  pyyaml
+]
+""",
+    )
 
 
 def test_george_local_bin_exports_only_git_ignore() -> None:
@@ -120,3 +141,84 @@ def test_george_local_bin_exports_only_git_ignore() -> None:
     assert local_bin_entries == {
         '".local/bin/git-ignore"',
     }
+
+
+def test_zen_module_activation_assembles_scope_specific_zentool_args() -> None:
+    """Activation should append only requested scope arguments and skip empty applies."""
+    home = expect_instance(
+        expect_binding(_zen_config_attrset().values, "home").value,
+        AttributeSet,
+    )
+    activation_call = expect_instance(
+        expect_binding(home.values, "activation").value,
+        FunctionCall,
+    )
+    assert_nix_ast_equal(
+        activation_call.name,
+        FunctionCall(
+            name=Identifier(name="mkIf"),
+            argument=identifier_attr_path("cfg", "syncOnActivation"),
+        ),
+    )
+    activation = expect_instance(activation_call.argument, AttributeSet)
+
+    expected = "\n".join([
+        "lib.hm.dag.entryAfter [ \"linkGeneration\" ] ''",
+        "        sync_cmd=(${lib.escapeShellArg cfg.toolCommand})",
+        "        sync_args=(apply --yes)",
+        "        profile_args=()",
+        "        state_args=()",
+        "        asset_args=()",
+        (
+            "        state_config="
+            '${lib.escapeShellArg (managedConfigDir + "/folders.yaml")}'
+        ),
+        "",
+        "        ${lib.optionalString (cfg.profile != null) ''",
+        "          profile_args+=(--profile ${lib.escapeShellArg cfg.profile})",
+        "        ''}",
+        "",
+        "        ${lib.optionalString cfg.applyStateOnActivation ''",
+        '          if [ -e "$state_config" ]; then',
+        "            state_args+=(--state)",
+        '            state_args+=(--config "$state_config")',
+        "          fi",
+        "        ''}",
+        "",
+        "        ${lib.optionalString cfg.applyAssetsOnActivation ''",
+        "          asset_args+=(--assets)",
+        "          asset_args+=(--asset-dir ${lib.escapeShellArg managedConfigDir})",
+        "        ''}",
+        "",
+        "        if [ \"''${#state_args[@]}\" -gt 0 ]; then",
+        "          runtime_check_cmd=(\"''${sync_cmd[@]}\" profile)",
+        "          if [ \"''${#profile_args[@]}\" -gt 0 ]; then",
+        "            runtime_check_cmd+=(\"''${profile_args[@]}\")",
+        "          fi",
+        "          runtime_check_cmd+=(is-running)",
+        "",
+        "          if \"''${runtime_check_cmd[@]}\" >/dev/null 2>&1; then",
+        '            echo "warning: skipping Zen state sync during activation because Zen is running" >&2',
+        "            state_args=()",
+        "          fi",
+        "        fi",
+        "",
+        "        if [ \"''${#state_args[@]}\" -gt 0 ]; then",
+        "          sync_args+=(\"''${state_args[@]}\")",
+        "        fi",
+        "",
+        "        if [ \"''${#asset_args[@]}\" -gt 0 ]; then",
+        "          sync_args+=(\"''${asset_args[@]}\")",
+        "        fi",
+        "",
+        "        if [ \"''${#profile_args[@]}\" -gt 0 ]; then",
+        "          sync_args+=(\"''${profile_args[@]}\")",
+        "        fi",
+        "",
+        "        if [ \"''${#state_args[@]}\" -gt 0 ] || [ \"''${#asset_args[@]}\" -gt 0 ]; then",
+        "          run --silence \"''${sync_cmd[@]}\" \"''${sync_args[@]}\"",
+        "        fi",
+        "      ''",
+    ])
+
+    assert str(expect_binding(activation.values, "nixcfgZenSync").value) == expected

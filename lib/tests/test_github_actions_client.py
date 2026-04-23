@@ -1,9 +1,9 @@
-"""Tests for GitHub Actions repository discovery and GitHubKit wrappers."""
+"""Focused tests for GitHub Actions API helpers."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from subprocess import CompletedProcess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -11,184 +11,54 @@ import pytest
 from lib.github_actions import client as gha_client
 
 
-class _FakeResponse[T]:
-    def __init__(self, parsed_data: T, *, json_value: object | None = None) -> None:
-        self.parsed_data = parsed_data
-        self._json_value = json_value
-
-    def json(self) -> object:
-        return self._json_value if self._json_value is not None else self.parsed_data
-
-
-class _FakeActions:
-    def __init__(
-        self,
-        *,
-        workflows: gha_client.ReposOwnerRepoActionsWorkflowsGetResponse200,
-        runs: gha_client.ReposOwnerRepoActionsWorkflowsWorkflowIdRunsGetResponse200,
-        run: gha_client.WorkflowRun,
-        jobs_payload: dict[str, object],
-        workflow_pages: list[gha_client.ReposOwnerRepoActionsWorkflowsGetResponse200]
-        | None = None,
-        run_pages: list[
-            gha_client.ReposOwnerRepoActionsWorkflowsWorkflowIdRunsGetResponse200
-        ]
-        | None = None,
-        jobs_payload_pages: list[dict[str, object]] | None = None,
-    ) -> None:
-        self._workflow_pages = workflow_pages or [workflows]
-        self._run_pages = run_pages or [runs]
-        self._run = run
-        self._jobs_payload_pages = jobs_payload_pages or [jobs_payload]
-        self.workflow_page_calls: list[tuple[int, int]] = []
-        self.run_page_calls: list[tuple[int, int]] = []
-        self.job_page_calls: list[tuple[int, int]] = []
-
-    def list_repo_workflows(
-        self,
-        owner: str,
-        repo: str,
-        *,
-        per_page: int,
-        page: int | None = None,
-    ) -> _FakeResponse[gha_client.ReposOwnerRepoActionsWorkflowsGetResponse200]:
-        assert owner == "acme"
-        assert repo == "demo"
-        resolved_page = page or 1
-        self.workflow_page_calls.append((resolved_page, per_page))
-        index = min(resolved_page - 1, len(self._workflow_pages) - 1)
-        return _FakeResponse(self._workflow_pages[index])
-
-    def list_workflow_runs(
-        self,
-        owner: str,
-        repo: str,
-        workflow_id: int,
-        *,
-        per_page: int,
-        page: int | None = None,
-    ) -> _FakeResponse[
-        gha_client.ReposOwnerRepoActionsWorkflowsWorkflowIdRunsGetResponse200
-    ]:
-        assert owner == "acme"
-        assert repo == "demo"
-        assert workflow_id == 1
-        resolved_page = page or 1
-        self.run_page_calls.append((resolved_page, per_page))
-        index = min(resolved_page - 1, len(self._run_pages) - 1)
-        return _FakeResponse(self._run_pages[index])
-
-    def get_workflow_run(
-        self,
-        owner: str,
-        repo: str,
-        run_id: int,
-    ) -> _FakeResponse[gha_client.WorkflowRun]:
-        assert owner == "acme"
-        assert repo == "demo"
-        assert run_id == 9
-        return _FakeResponse(self._run)
-
-    def list_jobs_for_workflow_run(
-        self,
-        owner: str,
-        repo: str,
-        run_id: int,
-        *,
-        per_page: int,
-        page: int | None = None,
-    ) -> _FakeResponse[gha_client.ReposOwnerRepoActionsRunsRunIdJobsGetResponse200]:
-        assert owner == "acme"
-        assert repo == "demo"
-        assert run_id == 9
-        resolved_page = page or 1
-        self.job_page_calls.append((resolved_page, per_page))
-        parsed = (
-            gha_client.ReposOwnerRepoActionsRunsRunIdJobsGetResponse200.model_construct(
-                total_count=1,
-                jobs=[],
-            )
-        )
-        index = min(resolved_page - 1, len(self._jobs_payload_pages) - 1)
-        return _FakeResponse(parsed, json_value=self._jobs_payload_pages[index])
-
-
-class _FakeGitHub:
-    def __init__(self, actions: _FakeActions) -> None:
-        self._actions = actions
-        self.requested_versions: list[str] = []
-
-    def rest(self, version: str):
-        self.requested_versions.append(version)
-        return SimpleNamespace(actions=self._actions)
-
-
-def _workflow(
-    workflow_id: int,
-    name: str,
-    path: str,
-    state: str,
-) -> gha_client.Workflow:
+def _workflow(name: str, workflow_id: int = 1) -> gha_client.Workflow:
     timestamp = datetime(2026, 4, 2, 16, 0, tzinfo=UTC)
     return gha_client.Workflow.model_construct(
         id=workflow_id,
         node_id=f"WF_{workflow_id}",
         name=name,
-        path=path,
-        state=state,
+        path=f".github/workflows/{workflow_id}.yml",
+        state="active",
         created_at=timestamp,
         updated_at=timestamp,
         url=f"https://api.github.com/repos/acme/demo/actions/workflows/{workflow_id}",
         html_url=f"https://github.com/acme/demo/actions/workflows/{workflow_id}",
-        badge_url=(
-            f"https://github.com/acme/demo/actions/workflows/{workflow_id}/badge.svg"
-        ),
+        badge_url=f"https://github.com/acme/demo/actions/workflows/{workflow_id}/badge.svg",
         deleted_at=None,
     )
 
 
-def _run(
-    run_id: int,
-    *,
-    run_number: int,
-    status: str,
-    conclusion: str | None = None,
-) -> gha_client.WorkflowRun:
-    created_at = datetime(2026, 4, 2, 16, 0, tzinfo=UTC)
-    updated_at = datetime(2026, 4, 2, 16, 1, tzinfo=UTC)
+def _run(run_id: int, status: str = "queued") -> gha_client.WorkflowRun:
+    timestamp = datetime(2026, 4, 2, 16, 0, tzinfo=UTC)
     return gha_client.WorkflowRun.model_construct(
         id=run_id,
-        name="update.yml",
+        name="workflow.yml",
         node_id=f"WR_{run_id}",
-        check_suite_id=100,
-        check_suite_node_id="CS_100",
+        check_suite_id=run_id,
+        check_suite_node_id=f"CS_{run_id}",
         head_branch="main",
         head_sha="deadbeef",
         path=".github/workflows/update.yml@refs/heads/main",
-        run_number=run_number,
+        run_number=run_id,
         run_attempt=1,
         referenced_workflows=[],
         event="workflow_dispatch",
         status=status,
-        conclusion=conclusion,
+        conclusion=None if status != "completed" else "success",
         workflow_id=1,
         url=f"https://api.github.com/repos/acme/demo/actions/runs/{run_id}",
         html_url=f"https://github.com/acme/demo/actions/runs/{run_id}",
         pull_requests=[],
-        created_at=created_at,
-        updated_at=updated_at,
+        created_at=timestamp,
+        updated_at=timestamp,
         actor=None,
         triggering_actor=None,
-        run_started_at=created_at,
+        run_started_at=timestamp,
         jobs_url=f"https://api.github.com/repos/acme/demo/actions/runs/{run_id}/jobs",
         logs_url=f"https://api.github.com/repos/acme/demo/actions/runs/{run_id}/logs",
-        check_suite_url="https://api.github.com/check-suites/100",
-        artifacts_url=(
-            f"https://api.github.com/repos/acme/demo/actions/runs/{run_id}/artifacts"
-        ),
-        cancel_url=(
-            f"https://api.github.com/repos/acme/demo/actions/runs/{run_id}/cancel"
-        ),
+        check_suite_url=f"https://api.github.com/check-suites/{run_id}",
+        artifacts_url=f"https://api.github.com/repos/acme/demo/actions/runs/{run_id}/artifacts",
+        cancel_url=f"https://api.github.com/repos/acme/demo/actions/runs/{run_id}/cancel",
         rerun_url=f"https://api.github.com/repos/acme/demo/actions/runs/{run_id}/rerun",
         previous_attempt_url=None,
         workflow_url="https://api.github.com/repos/acme/demo/actions/workflows/1",
@@ -196,173 +66,195 @@ def _run(
         repository={},
         head_repository={},
         head_repository_id=1,
-        display_title="Periodic Flake Update",
+        display_title="Workflow",
     )
 
 
-def _job_summary(
-    job_id: int,
-    name: str,
-    status: str,
-    conclusion: str | None = None,
-) -> gha_client.JobSummary:
-    started_at = datetime(2026, 4, 2, 16, 0, tzinfo=UTC)
-    completed_at = None
-    if status == "completed":
-        completed_at = datetime(2026, 4, 2, 16, 5, tzinfo=UTC)
-    return gha_client.JobSummary(
+def _job_model(
+    *,
+    job_id: int = 1,
+    name: str = "build",
+    html_url: str | None = "https://github.com/acme/demo/actions/runs/1/job/1",
+) -> gha_client.Job:
+    timestamp = datetime(2026, 4, 2, 16, 0, tzinfo=UTC)
+    return gha_client.Job.model_construct(
         id=job_id,
+        run_id=1,
+        run_url="https://api.github.com/repos/acme/demo/actions/runs/1",
+        run_attempt=1,
+        node_id=f"JOB_{job_id}",
+        head_branch="main",
+        head_sha="deadbeef",
+        url=f"https://api.github.com/repos/acme/demo/actions/jobs/{job_id}",
+        html_url=html_url,
+        status="in_progress",
+        conclusion=None,
+        created_at=timestamp,
+        started_at=timestamp,
+        completed_at=None,
         name=name,
-        status=status,
-        conclusion=conclusion,
-        html_url=f"https://github.com/acme/demo/actions/runs/9/job/{job_id}",
-        started_at=started_at,
-        completed_at=completed_at,
+        steps=[],
+        check_run_url=f"https://api.github.com/repos/acme/demo/check-runs/{job_id}",
+        labels=[],
+        runner_id=None,
+        runner_name=None,
+        runner_group_id=None,
+        runner_group_name=None,
+        workflow_name="Workflow",
     )
 
 
-def _job_payload(
-    job_id: int,
-    name: str,
-    status: str,
-    conclusion: str | None = None,
-) -> dict[str, object]:
-    return {
-        "id": job_id,
-        "run_id": 9,
-        "run_url": "https://api.github.com/repos/acme/demo/actions/runs/9",
-        "run_attempt": 1,
-        "node_id": f"JOB_{job_id}",
-        "head_sha": "deadbeef",
-        "url": f"https://api.github.com/repos/acme/demo/actions/jobs/{job_id}",
-        "html_url": f"https://github.com/acme/demo/actions/runs/9/job/{job_id}",
-        "status": status,
-        "conclusion": conclusion,
-        "created_at": "2026-04-02T16:00:00Z",
-        "started_at": "2026-04-02T16:00:00Z",
-        "completed_at": (None if status != "completed" else "2026-04-02T16:05:00Z"),
-        "name": name,
-        "check_run_url": f"https://api.github.com/repos/acme/demo/check-runs/{job_id}",
-        "labels": ["macos-15-arm64"],
-        "runner_id": 1,
-        "runner_name": "GitHub Actions 1",
-        "runner_group_id": 1,
-        "runner_group_name": "GitHub Actions",
-        "workflow_name": "Periodic Flake Update",
-        "head_branch": "main",
-        "steps": [
-            {
-                "number": 1,
-                "name": "Set up job",
-                "status": "completed",
-                "conclusion": "success",
-            },
-            {
-                "number": 2,
-                "name": "Pre-fetch flake inputs",
-                "status": "pending",
-                "conclusion": None,
-            },
-        ],
-    }
+class _FakeActions:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def list_repo_workflows(self, *args: object, **kwargs: object) -> SimpleNamespace:
+        self.calls.append(("workflows", args, kwargs))
+        page = int(kwargs["page"])
+        workflows = () if page > 1 else (_workflow("One", 1), _workflow("Two", 2))
+        return SimpleNamespace(parsed_data=SimpleNamespace(workflows=workflows))
+
+    def list_workflow_runs(self, *args: object, **kwargs: object) -> SimpleNamespace:
+        self.calls.append(("runs", args, kwargs))
+        page = int(kwargs["page"])
+        runs = () if page > 1 else (_run(1), _run(2))
+        return SimpleNamespace(parsed_data=SimpleNamespace(workflow_runs=runs))
+
+    def get_workflow_run(self, *args: object) -> SimpleNamespace:
+        self.calls.append(("run", args, {}))
+        return SimpleNamespace(parsed_data=_run(9, status="completed"))
+
+    def list_jobs_for_workflow_run(
+        self, *args: object, **kwargs: object
+    ) -> SimpleNamespace:
+        self.calls.append(("jobs", args, kwargs))
+        return SimpleNamespace(json=lambda: {"jobs": [{"ignored": True}]})
 
 
-def _job_list_payload(jobs: list[dict[str, object]] | None = None) -> dict[str, object]:
-    jobs_payload = jobs or [_job_payload(42, "darwin-lock-smoke", "in_progress")]
-    return {
-        "total_count": len(jobs_payload),
-        "jobs": jobs_payload,
-    }
+def test_repository_slug_parse_and_full_name() -> None:
+    slug = gha_client.RepositorySlug.parse(" acme/demo ")
+    assert slug.full_name == "acme/demo"
+
+    with pytest.raises(ValueError, match="owner/name"):
+        gha_client.RepositorySlug.parse("acme")
 
 
-def test_parse_git_remote_url_supports_common_forms() -> None:
-    """Handle SSH, ssh://, and HTTPS GitHub remotes."""
-    ssh_remote = gha_client.parse_git_remote_url("git@github.com:acme/demo.git")
-    assert ssh_remote.host == "github.com"
-    assert ssh_remote.slug.full_name == "acme/demo"
-
-    ssh_scheme_remote = gha_client.parse_git_remote_url(
-        "ssh://git@github.example.com/acme/demo.git"
-    )
-    assert ssh_scheme_remote.host == "github.example.com"
-    assert ssh_scheme_remote.slug.full_name == "acme/demo"
-
-    https_remote = gha_client.parse_git_remote_url("https://github.com/acme/demo")
-    assert https_remote.host == "github.com"
-    assert https_remote.slug.full_name == "acme/demo"
-
-    with pytest.raises(ValueError, match="Unsupported git remote URL"):
-        gha_client.parse_git_remote_url("file:///tmp/demo")
-
-
-def test_repository_slug_parse_rejects_extra_segments_and_empty_parts() -> None:
-    """Explicit --repo values should require exactly one owner and one name."""
-    assert gha_client.RepositorySlug.parse("acme/demo").full_name == "acme/demo"
-
-    for invalid in ("acme/demo/extra", "acme//demo", "acme/", "/demo"):
-        with pytest.raises(ValueError, match="owner/name"):
-            gha_client.RepositorySlug.parse(invalid)
-
-
-def test_parse_git_remote_origin_uses_git_config_and_errors(
+def test_github_actions_client_wraps_actions_endpoints(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Read origin from git config and fail cleanly when it is missing."""
-
-    def _success(*_args: object, **_kwargs: object) -> CompletedProcess[str]:
-        return CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="git@github.com:acme/demo.git\n",
-        )
-
-    monkeypatch.setattr(gha_client.shutil, "which", lambda _name: "/usr/bin/git")
-    monkeypatch.setattr(gha_client.subprocess, "run", _success)
-    parsed = gha_client.parse_git_remote_origin()
-    assert parsed.host == "github.com"
-    assert parsed.slug.full_name == "acme/demo"
-
-    def _failure(*_args: object, **_kwargs: object) -> CompletedProcess[str]:
-        return CompletedProcess(args=[], returncode=1, stdout="")
-
-    monkeypatch.setattr(gha_client.subprocess, "run", _failure)
-    with pytest.raises(RuntimeError, match="remote.origin.url"):
-        gha_client.parse_git_remote_origin()
-
-
-def test_resolve_repository_context_prefers_explicit_repo_and_validates_host(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Use the explicit repo when provided and validate conflicting hosts."""
-    explicit = gha_client.resolve_repository_context(
-        repo="acme/demo",
-        server_url="https://github.example.com",
+    auth = "token"
+    actions = _FakeActions()
+    github = SimpleNamespace(rest=lambda _version: SimpleNamespace(actions=actions))
+    context = gha_client.RepositoryContext(
+        slug=gha_client.RepositorySlug(owner="acme", name="demo"),
+        server_url="https://github.com",
     )
-    assert explicit.slug.full_name == "acme/demo"
-    assert explicit.server_url == "https://github.example.com"
+    client = gha_client.GitHubActionsClient(
+        token=auth,
+        context=context,
+        github=github,
+    )
 
     monkeypatch.setattr(
         gha_client,
-        "parse_git_remote_origin",
-        lambda **_kwargs: gha_client.parse_git_remote_url(
-            "git@github.com:acme/demo.git"
+        "_parse_job_list_response",
+        lambda _payload: SimpleNamespace(jobs=(_job_model(job_id=7),)),
+    )
+
+    workflows = client.list_workflows()
+    runs = client.list_workflow_runs(1, limit=2)
+    run = client.get_workflow_run(9)
+    jobs = client.list_run_jobs(9)
+
+    assert [workflow.name for workflow in workflows] == ["One", "Two"]
+    assert [item.run_number for item in runs] == [1, 2]
+    assert run.run_number == 9
+    assert jobs == (
+        gha_client.JobSummary(
+            id=7,
+            name="build",
+            status="in_progress",
+            conclusion=None,
+            html_url="https://github.com/acme/demo/actions/runs/1/job/1",
+            started_at=datetime(2026, 4, 2, 16, 0, tzinfo=UTC),
+            completed_at=None,
         ),
     )
-    inferred = gha_client.resolve_repository_context(repo=None, server_url=None)
-    assert inferred.slug.full_name == "acme/demo"
-    assert inferred.server_url == "https://github.com"
+    assert [call[0] for call in actions.calls] == ["workflows", "runs", "run", "jobs"]
+
+
+def test_build_github_client_uses_github_api_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    auth = "secret"
+    captured: dict[str, object] = {}
+
+    class _FakeGitHub:
+        def __init__(self, token: str, *, base_url: str, user_agent: str) -> None:
+            captured.update(token=token, base_url=base_url, user_agent=user_agent)
+
+    monkeypatch.setattr(gha_client, "GitHub", _FakeGitHub)
+
+    created = gha_client.build_github_client(
+        token=auth,
+        context=gha_client.RepositoryContext(
+            slug=gha_client.RepositorySlug(owner="acme", name="demo"),
+            server_url="https://ghe.example.com",
+        ),
+    )
+
+    assert isinstance(created, _FakeGitHub)
+    assert captured == {
+        "token": auth,
+        "base_url": "https://ghe.example.com/api/v3",
+        "user_agent": "nixcfg-github-actions/0.0.0",
+    }
+
+
+def test_resolve_repository_context_variants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        gha_client,
+        "parse_git_remote_origin",
+        lambda cwd=None: gha_client._ParsedRemote(
+            host="github.example.com",
+            slug=gha_client.RepositorySlug(owner="acme", name="demo"),
+        ),
+    )
+
+    explicit = gha_client.resolve_repository_context(
+        repo="acme/demo",
+        server_url="https://github.com",
+    )
+    matched = gha_client.resolve_repository_context(
+        repo=None,
+        server_url="https://github.example.com",
+    )
+    implicit = gha_client.resolve_repository_context(repo=None, server_url=None)
+
+    assert explicit.slug.full_name == "acme/demo"
+    assert explicit.server_url == "https://github.com"
+    assert matched.server_url == "https://github.example.com"
+    assert implicit.server_url == "https://github.example.com"
 
     with pytest.raises(ValueError, match="remote.origin.url points at"):
         gha_client.resolve_repository_context(
             repo=None,
-            server_url="https://github.example.com",
+            server_url="https://github.com",
         )
 
 
-def test_default_github_token_requires_known_credentials(
+def test_default_github_token_returns_value_or_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Raise a helpful error when no GitHub token can be resolved."""
+    monkeypatch.setattr(
+        gha_client.http_utils,
+        "resolve_github_token",
+        lambda **_kwargs: "token",
+    )
+    assert gha_client.default_github_token() == "token"
+
     monkeypatch.setattr(
         gha_client.http_utils,
         "resolve_github_token",
@@ -372,240 +264,180 @@ def test_default_github_token_requires_known_credentials(
         gha_client.default_github_token()
 
 
-def test_server_url_helpers_cover_public_and_enterprise() -> None:
-    """Normalize GitHub web origins and derive the correct API base."""
+def test_server_url_normalization_and_api_base() -> None:
     assert (
-        gha_client.normalize_server_url("https://github.com/") == "https://github.com"
+        gha_client.normalize_server_url(" https://github.com/ ") == "https://github.com"
     )
     assert (
         gha_client.github_api_base_url("https://github.com") == "https://api.github.com"
     )
     assert (
-        gha_client.github_api_base_url("https://github.example.com")
-        == "https://github.example.com/api/v3"
+        gha_client.github_api_base_url("https://ghe.example.com")
+        == "https://ghe.example.com/api/v3"
     )
 
-    with pytest.raises(ValueError, match="Expected an HTTPS GitHub server URL"):
+    with pytest.raises(ValueError, match="HTTPS"):
         gha_client.normalize_server_url("http://github.com")
-    with pytest.raises(ValueError, match="Expected a bare GitHub server origin"):
+    with pytest.raises(ValueError, match="bare GitHub server origin"):
         gha_client.normalize_server_url("https://github.com/path")
 
 
-def test_select_helpers_and_run_choice_cover_exact_fuzzy_and_ambiguous() -> None:
-    """Resolve exact, fuzzy, and ambiguous workflow/job names."""
+def test_parse_git_remote_origin_handles_missing_git_and_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gha_client, "get_repo_root", lambda: Path("/tmp/repo"))
+    monkeypatch.setattr(gha_client.shutil, "which", lambda _name: None)
+    with pytest.raises(RuntimeError, match="Could not find `git`"):
+        gha_client.parse_git_remote_origin()
+
+    monkeypatch.setattr(gha_client.shutil, "which", lambda _name: "/usr/bin/git")
+    monkeypatch.setattr(
+        gha_client.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout=""),
+    )
+    with pytest.raises(RuntimeError, match="Could not read remote.origin.url"):
+        gha_client.parse_git_remote_origin()
+
+    monkeypatch.setattr(
+        gha_client.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="git@github.com:acme/demo.git\n",
+        ),
+    )
+    parsed = gha_client.parse_git_remote_origin()
+    assert parsed.host == "github.com"
+    assert parsed.slug.full_name == "acme/demo"
+
+
+@pytest.mark.parametrize(
+    ("remote_url", "host", "slug"),
+    [
+        ("git@github.com:acme/demo.git", "github.com", "acme/demo"),
+        ("https://github.com/acme/demo.git", "github.com", "acme/demo"),
+        ("ssh://git@github.example.com/acme/demo", "github.example.com", "acme/demo"),
+    ],
+)
+def test_parse_git_remote_url_supported_forms(
+    remote_url: str,
+    host: str,
+    slug: str,
+) -> None:
+    parsed = gha_client.parse_git_remote_url(remote_url)
+    assert parsed.host == host
+    assert parsed.slug.full_name == slug
+
+
+def test_parse_git_remote_url_and_path_reject_invalid_values() -> None:
+    with pytest.raises(ValueError, match="Unsupported git remote URL"):
+        gha_client.parse_git_remote_url("file:///tmp/repo")
+    with pytest.raises(ValueError, match="Unsupported git remote URL"):
+        gha_client.parse_git_remote_url("git@github.com/acme/demo")
+    with pytest.raises(ValueError, match="owner/name"):
+        gha_client._parse_remote_path("/too/many/parts")
+
+
+def test_selection_and_live_helpers_cover_matching_modes() -> None:
     workflows = (
-        _workflow(1, "CI", ".github/workflows/ci.yml", "active"),
-        _workflow(
-            2,
-            "Periodic Flake Update",
-            ".github/workflows/update.yml",
-            "active",
-        ),
+        _workflow("Build"),
+        _workflow("BUILD", 2),
+        _workflow("Deploy", 3),
     )
-    assert gha_client.select_named_workflow(workflows, "CI").id == 1
-    assert gha_client.select_named_workflow(workflows, "periodic flake update").id == 2
-    assert gha_client.select_named_workflow(workflows, "flake").id == 2
-    with pytest.raises(ValueError, match="Unknown workflow"):
-        gha_client.select_named_workflow(workflows, "missing")
-
     jobs = (
-        _job_summary(1, "linux", "queued"),
-        _job_summary(2, "linux smoke", "queued"),
-    )
-    with pytest.raises(ValueError, match="Ambiguous job name"):
-        gha_client.select_named_job(jobs, "lin")
-
-    runs = (
-        _run(1, run_number=1, status="completed", conclusion="success"),
-        _run(2, run_number=2, status="queued"),
-    )
-    assert gha_client.choose_live_run(runs).id == 2
-    assert (
-        gha_client.choose_next_live_job((
-            _job_summary(10, "active", "in_progress"),
-            _job_summary(11, "queued", "queued"),
-        )).id
-        == 10
-    )
-    assert gha_client.choose_next_live_job(jobs) is None
-    assert (
-        gha_client.choose_next_live_job((
-            _job_summary(3, "done", "completed", "success"),
-        ))
-        is None
-    )
-
-
-def test_client_wraps_githubkit_actions_models(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Return GitHubKit-generated models for workflows, runs, and jobs."""
-    context = gha_client.RepositoryContext(
-        slug=gha_client.RepositorySlug(owner="acme", name="demo"),
-        server_url="https://github.com",
-    )
-    workflow = _workflow(
-        1, "Periodic Flake Update", ".github/workflows/update.yml", "active"
-    )
-    run = _run(9, run_number=683, status="in_progress")
-    fake_actions = _FakeActions(
-        workflows=gha_client.ReposOwnerRepoActionsWorkflowsGetResponse200.model_construct(
-            total_count=1,
-            workflows=[workflow],
+        gha_client.JobSummary(
+            1, "lint", "queued", None, "https://example/1", None, None
         ),
-        runs=gha_client.ReposOwnerRepoActionsWorkflowsWorkflowIdRunsGetResponse200.model_construct(
-            total_count=1,
-            workflow_runs=[run],
+        gha_client.JobSummary(
+            2, "build-macos", "completed", "success", "https://example/2", None, None
         ),
-        run=run,
-        jobs_payload=_job_list_payload(),
-    )
-    fake_github = _FakeGitHub(fake_actions)
-    monkeypatch.setattr(
-        gha_client,
-        "build_github_client",
-        lambda **_kwargs: fake_github,
+        gha_client.JobSummary(
+            3, "build-linux", "in_progress", None, "https://example/3", None, None
+        ),
     )
 
-    client = gha_client.GitHubActionsClient(token="ghs_" + "test", context=context)
-    workflows = client.list_workflows()
-    assert workflows == (workflow,)
-
-    runs = client.list_workflow_runs(1)
-    assert runs[0].run_number == 683
-    assert runs[0].created_at == datetime(2026, 4, 2, 16, 0, tzinfo=UTC)
-
-    resolved_run = client.get_workflow_run(9)
-    assert resolved_run.html_url.endswith("/actions/runs/9")
-
-    jobs = client.list_run_jobs(9)
-    assert jobs[0].name == "darwin-lock-smoke"
-    assert jobs[0].status == "in_progress"
-    assert jobs[0].html_url.endswith("/job/42")
-    assert jobs[0].completed_at is None
-    assert fake_actions.workflow_page_calls == [(1, 100)]
-    assert fake_actions.run_page_calls == [(1, 20)]
-    assert fake_actions.job_page_calls == [(1, 100)]
-    assert fake_github.requested_versions == ["2022-11-28"]
-
-
-def test_client_paginates_workflows_runs_and_jobs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Collect multi-page workflow and job results while respecting run limits."""
-    context = gha_client.RepositoryContext(
-        slug=gha_client.RepositorySlug(owner="acme", name="demo"),
-        server_url="https://github.com",
+    assert (
+        gha_client.select_named_workflow((_workflow("Build"),), "Build").name == "Build"
     )
-    workflow_page_1 = [
-        _workflow(
-            index, f"Workflow {index}", f".github/workflows/{index}.yml", "active"
+    assert (
+        gha_client.select_named_workflow((_workflow("Build"),), "build").name == "Build"
+    )
+    assert gha_client.select_named_job(jobs, "macos").id == 2
+    assert gha_client.choose_live_run((_run(1, "completed"), _run(2, "queued"))).id == 2
+    assert gha_client.choose_live_run((_run(1, "completed"),)) is None
+    assert gha_client.choose_next_live_job(jobs).id == 3
+    assert gha_client.choose_next_live_job((jobs[0], jobs[1])) is None
+
+    with pytest.raises(ValueError, match="Expected a non-empty workflow name"):
+        gha_client.select_named_workflow((_workflow("Build"),), "   ")
+    with pytest.raises(ValueError, match="Ambiguous workflow name"):
+        gha_client.select_named_workflow(workflows, "BuIlD")
+    with pytest.raises(ValueError, match="Unknown workflow 'ship'"):
+        gha_client.select_named_workflow((_workflow("Build"),), "ship")
+
+
+def test_collect_paginated_and_name_message_helpers() -> None:
+    seen_calls: list[tuple[int, int]] = []
+
+    def _fetch_page(*, page: int, per_page: int) -> tuple[int, ...]:
+        seen_calls.append((page, per_page))
+        if page == 1:
+            return tuple(range(1, per_page + 1))
+        if page == 2:
+            return (per_page + 1,)
+        return ()
+
+    assert gha_client._collect_paginated(_fetch_page, limit=0) == ()
+    assert gha_client._collect_paginated(_fetch_page, limit=2) == (1, 2)
+    assert gha_client._collect_paginated(_fetch_page) == tuple(range(1, 102))
+    assert seen_calls == [(1, 2), (1, 100), (2, 100)]
+
+    empty_seen: list[tuple[int, int]] = []
+
+    def _empty_page(*, page: int, per_page: int) -> tuple[int, ...]:
+        empty_seen.append((page, per_page))
+        return ()
+
+    assert gha_client._collect_paginated(_empty_page) == ()
+    assert empty_seen == [(1, 100)]
+    assert (
+        gha_client._ambiguous_name_message(
+            [_workflow("Build")], label="workflow", value_getter=lambda item: item.name
         )
-        for index in range(1, 101)
-    ]
-    workflow_page_2 = [
-        _workflow(101, "Workflow 101", ".github/workflows/101.yml", "active")
-    ]
-    run_page_1 = [
-        _run(index, run_number=index, status="completed", conclusion="success")
-        for index in range(1, 101)
-    ]
-    run_page_2 = [
-        _run(index, run_number=index, status="completed", conclusion="success")
-        for index in range(101, 201)
-    ]
-    job_page_1 = [
-        _job_payload(index, f"job-{index}", "completed", "success")
-        for index in range(1, 101)
-    ]
-    job_page_2 = [_job_payload(101, "job-101", "completed", "success")]
-    fake_actions = _FakeActions(
-        workflows=gha_client.ReposOwnerRepoActionsWorkflowsGetResponse200.model_construct(
-            total_count=len(workflow_page_1),
-            workflows=workflow_page_1,
-        ),
-        runs=gha_client.ReposOwnerRepoActionsWorkflowsWorkflowIdRunsGetResponse200.model_construct(
-            total_count=len(run_page_1),
-            workflow_runs=run_page_1,
-        ),
-        run=_run(9, run_number=683, status="in_progress"),
-        jobs_payload=_job_list_payload(job_page_1),
-        workflow_pages=[
-            gha_client.ReposOwnerRepoActionsWorkflowsGetResponse200.model_construct(
-                total_count=101,
-                workflows=workflow_page_1,
-            ),
-            gha_client.ReposOwnerRepoActionsWorkflowsGetResponse200.model_construct(
-                total_count=101,
-                workflows=workflow_page_2,
-            ),
-        ],
-        run_pages=[
-            gha_client.ReposOwnerRepoActionsWorkflowsWorkflowIdRunsGetResponse200.model_construct(
-                total_count=200,
-                workflow_runs=run_page_1,
-            ),
-            gha_client.ReposOwnerRepoActionsWorkflowsWorkflowIdRunsGetResponse200.model_construct(
-                total_count=200,
-                workflow_runs=run_page_2,
-            ),
-        ],
-        jobs_payload_pages=[
-            _job_list_payload(job_page_1),
-            _job_list_payload(job_page_2),
-        ],
-    )
-    fake_github = _FakeGitHub(fake_actions)
-    monkeypatch.setattr(
-        gha_client,
-        "build_github_client",
-        lambda **_kwargs: fake_github,
+        == "Ambiguous workflow name; matches: Build"
     )
 
-    client = gha_client.GitHubActionsClient(token="ghs_" + "test", context=context)
-
-    workflows = client.list_workflows()
-    runs = client.list_workflow_runs(1, limit=150)
-    jobs = client.list_run_jobs(9)
-
-    assert len(workflows) == 101
-    assert workflows[-1].name == "Workflow 101"
-    assert len(runs) == 150
-    assert runs[-1].run_number == 150
-    assert len(jobs) == 101
-    assert jobs[-1].name == "job-101"
-    assert fake_actions.workflow_page_calls == [(1, 100), (2, 100)]
-    assert fake_actions.run_page_calls == [(1, 100), (2, 100)]
-    assert fake_actions.job_page_calls == [(1, 100), (2, 100)]
+    with pytest.raises(ValueError, match="Ambiguous job name"):
+        gha_client.select_named_job(
+            (
+                gha_client.JobSummary(
+                    1, "lint-linux", "queued", None, "https://example/1", None, None
+                ),
+                gha_client.JobSummary(
+                    2, "lint-macos", "queued", None, "https://example/2", None, None
+                ),
+            ),
+            "lint",
+        )
 
 
-def test_build_github_client_uses_api_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Construct the shared GitHubKit client against the API origin."""
-    called: dict[str, object] = {}
+def test_parse_job_payload_and_summary_validation_errors() -> None:
+    timestamp = "2026-04-02T16:00:00Z"
+    payload = _job_model().model_dump(mode="json")
+    payload["status"] = "completed"
+    payload["conclusion"] = "success"
+    payload["completed_at"] = timestamp
+    payload["steps"] = [{"bad": "shape"}]
+    parsed = gha_client._parse_job_list_response({"total_count": 1, "jobs": [payload]})
+    assert parsed.jobs[0].name == "build"
+    assert "steps" not in parsed.jobs[0].model_dump(exclude_unset=True)
 
-    class _ConstructedGitHub:
-        pass
-
-    def _fake_github(
-        auth: str,
-        *,
-        base_url: str,
-        user_agent: str,
-    ) -> _ConstructedGitHub:
-        called.update(auth=auth, base_url=base_url, user_agent=user_agent)
-        return _ConstructedGitHub()
-
-    monkeypatch.setattr(gha_client, "GitHub", _fake_github)
-    context = gha_client.RepositoryContext(
-        slug=gha_client.RepositorySlug(owner="acme", name="demo"),
-        server_url="https://github.example.com",
-    )
-
-    github = gha_client.build_github_client(token="ghs_" + "test", context=context)
-
-    assert isinstance(github, _ConstructedGitHub)
-    assert called == {
-        "auth": "ghs_test",
-        "base_url": "https://github.example.com/api/v3",
-        "user_agent": "nixcfg-github-actions/0.0.0",
-    }
+    with pytest.raises(TypeError, match="response object"):
+        gha_client._parse_job_list_response([])
+    with pytest.raises(TypeError, match="jobs list"):
+        gha_client._parse_job_list_response({"jobs": "nope"})
+    with pytest.raises(TypeError, match="job to be an object"):
+        gha_client._parse_job_list_response({"jobs": ["bad"]})
+    with pytest.raises(TypeError, match="html_url"):
+        gha_client._job_to_summary(_job_model(html_url=None))

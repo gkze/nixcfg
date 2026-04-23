@@ -2,28 +2,83 @@
 
 from __future__ import annotations
 
-import json
+import asyncio
 import os
-import shutil
 import subprocess
+from functools import cache
 from pathlib import Path
 
 import pytest
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.list import NixList
+from nix_manipulator.expressions.primitive import Primitive
+from nix_manipulator.expressions.set import AttributeSet
 
-from lib.update.ci import crate2nix
+from lib.tests._assertions import expect_instance
+from lib.tests._nix_ast import (
+    assert_nix_ast_equal,
+    expect_binding,
+    expect_scope_binding,
+    parse_nix_expr,
+)
+from lib.update import crate2nix
+from lib.update.events import UpdateEvent, UpdateEventKind, expect_artifact_updates
 
 
-def _nix_eval_json(*, expr: str) -> object:
-    """Evaluate a Nix expression and decode its JSON result."""
-    nix = shutil.which("nix")
-    assert nix is not None
-    result = subprocess.run(  # noqa: S603
-        [nix, "eval", "--impure", "--json", "--expr", expr],
-        check=True,
-        capture_output=True,
-        text=True,
+@cache
+def _registry_expr() -> AttributeSet:
+    """Return the package registry attrset, including its let-scope bindings."""
+    root = expect_instance(
+        parse_nix_expr(
+            (crate2nix.REPO_ROOT / "packages/registry.nix").read_text(encoding="utf-8")
+        ),
+        FunctionDefinition,
     )
-    return json.loads(result.stdout)
+    return expect_instance(root.output, AttributeSet)
+
+
+def _constraint_value(value: Primitive | NixList) -> str | list[str] | None:
+    """Decode one simple registry constraint literal."""
+    if isinstance(value, NixList):
+        decoded = [expect_instance(item, Primitive).value for item in value.value]
+        assert all(isinstance(item, str) for item in decoded)
+        return decoded
+    decoded = expect_instance(value, Primitive).value
+    assert decoded is None or isinstance(decoded, str)
+    return decoded
+
+
+def _registry_overrides() -> dict[str, dict[str, object]]:
+    """Decode the literal override metadata table used by the registry."""
+    overrides = expect_instance(
+        expect_scope_binding(_registry_expr(), "packageMetadataOverrides").value,
+        AttributeSet,
+    )
+    decoded: dict[str, dict[str, object]] = {}
+    for binding in overrides.values:
+        entry = expect_instance(binding, Binding)
+        entry_value = expect_instance(entry.value, AttributeSet)
+        metadata: dict[str, object] = {}
+        for meta in entry_value.values:
+            field = expect_instance(meta, Binding)
+            if field.name == "helper":
+                metadata[field.name] = expect_instance(field.value, Primitive).value
+                continue
+            assert field.name == "constraint"
+            metadata[field.name] = _constraint_value(field.value)
+        decoded[entry.name.strip('"')] = metadata
+    return decoded
+
+
+def _supports_system(constraint: object, system: str) -> bool:
+    """Mirror the tiny system-constraint contract exported by ``packages/registry.nix``."""
+    if constraint is None:
+        return True
+    if isinstance(constraint, list):
+        return system in constraint
+    assert constraint == "darwin"
+    return system.endswith("-darwin")
 
 
 def test_normalize_json_text_sorts_keys_and_adds_newline() -> None:
@@ -171,8 +226,137 @@ def test_resolve_targets_skips_unsupported_platforms(monkeypatch) -> None:
 
     runnable, skipped = crate2nix._resolve_targets(())
 
-    assert [target.name for target in runnable] == ["codex", "goose-cli"]
-    assert skipped == ["zed-editor-nightly", "opencode-desktop"]
+    assert [target.name for target in runnable] == [
+        "codex",
+        "goose-cli",
+        "zed-editor-nightly",
+    ]
+    assert skipped == ["opencode-desktop"]
+
+
+def test_stream_crate2nix_artifact_updates_emits_changed_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Surface crate2nix regen through normal updater status/artifact events."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo-crate2nix-src",
+        cargo_nix=Path("packages/demo/Cargo.nix"),
+        crate_hashes=Path("packages/demo/crate-hashes.json"),
+        normalizer_path=Path("packages/demo/normalize_cargo_nix.py"),
+        supported_platforms=("linux",),
+    )
+    monkeypatch.setitem(crate2nix.TARGETS, "demo", target)
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
+    monkeypatch.setattr(
+        crate2nix,
+        "_refresh_target",
+        lambda _target: crate2nix.RefreshResult(
+            cargo_nix="{ demo = true; }\n",
+            crate_hashes='{"demo": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}\n',
+        ),
+    )
+
+    async def _collect() -> list[UpdateEvent]:
+        return [
+            event async for event in crate2nix.stream_crate2nix_artifact_updates("demo")
+        ]
+
+    events = asyncio.run(_collect())
+
+    assert [event.kind for event in events] == [
+        UpdateEventKind.STATUS,
+        UpdateEventKind.ARTIFACT,
+        UpdateEventKind.STATUS,
+    ]
+    assert events[0].message == "Refreshing crate2nix artifacts..."
+    assert events[2].message == "Prepared crate2nix artifacts"
+    artifact_paths = tuple(
+        str(artifact.path) for artifact in expect_artifact_updates(events[1].payload)
+    )
+    assert artifact_paths == (
+        "packages/demo/Cargo.nix",
+        "packages/demo/crate-hashes.json",
+    )
+
+
+def test_crate2nix_artifact_updates_skip_unknown_or_unsupported_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skip crate2nix refreshes for unknown names and unsupported platforms."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo-skip",
+        patched_src_installable="path:.#demo-skip-crate2nix-src",
+        cargo_nix=Path("packages/demo/Cargo.nix"),
+        crate_hashes=Path("packages/demo/crate-hashes.json"),
+        normalizer_path=Path("packages/demo/normalize_cargo_nix.py"),
+        supported_platforms=("linux",),
+    )
+    monkeypatch.setitem(crate2nix.TARGETS, "demo-skip", target)
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "darwin")
+    monkeypatch.setattr(
+        crate2nix,
+        "_refresh_target",
+        lambda _target: (_ for _ in ()).throw(AssertionError("should not refresh")),
+    )
+
+    assert crate2nix.crate2nix_artifact_updates("missing-target") == ()
+    assert crate2nix.crate2nix_artifact_updates("demo-skip") == ()
+
+
+def test_stream_crate2nix_artifact_updates_skips_unknown_or_unsupported_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not emit events when the target is missing or unsupported here."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo-stream-skip",
+        patched_src_installable="path:.#demo-stream-skip-crate2nix-src",
+        cargo_nix=Path("packages/demo/Cargo.nix"),
+        crate_hashes=Path("packages/demo/crate-hashes.json"),
+        normalizer_path=Path("packages/demo/normalize_cargo_nix.py"),
+        supported_platforms=("linux",),
+    )
+    monkeypatch.setitem(crate2nix.TARGETS, "demo-stream-skip", target)
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "darwin")
+
+    async def _collect(name: str) -> list[UpdateEvent]:
+        return [
+            event async for event in crate2nix.stream_crate2nix_artifact_updates(name)
+        ]
+
+    assert asyncio.run(_collect("missing-target")) == []
+    assert asyncio.run(_collect("demo-stream-skip")) == []
+
+
+def test_stream_crate2nix_artifact_updates_reports_up_to_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Emit an up-to-date status when regenerated artifacts are unchanged."""
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
+
+    async def _to_thread(_func, _name: str) -> tuple[()]:
+        return ()
+
+    monkeypatch.setattr(crate2nix.asyncio, "to_thread", _to_thread)
+
+    async def _collect() -> list[UpdateEvent]:
+        return [
+            event
+            async for event in crate2nix.stream_crate2nix_artifact_updates("codex")
+        ]
+
+    events = asyncio.run(_collect())
+
+    assert [event.kind for event in events] == [
+        UpdateEventKind.STATUS,
+        UpdateEventKind.STATUS,
+    ]
+    assert events[1].message == "crate2nix artifacts up to date"
+    assert events[1].payload == {
+        "status": "up_to_date",
+        "operation": "materialize_artifacts",
+        "detail": {"scope": "artifacts", "value": "crate2nix artifacts"},
+    }
 
 
 def test_targets_use_dedicated_source_installables() -> None:
@@ -188,9 +372,8 @@ def test_targets_use_dedicated_source_installables() -> None:
     }
 
 
-@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_crate2nix_source_installables_are_wired_through_package_registry() -> None:
-    """Package registry contracts should expose and filter crate2nix sources correctly."""
+    """Package registry contracts should expose crate2nix companions structurally."""
     packages_root = (crate2nix.REPO_ROOT / "packages").resolve()
     companion_entries = {
         f"{path.parent.name}-crate2nix-src"
@@ -205,91 +388,70 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
 
     assert expected_companions <= companion_entries
 
-    root = Path(crate2nix.REPO_ROOT).resolve()
-    payload = _nix_eval_json(
-        expr=f"""
-let
-  root = {root};
-  registry = import (root + "/packages/registry.nix") {{ src = root; }};
-  names = attrs: builtins.sort builtins.lessThan (builtins.attrNames attrs);
-  linux = registry.forSystem "x86_64-linux";
-  darwin = registry.forSystem "aarch64-darwin";
-  linuxAarch64 = registry.forSystem "aarch64-linux";
-in {{
-  packageNames = names registry.packagePaths;
-  helperEntries = registry.helperEntries;
-  darwinOnly = registry.darwinOnly;
-  sculptorSystems = registry.sculptorSystems;
-  selectedPaths = {{
-    codex = toString registry.packagePaths.codex-crate2nix-src;
-    goose = toString registry.packagePaths.goose-cli-crate2nix-src;
-    opencode = toString registry.packagePaths.opencode-desktop-crate2nix-src;
-    zed = toString registry.packagePaths.zed-editor-nightly-crate2nix-src;
-  }};
-  presence = {{
-    gooseCli = {{
-      linux = builtins.hasAttr "goose-cli" linux;
-      darwin = builtins.hasAttr "goose-cli" darwin;
-      linuxAarch64 = builtins.hasAttr "goose-cli" linuxAarch64;
-    }};
-    gooseCliCrate2nixSrc = {{
-      linux = builtins.hasAttr "goose-cli-crate2nix-src" linux;
-      darwin = builtins.hasAttr "goose-cli-crate2nix-src" darwin;
-      linuxAarch64 = builtins.hasAttr "goose-cli-crate2nix-src" linuxAarch64;
-    }};
-    codexCrate2nixSrc = {{
-      linux = builtins.hasAttr "codex-crate2nix-src" linux;
-      darwin = builtins.hasAttr "codex-crate2nix-src" darwin;
-      linuxAarch64 = builtins.hasAttr "codex-crate2nix-src" linuxAarch64;
-    }};
-    opencodeDesktopCrate2nixSrc = {{
-      linux = builtins.hasAttr "opencode-desktop-crate2nix-src" linux;
-      darwin = builtins.hasAttr "opencode-desktop-crate2nix-src" darwin;
-      linuxAarch64 = builtins.hasAttr "opencode-desktop-crate2nix-src" linuxAarch64;
-    }};
-    zedEditorNightlyCrate2nixSrc = {{
-      linux = builtins.hasAttr "zed-editor-nightly-crate2nix-src" linux;
-      darwin = builtins.hasAttr "zed-editor-nightly-crate2nix-src" darwin;
-      linuxAarch64 = builtins.hasAttr "zed-editor-nightly-crate2nix-src" linuxAarch64;
-    }};
-    sculptor = {{
-      linux = builtins.hasAttr "sculptor" linux;
-      darwin = builtins.hasAttr "sculptor" darwin;
-      linuxAarch64 = builtins.hasAttr "sculptor" linuxAarch64;
-    }};
-  }};
-}}
-"""
+    assert_nix_ast_equal(
+        expect_scope_binding(_registry_expr(), "companionPackages").value,
+        """
+        discovery.discoverCompanionEntries {
+          root = pkgDir;
+          directories = discoveredPackages.dirNames;
+          fileName = "crate2nix-src.nix";
+        }
+        """,
     )
-    assert isinstance(payload, dict)
+    assert_nix_ast_equal(
+        expect_scope_binding(_registry_expr(), "supportsSystem").value,
+        """
+        constraint: system:
+        if constraint == null then
+          true
+        else if builtins.isList constraint then
+          builtins.elem system constraint
+        else if constraint == "darwin" then
+          builtins.match ".*-darwin" system != null
+        else
+          throw "packages/registry.nix: unsupported system constraint `${constraint}`"
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_binding(_registry_expr().values, "forSystem").value,
+        "system: packagePathsMatching (meta: supportsSystem meta.constraint system)",
+    )
 
-    assert expected_companions <= set(payload["packageNames"])
-    assert payload["selectedPaths"] == {
-        "codex": str(packages_root / "codex/crate2nix-src.nix"),
-        "goose": str(packages_root / "goose-cli/crate2nix-src.nix"),
-        "opencode": str(packages_root / "opencode-desktop/crate2nix-src.nix"),
-        "zed": str(packages_root / "zed-editor-nightly/crate2nix-src.nix"),
-    }
-    assert payload["helperEntries"] == [
+    overrides = _registry_overrides()
+    assert {name for name, meta in overrides.items() if meta.get("helper") is True} == {
         "go-cli-wrapper",
         "openchamber-bun",
         "registry",
-    ]
-    assert payload["darwinOnly"] == sorted([
-        "commander",
+        "t3code-workspace",
+    }
+    assert sorted(
+        name for name, meta in overrides.items() if meta.get("constraint") == "darwin"
+    ) == [
         "codex-desktop",
+        "commander",
         "conductor",
         "granola",
         "netnewswire",
         "opencode-desktop-crate2nix-src",
         "raycast",
         "wispr-flow",
-        "zed-editor-nightly",
-        "zed-editor-nightly-crate2nix-src",
-    ])
-    assert payload["sculptorSystems"] == ["aarch64-darwin", "x86_64-linux"]
-    assert payload["presence"] == {
-        "gooseCli": {"linux": False, "darwin": True, "linuxAarch64": False},
+    ]
+    assert overrides["sculptor"]["constraint"] == [
+        "aarch64-darwin",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ]
+
+    selected_paths = {
+        "codex": str(packages_root / "codex/crate2nix-src.nix"),
+        "goose": str(packages_root / "goose-cli/crate2nix-src.nix"),
+        "opencode": str(packages_root / "opencode-desktop/crate2nix-src.nix"),
+        "zed": str(packages_root / "zed-editor-nightly/crate2nix-src.nix"),
+    }
+    assert all(Path(path).is_file() for path in selected_paths.values())
+
+    presence = {
+        "gooseCli": {"linux": True, "darwin": True, "linuxAarch64": False},
         "gooseCliCrate2nixSrc": {
             "linux": True,
             "darwin": True,
@@ -305,13 +467,57 @@ in {{
             "darwin": True,
             "linuxAarch64": False,
         },
-        "zedEditorNightlyCrate2nixSrc": {
-            "linux": False,
+        "zedEditorNightly": {
+            "linux": True,
             "darwin": True,
             "linuxAarch64": False,
         },
-        "sculptor": {"linux": True, "darwin": True, "linuxAarch64": False},
+        "zedEditorNightlyCrate2nixSrc": {
+            "linux": True,
+            "darwin": True,
+            "linuxAarch64": False,
+        },
+        "sculptor": {
+            "linux": True,
+            "darwin": True,
+            "x86Darwin": True,
+            "linuxAarch64": False,
+        },
     }
+    systems = {
+        "linux": "x86_64-linux",
+        "darwin": "aarch64-darwin",
+        "x86Darwin": "x86_64-darwin",
+        "linuxAarch64": "aarch64-linux",
+    }
+    package_constraints = {
+        name: overrides.get(name, {}).get("constraint")
+        for name in (
+            "goose-cli",
+            "goose-cli-crate2nix-src",
+            "codex-crate2nix-src",
+            "opencode-desktop-crate2nix-src",
+            "zed-editor-nightly",
+            "zed-editor-nightly-crate2nix-src",
+            "sculptor",
+        )
+    }
+    assert {
+        key: {
+            surface: _supports_system(package_constraints[name], system)
+            for surface, system in systems.items()
+            if not (key != "sculptor" and surface == "x86Darwin")
+        }
+        for key, name in {
+            "gooseCli": "goose-cli",
+            "gooseCliCrate2nixSrc": "goose-cli-crate2nix-src",
+            "codexCrate2nixSrc": "codex-crate2nix-src",
+            "opencodeDesktopCrate2nixSrc": "opencode-desktop-crate2nix-src",
+            "zedEditorNightly": "zed-editor-nightly",
+            "zedEditorNightlyCrate2nixSrc": "zed-editor-nightly-crate2nix-src",
+            "sculptor": "sculptor",
+        }.items()
+    } == presence
 
 
 def test_run_writes_refreshed_files(monkeypatch, tmp_path: Path) -> None:
@@ -659,6 +865,8 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
 
 def test_cli_callback_exits_with_run_status(monkeypatch: pytest.MonkeyPatch) -> None:
     """The Typer callback should forward arguments into run()."""
+    import lib.update.ci.crate2nix as crate2nix_cli
+
     called: dict[str, object] = {}
 
     def _fake_run(*, packages: tuple[str, ...] = (), write: bool = False) -> int:
@@ -666,6 +874,6 @@ def test_cli_callback_exits_with_run_status(monkeypatch: pytest.MonkeyPatch) -> 
         called["write"] = write
         return 7
 
-    monkeypatch.setattr(crate2nix, "run", _fake_run)
-    assert crate2nix.main(["--package", "demo", "--write"]) == 7
+    monkeypatch.setattr(crate2nix_cli, "run", _fake_run)
+    assert crate2nix_cli.main(["--package", "demo", "--write"]) == 7
     assert called == {"packages": ("demo",), "write": True}

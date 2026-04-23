@@ -16,10 +16,13 @@ let
     enable = isNullable builtins.isBool;
     enabled = isNullable builtins.isBool;
     environment = isNullable isNullableStringAttrs;
-    type = isNullable (value: builtins.elem value [
-      "local"
-      "remote"
-    ]);
+    type = isNullable (
+      value:
+      builtins.elem value [
+        "local"
+        "remote"
+      ]
+    );
     url = isNullable builtins.isString;
   };
 
@@ -34,15 +37,13 @@ let
       check server.${field}
     ) (builtins.attrNames server);
 
-  sparseMcpServerOverrideType = types.addCheck
-    (types.attrsOf types.anything)
-    isValidSparseMcpServerOverride;
+  sparseMcpServerOverrideType = types.addCheck (types.attrsOf types.anything) isValidSparseMcpServerOverride;
 
   sparseMcpServerOverrideMapType = types.attrsOf sparseMcpServerOverrideType;
 in
 {
   inherit sparseMcpServerOverrideMapType sparseMcpServerOverrideType;
 
-  resolveSparseMcpServerOverrides = baseServers: overrideServers:
-    recursiveUpdate baseServers overrideServers;
+  resolveSparseMcpServerOverrides =
+    baseServers: overrideServers: recursiveUpdate baseServers overrideServers;
 }

@@ -266,6 +266,56 @@ def test_apply_status_prefers_structured_status_payloads(
     assert op.message == expected_message
 
 
+def test_apply_status_handles_artifact_materialization_payloads() -> None:
+    """Keep a dedicated artifact phase stable when typed payloads are used."""
+    item = _item(
+        op_order=(
+            OperationKind.CHECK_VERSION,
+            OperationKind.MATERIALIZE_ARTIFACTS,
+            OperationKind.COMPUTE_HASH,
+        )
+    )
+
+    apply_status(
+        item,
+        "Refreshing crate2nix artifacts...",
+        {
+            "operation": OperationKind.MATERIALIZE_ARTIFACTS.value,
+            "status": "computing_hash",
+            "detail": "crate2nix artifacts",
+        },
+    )
+    artifact_op = item.operations[OperationKind.MATERIALIZE_ARTIFACTS]
+    assert artifact_op.status == "running"
+    assert artifact_op.message == "crate2nix artifacts"
+
+    apply_status(
+        item,
+        "Prepared crate2nix artifacts",
+        {
+            "operation": OperationKind.MATERIALIZE_ARTIFACTS.value,
+            "status": "updated",
+            "detail": "crate2nix artifacts",
+        },
+    )
+    assert artifact_op.status == "success"
+    assert artifact_op.message == "crate2nix artifacts"
+
+    item2 = _item(op_order=(OperationKind.MATERIALIZE_ARTIFACTS,))
+    apply_status(
+        item2,
+        "crate2nix artifacts up to date",
+        {
+            "operation": OperationKind.MATERIALIZE_ARTIFACTS.value,
+            "status": "up_to_date",
+            "detail": {"scope": "artifacts", "value": "crate2nix artifacts"},
+        },
+    )
+    same_op = item2.operations[OperationKind.MATERIALIZE_ARTIFACTS]
+    assert same_op.status == "no_change"
+    assert same_op.message == "crate2nix artifacts (up to date)"
+
+
 def test_apply_status_legacy_fallbacks_cover_remaining_message_patterns() -> None:
     """Keep legacy message parsing behavior for unsupported payloads."""
     item = _item()
@@ -339,6 +389,24 @@ def test_apply_status_rules_and_status_priority() -> None:
     hash_op2 = item2.operations[OperationKind.COMPUTE_HASH]
     assert hash_op2.status == "running"
     assert hash_op2.message == "warning: cache miss"
+
+
+def test_ui_status_helper_edge_cases_cover_non_string_details() -> None:
+    """Keep helper return values stable for malformed or non-string detail payloads."""
+    assert ui_state_module._up_to_date_status_update("demo") is None
+    assert ui_state_module._up_to_date_status_update({
+        "scope": "artifacts",
+        "value": ["crate2nix"],
+    }) == ui_state_module.StatusUpdate("no_change", clear_message=True)
+    assert ui_state_module._updated_status_update({
+        "value": "crate2nix artifacts"
+    }) == ui_state_module.StatusUpdate("success", "crate2nix artifacts")
+    assert ui_state_module._updated_status_update({
+        "value": ["bad"]
+    }) == ui_state_module.StatusUpdate("success")
+    assert ui_state_module._updated_status_update([
+        "bad"
+    ]) == ui_state_module.StatusUpdate("success")
 
 
 def test_payload_status_update_rejects_malformed_structured_details() -> None:

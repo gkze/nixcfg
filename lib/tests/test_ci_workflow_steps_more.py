@@ -37,6 +37,12 @@ def test_xcode_version_key_and_git_show_fallback(
     assert ws._git_show("HEAD:missing") == "{}\n"
 
 
+def test_json_object_rejects_non_string_keys() -> None:
+    """Reject JSON objects whose runtime keys are not strings."""
+    with pytest.raises(TypeError, match="Expected string keys"):
+        ws._json_object({1: "x"}, context="payload")
+
+
 def test_git_show_raises_for_unexpected_history_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -303,6 +309,120 @@ def test_cmd_prepare_bun_lock_reports_validation_relock_and_failure(
     assert "relock failed" in capsys.readouterr().err
 
 
+def test_json_object_and_flake_lock_helpers_cover_error_edges(tmp_path: Path) -> None:
+    """Reject non-object payloads and treat null locked metadata as empty."""
+    with pytest.raises(TypeError, match="Expected JSON object for demo"):
+        ws._json_object([], context="demo")
+
+    lock_file = tmp_path / "flake.lock"
+    lock_file.write_text('{"nodes":{"demo":{"locked":null}}}\n', encoding="utf-8")
+
+    assert ws._load_flake_lock_input_locked(lock_file=lock_file, node="demo") == {}
+
+
+def test_load_flake_lock_input_locked_rejects_missing_node(tmp_path: Path) -> None:
+    """Missing flake.lock nodes should fail explicitly instead of diffing empty payloads."""
+    lock_file = tmp_path / "flake.lock"
+    lock_file.write_text(
+        '{"nodes":{"demo":{"locked":{"rev":"abc"}}}}\n', encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="does not contain flake.lock node 'missing'"):
+        ws._load_flake_lock_input_locked(lock_file=lock_file, node="missing")
+
+
+def test_snapshot_and_compare_flake_input_report_io_failures(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Return exit code 1 when snapshot loading or GitHub output writes fail."""
+    missing_lock = tmp_path / "missing.lock"
+    snapshot_output = tmp_path / "snapshots" / "demo.json"
+
+    assert (
+        ws._cmd_snapshot_flake_input(
+            node="demo",
+            lock_file=missing_lock,
+            output=snapshot_output,
+        )
+        == 1
+    )
+    assert "missing.lock" in capsys.readouterr().err
+
+    before = tmp_path / "before.json"
+    before.write_text('{"rev":"abc"}\n', encoding="utf-8")
+    broken_lock = tmp_path / "broken.lock"
+    broken_lock.write_text('{"nodes":{"demo":[]}}\n', encoding="utf-8")
+
+    assert (
+        ws._cmd_compare_flake_input(
+            node="demo",
+            before=before,
+            lock_file=broken_lock,
+            github_output=None,
+            output_name="changed",
+        )
+        == 1
+    )
+    assert "Expected JSON object" in capsys.readouterr().err
+
+    lock_file = tmp_path / "flake.lock"
+    lock_file.write_text(
+        '{"nodes":{"demo":{"locked":{"rev":"def"}}}}\n', encoding="utf-8"
+    )
+
+    def _boom(*_args: object, **_kwargs: object) -> object:
+        msg = "cannot append"
+        raise OSError(msg)
+
+    assert (
+        ws._cmd_compare_flake_input(
+            node="demo",
+            before=before,
+            lock_file=lock_file,
+            github_output=SimpleNamespace(open=_boom),
+            output_name="changed",
+        )
+        == 1
+    )
+    assert "cannot append" in capsys.readouterr().err
+
+
+def test_snapshot_and_compare_flake_input_report_missing_nodes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Snapshot and compare should surface unknown flake inputs as errors."""
+    before = tmp_path / "before.json"
+    before.write_text('{"rev":"abc"}\n', encoding="utf-8")
+    lock_file = tmp_path / "flake.lock"
+    lock_file.write_text(
+        '{"nodes":{"demo":{"locked":{"rev":"def"}}}}\n', encoding="utf-8"
+    )
+
+    assert (
+        ws._cmd_snapshot_flake_input(
+            node="missing",
+            lock_file=lock_file,
+            output=tmp_path / "snapshot.json",
+        )
+        == 1
+    )
+    assert "does not contain flake.lock node 'missing'" in capsys.readouterr().err
+
+    assert (
+        ws._cmd_compare_flake_input(
+            node="missing",
+            before=before,
+            lock_file=lock_file,
+            github_output=None,
+            output_name="changed",
+        )
+        == 1
+    )
+    assert "does not contain flake.lock node 'missing'" in capsys.readouterr().err
+
+
 def test_cmd_free_disk_space_runs_darwin_cleanup_in_ci(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -396,6 +516,7 @@ def test_command_routing_for_new_and_legacy_aliases(
 ) -> None:
     """Exercise Typer commands for grouped and legacy aliases."""
     output = tmp_path / "pr.md"
+    snapshot = tmp_path / "snapshot.json"
 
     monkeypatch.setattr(
         ws, "_cmd_build_darwin_config", lambda *, host: 11 if host == "argus" else 1
@@ -416,6 +537,8 @@ def test_command_routing_for_new_and_legacy_aliases(
     monkeypatch.setattr(ws, "_cmd_verify_artifacts", lambda *, workflow: 19)
     monkeypatch.setattr(ws, "_cmd_verify_structure", lambda *, workflow: 23)
     monkeypatch.setattr(ws, "_cmd_validate_bun_lock", lambda *, lock_file: 20)
+    monkeypatch.setattr(ws, "_cmd_snapshot_flake_input", lambda **_kwargs: 25)
+    monkeypatch.setattr(ws, "_cmd_compare_flake_input", lambda **_kwargs: 26)
     monkeypatch.setattr(
         ws,
         "_cmd_prepare_bun_lock",
@@ -430,6 +553,28 @@ def test_command_routing_for_new_and_legacy_aliases(
     assert ws.main(["darwin", "install"]) == 13
     assert ws.main(["flake", "prefetch"]) == 14
     assert ws.main(["flake", "update"]) == 15
+    assert (
+        ws.main([
+            "flake-input",
+            "snapshot",
+            "--node",
+            "superset",
+            "--output",
+            str(snapshot),
+        ])
+        == 25
+    )
+    assert (
+        ws.main([
+            "flake-input",
+            "compare",
+            "--node",
+            "superset",
+            "--before",
+            str(snapshot),
+        ])
+        == 26
+    )
     assert ws.main(["update-app"]) == 16
     assert ws.main(["update-targets"]) == 17
     assert (
@@ -517,6 +662,7 @@ def test_registered_command_metadata_preserves_cli_surface() -> None:
     ] == [
         ("darwin", "Darwin workflow steps."),
         ("flake", "Flake-related workflow steps."),
+        ("flake-input", "flake.lock input snapshot/compare workflow steps."),
         ("pr-body", "Pull request body generation workflow step."),
         ("update-app", "Update app smoke-check workflow step."),
         ("update-targets", "Update target listing workflow step."),
@@ -536,6 +682,10 @@ def test_registered_command_metadata_preserves_cli_surface() -> None:
         (command.name, command.help)
         for command in ws.workflow_flake_app.registered_commands
     ] == [("prefetch", None), ("update", None)]
+    assert [
+        (command.name, command.help)
+        for command in ws.workflow_flake_input_app.registered_commands
+    ] == [("snapshot", None), ("compare", None)]
     assert ws.workflow_pr_body_app.registered_callback is not None
     assert (
         ws.workflow_pr_body_app.registered_callback.callback

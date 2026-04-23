@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import importlib
+import json
 import os
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -318,6 +319,90 @@ def _cmd_prepare_bun_lock(
     return 0
 
 
+def _json_object(value: object, *, context: str) -> dict[str, Any]:
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                msg = f"Expected string keys for JSON object {context}"
+                raise TypeError(msg)
+            result[key] = item
+        return result
+    msg = f"Expected JSON object for {context}"
+    raise TypeError(msg)
+
+
+def _load_flake_lock_input_locked(*, lock_file: Path, node: str) -> dict[str, Any]:
+    payload = _json_object(
+        json.loads(lock_file.read_text(encoding="utf-8")),
+        context=f"{lock_file}",
+    )
+    nodes = _json_object(payload.get("nodes", {}), context=f"{lock_file} nodes")
+    if node not in nodes:
+        msg = f"{lock_file} does not contain flake.lock node {node!r}"
+        raise ValueError(msg)
+    node_payload = _json_object(nodes[node], context=f"{lock_file} node {node!r}")
+    locked = node_payload.get("locked", {})
+    if locked is None:
+        return {}
+    return _json_object(locked, context=f"{lock_file} node {node!r} locked")
+
+
+def _load_json_snapshot(*, snapshot_path: Path) -> dict[str, Any]:
+    return _json_object(
+        json.loads(snapshot_path.read_text(encoding="utf-8")),
+        context=f"{snapshot_path}",
+    )
+
+
+def _cmd_snapshot_flake_input(
+    *,
+    node: str,
+    lock_file: Path,
+    output: Path,
+) -> int:
+    try:
+        locked = _load_flake_lock_input_locked(lock_file=lock_file, node=node)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(locked, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, TypeError, ValueError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+
+    sys.stdout.write(f"Snapshotted flake.lock input {node!r} to {output}\n")
+    return 0
+
+
+def _cmd_compare_flake_input(
+    *,
+    node: str,
+    before: Path,
+    lock_file: Path,
+    github_output: Path | None,
+    output_name: str,
+) -> int:
+    try:
+        before_snapshot = _load_json_snapshot(snapshot_path=before)
+        after_snapshot = _load_flake_lock_input_locked(lock_file=lock_file, node=node)
+    except (OSError, TypeError, ValueError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+
+    changed = before_snapshot != after_snapshot
+    if github_output is not None:
+        try:
+            with github_output.open("a", encoding="utf-8") as handle:
+                handle.write(f"{output_name}={'true' if changed else 'false'}\n")
+        except OSError as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 1
+
+    sys.stdout.write(
+        f"flake.lock input {node!r} changed: {'true' if changed else 'false'}\n"
+    )
+    return 0
+
+
 def _is_missing_history_pathspec(stderr: str, pathspec: str) -> bool:
     missing_markers = (
         "exists on disk, but not in",
@@ -519,6 +604,10 @@ workflow_flake_app = make_typer_app(
     help_text="Flake-related workflow steps.",
     no_args_is_help=True,
 )
+workflow_flake_input_app = make_typer_app(
+    help_text="flake.lock input snapshot/compare workflow steps.",
+    no_args_is_help=True,
+)
 workflow_pr_body_app = make_typer_app(
     help_text="Pull request body generation workflow step.",
     no_args_is_help=False,
@@ -535,6 +624,7 @@ workflow_update_targets_app = make_typer_app(
 
 app.add_typer(workflow_darwin_app, name="darwin")
 app.add_typer(workflow_flake_app, name="flake")
+app.add_typer(workflow_flake_input_app, name="flake-input")
 app.add_typer(workflow_pr_body_app, name="pr-body")
 app.add_typer(workflow_update_app, name="update-app")
 app.add_typer(workflow_update_targets_app, name="update-targets")
@@ -589,6 +679,70 @@ def command_prefetch_flake_inputs() -> None:
 def command_nix_flake_update() -> None:
     """Run `nix flake update`."""
     _exit_with_code(_cmd_nix_flake_update())
+
+
+def command_snapshot_flake_input(
+    *,
+    node: Annotated[
+        str,
+        typer.Option("-n", "--node", help="flake.lock node name to snapshot."),
+    ],
+    lock_file: Annotated[
+        Path,
+        typer.Option("-l", "--lock-file", help="flake.lock file to read."),
+    ] = Path("flake.lock"),
+    output: Annotated[
+        Path,
+        typer.Option("-o", "--output", help="Path to write the JSON snapshot."),
+    ],
+) -> None:
+    """Snapshot one flake.lock input's locked payload."""
+    _exit_with_code(
+        _cmd_snapshot_flake_input(node=node, lock_file=lock_file, output=output)
+    )
+
+
+def command_compare_flake_input(
+    *,
+    node: Annotated[
+        str,
+        typer.Option("-n", "--node", help="flake.lock node name to compare."),
+    ],
+    before: Annotated[
+        Path,
+        typer.Option("-b", "--before", help="Path to the previous JSON snapshot."),
+    ],
+    lock_file: Annotated[
+        Path,
+        typer.Option("-l", "--lock-file", help="flake.lock file to read."),
+    ] = Path("flake.lock"),
+    github_output: Annotated[
+        Path | None,
+        typer.Option(
+            "-g",
+            "--github-output",
+            help="Optional GitHub output file to append changed=true/false.",
+        ),
+    ] = None,
+    output_name: Annotated[
+        str,
+        typer.Option(
+            "-O",
+            "--output-name",
+            help="Output variable name written to --github-output.",
+        ),
+    ] = "changed",
+) -> None:
+    """Compare one flake.lock input against a prior JSON snapshot."""
+    _exit_with_code(
+        _cmd_compare_flake_input(
+            node=node,
+            before=before,
+            lock_file=lock_file,
+            github_output=github_output,
+            output_name=output_name,
+        )
+    )
 
 
 def command_generate_pr_body(
@@ -735,6 +889,8 @@ workflow_darwin_app.command("install")(command_install_darwin_tools)
 
 workflow_flake_app.command("prefetch")(command_prefetch_flake_inputs)
 workflow_flake_app.command("update")(command_nix_flake_update)
+workflow_flake_input_app.command("snapshot")(command_snapshot_flake_input)
+workflow_flake_input_app.command("compare")(command_compare_flake_input)
 
 workflow_pr_body_app.callback(invoke_without_command=True)(command_generate_pr_body)
 workflow_update_app.callback(invoke_without_command=True)(

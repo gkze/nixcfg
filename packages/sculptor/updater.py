@@ -45,6 +45,6 @@ class SculptorUpdater(DownloadHashUpdater):
                 dt = dt.replace(tzinfo=UTC)
             dt = dt.astimezone(UTC)
             version = dt.strftime("%Y-%m-%d")
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             version = last_modified[:10]
         return VersionInfo(version=version, metadata=NO_METADATA)

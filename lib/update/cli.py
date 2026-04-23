@@ -9,7 +9,7 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Unpack
+from typing import TYPE_CHECKING, Annotated, Protocol, Unpack
 
 import aiohttp
 import typer
@@ -80,6 +80,14 @@ from lib.update.ui_state import ItemMeta, OperationKind, SummaryStatus
 from lib.update.updaters import UPDATERS, UpdaterClass, ensure_updaters_loaded
 from lib.update.updaters.base import FlakeInputHashUpdater, Updater, VersionInfo
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
+
+
+class _EventPut(Protocol):
+    def __call__(self, event: UpdateEvent | None, /) -> Awaitable[None]: ...
+
+
 __all__ = (
     "OutputOptions",
     "ResolvedTargets",
@@ -95,6 +103,12 @@ __all__ = (
 
 def _get_updaters() -> dict[str, UpdaterClass]:
     return updater_module.resolve_registry_alias(UPDATERS, ensure_updaters_loaded)
+
+
+def _shows_materialize_artifacts_phase(updater_cls: type[Updater] | None) -> bool:
+    if updater_cls is None:
+        return False
+    return bool(getattr(updater_cls, "shows_materialize_artifacts_phase", False))
 
 
 def _build_update_options(values: UpdateOptionsKwargs) -> UpdateOptions:
@@ -290,6 +304,26 @@ class UpdateSummary:
 _SUMMARY_STATUS_PRIORITY = {"no_change": 0, "updated": 1, "error": 2}
 
 
+def _select_source_names(
+    source: str | None,
+    updaters: dict[str, UpdaterClass],
+) -> list[str]:
+    """Resolve source targets, expanding backing-input names to dependent sources."""
+    if source is None:
+        return list(updaters.keys())
+
+    dependent_sources = sorted(
+        name
+        for name, updater_cls in updaters.items()
+        if _source_backing_input_name(name, updater_cls, None) == source
+    )
+    if dependent_sources:
+        return dependent_sources
+    if source in updaters:
+        return [source]
+    return []
+
+
 @dataclass(frozen=True)
 class ResolvedTargets:
     """Resolved source/input targets and effective mode flags."""
@@ -315,6 +349,8 @@ class ResolvedTargets:
         all_ref_names = {i.name for i in all_ref_inputs}
         all_known_names = all_source_names | all_ref_names
 
+        source_names = _select_source_names(opts.source, updaters)
+
         # --native-only implies --no-refs: in CI, refs are managed by the
         # pipeline (nix flake update + create-pr).
         do_refs = not opts.no_refs and not opts.native_only
@@ -322,20 +358,13 @@ class ResolvedTargets:
         if opts.source:
             if opts.source not in all_ref_names:
                 do_refs = False
-            if opts.source not in all_source_names:
+            if not source_names:
                 do_sources = False
 
         ref_inputs = (
             [i for i in all_ref_inputs if i.name == opts.source]
             if opts.source
             else all_ref_inputs
-        )
-        source_names = (
-            [opts.source]
-            if opts.source in all_source_names
-            else []
-            if opts.source
-            else list(updaters.keys())
         )
         if not do_refs:
             ref_inputs = []
@@ -372,6 +401,9 @@ def _build_item_meta(
         in_sources = name in source_names
         entry = None if sources is None else sources.entries.get(name)
         updater_cls = _get_updaters().get(name)
+        has_materialize_artifacts_phase = _shows_materialize_artifacts_phase(
+            updater_cls
+        )
         has_input_refresh = (
             _source_backing_input_name(name, updater_cls, entry) is not None
         )
@@ -381,20 +413,26 @@ def _build_item_meta(
             op_order = [OperationKind.CHECK_VERSION, OperationKind.UPDATE_REF]
             if has_input_refresh:
                 op_order.append(OperationKind.REFRESH_LOCK)
+            if has_materialize_artifacts_phase:
+                op_order.append(OperationKind.MATERIALIZE_ARTIFACTS)
             op_order.append(OperationKind.COMPUTE_HASH)
         elif in_sources and has_input_refresh:
             origin = _ORIGIN_SOURCES_ONLY
-            op_order = (
+            op_order = [
                 OperationKind.CHECK_VERSION,
                 OperationKind.REFRESH_LOCK,
-                OperationKind.COMPUTE_HASH,
-            )
+            ]
+            if has_materialize_artifacts_phase:
+                op_order.append(OperationKind.MATERIALIZE_ARTIFACTS)
+            op_order.append(OperationKind.COMPUTE_HASH)
         elif in_sources:
             origin = _ORIGIN_SOURCES_ONLY
-            op_order = (
+            op_order = [
                 OperationKind.CHECK_VERSION,
-                OperationKind.COMPUTE_HASH,
-            )
+            ]
+            if has_materialize_artifacts_phase:
+                op_order.append(OperationKind.MATERIALIZE_ARTIFACTS)
+            op_order.append(OperationKind.COMPUTE_HASH)
         else:
             origin = _ORIGIN_FLAKE_ONLY
             op_order = (
@@ -466,6 +504,7 @@ class _SourceTaskContext:
     native_only: bool
     session: aiohttp.ClientSession
     update_input_lock: asyncio.Lock
+    update_input_tasks: dict[str, asyncio.Task[None]]
     queue: asyncio.Queue[UpdateEvent | None]
     config: UpdateConfig | None = None
     pinned_version: VersionInfo | None = None
@@ -480,6 +519,56 @@ class _SourcesPhaseContext:
     native_only: bool
     config: UpdateConfig
     pinned: dict[str, VersionInfo]
+
+
+async def _refresh_input_task(
+    *,
+    input_name: str,
+    source: str,
+    put: _EventPut,
+) -> None:
+    await put(
+        UpdateEvent.status(
+            source,
+            f"Updating flake input '{input_name}'...",
+            operation="refresh_lock",
+            status="refresh_lock",
+            detail=input_name,
+        )
+    )
+    async for event in update_flake_input(input_name, source=source):
+        await put(event)
+
+
+async def _ensure_input_refreshed(
+    name: str,
+    input_name: str,
+    *,
+    context: _SourceTaskContext,
+) -> None:
+    put = context.queue.put
+    async with context.update_input_lock:
+        task = context.update_input_tasks.get(input_name)
+        if task is None:
+            task = asyncio.create_task(
+                _refresh_input_task(input_name=input_name, source=name, put=put)
+            )
+            context.update_input_tasks[input_name] = task
+            reuse_existing = False
+        else:
+            reuse_existing = True
+
+    if reuse_existing:
+        await put(
+            UpdateEvent.status(
+                name,
+                f"Reusing flake input '{input_name}' refresh...",
+                operation="refresh_lock",
+                status="refresh_lock",
+                detail=input_name,
+            )
+        )
+    await task
 
 
 async def _update_source_task(
@@ -498,18 +587,7 @@ async def _update_source_task(
 
         await put(UpdateEvent.status(name, "Starting update"))
         if context.update_input and input_name:
-            await put(
-                UpdateEvent.status(
-                    name,
-                    f"Updating flake input '{input_name}'...",
-                    operation="refresh_lock",
-                    status="refresh_lock",
-                    detail=input_name,
-                ),
-            )
-            async with context.update_input_lock:
-                async for event in update_flake_input(input_name, source=name):
-                    await put(event)
+            await _ensure_input_refreshed(name, input_name, context=context)
 
         async for event in updater.update_stream(
             current,
@@ -674,6 +752,7 @@ async def _run_sources_phase(
 ) -> None:
     async with aiohttp.ClientSession() as session:
         update_input_lock = asyncio.Lock()
+        update_input_tasks: dict[str, asyncio.Task[None]] = {}
         async with asyncio.TaskGroup() as group:
             for name in context.source_names:
                 group.create_task(
@@ -685,6 +764,7 @@ async def _run_sources_phase(
                             native_only=context.native_only,
                             session=session,
                             update_input_lock=update_input_lock,
+                            update_input_tasks=update_input_tasks,
                             queue=context.queue,
                             config=context.config,
                             pinned_version=context.pinned.get(name),

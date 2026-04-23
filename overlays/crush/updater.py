@@ -66,9 +66,7 @@ def _extract_required_go_version(go_mod: str) -> tuple[int, int, int]:
         stripped = line.strip()
         if not stripped.startswith("go "):
             continue
-        version = stripped.removeprefix("go ").strip()
-        if version:
-            return _parse_version_triplet(version)
+        return _parse_version_triplet(stripped.removeprefix("go ").strip())
     msg = "Could not find Go toolchain requirement in crush go.mod"
     raise RuntimeError(msg)
 

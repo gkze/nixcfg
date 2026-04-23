@@ -399,28 +399,18 @@ class GitHubActionsTailer:
         run: WorkflowRun,
         requested_job_name: str,
     ) -> None:
-        matched_job_id: int | None = None
         while True:
             jobs = self.api_client.list_run_jobs(run.id)
-            if matched_job_id is None:
-                try:
-                    matched_job = select_named_job(jobs, requested_job_name)
-                except ValueError as exc:
-                    if str(exc).startswith("Ambiguous job name"):
-                        raise RuntimeError(str(exc)) from exc
-                    if self.api_client.get_workflow_run(run.id).status == "completed":
-                        msg = f"Job {requested_job_name!r} never appeared before the run completed"
-                        raise RuntimeError(msg) from None
-                    await self._sleep()
-                    continue
-                matched_job_id = matched_job.id
-                await self._tail_one_job(run_id=run.id, job=matched_job)
-                return
-
-            matched_job = _job_by_id(jobs, matched_job_id)
-            if matched_job is None:
-                msg = f"Job id {matched_job_id} disappeared from run {run.id}"
-                raise RuntimeError(msg)
+            try:
+                matched_job = select_named_job(jobs, requested_job_name)
+            except ValueError as exc:
+                if str(exc).startswith("Ambiguous job name"):
+                    raise RuntimeError(str(exc)) from exc
+                if self.api_client.get_workflow_run(run.id).status == "completed":
+                    msg = f"Job {requested_job_name!r} never appeared before the run completed"
+                    raise RuntimeError(msg) from None
+                await self._sleep()
+                continue
             await self._tail_one_job(run_id=run.id, job=matched_job)
             return
 

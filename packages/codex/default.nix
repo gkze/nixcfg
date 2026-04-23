@@ -9,6 +9,8 @@
   runCommand,
   ripgrep,
   python3,
+  bubblewrap,
+  libcap,
   crate2nixSourceOnly ? false,
   ...
 }:
@@ -17,6 +19,54 @@ let
   version = slib.getFlakeVersion "codex";
   src = "${inputs.codex}/codex-rs";
   pythonForSourcePrep = python3.withPackages (ps: [ ps.tomlkit ]);
+
+  # Reuse the shared codex-v8 overlay source so updates only touch one pin.
+  v8Source = slib.sources.codex-v8;
+  rustyV8Src = pkgs.codex-v8;
+  v8ManifestVersion =
+    (builtins.fromTOML (builtins.readFile "${rustyV8Src}/Cargo.toml")).package.version;
+  prebuiltV8 =
+    if pkgs.stdenv.hostPlatform.isLinux then
+      slib.mkRustyV8PrebuiltArtifacts {
+        inherit pkgs;
+        name = "codex-v8";
+        releaseVersion = v8ManifestVersion;
+        archiveHash =
+          slib.sourceHashForPlatform "codex-v8" "rustyV8ArchiveHash"
+            pkgs.stdenv.hostPlatform.system;
+        bindingHash =
+          slib.sourceHashForPlatform "codex-v8" "rustyV8BindingHash"
+            pkgs.stdenv.hostPlatform.system;
+      }
+    else
+      null;
+  v8Build = slib.mkRustyV8Build {
+    inherit pkgs;
+    name = "codex-v8";
+    inherit (v8Source) version;
+    inherit rustyV8Src;
+    clangResourceVersion = "23";
+    gnArgsOverrides = {
+      # Our Nix-provided rustc + RUSTC_BOOTSTRAP=1 is nightly-capable, but GN
+      # can't detect this since we supply rust_sysroot_absolute.
+      rustc_nightly_capability = "true";
+    };
+    # v146.4.0's allocator uses #[linkage = "weak"] for shim symbols, but on
+    # Darwin weak symbols in force-loaded static archives are not resolved
+    # properly. Remove weak linkage so the symbols are strong externals.
+    extraPatchCommands = ''
+      ${pkgs.python3}/bin/python3 - "$out" <<'PYEOF'
+      import sys
+      from pathlib import Path
+      out = sys.argv[1]
+      p = Path(out) / "build/rust/allocator/lib.rs"
+      t = p.read_text()
+      t = t.replace('#[linkage = "weak"]\n', "")
+      p.write_text(t)
+      PYEOF
+    '';
+    prebuiltArtifacts = prebuiltV8;
+  };
 
   patchedSrc =
     runCommand "codex-${version}-src"
@@ -42,6 +92,7 @@ let
     rootSrc = patchedSrc;
   };
   cargoNixVersion = cargoNix.internal.crates."codex-cli".version;
+  cargoNixV8Version = cargoNix.internal.crates.v8.version;
   cargoNixVersionCheck =
     if cargoNixVersion == version then
       true
@@ -49,6 +100,14 @@ let
       throw ''
         packages/codex/Cargo.nix has codex-cli version ${cargoNixVersion},
         expected ${version}; regenerate Cargo.nix
+      '';
+  cargoNixV8VersionCheck =
+    if cargoNixV8Version == v8ManifestVersion then
+      true
+    else
+      throw ''
+        packages/codex/Cargo.nix has v8 version ${cargoNixV8Version},
+        expected ${v8ManifestVersion}; regenerate Cargo.nix
       '';
 
   crosstermOverride = attrs: {
@@ -71,10 +130,54 @@ let
     src = "${attrs.src}/rust/runfiles";
   };
 
+  codexLinuxSandboxOverride =
+    attrs:
+    lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+      nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [ pkgs.pkg-config ];
+      buildInputs = (attrs.buildInputs or [ ]) ++ [ libcap ];
+      postUnpack = (attrs.postUnpack or "") + ''
+        vendor_dir="$(dirname "$sourceRoot")/vendor"
+        mkdir -p "$vendor_dir"
+        ln -s ${patchedSrc}/vendor/bubblewrap "$vendor_dir/bubblewrap"
+      '';
+    };
+
+  codexLinuxLowMemoryOverride =
+    _attrs:
+    lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+      codegenUnits = 16;
+    };
+
+  # Prebuilt WebRTC libraries for the webrtc-sys crate. The crate's build.rs
+  # tries to download these at build time via scratch::path(), which fails in
+  # the Nix sandbox. Setting LK_CUSTOM_WEBRTC skips the download.
+  webrtcPrebuilt = pkgs.fetchzip (
+    if pkgs.stdenv.hostPlatform.isLinux then
+      {
+        url = "https://github.com/livekit/rust-sdks/releases/download/webrtc-24f6822-2/webrtc-linux-x64-release.zip";
+        hash = "sha256-aR76GGfK2UJheN5nI10e2f8CZPgxMxqlEPxyWc95AQ0=";
+      }
+    else
+      {
+        url = "https://github.com/livekit/rust-sdks/releases/download/webrtc-24f6822-2/webrtc-mac-arm64-release.zip";
+        hash = "sha256-4IwJM6EzTFgQd2AdX+Hj9NWzmyqXrSioRax2L6GKL1U=";
+      }
+  );
+  webrtcSysOverride = _attrs: {
+    LK_CUSTOM_WEBRTC = "${webrtcPrebuilt}";
+    # cxx-build creates a symlink to cxx.h that lands outside $lib, triggering
+    # the noBrokenSymlinks fixup check. Disable it for this crate.
+    dontCheckForBrokenSymlinks = true;
+  };
+
   crateOverrides = pkgs.defaultCrateOverrides // {
+    codex-app-server-protocol = codexLinuxLowMemoryOverride;
     crossterm = crosstermOverride;
+    codex-linux-sandbox = codexLinuxSandboxOverride;
     rmcp = rmcpOverride;
     runfiles = runfilesOverride;
+    v8 = v8Build.mkCrateOverride;
+    webrtc-sys = webrtcSysOverride;
   };
 
   codexDrv = cargoNix.workspaceMembers.codex-cli.build.override {
@@ -106,6 +209,7 @@ let
   });
   guardedCodexDrv =
     assert cargoNixVersionCheck;
+    assert cargoNixV8VersionCheck;
     codexDrvChecked;
 in
 if crate2nixSourceOnly then
@@ -125,11 +229,18 @@ else
         --fish <($out/bin/codex completion fish) \
         --zsh <($out/bin/codex completion zsh)
 
-      wrapProgram "$out/bin/codex" --prefix PATH : ${lib.makeBinPath [ ripgrep ]}
+      wrapProgram "$out/bin/codex" --prefix PATH : ${
+        lib.makeBinPath ([ ripgrep ] ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ bubblewrap ])
+      }
     '';
 
     passthru = {
-      inherit cargoNix crateOverrides patchedSrc;
+      inherit
+        cargoNix
+        crateOverrides
+        patchedSrc
+        v8Build
+        ;
       codexDrv = guardedCodexDrv;
     };
 
@@ -138,6 +249,9 @@ else
       homepage = "https://github.com/openai/codex";
       license = lib.licenses.asl20;
       mainProgram = "codex";
-      platforms = lib.platforms.unix;
+      platforms = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
     };
   }

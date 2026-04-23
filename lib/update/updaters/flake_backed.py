@@ -114,6 +114,31 @@ class FlakeInputUpdater(Updater):
         )
 
 
+class FlakeInputMetadataUpdater(FlakeInputUpdater):
+    """Persist flake input version/commit metadata without extra hashes."""
+
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
+        """Build a source entry tied to this updater's flake input."""
+        return SourceEntry(
+            version=info.version,
+            hashes=HashCollection.from_value(hashes),
+            input=self._input,
+            commit=info.commit,
+        )
+
+    async def fetch_hashes(
+        self,
+        info: VersionInfo,
+        session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
+    ) -> EventStream:
+        """Emit an empty hash set for metadata-only flake input tracking."""
+        _ = (info, session, _coerce_context(context))
+        empty_entries: list[HashEntry] = []
+        yield UpdateEvent.value(self.name, empty_entries)
+
+
 class FlakeInputHashUpdater(FlakeInputUpdater):
     """Base updater for hash-only sources backed by flake inputs."""
 
@@ -318,7 +343,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
 class DenoDepsHashUpdater(FlakeInputHashUpdater):
     """Hash updater for per-platform Deno dependency derivations."""
 
-    hash_type = "denoDepsHash"
+    hash_type: HashType = "denoDepsHash"
     native_only: bool = False
 
     def _compute_hash(self, info: VersionInfo) -> EventStream:
@@ -632,6 +657,7 @@ __all__ = [
     "DenoDepsHashUpdater",
     "DenoManifestUpdater",
     "FlakeInputHashUpdater",
+    "FlakeInputMetadataUpdater",
     "FlakeInputUpdater",
     "UvLockUpdater",
 ]

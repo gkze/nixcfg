@@ -294,7 +294,7 @@ async def _build_derivations(
                     profiler=profiler,
                     nix_verbosity=nix_verbosity,
                 )
-        except NixCommandError, TimeoutError:
+        except (NixCommandError, TimeoutError):
             # run_nix raises on timeout regardless of check=
             log.exception(
                 "%sBuild timed out after %s",

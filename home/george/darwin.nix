@@ -6,8 +6,27 @@
 }:
 let
   localZshSiteFuncsPath = "zsh/site-functions";
+  opencodeElectronDockApp = "${config.home.homeDirectory}/Applications/Home Manager Apps/OpenCode Electron Dev.app";
 in
 {
+  home.activation.repairTownDockOpenCodeElectron = lib.hm.dag.entryAfter [ "installPackages" ] ''
+    # When nix-darwin writes Dock defaults before Home Manager finishes
+    # materializing ~/Applications/Home Manager Apps, macOS can keep an
+    # unresolved question-mark tile for OpenCode Electron Dev. Re-add the item
+    # after installPackages so Dock resolves it against the live bundle.
+    if ! /usr/bin/defaults read com.apple.dock persistent-apps 2>/dev/null | ${lib.getExe pkgs.gnugrep} -Fq 'OpenCode Electron Dev'; then
+      exit 0
+    fi
+
+    if [ ! -d ${lib.escapeShellArg opencodeElectronDockApp} ]; then
+      echo "warning: skipping OpenCode Electron Dev Dock repair because ${opencodeElectronDockApp} is missing" >&2
+      exit 0
+    fi
+
+    ${pkgs.dockutil}/bin/dockutil --remove "OpenCode Electron Dev" --no-restart >/dev/null 2>&1 || true
+    ${pkgs.dockutil}/bin/dockutil --add ${lib.escapeShellArg opencodeElectronDockApp} --after "OpenCode Dev"
+  '';
+
   launchd.agents = {
     ssh-add = {
       enable = true;

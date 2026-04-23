@@ -34,6 +34,24 @@ let
 
   keymapData = import ./nvim-keymaps.nix;
   helpers = config.lib.nixvim;
+  oxfmtDefaultConfigText = ''
+    {
+      // Neovim-wide fallback when a project does not ship Oxfmt config.
+      "printWidth": 80,
+      "tabWidth": 2,
+      "useTabs": false,
+      "semi": true,
+      "singleQuote": false,
+      "jsxSingleQuote": false,
+      "trailingComma": "all",
+      "quoteProps": "as-needed",
+      "arrowParens": "always",
+      "bracketSpacing": true,
+      "endOfLine": "lf"
+    }
+  '';
+  oxfmtDefaultConfigPath = pkgs.writeText "nixcfg-oxfmt-defaults.jsonc" oxfmtDefaultConfigText;
+  oxlintTsgolintCmd = lib.getExe pkgs.oxlint-tsgolint;
 
   scopeSectionTitles = scope: map (section: section.title) scope.sections;
 
@@ -442,10 +460,49 @@ in
             formatters =
               let
                 ruffCmd = lib.getExe pkgs.ruff;
+                oxlintCmd = lib.getExe pkgs.oxlint;
               in
               {
                 biome.command = lib.getExe pkgs.biome;
-                prettier.command = lib.getExe pkgs.prettier;
+                oxlint = {
+                  command = oxlintCmd;
+                  args = [
+                    "--type-aware"
+                    "--fix"
+                    "$FILENAME"
+                  ];
+                  env = {
+                    OXLINT_TSGOLINT_PATH = oxlintTsgolintCmd;
+                  };
+                  stdin = false;
+                  cwd.__raw = ''
+                    function(self, ctx)
+                      return ctx.dirname or vim.fn.getcwd()
+                    end
+                  '';
+                };
+                oxfmt = {
+                  command = lib.getExe pkgs.oxfmt;
+                  args.__raw = ''
+                    function(self, ctx)
+                      local args = { "--stdin-filepath", "$FILENAME" }
+                      local dirname = ctx.dirname or vim.fn.getcwd()
+                      local config_files = vim.env.VP_VERSION ~= nil
+                        and { "vite.config.ts" }
+                        or { ".oxfmtrc.json", ".oxfmtrc.jsonc", "oxfmt.config.ts" }
+                      if vim.fs.root(dirname, config_files) == nil then
+                        vim.list_extend(args, { "--config", "${oxfmtDefaultConfigPath}" })
+                      end
+                      return args
+                    end
+                  '';
+                  stdin = true;
+                  cwd.__raw = ''
+                    function(self, ctx)
+                      return ctx.dirname or vim.fn.getcwd()
+                    end
+                  '';
+                };
                 ruff_fix.command = ruffCmd;
                 ruff_format.command = ruffCmd;
                 ruff_organize_imports.command = ruffCmd;
@@ -465,8 +522,14 @@ in
                 "ruff_organize_imports"
               ];
               toml = [ "taplo" ];
-              typescript = [ "prettier" ];
-              typescriptreact = [ "prettier" ];
+              typescript = [
+                "oxlint"
+                "oxfmt"
+              ];
+              typescriptreact = [
+                "oxlint"
+                "oxfmt"
+              ];
             };
           };
         };

@@ -1,4 +1,6 @@
-{ enableDescription ? "work profile" }:
+{
+  enableDescription ? "work profile",
+}:
 { lib, ... }:
 {
   imports = [

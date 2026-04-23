@@ -21,7 +21,7 @@ from lib.nix.schemas import codegen_main
 from lib.nix.schemas import fetch as fetch_schemas
 from lib.recover.cli import app as recover_app
 from lib.schema_codegen import (
-    DEFAULT_CONFIG_PATH,
+    default_config_path,
     generate_schema_codegen_target,
     list_schema_codegen_targets,
     write_codegen_lockfile,
@@ -118,6 +118,11 @@ def _display_schema_path(path: pathlib.Path) -> str:
         return str(path)
 
 
+def _resolve_schema_config_path(config: pathlib.Path | None) -> pathlib.Path:
+    """Resolve the default schema codegen config lazily at command runtime."""
+    return default_config_path() if config is None else config
+
+
 @schema_app.command(
     name="targets",
     help="List declarative schema codegen targets.",
@@ -125,17 +130,18 @@ def _display_schema_path(path: pathlib.Path) -> str:
 def schema_targets(
     *,
     config: Annotated[
-        pathlib.Path,
+        pathlib.Path | None,
         typer.Option(
             "-c",
             "--config",
             help="Path to the schema codegen config file.",
         ),
-    ] = DEFAULT_CONFIG_PATH,
+    ] = None,
 ) -> None:
     """List available schema generation targets from the declarative config."""
+    resolved_config = _resolve_schema_config_path(config)
     try:
-        for target in list_schema_codegen_targets(config_path=config):
+        for target in list_schema_codegen_targets(config_path=resolved_config):
             typer.echo(f"{target.name}\t{_display_schema_path(target.output)}")
     except (FileNotFoundError, RuntimeError, TypeError, ValueError) as exc:
         typer.echo(f"Schema target listing failed: {exc}", err=True)
@@ -153,18 +159,19 @@ def schema_generate(
     ],
     *,
     config: Annotated[
-        pathlib.Path,
+        pathlib.Path | None,
         typer.Option(
             "-c",
             "--config",
             help="Path to the schema codegen config file.",
         ),
-    ] = DEFAULT_CONFIG_PATH,
+    ] = None,
 ) -> None:
     """Run the declarative schema codegen pipeline for one target."""
+    resolved_config = _resolve_schema_config_path(config)
     try:
         output_path = generate_schema_codegen_target(
-            config_path=config,
+            config_path=resolved_config,
             progress=_schema_progress,
             target_name=target,
         )
@@ -246,10 +253,11 @@ def schema_fetch(
     ] = False,
 ) -> None:
     """Download or verify vendored Nix JSON schemas."""
+    if check:
+        ok = schema_check()
+        raise typer.Exit(code=0 if ok else 1)
+
     try:
-        if check:
-            ok = schema_check()
-            raise typer.Exit(code=0 if ok else 1)
         fetch_schemas(progress=_schema_progress)
     except RuntimeError as exc:
         typer.echo(f"Schema fetch failed: {exc}", err=True)

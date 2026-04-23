@@ -16,6 +16,7 @@
       { app = "/Applications/Twilight.app"; }
       { app = "/Applications/Ghostty.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/OpenCode Dev.app"; }
+      { app = "/Users/${primaryUser}/Applications/Home Manager Apps/OpenCode Electron Dev.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Zed Nightly.app"; }
       { app = "/Applications/Cursor.app"; }
       { app = "/Applications/Visual Studio Code - Insiders.app"; }

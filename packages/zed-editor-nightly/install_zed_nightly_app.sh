@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-if [ "$#" -ne 8 ]; then
-  echo "usage: install_zed_nightly_app.sh <out> <tmpdir> <app-version> <patched-src> <magick> <png2icns> <git-bin> <cli-bin>" >&2
+if [ "$#" -ne 9 ]; then
+  echo "usage: install_zed_nightly_app.sh <out> <tmpdir> <app-version> <patched-src> <magick> <png2icns> <git-bin> <cli-bin> <zed-bin>" >&2
   exit 1
 fi
 
@@ -14,13 +14,14 @@ magick_bin="$5"
 png2icns_bin="$6"
 git_bin="$7"
 cli_bin="$8"
+zed_bin="$9"
 
 app_path="$out_path/Applications/Zed Nightly.app"
 iconset_dir="$tmpdir_path/Zed Nightly.iconset"
 
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources" "$out_path/bin"
 
-cat > "$app_path/Contents/Info.plist" <<EOF
+cat >"$app_path/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -79,7 +80,7 @@ cp "${patched_src}/crates/zed/resources/app-icon-nightly@2x.png" "$iconset_dir/1
 "$png2icns_bin" "$app_path/Contents/Resources/Zed Nightly.icns" "$iconset_dir"/*.png >/dev/null
 cp "${patched_src}/crates/zed/resources/Document.icns" "$app_path/Contents/Resources/Document.icns"
 
-cp "$PWD/target/bin/zed" "$app_path/Contents/MacOS/zed"
+cp "$zed_bin" "$app_path/Contents/MacOS/zed"
 ln -s "$git_bin" "$app_path/Contents/MacOS/git"
 cp "$cli_bin" "$app_path/Contents/MacOS/cli"
 ln -s "$out_path/Applications/Zed Nightly.app/Contents/MacOS/cli" "$out_path/bin/zed"

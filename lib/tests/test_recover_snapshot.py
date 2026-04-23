@@ -114,6 +114,58 @@ def test_plan_snapshot_recovery_rejects_distinct_ambiguous_snapshots(
         asyncio.run(rs.plan_snapshot_recovery(str(realised)))
 
 
+def test_snapshot_helpers_cover_missing_generation_symlinks_and_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Cover helper failures and symlink fingerprint support."""
+    missing = tmp_path / "missing"
+    with pytest.raises(RuntimeError, match="Generation path not found"):
+        rs._normalise_generation_path(str(missing))
+
+    symlink_root = tmp_path / "symlink-root"
+    symlink_root.mkdir()
+    (symlink_root / "target.txt").write_text("payload\n", encoding="utf-8")
+    (symlink_root / "link.txt").symlink_to("target.txt")
+    fingerprint = rs._snapshot_fingerprint(symlink_root)
+    assert ("symlink", "link.txt", "target.txt") in fingerprint
+
+    with pytest.raises(RuntimeError, match="Could not locate a source snapshot"):
+        rs._select_source_snapshot([str(tmp_path / "not-a-snapshot")])
+
+    realised = tmp_path / "realised"
+    realised.write_text("out\n", encoding="utf-8")
+
+    async def _missing_deriver(_path: str) -> str | None:
+        return None
+
+    monkeypatch.setattr(rs, "nix_store_query_deriver", _missing_deriver)
+
+    with pytest.raises(RuntimeError, match="Could not resolve deriver"):
+        asyncio.run(rs.plan_snapshot_recovery(str(realised)))
+
+
+def test_run_snapshot_recovery_returns_errors_in_plain_and_json_forms(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Surface planning failures through the shared CLI renderer."""
+
+    async def _plan(_generation: str) -> rs.SnapshotPlan:
+        raise RuntimeError("no snapshot")
+
+    monkeypatch.setattr(rs, "plan_snapshot_recovery", _plan)
+
+    assert rs.run_snapshot_recovery("/run/current-system") == 1
+    assert capsys.readouterr().err == "Error: no snapshot\n"
+
+    assert rs.run_snapshot_recovery("/run/current-system", json_output=True) == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "success": False,
+        "error": "no snapshot",
+    }
+
+
 def test_run_snapshot_recovery_supports_plain_and_json_output(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

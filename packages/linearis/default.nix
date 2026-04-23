@@ -9,7 +9,7 @@
 }:
 let
   pname = "linearis";
-  version = (outputs.lib.sourceEntry pname).version;
+  inherit ((outputs.lib.sourceEntry pname)) version;
   src = fetchurl {
     url = outputs.lib.sourceUrl pname "sha256";
     hash = outputs.lib.sourceHash pname "sha256";

@@ -7,7 +7,6 @@ lib.mkDarwinHost {
   work = true;
   brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
   extraHomeModules = [
-    ../home/george/zed.nix
     "${lib.modulesPath}/home/darwin-closure-priority.nix"
     (
       { pkgs, ... }:
@@ -28,6 +27,10 @@ lib.mkDarwinHost {
       # takes over files like ~/.gemini/settings.json and VS Code Insiders
       # settings.json.
       home-manager.backupFileExtension = "backup";
+
+      # The default 6 GiB Rosetta Linux builder VM is too small for some of
+      # the heavier x86_64-linux Rust builds we run from argus.
+      nix-rosetta-builder.memory = "16GiB";
     }
     "${lib.modulesPath}/darwin/george/town-dock-apps.nix"
     (lib.mkSetOpencodeEnvModule "work.json")

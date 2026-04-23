@@ -7,7 +7,6 @@ import subprocess
 from collections.abc import Iterable
 from dataclasses import fields, is_dataclass
 from functools import lru_cache
-from pathlib import Path
 
 from nix_manipulator import parse
 from nix_manipulator.expressions.binding import Binding
@@ -17,6 +16,7 @@ from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.source_code import NixSourceCode
 
 from lib.tests._assertions import expect_not_none
+from lib.update.paths import REPO_ROOT
 
 _NON_SEMANTIC_FIELD_NAMES = {
     "after",
@@ -134,7 +134,7 @@ def _canonical_nix_parse(text: str) -> str:
         capture_output=True,
         text=True,
         check=False,
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=REPO_ROOT,
     )
     assert result.returncode == 0, (
         result.stderr.strip() or "nix-instantiate --parse failed"

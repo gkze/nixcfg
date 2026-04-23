@@ -1,0 +1,27 @@
+{
+  "drvHash": "2fj03wcic4lbwdpc02ik0pp5wal5zm8k",
+  "hashes": [
+    {
+      "hash": "sha256-10XfKNVN4pS3G09yeP8g0RLjvVMX5Ulagou9hswcWkY=",
+      "hashType": "nodeModulesHash",
+      "platform": "aarch64-darwin"
+    },
+    {
+      "hash": "sha256-mBOj9T4yu6qLUMPdIFF5/Av+bDJ8XMqCcYTM6L8Bjs0=",
+      "hashType": "nodeModulesHash",
+      "platform": "aarch64-linux"
+    },
+    {
+      "hash": "sha256-O16yl8I8qRzX8aoDL2DprGSlDsgpi7gLSuNPKN20rIk=",
+      "hashType": "nodeModulesHash",
+      "platform": "x86_64-darwin"
+    },
+    {
+      "hash": "sha256-2iQxU6IIXhUHojGegf9Tg9DbS0C795UytE6ueGLP5Io=",
+      "hashType": "nodeModulesHash",
+      "platform": "x86_64-linux"
+    }
+  ],
+  "input": "opencode",
+  "version": "gkze/fixes"
+}

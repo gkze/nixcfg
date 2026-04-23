@@ -5,13 +5,7 @@
   "description": "Language-agnostic manifest for pinned sources, prepared inputs, and generator products.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "version",
-    "sources",
-    "inputs",
-    "generators",
-    "products"
-  ],
+  "required": ["version", "sources", "inputs", "generators", "products"],
   "properties": {
     "version": {
       "type": "integer",
@@ -109,10 +103,7 @@
     "SchemaFormat": {
       "title": "SchemaFormat",
       "type": "string",
-      "enum": [
-        "json",
-        "yaml"
-      ]
+      "enum": ["json", "yaml"]
     },
     "LanguageName": {
       "title": "LanguageName",
@@ -167,11 +158,7 @@
       "title": "DirectorySource",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "kind",
-        "path",
-        "format"
-      ],
+      "required": ["kind", "path", "format"],
       "properties": {
         "kind": {
           "type": "string",
@@ -200,11 +187,7 @@
       "title": "UrlSource",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "kind",
-        "uri",
-        "format"
-      ],
+      "required": ["kind", "uri", "format"],
       "properties": {
         "kind": {
           "type": "string",
@@ -225,14 +208,7 @@
       "title": "GitHubRawSource",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "kind",
-        "owner",
-        "repo",
-        "ref",
-        "path",
-        "format"
-      ],
+      "required": ["kind", "owner", "repo", "ref", "path", "format"],
       "properties": {
         "kind": {
           "type": "string",
@@ -282,9 +258,7 @@
       "title": "RegistryProfile",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "resource"
-      ],
+      "required": ["resource"],
       "properties": {
         "aliases": {
           "title": "AliasStrategies",
@@ -305,26 +279,17 @@
     "AliasStrategy": {
       "title": "AliasStrategy",
       "type": "string",
-      "enum": [
-        "basename",
-        "internal-id",
-        "relative-path",
-        "source-uri"
-      ]
+      "enum": ["basename", "internal-id", "relative-path", "source-uri"]
     },
     "ResourceConfig": {
       "title": "ResourceConfig",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "mode"
-      ],
+      "required": ["mode"],
       "properties": {
         "mode": {
           "type": "string",
-          "enum": [
-            "from-contents"
-          ]
+          "enum": ["from-contents"]
         },
         "default_specification": {
           "$ref": "#/$defs/NonEmptyString"
@@ -348,15 +313,11 @@
       "title": "RetrieveConfig",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "kind"
-      ],
+      "required": ["kind"],
       "properties": {
         "kind": {
           "type": "string",
-          "enum": [
-            "none"
-          ]
+          "enum": ["none"]
         }
       }
     },
@@ -375,11 +336,7 @@
       "title": "JsonSchemaInput",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "kind",
-        "sources",
-        "entrypoints"
-      ],
+      "required": ["kind", "sources", "entrypoints"],
       "properties": {
         "kind": {
           "type": "string",
@@ -411,10 +368,7 @@
       "title": "WorkflowTemplateSchemaInput",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "kind",
-        "sources"
-      ],
+      "required": ["kind", "sources"],
       "properties": {
         "kind": {
           "type": "string",
@@ -451,10 +405,7 @@
       "properties": {
         "dereference": {
           "type": "string",
-          "enum": [
-            "inline-refs",
-            "none"
-          ]
+          "enum": ["inline-refs", "none"]
         },
         "merge_ref_siblings": {
           "type": "boolean"
@@ -473,10 +424,7 @@
       "title": "Generator",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "language",
-        "tool"
-      ],
+      "required": ["language", "tool"],
       "properties": {
         "language": {
           "$ref": "#/$defs/LanguageName"
@@ -498,11 +446,7 @@
       "title": "Product",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "inputs",
-        "generators",
-        "output_template"
-      ],
+      "required": ["inputs", "generators", "output_template"],
       "properties": {
         "inputs": {
           "$ref": "#/$defs/InputRefList"

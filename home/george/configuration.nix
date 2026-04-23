@@ -20,6 +20,7 @@
     outputs.homeModules.nixcfgGit
     outputs.homeModules.nixcfgLanguageGo
     ./nixvim.nix
+    ./zed.nix
     outputs.homeModules.nixcfgOpencode
     outputs.homeModules.nixcfgPackages
     outputs.homeModules.nixcfgZen
@@ -40,12 +41,67 @@
 
   home = {
     activation.injectZedGithubToken = lib.hm.dag.entryAfter [ "zedSettingsActivation" "sops-nix" ] ''
-      # Inject sops-managed GitHub token into Zed settings (preserves user modifications)
-      ${lib.getExe pkgs.jq} --arg token "$(cat ${config.sops.secrets.github_pat.path})" \
-        '.context_servers."mcp-server-github".settings.github_personal_access_token = $token' \
-        "${config.xdg.configHome}/zed/settings.json" \
-        | ${lib.getExe' pkgs.moreutils "sponge"} "${config.xdg.configHome}/zed/settings.json"
+      settings_path="${config.xdg.configHome}/zed/settings.json"
+      token_path="${config.sops.secrets.github_pat.path}"
+
+      # Inject the sops-managed GitHub token into Zed settings while avoiding
+      # partial writes when jq or the filesystem fails mid-update.
+      if [ ! -f "$settings_path" ]; then
+        echo "warning: skipping Zed GitHub token injection because $settings_path is missing" >&2
+      else
+        if [ ! -s "$token_path" ]; then
+          echo "missing GitHub token for Zed injection: $token_path" >&2
+          exit 1
+        fi
+
+        token="$(cat "$token_path")"
+        tmp_settings="$(mktemp "$settings_path.tmp.XXXXXX")"
+        chmod 600 "$tmp_settings"
+
+        if ! ${lib.getExe pkgs.jq} \
+          --arg token "$token" \
+          '.context_servers."mcp-server-github".settings.github_personal_access_token = $token' \
+          "$settings_path" > "$tmp_settings"
+        then
+          rm -f "$tmp_settings"
+          exit 1
+        fi
+
+        run mv "$tmp_settings" "$settings_path"
+      fi
     '';
+    activation.materializeVscodeSettings =
+      let
+        vscodeSettingsHomeFileKey =
+          "${config.home.homeDirectory}/Library/Application Support/${config.programs.vscode.nameShort}/User/settings.json";
+        vscodeSettingsRelativePath = lib.removePrefix "${config.home.homeDirectory}/" vscodeSettingsHomeFileKey;
+        vscodeSettingsSource = lib.attrByPath [
+          "home"
+          "file"
+          vscodeSettingsHomeFileKey
+          "source"
+        ] (throw "missing generated VS Code settings source for ${vscodeSettingsHomeFileKey}") config;
+      in
+      lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+        settings_path="$HOME/${vscodeSettingsRelativePath}"
+        settings_dir="$(dirname "$settings_path")"
+        tmp_settings=""
+
+        run mkdir -p "$settings_dir"
+        tmp_settings="$(mktemp "$settings_dir/settings.json.tmp.XXXXXX")"
+
+        cleanup_tmp() {
+          if [ -n "$tmp_settings" ] && [ -e "$tmp_settings" ]; then
+            rm -f "$tmp_settings"
+          fi
+        }
+
+        trap cleanup_tmp EXIT
+        run cp "${vscodeSettingsSource}" "$tmp_settings"
+        run chmod 600 "$tmp_settings"
+        run mv "$tmp_settings" "$settings_path"
+        trap - EXIT
+      '';
     # Symlink ~/.config/home-manager -> nixcfg so `home-manager switch` uses the main flake
     # This avoids a separate lockfile that drifts when topgrade runs home-manager updates
     activation.standaloneHomeManagerSymlink = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
@@ -56,14 +112,70 @@
       if [ -L "$HM_DIR" ] && [ "$(readlink "$HM_DIR")" = "$NIXCFG_DIR" ]; then
         run --silence echo "home-manager symlink already correct"
       else
-        # Remove existing directory/files
-        if [ -e "$HM_DIR" ]; then
-          run rm -rf "$HM_DIR"
+        if [ -L "$HM_DIR" ]; then
+          run rm -f "$HM_DIR"
+        elif [ -e "$HM_DIR" ]; then
+          backup_path="$HM_DIR.nixcfg-backup.$(date +%Y%m%d%H%M%S)"
+          echo "Backing up existing $HM_DIR to $backup_path" >&2
+          run mv "$HM_DIR" "$backup_path"
         fi
         run ln -s "$NIXCFG_DIR" "$HM_DIR"
       fi
     '';
+    activation.opencodeElectronStateLinks = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      OPENCODE_TAURI_STATE_DIR="${config.home.homeDirectory}/Library/Application Support/ai.opencode.desktop.dev"
+      OPENCODE_ELECTRON_STATE_DIR="${config.home.homeDirectory}/Library/Application Support/ai.opencode.desktop.electron-dev"
+      OPENCODE_ELECTRON_BACKUP_DIR="$OPENCODE_ELECTRON_STATE_DIR/backups/pre-symlink"
+
+      link_state_file() {
+        local source_path="$1"
+        local target_path="$2"
+
+        if [ ! -e "$source_path" ]; then
+          return
+        fi
+
+        if [ -L "$target_path" ]; then
+          local existing_target
+          existing_target="$(${lib.getExe' pkgs.coreutils "readlink"} "$target_path")"
+          if [ "$existing_target" = "$source_path" ]; then
+            return
+          fi
+          run rm -f "$target_path"
+        elif [ -e "$target_path" ]; then
+          local backup_dir
+          run mkdir -p "$OPENCODE_ELECTRON_BACKUP_DIR"
+          backup_dir="$(${lib.getExe' pkgs.coreutils "mktemp"} -d "$OPENCODE_ELECTRON_BACKUP_DIR/$(basename "$target_path").XXXXXX")"
+          echo "Backing up existing $target_path to $backup_dir" >&2
+          run mv "$target_path" "$backup_dir/$(basename "$target_path")"
+        fi
+
+        run ln -s "$source_path" "$target_path"
+      }
+
+      if [ -d "$OPENCODE_TAURI_STATE_DIR" ]; then
+        run mkdir -p "$OPENCODE_ELECTRON_STATE_DIR"
+
+        # Share the app-owned persisted stores between the Tauri and Electron
+        # dev shells, but keep browser/runtime files (cookies, caches, window
+        # state, Chromium local/session storage) separate.
+        link_state_file "$OPENCODE_TAURI_STATE_DIR/default.dat" "$OPENCODE_ELECTRON_STATE_DIR/default.dat"
+        link_state_file "$OPENCODE_TAURI_STATE_DIR/opencode.global.dat" "$OPENCODE_ELECTRON_STATE_DIR/opencode.global.dat"
+        link_state_file "$OPENCODE_TAURI_STATE_DIR/opencode.settings.dat" "$OPENCODE_ELECTRON_STATE_DIR/opencode.settings.dat"
+
+        for source_path in "$OPENCODE_TAURI_STATE_DIR"/opencode.workspace*.dat; do
+          if [ ! -e "$source_path" ]; then
+            continue
+          fi
+          link_state_file "$source_path" "$OPENCODE_ELECTRON_STATE_DIR/$(basename "$source_path")"
+        done
+      fi
+    '';
     file = {
+      # Keep the Nix-generated VS Code settings content, but materialize it as a
+      # normal file so the editor can mutate it between switches.
+      "${config.home.homeDirectory}/Library/Application Support/${config.programs.vscode.nameShort}/User/settings.json".enable = false;
+
       "${config.programs.gpg.homedir}/gpg-agent.conf".text =
         let
           prog =
@@ -92,7 +204,9 @@
       MANPAGER = "sh -c 'col -bx | bat -plman'";
       MANROFFOPT = "-c";
       NIX_PAGER = "bat -p";
+      OXLINT_TSGOLINT_PATH = lib.getExe pkgs.oxlint-tsgolint;
       OPENCODE_DB = "opencode.db";
+      OPENCODE_EXPERIMENTAL = "1";
       PAGER = "bat -p";
     };
     shellAliases =
@@ -192,7 +306,7 @@
         # optional apps just to evaluate unrelated checks.
         heavyOptional.enable = lib.mkDefault false;
         cloud.enable = lib.mkDefault false;
-        excludePackagesByName = managedMacAppProjection.excludePackagesByName;
+        inherit (managedMacAppProjection) excludePackagesByName;
         extraPackages = with pkgs; [
           betterdisplay
           rectangle

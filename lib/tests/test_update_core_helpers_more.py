@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -117,28 +118,34 @@ def test_flake_helpers_cover_root_without_inputs_and_original_rev(
     assert version == "deadbeef"
 
 
-def test_resolve_repo_root_env_and_nix_store_branches(
+def test_find_root_prefers_env_and_root_marker_search(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Resolve root from REPO_ROOT and nix-store fallback search."""
+    """Resolve root from REPO_ROOT first, then by walking to ``.root``."""
     env_root = tmp_path / "env-root"
     env_root.mkdir()
     monkeypatch.setenv("REPO_ROOT", str(env_root))
-    assert update_paths._resolve_repo_root() == env_root.resolve()
+    update_paths.find_root.cache_clear()
+    assert update_paths.find_root() == env_root.resolve()
     monkeypatch.delenv("REPO_ROOT", raising=False)
+    update_paths.find_root.cache_clear()
 
     repo_root = tmp_path / "repo"
     nested = repo_root / "nested" / "work"
     nested.mkdir(parents=True)
-    (repo_root / "flake.nix").write_text("{}\n", encoding="utf-8")
+    (repo_root / ".root").write_text("marker\n", encoding="utf-8")
+    existing_tool = nested / "tool.py"
+    existing_tool.write_text("pass\n", encoding="utf-8")
 
-    monkeypatch.setattr(update_paths, "__file__", "/nix/store/hash/lib/update/paths.py")
     monkeypatch.setattr(update_paths.Path, "cwd", staticmethod(lambda: nested))
-    assert update_paths._resolve_repo_root() == repo_root.resolve()
+    assert update_paths.find_root() == repo_root.resolve()
+    assert update_paths.find_root(existing_tool) == repo_root.resolve()
+    assert update_paths.find_repo_root(existing_tool) == repo_root.resolve()
 
-    (repo_root / "flake.nix").unlink()
-    assert update_paths._resolve_repo_root() == nested.resolve()
+    update_paths.find_root.cache_clear()
+    with pytest.raises(RuntimeError, match=r"Could not find repo root"):
+        update_paths.find_root(tmp_path / "missing")
 
 
 def test_paths_helpers_cover_remaining_branches(
@@ -181,12 +188,32 @@ def test_paths_helpers_cover_remaining_branches(
 def test_repo_root_proxy_string_helpers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Expose readable string representations for the lazy repo-root proxy."""
+    """Expose readable string representations and path-like behavior.
+
+    This covers the lazy repo-root proxy helpers used across update modules.
+    """
     monkeypatch.setenv("REPO_ROOT", str(tmp_path))
     update_paths.get_repo_root.cache_clear()
-    assert str(update_paths.REPO_ROOT) == str(tmp_path.resolve())
-    assert repr(update_paths.REPO_ROOT) == repr(tmp_path.resolve())
+
+    relative_proxy = update_paths._RepoPathProxy("flake.nix")
+    resolved_root = tmp_path.resolve()
+    resolved_file = resolved_root / "flake.nix"
+
+    assert str(update_paths.REPO_ROOT) == str(resolved_root)
+    assert repr(update_paths.REPO_ROOT) == repr(resolved_root)
+    assert os.fspath(relative_proxy) == os.fspath(resolved_file)
+    assert relative_proxy == resolved_file
+    assert relative_proxy == os.fspath(resolved_file)
+    assert relative_proxy != object()
+    assert relative_proxy != _BytesPathLike()
+    assert hash(relative_proxy) == hash(resolved_file)
+
     monkeypatch.delenv("REPO_ROOT", raising=False)
+
+
+class _BytesPathLike(os.PathLike[bytes]):
+    def __fspath__(self) -> bytes:
+        return b"/tmp/not-a-str-path"
 
 
 def test_sources_helpers_cover_loading_and_save_branches(

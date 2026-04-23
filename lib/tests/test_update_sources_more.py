@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import lib.update.sources as update_sources_module
 from lib.nix.models.sources import SourceEntry
 from lib.update.sources import (
     nix_source_names,
@@ -75,3 +77,62 @@ def test_validate_source_discovery_consistency_and_save_source_entry(
     save_source_entry(target, SourceEntry(hashes={"x86_64-linux": "sha256-demo"}))
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["hashes"]["x86_64-linux"] == "sha256-demo"
+
+
+def test_run_nix_eval_uses_thread_pool_when_loop_is_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run nix eval via a helper thread when already inside an event loop."""
+    seen: dict[str, object] = {}
+
+    async def _fake_run_nix(command: list[str], *, check: bool) -> object:
+        seen["command"] = command
+        seen["check"] = check
+        return SimpleNamespace(returncode=0, stdout='["demo"]', stderr="")
+
+    class _Future:
+        def __init__(self, value: object) -> None:
+            self._value = value
+
+        def result(self) -> object:
+            return self._value
+
+    class _Executor:
+        def __enter__(self) -> _Executor:
+            seen["entered"] = True
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            seen["exited"] = True
+
+        def submit(self, func):
+            seen["submitted"] = True
+            return _Future(func())
+
+    monkeypatch.setattr(update_sources_module, "run_nix", _fake_run_nix)
+    monkeypatch.setattr(
+        update_sources_module.asyncio, "get_running_loop", lambda: object()
+    )
+    monkeypatch.setattr(
+        update_sources_module,
+        "ThreadPoolExecutor",
+        lambda **_kwargs: _Executor(),
+    )
+
+    returncode, stdout, stderr = update_sources_module._run_nix_eval(
+        "builtins.attrNames {}"
+    )
+
+    assert (returncode, stdout, stderr) == (0, '["demo"]', "")
+    assert seen["entered"] is True
+    assert seen["submitted"] is True
+    assert seen["exited"] is True
+    assert seen["command"] == [
+        "nix",
+        "eval",
+        "--impure",
+        "--json",
+        "--expr",
+        "builtins.attrNames {}",
+    ]
+    assert seen["check"] is False

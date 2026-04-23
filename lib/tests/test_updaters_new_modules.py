@@ -10,11 +10,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from lib.import_utils import load_module_from_path
-from lib.nix.models.sources import SourceEntry
+from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
+from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.paths import REPO_ROOT
+from lib.update.updaters import materialization as materialization_mod
 from lib.update.updaters.base import VersionInfo
+from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -44,6 +47,18 @@ def codex_desktop_module() -> ModuleType:
     return _load_module(
         "packages/codex-desktop/updater.py", "codex_desktop_updater_test"
     )
+
+
+@pytest.fixture(scope="module")
+def codex_module() -> ModuleType:
+    """Load the codex updater module."""
+    return _load_module("packages/codex/updater.py", "codex_updater_test")
+
+
+@pytest.fixture(scope="module")
+def goose_cli_module() -> ModuleType:
+    """Load the goose-cli updater module."""
+    return _load_module("overlays/goose-cli/updater.py", "goose_cli_updater_test")
 
 
 @pytest.fixture(scope="module")
@@ -87,6 +102,130 @@ def test_mux_uses_platform_specific_node_modules_hashes(
     updater_cls = mux_module.MuxUpdater
     assert updater_cls.platform_specific is True
     assert updater_cls.hash_type == "nodeModulesHash"
+
+
+def test_codex_updater_refreshes_crate2nix_artifacts(
+    codex_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex should emit checked-in crate2nix artifacts during refreshes."""
+    updater = codex_module.CodexUpdater()
+    assert updater.materialize_when_current is True
+    assert updater.shows_materialize_artifacts_phase is True
+
+    async def _stream(name: str) -> EventStream:
+        yield UpdateEvent.status(
+            name,
+            "Refreshing crate2nix artifacts...",
+            operation="materialize_artifacts",
+        )
+        yield UpdateEvent.artifact(
+            name,
+            GeneratedArtifact.text("packages/codex/Cargo.nix", "{ codex = true; }\n"),
+        )
+        yield UpdateEvent.status(
+            name,
+            "Prepared crate2nix artifacts",
+            operation="materialize_artifacts",
+            status="updated",
+            detail="crate2nix artifacts",
+        )
+
+    monkeypatch.setattr(
+        codex_module.CodexUpdater,
+        "stream_materialized_artifacts",
+        lambda _self: _stream("codex"),
+    )
+
+    events = _run(_collect(updater.fetch_hashes(VersionInfo("main", {}), object())))
+    assert [event.kind for event in events] == [
+        UpdateEventKind.STATUS,
+        UpdateEventKind.ARTIFACT,
+        UpdateEventKind.STATUS,
+        UpdateEventKind.VALUE,
+    ]
+    assert events[-1].payload == []
+
+
+def test_goose_cli_updater_emits_crate2nix_artifacts_before_src_hash(
+    goose_cli_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Goose should refresh crate2nix artifacts before computing srcHash."""
+    updater = goose_cli_module.GooseCliUpdater()
+    assert updater.materialize_when_current is True
+    assert updater.shows_materialize_artifacts_phase is True
+
+    async def _stream(name: str) -> EventStream:
+        yield UpdateEvent.artifact(
+            name,
+            GeneratedArtifact.text(
+                "overlays/goose-cli/Cargo.nix",
+                "{ goose = true; }\n",
+            ),
+        )
+
+    async def _fixed_hash(_name: str, _expr: str, **_kwargs: object) -> EventStream:
+        yield UpdateEvent.value(
+            "goose-cli", "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        )
+
+    monkeypatch.setattr(
+        goose_cli_module.GooseCliUpdater,
+        "stream_materialized_artifacts",
+        lambda _self: _stream("goose-cli"),
+    )
+    monkeypatch.setattr(goose_cli_module, "compute_fixed_output_hash", _fixed_hash)
+
+    events = _run(_collect(updater.fetch_hashes(VersionInfo("1.0.0", {}), object())))
+    artifact_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.kind == UpdateEventKind.ARTIFACT
+    )
+    value_index = max(
+        index
+        for index, event in enumerate(events)
+        if event.kind == UpdateEventKind.VALUE
+    )
+    assert artifact_index < value_index
+    payload = expect_instance(events[value_index].payload, list)
+    hash_entry = expect_instance(payload[0], HashEntry)
+    assert hash_entry.hash_type == "srcHash"
+
+
+def test_crate2nix_artifacts_mixin_streams_shared_materialization_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The shared crate2nix materialization mixin should proxy the standard stream."""
+
+    async def _stream(name: str, *, operation: str) -> EventStream:
+        yield UpdateEvent.status(name, "refreshing", operation=operation)
+        yield UpdateEvent.artifact(
+            name,
+            GeneratedArtifact.text("packages/demo/Cargo.nix", "{ demo = true; }\n"),
+        )
+
+    monkeypatch.setattr(
+        materialization_mod,
+        "stream_crate2nix_artifact_updates",
+        _stream,
+    )
+
+    class _Updater(materialization_mod.Crate2NixArtifactsMixin):
+        name = "demo"
+
+    updater = _Updater()
+    events = _run(_collect(updater.stream_materialized_artifacts()))
+
+    assert [event.kind for event in events] == [
+        UpdateEventKind.STATUS,
+        UpdateEventKind.ARTIFACT,
+    ]
+    assert events[0].payload == {"operation": "materialize_artifacts"}
+    artifact_payload = expect_instance(events[1].payload, list)
+    assert len(artifact_payload) == 1
+    assert artifact_payload[0].path == Path("packages/demo/Cargo.nix")
 
 
 def test_commander_fetches_latest_version_from_changelog(
@@ -335,6 +474,8 @@ def test_opencode_hash_fetch_passes_direct_match_names(
 ) -> None:
     """Pass direct git dep keys to cargo hash helper."""
     updater = opencode_desktop_module.OpencodeDesktopUpdater()
+    assert updater.materialize_when_current is True
+    assert updater.shows_materialize_artifacts_phase is True
     lockfile = "\n".join([
         "[[package]]",
         'name = "specta"',
@@ -354,6 +495,21 @@ def test_opencode_hash_fetch_passes_direct_match_names(
         updater,
         "_fetch_lockfile_content",
         lambda *_a, **_k: asyncio.sleep(0, result=lockfile),
+    )
+
+    async def _stream(name: str) -> EventStream:
+        yield UpdateEvent.artifact(
+            name,
+            GeneratedArtifact.text(
+                "packages/opencode-desktop/Cargo.nix",
+                "{ opencode = true; }\n",
+            ),
+        )
+
+    monkeypatch.setattr(
+        opencode_desktop_module.OpencodeDesktopUpdater,
+        "stream_materialized_artifacts",
+        lambda _self: _stream("opencode-desktop"),
     )
 
     captured: dict[str, object] = {}
@@ -384,7 +540,18 @@ def test_opencode_hash_fetch_passes_direct_match_names(
     )
 
     events = _run(_collect(updater.fetch_hashes(VersionInfo("main", {}), object())))
+    artifact_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.kind == UpdateEventKind.ARTIFACT
+    )
     value_events = [event for event in events if event.kind == UpdateEventKind.VALUE]
+    value_index = max(
+        index
+        for index, event in enumerate(events)
+        if event.kind == UpdateEventKind.VALUE
+    )
+    assert artifact_index < value_index
     payload = expect_instance(value_events[-1].payload, list)
     assert len(payload) == 3
 
@@ -411,6 +578,21 @@ def test_element_desktop_reads_pinned_version_from_sources(
 
     is_latest = _run(updater._is_latest(None, latest))
     assert is_latest is False
+
+
+def test_flake_input_metadata_updater_emits_empty_hash_entries() -> None:
+    """Metadata-only flake inputs should still emit a typed empty value event."""
+
+    class _DemoUpdater(FlakeInputMetadataUpdater):
+        name = "demo"
+        input_name = "demo"
+
+    updater = _DemoUpdater()
+    events = _run(_collect(updater.fetch_hashes(VersionInfo("main"), object())))
+
+    assert [event.kind for event in events] == [UpdateEventKind.VALUE]
+    assert events[0].source == "demo"
+    assert events[0].payload == []
 
 
 def test_superset_fetches_desktop_release_assets(

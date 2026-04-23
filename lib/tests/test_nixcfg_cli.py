@@ -6,11 +6,15 @@ implementation (which is covered elsewhere).
 
 from __future__ import annotations
 
+import runpy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 import click
+import httpx
+import pytest
+import typer
 from typer.main import get_command
 from typer.testing import CliRunner
 
@@ -254,6 +258,45 @@ def test_nixcfg_schema_targets_lists_configured_targets(
     assert "demo\tdemo.py" in result.output
 
 
+def test_nixcfg_schema_targets_uses_default_config_path_when_omitted(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Ensure `nixcfg schema targets` resolves its default config lazily."""
+    called: dict[str, Path] = {}
+
+    monkeypatch.setattr(
+        "nixcfg.default_config_path", lambda: Path("/tmp/schema_codegen.yaml")
+    )
+
+    def _fake_targets(*, config_path: Path) -> tuple[SchemaTargetSummary, ...]:
+        called["config_path"] = config_path
+        return ()
+
+    monkeypatch.setattr("nixcfg.list_schema_codegen_targets", _fake_targets)
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["schema", "targets"])
+
+    assert result.exit_code == 0
+    assert called["config_path"] == Path("/tmp/schema_codegen.yaml")
+
+
+def test_nixcfg_schema_targets_reports_errors_cleanly(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Schema target listing should format runtime failures without a traceback."""
+    monkeypatch.setattr(
+        "nixcfg.list_schema_codegen_targets",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("bad config")),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["schema", "targets"])
+
+    assert result.exit_code == 1
+    assert "Schema target listing failed: bad config" in result.output
+
+
 def test_nixcfg_schema_generate_forwards_target_and_config(
     monkeypatch: _MonkeyPatchLike,
 ) -> None:
@@ -281,6 +324,22 @@ def test_nixcfg_schema_generate_forwards_target_and_config(
     assert called["progress"] is nixcfg._schema_progress
     assert called["config_path"] == Path("alt-config.yaml")
     assert "Generated /tmp/generated.py" in result.output
+
+
+def test_nixcfg_schema_generate_reports_errors_cleanly(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Schema generation should turn expected exceptions into exit code 1."""
+    monkeypatch.setattr(
+        "nixcfg.generate_schema_codegen_target",
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError("unknown target")),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["schema", "generate", "missing"])
+
+    assert result.exit_code == 1
+    assert "Schema generation failed: unknown target" in result.output
 
 
 def test_nixcfg_schema_lock_forwards_manifest_output_and_metadata(
@@ -325,6 +384,75 @@ def test_nixcfg_schema_lock_forwards_manifest_output_and_metadata(
     assert called["include_metadata"] is True
     assert called["progress"] is nixcfg._schema_progress
     assert "Generated /tmp/codegen.lock.json" in result.output
+
+
+def test_nixcfg_schema_lock_reports_http_errors_cleanly(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Schema lockfile generation should surface fetch failures without a traceback."""
+    monkeypatch.setattr(
+        "nixcfg.write_codegen_lockfile",
+        lambda **_kwargs: (_ for _ in ()).throw(httpx.HTTPError("download failed")),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["schema", "lock", "codegen.yaml"])
+
+    assert result.exit_code == 1
+    assert "Schema lockfile generation failed: download failed" in result.output
+
+
+def test_nixcfg_schema_codegen_invokes_codegen_main(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Schema codegen command should forward the shared progress callback."""
+    called: dict[str, object] = {}
+
+    def _fake_codegen(*, progress: object) -> None:
+        called["progress"] = progress
+
+    monkeypatch.setattr("nixcfg.codegen_main", _fake_codegen)
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["schema", "codegen"])
+
+    assert result.exit_code == 0
+    assert called["progress"] is nixcfg._schema_progress
+
+
+@pytest.mark.parametrize(("ok", "expected_exit"), [(True, 0), (False, 1)])
+def test_nixcfg_schema_fetch_check_uses_validation_exit_code(
+    monkeypatch: _MonkeyPatchLike,
+    ok: bool,
+    expected_exit: int,
+) -> None:
+    """Schema fetch --check should return the schema-check status without downloading."""
+    monkeypatch.setattr("nixcfg.schema_check", lambda: ok)
+    monkeypatch.setattr(
+        "nixcfg.fetch_schemas",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("should not fetch")),
+    )
+
+    with pytest.raises(typer.Exit) as excinfo:
+        nixcfg.schema_fetch(check=True)
+
+    assert excinfo.value.exit_code == expected_exit
+
+
+def test_nixcfg_schema_fetch_reports_runtime_errors_cleanly(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Schema fetch should surface runtime failures without a traceback."""
+    monkeypatch.setattr(
+        "nixcfg.fetch_schemas",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("fetch failed")),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["schema", "fetch"])
+
+    assert result.exit_code == 1
+    assert "Schema fetch failed: fetch failed" in result.output
 
 
 def test_nixcfg_all_commands_support_short_help_alias() -> None:
@@ -699,6 +827,63 @@ def test_nixcfg_tree_colors_empty_groups_like_leaf_commands() -> None:
     )
 
 
+def test_nixcfg_command_label_omits_description_when_none() -> None:
+    """Leaf commands without help text should render without a description suffix."""
+    command = click.Command("plain")
+
+    assert nixcfg._command_label("plain", command) == "[green]plain[/green]"
+
+
+def test_nixcfg_add_command_nodes_skips_hidden_subcommands() -> None:
+    """Tree rendering should ignore hidden commands entirely."""
+    group = click.Group("root")
+    group.add_command(click.Command("visible", help="Shown"))
+    group.add_command(click.Command("secret", hidden=True))
+    tree = nixcfg.Tree("root")
+
+    nixcfg._add_command_nodes(tree, group)
+
+    assert len(tree.children) == 1
+    assert "visible" in str(tree.children[0].label)
+    assert "secret" not in str(tree.children[0].label)
+
+
+def test_nixcfg_tree_falls_back_when_root_is_not_group(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """The tree command should degrade gracefully if Typer returns a plain command."""
+    monkeypatch.setattr("nixcfg.get_command", lambda _app: click.Command("nixcfg"))
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["tree"])
+
+    assert result.exit_code == 0
+    assert result.output == "nixcfg\n"
+
+
+def test_nixcfg_schema_progress_writes_to_stderr(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Schema progress helper should write to stderr for long-running commands."""
+    nixcfg._schema_progress("working")
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "working\n"
+
+
+def test_nixcfg_display_schema_path_falls_back_outside_repo(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Display paths should stay absolute when outputs live outside the repo."""
+    monkeypatch.setattr("nixcfg.get_repo_root", lambda: Path("/repo"))
+
+    assert (
+        nixcfg._display_schema_path(Path("/outside/generated.py"))
+        == "/outside/generated.py"
+    )
+
+
 def test_nixcfg_all_custom_options_have_short_and_long_forms() -> None:
     """Require short+long aliases for every non-built-in CLI option."""
     root = get_command(nixcfg.app)
@@ -739,5 +924,22 @@ def test_nixcfg_main_uses_stable_prog_name(monkeypatch: _MonkeyPatchLike) -> Non
     monkeypatch.setattr("nixcfg.app", _fake_app)
 
     nixcfg.main()
+
+    assert called["prog_name"] == "nixcfg"
+
+
+def test_nixcfg_module_main_guard_executes_main(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Executing nixcfg.py as __main__ should still route through the stable app entrypoint."""
+    called: dict[str, str] = {}
+
+    def _fake_call(self: object, *args: object, **kwargs: object) -> None:
+        del self, args
+        called["prog_name"] = cast("str", kwargs["prog_name"])
+
+    monkeypatch.setattr(typer.Typer, "__call__", _fake_call)
+
+    runpy.run_path(str(Path(nixcfg.__file__).resolve()), run_name="__main__")
 
     assert called["prog_name"] == "nixcfg"

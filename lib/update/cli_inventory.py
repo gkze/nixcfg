@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 from dataclasses import dataclass
@@ -331,14 +332,46 @@ def _generated_artifact_paths(
     package_dir_for: Callable[[str], Path | None],
     repo_relative_path: Callable[[Path | None], str | None],
 ) -> tuple[str, ...]:
-    if not issubclass(updater_cls, DenoManifestUpdater):
-        return ()
+    crate2nix_paths = _crate2nix_generated_artifact_paths(name)
+    declared_paths = getattr(updater_cls, "generated_artifact_files", ())
+    needs_package_dir = bool(declared_paths) or issubclass(
+        updater_cls, DenoManifestUpdater
+    )
+    if not needs_package_dir:
+        return crate2nix_paths
+
     pkg_dir = package_dir_for(name)
-    manifest_name = getattr(updater_cls, "manifest_file", "deno-deps.json")
     if pkg_dir is None:
         return ()
+
+    if declared_paths:
+        paths = tuple(
+            resolved
+            for relative in declared_paths
+            if (resolved := repo_relative_path(pkg_dir / relative)) is not None
+        )
+        if paths:
+            return tuple(dict.fromkeys((*paths, *crate2nix_paths)))
+
+    if not issubclass(updater_cls, DenoManifestUpdater):
+        return crate2nix_paths
+    manifest_name = getattr(updater_cls, "manifest_file", "deno-deps.json")
     path = repo_relative_path(pkg_dir / manifest_name)
-    return () if path is None else (path,)
+    if path is None:
+        return crate2nix_paths
+    return tuple(dict.fromkeys((path, *crate2nix_paths)))
+
+
+def _crate2nix_generated_artifact_paths(name: str) -> tuple[str, ...]:
+    try:
+        crate2nix_module = importlib.import_module("lib.update.crate2nix")
+    except ImportError:
+        return ()
+
+    target = getattr(crate2nix_module, "TARGETS", {}).get(name)
+    if target is None:
+        return ()
+    return (target.cargo_nix.as_posix(), target.crate_hashes.as_posix())
 
 
 def _inventory_classification(handles: _InventoryHandles) -> str:

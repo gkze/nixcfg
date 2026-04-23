@@ -5,12 +5,16 @@ from __future__ import annotations
 import functools
 import os
 import shlex
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.path import NixPath
+from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.commands.flake import nix_flake_lock_update
@@ -22,7 +26,7 @@ from lib.update.events import (
     UpdateEventKind,
 )
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
-from lib.update.paths import FLAKE_LOCK_FILE
+from lib.update.paths import get_repo_root
 
 if TYPE_CHECKING:
     from nix_manipulator.expressions.expression import NixExpression
@@ -31,7 +35,7 @@ if TYPE_CHECKING:
 @functools.cache
 def load_flake_lock() -> FlakeLock:
     """Load and cache the flake.lock as a validated :class:`FlakeLock` model."""
-    return FlakeLock.from_file(FLAKE_LOCK_FILE)
+    return FlakeLock.from_file(get_repo_root() / "flake.lock")
 
 
 def invalidate_flake_lock() -> None:
@@ -66,7 +70,12 @@ def resolve_root_input_node(
     """Resolve a root input to its final node and optional follows path."""
     root_inputs = lock.root_node.inputs or {}
     target = root_inputs.get(input_name)
-    follows = "/".join(target) if isinstance(target, list) else None
+    follows = (
+        "/".join(target)
+        if isinstance(target, list)
+        and all(isinstance(segment, str) for segment in target)
+        else None
+    )
     if target is None:
         return None, follows
     if isinstance(target, str):
@@ -137,28 +146,47 @@ def flake_fetch_expr(node: FlakeLockNode) -> str:
     return flake_fetch_expression(node).rebuild()
 
 
+def _nixpkgs_source_expression() -> NixExpression:
+    """Return the nixpkgs source path or pinned flake fetchTree expression."""
+    nixpkgs_path = os.environ.get("NIXCFG_NIXPKGS_PATH", "").strip()
+    if nixpkgs_path:
+        return NixPath(path=nixpkgs_path)
+    return flake_fetch_expression(get_flake_input_node(get_root_input_name("nixpkgs")))
+
+
 def nixpkgs_expression() -> NixExpression:
     """Build a nixpkgs import expression from a local path or pinned flake input."""
-    nixpkgs_path = os.environ.get("NIXCFG_NIXPKGS_PATH", "").strip()
-    fetch_tree: NixExpression = (
-        NixPath(path=nixpkgs_path)
-        if nixpkgs_path
-        else flake_fetch_expression(
-            get_flake_input_node(get_root_input_name("nixpkgs"))
-        )
-    )
-    import_fetch_tree = FunctionCall(
+    source = _nixpkgs_source_expression()
+    import_source = FunctionCall(
         name=Identifier(name="import"),
-        argument=(
-            fetch_tree
-            if isinstance(fetch_tree, NixPath)
-            else Parenthesis(value=fetch_tree)
-        ),
+        argument=source if isinstance(source, NixPath) else Parenthesis(value=source),
     )
     return FunctionCall(
-        name=import_fetch_tree,
+        name=import_source,
         argument=AttributeSet.from_dict(
             {"system": identifier_attr_path("builtins", "currentSystem")},
+        ),
+    )
+
+
+def nixpkgs_lib_expression() -> NixExpression:
+    """Build an import of nixpkgs' ``lib`` tree without importing the full package set."""
+    source = _nixpkgs_source_expression()
+    lib_source: NixExpression = (
+        NixPath(path=str(Path(source.path) / "lib"))
+        if isinstance(source, NixPath)
+        else BinaryExpression(
+            left=Parenthesis(value=source),
+            operator=Operator(name="+"),
+            right=StringPrimitive(value="/lib"),
+        )
+    )
+    return FunctionCall(
+        name=Identifier(name="import"),
+        argument=(
+            lib_source
+            if isinstance(lib_source, NixPath)
+            else Parenthesis(value=lib_source)
         ),
     )
 

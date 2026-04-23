@@ -515,12 +515,16 @@ def _validate_job_artifact_flows(
 
 def validate_workflow_artifact_contracts(
     *,
-    workflow_path: Path | os.PathLike[str] = REPO_ROOT / ".github/workflows/update.yml",
+    workflow_path: Path | os.PathLike[str] | None = None,
     repo_root: Path | os.PathLike[str] = REPO_ROOT,
 ) -> None:
     """Raise ``RuntimeError`` when artifact flow semantics are inconsistent."""
-    workflow_path = Path(workflow_path)
     repo_root = Path(repo_root)
+    workflow_path = (
+        repo_root / ".github/workflows/update.yml"
+        if workflow_path is None
+        else Path(workflow_path)
+    )
     workflow = load_workflow_analysis(
         workflow_path,
         context=f"workflow jobs {workflow_path}",

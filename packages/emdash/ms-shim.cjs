@@ -21,7 +21,7 @@ var durationPattern = new RegExp(
   "i",
 );
 
-module.exports = function (val, options) {
+module.exports = (val, options) => {
   options = options || {};
   var type = typeof val;
 
@@ -29,11 +29,11 @@ module.exports = function (val, options) {
     return parse(val);
   }
 
-  if (type === "number" && isFinite(val)) {
+  if (type === "number" && Number.isFinite(val)) {
     return options.long ? fmtLong(val) : fmtShort(val);
   }
 
-  throw new Error("val is not a non-empty string or a valid number. val=" + JSON.stringify(val));
+  throw new Error(`val is not a non-empty string or a valid number. val=${JSON.stringify(val)}`);
 };
 
 function parse(str) {
@@ -95,18 +95,18 @@ function parse(str) {
 function fmtShort(ms) {
   var msAbs = Math.abs(ms);
   if (msAbs >= d) {
-    return Math.round(ms / d) + "d";
+    return `${Math.round(ms / d)}d`;
   }
   if (msAbs >= h) {
-    return Math.round(ms / h) + "h";
+    return `${Math.round(ms / h)}h`;
   }
   if (msAbs >= m) {
-    return Math.round(ms / m) + "m";
+    return `${Math.round(ms / m)}m`;
   }
   if (msAbs >= s) {
-    return Math.round(ms / s) + "s";
+    return `${Math.round(ms / s)}s`;
   }
-  return ms + "ms";
+  return `${ms}ms`;
 }
 
 function fmtLong(ms) {
@@ -123,10 +123,10 @@ function fmtLong(ms) {
   if (msAbs >= s) {
     return plural(ms, msAbs, s, "second");
   }
-  return ms + " ms";
+  return `${ms} ms`;
 }
 
 function plural(ms, msAbs, n, name) {
   var isPlural = msAbs >= n * 1.5;
-  return Math.round(ms / n) + " " + name + (isPlural ? "s" : "");
+  return `${Math.round(ms / n)} ${name}${isPlural ? "s" : ""}`;
 }

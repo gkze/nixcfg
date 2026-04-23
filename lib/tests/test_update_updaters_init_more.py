@@ -14,7 +14,6 @@ from lib.update.updaters import (
     ensure_updaters_loaded,
     resolve_registry_alias,
 )
-from lib.update.updaters.module_manifest import UPDATER_MODULE_PATHS
 
 
 def test_discover_updaters_handles_existing_and_invalid_specs(
@@ -77,13 +76,12 @@ def test_discover_updaters_handles_existing_and_invalid_specs(
     assert sys.modules["_updater_pkg.stale"] is not None
 
 
-def test_updater_manifest_matches_repo_scan() -> None:
-    """Keep the explicit updater manifest aligned with the repository layout."""
+def test_updater_discovery_matches_repo_scan() -> None:
+    """Keep updater discovery aligned with the repository layout."""
     expected = package_file_map("updater.py")
-    manifest_paths = _updater_module_paths()
+    discovered_paths = _updater_module_paths()
 
-    assert set(UPDATER_MODULE_PATHS) == set(expected)
-    assert manifest_paths == expected
+    assert discovered_paths == expected
 
 
 def test_ensure_updaters_loaded_fast_path_skips_discovery(monkeypatch) -> None:

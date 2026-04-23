@@ -1,6 +1,13 @@
-# Zed crate2nix packaging notes
+# Zed Nightly crate2nix packaging notes
 
-This package builds Zed Nightly with `crate2nix` on Darwin.
+This package keeps Zed Nightly on the repo's `crate2nix` build path.
+
+It does **not** delegate runtime builds to upstream Zed's coarse-grained Nix
+package. The repo-local package expression is responsible for:
+
+- preparing a patched workspace source tree for `crate2nix`
+- building the actual app from the checked-in `Cargo.nix`
+- handling the platform-specific install phases for Darwin and Linux
 
 ## File ownership
 
@@ -12,31 +19,19 @@ This package builds Zed Nightly with `crate2nix` on Darwin.
 ### Hand-maintained
 
 - `default.nix`
-  - source preparation for Zed's workspace-relative assets and build scripts
-  - crate overrides
-  - final app bundle assembly
+  - source preparation for workspace-relative assets/build scripts
+  - shared crate overrides and platform-specific install logic
 - `normalize_cargo_nix.py`
   - thin package-specific wrapper around `lib/cargo_nix_normalizer.py`
-
-## Why the package is complex
-
-Zed is a large Rust workspace with:
-
-- embedded workspace assets
-- multiple path-sensitive build scripts
-- generated protobuf code
-- a macOS app bundle layout
-
-That means the package needs both crate2nix and a prepared workspace source tree that preserves
-Cargo's expectations inside `buildRustCrate`.
+- `install_zed_nightly_app.sh`
+  - Darwin app bundle installer used by the crate2nix build
 
 ## Current strategy
 
-- build a `patchedSrc` tree with the minimal source surgery needed for Nix
-- import checked-in `Cargo.nix` with `rootSrc = patchedSrc`
-- apply shared per-crate native/build inputs through generated common overrides
-- keep only exceptional crates (`gpui_macos`, `tree-sitter`, `webrtc-sys`, `zed`, etc.) hand-written
-- reuse the upstream Zed app bundle metadata and icon while swapping in the crate2nix-built binaries
+- build a `patchedSrc` tree with the source surgery needed by `crate2nix`
+- keep the checked-in `Cargo.nix` / `crate-hashes.json` refresh flow for update automation
+- use one package expression for both Darwin and Linux
+- keep `crate2nixSourceOnly` available for CI/update tooling that only needs the prepared workspace source
 
 ## Regenerating `Cargo.nix`
 
@@ -70,13 +65,14 @@ python packages/zed-editor-nightly/normalize_cargo_nix.py \
 
 ```bash
 nix run path:.#nixcfg -- ci pipeline crate2nix --package zed-editor-nightly
-nix build .#packages.aarch64-darwin.zed-editor-nightly --no-link
+nix build .#pkgs.aarch64-darwin.zed-editor-nightly --no-link
+nix build .#pkgs.x86_64-linux.zed-editor-nightly --no-link
 ```
 
 Then smoke-test the CLI:
 
 ```bash
-ZED=$(nix path-info .#packages.aarch64-darwin.zed-editor-nightly)/bin/zed
+ZED=$(nix path-info .#pkgs.aarch64-darwin.zed-editor-nightly)/bin/zed
 "$ZED" --help
 ```
 

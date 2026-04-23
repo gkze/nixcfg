@@ -1,8 +1,8 @@
 """Updater registry with automatic per-package discovery.
 
-Loads updater modules from an explicit manifest. Importing each module runs
-explicit ``register_updater(...)`` calls or factory helpers, which populate
-:data:`UPDATERS`.
+Loads updater modules by scanning package/overlay updater files in the repo.
+Importing each module runs explicit ``register_updater(...)`` calls or factory
+helpers, which populate :data:`UPDATERS`.
 """
 
 import importlib.util
@@ -14,8 +14,7 @@ import lib.update.updaters.base as _updaters_base
 import lib.update.updaters.github_raw_file as _github_raw_file_module
 import lib.update.updaters.github_release as _github_release_module
 import lib.update.updaters.platform_api as _platform_api_module
-from lib.update.paths import REPO_ROOT
-from lib.update.updaters.module_manifest import UPDATER_MODULE_PATHS
+from lib.update.paths import REPO_ROOT, package_file_map
 from lib.update.updaters.registry import UPDATERS, UpdaterClass, register_updater
 
 CargoLockGitDep = _updaters_base.CargoLockGitDep
@@ -23,8 +22,12 @@ ChecksumProvidedUpdater = _updaters_base.ChecksumProvidedUpdater
 DenoDepsHashUpdater = _updaters_base.DenoDepsHashUpdater
 DownloadHashUpdater = _updaters_base.DownloadHashUpdater
 FlakeInputHashUpdater = _updaters_base.FlakeInputHashUpdater
+FlakeInputMetadataUpdater = _updaters_base.FlakeInputMetadataUpdater
 FlakeInputUpdater = _updaters_base.FlakeInputUpdater
 HashEntryUpdater = _updaters_base.HashEntryUpdater
+MaterializesArtifactsMixin = _updaters_base.MaterializesArtifactsMixin
+Crate2NixArtifactsMixin = _updaters_base.Crate2NixArtifactsMixin
+Crate2NixMetadataUpdater = _updaters_base.Crate2NixMetadataUpdater
 UpdateContext = _updaters_base.UpdateContext
 Updater = _updaters_base.Updater
 UvLockUpdater = _updaters_base.UvLockUpdater
@@ -52,14 +55,12 @@ _DISCOVERY_STATE = {"complete": False}
 
 
 def _updater_module_paths() -> dict[str, Path]:
-    """Return the explicit updater module path manifest."""
-    return {
-        name: REPO_ROOT / rel_path for name, rel_path in UPDATER_MODULE_PATHS.items()
-    }
+    """Return discovered updater module paths from the repository layout."""
+    return package_file_map("updater.py")
 
 
 def _discover_updaters() -> None:
-    """Import every manifest-declared updater module to trigger registration."""
+    """Import every discovered updater module to trigger registration."""
     for name, updater_file in sorted(_updater_module_paths().items()):
         # Use a stable module name so re-imports are safe.
         mod_name = f"_updater_pkg.{name}"
@@ -99,17 +100,22 @@ def resolve_registry_alias(
 
 
 __all__ = [
+    "REPO_ROOT",
     "UPDATERS",
     "CargoLockGitDep",
     "ChecksumProvidedUpdater",
+    "Crate2NixArtifactsMixin",
+    "Crate2NixMetadataUpdater",
     "DenoDepsHashUpdater",
     "DownloadHashUpdater",
     "DownloadingPlatformAPIUpdater",
     "FlakeInputHashUpdater",
+    "FlakeInputMetadataUpdater",
     "FlakeInputUpdater",
     "GitHubRawFileUpdater",
     "GitHubReleaseUpdater",
     "HashEntryUpdater",
+    "MaterializesArtifactsMixin",
     "PlatformAPIUpdater",
     "UpdateContext",
     "Updater",

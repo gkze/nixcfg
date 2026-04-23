@@ -102,10 +102,14 @@ jobs:
           - format-yaml-yamlfmt
           - lint-yaml-yamllint
           - format-web-biome
+          - format-python-pyupgrade
           - format-python-ruff
+          - lint-python-compile
           - lint-python-ruff
           - lint-python-ty
           - lint-workflows-actionlint
+          - test-nix-default-api
+          - test-nix-opencode-desktop-electron
           - test-python-pytest
           - verify-workflow-artifacts-refresh
           - verify-workflow-artifacts-certify

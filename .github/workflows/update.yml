@@ -73,33 +73,15 @@ jobs:
       - name: Verify workflow structure contracts
         run: nix run .#nixcfg -- ci workflow verify-structure
       - name: Snapshot superset flake input
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          lock = json.loads(Path("flake.lock").read_text())
-          superset_locked = lock.get("nodes", {}).get("superset", {}).get("locked", {})
-          Path("/tmp/superset-lock-before.json").write_text(
-              json.dumps(superset_locked, sort_keys=True)
-          )
-          PY
+        run: >-
+          nix run .#nixcfg -- ci workflow flake-input snapshot --node superset --output
+          /tmp/superset-lock-before.json
       - run: nix run .#nixcfg -- ci workflow nix-flake-update
       - name: Detect superset flake input changes
         id: superset-changed
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          before = json.loads(Path("/tmp/superset-lock-before.json").read_text())
-          lock = json.loads(Path("flake.lock").read_text())
-          after = lock.get("nodes", {}).get("superset", {}).get("locked", {})
-          changed = before != after
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write(f"changed={'true' if changed else 'false'}\n")
-          PY
+        run: >-
+          nix run .#nixcfg -- ci workflow flake-input compare --node superset --before
+          /tmp/superset-lock-before.json --github-output "$GITHUB_OUTPUT"
       - name: Regenerate superset bun2nix lock
         if: steps.superset-changed.outputs.changed == 'true'
         run: nix run .#superset.passthru.updateScript

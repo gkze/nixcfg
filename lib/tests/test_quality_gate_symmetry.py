@@ -2,18 +2,36 @@
 
 from __future__ import annotations
 
+import fnmatch
 import re
-from pathlib import Path
+import subprocess
+import tomllib
+from functools import cache
+from pathlib import Path, PurePosixPath
 
 import yaml
+from nix_manipulator.expressions.binary import BinaryExpression
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.expression import NixExpression
+from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.inherit import Inherit
+from nix_manipulator.expressions.list import NixList
+from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.primitive import Primitive
+from nix_manipulator.expressions.set import AttributeSet
 
+from lib.check_python_compile import iter_target_paths
+from lib.tests._assertions import expect_instance
+from lib.tests._nix_ast import parse_nix_expr
 from lib.update.paths import REPO_ROOT
 
 _FAST_HOOKS = (
     "guard-merge-conflicts",
     "fix-end-of-file",
     "fix-trailing-whitespace",
+    "format-python-pyupgrade",
     "format-python-ruff",
+    "lint-python-compile",
     "format-web-biome",
     "format-yaml-yamlfmt",
     "lint-editorconfig",
@@ -31,15 +49,23 @@ _SHARED_FLAKE_CHECKS = (
     "format-yaml-yamlfmt",
     "lint-yaml-yamllint",
     "format-web-biome",
+    "format-python-pyupgrade",
     "format-python-ruff",
+    "lint-python-compile",
     "lint-python-ruff",
     "lint-python-ty",
     "lint-workflows-actionlint",
+    "test-nix-default-api",
+    "test-nix-opencode-desktop-electron",
     "test-python-pytest",
     "verify-workflow-artifacts-refresh",
     "verify-workflow-artifacts-certify",
     "verify-workflow-structure-refresh",
     "verify-workflow-structure-certify",
+)
+_SINGLE_LINE_MULTI_EXCEPT_PATTERN = re.compile(
+    r"^\s*except \([^)\n]*,[^)\n]*\):(?:\s*#.*)?$",
+    re.MULTILINE,
 )
 
 
@@ -80,6 +106,19 @@ def _flake_check_names() -> tuple[str, ...]:
     return tuple(sorted(set(re.findall(r'checks\."([^"]+)"\s*=', text))))
 
 
+def _flake_check_block(attr_name: str) -> str:
+    text = _read(REPO_ROOT / "flake.nix")
+    pattern = re.compile(
+        rf'^\s*checks\."{re.escape(attr_name)}"\s*=\s*mkRepoCheck\s*\{{(?P<body>.*?)^\s*\}};',
+        re.DOTALL | re.MULTILINE,
+    )
+    match = pattern.search(text)
+    if match is None:
+        msg = f"Could not find flake check block {attr_name!r}"
+        raise AssertionError(msg)
+    return match.group("body")
+
+
 def _ci_matrix_checks() -> tuple[str, ...]:
     payload = yaml.safe_load(_read(REPO_ROOT / ".github/workflows/ci.yml"))
     return tuple(payload["jobs"]["quality"]["strategy"]["matrix"]["check"])
@@ -113,6 +152,180 @@ def _workflow_body(path: str) -> str:
     return _read(REPO_ROOT / path)
 
 
+@cache
+def _lint_files_expr() -> AttributeSet:
+    """Parse ``lib/lint-files.nix`` once for literal-data extraction."""
+    return expect_instance(
+        parse_nix_expr(_read(REPO_ROOT / "lib/lint-files.nix")), AttributeSet
+    )
+
+
+@cache
+def _lint_files() -> dict[str, object]:
+    """Decode the simple let-bound literal surface without invoking Nix."""
+    expr = _lint_files_expr()
+    scope = {
+        binding.name: binding.value
+        for binding in expr.scope
+        if isinstance(binding, Binding)
+    }
+    payload = _eval_lint_files_expr(expr, scope)
+    assert isinstance(payload, dict)
+    return payload
+
+
+def _eval_lint_files_expr(
+    expr: NixExpression, scope: dict[str, NixExpression]
+) -> object:
+    if isinstance(expr, Parenthesis):
+        return _eval_lint_files_expr(expr.value, scope)
+    if isinstance(expr, Primitive):
+        return expr.value
+    if isinstance(expr, Identifier):
+        try:
+            return _eval_lint_files_expr(scope[expr.name], scope)
+        except KeyError as exc:
+            msg = f"Unsupported identifier {expr.name!r} in lib/lint-files.nix"
+            raise AssertionError(msg) from exc
+    if isinstance(expr, NixList):
+        return [_eval_lint_files_expr(item, scope) for item in expr.value]
+    if isinstance(expr, BinaryExpression):
+        assert expr.operator.name == "++"
+        left = _eval_lint_files_expr(expr.left, scope)
+        right = _eval_lint_files_expr(expr.right, scope)
+        assert isinstance(left, list)
+        assert isinstance(right, list)
+        return [*left, *right]
+    if isinstance(expr, AttributeSet):
+        result: dict[str, object] = {}
+        for value in expr.values:
+            if isinstance(value, Inherit):
+                inherited: dict[str, object] = {}
+                if value.from_expression is not None:
+                    source = _eval_lint_files_expr(value.from_expression, scope)
+                    assert isinstance(source, dict)
+                    inherited = source
+                for name in value.names:
+                    if value.from_expression is None:
+                        result[name.name] = _eval_lint_files_expr(
+                            scope[name.name], scope
+                        )
+                    else:
+                        result[name.name] = inherited[name.name]
+                continue
+            binding = expect_instance(value, Binding)
+            result[binding.name] = _eval_lint_files_expr(binding.value, scope)
+        return result
+
+    msg = f"Unsupported expression {type(expr).__name__} in lib/lint-files.nix"
+    raise AssertionError(msg)
+
+
+def _lint_files_python() -> dict[str, object]:
+    python = _lint_files().get("python")
+    assert isinstance(python, dict)
+    return python
+
+
+def _lint_files_group(name: str) -> dict[str, object]:
+    group = _lint_files().get(name)
+    assert isinstance(group, dict)
+    return group
+
+
+@cache
+def _pyproject() -> dict[str, object]:
+    payload = tomllib.loads(_read(REPO_ROOT / "pyproject.toml"))
+    assert isinstance(payload, dict)
+    return payload
+
+
+def _relative_repo_path(path: Path) -> str:
+    return path.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
+
+
+@cache
+def _repo_python_paths() -> tuple[Path, ...]:
+    python = _lint_files_python()
+    script_paths = python["pythonScriptPaths"]
+    assert isinstance(script_paths, list)
+
+    patterns = ("**/*.py", "**/*.pyi", *script_paths)
+    return tuple(
+        sorted(REPO_ROOT / path for path in iter_target_paths(patterns, root=REPO_ROOT))
+    )
+
+
+@cache
+def _single_line_multi_except_files() -> set[str]:
+    return {
+        _relative_repo_path(path)
+        for path in _repo_python_paths()
+        if _SINGLE_LINE_MULTI_EXCEPT_PATTERN.search(_read(path))
+    }
+
+
+@cache
+def _formatter_globs() -> tuple[str, ...]:
+    python = _lint_files_python()
+    pyupgrade_paths = python["pyupgradePaths"]
+    assert isinstance(pyupgrade_paths, list)
+
+    groups = (
+        _lint_files_group("nix"),
+        _lint_files_group("yaml"),
+        _lint_files_group("toml"),
+        _lint_files_group("biome"),
+        _lint_files_group("go"),
+        _lint_files_group("markdown"),
+        _lint_files_group("shell"),
+        _lint_files_group("text"),
+    )
+    globs = [pattern for pattern in pyupgrade_paths if isinstance(pattern, str)]
+    for group in groups:
+        group_globs = group["globs"]
+        assert isinstance(group_globs, list)
+        globs.extend(pattern for pattern in group_globs if isinstance(pattern, str))
+    return tuple(globs)
+
+
+@cache
+def _tracked_repo_paths() -> tuple[Path, ...]:
+    result = subprocess.run(
+        ["git", "ls-files", "-z"],
+        check=True,
+        capture_output=True,
+        cwd=REPO_ROOT,
+    )
+    relative_paths = sorted(
+        item.decode() for item in result.stdout.split(b"\0") if item
+    )
+    return tuple(REPO_ROOT / path for path in relative_paths)
+
+
+def _matches_glob(path: str, pattern: str) -> bool:
+    pure_path = PurePosixPath(path)
+    return pure_path.match(pattern) or fnmatch.fnmatch(path, pattern)
+
+
+def _is_binary_file(path: Path) -> bool:
+    return b"\0" in path.read_bytes()
+
+
+@cache
+def _tracked_binary_paths() -> tuple[str, ...]:
+    return tuple(
+        _relative_repo_path(path)
+        for path in _tracked_repo_paths()
+        if _is_binary_file(path)
+    )
+
+
+@cache
+def _expand_python_paths(patterns: tuple[str, ...]) -> set[str]:
+    return {path.as_posix() for path in iter_target_paths(patterns, root=REPO_ROOT)}
+
+
 def test_flake_quality_check_names_match_shared_surface_names() -> None:
     """Expose the shared flake-friendly quality/test gate names directly as checks."""
     assert _flake_check_names() == tuple(sorted(_SHARED_FLAKE_CHECKS))
@@ -126,6 +339,61 @@ def test_ci_quality_matrix_matches_shared_check_names() -> None:
 def test_update_certify_quality_job_matches_shared_check_names() -> None:
     """Keep certification flake-check gates aligned with the CI matrix and flake checks."""
     assert _certify_quality_checks() == _SHARED_FLAKE_CHECKS
+
+
+def test_pyproject_ruff_format_excludes_match_shared_python_runtime_sensitive_paths() -> (
+    None
+):
+    """Keep direct Ruff runs aligned with the shared Python helper exclusions."""
+    pyproject = _pyproject()
+    excludes = pyproject["tool"]["ruff"]["format"]["exclude"]
+    assert excludes == _lint_files_python()["ruffMutationExcludes"]
+
+
+def test_pyproject_ruff_force_exclude_stays_enabled() -> None:
+    """Keep direct file-based Ruff invocations from bypassing excluded helpers."""
+    pyproject = _pyproject()
+    assert pyproject["tool"]["ruff"]["force-exclude"] is True
+
+
+def test_python_quality_surfaces_use_multi_except_normalizer() -> None:
+    """Keep the pyupgrade surfaces aligned with the multi-except repair shim."""
+    dev_shell = _read(REPO_ROOT / "lib/dev-shell.nix")
+    flake_check = _flake_check_block("format-python-pyupgrade")
+    assert "lib.fix_python_multi_except" in dev_shell
+    assert "lib.fix_python_multi_except" in flake_check
+    assert "--pyupgrade-exe ${lib.getExe pkgs.pyupgrade}" in flake_check
+    assert "--pyupgrade-arg=--py313-plus" in flake_check
+    assert (
+        "| ${pkgs.findutils}/bin/xargs -0 -r ${lib.getExe pkgs.pyupgrade}"
+        not in flake_check
+    )
+
+
+def test_python_compile_surfaces_use_shared_compile_helper() -> None:
+    """Keep compile smoke checks routed through the shared helper script."""
+    dev_shell = _read(REPO_ROOT / "lib/dev-shell.nix")
+    flake = _read(REPO_ROOT / "flake.nix")
+    assert "check_python_compile.py" in dev_shell
+    assert "check_python_compile.py" in flake
+
+
+def test_ruff_format_excludes_cover_vulnerable_single_line_multi_except_files() -> None:
+    """Exclude every file Ruff can misformat into invalid multi-exception syntax."""
+    python = _lint_files_python()
+    excludes = python["ruffMutationExcludes"]
+    assert isinstance(excludes, list)
+    assert _single_line_multi_except_files() <= set(excludes)
+
+
+def test_compile_paths_cover_vulnerable_single_line_multi_except_files() -> None:
+    """Keep compile checks broad enough to catch invalid nested Python rewrites."""
+    python = _lint_files_python()
+    compile_paths = python["compilePaths"]
+    assert isinstance(compile_paths, list)
+    assert _single_line_multi_except_files() <= _expand_python_paths(
+        tuple(pattern for pattern in compile_paths if isinstance(pattern, str))
+    )
 
 
 def test_ci_runs_runner_only_pinact_and_crate2nix_verification_explicitly() -> None:
@@ -142,3 +410,23 @@ def test_update_certify_runs_runner_only_pinact_and_crate2nix_verification_expli
     workflow = _workflow_body(".github/workflows/update-certify.yml")
     assert "nix run --inputs-from . nixpkgs#pinact -- run --check" in workflow
     assert "nix run .#nixcfg -- ci pipeline crate2nix" in workflow
+
+
+def test_tracked_binary_files_stay_explicit() -> None:
+    """Keep the repo's binary asset surface small and intentional."""
+    assert _tracked_binary_paths() == ("home/george/wallpaper.jpeg",)
+
+
+def test_tracked_text_files_have_formatter_coverage() -> None:
+    """Keep every tracked text format covered by `nix fmt` surfaces."""
+    formatter_globs = _formatter_globs()
+    uncovered = tuple(
+        relative_path
+        for relative_path in (
+            _relative_repo_path(path)
+            for path in _tracked_repo_paths()
+            if not _is_binary_file(path)
+        )
+        if not any(_matches_glob(relative_path, pattern) for pattern in formatter_globs)
+    )
+    assert uncovered == ()

@@ -1,0 +1,2902 @@
+#!/usr/bin/env python3
+# vi: set ft=python
+"""Inspect and reconcile Zen session state and managed profile assets.
+
+This file is the canonical Zen/Twilight tool entrypoint for the repo. It owns:
+
+- the authored YAML schema exposed through ``home/george/zen/folders.yaml``
+- the canonical internal config model used by the state compiler
+- the managed subset of ``zen-sessions.jsonlz4``
+- profile/runtime inspection helpers
+- chrome and ``user.js`` asset diff/apply helpers
+- the ``zentool`` CLI command tree
+
+The implementation intentionally has three layers:
+
+1. parse the authored workspace-map/node-tree YAML into authored node objects
+2. normalize those authored nodes into canonical workspace/tab/folder specs
+3. compile canonical specs into the managed Zen session subset while preserving
+   opaque runtime fields on matched tabs, folders, groups, spaces, and
+   top-level keys
+
+Anything in the managed subset that is not declared by config is removed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import configparser
+import contextlib
+import errno
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import uuid
+from collections import defaultdict, deque
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from contextlib import suppress
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Annotated, Any, Final, Literal, cast
+
+import lz4.block
+import yaml
+from deepdiff import DeepDiff
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
+from yaml.constructor import ConstructorError
+from yaml.resolver import BaseResolver
+
+fcntl: Any = None
+with suppress(ImportError):
+    fcntl = __import__("fcntl")
+
+ZEN_APPLICATION_SUPPORT: Final = Path.home() / "Library/Application Support/zen"
+ZEN_PROFILES: Final = ZEN_APPLICATION_SUPPORT / "Profiles"
+PROFILES_INI: Final = ZEN_APPLICATION_SUPPORT / "profiles.ini"
+SESSION_FILENAME: Final = "zen-sessions.jsonlz4"
+SESSION_HEADER_PREFIX: Final[bytes] = b"mozLz40\0"
+SESSION_HEADER_SIZE: Final[int] = 12
+DEFAULT_YAML: Final = Path.home() / ".config/zen/folders.yaml"
+DEFAULT_CONFIG_DIR: Final = Path.home() / ".config" / "zen"
+DEFAULT_CHROME_SOURCE_ENV: Final = "ZEN_CHROME_SOURCE"
+MANAGED_CHROME_MANIFEST: Final = ".zentool-managed-chrome"
+MANAGED_USER_JS_MANIFEST: Final = ".zentool-managed-user-js"
+PROFILE_HELP: Final = (
+    "Zen profile directory name, a direct path to a profile directory/session file, "
+    "or a human profile name from profiles.ini. Default: auto-detect from profiles.ini"
+)
+GROUP_COLOR: Final = "zen-workspace-color"
+DEFAULT_THEME_TYPE: Final = "gradient"
+DEFAULT_THEME_OPACITY: Final = 0.5
+DEFAULT_THEME_TEXTURE: Final = 0
+MAX_SESSION_UNCOMPRESSED_BYTES: Final = 256 * 1024 * 1024
+PROFILE_LOCK_FILENAMES: Final[tuple[str, ...]] = ("parent.lock", ".parentlock", "lock")
+
+
+class ZentoolError(RuntimeError):
+    """User-facing command error."""
+
+
+class SessionFormatError(ZentoolError):
+    """Session file exists but does not match expected structure."""
+
+
+ZenFoldersError = ZentoolError
+
+
+class UniqueKeyLoader(yaml.SafeLoader):
+    """YAML loader that rejects duplicate mapping keys."""
+
+
+class ThemeSpec(BaseModel):
+    """Declarative workspace theme settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["gradient"] = DEFAULT_THEME_TYPE
+    gradientColors: list[str] = Field(default_factory=list)
+    opacity: float = DEFAULT_THEME_OPACITY
+    texture: int = DEFAULT_THEME_TEXTURE
+
+    @field_validator("gradientColors")
+    @classmethod
+    def validate_gradient_colors(cls, value: list[str]) -> list[str]:
+        """Require non-empty color strings."""
+        colors: list[str] = []
+        for color in value:
+            stripped = color.strip()
+            if not stripped:
+                msg = "theme.gradientColors entries must be non-empty strings"
+                raise ValueError(msg)
+            colors.append(stripped)
+        return colors
+
+    @field_validator("opacity")
+    @classmethod
+    def validate_opacity(cls, value: float) -> float:
+        """Keep opacity within Zen's supported range."""
+        if not 0 <= value <= 1:
+            msg = "theme.opacity must be between 0 and 1"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("texture")
+    @classmethod
+    def validate_texture(cls, value: int) -> int:
+        """Require a non-negative texture index."""
+        if value < 0:
+            msg = "theme.texture must be >= 0"
+            raise ValueError(msg)
+        return value
+
+
+class TabSpec(BaseModel):
+    """Canonical leaf tab spec used by the internal compiler."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    url: str
+
+    @field_validator("name", "url")
+    @classmethod
+    def validate_non_empty_strings(cls, value: str) -> str:
+        """Trim and validate required string fields."""
+        stripped = value.strip()
+        if not stripped:
+            msg = "tab fields must be non-empty strings"
+            raise ValueError(msg)
+        return stripped
+
+
+class ItemTabSpec(TabSpec):
+    """Canonical pinned tab spec used by the internal compiler."""
+
+    type: Literal["tab"] = "tab"
+
+
+class FolderSpec(BaseModel):
+    """Canonical pinned folder spec used by the internal compiler."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["folder"] = "folder"
+    name: str
+    collapsed: bool = True
+    items: list[ItemSpec] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        """Trim and validate the folder name."""
+        stripped = value.strip()
+        if not stripped:
+            msg = "folder names must be non-empty strings"
+            raise ValueError(msg)
+        return stripped
+
+    @model_validator(mode="after")
+    def validate_unique_child_folder_names(self) -> FolderSpec:
+        """Reject ambiguous same-name child folders."""
+        folder_names: set[str] = set()
+        for item in self.items:
+            if isinstance(item, FolderSpec):
+                key = item.name.casefold()
+                if key in folder_names:
+                    msg = f"duplicate child folder name {item.name!r}"
+                    raise ValueError(msg)
+                folder_names.add(key)
+        return self
+
+
+type ItemSpec = Annotated[ItemTabSpec | FolderSpec, Field(discriminator="type")]
+FolderSpec.model_rebuild()
+
+
+class WorkspaceSpec(BaseModel):
+    """Canonical workspace config used by the internal compiler."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    icon: str | None = None
+    hasCollapsedPinnedTabs: bool = False
+    theme: ThemeSpec = Field(default_factory=ThemeSpec)
+    essentials: list[TabSpec] = Field(default_factory=list)
+    items: list[ItemSpec] = Field(default_factory=list)
+    tabs: list[TabSpec] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        """Trim and validate the workspace name."""
+        stripped = value.strip()
+        if not stripped:
+            msg = "workspace names must be non-empty strings"
+            raise ValueError(msg)
+        return stripped
+
+    @field_validator("icon")
+    @classmethod
+    def validate_icon(cls, value: str | None) -> str | None:
+        """Trim optional workspace icons."""
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            msg = "workspace icons must be non-empty strings"
+            raise ValueError(msg)
+        return stripped
+
+    @model_validator(mode="after")
+    def validate_unique_top_level_folder_names(self) -> WorkspaceSpec:
+        """Reject ambiguous same-name top-level folders."""
+        folder_names: set[str] = set()
+        for item in self.items:
+            if isinstance(item, FolderSpec):
+                key = item.name.casefold()
+                if key in folder_names:
+                    msg = f"duplicate top-level folder name {item.name!r}"
+                    raise ValueError(msg)
+                folder_names.add(key)
+        return self
+
+
+class AuthoredLeafNode(BaseModel):
+    """Authored leaf node in the public YAML schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    url: str
+    role: Literal["essential", "tab"] | None = None
+
+    @field_validator("name", "url")
+    @classmethod
+    def validate_non_empty_strings(cls, value: str) -> str:
+        """Trim and validate required string fields."""
+        stripped = value.strip()
+        if not stripped:
+            msg = "node fields must be non-empty strings"
+            raise ValueError(msg)
+        return stripped
+
+
+class AuthoredFolderNode(BaseModel):
+    """Authored folder node in the public YAML schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    children: list[AuthoredNode] = Field(default_factory=list)
+    collapsed: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        """Trim and validate the folder name."""
+        stripped = value.strip()
+        if not stripped:
+            msg = "folder names must be non-empty strings"
+            raise ValueError(msg)
+        return stripped
+
+    @model_validator(mode="after")
+    def validate_unique_child_folder_names(self) -> AuthoredFolderNode:
+        """Reject ambiguous same-name child folders."""
+        folder_names: set[str] = set()
+        for child in self.children:
+            if isinstance(child, AuthoredFolderNode):
+                key = child.name.casefold()
+                if key in folder_names:
+                    msg = f"duplicate child folder name {child.name!r}"
+                    raise ValueError(msg)
+                folder_names.add(key)
+        return self
+
+
+type AuthoredNode = AuthoredLeafNode | AuthoredFolderNode
+AuthoredFolderNode.model_rebuild()
+
+AuthoredNodeAdapter = TypeAdapter(AuthoredNode)
+
+
+class ZenConfig(BaseModel):
+    """Canonical root config used by the internal compiler."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspaces: list[WorkspaceSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_workspace_names(self) -> ZenConfig:
+        """Reject duplicate workspace names."""
+        names: set[str] = set()
+        for workspace in self.workspaces:
+            key = workspace.name.casefold()
+            if key in names:
+                msg = f"duplicate workspace name {workspace.name!r}"
+                raise ValueError(msg)
+            names.add(key)
+        return self
+
+
+class SessionTheme(BaseModel):
+    """Managed subset of Zen workspace theme data."""
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str = DEFAULT_THEME_TYPE
+    gradientColors: list[str] = Field(default_factory=list)
+    opacity: float = DEFAULT_THEME_OPACITY
+    texture: int = DEFAULT_THEME_TEXTURE
+
+
+class SessionSpace(BaseModel):
+    """Managed subset of a workspace record in the session file."""
+
+    model_config = ConfigDict(extra="allow")
+
+    uuid: str
+    name: str
+    theme: SessionTheme = Field(default_factory=SessionTheme)
+    containerTabId: int = 0
+    icon: str | None = None
+    hasCollapsedPinnedTabs: bool = False
+
+
+class PrevSiblingInfo(BaseModel):
+    """Folder ordering reference used by Zen."""
+
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["start", "tab", "group"]
+    id: str | None = None
+
+
+class SessionFolder(BaseModel):
+    """Managed subset of a folder record in the session file."""
+
+    model_config = ConfigDict(extra="allow")
+
+    pinned: bool = True
+    splitViewGroup: bool = False
+    id: str
+    name: str
+    collapsed: bool = True
+    saveOnWindowClose: bool = True
+    parentId: str | None = None
+    prevSiblingInfo: PrevSiblingInfo | None = Field(
+        default_factory=lambda: PrevSiblingInfo(type="start", id=None)
+    )
+    emptyTabIds: list[str] = Field(default_factory=list)
+    userIcon: str = ""
+    workspaceId: str
+
+
+class SessionGroup(BaseModel):
+    """Managed subset of a tab-group record in the session file."""
+
+    model_config = ConfigDict(extra="allow")
+
+    pinned: bool = True
+    splitView: bool = False
+    id: str
+    name: str
+    color: str = GROUP_COLOR
+    collapsed: bool = True
+    saveOnWindowClose: bool = True
+
+
+class SessionEntry(BaseModel):
+    """Managed subset of an active tab history entry."""
+
+    model_config = ConfigDict(extra="allow")
+
+    url: str
+    title: str = ""
+
+
+class SessionTab(BaseModel):
+    """Managed subset of a tab record in the session file."""
+
+    model_config = ConfigDict(extra="allow")
+
+    entries: list[SessionEntry] = Field(default_factory=list)
+    index: int = 1
+    lastAccessed: int = 0
+    hidden: bool = False
+    pinned: bool = False
+    zenWorkspace: str | None = None
+    zenSyncId: str
+    zenEssential: bool = False
+    zenDefaultUserContextId: str | None = None
+    zenPinnedIcon: str | None = None
+    zenIsEmpty: bool = False
+    zenStaticLabel: str | None = None
+    zenHasStaticIcon: bool = False
+    zenGlanceId: str | None = None
+    zenIsGlance: bool = False
+    zenLiveFolderItemId: str | None = None
+    searchMode: Any = None
+    userContextId: int = 0
+    groupId: str | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionState(BaseModel):
+    """Managed subset of the Zen sidecar file."""
+
+    model_config = ConfigDict(extra="allow")
+
+    tabs: list[SessionTab] = Field(default_factory=list)
+    groups: list[SessionGroup] = Field(default_factory=list)
+    folders: list[SessionFolder] = Field(default_factory=list)
+    spaces: list[SessionSpace] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def normalize_nullable_folder_links(self) -> SessionState:
+        """Normalize raw folder sibling metadata that may be null in live sessions."""
+        for folder in self.folders:
+            if folder.prevSiblingInfo is None:
+                folder.prevSiblingInfo = PrevSiblingInfo(type="start", id=None)
+        return self
+
+
+class ZenRuntimeState(BaseModel):
+    """Best-effort runtime detection result for one profile."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    running: bool
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class CompiledTab:
+    """Internal compiled tab node with sync metadata."""
+
+    spec: TabSpec | ItemTabSpec
+    essential: bool
+    pinned: bool
+    workspace_key: str | None
+    workspace_uuid: str | None
+    folder_id: str | None
+    user_context_id: int
+    existing: SessionTab | None = None
+    sync_id: str = ""
+    placeholder: bool = False
+
+
+@dataclass(slots=True)
+class CompiledFolder:
+    """Internal compiled folder node with preserved IDs."""
+
+    spec: FolderSpec
+    workspace_key: str
+    workspace_uuid: str
+    id: str
+    existing: SessionFolder | None
+    group_existing: SessionGroup | None
+    placeholder_sync_id: str | None = None
+    items: list[CompiledItem] = field(default_factory=list)
+    placeholder_tab: CompiledTab | None = None
+
+
+type CompiledItem = CompiledTab | CompiledFolder
+
+
+@dataclass(slots=True)
+class WorkspaceCompilation:
+    """Compiled state for one workspace."""
+
+    spec: WorkspaceSpec
+    key: str
+    space: SessionSpace
+    items: list[CompiledItem]
+    tabs: list[CompiledTab]
+
+
+@dataclass(slots=True)
+class ExistingFolderRecord:
+    """Existing folder plus its path for reuse during sync."""
+
+    folder: SessionFolder
+    path: tuple[str, ...]
+
+
+class TabPool:
+    """Match existing tabs by exact active URL."""
+
+    def __init__(self, tabs: Iterable[SessionTab]) -> None:
+        """Index tabs by exact URL."""
+        self._by_url: dict[str, deque[SessionTab]] = defaultdict(deque)
+        for tab in tabs:
+            self._by_url[active_url(tab)].append(tab)
+
+    def claim(self, url: str) -> SessionTab | None:
+        """Return the first unmatched tab for *url*, if any."""
+        tabs = self._by_url.get(url)
+        if not tabs:
+            return None
+        return tabs.popleft()
+
+
+def _stdout(message: str = "") -> None:
+    sys.stdout.write(f"{message}\n")
+
+
+def _stderr(message: str = "") -> None:
+    sys.stderr.write(f"{message}\n")
+
+
+def _stdout_raw(message: str) -> None:
+    sys.stdout.write(message)
+
+
+def _expand_path(raw: str) -> Path:
+    """Expand one user-supplied filesystem path."""
+    return Path(raw).expanduser().resolve()
+
+
+def _resolve_optional_dir(
+    explicit: str | None,
+    default: Path,
+    *,
+    label: str,
+) -> Path | None:
+    """Resolve an optional directory path with strict explicit validation."""
+    if explicit:
+        path = _expand_path(explicit)
+        if not path.exists():
+            msg = f"{label} not found: {path}"
+            raise ZenFoldersError(msg)
+        if not path.is_dir():
+            msg = f"{label} is not a directory: {path}"
+            raise ZenFoldersError(msg)
+        return path
+
+    if default.exists():
+        if not default.is_dir():
+            msg = f"{label} is not a directory: {default}"
+            raise ZenFoldersError(msg)
+        return default.resolve()
+    return None
+
+
+def _resolve_optional_file(
+    explicit: str | None,
+    default: Path,
+    *,
+    label: str,
+) -> Path | None:
+    """Resolve an optional file path with strict explicit validation."""
+    if explicit:
+        path = _expand_path(explicit)
+        if not path.exists():
+            msg = f"{label} not found: {path}"
+            raise ZenFoldersError(msg)
+        if not path.is_file():
+            msg = f"{label} is not a file: {path}"
+            raise ZenFoldersError(msg)
+        return path
+
+    if default.exists():
+        if not default.is_file():
+            msg = f"{label} is not a file: {default}"
+            raise ZenFoldersError(msg)
+        return default.resolve()
+    return None
+
+
+def _construct_mapping_no_dupes(
+    loader: UniqueKeyLoader,
+    node: yaml.nodes.MappingNode,
+) -> dict[Any, Any]:
+    """Construct a mapping while rejecting duplicate keys."""
+    mapping: dict[Any, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node)
+        if key in mapping:
+            context_message = "while constructing a mapping"
+            detail_message = f"found duplicate key {key!r}"
+            raise ConstructorError(
+                context_message,
+                node.start_mark,
+                detail_message,
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node)
+    return mapping
+
+
+UniqueKeyLoader.add_constructor(
+    BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_mapping_no_dupes,
+)
+
+
+def load_yaml(path: Path) -> object:
+    """Load YAML from *path* with duplicate-key rejection."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        msg = f"Unable to read config file {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
+
+    loader = UniqueKeyLoader(text)
+    try:
+        return loader.get_single_data()
+    except ConstructorError as exc:
+        msg = f"Invalid config file {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
+    finally:
+        loader.dispose()
+
+
+def _coerce_authored_node_input(raw: object) -> object:
+    """Convert one shorthand authored node into a model-friendly mapping."""
+    if not isinstance(raw, dict) or len(raw) != 1:
+        msg = "each workspace item must be a single-key mapping"
+        raise ZenFoldersError(msg)
+
+    [(name, value)] = raw.items()
+
+    if not isinstance(name, str):
+        msg = "node names must be strings"
+        raise ZenFoldersError(msg)
+
+    if isinstance(value, str):
+        return {
+            "name": name,
+            "url": value,
+        }
+
+    if isinstance(value, list):
+        return {
+            "name": name,
+            "children": [_normalize_authored_node(item) for item in value],
+        }
+
+    if not isinstance(value, dict):
+        msg = f"unable to parse node {name!r}"
+        raise ZenFoldersError(msg)
+
+    value_map = {str(key): value for key, value in value.items()}
+
+    if "url" in value_map:
+        return {
+            "name": name,
+            "url": str(value_map["url"]),
+            "role": value_map.get("role"),
+        }
+
+    if "children" in value_map:
+        children_raw = value_map["children"]
+        if not isinstance(children_raw, list):
+            msg = f"folder {name!r} children must be a list"
+            raise ZenFoldersError(msg)
+        return {
+            "name": name,
+            "collapsed": bool(value_map.get("collapsed", True)),
+            "children": [_normalize_authored_node(item) for item in children_raw],
+        }
+
+    child_entries = {
+        key: child for key, child in value_map.items() if key != "collapsed"
+    }
+    return {
+        "name": name,
+        "collapsed": bool(value_map.get("collapsed", True)),
+        "children": [
+            _normalize_authored_node({child_name: child_value})
+            for child_name, child_value in child_entries.items()
+        ],
+    }
+
+
+def _normalize_authored_node(raw: object) -> AuthoredNode:
+    """Normalize one authored node from the public YAML schema."""
+    try:
+        return AuthoredNodeAdapter.validate_python(_coerce_authored_node_input(raw))
+    except Exception as exc:
+        msg = f"Invalid authored node: {exc}"
+        raise ZenFoldersError(msg) from exc
+
+
+def _authored_folder_to_item(folder: AuthoredFolderNode) -> FolderSpec:
+    """Convert one authored folder node into the canonical pinned folder form."""
+    return FolderSpec(
+        name=folder.name,
+        collapsed=folder.collapsed,
+        items=[_authored_node_to_item(node) for node in folder.children],
+    )
+
+
+def _authored_node_to_item(node: AuthoredNode) -> ItemSpec:
+    """Convert one authored node into a canonical pinned-strip item."""
+    if isinstance(node, AuthoredFolderNode):
+        return _authored_folder_to_item(node)
+
+    if node.role == "tab":
+        msg = f"tab-role node {node.name!r} cannot appear in the pinned tree"
+        raise ZenFoldersError(msg)
+
+    return ItemTabSpec(name=node.name, url=node.url)
+
+
+class AuthoredWorkspace(BaseModel):
+    """Authored workspace entry in the public YAML schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    icon: str | None = None
+    hasCollapsedPinnedTabs: bool = False
+    theme: ThemeSpec = Field(default_factory=ThemeSpec)
+    tree: list[AuthoredNode] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        """Trim and validate the workspace name."""
+        stripped = value.strip()
+        if not stripped:
+            msg = "workspace names must be non-empty strings"
+            raise ValueError(msg)
+        return stripped
+
+    @field_validator("icon")
+    @classmethod
+    def validate_icon(cls, value: str | None) -> str | None:
+        """Trim optional workspace icons."""
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            msg = "workspace icons must be non-empty strings"
+            raise ValueError(msg)
+        return stripped
+
+    @model_validator(mode="after")
+    def validate_unique_top_level_folder_names(self) -> AuthoredWorkspace:
+        """Reject ambiguous same-name top-level folders."""
+        folder_names: set[str] = set()
+        for node in self.tree:
+            if isinstance(node, AuthoredFolderNode):
+                key = node.name.casefold()
+                if key in folder_names:
+                    msg = f"duplicate top-level folder name {node.name!r}"
+                    raise ValueError(msg)
+                folder_names.add(key)
+        return self
+
+
+def _coerce_authored_workspace(name: str, value: object) -> AuthoredWorkspace:
+    """Convert one authored workspace entry into a Pydantic workspace model."""
+    if isinstance(value, list):
+        return AuthoredWorkspace(
+            name=name,
+            tree=[_normalize_authored_node(item) for item in value],
+        )
+
+    if not isinstance(value, dict):
+        msg = f"workspace {name!r} must be a list or mapping"
+        raise ZenFoldersError(msg)
+
+    value_map = {str(key): value for key, value in value.items()}
+    if "tree" in value_map:
+        tree_raw = value_map["tree"]
+        if not isinstance(tree_raw, list):
+            msg = f"workspace {name!r} tree must be a list"
+            raise ZenFoldersError(msg)
+        tree = [_normalize_authored_node(item) for item in tree_raw]
+    else:
+        tree = [
+            _normalize_authored_node({child_name: child_value})
+            for child_name, child_value in value_map.items()
+            if child_name not in {"icon", "hasCollapsedPinnedTabs", "theme"}
+        ]
+
+    theme_raw = value_map.get("theme", {})
+    if not isinstance(theme_raw, dict):
+        msg = f"workspace {name!r} theme must be a mapping"
+        raise ZenFoldersError(msg)
+
+    return AuthoredWorkspace(
+        name=name,
+        icon=cast("str | None", value_map.get("icon")),
+        hasCollapsedPinnedTabs=bool(value_map.get("hasCollapsedPinnedTabs", False)),
+        theme=ThemeSpec.model_validate(theme_raw),
+        tree=tree,
+    )
+
+
+def _authored_workspace_to_spec(name: str, value: object) -> WorkspaceSpec:
+    """Convert one authored workspace entry into the canonical workspace form."""
+    workspace = _coerce_authored_workspace(name, value)
+
+    essentials: list[TabSpec] = []
+    items: list[ItemSpec] = []
+    tabs: list[TabSpec] = []
+
+    for node in workspace.tree:
+        if isinstance(node, AuthoredFolderNode):
+            items.append(_authored_folder_to_item(node))
+            continue
+
+        tab_spec = TabSpec(name=node.name, url=node.url)
+        if node.role == "essential":
+            essentials.append(tab_spec)
+        elif node.role == "tab":
+            tabs.append(tab_spec)
+        else:
+            items.append(ItemTabSpec(name=node.name, url=node.url))
+
+    return WorkspaceSpec(
+        name=workspace.name,
+        icon=workspace.icon,
+        hasCollapsedPinnedTabs=workspace.hasCollapsedPinnedTabs,
+        theme=workspace.theme,
+        essentials=essentials,
+        items=items,
+        tabs=tabs,
+    )
+
+
+def load_config(path: Path) -> ZenConfig:
+    """Parse and validate one declarative config file."""
+    raw = load_yaml(path)
+    if raw is None:
+        return ZenConfig()
+    if not isinstance(raw, dict):
+        msg = "Config root must be a mapping"
+        raise ZenFoldersError(msg)
+
+    try:
+        workspaces = [
+            _authored_workspace_to_spec(str(name), value) for name, value in raw.items()
+        ]
+        return ZenConfig(workspaces=workspaces)
+    except Exception as exc:  # pragma: no cover - exercised by callers
+        msg = f"Invalid config file {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
+
+
+def _load_profiles_ini() -> configparser.RawConfigParser | None:
+    """Load Zen's profiles.ini if it exists and is parseable."""
+    if not PROFILES_INI.exists():
+        return None
+    parser = configparser.RawConfigParser()
+    try:
+        with PROFILES_INI.open(encoding="utf-8") as handle:
+            parser.read_file(handle)
+    except (OSError, configparser.Error):
+        return None
+    return parser
+
+
+def _profile_path_from_ini(raw_path: str) -> Path | None:
+    """Resolve one profiles.ini path field into an absolute profile path."""
+    value = raw_path.strip()
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = ZEN_APPLICATION_SUPPORT / path
+    return path
+
+
+def _profiles_from_ini() -> list[tuple[str, Path, bool]]:
+    """Return ``(name, path, is_default)`` tuples from profiles.ini."""
+    parser = _load_profiles_ini()
+    if parser is None:
+        return []
+
+    profiles: list[tuple[str, Path, bool]] = []
+    for section in parser.sections():
+        if not section.startswith("Profile"):
+            continue
+        path = _profile_path_from_ini(parser.get(section, "Path", fallback=""))
+        if path is None:
+            continue
+        profiles.append((
+            parser.get(section, "Name", fallback="").strip(),
+            path,
+            parser.getboolean(section, "Default", fallback=False),
+        ))
+    return profiles
+
+
+def _default_profile_dir() -> Path | None:
+    """Auto-detect the default Zen profile directory."""
+    parser = _load_profiles_ini()
+    if parser is not None:
+        for section in parser.sections():
+            if not section.startswith("Install"):
+                continue
+            path = _profile_path_from_ini(parser.get(section, "Default", fallback=""))
+            if path is not None:
+                return path
+
+    for _name, path, is_default in _profiles_from_ini():
+        if is_default:
+            return path
+
+    profiles = _profiles_from_ini()
+    if profiles:
+        return profiles[0][1]
+
+    if not ZEN_PROFILES.exists():
+        return None
+    directories = sorted(path for path in ZEN_PROFILES.iterdir() if path.is_dir())
+    if len(directories) == 1:
+        return directories[0]
+    return None
+
+
+def _available_profile_hints() -> str:
+    """Return profile names or directory names for error messages."""
+    names = [name for name, _path, _default in _profiles_from_ini() if name]
+    if names:
+        return ", ".join(names)
+    if not ZEN_PROFILES.exists():
+        return "<none found>"
+    directories = sorted(path.name for path in ZEN_PROFILES.iterdir() if path.is_dir())
+    if directories:
+        return ", ".join(directories)
+    return "<none found>"
+
+
+def resolve_profile_dir(profile: str | None) -> Path:
+    """Resolve a profile selector into an on-disk profile directory path."""
+    if profile is None or not profile.strip():
+        detected = _default_profile_dir()
+        if detected is not None:
+            return detected
+        msg = (
+            "Unable to auto-detect a Zen profile. Pass --profile with a "
+            "profile name, directory, or session file path."
+        )
+        raise ZenFoldersError(msg)
+
+    candidate = Path(profile).expanduser()
+    if candidate.is_file():
+        return candidate.parent
+    if candidate.exists():
+        if candidate.is_dir():
+            return candidate
+        msg = f"Profile path is not a directory: {candidate}"
+        raise ZenFoldersError(msg)
+    if candidate.is_absolute():
+        msg = f"Profile not found: {candidate}"
+        raise ZenFoldersError(msg)
+
+    profile_path = ZEN_PROFILES / profile
+    if profile_path.exists():
+        if profile_path.is_dir():
+            return profile_path
+        msg = f"Profile path is not a directory: {profile_path}"
+        raise ZenFoldersError(msg)
+
+    profile_key = profile.strip().casefold()
+    for profile_name, path, _is_default in _profiles_from_ini():
+        if profile_name and profile_name.casefold() == profile_key:
+            return path
+
+    msg = f"Profile {profile!r} not found. Available: {_available_profile_hints()}"
+    raise ZenFoldersError(msg)
+
+
+def zen_profile_dir(profile: str | None) -> Path:
+    """Resolve a profile argument to the profile directory path."""
+    return resolve_profile_dir(profile)
+
+
+def session_file(profile: str | None) -> Path:
+    """Resolve a profile argument to an on-disk session file path."""
+    if profile is not None:
+        candidate = Path(profile).expanduser()
+        if candidate.is_file():
+            return candidate
+    path = zen_profile_dir(profile) / SESSION_FILENAME
+    if not path.exists():
+        msg = f"Session file not found: {path}"
+        raise ZenFoldersError(msg)
+    if not path.is_file():
+        msg = f"Session path is not a file: {path}"
+        raise ZenFoldersError(msg)
+    return path
+
+
+def read_session(path: Path) -> SessionState:
+    """Read and validate a Mozilla LZ4 session file."""
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        msg = f"Unable to read session file {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
+
+    if len(data) < SESSION_HEADER_SIZE:
+        msg = f"Session file is too small: {path}"
+        raise SessionFormatError(msg)
+    if data[: len(SESSION_HEADER_PREFIX)] != SESSION_HEADER_PREFIX:
+        msg = f"Not a Mozilla LZ4 file: {path}"
+        raise SessionFormatError(msg)
+
+    size = int.from_bytes(
+        data[len(SESSION_HEADER_PREFIX) : SESSION_HEADER_SIZE], "little"
+    )
+    if size <= 0 or size > MAX_SESSION_UNCOMPRESSED_BYTES:
+        msg = f"Invalid uncompressed size in session header: {size}"
+        raise SessionFormatError(msg)
+
+    try:
+        raw = json.loads(lz4.block.decompress(data[SESSION_HEADER_SIZE:], size))
+    except (RuntimeError, ValueError) as exc:
+        msg = f"Unable to decode session file {path}: {exc}"
+        raise SessionFormatError(msg) from exc
+
+    if not isinstance(raw, dict):
+        msg = "Session payload root must be an object"
+        raise SessionFormatError(msg)
+    return SessionState.model_validate(raw)
+
+
+def write_session(path: Path, session: SessionState) -> None:
+    """Write a session payload back to a Mozilla LZ4 file."""
+    payload = json.dumps(
+        session.model_dump(mode="json", exclude_none=False),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    header = SESSION_HEADER_PREFIX + len(payload).to_bytes(4, "little")
+    data = header + lz4.block.compress(payload, store_size=False)
+    try:
+        path.write_bytes(data)
+    except OSError as exc:
+        msg = f"Unable to write session file {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
+
+
+def load_session(profile: str | None) -> tuple[Path, SessionState]:
+    """Load and decode a profile's session payload."""
+    path = session_file(profile)
+    return path, read_session(path)
+
+
+def zen_lock_paths(profile: str | None) -> list[Path]:
+    """Return existing profile lock-file paths for one Zen profile."""
+    profile_dir = zen_profile_dir(profile)
+    return [
+        profile_dir / name
+        for name in PROFILE_LOCK_FILENAMES
+        if (profile_dir / name).exists()
+    ]
+
+
+def _lock_probe_state(path: Path) -> bool | None:
+    """Return whether *path* appears actively locked, if probeable."""
+    if fcntl is None:
+        return None
+    try:
+        fd = os.open(path, os.O_RDWR)
+    except OSError:
+        return None
+
+    try:
+        try:
+            fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EAGAIN):
+                return True
+            return None
+        with contextlib.suppress(OSError):
+            fcntl.lockf(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
+def zen_profile_lock_state(profile: str | None) -> bool | None:
+    """Return whether the target profile lock appears active."""
+    locks = zen_lock_paths(profile)
+    if not locks:
+        return False
+    saw_unknown = False
+    for path in locks:
+        state = _lock_probe_state(path)
+        if state is True:
+            return True
+        if state is None:
+            saw_unknown = True
+    if saw_unknown:
+        return None
+    return False
+
+
+def zen_process_is_running() -> bool | None:
+    """Best-effort detection of a running Zen/Twilight GUI process."""
+    try:
+        result = subprocess_run(["/bin/ps", "ax", "-o", "command="], capture=True)
+    except ZenFoldersError:
+        return None
+    return any(
+        ".app/contents/macos/zen" in line.strip().casefold()
+        for line in result.splitlines()
+    )
+
+
+def inspect_zen_runtime(profile: str | None) -> ZenRuntimeState:
+    """Inspect runtime state and preserve any detection uncertainty."""
+    lock_paths = zen_lock_paths(profile)
+    lock_state = zen_profile_lock_state(profile)
+    if lock_state is not None:
+        return ZenRuntimeState(running=lock_state)
+    warnings = (
+        "Could not confirm whether the profile lock is active; falling back to "
+        "process inspection.",
+    )
+    process_state = zen_process_is_running()
+    if process_state is not None:
+        return ZenRuntimeState(running=process_state, warnings=warnings)
+    return ZenRuntimeState(
+        running=bool(lock_paths),
+        warnings=(
+            *warnings,
+            "Could not inspect Zen processes either; treating existing profile "
+            f"lock files as {'active' if lock_paths else 'inactive'}.",
+        ),
+    )
+
+
+def zen_is_running(profile: str | None) -> bool:
+    """Return whether Zen appears to be actively using the target profile."""
+    return inspect_zen_runtime(profile).running
+
+
+def _print_runtime_warnings(state: ZenRuntimeState) -> None:
+    """Render runtime-detection warnings to stderr."""
+    for warning in state.warnings:
+        _stderr(f"Warning: {warning}")
+
+
+def require_zen_closed(profile: str | None) -> ZenRuntimeState:
+    """Abort when Zen is currently running against the target profile."""
+    path = session_file(profile)
+    state = inspect_zen_runtime(profile)
+    if state.running:
+        msg = f"Zen is running. Quit it first. (It may overwrite {path.name} on exit.)"
+        if state.warnings:
+            msg = f"{msg} Detection details: {' '.join(state.warnings)}"
+        raise ZenFoldersError(msg)
+    return state
+
+
+def backup_session(path: Path) -> Path:
+    """Create a timestamped backup alongside the session file."""
+    stem = f"{path.name}.{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns() % 1_000_000_000:09d}"
+    backup = path.with_name(f"{stem}.bak")
+    suffix = 0
+    while backup.exists():
+        suffix += 1
+        backup = path.with_name(f"{stem}.{suffix}.bak")
+    try:
+        shutil.copy2(path, backup)
+    except OSError as exc:
+        msg = f"Failed to create backup {backup.name}: {exc}"
+        raise ZenFoldersError(msg) from exc
+    return backup
+
+
+def subprocess_run(command: Sequence[str], *, capture: bool) -> str:
+    """Run one subprocess and return stdout when capturing."""
+    try:
+        result = subprocess.run(  # noqa: S603
+            list(command),
+            check=True,
+            capture_output=capture,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError, OSError) as exc:
+        msg = f"Failed to run command {' '.join(command)}: {exc}"
+        raise ZenFoldersError(msg) from exc
+    return result.stdout if capture else ""
+
+
+def active_index(tab: SessionTab) -> int:
+    """Return the clamped active-entry index for *tab*."""
+    if not tab.entries:
+        return 0
+    return max(0, min(tab.index - 1, len(tab.entries) - 1))
+
+
+def active_entry(tab: SessionTab) -> SessionEntry | None:
+    """Return the active history entry for *tab*."""
+    if not tab.entries:
+        return None
+    return tab.entries[active_index(tab)]
+
+
+def active_url(tab: SessionTab) -> str:
+    """Return the active URL for *tab*."""
+    entry = active_entry(tab)
+    return entry.url if entry is not None else ""
+
+
+def active_title(tab: SessionTab) -> str:
+    """Return the active title for *tab*."""
+    entry = active_entry(tab)
+    return entry.title if entry is not None else ""
+
+
+def display_name(tab: SessionTab) -> str:
+    """Return the declared label for *tab*."""
+    if isinstance(tab.zenStaticLabel, str) and tab.zenStaticLabel.strip():
+        return tab.zenStaticLabel.strip()
+    title = active_title(tab).strip()
+    if title:
+        return title
+    return active_url(tab)
+
+
+def tab_to_spec(tab: SessionTab) -> TabSpec:
+    """Convert one session tab into a declarative tab spec."""
+    return TabSpec(name=display_name(tab), url=active_url(tab))
+
+
+def clone_tab(existing: SessionTab | None) -> SessionTab:
+    """Return a deep copy of *existing* or a fresh tab shell."""
+    if existing is not None:
+        return existing.model_copy(deep=True)
+    return SessionTab(zenSyncId="")
+
+
+def reset_active_entry(tab: SessionTab, *, name: str, url: str) -> None:
+    """Replace the active entry with one declarative target entry."""
+    tab.entries = [SessionEntry(url=url, title=name)]
+    tab.index = 1
+
+
+def build_tab(
+    spec: TabSpec | ItemTabSpec,
+    *,
+    existing: SessionTab | None,
+    sync_id: str,
+    pinned: bool,
+    essential: bool,
+    workspace_uuid: str | None,
+    folder_id: str | None,
+    user_context_id: int,
+    placeholder: bool = False,
+) -> SessionTab:
+    """Return one session tab matching the declarative target."""
+    tab = clone_tab(existing)
+    desired_url = spec.url if not placeholder else ""
+    current_url = active_url(tab)
+    if placeholder or current_url != desired_url:
+        reset_active_entry(tab, name=spec.name, url=desired_url)
+    tab.zenSyncId = sync_id
+    tab.pinned = pinned or essential
+    tab.hidden = False
+    tab.zenWorkspace = workspace_uuid
+    tab.zenEssential = essential
+    tab.groupId = folder_id
+    tab.zenIsEmpty = placeholder
+    tab.userContextId = user_context_id
+    tab.zenStaticLabel = None if placeholder else spec.name
+    tab.zenHasStaticIcon = False
+    tab.zenPinnedIcon = None
+    tab.zenGlanceId = None
+    tab.zenIsGlance = False
+    tab.zenLiveFolderItemId = None
+    tab.searchMode = None
+    tab.attributes = dict(tab.attributes)
+    tab.lastAccessed = tab.lastAccessed or int(time.time() * 1000)
+    tab.zenDefaultUserContextId = "true" if user_context_id else None
+    return tab
+
+
+def build_placeholder_tab(
+    *,
+    sync_id: str,
+    workspace_uuid: str,
+    folder_id: str,
+    user_context_id: int,
+) -> SessionTab:
+    """Build the hidden empty tab Zen uses for empty folders."""
+    return SessionTab(
+        entries=[],
+        index=1,
+        lastAccessed=0,
+        hidden=False,
+        pinned=True,
+        zenWorkspace=workspace_uuid,
+        zenSyncId=sync_id,
+        zenEssential=False,
+        zenDefaultUserContextId="true" if user_context_id else None,
+        zenPinnedIcon=None,
+        zenIsEmpty=True,
+        zenStaticLabel=None,
+        zenHasStaticIcon=False,
+        zenGlanceId=None,
+        zenIsGlance=False,
+        zenLiveFolderItemId=None,
+        searchMode=None,
+        userContextId=user_context_id,
+        groupId=folder_id,
+        attributes={},
+    )
+
+
+def new_workspace_uuid() -> str:
+    """Return a new workspace UUID in Zen's brace-wrapped format."""
+    return f"{{{uuid.uuid4()}}}"
+
+
+def new_item_id() -> str:
+    """Return a new folder or tab sync identifier."""
+    return f"zf-{uuid.uuid4().hex}"
+
+
+def folder_path_map(session: SessionState) -> dict[str, ExistingFolderRecord]:
+    """Return existing folder records keyed by folder ID."""
+    folders_by_id = {folder.id: folder for folder in session.folders}
+    paths_by_id: dict[str, tuple[str, ...]] = {}
+
+    def build_path(folder_id: str) -> tuple[str, ...]:
+        if folder_id in paths_by_id:
+            return paths_by_id[folder_id]
+        folder = folders_by_id[folder_id]
+        parent_path: tuple[str, ...] = ()
+        if folder.parentId is not None and folder.parentId in folders_by_id:
+            parent_path = build_path(folder.parentId)
+        path = (*parent_path, folder.name)
+        paths_by_id[folder_id] = path
+        return path
+
+    records: dict[str, ExistingFolderRecord] = {}
+    for folder in session.folders:
+        records[folder.id] = ExistingFolderRecord(
+            folder=folder, path=build_path(folder.id)
+        )
+    return records
+
+
+def folder_lookup_by_path(
+    session: SessionState,
+    spaces_by_uuid: dict[str, SessionSpace],
+) -> dict[tuple[str, tuple[str, ...]], SessionFolder]:
+    """Index existing folders by ``(workspace-name, path)``."""
+    records = folder_path_map(session)
+    lookup: dict[tuple[str, tuple[str, ...]], SessionFolder] = {}
+    for record in records.values():
+        workspace = spaces_by_uuid.get(record.folder.workspaceId)
+        if workspace is None:
+            continue
+        key = (
+            workspace.name.casefold(),
+            tuple(part.casefold() for part in record.path),
+        )
+        if key in lookup:
+            msg = f"Duplicate folder path in session: {record.path!r}"
+            raise ZenFoldersError(msg)
+        lookup[key] = record.folder
+    return lookup
+
+
+def compile_items(
+    specs: Sequence[ItemSpec],
+    *,
+    workspace_key: str,
+    workspace_uuid: str,
+    inherited_container_id: int,
+    existing_folders: dict[tuple[str, tuple[str, ...]], SessionFolder],
+    existing_groups: dict[str, SessionGroup],
+    parent_path: tuple[str, ...] = (),
+) -> list[CompiledItem]:
+    """Compile declarative pinned-strip items into internal nodes."""
+    compiled: list[CompiledItem] = []
+    for spec in specs:
+        if isinstance(spec, ItemTabSpec):
+            compiled.append(
+                CompiledTab(
+                    spec=spec,
+                    essential=False,
+                    pinned=True,
+                    workspace_key=workspace_key,
+                    workspace_uuid=workspace_uuid,
+                    folder_id=None,
+                    user_context_id=inherited_container_id,
+                )
+            )
+            continue
+
+        path = (*parent_path, spec.name)
+        key = (workspace_key, tuple(part.casefold() for part in path))
+        existing_folder = existing_folders.get(key)
+        folder_id = existing_folder.id if existing_folder is not None else new_item_id()
+        compiled_folder = CompiledFolder(
+            spec=spec,
+            workspace_key=workspace_key,
+            workspace_uuid=workspace_uuid,
+            id=folder_id,
+            existing=existing_folder,
+            group_existing=existing_groups.get(folder_id),
+            placeholder_sync_id=(
+                existing_folder.emptyTabIds[0]
+                if existing_folder and existing_folder.emptyTabIds
+                else None
+            ),
+        )
+        compiled_folder.items = compile_folder_children(
+            spec.items,
+            workspace_key=workspace_key,
+            workspace_uuid=workspace_uuid,
+            inherited_container_id=inherited_container_id,
+            folder_id=folder_id,
+            existing_folders=existing_folders,
+            existing_groups=existing_groups,
+            parent_path=path,
+        )
+        compiled.append(compiled_folder)
+    return compiled
+
+
+def compile_folder_children(
+    specs: Sequence[ItemSpec],
+    *,
+    workspace_key: str,
+    workspace_uuid: str,
+    inherited_container_id: int,
+    folder_id: str,
+    existing_folders: dict[tuple[str, tuple[str, ...]], SessionFolder],
+    existing_groups: dict[str, SessionGroup],
+    parent_path: tuple[str, ...],
+) -> list[CompiledItem]:
+    """Compile the children of one folder."""
+    compiled = compile_items(
+        specs,
+        workspace_key=workspace_key,
+        workspace_uuid=workspace_uuid,
+        inherited_container_id=inherited_container_id,
+        existing_folders=existing_folders,
+        existing_groups=existing_groups,
+        parent_path=parent_path,
+    )
+    for item in compiled:
+        if isinstance(item, CompiledTab):
+            item.folder_id = folder_id
+    return compiled
+
+
+def build_workspace_compilation(
+    spec: WorkspaceSpec,
+    *,
+    existing_space: SessionSpace | None,
+    existing_folders: dict[tuple[str, tuple[str, ...]], SessionFolder],
+    existing_groups: dict[str, SessionGroup],
+) -> WorkspaceCompilation:
+    """Compile one workspace spec into reusable internal nodes."""
+    space = (
+        existing_space.model_copy(deep=True)
+        if existing_space is not None
+        else SessionSpace(uuid=new_workspace_uuid(), name=spec.name)
+    )
+    space.name = spec.name
+    space.icon = spec.icon
+    space.hasCollapsedPinnedTabs = spec.hasCollapsedPinnedTabs
+    space.theme = SessionTheme.model_validate(spec.theme.model_dump())
+
+    workspace_key = spec.name.casefold()
+    items = compile_items(
+        spec.items,
+        workspace_key=workspace_key,
+        workspace_uuid=space.uuid,
+        inherited_container_id=space.containerTabId,
+        existing_folders=existing_folders,
+        existing_groups=existing_groups,
+    )
+    tabs = [
+        CompiledTab(
+            spec=tab,
+            essential=False,
+            pinned=False,
+            workspace_key=workspace_key,
+            workspace_uuid=space.uuid,
+            folder_id=None,
+            user_context_id=space.containerTabId,
+        )
+        for tab in spec.tabs
+    ]
+    return WorkspaceCompilation(
+        spec=spec, key=workspace_key, space=space, items=items, tabs=tabs
+    )
+
+
+def iter_compiled_tabs(items: Sequence[CompiledItem]) -> Iterator[CompiledTab]:
+    """Yield tabs from a compiled pinned-strip tree."""
+    for item in items:
+        if isinstance(item, CompiledTab):
+            yield item
+            continue
+        if item.placeholder_tab is not None:
+            yield item.placeholder_tab
+        yield from iter_compiled_tabs(item.items)
+
+
+def gather_workspace_pinned_tabs(items: Sequence[CompiledItem]) -> list[CompiledTab]:
+    """Collect pinned tabs for one workspace in deterministic order."""
+    return list(iter_compiled_tabs(items))
+
+
+def gather_compiled_tabs(
+    essentials: Sequence[CompiledTab],
+    workspaces: Sequence[WorkspaceCompilation],
+) -> list[CompiledTab]:
+    """Return all desired tabs in their persisted order."""
+    essentials_by_workspace: dict[str | None, list[CompiledTab]] = defaultdict(list)
+    for tab in essentials:
+        essentials_by_workspace[tab.workspace_uuid].append(tab)
+
+    tabs: list[CompiledTab] = []
+    for workspace in workspaces:
+        tabs.extend(essentials_by_workspace.get(workspace.space.uuid, ()))
+        tabs.extend(gather_workspace_pinned_tabs(workspace.items))
+        tabs.extend(workspace.tabs)
+
+    tabs.extend(essentials_by_workspace.get(None, ()))
+    return tabs
+
+
+def match_tabs_to_existing(
+    *,
+    session: SessionState,
+    essentials: Sequence[CompiledTab],
+    workspaces: Sequence[WorkspaceCompilation],
+) -> None:
+    """Match compiled tabs to existing session tabs by exact URL."""
+    essential_pools: dict[str | None, TabPool] = {}
+    workspace_pools: dict[str, TabPool] = {}
+    workspace_tab_pools: dict[str, TabPool] = {}
+    for workspace in workspaces:
+        uuid_value = workspace.space.uuid
+        essential_pools[uuid_value] = TabPool(
+            tab
+            for tab in session.tabs
+            if tab.zenEssential
+            and tab.zenWorkspace == uuid_value
+            and not tab.zenIsEmpty
+        )
+        workspace_pools[workspace.key] = TabPool(
+            tab
+            for tab in session.tabs
+            if tab.pinned
+            and not tab.zenEssential
+            and tab.zenWorkspace == uuid_value
+            and not tab.zenIsEmpty
+        )
+        workspace_tab_pools[workspace.key] = TabPool(
+            tab
+            for tab in session.tabs
+            if not tab.pinned and tab.zenWorkspace == uuid_value and not tab.zenIsEmpty
+        )
+
+    essential_pools[None] = TabPool(
+        tab
+        for tab in session.tabs
+        if tab.zenEssential and tab.zenWorkspace is None and not tab.zenIsEmpty
+    )
+
+    for tab in essentials:
+        essential_pool = essential_pools.get(tab.workspace_uuid)
+        tab.existing = (
+            essential_pool.claim(tab.spec.url) if essential_pool is not None else None
+        )
+        tab.sync_id = (
+            tab.existing.zenSyncId if tab.existing is not None else new_item_id()
+        )
+        if tab.existing is not None:
+            tab.user_context_id = tab.existing.userContextId
+
+    for workspace in workspaces:
+        pinned_pool = workspace_pools[workspace.key]
+        for tab in gather_workspace_pinned_tabs(workspace.items):
+            if tab.placeholder:
+                tab.sync_id = tab.spec.url or tab.sync_id or new_item_id()
+                continue
+            tab.existing = pinned_pool.claim(tab.spec.url)
+            tab.sync_id = (
+                tab.existing.zenSyncId if tab.existing is not None else new_item_id()
+            )
+            if tab.existing is not None:
+                tab.user_context_id = tab.existing.userContextId
+        regular_pool = workspace_tab_pools[workspace.key]
+        for tab in workspace.tabs:
+            tab.existing = regular_pool.claim(tab.spec.url)
+            tab.sync_id = (
+                tab.existing.zenSyncId if tab.existing is not None else new_item_id()
+            )
+            if tab.existing is not None:
+                tab.user_context_id = tab.existing.userContextId
+
+
+def direct_tab_count(items: Sequence[CompiledItem]) -> int:
+    """Return the count of direct non-folder tab children."""
+    return sum(1 for item in items if isinstance(item, CompiledTab))
+
+
+def prepare_folder_placeholders(workspaces: Sequence[WorkspaceCompilation]) -> None:
+    """Create placeholder sync IDs for folders without direct tab children."""
+    for workspace in workspaces:
+        for folder in iter_compiled_folders(workspace.items):
+            if direct_tab_count(folder.items) > 0:
+                folder.placeholder_tab = None
+                continue
+            sync_id = folder.placeholder_sync_id or new_item_id()
+            folder.placeholder_tab = CompiledTab(
+                spec=TabSpec(name="", url=""),
+                essential=False,
+                pinned=True,
+                workspace_key=folder.workspace_key,
+                workspace_uuid=folder.workspace_uuid,
+                folder_id=folder.id,
+                user_context_id=workspace.space.containerTabId,
+                sync_id=sync_id,
+                placeholder=True,
+            )
+
+
+def iter_compiled_folders(items: Sequence[CompiledItem]) -> Iterator[CompiledFolder]:
+    """Yield folders from a compiled pinned-strip tree."""
+    for item in items:
+        if isinstance(item, CompiledFolder):
+            yield item
+            yield from iter_compiled_folders(item.items)
+
+
+def assign_folder_links(
+    items: Sequence[CompiledItem], *, parent_id: str | None
+) -> None:
+    """Assign ``parentId`` and ``prevSiblingInfo`` for all folders in *items*."""
+    previous_type: Literal["tab", "group"] | None = None
+    previous_id: str | None = None
+    for item in items:
+        if isinstance(item, CompiledTab):
+            previous_type = "tab"
+            previous_id = item.sync_id
+            continue
+        info = (
+            PrevSiblingInfo(type="start", id=None)
+            if previous_type is None
+            else PrevSiblingInfo(type=previous_type, id=previous_id)
+        )
+        if item.existing is not None:
+            item.existing.parentId = parent_id
+            item.existing.prevSiblingInfo = info
+        else:
+            item.existing = SessionFolder(
+                id=item.id,
+                name=item.spec.name,
+                workspaceId=item.workspace_uuid,
+                parentId=parent_id,
+                prevSiblingInfo=info,
+            )
+        item.existing.parentId = parent_id
+        item.existing.prevSiblingInfo = info
+        assign_folder_links(item.items, parent_id=item.id)
+        previous_type = "group"
+        previous_id = item.id
+
+
+def build_group(folder: CompiledFolder) -> SessionGroup:
+    """Return a group record for *folder*."""
+    group = (
+        folder.group_existing.model_copy(deep=True)
+        if folder.group_existing is not None
+        else SessionGroup(id=folder.id, name=folder.spec.name)
+    )
+    group.id = folder.id
+    group.name = folder.spec.name
+    group.collapsed = folder.spec.collapsed
+    group.pinned = True
+    group.color = GROUP_COLOR
+    group.splitView = False
+    group.saveOnWindowClose = True
+    return group
+
+
+def build_folder(folder: CompiledFolder) -> SessionFolder:
+    """Return a folder record for *folder*."""
+    session_folder = (
+        folder.existing.model_copy(deep=True)
+        if folder.existing is not None
+        else SessionFolder(
+            id=folder.id, name=folder.spec.name, workspaceId=folder.workspace_uuid
+        )
+    )
+    session_folder.id = folder.id
+    session_folder.name = folder.spec.name
+    session_folder.workspaceId = folder.workspace_uuid
+    session_folder.collapsed = folder.spec.collapsed
+    session_folder.pinned = True
+    session_folder.splitViewGroup = False
+    session_folder.saveOnWindowClose = True
+    session_folder.userIcon = session_folder.userIcon or ""
+    session_folder.emptyTabIds = (
+        [folder.placeholder_tab.sync_id] if folder.placeholder_tab else []
+    )
+    return session_folder
+
+
+def build_desired_tabs(
+    essentials: Sequence[CompiledTab],
+    workspaces: Sequence[WorkspaceCompilation],
+) -> list[SessionTab]:
+    """Return the desired session tab list."""
+    tabs: list[SessionTab] = []
+    for compiled in gather_compiled_tabs(essentials, workspaces):
+        if compiled.placeholder:
+            if compiled.workspace_uuid is None or compiled.folder_id is None:
+                msg = "placeholder tabs must belong to a workspace folder"
+                raise ZenFoldersError(msg)
+            tabs.append(
+                build_placeholder_tab(
+                    sync_id=compiled.sync_id,
+                    workspace_uuid=compiled.workspace_uuid,
+                    folder_id=compiled.folder_id,
+                    user_context_id=compiled.user_context_id,
+                )
+            )
+            continue
+        tabs.append(
+            build_tab(
+                compiled.spec,
+                existing=compiled.existing,
+                sync_id=compiled.sync_id,
+                pinned=compiled.pinned,
+                essential=compiled.essential,
+                workspace_uuid=compiled.workspace_uuid,
+                folder_id=compiled.folder_id,
+                user_context_id=compiled.user_context_id,
+            )
+        )
+    return tabs
+
+
+def build_desired_state(existing: SessionState, config: ZenConfig) -> SessionState:
+    """Compile *config* into the managed session subset."""
+    result = existing.model_copy(deep=True)
+    existing_spaces = {space.name.casefold(): space for space in existing.spaces}
+    spaces_by_uuid = {space.uuid: space for space in existing.spaces}
+    existing_folders = folder_lookup_by_path(existing, spaces_by_uuid)
+    existing_groups = {group.id: group for group in existing.groups}
+
+    compiled_workspaces = [
+        build_workspace_compilation(
+            workspace,
+            existing_space=existing_spaces.get(workspace.name.casefold()),
+            existing_folders=existing_folders,
+            existing_groups=existing_groups,
+        )
+        for workspace in config.workspaces
+    ]
+    compiled_essentials = [
+        CompiledTab(
+            spec=spec,
+            essential=True,
+            pinned=True,
+            workspace_key=workspace.key,
+            workspace_uuid=workspace.space.uuid,
+            folder_id=None,
+            user_context_id=workspace.space.containerTabId,
+        )
+        for workspace, spec in (
+            (workspace, spec)
+            for workspace in compiled_workspaces
+            for spec in workspace.spec.essentials
+        )
+    ]
+
+    prepare_folder_placeholders(compiled_workspaces)
+    match_tabs_to_existing(
+        session=existing,
+        essentials=compiled_essentials,
+        workspaces=compiled_workspaces,
+    )
+    for workspace in compiled_workspaces:
+        assign_folder_links(workspace.items, parent_id=None)
+
+    result.spaces = [workspace.space for workspace in compiled_workspaces]
+    result.folders = [
+        build_folder(folder)
+        for workspace in compiled_workspaces
+        for folder in iter_compiled_folders(workspace.items)
+    ]
+    result.groups = [
+        build_group(folder)
+        for workspace in compiled_workspaces
+        for folder in iter_compiled_folders(workspace.items)
+    ]
+    result.tabs = build_desired_tabs(compiled_essentials, compiled_workspaces)
+    if result.model_extra is None:
+        result.__pydantic_extra__ = {"splitViewData": []}
+    else:
+        result.model_extra["splitViewData"] = []
+    return result
+
+
+def top_level_essentials(session: SessionState) -> list[SessionTab]:
+    """Return essential tabs in persisted order."""
+    return [tab for tab in session.tabs if tab.zenEssential and not tab.zenIsEmpty]
+
+
+def top_level_pinned_tabs(
+    session: SessionState, workspace_uuid: str
+) -> list[SessionTab]:
+    """Return top-level pinned, non-essential tabs for one workspace."""
+    return [
+        tab
+        for tab in session.tabs
+        if tab.pinned
+        and not tab.zenEssential
+        and not tab.zenIsEmpty
+        and tab.zenWorkspace == workspace_uuid
+        and tab.groupId is None
+    ]
+
+
+def direct_folder_tabs(session: SessionState, folder_id: str) -> list[SessionTab]:
+    """Return direct non-placeholder tabs for one folder."""
+    return [
+        tab for tab in session.tabs if tab.groupId == folder_id and not tab.zenIsEmpty
+    ]
+
+
+def top_level_workspace_tabs(
+    session: SessionState, workspace_uuid: str
+) -> list[SessionTab]:
+    """Return unpinned top-level tabs for one workspace."""
+    return [
+        tab
+        for tab in session.tabs
+        if not tab.pinned
+        and not tab.zenIsEmpty
+        and tab.zenWorkspace == workspace_uuid
+        and tab.groupId is None
+    ]
+
+
+def insert_folder_nodes(
+    base_nodes: list[tuple[str, ItemTabSpec]],
+    folders: Sequence[SessionFolder],
+    build_folder_spec: Callable[[SessionFolder], FolderSpec],
+) -> list[ItemSpec]:
+    """Insert folders into a tab-only base sequence using sibling metadata."""
+    nodes: list[tuple[str, ItemSpec]] = list(base_nodes)
+    pending = list(folders)
+    while pending:
+        progress = False
+        for folder in list(pending):
+            prev = folder.prevSiblingInfo or PrevSiblingInfo(type="start", id=None)
+            insert_at: int | None = None
+            if prev.type == "start":
+                insert_at = 0
+            else:
+                for index, (node_id, _node) in enumerate(nodes):
+                    if node_id == prev.id:
+                        insert_at = index + 1
+                        break
+            if insert_at is None:
+                continue
+            nodes.insert(insert_at, (folder.id, build_folder_spec(folder)))
+            pending.remove(folder)
+            progress = True
+        if progress:
+            continue
+        nodes.extend((folder.id, build_folder_spec(folder)) for folder in pending)
+        break
+    return [node for _node_id, node in nodes]
+
+
+def build_folder_tree(
+    session: SessionState,
+    *,
+    workspace_uuid: str,
+    parent_id: str | None,
+    folders_by_parent: dict[str | None, list[SessionFolder]],
+) -> list[ItemSpec]:
+    """Reconstruct the pinned-strip item order for one folder container."""
+    source_tabs = (
+        top_level_pinned_tabs(session, workspace_uuid)
+        if parent_id is None
+        else direct_folder_tabs(session, parent_id)
+    )
+    tab_nodes = [
+        (
+            tab.zenSyncId,
+            ItemTabSpec.model_validate({
+                "name": display_name(tab),
+                "url": active_url(tab),
+            }),
+        )
+        for tab in source_tabs
+    ]
+
+    def build_folder_spec(folder: SessionFolder) -> FolderSpec:
+        return FolderSpec(
+            name=folder.name,
+            collapsed=folder.collapsed,
+            items=build_folder_tree(
+                session,
+                workspace_uuid=workspace_uuid,
+                parent_id=folder.id,
+                folders_by_parent=folders_by_parent,
+            ),
+        )
+
+    return insert_folder_nodes(
+        tab_nodes, folders_by_parent.get(parent_id, []), build_folder_spec
+    )
+
+
+def export_config(session: SessionState) -> ZenConfig:
+    """Convert a session payload into the canonical declarative config model."""
+    workspaces: list[WorkspaceSpec] = []
+    for space in session.spaces:
+        folders_by_parent: dict[str | None, list[SessionFolder]] = defaultdict(list)
+        for folder in session.folders:
+            if folder.workspaceId != space.uuid:
+                continue
+            folders_by_parent[folder.parentId].append(folder)
+        workspace_items = build_folder_tree(
+            session,
+            workspace_uuid=space.uuid,
+            parent_id=None,
+            folders_by_parent=folders_by_parent,
+        )
+        workspace_tabs = [
+            tab_to_spec(tab) for tab in top_level_workspace_tabs(session, space.uuid)
+        ]
+        workspace_essentials = [
+            tab_to_spec(tab)
+            for tab in top_level_essentials(session)
+            if tab.zenWorkspace == space.uuid
+        ]
+
+        workspaces.append(
+            WorkspaceSpec(
+                name=space.name,
+                icon=space.icon,
+                hasCollapsedPinnedTabs=space.hasCollapsedPinnedTabs,
+                theme=ThemeSpec.model_validate(space.theme.model_dump()),
+                essentials=workspace_essentials,
+                items=workspace_items,
+                tabs=workspace_tabs,
+            )
+        )
+    return ZenConfig(workspaces=workspaces)
+
+
+def _theme_to_dict(theme: ThemeSpec) -> dict[str, object]:
+    """Serialize a theme spec while omitting default values."""
+    data: dict[str, object] = {}
+    if theme.gradientColors:
+        data["gradientColors"] = list(theme.gradientColors)
+    if theme.opacity != DEFAULT_THEME_OPACITY:
+        data["opacity"] = theme.opacity
+    if theme.texture != DEFAULT_THEME_TEXTURE:
+        data["texture"] = theme.texture
+    if theme.type != DEFAULT_THEME_TYPE:
+        data["type"] = theme.type
+    return data
+
+
+def _tab_spec_to_dict(
+    tab: TabSpec,
+    *,
+    include_type: bool,
+) -> dict[str, object]:
+    """Serialize one tab spec to a compact mapping."""
+    data: dict[str, object] = {"name": tab.name, "url": tab.url}
+    if include_type:
+        data = {"type": "tab", **data}
+    return data
+
+
+def _item_to_dict(item: ItemSpec) -> dict[str, object]:
+    """Serialize one pinned-strip item to a compact mapping."""
+    if isinstance(item, ItemTabSpec):
+        return _tab_spec_to_dict(item, include_type=True)
+    data: dict[str, object] = {"type": "folder", "name": item.name}
+    if not item.collapsed:
+        data["collapsed"] = False
+    if item.items:
+        data["items"] = [_item_to_dict(child) for child in item.items]
+    return data
+
+
+def _authored_leaf_to_dict(
+    tab: TabSpec,
+    *,
+    role: Literal["essential", "tab"] | None = None,
+) -> dict[str, object]:
+    """Serialize one authored leaf node."""
+    if role is None:
+        return {tab.name: tab.url}
+    return {tab.name: {"url": tab.url, "role": role}}
+
+
+def _authored_folder_to_dict(folder: FolderSpec) -> dict[str, object]:
+    """Serialize one authored folder node."""
+    children = [_item_to_authored_dict(item) for item in folder.items]
+    if folder.collapsed:
+        return {folder.name: children}
+    return {
+        folder.name: {
+            "collapsed": False,
+            "children": children,
+        }
+    }
+
+
+def _item_to_authored_dict(item: ItemSpec) -> dict[str, object]:
+    """Serialize one canonical pinned item into the authored YAML shape."""
+    if isinstance(item, ItemTabSpec):
+        return {item.name: item.url}
+    return _authored_folder_to_dict(item)
+
+
+def config_to_dict(config: ZenConfig) -> dict[str, object]:
+    """Serialize one config model to the public authored YAML shape."""
+    data: dict[str, object] = {}
+
+    for workspace in config.workspaces:
+        tree: list[dict[str, object]] = []
+        tree.extend(
+            _authored_leaf_to_dict(tab, role="essential")
+            for tab in workspace.essentials
+        )
+        tree.extend(_item_to_authored_dict(item) for item in workspace.items)
+        tree.extend(_authored_leaf_to_dict(tab, role="tab") for tab in workspace.tabs)
+
+        workspace_data: dict[str, object] = {}
+        if workspace.icon is not None:
+            workspace_data["icon"] = workspace.icon
+        if workspace.hasCollapsedPinnedTabs:
+            workspace_data["hasCollapsedPinnedTabs"] = True
+        theme = _theme_to_dict(workspace.theme)
+        if theme:
+            workspace_data["theme"] = theme
+
+        if workspace_data:
+            workspace_data["tree"] = tree
+            data[workspace.name] = workspace_data
+        else:
+            data[workspace.name] = tree
+
+    return data
+
+
+def snapshot(session: SessionState) -> dict[str, Any]:
+    """Return a compact declarative snapshot for diffing and dump output."""
+    return config_to_dict(export_config(session))
+
+
+def format_config_yaml(config: ZenConfig) -> str:
+    """Serialize one config model to YAML."""
+    return yaml.safe_dump(
+        config_to_dict(config),
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+
+
+def format_snapshot_yaml(session: SessionState) -> str:
+    """Serialize the current session snapshot to YAML."""
+    return yaml.safe_dump(
+        snapshot(session),
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+
+
+def diff_session(session: SessionState, config: ZenConfig) -> DeepDiff:
+    """Return the structural diff between current and desired managed state."""
+    desired = snapshot(build_desired_state(session, config))
+    current = snapshot(session)
+    return DeepDiff(current, desired, ignore_order=False)
+
+
+def iter_folder_records(session: SessionState) -> Iterator[tuple[str, SessionFolder]]:
+    """Yield folder paths and records in session order."""
+    spaces_by_uuid = {space.uuid: space for space in session.spaces}
+    records = folder_path_map(session)
+    for folder in session.folders:
+        record = records[folder.id]
+        workspace = spaces_by_uuid.get(folder.workspaceId)
+        workspace_name = workspace.name if workspace is not None else folder.workspaceId
+        yield (" / ".join((workspace_name, *record.path)), folder)
+
+
+def session_check(session: SessionState) -> list[str]:
+    """Return structural errors in the managed subset."""
+    errors: list[str] = []
+    group_ids = {group.id for group in session.groups}
+    folder_ids = {folder.id for folder in session.folders}
+    folder_names: set[tuple[str, str | None, str]] = set()
+    for folder in session.folders:
+        if folder.id not in group_ids:
+            errors.append(f"Folder {folder.name!r} has no matching group")
+        key = (folder.workspaceId, folder.parentId, folder.name.casefold())
+        if key in folder_names:
+            errors.append(f"Duplicate folder name in one container: {folder.name!r}")
+        folder_names.add(key)
+        if folder.parentId is not None and folder.parentId not in folder_ids:
+            errors.append(
+                f"Folder {folder.name!r} has unknown parentId {folder.parentId!r}"
+            )
+    for tab in session.tabs:
+        if tab.zenIsEmpty:
+            continue
+        if tab.groupId is not None and tab.groupId not in folder_ids:
+            errors.append(
+                f"Tab {active_url(tab)!r} references unknown folder {tab.groupId!r}"
+            )
+        if tab.zenEssential and not tab.pinned:
+            errors.append(f"Essential tab {active_url(tab)!r} is not pinned")
+    return errors
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    """List folders in path order."""
+    _path, session = load_session(args.profile)
+    folders = list(iter_folder_records(session))
+    if not folders:
+        _stdout("No folders found.")
+        return 0
+    for index, (path, folder) in enumerate(folders, start=1):
+        _stdout(f"{index:2d}. {path}  [collapsed={folder.collapsed}]")
+    return 0
+
+
+def cmd_tabs(args: argparse.Namespace) -> int:
+    """List declarative tab locations from the current session."""
+    _path, session = load_session(args.profile)
+    essentials = top_level_essentials(session)
+    if essentials:
+        _stdout("Essentials:")
+        for tab in essentials:
+            _stdout(f"  {display_name(tab)} -> {active_url(tab)}")
+    for workspace in session.spaces:
+        _stdout()
+        _stdout(f"Workspace: {workspace.name}")
+        pinned = top_level_pinned_tabs(session, workspace.uuid)
+        if pinned:
+            _stdout("  Pinned:")
+            for tab in pinned:
+                _stdout(f"    {display_name(tab)} -> {active_url(tab)}")
+        folders = [
+            folder for folder in session.folders if folder.workspaceId == workspace.uuid
+        ]
+        for folder in folders:
+            folder_tabs = direct_folder_tabs(session, folder.id)
+            if not folder_tabs:
+                continue
+            _stdout(f"  Folder: {folder.name}")
+            for tab in folder_tabs:
+                _stdout(f"    {display_name(tab)} -> {active_url(tab)}")
+        tabs = top_level_workspace_tabs(session, workspace.uuid)
+        if tabs:
+            _stdout("  Tabs:")
+            for tab in tabs:
+                _stdout(f"    {display_name(tab)} -> {active_url(tab)}")
+    return 0
+
+
+def cmd_dump(args: argparse.Namespace) -> int:
+    """Dump the current session as declarative config YAML."""
+    _path, session = load_session(args.profile)
+    output = format_snapshot_yaml(session)
+    if args.output:
+        out_path = Path(args.output)
+        out_path.write_text(output, encoding="utf-8")
+        _stdout(f"Written to {out_path}")
+        return 0
+    _stdout_raw(output)
+    return 0
+
+
+def _selected_scope(args: argparse.Namespace) -> tuple[bool, bool]:
+    """Resolve the requested diff/apply scope flags."""
+    selected_state = bool(getattr(args, "state", False))
+    selected_assets = bool(getattr(args, "assets", False))
+    if not selected_state and not selected_assets:
+        return True, True
+    return selected_state, selected_assets
+
+
+def _symlink_target_matches(destination: Path, expected_source: Path) -> bool:
+    """Return whether *destination* points at *expected_source* verbatim."""
+    if not destination.is_symlink():
+        return False
+    return str(destination.readlink()) == str(expected_source)
+
+
+def _read_managed_source(manifest_path: Path) -> Path | None:
+    """Return the recorded managed source path, if one exists."""
+    if not manifest_path.is_file():
+        return None
+    recorded = manifest_path.read_text(encoding="utf-8").strip()
+    if not recorded:
+        return None
+    return Path(recorded)
+
+
+def link_managed_file(
+    source: Path | None,
+    destination: Path,
+    *,
+    manifest_path: Path,
+) -> None:
+    """Link one managed file into place, or remove the prior managed symlink."""
+    if source is None:
+        previous_source = _read_managed_source(manifest_path)
+        if previous_source is not None and _symlink_target_matches(
+            destination, previous_source
+        ):
+            destination.unlink()
+        if manifest_path.exists():
+            manifest_path.unlink()
+        return
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_symlink() or destination.is_file():
+        destination.unlink()
+    elif destination.exists():
+        msg = f"Destination path is not a file: {destination}"
+        raise ZenFoldersError(msg)
+    destination.symlink_to(source)
+    manifest_path.write_text(f"{source}\n", encoding="utf-8")
+
+
+def cleanup_managed_chrome_symlinks(
+    profile_chrome_dir: Path, manifest_path: Path
+) -> None:
+    """Remove previously managed chrome symlinks recorded in the manifest."""
+    if not manifest_path.is_file():
+        return
+
+    for entry in manifest_path.read_text(encoding="utf-8").splitlines():
+        rel = entry.strip()
+        if not rel:
+            continue
+        destination = profile_chrome_dir / rel
+        if destination.is_symlink():
+            destination.unlink()
+
+
+def prune_empty_chrome_dirs(profile_chrome_dir: Path) -> None:
+    """Delete empty directories left behind after managed chrome cleanup."""
+    if not profile_chrome_dir.exists():
+        return
+
+    for root, _, _ in os.walk(profile_chrome_dir, topdown=False):
+        path = Path(root)
+        try:
+            path.rmdir()
+        except OSError:
+            continue
+
+
+def _iter_source_files(source_dir: Path) -> list[Path]:
+    """Return all source files beneath one chrome source tree."""
+    files: list[Path] = []
+    for root, _, filenames in os.walk(source_dir, followlinks=True):
+        root_path = Path(root)
+        files.extend(root_path / filename for filename in filenames)
+    files.sort(key=lambda path: path.relative_to(source_dir).as_posix())
+    return files
+
+
+def sync_chrome_tree(
+    source_dir: Path,
+    profile_chrome_dir: Path,
+    manifest_path: Path,
+) -> None:
+    """Symlink a managed chrome tree into the live profile and write a manifest."""
+    manifest_entries: list[str] = []
+    for source in _iter_source_files(source_dir):
+        rel = source.relative_to(source_dir)
+        destination = profile_chrome_dir / rel
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.is_symlink() or destination.is_file():
+            destination.unlink()
+        elif destination.exists():
+            msg = f"Chrome destination path is not a file: {destination}"
+            raise ZenFoldersError(msg)
+        destination.symlink_to(source)
+        manifest_entries.append(rel.as_posix())
+
+    manifest_path.write_text(
+        "".join(f"{entry}\n" for entry in manifest_entries),
+        encoding="utf-8",
+    )
+
+
+def _load_asset_sources(
+    args: argparse.Namespace,
+) -> tuple[Path, Path | None, Path | None]:
+    """Resolve managed asset inputs from the configured asset directory."""
+    config_dir = _expand_path(args.asset_dir)
+    chrome_source = _resolve_optional_dir(
+        getattr(args, "chrome_source", None)
+        or os.environ.get(DEFAULT_CHROME_SOURCE_ENV),
+        config_dir / "chrome",
+        label="chrome source directory",
+    )
+    user_js_source = _resolve_optional_file(
+        getattr(args, "user_js_source", None),
+        config_dir / "user.js",
+        label="user.js source file",
+    )
+    return config_dir, chrome_source, user_js_source
+
+
+def _resolve_asset_targets(
+    args: argparse.Namespace,
+) -> tuple[Path, Path | None, Path | None, Path, Path, Path]:
+    """Resolve managed asset sources and live profile target paths."""
+    _config_dir, chrome_source, user_js_source = _load_asset_sources(args)
+    profile_dir = zen_profile_dir(args.profile)
+
+    profile_chrome_dir = profile_dir / "chrome"
+    manifest_path = profile_dir / MANAGED_CHROME_MANIFEST
+    user_js_manifest_path = profile_dir / MANAGED_USER_JS_MANIFEST
+
+    return (
+        profile_dir,
+        chrome_source,
+        user_js_source,
+        profile_chrome_dir,
+        manifest_path,
+        user_js_manifest_path,
+    )
+
+
+def _asset_diff_lines(args: argparse.Namespace) -> list[str]:
+    """Return human-readable differences between managed assets and the live profile."""
+    (
+        profile_dir,
+        chrome_source,
+        user_js_source,
+        profile_chrome_dir,
+        manifest_path,
+        user_js_manifest_path,
+    ) = _resolve_asset_targets(args)
+
+    lines: list[str] = []
+
+    managed_entries: dict[str, Path] = {}
+    if chrome_source is not None:
+        for source in _iter_source_files(chrome_source):
+            rel = source.relative_to(chrome_source).as_posix()
+            managed_entries[rel] = source.resolve()
+
+    previous_entries: set[str] = set()
+    if manifest_path.is_file():
+        previous_entries = {
+            entry.strip()
+            for entry in manifest_path.read_text(encoding="utf-8").splitlines()
+            if entry.strip()
+        }
+
+    for rel, source in managed_entries.items():
+        destination = profile_chrome_dir / rel
+        if not destination.exists() and not destination.is_symlink():
+            lines.append(f"create asset chrome/{rel} -> {source}")
+        elif not _symlink_target_matches(destination, source):
+            lines.append(f"update asset chrome/{rel} -> {source}")
+
+    lines.extend(
+        f"remove asset chrome/{rel}"
+        for rel in sorted(previous_entries - managed_entries.keys())
+    )
+
+    user_js_destination = profile_dir / "user.js"
+    if user_js_source is None:
+        previous_user_js = _read_managed_source(user_js_manifest_path)
+        if previous_user_js is not None and _symlink_target_matches(
+            user_js_destination, previous_user_js
+        ):
+            lines.append("remove asset user.js")
+    elif not user_js_destination.exists() and not user_js_destination.is_symlink():
+        lines.append(f"create asset user.js -> {user_js_source}")
+    elif not _symlink_target_matches(user_js_destination, user_js_source):
+        lines.append(f"update asset user.js -> {user_js_source}")
+
+    return lines
+
+
+def _apply_assets(args: argparse.Namespace) -> bool:
+    """Synchronize managed assets into the live profile and return whether anything changed."""
+    (
+        profile_dir,
+        chrome_source,
+        user_js_source,
+        profile_chrome_dir,
+        manifest_path,
+        user_js_manifest_path,
+    ) = _resolve_asset_targets(args)
+    profile_chrome_dir.mkdir(parents=True, exist_ok=True)
+
+    changes = bool(_asset_diff_lines(args))
+
+    cleanup_managed_chrome_symlinks(profile_chrome_dir, manifest_path)
+    prune_empty_chrome_dirs(profile_chrome_dir)
+
+    if chrome_source is not None:
+        sync_chrome_tree(chrome_source, profile_chrome_dir, manifest_path)
+    elif manifest_path.exists():
+        manifest_path.unlink()
+
+    link_managed_file(
+        user_js_source,
+        profile_dir / "user.js",
+        manifest_path=user_js_manifest_path,
+    )
+
+    return changes
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    """Validate the declarative config file."""
+    load_config(Path(args.config))
+    _stdout("Config is valid.")
+    return 0
+
+
+def cmd_diff(args: argparse.Namespace) -> int:
+    """Show the structural diff between current and desired state."""
+    want_state, want_assets = _selected_scope(args)
+    sections: list[str] = []
+
+    if want_state:
+        _path, session = load_session(args.profile)
+        config = load_config(Path(args.config))
+        diff = diff_session(session, config)
+        if diff:
+            sections.append(diff.pretty())
+
+    if want_assets:
+        asset_lines = _asset_diff_lines(args)
+        if asset_lines:
+            sections.append("\n".join(asset_lines))
+
+    if not sections:
+        _stdout("No changes needed.")
+        return 0
+
+    _stdout("\n\n".join(sections))
+    return 0
+
+
+def cmd_apply(args: argparse.Namespace) -> int:
+    """Apply the declarative config to the session file."""
+    want_state, want_assets = _selected_scope(args)
+
+    state_runtime: ZenRuntimeState | None = None
+    state_path: Path | None = None
+    desired_state: SessionState | None = None
+    state_diff_text: str | None = None
+    asset_lines: list[str] = []
+
+    if want_state:
+        state_runtime = require_zen_closed(args.profile)
+        _print_runtime_warnings(state_runtime)
+        state_path, session = load_session(args.profile)
+        config = load_config(Path(args.config))
+        desired_state = build_desired_state(session, config)
+        state_diff = DeepDiff(
+            snapshot(session), snapshot(desired_state), ignore_order=False
+        )
+        if state_diff:
+            state_diff_text = state_diff.pretty()
+
+    if want_assets:
+        asset_lines = _asset_diff_lines(args)
+
+    if state_diff_text is None and not asset_lines:
+        _stdout("No changes needed.")
+        return 0
+
+    if state_diff_text is not None:
+        _stdout(state_diff_text)
+    if asset_lines:
+        if state_diff_text is not None:
+            _stdout()
+        _stdout("\n".join(asset_lines))
+
+    if not args.yes:
+        prompt = "Apply changes? [y/N] "
+        if want_state and not want_assets:
+            prompt = "Apply state changes? [y/N] "
+        elif want_assets and not want_state:
+            prompt = "Apply asset changes? [y/N] "
+        try:
+            answer = input(prompt).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            _stdout("\nAborted.")
+            return 1
+        if answer not in {"y", "yes"}:
+            _stdout("Aborted.")
+            return 1
+
+    if (
+        want_state
+        and state_path is not None
+        and desired_state is not None
+        and state_diff_text is not None
+    ):
+        backup = backup_session(state_path)
+        _stdout(f"Backup: {backup.name}")
+        write_session(state_path, desired_state)
+        _stdout("Applied state successfully.")
+
+    if want_assets and asset_lines:
+        _apply_assets(args)
+        _stdout("Applied assets successfully.")
+
+    return 0
+
+
+def cmd_inspect_folders(args: argparse.Namespace) -> int:
+    """List folders in path order."""
+    return cmd_list(args)
+
+
+def cmd_inspect_tabs(args: argparse.Namespace) -> int:
+    """List declarative tab locations from the current session."""
+    return cmd_tabs(args)
+
+
+def cmd_inspect_workspaces(args: argparse.Namespace) -> int:
+    """List workspaces from the current session."""
+    _path, session = load_session(args.profile)
+    if not session.spaces:
+        _stdout("No workspaces found.")
+        return 0
+    for workspace in session.spaces:
+        _stdout(f"{workspace.name} [{workspace.uuid}]")
+    return 0
+
+
+def cmd_inspect_raw(args: argparse.Namespace) -> int:
+    """Print the decoded session payload."""
+    path = session_file(args.profile)
+    if args.literal:
+        data = path.read_bytes()
+        size = int.from_bytes(
+            data[len(SESSION_HEADER_PREFIX) : SESSION_HEADER_SIZE],
+            "little",
+        )
+        raw = json.loads(lz4.block.decompress(data[SESSION_HEADER_SIZE:], size))
+        output = json.dumps(
+            raw,
+            indent=2,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    else:
+        session = read_session(path)
+        output = json.dumps(
+            session.model_dump(mode="json", exclude_none=False),
+            indent=2,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    if args.output:
+        out_path = Path(args.output)
+        out_path.write_text(output, encoding="utf-8")
+        _stdout(f"Written to {out_path}")
+        return 0
+    _stdout_raw(f"{output}\n")
+    return 0
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """Validate structural invariants in the current session subset."""
+    _path, session = load_session(args.profile)
+    errors = session_check(session)
+    if not errors:
+        _stdout("Session check passed: no structural errors found.")
+        return 0
+    _stdout(f"Session check found {len(errors)} error(s):")
+    for error in errors:
+        _stdout(f"  - {error}")
+    return 1
+
+
+def cmd_profile_is_running(args: argparse.Namespace) -> int:
+    """Return whether Zen appears to be actively using the target profile."""
+    state = inspect_zen_runtime(args.profile)
+    _print_runtime_warnings(state)
+    if state.running:
+        _stdout("running")
+        return 0
+    _stdout("not-running")
+    return 1
+
+
+def cmd_profile_path(args: argparse.Namespace) -> int:
+    """Print the resolved profile directory path and exit."""
+    _stdout(str(zen_profile_dir(args.profile)))
+    return 0
+
+
+def _add_profile_argument(parser: argparse.ArgumentParser) -> None:
+    """Add the shared profile selection argument to one parser."""
+    parser.add_argument(
+        "-p",
+        "--profile",
+        default=None,
+        help=PROFILE_HELP,
+    )
+
+
+def _add_scoped_operation_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add shared diff/apply scope and asset arguments to one parser."""
+    _add_profile_argument(parser)
+    parser.add_argument(
+        "-c",
+        "--config",
+        default=str(DEFAULT_YAML),
+        help=f"Config file (default: {DEFAULT_YAML})",
+    )
+    parser.add_argument(
+        "-d",
+        "--asset-dir",
+        default=str(DEFAULT_CONFIG_DIR),
+        help=f"Managed asset directory (default: {DEFAULT_CONFIG_DIR})",
+    )
+    parser.add_argument(
+        "-C",
+        "--chrome-source",
+        default=None,
+        help=(
+            "Chrome source directory override. Defaults to ASSET_DIR/chrome when present. "
+            f"Also accepts ${DEFAULT_CHROME_SOURCE_ENV}."
+        ),
+    )
+    parser.add_argument(
+        "-u",
+        "--user-js-source",
+        default=None,
+        help="user.js source file override. Defaults to ASSET_DIR/user.js when present.",
+    )
+    parser.add_argument(
+        "-s",
+        "--state",
+        action="store_true",
+        help="Limit the operation to Zen session state",
+    )
+    parser.add_argument(
+        "-a",
+        "--assets",
+        action="store_true",
+        help="Limit the operation to theme/profile assets",
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI parser."""
+    parser = argparse.ArgumentParser(
+        description="Inspect and reconcile Zen session state.",
+    )
+    _add_profile_argument(parser)
+
+    sub = parser.add_subparsers(dest="command", metavar="command")
+
+    validate_parser = sub.add_parser(
+        "validate",
+        help="Validate the authored workspace-map config",
+    )
+    validate_parser.add_argument(
+        "-c",
+        "--config",
+        default=str(DEFAULT_YAML),
+        help=f"Config file (default: {DEFAULT_YAML})",
+    )
+
+    dump_parser = sub.add_parser(
+        "dump",
+        help="Dump declarative YAML from the current session",
+    )
+    _add_profile_argument(dump_parser)
+    dump_parser.add_argument(
+        "-o",
+        "--output",
+        metavar="FILE",
+        help="Write output to file",
+    )
+
+    diff_parser = sub.add_parser("diff", help="Show what changes would be made")
+    _add_scoped_operation_arguments(diff_parser)
+
+    apply_parser = sub.add_parser("apply", help="Apply changes to the Zen session file")
+    _add_scoped_operation_arguments(apply_parser)
+    apply_parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Skip confirmation prompts",
+    )
+
+    check_parser = sub.add_parser(
+        "check",
+        help="Validate structural invariants in the current session",
+    )
+    _add_profile_argument(check_parser)
+
+    inspect_parser = sub.add_parser(
+        "inspect",
+        help="Inspect live Zen session state views",
+    )
+    _add_profile_argument(inspect_parser)
+    inspect_sub = inspect_parser.add_subparsers(
+        dest="inspect_command", metavar="inspect-command"
+    )
+    inspect_sub.add_parser("folders", help="List folders")
+    inspect_sub.add_parser("tabs", help="List managed tab locations")
+    inspect_sub.add_parser("workspaces", help="List workspaces")
+    inspect_raw_parser = inspect_sub.add_parser(
+        "raw",
+        help="Print decoded session JSON",
+    )
+    inspect_raw_parser.add_argument(
+        "-l",
+        "--literal",
+        action="store_true",
+        help="Print the literal decoded session payload without Pydantic normalization",
+    )
+    inspect_raw_parser.add_argument(
+        "-o",
+        "--output",
+        metavar="FILE",
+        help="Write output to file",
+    )
+
+    profile_parser = sub.add_parser("profile", help="Inspect profile/runtime state")
+    _add_profile_argument(profile_parser)
+    profile_sub = profile_parser.add_subparsers(
+        dest="profile_command", metavar="profile-command"
+    )
+    profile_sub.add_parser("path", help="Print the resolved profile directory path")
+    profile_sub.add_parser(
+        "is-running",
+        help="Exit 0 if Zen appears to be using the target profile",
+    )
+
+    return parser
+
+
+def _dispatch_nested_command(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> Callable[[argparse.Namespace], int] | None:
+    """Resolve nested inspect/profile commands to their handlers."""
+    if args.command == "inspect":
+        inspect_command = getattr(args, "inspect_command", None)
+        if inspect_command is None:
+            parser.parse_args([args.command, "-h"])
+            return None
+        inspect_dispatch: dict[str, Callable[[argparse.Namespace], int]] = {
+            "folders": cmd_inspect_folders,
+            "tabs": cmd_inspect_tabs,
+            "workspaces": cmd_inspect_workspaces,
+            "raw": cmd_inspect_raw,
+        }
+        return inspect_dispatch[inspect_command]
+
+    if args.command == "profile":
+        profile_command = getattr(args, "profile_command", None)
+        if profile_command is None:
+            parser.parse_args([args.command, "-h"])
+            return None
+        profile_dispatch: dict[str, Callable[[argparse.Namespace], int]] = {
+            "path": cmd_profile_path,
+            "is-running": cmd_profile_is_running,
+        }
+        return profile_dispatch[profile_command]
+
+    return None
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the CLI."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not args.command:
+        parser.print_help()
+        return 0
+
+    dispatch: dict[str, Callable[[argparse.Namespace], int]] = {
+        "apply": cmd_apply,
+        "check": cmd_check,
+        "diff": cmd_diff,
+        "dump": cmd_dump,
+        "validate": cmd_validate,
+    }
+
+    try:
+        handler = dispatch.get(args.command)
+        if handler is None:
+            handler = _dispatch_nested_command(parser, args)
+        if handler is not None:
+            return handler(args)
+    except ZentoolError as exc:
+        _stderr(f"Error: {exc}")
+        return 1
+    except KeyboardInterrupt:
+        _stderr("Interrupted.")
+        return 130
+    else:
+        parser.print_help()
+        return 0
+
+
+__all__ = [
+    "DEFAULT_YAML",
+    "MAX_SESSION_UNCOMPRESSED_BYTES",
+    "FolderSpec",
+    "ItemTabSpec",
+    "SessionFormatError",
+    "SessionState",
+    "TabSpec",
+    "ThemeSpec",
+    "UniqueKeyLoader",
+    "WorkspaceSpec",
+    "ZenConfig",
+    "ZenFoldersError",
+    "ZenRuntimeState",
+    "active_title",
+    "active_url",
+    "backup_session",
+    "build_desired_state",
+    "build_parser",
+    "diff_session",
+    "display_name",
+    "export_config",
+    "inspect_zen_runtime",
+    "load_config",
+    "load_session",
+    "load_yaml",
+    "main",
+    "read_session",
+    "require_zen_closed",
+    "resolve_profile_dir",
+    "session_check",
+    "session_file",
+    "snapshot",
+    "write_session",
+    "zen_is_running",
+    "zen_process_is_running",
+    "zen_profile_dir",
+    "zen_profile_lock_state",
+]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

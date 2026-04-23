@@ -1,7 +1,5 @@
 """Shared subprocess helpers for CI command modules."""
 
-from __future__ import annotations
-
 import asyncio
 import shlex
 import subprocess
@@ -13,7 +11,7 @@ if TYPE_CHECKING:
 
 
 def _emit_hidden_output(*, args: list[str], stdout: str, stderr: str) -> None:
-    rendered = " ".join(shlex.quote(arg) for arg in args)
+    rendered = shlex.join(args)
     if stdout:
         sys.stderr.write(f"Command failed with hidden stdout: {rendered}\n{stdout}")
         if not stdout.endswith("\n"):

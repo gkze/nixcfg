@@ -347,6 +347,7 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
                     native_only=False,
                     session=session,
                     update_input_lock=asyncio.Lock(),
+                    update_input_tasks={},
                     queue=queue,
                     config=resolve_config(),
                 ),
@@ -396,18 +397,22 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
     ref_events = _run(_run_refs())
     assert any(event.message == "ref phase" for event in ref_events)
 
-    calls: list[str] = []
+    calls: list[tuple[str, int]] = []
 
-    async def _update_source(name: str, *, context: object) -> None:
-        _ = context
-        calls.append(name)
+    async def _update_source(name: str, *, context: _SourceTaskContext) -> None:
+        calls.append((name, id(context.update_input_tasks)))
 
     monkeypatch.setattr("lib.update.cli._update_source_task", _update_source)
     _run(
         _run_sources_phase(
             context=_SourcesPhaseContext(
-                source_names=["demo"],
-                sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
+                source_names=["demo", "other"],
+                sources=SourcesFile(
+                    entries={
+                        "demo": SourceEntry(hashes={}),
+                        "other": SourceEntry(hashes={}),
+                    }
+                ),
                 queue=asyncio.Queue(),
                 update_input=False,
                 native_only=False,
@@ -416,7 +421,105 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
             )
         )
     )
-    assert calls == ["demo"]
+    assert {name for name, _ in calls} == {"demo", "other"}
+    assert len({task_map_id for _name, task_map_id in calls}) == 1
+
+
+def test_update_source_task_dedupes_shared_input_refreshes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refresh each backing flake input at most once per sources phase."""
+
+    class _Updater:
+        def __init__(self, *, config: object | None = None) -> None:
+            _ = config
+
+        input_name = "shared-input"
+
+        async def update_stream(
+            self,
+            current: SourceEntry | None,
+            session: aiohttp.ClientSession,
+            *,
+            pinned_version: VersionInfo | None = None,
+        ) -> AsyncIterator[UpdateEvent]:
+            _ = (current, session, pinned_version)
+            yield UpdateEvent.result("demo")
+
+    async def _run_queue_task(
+        *, source: str, queue: asyncio.Queue[UpdateEvent | None], task
+    ) -> None:
+        _ = (source, queue)
+        await task()
+
+    called = {"count": 0}
+
+    async def _update_input(
+        _input_name: str, *, source: str
+    ) -> AsyncIterator[UpdateEvent]:
+        called["count"] += 1
+        await asyncio.sleep(0)
+        yield UpdateEvent.status(source, f"input refreshed for {_input_name}")
+
+    monkeypatch.setattr("lib.update.cli.UPDATERS", {"one": _Updater, "two": _Updater})
+    monkeypatch.setattr("lib.update.cli.run_queue_task", _run_queue_task)
+    monkeypatch.setattr("lib.update.cli.update_flake_input", _update_input)
+
+    async def _run_case() -> list[UpdateEvent]:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        shared_lock = asyncio.Lock()
+        shared_tasks: dict[str, asyncio.Task[None]] = {}
+        shared_sources = SourcesFile(
+            entries={
+                "one": SourceEntry(hashes={}),
+                "two": SourceEntry(hashes={}),
+            }
+        )
+        async with aiohttp.ClientSession() as session:
+            await asyncio.gather(
+                _update_source_task(
+                    "one",
+                    context=_SourceTaskContext(
+                        sources=shared_sources,
+                        update_input=True,
+                        native_only=False,
+                        session=session,
+                        update_input_lock=shared_lock,
+                        update_input_tasks=shared_tasks,
+                        queue=queue,
+                        config=resolve_config(),
+                    ),
+                ),
+                _update_source_task(
+                    "two",
+                    context=_SourceTaskContext(
+                        sources=shared_sources,
+                        update_input=True,
+                        native_only=False,
+                        session=session,
+                        update_input_lock=shared_lock,
+                        update_input_tasks=shared_tasks,
+                        queue=queue,
+                        config=resolve_config(),
+                    ),
+                ),
+            )
+        events: list[UpdateEvent] = []
+        while not queue.empty():
+            item = queue.get_nowait()
+            if isinstance(item, UpdateEvent):
+                events.append(item)
+        return events
+
+    events = _run(_run_case())
+    assert called["count"] == 1
+    assert any(
+        event.message == "Updating flake input 'shared-input'..." for event in events
+    )
+    assert any(
+        event.message == "Reusing flake input 'shared-input' refresh..."
+        for event in events
+    )
 
 
 def test_update_source_task_sets_native_only_for_deno_updater(
@@ -475,6 +578,7 @@ def test_update_source_task_sets_native_only_for_deno_updater(
                     native_only=True,
                     session=session,
                     update_input_lock=asyncio.Lock(),
+                    update_input_tasks={},
                     queue=queue,
                     config=resolve_config(),
                 ),
@@ -540,6 +644,7 @@ def test_update_source_task_skips_input_update_when_disabled(
                     native_only=False,
                     session=session,
                     update_input_lock=asyncio.Lock(),
+                    update_input_tasks={},
                     queue=queue,
                     config=resolve_config(),
                 ),

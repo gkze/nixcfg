@@ -80,6 +80,14 @@ let
         touch "$out/.github/TEAM_MEMBERS"
       fi
     fi
+
+    # Keep desktop project icons stable unless the user explicitly sets one.
+    # Upstream currently forces favicon auto-discovery on in the Tauri shell,
+    # which can replace the normal initial/color avatar with arbitrary repo
+    # favicons on each launch.
+    substituteInPlace "$out/packages/desktop/src-tauri/src/cli.rs" \
+      --replace-fail '            "true".to_string(),' '            "false".to_string(),' \
+      --replace-fail '                "OPENCODE_EXPERIMENTAL_ICON_DISCOVERY=true".to_string(),' '                "OPENCODE_EXPERIMENTAL_ICON_DISCOVERY=false".to_string(),'
   '';
 
   cargoNix = import ./Cargo.nix {

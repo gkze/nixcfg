@@ -104,7 +104,8 @@ machine-specific.
 - `lib.nix`
 - `lib/lib.nix`
 - `lib/exports.nix`
-- `lib/tests/test_default_nix_api.py`
+- `tests/nix/default-api/default-api.nix`
+- `lib/tests/test_update_nix_ast.py`
 
 ### OpenCode / MCP / profile wiring
 
@@ -116,9 +117,8 @@ machine-specific.
 ### Zen / Twilight browser work
 
 - `modules/home/zen.nix`
-- `home/george/bin/zen-folders`
+- `home/george/bin/zentool`
 - `home/george/zen/`
-- `home/george/bin/zen-profile-sync`
 
 ### `ghawfr` work
 
@@ -207,6 +207,58 @@ separate source changes from runtime leftovers.
 The repo exports constructors and module sets for downstream use. If you touch these files, treat
 them as public API and validate accordingly. Preserve constructor names and module export intent
 unless the task explicitly changes API shape.
+
+### 8. Prefer AST-backed Nix generation from Python
+
+When Python needs to construct or compose Nix code, prefer `nix-manipulator` AST builders over raw
+Nix string templates. For Nix-native behavioral checks, prefer dedicated `.nix` test files or
+flake checks instead of embedding multiline Nix programs in Python. Only use inline Nix strings in
+Python when they are clearly simpler and better for the task at hand.
+
+## Python Test Philosophy
+
+Apply this guidance to all maintained Python surfaces in this repo, including `nixcfg.py`,
+`lib/**/*.py`, `packages/**/*.py`, `overlays/**/*.py`, `modules/**/*.py`, and extensionless Python
+entrypoints.
+
+Treat Python tests as the executable spec for maintained Python behavior. Aim for complete branch
+coverage of maintained Python logic, including success paths, failure paths, and edge cases. Treat
+uncovered branches as either missing tests or a design smell that should be simplified or
+refactored.
+
+Use this testing order by default:
+
+1. pure Python unit tests
+1. Nix AST assertions with `nix-manipulator`
+1. mocked Python-side subprocess or wrapper tests
+1. real Nix evaluation only when the semantic property cannot be established above
+
+When Python produces, rewrites, or composes Nix, test the result structurally. Prefer
+`nix-manipulator` builders and AST assertions through the shared test helpers. Prefer AST equality
+over string equality unless exact rendered text is itself the contract.
+
+Do not use Nix evaluation merely to prove that Python emitted the right Nix. If production code
+currently returns Nix text, parse it in the test and compare ASTs. If that is awkward, prefer
+refactoring the production code toward explicit Nix AST builders.
+
+Treat real Nix evaluation as an exception. Use it only when the semantic property cannot be
+established at the AST level. Keep those evals extremely lightweight: import only the smallest unit
+under test, use tiny `--expr` harnesses, return JSON or raw scalars, and never trigger builds,
+flake checks, host evaluations, closures, or broad module graphs from pytest.
+
+When Python code shells out to Nix or subprocess helpers, test Python behavior at the Python
+boundary first. Mock `run_nix`, `run_nix_json`, `subprocess.run`, or equivalent wrappers to cover
+control flow, argument construction, parsing, timeouts, and failures. Reserve real Nix invocation
+for narrow semantic checks that cannot be replaced with AST or mocked-boundary tests.
+
+Any new eval-based test must include a short docstring or comment explaining why AST-only or pure-
+Python testing was insufficient.
+
+If existing code or tests do not fit this philosophy, refactor them as they are encountered. Prefer
+separating pure Python decision logic, Nix AST construction/rendering, and thin
+subprocess/evaluation adapters. Do not preserve heavyweight, stringly, or broad-eval tests just
+for consistency with older patterns. Move them toward pure Python and AST-based assertions when
+touched.
 
 ## Investigation Rules
 
@@ -315,11 +367,44 @@ host-specific.
 Use the dedicated module and repo-managed Zen tooling:
 
 - `modules/home/zen.nix`
-- `home/george/bin/zen-folders`
-- `home/george/bin/zen-profile-sync`
-- `home/george/zen-folders.yaml`
+- `home/george/bin/zentool`
+- `home/george/zen/folders.yaml`
 
 Remember that Zen folder reconciliation is stateful and interacts with a live browser profile.
+
+#### Catppuccin chrome theme wiring — do not touch unless explicitly asked
+
+The Zen chrome theme (`userChrome.css`, `userContent.css`, `zen-logo-<variant>.svg`) is **not**
+maintained in this repo. It is sourced from the `catppuccin-zen-browser` flake input, which pins
+the `gkze/zen-browser` fork on branch `fix/frappe-zen-twilight-acrylic-gap` until that fix lands
+upstream in `catppuccin/zen-browser`. See the committed architecture at
+`home/george/configuration.nix` — the `zen.chromeSource` is a `pkgs.runCommand` derivation that
+symlinks the three files from `themes/${Variant}/${Accent}/` in the flake input, driven by
+`config.theme.variant` and `config.theme.accentColor`.
+
+Hard rules for this setup:
+
+- Do **not** re-add `home/george/zen/chrome/` with hand-copied `userChrome.css` /
+  `userContent.css` / `zen-logo-*.svg`. Those files belong upstream in the fork. If a theme tweak
+  is needed, make it on the `gkze/zen-browser` fork branch and bump the flake input.
+- Do **not** add a `home.activation.directZenRepoSymlinks` (or similar) script that live-links
+  `~/.config/zen/chrome/*` to working-tree paths. The declarative `chromeSource` path already
+  materializes the correct store path; `zentool` then syncs it into the live profile.
+- Do **not** set `nixcfg.zen.chromeSource = null` in `home/george/configuration.nix`. `null`
+  disables the Nix-store materialization and leaves the profile unthemed.
+- `home/george/zen/user.js` is genuinely local (not a copy of upstream) and contains the
+  `ui.systemUsesDarkTheme = 1` workaround for
+  [zen-browser/desktop#9542](https://github.com/zen-browser/desktop/issues/9542). Without that
+  pref, every `@media (prefers-color-scheme: dark)` rule in the Catppuccin userChrome.css
+  evaluates false and the whole theme silently fails to apply. Do not remove that pref.
+
+If you think the chrome theme is broken, the first diagnostic is almost always one of:
+
+1. Uncommitted regression in `flake.nix` / `flake.lock` / `home/george/configuration.nix` that
+   reverted the fork-sourcing. Run `git diff HEAD -- flake.nix flake.lock
+   home/george/configuration.nix home/george/zen/` first.
+1. Missing `ui.systemUsesDarkTheme` pref in `home/george/zen/user.js`.
+1. Drift between the fork branch and current Zen internals — fix in the fork, not here.
 
 ## Validation Ladder
 

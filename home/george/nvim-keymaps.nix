@@ -203,6 +203,30 @@ rec {
             desc = "Focus right pane";
           }
           {
+            key = "<C-A-h>";
+            mode = "n";
+            action = ":Treewalker Left<CR>";
+            desc = "Treewalker left";
+          }
+          {
+            key = "<C-A-j>";
+            mode = "n";
+            action = ":Treewalker Down<CR>";
+            desc = "Treewalker down";
+          }
+          {
+            key = "<C-A-k>";
+            mode = "n";
+            action = ":Treewalker Up<CR>";
+            desc = "Treewalker up";
+          }
+          {
+            key = "<C-A-l>";
+            mode = "n";
+            action = ":Treewalker Right<CR>";
+            desc = "Treewalker right";
+          }
+          {
             key = "<leader>N";
             mode = "n";
             action = ":Neotree focus<CR>";

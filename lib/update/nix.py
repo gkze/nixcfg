@@ -173,6 +173,48 @@ def _build_fetch_from_github_expr(
     )
 
 
+def _build_fetchgit_call(
+    url: str,
+    rev: str,
+    *,
+    hash_value: str | NixExpression | None = None,
+    fetch_submodules: bool = True,
+) -> FunctionCall:
+    bindings: list[Binding | Inherit] = [
+        Binding(name="url", value=url),
+        Binding(name="rev", value=rev),
+        Binding(
+            name="hash",
+            value=_fake_hash_expr()
+            if hash_value is None
+            else _nix_string_or_expr(hash_value),
+        ),
+    ]
+    if fetch_submodules:
+        bindings.append(Binding(name="fetchSubmodules", value=Primitive(value=True)))
+    return FunctionCall(
+        name=_select_attrs(Identifier(name="pkgs"), "fetchgit"),
+        argument=AttributeSet(values=bindings),
+    )
+
+
+def _build_fetchgit_expr(
+    url: str,
+    rev: str,
+    *,
+    hash_value: str | NixExpression | None = None,
+    fetch_submodules: bool = True,
+) -> str:
+    return compact_nix_expr(
+        _build_fetchgit_call(
+            url,
+            rev,
+            hash_value=hash_value,
+            fetch_submodules=fetch_submodules,
+        ).rebuild(),
+    )
+
+
 def _build_fetch_yarn_deps_expr(
     src_expr: NixExpression,
     *,
@@ -615,6 +657,8 @@ __all__ = [
     "_build_fetch_from_github_call",
     "_build_fetch_from_github_expr",
     "_build_fetch_yarn_deps_expr",
+    "_build_fetchgit_call",
+    "_build_fetchgit_expr",
     "_build_flake_attr_expr",
     "_build_nix_expr",
     "_build_overlay_attr_expr",

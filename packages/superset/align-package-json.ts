@@ -1,4 +1,4 @@
-import type {PackageJson} from "type-fest";
+import type { PackageJson } from "type-fest";
 import bunLock from "./bun.lock";
 
 type PackageJsonWithFlatResolutions = PackageJson & {

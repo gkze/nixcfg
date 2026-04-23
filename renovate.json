@@ -1,18 +1,11 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:best-practices",
-    "helpers:pinGitHubActionDigests"
-  ],
-  "enabledManagers": [
-    "github-actions"
-  ],
+  "extends": ["config:best-practices", "helpers:pinGitHubActionDigests"],
+  "enabledManagers": ["github-actions"],
   "packageRules": [
     {
       "groupName": "github-actions",
-      "matchManagers": [
-        "github-actions"
-      ]
+      "matchManagers": ["github-actions"]
     }
   ]
 }

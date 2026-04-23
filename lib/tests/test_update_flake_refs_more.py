@@ -179,20 +179,6 @@ def test_resolve_root_input_node_handles_incomplete_follows_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Return ``None`` when a follows chain cannot be resolved cleanly."""
-    skipped_first = SimpleNamespace(
-        root_node=SimpleNamespace(inputs={"broken": ["wrapper", "nixpkgs"]}),
-        nodes={"wrapper": SimpleNamespace(inputs={"nixpkgs": "node-b"})},
-    )
-    monkeypatch.setattr(
-        "builtins.enumerate",
-        lambda _target: iter(((1, "nixpkgs"),)),
-    )
-    node, follows = resolve_root_input_node(cast("FlakeLock", skipped_first), "broken")
-    assert node is None
-    assert follows == "wrapper/nixpkgs"
-
-    monkeypatch.undo()
-
     broken_start = SimpleNamespace(
         root_node=SimpleNamespace(inputs={"broken": ["missing", "nixpkgs"]}),
         nodes={},
@@ -216,6 +202,16 @@ def test_resolve_root_input_node_handles_incomplete_follows_paths(
     node, follows = resolve_root_input_node(cast("FlakeLock", empty_follows), "broken")
     assert node is None
     assert follows == ""
+
+    malformed_start = SimpleNamespace(
+        root_node=SimpleNamespace(inputs={"broken": [None, "nixpkgs"]}),
+        nodes={},
+    )
+    node, follows = resolve_root_input_node(
+        cast("FlakeLock", malformed_start), "broken"
+    )
+    assert node is None
+    assert follows is None
 
 
 def test_load_flake_lock_cache_can_be_invalidated(

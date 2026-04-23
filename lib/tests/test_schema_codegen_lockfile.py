@@ -17,6 +17,7 @@ from lib.schema_codegen.lockfile import (
     write_codegen_lockfile,
 )
 from lib.schema_codegen.models._generated import CodegenLockfile
+from lib.update.paths import REPO_ROOT
 
 
 class _MonkeyPatchLike:
@@ -372,8 +373,7 @@ def test_write_codegen_lockfile_normalizes_manifest_path_against_custom_output(
 
 def test_write_codegen_lockfile_matches_shared_golden_fixture(tmp_path: Path) -> None:
     """Keep Python lockfile bytes aligned with the shared cross-language fixture."""
-    repo_root = Path(__file__).resolve().parents[2]
-    fixture_root = repo_root / "schemas/codegen/testdata/lockfile-golden"
+    fixture_root = REPO_ROOT / "schemas/codegen/testdata/lockfile-golden"
     working_root = tmp_path / "fixture"
     shutil.copytree(fixture_root, working_root)
 

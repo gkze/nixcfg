@@ -36,7 +36,7 @@ def _copy_path(source: Path, destination: Path) -> None:
 def _rewrite_nested_json_file(destination: Path, metadata_dir: Path, key: str) -> None:
     try:
         payload = json.loads(destination.read_text())
-    except OSError, UnicodeDecodeError, json.JSONDecodeError:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return
     if not isinstance(payload, list) or not all(
         isinstance(item, str) for item in payload

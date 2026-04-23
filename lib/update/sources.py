@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -16,20 +17,27 @@ from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.let import LetExpression
 from nix_manipulator.expressions.primitive import StringPrimitive
 
-from lib.nix.commands.base import run_nix
+from lib.nix.commands.base import CommandResult, run_nix
 from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update.io import atomic_write_json
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT, package_dir_for, package_file_map
+from lib.update.surfaces import validate_repo_update_surface_coverage
 
 
 def _run_nix_eval(expr: str) -> tuple[int, str, str]:
-    result = asyncio.run(
-        run_nix(
-            ["nix", "eval", "--impure", "--json", "--expr", expr],
-            check=False,
-        ),
-    )
+    command = ["nix", "eval", "--impure", "--json", "--expr", expr]
+
+    def _invoke() -> CommandResult:
+        return asyncio.run(run_nix(command, check=False))
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        result = _invoke()
+    else:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            result = executor.submit(_invoke).result()
     return result.returncode, result.stdout, result.stderr
 
 
@@ -108,6 +116,8 @@ def validate_source_discovery_consistency() -> None:
     nix_names = nix_source_names()
     missing_in_nix = sorted(py_names - nix_names)
     missing_in_python = sorted(nix_names - py_names)
+    validate_repo_update_surface_coverage()
+
     if not missing_in_nix and not missing_in_python:
         return
     lines = ["Python/Nix source discovery mismatch detected:"]

@@ -54,6 +54,14 @@ let
           ]
           (builtins.readFile updateBunLockTemplate);
   };
+  # Keep this in sync with apps/desktop/package.json and bun.lock. We pre-seed
+  # these headers so `electron-builder install-app-deps` stays offline and
+  # reproducible under Nix instead of hitting electronjs.org at build time.
+  electronVersion = "40.8.5";
+  electronHeadersTarball = fetchurl {
+    url = "https://www.electronjs.org/headers/v${electronVersion}/node-v${electronVersion}-headers.tar.gz";
+    hash = "sha256-kyeCgCvn9qIneittSPHA/Dsgocva33Z64RB2NGPNP5o=";
+  };
   invalidBunNixErr = ''
     packages/superset/bun.nix failed to evaluate.
 
@@ -79,6 +87,9 @@ let
       chmod u+w "$out/bin"
 
       for node_binary in node npm bunx; do
+        if [ -e "$out/bin/$node_binary" ]; then
+          continue
+        fi
         ln -s "$out/bin/bun" "$out/bin/$node_binary"
       done
 
@@ -274,6 +285,14 @@ else
       export SKIP_ENV_VALIDATION=1
       export NEXT_PUBLIC_OUTLIT_KEY="nix-build"
       export CSC_IDENTITY_AUTO_DISCOVERY=false
+      export ELECTRON_SKIP_BINARY_DOWNLOAD=1
+      export npm_config_runtime=electron
+      export npm_config_target=${electronVersion}
+
+      electron_gyp_dir="$HOME/.electron-gyp/${electronVersion}"
+      mkdir -p "$electron_gyp_dir"
+      tar -xzf ${electronHeadersTarball} --strip-components=1 -C "$electron_gyp_dir"
+      export npm_config_nodedir="$electron_gyp_dir"
 
       bun run --cwd apps/desktop copy:native-modules
 

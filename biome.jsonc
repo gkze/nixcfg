@@ -1,14 +1,21 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.9/schema.json",
 
-  // Keep Biome narrowly focused on repo-managed web assets.
+  // Keep Biome focused on repo-managed JS/TS, JSON, and CSS assets.
   "files": {
     "ignoreUnknown": true,
     "includes": [
       "**/*.css",
       "**/*.js",
       "**/*.cjs",
-      "**/*.mjs",
+      "commitlint.config.ts",
+      "misc/zellij-plugin-wasm-ts/scripts/*.ts",
+      "packages/**/*.ts",
+      "**/*.json",
+      "**/*.jsonc",
+      "flake.lock",
+      "!**/*pre-commit-config.json",
+      "!schemas/codegen/testdata/lockfile-golden/expected.codegen.lock.json",
       "!**/.direnv",
       "!**/.ghawfr",
       "!**/.venv",
@@ -50,6 +57,6 @@
     }
   },
 
-  // No repo-managed CSS or JavaScript currently needs custom Biome overrides.
+  // No repo-managed CSS, JavaScript, or JSON currently needs custom overrides.
   "overrides": []
 }

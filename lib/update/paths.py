@@ -1,37 +1,86 @@
 """Repository path helpers used by update modules."""
 
+from __future__ import annotations
+
 import os
 from functools import cache
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
+
+ROOT_MARKER = ".root"
 
 
-def _resolve_repo_root() -> Path:
-    env_root = os.environ.get("REPO_ROOT")
-    if env_root:
-        return Path(env_root).expanduser().resolve()
-
-    script_path = Path(__file__).resolve()
-    if "/nix/store" not in str(script_path):
-        return script_path.parents[2]
-
-    cwd = Path.cwd().resolve()
-    for candidate in (cwd, *cwd.parents):
-        if (candidate / "flake.nix").exists():
-            return candidate
-    return cwd
+def _search_anchor(start: os.PathLike[str] | str | None = None) -> Path:
+    """Return the directory from which repo-root discovery should begin."""
+    anchor = Path.cwd() if start is None else Path(start).expanduser()
+    resolved = anchor.resolve()
+    if resolved.exists() and resolved.is_file():
+        return resolved.parent
+    return resolved
 
 
 @cache
+def _find_root_cached(env_root: str | None, start: str) -> Path:
+    """Resolve the repository root from an environment override or search anchor."""
+    if env_root:
+        return Path(env_root).expanduser().resolve()
+
+    anchor = Path(start).expanduser().resolve()
+    for candidate in (anchor, *anchor.parents):
+        if (candidate / ROOT_MARKER).is_file():
+            return candidate
+
+    msg = (
+        f"Could not find repo root from {anchor}; expected {ROOT_MARKER} in an ancestor"
+    )
+    raise RuntimeError(msg)
+
+
+def _clear_root_cache() -> None:
+    """Clear the shared cached repo-root lookup."""
+    _find_root_cached.cache_clear()
+
+
+def find_root(start: os.PathLike[str] | str | None = None) -> Path:
+    """Return the repository root discovered from ``start`` or ``cwd``.
+
+    Resolution prefers ``$REPO_ROOT`` when set. Otherwise the search walks upward from
+    ``start`` (or the current working directory) until it finds ``.root``.
+    """
+    anchor = _search_anchor(start)
+    return _find_root_cached(os.environ.get("REPO_ROOT"), os.fspath(anchor))
+
+
+cast("Any", find_root).cache_clear = _clear_root_cache
+
+
+def find_repo_root(start: os.PathLike[str] | str | None = None) -> Path:
+    """Compatibility wrapper around :func:`find_root`."""
+    return find_root(start)
+
+
+cast("Any", find_repo_root).cache_clear = _clear_root_cache
+
+
 def get_repo_root() -> Path:
-    """Return the current repository root, honoring runtime env overrides."""
-    return _resolve_repo_root()
+    """Return the current repository root."""
+    return find_root()
 
 
-class _RepoRootProxy(os.PathLike[str]):
+cast("Any", get_repo_root).cache_clear = _clear_root_cache
+
+
+class _RepoPathProxy(os.PathLike[str]):
+    """Lazy path-like wrapper rooted on :func:`find_root`."""
+
+    def __init__(self, relative_path: str | None = None) -> None:
+        self._relative_path = relative_path
+
     def _path(self) -> Path:
-        get_repo_root.cache_clear()
-        return get_repo_root()
+        root = get_repo_root()
+        if self._relative_path is None:
+            return root
+        return root / self._relative_path
 
     def __fspath__(self) -> str:
         return os.fspath(self._path())
@@ -48,8 +97,26 @@ class _RepoRootProxy(os.PathLike[str]):
     def __str__(self) -> str:
         return str(self._path())
 
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Path):
+            return self._path() == other
+        if isinstance(other, str):
+            return self._path() == Path(other)
+        if isinstance(other, os.PathLike):
+            other_path = os.fspath(other)
+            return (
+                self._path() == Path(other_path)
+                if isinstance(other_path, str)
+                else False
+            )
+        return False
 
-REPO_ROOT: Path = cast("Path", _RepoRootProxy())
+    def __hash__(self) -> int:
+        return hash(self._path())
+
+
+REPO_ROOT: Path = cast("Path", _RepoPathProxy())
+
 
 # Top-level directories containing package and overlay metadata files.
 PACKAGE_DIRS = ("packages", "overlays")
@@ -85,7 +152,7 @@ def is_sources_file_path(relative_path: str) -> bool:
 
 
 def get_repo_file(filename: str) -> Path:
-    """Return a path under the detected repository root."""
+    """Return a concrete path under the detected repository root."""
     return get_repo_root() / filename
 
 
@@ -207,6 +274,3 @@ def package_dir_for(name: str) -> Path | None:
 def sources_file_for(name: str) -> Path | None:
     """Return the ``sources.json`` path for a named package, or ``None``."""
     return package_file_for(name, SOURCES_FILE_NAME)
-
-
-FLAKE_LOCK_FILE = get_repo_file("flake.lock")

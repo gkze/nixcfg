@@ -1,0 +1,52 @@
+diff --git a/build.rs b/build.rs
+index 3634865..393b9d5 100644
+--- a/build.rs
++++ b/build.rs
+@@ -247,7 +247,7 @@ fn build_v8(is_asan: bool) {
+     download_ninja_gn_binaries();
+   }
+
+-  download_rust_toolchain();
++  // Nix: skip rust toolchain downloader.
+
+   // `#[cfg(...)]` attributes don't work as expected from build.rs -- they refer to the configuration
+   // of the host system which the build.rs script will be running on. In short, `cfg!(target_<os/arch>)`
+diff --git a/build/config/compiler/BUILD.gn b/build/config/compiler/BUILD.gn
+index 41b256e..7d50e4d 100644
+--- a/build/config/compiler/BUILD.gn
++++ b/build/config/compiler/BUILD.gn
+@@ -57,7 +57,7 @@ declare_args() {
+
+   # Enable fatal linker warnings. Building Chromium with certain versions
+   # of binutils can cause linker warning.
+-  fatal_linker_warnings = true
++  fatal_linker_warnings = false
+
+   # Build with C++ RTTI enabled. Chromium builds without RTTI by default,
+   # but some sanitizers are known to require it, like CFI diagnostics
+diff --git a/build/config/compiler/compiler.gni b/build/config/compiler/compiler.gni
+index a223b25..68e17b0 100644
+--- a/build/config/compiler/compiler.gni
++++ b/build/config/compiler/compiler.gni
+@@ -27,7 +27,7 @@ if (is_apple) {
+   # Set to true to use lld, the LLVM linker.
+   # In late bring-up on macOS (see docs/mac_lld.md).
+   # Tentatively used on iOS.
+   # The default linker everywhere else.
+-  use_lld = is_clang && current_os != "zos"
++  use_lld = false
+
+   # If false, build using C++20; otherwise, build using C++23.
+   use_cxx23 = true
+diff --git a/build/rust/std/BUILD.gn b/build/rust/std/BUILD.gn
+index b6cb64d..74adddb 100644
+--- a/build/rust/std/BUILD.gn
++++ b/build/rust/std/BUILD.gn
+@@ -49,7 +49,7 @@ if (toolchain_has_rust) {
+     if (rustc_nightly_capability) {
+       stdlib_files += [ "adler2" ]
+     } else {
+-      stdlib_files += [ "adler" ]
++      stdlib_files += [ "adler2" ]
+     }
+   }

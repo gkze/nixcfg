@@ -188,7 +188,7 @@ def _parse_version() -> SchemaVersionManifest | None:
     try:
         payload = json.loads(VERSION_FILE.read_text())
         return SchemaVersionManifest.model_validate(payload)
-    except json.JSONDecodeError, ValidationError:
+    except (json.JSONDecodeError, ValidationError):
         return None
 
 

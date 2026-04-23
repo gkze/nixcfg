@@ -21,12 +21,13 @@
           model = "claude-opus-4-5-20251101";
           provider = "anthropic";
         };
-        dock = "right";
+        dock = "left";
         inline_assistant_model = {
           model = "claude-opus-4-5-20251101";
           provider = "anthropic";
         };
         model_parameters = [ ];
+        sidebar_side = "left";
       };
       buffer_font_family = config.fonts.monospace.name;
       buffer_font_size = 12.0;
@@ -46,9 +47,11 @@
         "Shell Script" = [ ".envrc" ];
       };
       format_on_save = "on";
+      git_panel.dock = "right";
       icon_theme = config.theme.displayNameAccented;
       minimap.show = "always";
       outline_panel.dock = "right";
+      project_panel.dock = "right";
       show_whitespaces = "all";
       theme = {
         dark = config.theme.displayNameAccented;

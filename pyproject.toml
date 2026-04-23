@@ -46,22 +46,27 @@ codegen = ["datamodel-code-generator[http]>=0.54.0", "referencing>=0.37.0"]
 [tool.ruff]
 # Turn on Ruff preview behavior to adopt newer checks earlier.
 preview = true
+# Apply excludes even when editors or manual commands pass explicit file paths.
+force-exclude = true
 # Treat these directories as namespace package roots during resolution.
 namespace-packages = ["overlays", "packages"]
 # Explicitly include all extensionless Python entrypoints in Ruff discovery.
-extend-include = [
-  "home/george/bin/git-ignore",
-  "home/george/bin/zen-folders",
-  "home/george/bin/zen-profile-sync",
-]
+extend-include = ["home/george/bin/git-ignore", "home/george/bin/zentool"]
 
 [tool.ruff.format]
-# Ruff 0.15.x can de-parenthesize multi-exception handlers on these scripts into
-# invalid Python 2-era syntax; keep them linted and typed, but do not format them.
+# Ruff 0.15.x can de-parenthesize multi-exception handlers into invalid Python
+# 2-era syntax on these entrypoints and helper modules; keep this list aligned
+# with lib/lint-files.nix and do not format them until the upstream formatter
+# bug is fixed.
 exclude = [
   "home/george/bin/git-ignore",
-  "home/george/bin/zen-folders",
-  "home/george/bin/zen-profile-sync",
+  "home/george/bin/zentool",
+  "lib/crate2nix_tauri_env_rewrite.py",
+  "lib/nix/schemas/_fetch.py",
+  "lib/update/ci/build_shared_closure.py",
+  "lib/update/ci/profile_generations.py",
+  "lib/update/updaters/_sourcefile.py",
+  "packages/sculptor/updater.py",
 ]
 
 [tool.ruff.lint]
@@ -78,12 +83,24 @@ explicit-preview-rules = true
 # Keep high-signal linting in tests while allowing pragmatic test patterns.
 "lib/tests/**/*.py" = [
   "ANN001",
+  "ANN002",
+  "ANN003",
   "ANN202",
   "ARG001",
   "ARG005",
   "ASYNC109",
+  "ASYNC240",
+  "D102",
+  "D103",
+  "D105",
+  "D107",
+  "DTZ001",
   "EM101",
+  "E501",
+  "E731",
+  "FBT001",
   "FLY002",
+  "F841",
   "PERF401",
   "PLC0415",
   "PLR2004",
@@ -91,20 +108,26 @@ explicit-preview-rules = true
   "PT012",
   "PT017",
   "PYI034",
+  "RUF012",
   "RUF015",
   "RUF043",
   "S101",
+  "S607",
   "S108",
+  "SIM103",
   "SLF001",
   "TC001",
   "TC002",
   "TC003",
+  "TC004",
   "TRY003",
   "TRY004",
+  "UP028",
 ]
 # SchemaStore's workflow schema generates very long prose docstrings and a few
 # legacy typing constructs that are valid at runtime but noisy under Ruff.
 "lib/github_actions/models/_generated.py" = ["D205", "D404", "E501", "UP007"]
+"home/george/bin/zentool" = ["N815", "TC003"]
 
 [tool.ruff.lint.isort]
 # Classify these imports as first-party for stable import ordering.
@@ -155,8 +178,7 @@ include = [
   "modules/**/*.py",
   "modules/**/*.pyi",
   "home/george/bin/git-ignore",
-  "home/george/bin/zen-folders",
-  "home/george/bin/zen-profile-sync",
+  "home/george/bin/zentool",
 ]
 
 [tool.ty.rules]
@@ -206,8 +228,8 @@ xfail_strict = true
 [tool.coverage.run]
 # Measure branch coverage in addition to line coverage.
 branch = true
-# Measure both core and update package trees for coverage.
-source = ["lib/nix", "lib/update"]
+# Measure the currently enforced Python surfaces for coverage.
+source = ["nixcfg", "lib", "modules", "packages", "overlays", "home/george/bin"]
 
 [tool.coverage.report]
 # Require at least this total coverage percentage.
@@ -246,6 +268,10 @@ dev = [
   "datamodel-code-generator[http]>=0.54.0",
   "mutmut>=3.5.0",
   "pytest>=9.0.2",
+  "pytest-xdist>=3.8.0",
+  "tree-sitter>=0.25.0",
+  "tree-sitter-bash>=0.25.0",
+  "pyupgrade>=3.21.2",
   "referencing>=0.37.0",
   "ruff>=0.15.2",
   "ty>=0.0.18",

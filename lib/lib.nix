@@ -40,6 +40,7 @@ let
   userMetaPath = u: maybePath "${src}/home/${u}/meta.nix";
   modulesPath = "${src}/modules";
   crate2nixTauri = import ./crate2nix-tauri.nix { inherit lib; };
+  rustyV8 = import ./rusty-v8.nix { inherit lib; };
 
   scanSourcesIn =
     dir:
@@ -105,6 +106,7 @@ rec {
     mkCrate2nixTauriUtilsOverride
     tauriPluginEnvCrateNames
     ;
+  inherit (rustyV8) mkRustyV8Build mkRustyV8PrebuiltArtifacts;
   inherit modulesPath;
   flakeLock = (fromJSON (readFile (src + "/flake.lock"))).nodes;
   # UPDATE_SOURCE_OVERRIDES_JSON allows update tooling to override selected

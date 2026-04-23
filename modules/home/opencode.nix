@@ -104,22 +104,15 @@ let
         "enabled"
       ];
       enabled =
-        if server ? enabled then
-          server.enabled
-        else if server ? enable then
-          server.enable
-        else if builtins.hasAttr name cfg.mcpServers then
-          null
-        else
-          false;
+        server.enabled or (server.enable or (if builtins.hasAttr name cfg.mcpServers then null else false));
     in
     extras // optionalAttrs (enabled != null) { inherit enabled; };
 
   renderMcpServers = servers: mapAttrs (_: mkServerConfig) servers;
   renderSparseMcpServerOverrides = servers: mapAttrs mkSparseServerOverride servers;
 
-  mergeProfileMcpServers = profileMcpServers:
-    opencodeMcpLib.resolveSparseMcpServerOverrides cfg.mcpServers profileMcpServers;
+  mergeProfileMcpServers =
+    profileMcpServers: opencodeMcpLib.resolveSparseMcpServerOverrides cfg.mcpServers profileMcpServers;
 
   mkServerAssertions =
     optionPath: servers:
@@ -168,12 +161,13 @@ let
   selectedProfileConfig = cfg.profiles.${cfg.activeProfile} or emptyProfile;
   selectedProfilePath = "${config.home.homeDirectory}/.config/opencode/${cfg.activeProfile}.json";
   staleProfileJsonPaths =
-    map (fileName: "${config.home.homeDirectory}/.config/opencode/${fileName}") (
-      (builtins.map (profileName: "${profileName}.json") (
-        builtins.filter (profileName: profileName != cfg.activeProfile) (builtins.attrNames cfg.profiles)
-      ))
-      ++ [ "active.json" ]
-    );
+    map (fileName: "${config.home.homeDirectory}/.config/opencode/${fileName}")
+      (
+        (builtins.map (profileName: "${profileName}.json") (
+          builtins.filter (profileName: profileName != cfg.activeProfile) (builtins.attrNames cfg.profiles)
+        ))
+        ++ [ "active.json" ]
+      );
 in
 {
   options.nixcfg.opencode = {
@@ -201,9 +195,18 @@ in
         chrome-devtools = {
           enable = false;
           type = "local";
+          # Use Node's npx here instead of bunx. Hard-verified on argus: the
+          # same chrome-devtools-mcp --autoConnect --channel=stable command
+          # succeeds via npx but fails via bunx after MCP init/tool discovery on
+          # the first browser attach/list_pages call. The bundled Puppeteer/ws
+          # transport inside chrome-devtools-mcp hits Bun websocket upgrade
+          # compatibility issues and can surface misleading
+          # "Could not find DevToolsActivePort" errors even when the file
+          # exists. Relevant upstream Bun threads: #5951, #28114, #25777,
+          # #8320, #27859, and #28828.
           command = [
-            "bunx"
-            "--bun"
+            "npx"
+            "-y"
             "chrome-devtools-mcp@latest"
             "--autoConnect"
             "--channel=stable"

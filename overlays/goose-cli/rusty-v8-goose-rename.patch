@@ -1,0 +1,11 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 2906926..c282ebe 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,5 +1,5 @@
+ [package]
+-name = "v8"
++name = "v8-goose"
+ version = "145.0.0"
+ description = "Rust bindings to V8"
+ readme = "README.md"

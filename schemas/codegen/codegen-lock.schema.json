@@ -5,10 +5,7 @@
   "description": "Resolved source pins and integrity metadata for a code generation manifest.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "version",
-    "sources"
-  ],
+  "required": ["version", "sources"],
   "properties": {
     "version": {
       "type": "integer",
@@ -84,10 +81,7 @@
       "title": "LockedDirectorySource",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "kind",
-        "path"
-      ],
+      "required": ["kind", "path"],
       "properties": {
         "kind": {
           "type": "string",
@@ -111,11 +105,7 @@
       "title": "LockedUrlSource",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "kind",
-        "uri",
-        "sha256"
-      ],
+      "required": ["kind", "uri", "sha256"],
       "properties": {
         "kind": {
           "type": "string",
@@ -146,15 +136,7 @@
       "title": "LockedGitHubRawSource",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "kind",
-        "owner",
-        "repo",
-        "ref",
-        "path",
-        "uri",
-        "sha256"
-      ],
+      "required": ["kind", "owner", "repo", "ref", "path", "uri", "sha256"],
       "properties": {
         "kind": {
           "type": "string",

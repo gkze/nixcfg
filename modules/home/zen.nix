@@ -17,21 +17,21 @@ let
   managedConfigDir = "${config.xdg.configHome}/zen";
   zenPython = pkgs.python3.withPackages (
     ps: with ps; [
+      deepdiff
       lz4
+      pydantic
       pyyaml
     ]
   );
-  mkZenWrapper = name: script:
+  mkZenWrapper =
+    name: script:
     pkgs.writeShellApplication {
       inherit name;
       text = ''
         exec ${lib.getExe zenPython} ${lib.escapeShellArg script} "$@"
       '';
     };
-  zenProfileSync =
-    mkZenWrapper "zen-profile-sync" ../../home/george/bin/zen-profile-sync;
-  zenFolders =
-    mkZenWrapper "zen-folders" ../../home/george/bin/zen-folders;
+  zenTool = mkZenWrapper "zentool" ../../home/george/bin/zentool;
 in
 {
   options.nixcfg.zen = {
@@ -42,7 +42,7 @@ in
       default = null;
       example = "Default (twilight)";
       description = ''
-        Profile selector passed through to zen-folders. Accepts a profile
+        Profile selector passed through to zentool. Accepts a profile
         directory name, a direct path, or a human profile name from
         profiles.ini. Null uses auto-detection from Zen's profiles.ini.
       '';
@@ -58,7 +58,7 @@ in
         chrome/ directory.
 
         For local theme iteration without a Nix rebuild, run
-        `zen-profile-sync --chrome-source /path/to/chrome` (or set
+        `zentool apply --assets --chrome-source /path/to/chrome` (or set
         `ZEN_CHROME_SOURCE=/path/to/chrome`) to temporarily sync from a direct
         filesystem path instead.
       '';
@@ -79,61 +79,51 @@ in
       default = null;
       example = ./folders.yaml;
       description = ''
-        Declarative folder config published to ~/.config/zen/folders.yaml and
-        applied with zen-folders when Zen is closed. Supports an optional
-        __workspace__ block for workspace metadata like icon,
-        hasCollapsedPinnedTabs, and theme. containerTabId is used when creating
-        a missing workspace.
+        Declarative Zen session config published to ~/.config/zen/folders.yaml
+        and applied with zentool when Zen is closed. The schema is
+        essentials/workspaces/items/tabs, with exact syncing against the
+        managed subset of zen-sessions.jsonlz4.
       '';
     };
 
-    profileSyncCommand = mkOption {
+    toolCommand = mkOption {
       type = types.str;
-      default = lib.getExe zenProfileSync;
+      default = lib.getExe zenTool;
       description = ''
-        Command used to sync managed chrome assets, user.js, and optional
-        folders.yaml into the live Zen profile. Defaults to the packaged
-        repo-managed zen-profile-sync wrapper.
-      '';
-    };
-
-    foldersCommand = mkOption {
-      type = types.str;
-      default = lib.getExe zenFolders;
-      description = ''
-        Command used to reconcile declarative Zen folders. Defaults to the
-        packaged repo-managed zen-folders wrapper.
+        Command used to inspect and reconcile Zen state and assets. Defaults to
+        the packaged repo-managed zentool wrapper.
       '';
     };
 
     syncOnActivation = mkOption {
       type = types.bool;
       default = true;
-      description = "Run zen-profile-sync during Home Manager activation.";
+      description = "Run zentool apply during Home Manager activation.";
     };
 
-    applyFoldersOnActivation = mkOption {
+    applyStateOnActivation = mkOption {
       type = types.bool;
       default = true;
-      description = "Apply folders.yaml during zen-profile-sync when Zen is closed.";
+      description = "Apply folders.yaml to the Zen session during activation.";
+    };
+
+    applyAssetsOnActivation = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Apply managed Zen assets during activation.";
     };
   };
 
   config = mkIf cfg.enable {
     assertions = [
       {
-        assertion = cfg.syncOnActivation -> cfg.profileSyncCommand != "";
-        message = "nixcfg.zen.profileSyncCommand must be non-empty when syncOnActivation is enabled.";
-      }
-      {
-        assertion = cfg.syncOnActivation -> cfg.foldersCommand != "";
-        message = "nixcfg.zen.foldersCommand must be non-empty when syncOnActivation is enabled.";
+        assertion = cfg.syncOnActivation -> cfg.toolCommand != "";
+        message = "nixcfg.zen.toolCommand must be non-empty when syncOnActivation is enabled.";
       }
     ];
 
     home.packages = [
-      zenProfileSync
-      zenFolders
+      zenTool
     ];
 
     xdg.configFile = mkMerge [
@@ -153,16 +143,57 @@ in
 
     home.activation = mkIf cfg.syncOnActivation {
       nixcfgZenSync = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-        sync_cmd=(${lib.escapeShellArg cfg.profileSyncCommand})
-        sync_args=(
-          --config-dir ${lib.escapeShellArg managedConfigDir}
-          --folders-command ${lib.escapeShellArg cfg.foldersCommand}
-          ${if cfg.applyFoldersOnActivation then "--apply-folders" else "--no-apply-folders"}
-        )
+        sync_cmd=(${lib.escapeShellArg cfg.toolCommand})
+        sync_args=(apply --yes)
+        profile_args=()
+        state_args=()
+        asset_args=()
+        state_config=${lib.escapeShellArg (managedConfigDir + "/folders.yaml")}
+
         ${lib.optionalString (cfg.profile != null) ''
-          sync_args+=(--profile ${lib.escapeShellArg cfg.profile})
+          profile_args+=(--profile ${lib.escapeShellArg cfg.profile})
         ''}
-        run --silence "''${sync_cmd[@]}" "''${sync_args[@]}"
+
+        ${lib.optionalString cfg.applyStateOnActivation ''
+          if [ -e "$state_config" ]; then
+            state_args+=(--state)
+            state_args+=(--config "$state_config")
+          fi
+        ''}
+
+        ${lib.optionalString cfg.applyAssetsOnActivation ''
+          asset_args+=(--assets)
+          asset_args+=(--asset-dir ${lib.escapeShellArg managedConfigDir})
+        ''}
+
+        if [ "''${#state_args[@]}" -gt 0 ]; then
+          runtime_check_cmd=("''${sync_cmd[@]}" profile)
+          if [ "''${#profile_args[@]}" -gt 0 ]; then
+            runtime_check_cmd+=("''${profile_args[@]}")
+          fi
+          runtime_check_cmd+=(is-running)
+
+          if "''${runtime_check_cmd[@]}" >/dev/null 2>&1; then
+            echo "warning: skipping Zen state sync during activation because Zen is running" >&2
+            state_args=()
+          fi
+        fi
+
+        if [ "''${#state_args[@]}" -gt 0 ]; then
+          sync_args+=("''${state_args[@]}")
+        fi
+
+        if [ "''${#asset_args[@]}" -gt 0 ]; then
+          sync_args+=("''${asset_args[@]}")
+        fi
+
+        if [ "''${#profile_args[@]}" -gt 0 ]; then
+          sync_args+=("''${profile_args[@]}")
+        fi
+
+        if [ "''${#state_args[@]}" -gt 0 ] || [ "''${#asset_args[@]}" -gt 0 ]; then
+          run --silence "''${sync_cmd[@]}" "''${sync_args[@]}"
+        fi
       '';
     };
   };

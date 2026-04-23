@@ -42,6 +42,8 @@ HashType = Literal[
     "denoDepsHash",
     "nodeModulesHash",  # For node_modules built via bun/custom builders
     "npmDepsHash",
+    "rustyV8ArchiveHash",  # Prebuilt librusty_v8 release artifact
+    "rustyV8BindingHash",  # Prebuilt rusty_v8 src_binding artifact
     "sha256",
     "srcHash",
     "spectaOutputHash",  # For specta git dependency hash

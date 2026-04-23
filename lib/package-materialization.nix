@@ -8,7 +8,7 @@
 }:
 let
   packageRegistry = import (src + "/packages/registry.nix") { inherit src; };
-  packagePaths = packageRegistry.packagePaths;
+  inherit (packageRegistry) packagePaths;
   packageNames = builtins.attrNames packagePaths;
   packagePathsForSystem = packageRegistry.forSystem;
   packageSelfSource =
@@ -24,9 +24,9 @@ let
     if packageSelfSource == null then
       throw "lib/package-materialization.nix: pass `lib` and `outputs` to materialize package functions."
     else
-      builtins.mapAttrs (
-        name: path: packageSelfSource.injectIntoFunction name (import path)
-      ) (packagePathsForSystem system);
+      builtins.mapAttrs (name: path: packageSelfSource.injectIntoFunction name (import path)) (
+        packagePathsForSystem system
+      );
 in
 {
   inherit

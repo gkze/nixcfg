@@ -1,10 +1,4 @@
-"""Updater for goose-cli source hashes.
-
-This updater intentionally only touches the upstream Goose source hash in
-sources.json. crate2nix artifacts (Cargo.nix, crate-hashes, path normalization,
-V8 lock patching, and crate overrides) are maintained separately; see
-overlays/goose-cli/README.md.
-"""
+"""Updater for goose-cli source hashes and crate2nix artifacts."""
 
 from __future__ import annotations
 
@@ -20,7 +14,12 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.nix import _build_fetch_from_github_expr, compute_fixed_output_hash
-from lib.update.updaters.base import UpdateContext, VersionInfo, register_updater
+from lib.update.updaters.base import (
+    Crate2NixArtifactsMixin,
+    UpdateContext,
+    VersionInfo,
+    register_updater,
+)
 from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 if TYPE_CHECKING:
@@ -30,7 +29,7 @@ if TYPE_CHECKING:
 
 
 @register_updater
-class GooseCliUpdater(GitHubReleaseUpdater):
+class GooseCliUpdater(Crate2NixArtifactsMixin, GitHubReleaseUpdater):
     """Resolve the latest Goose release and compute its source hash."""
 
     name = "goose-cli"
@@ -54,6 +53,9 @@ class GooseCliUpdater(GitHubReleaseUpdater):
     ) -> EventStream:
         """Compute the fixed-output source hash for Goose."""
         _ = (session, context)
+
+        async for event in self.stream_materialized_artifacts():
+            yield event
 
         src_hash_drain = ValueDrain[str]()
         async for event in drain_value_events(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,7 @@ from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance, expect_not_none
 from lib.tests._nix_ast import assert_nix_ast_equal, parse_nix_expr
+from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import VersionInfo
@@ -67,7 +69,11 @@ sentry_cli_module = _module_fixture(
 conductor_module = _module_fixture("packages/conductor/updater.py", "conductor_module")
 droid_module = _module_fixture("packages/droid/updater.py", "droid_module")
 scratch_module = _module_fixture("packages/scratch/updater.py", "scratch_module")
+oxlint_tsgolint_module = _module_fixture(
+    "overlays/oxlint-tsgolint/updater.py", "oxlint_tsgolint_module"
+)
 sculptor_module = _module_fixture("packages/sculptor/updater.py", "sculptor_module")
+neutils_module = _module_fixture("packages/neutils/updater.py", "neutils_module")
 
 
 def test_chatgpt_updater_paths(
@@ -182,6 +188,7 @@ def test_datagrip_updater_paths(
             {
                 "version": "2025.1",
                 "downloads": {
+                    "mac": {"checksumLink": "https://c/mac", "link": "https://d/mac"},
                     "macM1": {"checksumLink": "https://c/m1", "link": "https://d/m1"},
                     "linuxARM64": {
                         "checksumLink": "https://c/a64",
@@ -233,8 +240,15 @@ def test_datagrip_updater_paths(
     assert parsed_checksums == dict.fromkeys(updater.PLATFORMS, "abcd")
     assert set(urls_seen) == set(updater.PLATFORMS)
 
-    result = updater.build_result(info, {"x86_64-linux": HASH_A})
+    result = updater.build_result(
+        info,
+        {
+            "x86_64-darwin": HASH_A,
+            "x86_64-linux": HASH_A,
+        },
+    )
     urls = expect_not_none(result.urls)
+    assert urls["x86_64-darwin"] == "https://d/mac"
     assert urls["x86_64-linux"] == "https://d/x64"
 
 
@@ -245,6 +259,7 @@ def test_google_chrome_updater_paths(
     """Exercise Google Chrome release parsing edge cases."""
     updater = google_chrome_module.GoogleChromeUpdater()
     assert updater.materialize_when_current is True
+    assert updater.PLATFORMS["aarch64-darwin"] == updater.PLATFORMS["x86_64-darwin"]
     monkeypatch.setattr(
         google_chrome_module,
         "fetch_json",
@@ -359,7 +374,17 @@ def test_goose_v8_updater_skips_unchanged_pinned_revision(
             {
                 "hashType": "srcHash",
                 "hash": "sha256-UtbHrrBQleMb0KMyuX+7ELJJos3la7ZPtYv9Ri+kBTw=",
-            }
+            },
+            {
+                "hashType": "rustyV8ArchiveHash",
+                "hash": "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+                "platform": "x86_64-linux",
+            },
+            {
+                "hashType": "rustyV8BindingHash",
+                "hash": "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
+                "platform": "x86_64-linux",
+            },
         ],
     })
     monkeypatch.setattr(
@@ -381,6 +406,21 @@ def test_goose_v8_updater_skips_unchanged_pinned_revision(
             object.__getattribute__(updater, "_is_latest")(
                 current,
                 VersionInfo(version="changed", metadata={}),
+            )
+        )
+        is False
+    )
+
+    current_without_linux_artifacts = current.model_copy(
+        update={
+            "hashes": [{"hashType": "srcHash", "hash": current.hashes.entries[0].hash}]
+        }
+    )
+    assert (
+        _run(
+            object.__getattribute__(updater, "_is_latest")(
+                current_without_linux_artifacts,
+                VersionInfo(version=current.version, metadata={}),
             )
         )
         is False
@@ -567,6 +607,90 @@ def test_scratch_updater_paths(
     )
     assert built.input == "scratch"
     assert built.commit == "f" * 40
+
+
+def test_oxlint_tsgolint_updater_paths(
+    oxlint_tsgolint_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercise oxlint-tsgolint release parsing and override payload shape."""
+    updater = oxlint_tsgolint_module.OxlintTsgolintUpdater()
+
+    monkeypatch.setattr(
+        "lib.update.updaters.github_release.fetch_github_api",
+        lambda *_a, **_k: asyncio.sleep(0, result={"tag_name": "v0.21.0"}),
+    )
+    latest = _run(updater.fetch_latest(object()))
+    assert latest.version == "0.21.0"
+
+    env = updater._override_env(latest.version, HASH_A, HASH_B)
+    payload = json.loads(env["UPDATE_SOURCE_OVERRIDES_JSON"])
+    assert payload == {
+        "oxlint-tsgolint": {
+            "version": "0.21.0",
+            "hashes": [
+                {"hashType": "srcHash", "hash": HASH_A},
+                {"hashType": "vendorHash", "hash": HASH_B},
+            ],
+        }
+    }
+
+    fake_current = SourceEntry(
+        version=latest.version,
+        hashes=[
+            HashEntry.create("srcHash", HASH_A),
+            HashEntry.create("vendorHash", HASH_B),
+        ],
+    )
+    real_current = SourceEntry(
+        version=latest.version,
+        hashes=[
+            HashEntry.create("srcHash", HASH_B),
+            HashEntry.create("vendorHash", HASH_B),
+        ],
+    )
+    assert _run(updater._is_latest(fake_current, latest)) is False
+    assert _run(updater._is_latest(real_current, latest)) is True
+
+
+def test_neutils_updater_emits_generated_artifact_and_src_hash(
+    neutils_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Neutils should refresh build.zig.zon.nix alongside the source hash."""
+    updater = neutils_module.NeutilsUpdater()
+
+    async def _render(_info: object, _session: object) -> EventStream:
+        yield UpdateEvent.value("neutils", "# generated\n")
+
+    monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
+    monkeypatch.setattr(
+        neutils_module,
+        "package_dir_for",
+        lambda _name: REPO_ROOT / "packages" / "neutils",
+    )
+
+    async def _fixed_hash(_name: str, _expr: str, **_kwargs: object) -> EventStream:
+        yield UpdateEvent.value("neutils", HASH_A)
+
+    monkeypatch.setattr(neutils_module, "compute_fixed_output_hash", _fixed_hash)
+
+    latest = VersionInfo(version="0.7.2")
+    events = _run(_collect(updater.fetch_hashes(latest, object())))
+
+    artifact_event = next(
+        event for event in events if event.kind == UpdateEventKind.ARTIFACT
+    )
+    payload = expect_instance(artifact_event.payload, list)
+    artifact = expect_instance(payload[0], GeneratedArtifact)
+    assert artifact.path == REPO_ROOT / "packages" / "neutils" / "build.zig.zon.nix"
+    assert artifact.content == "# generated\n"
+
+    hashes = _require_hash_entries(
+        [event for event in events if event.kind == UpdateEventKind.VALUE][-1].payload
+    )
+    assert hashes == [HashEntry.create("srcHash", HASH_A)]
+    assert updater.materialize_when_current is True
+    assert updater.generated_artifact_files == ("build.zig.zon.nix",)
 
 
 def test_sculptor_updater_paths(

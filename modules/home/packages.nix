@@ -106,6 +106,8 @@ let
         ast-grep
         axiom-cli
         biome
+        oxlint
+        oxlint-tsgolint
         curator
         droid
         ffmpeg
@@ -120,6 +122,7 @@ let
         sd
         sentry-cli
         taplo
+        t3code
         toad
         worktrunk
         yt-dlp
@@ -128,40 +131,41 @@ let
     {
       name = "guiApps";
       description = "GUI applications (code-cursor, slack, spotify, etc.)";
-      packages =
-        [
-          code-cursor
-          dbeaver-bin
-          emdash
-          jetbrains.datagrip
-          hoppscotch
-          config.fonts.monospace.package
-          opencode-desktop
-          postman
-          red-reddit-cli
-          slack
-          spacedrive
-          spotify
-        ]
-        ++ lib.optionals stdenv.isLinux [ wl-clipboard ]
-        ++ lib.optionals stdenv.isDarwin [
-          appcleaner
-          chatgpt
-          commander
-          codex-desktop
-          conductor
-          container
-          cyberduck
-          google-chrome
-          granola
-          iina
-          mas
-          notion-app
-          raycast
-          rapidapi
-          sloth-app
-          wispr-flow
-        ];
+      packages = [
+        code-cursor
+        dbeaver-bin
+        emdash
+        jetbrains.datagrip
+        hoppscotch
+        config.fonts.monospace.package
+        opencode-desktop
+        postman
+        red-reddit-cli
+        slack
+        spacedrive
+        spotify
+      ]
+      ++ lib.optionals stdenv.isLinux [ wl-clipboard ]
+      ++ lib.optionals stdenv.isDarwin [
+        appcleaner
+        chatgpt
+        commander
+        codex-desktop
+        conductor
+        opencode-desktop-electron-dev
+        container
+        cyberduck
+        google-chrome
+        granola
+        iina
+        mas
+        notion-app
+        raycast
+        rapidapi
+        sloth-app
+        t3code-desktop
+        wispr-flow
+      ];
     }
     {
       name = "cloud";
@@ -190,16 +194,14 @@ let
   ];
 
   packageSetOptions = listToAttrs (
-    map
-      (
-        { name, description, ... }:
-        nameValuePair name {
-          enable = lib.mkEnableOption description // {
-            default = true;
-          };
-        }
-      )
-      packageSetTable
+    map (
+      { name, description, ... }:
+      nameValuePair name {
+        enable = lib.mkEnableOption description // {
+          default = true;
+        };
+      }
+    ) packageSetTable
   );
 
   packageSetEnabled = packageSet: (getAttr packageSet.name cfg).enable;
@@ -215,21 +217,20 @@ let
     any (name: name != null && elem name cfg.excludePackagesByName) pkgNames;
 in
 {
-  options.nixcfg.packageSets =
-    {
-      extraPackages = lib.mkOption {
-        type = lib.types.listOf lib.types.package;
-        default = [ ];
-        description = "Additional packages appended after all enabled package sets.";
-      };
+  options.nixcfg.packageSets = {
+    extraPackages = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      default = [ ];
+      description = "Additional packages appended after all enabled package sets.";
+    };
 
-      excludePackagesByName = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
-        description = "Package pname/name values to remove from enabled package sets.";
-      };
-    }
-    // packageSetOptions;
+    excludePackagesByName = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = "Package pname/name values to remove from enabled package sets.";
+    };
+  }
+  // packageSetOptions;
 
   config.home.packages =
     let

@@ -39,8 +39,14 @@ from lib.update.updaters.flake_backed import (
     DenoDepsHashUpdater,
     DenoManifestUpdater,
     FlakeInputHashUpdater,
+    FlakeInputMetadataUpdater,
     FlakeInputUpdater,
     UvLockUpdater,
+)
+from lib.update.updaters.materialization import (
+    Crate2NixArtifactsMixin,
+    Crate2NixMetadataUpdater,
+    MaterializesArtifactsMixin,
 )
 from lib.update.updaters.metadata import VersionInfo
 from lib.update.updaters.registry import UPDATERS, register_updater
@@ -90,12 +96,16 @@ __all__ = [
     "CargoLockGitDep",
     "ChecksumProvidedUpdater",
     "CommandResult",
+    "Crate2NixArtifactsMixin",
+    "Crate2NixMetadataUpdater",
     "DenoDepsHashUpdater",
     "DenoManifestUpdater",
     "DownloadHashUpdater",
     "FlakeInputHashUpdater",
+    "FlakeInputMetadataUpdater",
     "FlakeInputUpdater",
     "HashEntryUpdater",
+    "MaterializesArtifactsMixin",
     "UpdateConfig",
     "UpdateContext",
     "Updater",

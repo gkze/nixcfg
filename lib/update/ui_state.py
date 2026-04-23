@@ -42,6 +42,7 @@ class OperationKind(StrEnum):
     CHECK_VERSION = "check_version"
     UPDATE_REF = "update_ref"
     REFRESH_LOCK = "refresh_lock"
+    MATERIALIZE_ARTIFACTS = "materialize_artifacts"
     COMPUTE_HASH = "compute_hash"
 
 
@@ -52,6 +53,7 @@ _OPERATION_LABELS: dict[OperationKind, str] = {
     OperationKind.CHECK_VERSION: "Checking version",
     OperationKind.UPDATE_REF: "Updating ref",
     OperationKind.REFRESH_LOCK: "Refreshing lock",
+    OperationKind.MATERIALIZE_ARTIFACTS: "Refreshing artifacts",
     OperationKind.COMPUTE_HASH: "Computing hash",
 }
 
@@ -145,6 +147,34 @@ def _detail_payload(detail: object) -> StatusPayload | None:
     return _status_payload(detail)
 
 
+def _up_to_date_status_update(detail: object) -> StatusUpdate | None:
+    detail_payload = _detail_payload(detail)
+    if detail_payload is None:
+        return None
+    value = detail_payload.get("value")
+    scope = detail_payload.get("scope")
+    if scope == "hash":
+        return StatusUpdate("no_change", clear_message=True)
+    if scope == "artifacts":
+        if isinstance(value, str):
+            return StatusUpdate("no_change", f"{value} (up to date)")
+        return StatusUpdate("no_change", clear_message=True)
+    if isinstance(value, str):
+        return StatusUpdate("no_change", f"{value} (up to date)")
+    return None
+
+
+def _updated_status_update(detail: object) -> StatusUpdate:
+    if isinstance(detail, str):
+        return StatusUpdate("success", detail)
+    detail_payload = _detail_payload(detail)
+    if detail_payload is not None:
+        value = detail_payload.get("value")
+        if isinstance(value, str):
+            return StatusUpdate("success", value)
+    return StatusUpdate("success")
+
+
 def _payload_status_update(  # noqa: PLR0911
     payload: object | None,
 ) -> StatusUpdate | None:
@@ -165,13 +195,10 @@ def _payload_status_update(  # noqa: PLR0911
         latest = detail_payload.get("latest")
         if isinstance(current, str) and isinstance(latest, str):
             return StatusUpdate("success", f"{current} -> {latest}")
-    if status_name == "up_to_date" and detail_payload is not None:
-        value = detail_payload.get("value")
-        scope = detail_payload.get("scope")
-        if scope == "hash":
-            return StatusUpdate("no_change", clear_message=True)
-        if isinstance(value, str):
-            return StatusUpdate("no_change", f"{value} (up to date)")
+    if status_name == "up_to_date":
+        return _up_to_date_status_update(detail)
+    if status_name == "updated":
+        return _updated_status_update(detail)
     if status_name == "updating_ref" and detail_payload is not None:
         current = detail_payload.get("current")
         latest = detail_payload.get("latest")
