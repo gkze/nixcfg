@@ -97,8 +97,8 @@ def test_george_home_configuration_materializes_vscode_settings_after_link_gener
 
     assert 'lib.hm.dag.entryAfter [ "linkGeneration" ]' in materialize_text
     assert (
-        '"Library/Application Support/${config.programs.vscode.nameShort}/User/settings.json"'
-        in materialize_text
+        '"${config.home.homeDirectory}/Library/Application Support/'
+        '${config.programs.vscode.nameShort}/User/settings.json"' in materialize_text
     )
     assert 'run cp "${vscodeSettingsSource}" "$tmp_settings"' in materialize_text
     assert 'run mv "$tmp_settings" "$settings_path"' in materialize_text
@@ -113,6 +113,7 @@ def test_george_home_configuration_disables_direct_vscode_settings_symlink() -> 
     files = expect_instance(expect_binding(home.values, "file").value, AttributeSet)
 
     assert (
-        '"Library/Application Support/${config.programs.vscode.nameShort}/User/settings.json".enable = false;'
+        '"${config.home.homeDirectory}/Library/Application Support/'
+        '${config.programs.vscode.nameShort}/User/settings.json".enable = false;'
         in str(files)
     )
