@@ -182,6 +182,8 @@ def _merge_optional_scalar(
 def _merge_urls(
     existing: dict[str, str] | None,
     incoming: dict[str, str] | None,
+    *,
+    baseline: dict[str, str] | None = None,
 ) -> dict[str, str] | None:
     if existing is None and incoming is None:
         return None
@@ -189,6 +191,13 @@ def _merge_urls(
     for url_key, url_value in (incoming or {}).items():
         existing_value = merged.get(url_key)
         if existing_value is not None and existing_value != url_value:
+            baseline_value = None if baseline is None else baseline.get(url_key)
+            if baseline_value is not None:
+                if existing_value == baseline_value:
+                    merged[url_key] = url_value
+                    continue
+                if url_value == baseline_value:
+                    continue
             msg = f"Conflicting urls entry for {url_key!r}: {existing_value!r} vs {url_value!r}"
             raise RuntimeError(msg)
         merged[url_key] = url_value
@@ -243,7 +252,11 @@ def _merge_entry(
             incoming.commit,
             baseline=None if baseline is None else baseline.commit,
         ),
-        urls=_merge_urls(existing.urls, incoming.urls),
+        urls=_merge_urls(
+            existing.urls,
+            incoming.urls,
+            baseline=None if baseline is None else baseline.urls,
+        ),
     )
 
 

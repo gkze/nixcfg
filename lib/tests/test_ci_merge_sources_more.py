@@ -166,6 +166,23 @@ def test_merge_optional_scalar_prefers_changed_value_over_baseline() -> None:
     )
 
 
+def test_merge_urls_prefers_changed_value_over_baseline() -> None:
+    """Prefer updated URLs when the other root still matches the baseline."""
+    merged = ms._merge_urls(
+        {"aarch64-darwin": "https://example.invalid/old"},
+        {"aarch64-darwin": "https://example.invalid/new"},
+        baseline={"aarch64-darwin": "https://example.invalid/old"},
+    )
+    assert merged == {"aarch64-darwin": "https://example.invalid/new"}
+
+    preserved = ms._merge_urls(
+        {"aarch64-darwin": "https://example.invalid/new"},
+        {"aarch64-darwin": "https://example.invalid/old"},
+        baseline={"aarch64-darwin": "https://example.invalid/old"},
+    )
+    assert preserved == {"aarch64-darwin": "https://example.invalid/new"}
+
+
 def test_merge_optional_scalar_and_urls_conflicts() -> None:
     """Reject conflicting scalar and URL fields."""
     assert ms._merge_optional_scalar("version", "1.0.0", None) == "1.0.0"
