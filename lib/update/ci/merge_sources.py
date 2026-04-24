@@ -73,6 +73,7 @@ def _merge_hash_entries(
     incoming: list[HashEntry],
     *,
     platform: str | None,
+    baseline: list[HashEntry] | None = None,
 ) -> list[HashEntry]:
     by_key: dict[
         tuple[
@@ -84,6 +85,11 @@ def _merge_hash_entries(
         ],
         HashEntry,
     ] = {_hash_entry_key(entry): entry for entry in base}
+    baseline_by_key = (
+        {_hash_entry_key(entry): entry for entry in baseline}
+        if baseline is not None
+        else {}
+    )
 
     for entry in incoming:
         if entry.hash.startswith(HashCollection.FAKE_HASH_PREFIX):
@@ -93,6 +99,13 @@ def _merge_hash_entries(
         if entry.platform is None:
             existing = by_key.get(key)
             if existing is not None and existing.hash != entry.hash:
+                baseline_entry = baseline_by_key.get(key)
+                if baseline_entry is not None:
+                    if existing.hash == baseline_entry.hash:
+                        by_key[key] = entry
+                        continue
+                    if entry.hash == baseline_entry.hash:
+                        continue
                 msg = (
                     "Conflicting non-platform hash entry for "
                     f"{entry.hash_type}: {existing.hash} vs {entry.hash}"
@@ -116,6 +129,7 @@ def _merge_hash_mapping(
     incoming: dict[str, str],
     *,
     platform: str | None,
+    baseline: dict[str, str] | None = None,
 ) -> dict[str, str]:
     merged = dict(base)
     for incoming_platform, hash_value in incoming.items():
@@ -129,6 +143,15 @@ def _merge_hash_mapping(
             and incoming_platform != platform
             and existing != hash_value
         ):
+            baseline_value = (
+                None if baseline is None else baseline.get(incoming_platform)
+            )
+            if baseline_value is not None:
+                if existing == baseline_value:
+                    merged[incoming_platform] = hash_value
+                    continue
+                if hash_value == baseline_value:
+                    continue
             msg = (
                 "Conflicting non-platform hash mapping for "
                 f"{incoming_platform}: {existing} vs {hash_value}"
@@ -170,6 +193,7 @@ def _merge_entry(
     incoming: SourceEntry,
     *,
     platform: str | None,
+    baseline: SourceEntry | None = None,
 ) -> SourceEntry:
     if existing.hashes.entries is not None and incoming.hashes.entries is not None:
         merged_hashes = HashCollection(
@@ -177,6 +201,7 @@ def _merge_entry(
                 existing.hashes.entries,
                 incoming.hashes.entries,
                 platform=platform,
+                baseline=None if baseline is None else baseline.hashes.entries,
             ),
         )
     elif existing.hashes.mapping is not None and incoming.hashes.mapping is not None:
@@ -185,6 +210,7 @@ def _merge_entry(
                 existing.hashes.mapping,
                 incoming.hashes.mapping,
                 platform=platform,
+                baseline=None if baseline is None else baseline.hashes.mapping,
             ),
         )
     else:
@@ -201,8 +227,10 @@ def _merge_entry(
 
 def _collect_merged_entries(
     roots: list[str],
+    *,
+    baseline: dict[str, SourceEntry] | None = None,
 ) -> tuple[dict[str, SourceEntry], int, list[str], list[str]]:
-    merged: dict[str, SourceEntry] = {}
+    merged: dict[str, SourceEntry] = dict(baseline or {})
     loaded = 0
     missing_roots: list[str] = []
     empty_roots: list[str] = []
@@ -221,11 +249,17 @@ def _collect_merged_entries(
         for name, path in source_files.items():
             entry = _load_entry(path)
             existing = merged.get(name)
+            baseline_entry = None if baseline is None else baseline.get(name)
             try:
                 merged[name] = (
                     entry
                     if existing is None
-                    else _merge_entry(existing, entry, platform=platform)
+                    else _merge_entry(
+                        existing,
+                        entry,
+                        platform=platform,
+                        baseline=baseline_entry,
+                    )
                 )
             except RuntimeError as exc:
                 msg = (
@@ -276,9 +310,17 @@ def _write_merged_entries(output_root: Path, merged: dict[str, SourceEntry]) -> 
     raise RuntimeError(msg)
 
 
+def _load_baseline_entries(output_root: Path) -> dict[str, SourceEntry]:
+    source_files = package_file_map_in(output_root, SOURCES_FILE_NAME)
+    return {name: _load_entry(path) for name, path in source_files.items()}
+
+
 def run(*, roots: list[str], output_root: Path) -> int:
     """Merge sources from artifact roots into the repository tree."""
-    merged, loaded, missing_roots, empty_roots = _collect_merged_entries(roots)
+    merged, loaded, missing_roots, empty_roots = _collect_merged_entries(
+        roots,
+        baseline=_load_baseline_entries(output_root),
+    )
     _validate_input_roots(missing_roots, empty_roots)
 
     if loaded == 0:

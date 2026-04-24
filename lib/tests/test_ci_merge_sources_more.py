@@ -80,6 +80,23 @@ def test_merge_hash_entries_platform_filter_and_conflict() -> None:
     )
     assert len(preserved) == 1
 
+    baseline = [HashEntry(hash_type="sha256", hash="sha256-old")]
+    preferred_incoming = ms._merge_hash_entries(
+        [HashEntry(hash_type="sha256", hash="sha256-old")],
+        [HashEntry(hash_type="sha256", hash="sha256-new")],
+        platform=None,
+        baseline=baseline,
+    )
+    assert preferred_incoming == [HashEntry(hash_type="sha256", hash="sha256-new")]
+
+    preferred_existing = ms._merge_hash_entries(
+        [HashEntry(hash_type="sha256", hash="sha256-new")],
+        [HashEntry(hash_type="sha256", hash="sha256-old")],
+        platform=None,
+        baseline=baseline,
+    )
+    assert preferred_existing == [HashEntry(hash_type="sha256", hash="sha256-new")]
+
 
 def test_merge_hash_mapping_filters_and_conflicts() -> None:
     """Merge hash mapping with platform filtering and conflict detection."""
@@ -117,6 +134,14 @@ def test_merge_hash_mapping_filters_and_conflicts() -> None:
         platform="aarch64-darwin",
     )
     assert filtered == {"aarch64-darwin": "sha256-a"}
+
+    preferred_mapping = ms._merge_hash_mapping(
+        {"shared": "sha256-old"},
+        {"shared": "sha256-new"},
+        platform=None,
+        baseline={"shared": "sha256-old"},
+    )
+    assert preferred_mapping == {"shared": "sha256-new"}
 
 
 def test_merge_optional_scalar_and_urls_conflicts() -> None:
@@ -213,14 +238,14 @@ def test_collect_and_run_exit_paths(
     monkeypatch.setattr(
         ms,
         "_collect_merged_entries",
-        lambda _roots: ({}, 0, [], []),
+        lambda _roots, *, baseline=None: ({}, 0, [], []),
     )
     assert ms.run(roots=["x"], output_root=tmp_path) == 1
 
     monkeypatch.setattr(
         ms,
         "_collect_merged_entries",
-        lambda _roots: ({}, 1, ["missing"], ["empty"]),
+        lambda _roots, *, baseline=None: ({}, 1, ["missing"], ["empty"]),
     )
     try:
         ms.run(roots=["x"], output_root=tmp_path)
