@@ -165,8 +165,15 @@ def _merge_optional_scalar(
     field_name: str,
     existing: str | None,
     incoming: str | None,
+    *,
+    baseline: str | None = None,
 ) -> str | None:
     if existing and incoming and existing != incoming:
+        if baseline is not None:
+            if existing == baseline:
+                return incoming
+            if incoming == baseline:
+                return existing
         msg = f"Conflicting {field_name}: {existing!r} vs {incoming!r}"
         raise RuntimeError(msg)
     return incoming or existing
@@ -218,9 +225,24 @@ def _merge_entry(
 
     return SourceEntry(
         hashes=merged_hashes,
-        version=_merge_optional_scalar("version", existing.version, incoming.version),
-        input=_merge_optional_scalar("input", existing.input, incoming.input),
-        commit=_merge_optional_scalar("commit", existing.commit, incoming.commit),
+        version=_merge_optional_scalar(
+            "version",
+            existing.version,
+            incoming.version,
+            baseline=None if baseline is None else baseline.version,
+        ),
+        input=_merge_optional_scalar(
+            "input",
+            existing.input,
+            incoming.input,
+            baseline=None if baseline is None else baseline.input,
+        ),
+        commit=_merge_optional_scalar(
+            "commit",
+            existing.commit,
+            incoming.commit,
+            baseline=None if baseline is None else baseline.commit,
+        ),
         urls=_merge_urls(existing.urls, incoming.urls),
     )
 

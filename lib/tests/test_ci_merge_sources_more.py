@@ -144,6 +144,28 @@ def test_merge_hash_mapping_filters_and_conflicts() -> None:
     assert preferred_mapping == {"shared": "sha256-new"}
 
 
+def test_merge_optional_scalar_prefers_changed_value_over_baseline() -> None:
+    """Prefer the changed scalar when the other side still matches baseline."""
+    assert (
+        ms._merge_optional_scalar(
+            "version",
+            "1.0.0",
+            "2.0.0",
+            baseline="1.0.0",
+        )
+        == "2.0.0"
+    )
+    assert (
+        ms._merge_optional_scalar(
+            "version",
+            "2.0.0",
+            "1.0.0",
+            baseline="1.0.0",
+        )
+        == "2.0.0"
+    )
+
+
 def test_merge_optional_scalar_and_urls_conflicts() -> None:
     """Reject conflicting scalar and URL fields."""
     assert ms._merge_optional_scalar("version", "1.0.0", None) == "1.0.0"
