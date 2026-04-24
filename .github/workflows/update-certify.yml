@@ -381,3 +381,78 @@ jobs:
         run: nix build .#pkgs.x86_64-linux.nixcfg
       - name: List update targets
         run: nix run .#nixcfg -- ci workflow list-update-targets
+
+  publish-pr-certification:
+    needs:
+      - select-ref
+      - quality-gates
+      - darwin-priority-heavy
+      - darwin-extra-heavy
+      - darwin-shared
+      - darwin-argus
+      - darwin-rocinante
+      - linux-x86_64
+    if: needs.select-ref.outputs.exists == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    steps:
+      - *checkout_update_ref
+      - *setup_nix
+      - *cachix
+      - *cache_nix
+      - name: Resolve update PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_HEAD_REF: ${{ github.repository_owner }}:${{ needs.select-ref.outputs.ref }}
+        run: |
+          pr_number="$(gh pr list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --head "${PR_HEAD_REF}" \
+            --state open \
+            --json number \
+            --jq '.[0].number // ""')"
+          if [ -z "${pr_number}" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No open PR found for ref '${PR_HEAD_REF}'; skipping update." >&2
+            exit 0
+          fi
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "number=${pr_number}" >> "$GITHUB_OUTPUT"
+      - name: Capture current PR body
+        if: steps.pr.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh pr view "${{ steps.pr.outputs.number }}"
+          --repo "${{ github.repository }}"
+          --json body
+          --template '{{.body}}'
+          > /tmp/pr-body-current.md
+      - name: Capture certification workflow run metadata
+        if: steps.pr.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          > /tmp/certification-run.json
+      - name: Render updated PR body
+        if: steps.pr.outputs.found == 'true'
+        run: >-
+          nix run .#nixcfg -- ci workflow render-certification-pr-body
+          --existing-body /tmp/pr-body-current.md
+          --output /tmp/pr-body-updated.md
+          --run-json /tmp/certification-run.json
+          --cachix-name "${{ env.CACHIX_NAME }}"
+      - name: Update PR body with certification details
+        if: steps.pr.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh pr edit "${{ steps.pr.outputs.number }}"
+          --repo "${{ github.repository }}"
+          --body-file /tmp/pr-body-updated.md

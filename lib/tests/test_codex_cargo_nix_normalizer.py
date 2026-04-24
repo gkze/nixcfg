@@ -58,6 +58,28 @@ rec {
     )
 
 
+def test_normalize_rewrites_supported_store_backed_local_crates() -> None:
+    """Store-backed local Codex crates should normalize back to ``rootSrc`` paths."""
+    module = _load_normalizer_module()
+
+    sample = """{ nixpkgs ? <nixpkgs>
+, pkgs ? import nixpkgs { config = {}; }
+, crateConfig ? {}
+}:
+rec {
+  analytics = { src = ../../../nix/store/demo-source/analytics; };
+  plugin = { src = ../../../nix/store/demo-source/plugin; };
+}
+"""
+
+    normalized, rewrites, added_root_src = module.normalize(sample)
+
+    assert added_root_src is True
+    assert rewrites == 2
+    assert 'analytics = { src = "${rootSrc}/analytics"; };' in normalized
+    assert 'plugin = { src = "${rootSrc}/plugin"; };' in normalized
+
+
 def test_normalize_is_noop_for_checked_in_codex_cargo_nix() -> None:
     """The current checked-in Cargo.nix should already be normalized."""
     module = _load_normalizer_module()

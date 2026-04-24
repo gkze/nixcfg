@@ -1690,11 +1690,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1776828833,
-        "narHash": "sha256-ehaA63QAZPoqZOuuwE3FTfHeoIC830BE5KEjytf728s=",
+        "lastModified": 1777016305,
+        "narHash": "sha256-IjbkZYeb4oYL0Gi6mcO6//H3GVGR1JFvNxLfABbsFBs=",
         "owner": "gkze",
         "repo": "opencode",
-        "rev": "2a857eb14050436f9020d6f9b5b60320a4e0cd70",
+        "rev": "6742eefe43e7d90e8a8d6d4403d61c71ef971c8c",
         "type": "github"
       },
       "original": {
@@ -2291,11 +2291,11 @@
     "t3code": {
       "flake": false,
       "locked": {
-        "lastModified": 1776819890,
-        "narHash": "sha256-7sxUq0uf4zeo/5jwCSN/WI8yC/NO6Ve8nVHrYEG8tMY=",
+        "lastModified": 1776967515,
+        "narHash": "sha256-E5r9Ui7SKl2V6COTsNf2gSHnsae1ACrmHUutxO54Bak=",
         "owner": "pingdotgg",
         "repo": "t3code",
-        "rev": "b8305afa29309e52045987caab91db9b7e481ac0",
+        "rev": "ada410bccff144ce4cfed0e2c6e18974b045f968",
         "type": "github"
       },
       "original": {

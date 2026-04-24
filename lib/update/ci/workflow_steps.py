@@ -7,10 +7,12 @@ import dataclasses
 import importlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -25,6 +27,8 @@ from lib.update.bun_lock import (
 )
 from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.ci._subprocess import run_command as _run
+from lib.update.ci._time import format_duration as _format_duration
+from lib.update.ci._workflow_analysis import load_workflow_analysis
 from lib.update.ci.flake_lock_diff import run_diff as run_flake_lock_diff
 from lib.update.ci.sources_json_diff import NoChangesMessage
 from lib.update.ci.sources_json_diff import run_diff as run_sources_diff
@@ -55,6 +59,27 @@ class PRBodyOptions:
 
 class GitHistoryReadError(RuntimeError):
     """Raised when Git history cannot be read for PR body generation."""
+
+
+@dataclasses.dataclass(frozen=True)
+class CertificationPRBodyOptions:
+    """Inputs used to render the certification section onto an update PR."""
+
+    workflow_url: str
+    started_at: str
+    updated_at: str
+    cachix_name: str
+    workflow_path: Path = Path(".github/workflows/update-certify.yml")
+
+
+_CERTIFICATION_SECTION_START = "<!-- update-certification:start -->"
+_CERTIFICATION_SECTION_END = "<!-- update-certification:end -->"
+_CERTIFICATION_SHARED_CLOSURE_MARKER = "nix run .#nixcfg -- ci cache closure"
+_CERTIFICATION_EXCLUDE_REF_RE = re.compile(r"--exclude-ref\s+([^\s\\]+)")
+_CERTIFICATION_FLAKE_REF_RE = re.compile(r"(\.#[^\s\\]+)")
+_CERTIFICATION_BUILD_REF_RE = re.compile(r"nix build\s+([^\s\\]+)")
+_CERTIFICATION_DARWIN_HOST_RE = re.compile(r"build-darwin-config\s+([^\s\\]+)")
+_PAIR_ITEM_COUNT = 2
 
 
 def _cmd_nix_flake_update() -> int:
@@ -591,6 +616,279 @@ def _cmd_generate_pr_body(
     )
 
 
+def _load_json_file(*, input_path: Path, context: str) -> dict[str, Any]:
+    return _json_object(
+        json.loads(input_path.read_text(encoding="utf-8")),
+        context=context,
+    )
+
+
+def _required_string_field(payload: dict[str, Any], *, field: str, context: str) -> str:
+    value = payload.get(field)
+    if isinstance(value, str) and value.strip():
+        return value
+    msg = f"Expected non-empty string field {field!r} in {context}"
+    raise TypeError(msg)
+
+
+def _parse_github_timestamp(value: str) -> datetime:
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        msg = f"Invalid GitHub timestamp {value!r}"
+        raise ValueError(msg) from exc
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _format_github_timestamp(value: str) -> str:
+    return _parse_github_timestamp(value).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _ordered_unique(items: list[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return tuple(ordered)
+
+
+def _render_code_list(values: tuple[str, ...]) -> str:
+    rendered = [f"`{value}`" for value in values]
+    if not rendered:
+        msg = "Expected at least one value to render"
+        raise ValueError(msg)
+    if len(rendered) == 1:
+        return rendered[0]
+    if len(rendered) == _PAIR_ITEM_COUNT:
+        return f"{rendered[0]} and {rendered[1]}"
+    return ", ".join(rendered[:-1]) + f", and {rendered[-1]}"
+
+
+def _certification_matrix_targets(
+    workflow_path: Path, *, job_id: str
+) -> tuple[str, ...]:
+    workflow = load_workflow_analysis(workflow_path)
+    include = workflow.require_job(job_id=job_id).require_matrix_include()
+    targets: list[str] = []
+    for entry in include:
+        target = entry.get("target")
+        if not isinstance(target, str) or not target.strip():
+            msg = f"{job_id} matrix entry must define a non-empty string target"
+            raise TypeError(msg)
+        targets.append(target)
+    return _ordered_unique(targets)
+
+
+def _certification_shared_closure_refs(
+    workflow_path: Path,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    workflow = load_workflow_analysis(workflow_path)
+    run_strings = workflow.require_job(job_id="darwin-shared").run_strings
+    shared_runs = [
+        run for run in run_strings if _CERTIFICATION_SHARED_CLOSURE_MARKER in run
+    ]
+    if len(shared_runs) != 1:
+        msg = "darwin-shared must define exactly one shared-closure step"
+        raise RuntimeError(msg)
+
+    shared_run = shared_runs[0]
+    excluded = _ordered_unique([
+        match.strip("\"'")
+        for match in _CERTIFICATION_EXCLUDE_REF_RE.findall(shared_run)
+    ])
+    if not excluded:
+        msg = "darwin-shared shared-closure step must define --exclude-ref values"
+        raise RuntimeError(msg)
+
+    included = tuple(
+        ref
+        for ref in _ordered_unique([
+            match.strip("\"'")
+            for match in _CERTIFICATION_FLAKE_REF_RE.findall(shared_run)
+        ])
+        if ref not in excluded
+    )
+    if not included:
+        msg = "darwin-shared shared-closure step must include at least one flake ref"
+        raise RuntimeError(msg)
+
+    return included, excluded
+
+
+def _certification_darwin_host_targets(workflow_path: Path) -> tuple[str, ...]:
+    workflow = load_workflow_analysis(workflow_path)
+    targets: list[str] = []
+    for job_id in ("darwin-argus", "darwin-rocinante"):
+        hosts = _ordered_unique([
+            match.strip("\"'")
+            for run in workflow.require_job(job_id=job_id).run_strings
+            for match in _CERTIFICATION_DARWIN_HOST_RE.findall(run)
+        ])
+        if len(hosts) != 1:
+            msg = f"{job_id} must build exactly one darwin host"
+            raise RuntimeError(msg)
+        targets.append(f".#darwinConfigurations.{hosts[0]}.system")
+    return tuple(targets)
+
+
+def _certification_linux_targets(workflow_path: Path) -> tuple[str, ...]:
+    workflow = load_workflow_analysis(workflow_path)
+    targets = _ordered_unique([
+        match.strip("\"'")
+        for run in workflow.require_job(job_id="linux-x86_64").run_strings
+        for match in _CERTIFICATION_BUILD_REF_RE.findall(run)
+    ])
+    if not targets:
+        msg = "linux-x86_64 must define at least one nix build target"
+        raise RuntimeError(msg)
+    return targets
+
+
+def _render_certification_targets(
+    workflow_path: Path, *, cachix_name: str
+) -> list[str]:
+    darwin_heavy_targets = [
+        *_certification_matrix_targets(
+            workflow_path,
+            job_id="darwin-priority-heavy",
+        ),
+        *_certification_matrix_targets(
+            workflow_path,
+            job_id="darwin-extra-heavy",
+        ),
+    ]
+    shared_refs, shared_excludes = _certification_shared_closure_refs(workflow_path)
+    darwin_host_targets = _certification_darwin_host_targets(workflow_path)
+    linux_targets = _certification_linux_targets(workflow_path)
+
+    rendered_targets = [
+        f"- `{target}`" for target in _ordered_unique(darwin_heavy_targets)
+    ]
+    plural = "s" if len(shared_excludes) != 1 else ""
+    rendered_targets.append(
+        "- Shared Darwin closure for "
+        + _render_code_list(shared_refs)
+        + f" excluding {len(shared_excludes)} heavy package closure{plural}"
+    )
+    rendered_targets.extend(f"- `{target}`" for target in darwin_host_targets)
+    rendered_targets.extend(f"- `{target}`" for target in linux_targets)
+    return [f"Closures pushed to Cachix (`{cachix_name}`):", *rendered_targets]
+
+
+def _render_certification_section(options: CertificationPRBodyOptions) -> str:
+    started_at = _parse_github_timestamp(options.started_at)
+    updated_at = _parse_github_timestamp(options.updated_at)
+    elapsed_seconds = max(0.0, (updated_at - started_at).total_seconds())
+    lines = [
+        "## Certification",
+        "",
+        f"Latest certification: [workflow run]({options.workflow_url})",
+        f"Updated: `{_format_github_timestamp(options.updated_at)}`",
+        f"Elapsed: `{_format_duration(elapsed_seconds)}`",
+        "",
+        *_render_certification_targets(
+            options.workflow_path,
+            cachix_name=options.cachix_name,
+        ),
+    ]
+    return "\n".join(lines)
+
+
+def _replace_certification_section(*, body: str, section: str) -> str:
+    start_count = body.count(_CERTIFICATION_SECTION_START)
+    end_count = body.count(_CERTIFICATION_SECTION_END)
+    if start_count != end_count:
+        msg = "PR body contains unbalanced certification section markers"
+        raise ValueError(msg)
+    if start_count > 1:
+        msg = "PR body contains multiple certification sections"
+        raise ValueError(msg)
+
+    block = (
+        f"{_CERTIFICATION_SECTION_START}\n"
+        f"{section.rstrip()}\n"
+        f"{_CERTIFICATION_SECTION_END}"
+    )
+    stripped_body = body.strip()
+    if not stripped_body:
+        return block + "\n"
+
+    if start_count == 0:
+        return stripped_body + "\n\n" + block + "\n"
+
+    prefix, _, remainder = body.partition(_CERTIFICATION_SECTION_START)
+    _, _, suffix = remainder.partition(_CERTIFICATION_SECTION_END)
+    parts = [prefix.rstrip(), block, suffix.lstrip()]
+    return "\n\n".join(part for part in parts if part).rstrip() + "\n"
+
+
+def render_certification_pr_body(
+    *,
+    existing_body: str | Path,
+    output: str | Path,
+    options: CertificationPRBodyOptions,
+) -> int:
+    """Render a PR body with the certification section inserted or updated."""
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    current_body = Path(existing_body).read_text(encoding="utf-8")
+    updated_body = _replace_certification_section(
+        body=current_body,
+        section=_render_certification_section(options),
+    )
+    output_path.write_text(updated_body, encoding="utf-8")
+    return 0
+
+
+def _cmd_render_certification_pr_body(
+    *,
+    existing_body: str | Path,
+    output: str | Path,
+    run_json: Path,
+    cachix_name: str,
+    workflow: Path,
+) -> int:
+    try:
+        run_payload = _load_json_file(
+            input_path=run_json,
+            context=f"workflow run payload {run_json}",
+        )
+        return render_certification_pr_body(
+            existing_body=existing_body,
+            output=output,
+            options=CertificationPRBodyOptions(
+                workflow_url=_required_string_field(
+                    run_payload,
+                    field="html_url",
+                    context=f"workflow run payload {run_json}",
+                ),
+                started_at=_required_string_field(
+                    run_payload,
+                    field="run_started_at",
+                    context=f"workflow run payload {run_json}",
+                ),
+                updated_at=_required_string_field(
+                    run_payload,
+                    field="updated_at",
+                    context=f"workflow run payload {run_json}",
+                ),
+                cachix_name=cachix_name,
+                workflow_path=workflow,
+            ),
+        )
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+
+
 app = make_typer_app(
     help_text="CI workflow helper steps.",
     no_args_is_help=True,
@@ -785,6 +1083,45 @@ def command_generate_pr_body(
     )
 
 
+def command_render_certification_pr_body(
+    *,
+    cachix_name: Annotated[
+        str,
+        typer.Option("--cachix-name", help="Cachix cache name to render in PR body."),
+    ],
+    existing_body: Annotated[
+        Path,
+        typer.Option("--existing-body", help="Path to the current PR body."),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("-o", "--output", help="Path to write updated PR body."),
+    ],
+    run_json: Annotated[
+        Path,
+        typer.Option("--run-json", help="GitHub Actions run JSON payload from gh api."),
+    ],
+    workflow: Annotated[
+        Path,
+        typer.Option(
+            "-w",
+            "--workflow",
+            help="Certification workflow file used to enumerate cached closures.",
+        ),
+    ] = Path(".github/workflows/update-certify.yml"),
+) -> None:
+    """Render or replace the certification section in an existing PR body."""
+    _exit_with_code(
+        _cmd_render_certification_pr_body(
+            existing_body=existing_body,
+            output=output,
+            run_json=run_json,
+            cachix_name=cachix_name,
+            workflow=workflow,
+        )
+    )
+
+
 def command_smoke_check_update_app() -> None:
     """Smoke-check that the update app evaluates."""
     _exit_with_code(_cmd_smoke_check_update_app())
@@ -933,6 +1270,10 @@ app.command("nix-flake-update", help="Alias for `flake update`.")(
     command_nix_flake_update
 )
 app.command("generate-pr-body", help="Alias for `pr-body`.")(command_generate_pr_body)
+app.command(
+    "render-certification-pr-body",
+    help="Render certification details into an existing PR body.",
+)(command_render_certification_pr_body)
 app.command("smoke-check-update-app", help="Alias for `update-app`.")(
     command_smoke_check_update_app
 )

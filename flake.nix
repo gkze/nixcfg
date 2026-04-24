@@ -749,6 +749,8 @@
                 nixcfgPkg = mkNixcfgPackage pkgs;
               in
               ''
+                ${lib.getExe pkgs.git} init -q .
+                ${lib.getExe pkgs.git} add -A .
                 ${nixcfgPkg}/bin/coverage run -m pytest
                 ${nixcfgPkg}/bin/coverage report
               '';

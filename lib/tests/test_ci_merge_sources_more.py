@@ -143,6 +143,26 @@ def test_merge_hash_mapping_filters_and_conflicts() -> None:
     )
     assert preferred_mapping == {"shared": "sha256-new"}
 
+    preserved_existing = ms._merge_hash_mapping(
+        {"shared": "sha256-new"},
+        {"shared": "sha256-old"},
+        platform=None,
+        baseline={"shared": "sha256-old"},
+    )
+    assert preserved_existing == {"shared": "sha256-new"}
+
+    try:
+        ms._merge_hash_mapping(
+            {"shared": "sha256-new"},
+            {"shared": "sha256-newer"},
+            platform=None,
+            baseline={"shared": "sha256-old"},
+        )
+    except RuntimeError as exc:
+        assert "Conflicting non-platform hash mapping" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
 
 def test_merge_optional_scalar_prefers_changed_value_over_baseline() -> None:
     """Prefer the changed scalar when the other side still matches baseline."""
@@ -200,7 +220,30 @@ def test_merge_optional_scalar_and_urls_conflicts() -> None:
         raise AssertionError("expected RuntimeError")
 
     try:
+        ms._merge_optional_scalar(
+            "version",
+            "2.0.0",
+            "3.0.0",
+            baseline="1.0.0",
+        )
+    except RuntimeError as exc:
+        assert "Conflicting version" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    try:
         ms._merge_urls({"linux": "a"}, {"linux": "b"})
+    except RuntimeError as exc:
+        assert "Conflicting urls entry" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    try:
+        ms._merge_urls(
+            {"linux": "https://example.invalid/newer"},
+            {"linux": "https://example.invalid/newest"},
+            baseline={"linux": "https://example.invalid/old"},
+        )
     except RuntimeError as exc:
         assert "Conflicting urls entry" in str(exc)
     else:

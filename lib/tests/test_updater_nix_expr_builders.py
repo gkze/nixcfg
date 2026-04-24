@@ -28,6 +28,11 @@ def _load_sentry_cli_updater_module() -> ModuleType:
     return load_module_from_path(module_path, "_sentry_cli_updater")
 
 
+def _load_t3code_workspace_updater_module() -> ModuleType:
+    module_path = REPO_ROOT / "packages" / "t3code-workspace" / "updater.py"
+    return load_module_from_path(module_path, "_t3code_workspace_updater")
+
+
 def test_scratch_npm_expr_is_parseable() -> None:
     """Scratch NPM hash expression should be valid Nix."""
     expr = object.__getattribute__(ScratchUpdater, "_expr_for_npm_deps")()
@@ -131,3 +136,13 @@ def test_sentry_cargo_expr_is_parseable() -> None:
             ),
         ),
     )
+
+
+def test_t3code_workspace_expr_is_parseable() -> None:
+    """T3 Code workspace hash expression should be valid Nix."""
+    module = _load_t3code_workspace_updater_module()
+    updater = module.T3CodeWorkspaceUpdater
+
+    expr = updater._workspace_expr()
+
+    assert_nix_ast_equal(expr, updater._workspace_expression())

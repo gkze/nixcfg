@@ -7,6 +7,15 @@ import os
 import subprocess
 from typing import TYPE_CHECKING, Literal
 
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.path import NixPath
+from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
+from nix_manipulator.expressions.set import AttributeSet
+
 from lib.nix.commands.base import CommandResult, HashMismatchError
 from lib.nix.models.sources import HashEntry, SourceEntry, SourceHashes
 from lib.update.events import EventStream, UpdateEvent
@@ -15,12 +24,14 @@ from lib.update.nix import (
     _tail_output_excerpt,
     compute_expr_drv_fingerprint,
 )
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import UpdateContext, VersionInfo, register_updater
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
 
 if TYPE_CHECKING:
     import aiohttp
+    from nix_manipulator.expressions.expression import NixExpression
 
 
 def _workspace_build_args(expr: str) -> list[str]:
@@ -87,23 +98,58 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
     supported_platforms = (DARWIN_PLATFORM,)
 
     @classmethod
+    def _workspace_expression(cls) -> NixExpression:
+        import_nixpkgs = FunctionCall(
+            name=Identifier(name="import"),
+            argument=identifier_attr_path("flake", "inputs", "nixpkgs"),
+        )
+        call_package = FunctionCall(
+            name=identifier_attr_path("pkgs", "callPackage"),
+            argument=NixPath(path="./packages/t3code-workspace/default.nix"),
+        )
+        return LetExpression(
+            local_variables=[
+                Binding(
+                    name="flake",
+                    value=FunctionCall(
+                        name=identifier_attr_path("builtins", "getFlake"),
+                        argument=StringPrimitive(
+                            value=f"git+file://{REPO_ROOT}?dirty=1"
+                        ),
+                    ),
+                ),
+                Binding(
+                    name="system", value=StringPrimitive(value=cls.DARWIN_PLATFORM)
+                ),
+                Binding(
+                    name="pkgs",
+                    value=FunctionCall(
+                        name=import_nixpkgs,
+                        argument=AttributeSet.from_dict({
+                            "system": Identifier(name="system"),
+                            "config": AttributeSet.from_dict({
+                                "allowUnfree": Primitive(value=True),
+                                "allowInsecurePredicate": FunctionDefinition(
+                                    argument_set=Identifier(name="_"),
+                                    output=Primitive(value=True),
+                                ),
+                            }),
+                        }),
+                    ),
+                ),
+            ],
+            value=FunctionCall(
+                name=call_package,
+                argument=AttributeSet.from_dict({
+                    "inputs": identifier_attr_path("flake", "inputs"),
+                    "outputs": Identifier(name="flake"),
+                }),
+            ),
+        )
+
+    @classmethod
     def _workspace_expr(cls) -> str:
-        return f"""
-          let
-            flake = builtins.getFlake ("git+file://" + toString ./. + "?dirty=1");
-            system = "{cls.DARWIN_PLATFORM}";
-            pkgs = import flake.inputs.nixpkgs {{
-              inherit system;
-              config = {{
-                allowUnfree = true;
-                allowInsecurePredicate = _: true;
-              }};
-            }};
-          in pkgs.callPackage ./packages/t3code-workspace/default.nix {{
-            inputs = flake.inputs;
-            outputs = flake;
-          }}
-        """
+        return compact_nix_expr(cls._workspace_expression().rebuild())
 
     async def _is_latest(
         self,

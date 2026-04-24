@@ -5393,7 +5393,7 @@ rec {
         crateName = "codex-analytics";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/analytics; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/analytics"; };
         libName = "codex_analytics";
         dependencies = [
           {
@@ -7156,7 +7156,7 @@ rec {
         crateName = "codex-cloud-tasks-mock-client";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/cloud-tasks-mock-client; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/cloud-tasks-mock-client"; };
         libName = "codex_cloud_tasks_mock_client";
         dependencies = [
           {
@@ -7182,7 +7182,7 @@ rec {
         crateName = "codex-code-mode";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/code-mode; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/code-mode"; };
         libName = "codex_code_mode";
         dependencies = [
           {
@@ -7241,7 +7241,7 @@ rec {
         crateName = "codex-collaboration-mode-templates";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/collaboration-mode-templates; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/collaboration-mode-templates"; };
         libName = "codex_collaboration_mode_templates";
 
       };
@@ -7366,7 +7366,7 @@ rec {
         crateName = "codex-connectors";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/connectors; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/connectors"; };
         libName = "codex_connectors";
         dependencies = [
           {
@@ -7946,7 +7946,7 @@ rec {
         crateName = "codex-core-plugins";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/core-plugins; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/core-plugins"; };
         libName = "codex_core_plugins";
         dependencies = [
           {
@@ -8052,7 +8052,7 @@ rec {
         crateName = "codex-core-skills";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/core-skills; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/core-skills"; };
         libName = "codex_core_skills";
         dependencies = [
           {
@@ -8390,7 +8390,7 @@ rec {
         crateName = "codex-exec-server";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/exec-server; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/exec-server"; };
         libName = "codex_exec_server";
         dependencies = [
           {
@@ -8671,7 +8671,7 @@ rec {
         crateName = "codex-features";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/features; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/features"; };
         libName = "codex_features";
         dependencies = [
           {
@@ -8815,7 +8815,7 @@ rec {
         crateName = "codex-git-utils";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/git-utils; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/git-utils"; };
         libName = "codex_git_utils";
         dependencies = [
           {
@@ -8973,7 +8973,7 @@ rec {
         crateName = "codex-install-context";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/install-context; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/install-context"; };
         libName = "codex_install_context";
         dependencies = [
           {
@@ -8997,7 +8997,7 @@ rec {
         crateName = "codex-instructions";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/instructions; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/instructions"; };
         libName = "codex_instructions";
         dependencies = [
           {
@@ -9392,7 +9392,7 @@ rec {
         crateName = "codex-mcp";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/codex-mcp; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/codex-mcp"; };
         libName = "codex_mcp";
         dependencies = [
           {
@@ -9648,7 +9648,7 @@ rec {
         crateName = "codex-model-provider";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/model-provider; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/model-provider"; };
         libName = "codex_model_provider";
         dependencies = [
           {
@@ -9688,7 +9688,7 @@ rec {
         crateName = "codex-model-provider-info";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/model-provider-info; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/model-provider-info"; };
         libName = "codex_model_provider_info";
         dependencies = [
           {
@@ -9745,7 +9745,7 @@ rec {
         crateName = "codex-models-manager";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/models-manager; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/models-manager"; };
         libName = "codex_models_manager";
         dependencies = [
           {
@@ -10189,7 +10189,7 @@ rec {
         crateName = "codex-plugin";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/plugin; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/plugin"; };
         libName = "codex_plugin";
         dependencies = [
           {
@@ -10388,7 +10388,7 @@ rec {
         crateName = "codex-realtime-webrtc";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/realtime-webrtc; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/realtime-webrtc"; };
         libName = "codex_realtime_webrtc";
         dependencies = [
           {
@@ -10412,7 +10412,7 @@ rec {
         crateName = "codex-response-debug-context";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/response-debug-context; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/response-debug-context"; };
         libName = "codex_response_debug_context";
         dependencies = [
           {
@@ -10696,7 +10696,7 @@ rec {
         crateName = "codex-rollout";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/rollout; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/rollout"; };
         libName = "codex_rollout";
         dependencies = [
           {
@@ -10788,7 +10788,7 @@ rec {
         crateName = "codex-sandboxing";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/sandboxing; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/sandboxing"; };
         libName = "codex_sandboxing";
         dependencies = [
           {
@@ -11243,7 +11243,7 @@ rec {
         crateName = "codex-terminal-detection";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/terminal-detection; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/terminal-detection"; };
         libName = "codex_terminal_detection";
         dependencies = [
           {
@@ -11263,7 +11263,7 @@ rec {
         crateName = "codex-test-binary-support";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/test-binary-support; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/test-binary-support"; };
         libName = "codex_test_binary_support";
         libPath = "lib.rs";
         dependencies = [
@@ -11282,7 +11282,7 @@ rec {
         crateName = "codex-thread-store";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/thread-store; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/thread-store"; };
         libName = "codex_thread_store";
         dependencies = [
           {
@@ -11380,7 +11380,7 @@ rec {
         crateName = "codex-tools";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/tools; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/tools"; };
         libName = "codex_tools";
         dependencies = [
           {
@@ -12496,7 +12496,7 @@ rec {
         crateName = "codex-v8-poc";
         version = "0.122.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/iryiq5qkdd9si1rp9harnjxp8r04s04d-codex-0.122.0-src/v8-poc; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/v8-poc"; };
         libName = "codex_v8_poc";
         dependencies = [
           {

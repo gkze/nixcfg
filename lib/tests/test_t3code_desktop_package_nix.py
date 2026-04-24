@@ -126,7 +126,7 @@ def test_t3code_desktop_sources_track_the_supported_platform_matrix() -> None:
     assert payload["version"] == "main"
     assert payload["hashes"] == [
         {
-            "hash": "sha256-T75MRSMcrJrgCnLTDc05slg/dyIFED4rLBXCqNrb0yU=",
+            "hash": "sha256-o+LKHj/LJ5PwKxVHUUl/RR9CLLfmmtaelNN1JFGjs6w=",
             "hashType": "nodeModulesHash",
             "platform": "aarch64-darwin",
         }
