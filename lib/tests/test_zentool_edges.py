@@ -100,6 +100,16 @@ def test_resolve_profile_dir_matches_firefox_style_directory_display_name(
     assert zentool.resolve_profile_dir("Default (twilight)") == profile_dir
 
 
+def test_profile_display_name_without_firefox_prefix_uses_directory_name(
+    zentool: ModuleType,
+) -> None:
+    """Unprefixed profile directories should keep their full directory name."""
+    assert (
+        zentool._profile_display_name_from_directory(Path("plain-profile"))
+        == "plain-profile"
+    )
+
+
 def test_resolve_profile_dir_rejects_ambiguous_directory_display_name(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
