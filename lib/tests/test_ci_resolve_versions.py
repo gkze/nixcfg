@@ -44,6 +44,16 @@ def test_serialize_empty_metadata() -> None:
     assert restored.metadata == {}
 
 
+def test_serialize_null_metadata() -> None:
+    """VersionInfo with null metadata round-trips correctly."""
+    info = VersionInfo(version="1.20t-20260423082615")
+    data = _serialize_version_info(info)
+    restored = _deserialize_version_info(data)
+    assert data["metadata"] is None
+    assert restored.version == "1.20t-20260423082615"
+    assert restored.metadata is None
+
+
 def test_deserialize_missing_metadata() -> None:
     """Deserialize tolerates missing metadata key (defaults to {})."""
     data = _serialize_version_info(VersionInfo(version="2.0.0", metadata={}))

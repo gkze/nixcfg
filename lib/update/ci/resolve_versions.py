@@ -91,12 +91,16 @@ def _deserialize_version_info(data: _JsonObject) -> VersionInfo:
         msg = f"Pinned version entry missing string 'version': {data!r}"
         raise TypeError(msg)
     metadata_payload = data.get("metadata", {})
-    if not isinstance(metadata_payload, dict):
+    if metadata_payload is None:
+        metadata = None
+    elif isinstance(metadata_payload, dict):
+        metadata = deserialize_metadata(dict(metadata_payload))
+    else:
         msg = f"Pinned version entry has invalid 'metadata': {data!r}"
         raise TypeError(msg)
     return VersionInfo(
         version=version_payload,
-        metadata=deserialize_metadata(dict(metadata_payload)),
+        metadata=metadata,
     )
 
 
