@@ -257,6 +257,14 @@ linkFarm name [
     };
   }
   {
+    name = "N-V-__8AAExZCQBbT7NCZKdW4KxnVtSRvSVqTtJt0FEqfSa9";
+    path = fetchZigArtifact {
+      name = "tree_sitter_lua";
+      url = "https://github.com/tree-sitter-grammars/tree-sitter-lua/archive/7040a79f95b0bf7517a9809a8d0ecd41197027ac.tar.gz";
+      hash = "sha256-W2/4AIo73LOXMyQuLabtkEKT9uTXN6mzQOtwoF7raQg=";
+    };
+  }
+  {
     name = "N-V-__8AAD6dEwA9hwePYcn8FdDAJEeYqCBBlYI2Oey6O5g2";
     path = fetchZigArtifact {
       name = "tree_sitter_make";
@@ -393,11 +401,19 @@ linkFarm name [
     };
   }
   {
-    name = "zigdown-1.2.0-M06JT0DGFQC9CNUqGZcCgSA8nR8zv6BLaJ1g8Ib58Me-";
+    name = "N-V-__8AAC1yDQBe7ev1_AAguXlIl0g3dEFO_B-s5O_kJJI4";
+    path = fetchZigArtifact {
+      name = "whatwg_html";
+      url = "git+https://github.com/whatwg/html-build/#283a3531a61106d07d9a7d9fb3e6f3b9bfd33d70";
+      hash = "sha256-KHmfSliCT40m/jkM/WiBJgQTXEXzTyqicRIhfUvvp/w=";
+    };
+  }
+  {
+    name = "zigdown-1.2.1-M06JT5IzFgDTiRC66WcjynfIDs36nQocT40xNfys-wuq";
     path = fetchZigArtifact {
       name = "zigdown";
-      url = "https://github.com/JacobCrabill/zigdown/archive/aae37f89151378a21134493981efb81fbca2be0f.tar.gz";
-      hash = "sha256-68RTu9xobCIDrJ5ufZ3l4zStnDrp4y+mNk85EeMTkS0=";
+      url = "https://github.com/JacobCrabill/zigdown/archive/refs/tags/v1.2.1.tar.gz";
+      hash = "sha256-hIWv9bTqfIp25YlFfYYIey8I+1C/++AlZaZxaihXUQY=";
     };
   }
   {

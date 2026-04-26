@@ -324,7 +324,7 @@ def test_build_desired_state_syncs_exact_subset(
     desired = ZENTOOL.build_desired_state(base_session, config)
 
     assert [space.name for space in desired.spaces] == ["Work"]
-    assert desired.spaces[0].containerTabId == 6
+    assert desired.spaces[0].container_tab_id == 6
     assert [folder.name for folder in desired.folders] == ["AI"]
     assert [group.name for group in desired.groups] == ["AI"]
     assert [ZENTOOL.active_url(tab) for tab in desired.tabs] == [
@@ -334,11 +334,11 @@ def test_build_desired_state_syncs_exact_subset(
     ]
 
     by_url = {ZENTOOL.active_url(tab): tab for tab in desired.tabs}
-    assert by_url["https://mail.google.com/mail/u/0/"].zenSyncId == "ess-mail"
-    assert by_url["https://platform.claude.com"].zenSyncId == "folder-anthropic"
-    assert by_url["https://platform.openai.com"].zenSyncId == "top-openai"
-    assert by_url["https://platform.openai.com"].groupId == "f-ai"
-    assert by_url["https://platform.openai.com"].zenStaticLabel == "OpenAI"
+    assert by_url["https://mail.google.com/mail/u/0/"].zen_sync_id == "ess-mail"
+    assert by_url["https://platform.claude.com"].zen_sync_id == "folder-anthropic"
+    assert by_url["https://platform.openai.com"].zen_sync_id == "top-openai"
+    assert by_url["https://platform.openai.com"].group_id == "f-ai"
+    assert by_url["https://platform.openai.com"].zen_static_label == "OpenAI"
     assert all(
         ZENTOOL.active_url(tab)
         not in {
@@ -387,15 +387,15 @@ def test_workspace_scoped_essential_tabs_build_as_zen_essentials(
 
     desired = ZENTOOL.build_desired_state(base_session, config)
 
-    essential_tabs = [tab for tab in desired.tabs if tab.zenEssential]
+    essential_tabs = [tab for tab in desired.tabs if tab.zen_essential]
     assert [ZENTOOL.active_url(tab) for tab in essential_tabs] == [
         "https://mail.google.com/mail/u/0/#inbox",
         "https://calendar.google.com/calendar/u/0/r",
     ]
     assert all(tab.pinned is True for tab in essential_tabs)
-    assert all(tab.groupId is None for tab in essential_tabs)
-    assert all(tab.zenWorkspace == "ws-work" for tab in essential_tabs)
-    assert all(tab.userContextId == 6 for tab in essential_tabs)
+    assert all(tab.group_id is None for tab in essential_tabs)
+    assert all(tab.zen_workspace == "ws-work" for tab in essential_tabs)
+    assert all(tab.user_context_id == 6 for tab in essential_tabs)
 
 
 def test_build_desired_state_sets_parent_links_and_folder_order(
@@ -442,19 +442,19 @@ def test_build_desired_state_sets_parent_links_and_folder_order(
     desired = ZENTOOL.build_desired_state(base_session, config)
 
     tabs_by_name = {
-        tab.zenStaticLabel: tab for tab in desired.tabs if tab.zenStaticLabel
+        tab.zen_static_label: tab for tab in desired.tabs if tab.zen_static_label
     }
     folders_by_name = {folder.name: folder for folder in desired.folders}
 
-    assert folders_by_name["AI"].parentId is None
-    assert folders_by_name["AI"].prevSiblingInfo == ZENTOOL.PrevSiblingInfo(
+    assert folders_by_name["AI"].parent_id is None
+    assert folders_by_name["AI"].prev_sibling_info == ZENTOOL.PrevSiblingInfo(
         type="tab",
-        id=tabs_by_name["Search"].zenSyncId,
+        id=tabs_by_name["Search"].zen_sync_id,
     )
-    assert folders_by_name["Providers"].parentId == folders_by_name["AI"].id
-    assert folders_by_name["Providers"].prevSiblingInfo == ZENTOOL.PrevSiblingInfo(
+    assert folders_by_name["Providers"].parent_id == folders_by_name["AI"].id
+    assert folders_by_name["Providers"].prev_sibling_info == ZENTOOL.PrevSiblingInfo(
         type="tab",
-        id=tabs_by_name["OpenAI"].zenSyncId,
+        id=tabs_by_name["OpenAI"].zen_sync_id,
     )
 
 
@@ -550,13 +550,13 @@ def test_session_write_round_trips_workspace_essentials_and_collapsed_folders(
     loaded = ZENTOOL.read_session(session_path)
 
     essential_tabs = [
-        tab for tab in loaded.tabs if tab.zenEssential and not tab.zenIsEmpty
+        tab for tab in loaded.tabs if tab.zen_essential and not tab.zen_is_empty
     ]
     assert [ZENTOOL.active_url(tab) for tab in essential_tabs] == [
         "https://mail.google.com/mail/u/0/",
     ]
-    assert all(tab.zenWorkspace == "ws-work" for tab in essential_tabs)
-    assert all(tab.groupId is None for tab in essential_tabs)
+    assert all(tab.zen_workspace == "ws-work" for tab in essential_tabs)
+    assert all(tab.group_id is None for tab in essential_tabs)
 
     folders_by_name = {folder.name: folder for folder in loaded.folders}
     groups_by_name = {group.name: group for group in loaded.groups}
@@ -752,7 +752,7 @@ def test_read_session_normalizes_nullable_prev_sibling_info(tmp_path: Path) -> N
 
     loaded = ZENTOOL.read_session(path)
 
-    assert loaded.folders[0].prevSiblingInfo == ZENTOOL.PrevSiblingInfo(
+    assert loaded.folders[0].prev_sibling_info == ZENTOOL.PrevSiblingInfo(
         type="start",
         id=None,
     )

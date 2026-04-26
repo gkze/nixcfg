@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import HashEntry, HashType, SourceHashes
@@ -17,14 +19,15 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.nix import _build_fetchgit_expr, compute_fixed_output_hash
+from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import (
     HashEntryUpdater,
     UpdateContext,
     VersionInfo,
+    _coerce_context,
     compute_url_hashes,
     register_updater,
 )
-from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 if TYPE_CHECKING:
     import aiohttp
@@ -33,17 +36,48 @@ if TYPE_CHECKING:
 
 
 @register_updater
-class CodexV8Updater(GitHubReleaseUpdater, HashEntryUpdater):
-    """Resolve the pinned rusty_v8 tag and compute its recursive source hash."""
+class CodexV8Updater(HashEntryUpdater):
+    """Track the Codex-pinned rusty_v8 release and compute its source hash."""
 
     name = "codex-v8"
     input_name = "codex-v8"
-    GITHUB_OWNER = "denoland"
-    GITHUB_REPO = "rusty_v8"
-    TAG_PREFIX = ""
+    companion_of = "codex"
+    _CODEX_CARGO_NIX_PATH = Path("packages/codex/Cargo.nix")
+    _CODEX_V8_VERSION_RE = re.compile(
+        r'"v8"\s*=\s*rec\s*\{.*?^\s*version\s*=\s*"(?P<version>[^"]+)";',
+        re.MULTILINE | re.DOTALL,
+    )
     PLATFORMS: ClassVar[dict[str, str]] = {
         "x86_64-linux": "x86_64-unknown-linux-gnu",
     }
+
+    @classmethod
+    def _cargo_nix_text(cls, context: UpdateContext | SourceEntry | None) -> str:
+        resolved_context = _coerce_context(context)
+        overridden = resolved_context.generated_artifacts.get(cls._CODEX_CARGO_NIX_PATH)
+        if overridden is not None:
+            return overridden
+        return (REPO_ROOT / cls._CODEX_CARGO_NIX_PATH).read_text(encoding="utf-8")
+
+    @classmethod
+    def _codex_v8_version(cls, cargo_nix_text: str) -> str:
+        match = cls._CODEX_V8_VERSION_RE.search(cargo_nix_text)
+        if match is None:
+            msg = f"Could not resolve Codex v8 version from {cls._CODEX_CARGO_NIX_PATH}"
+            raise RuntimeError(msg)
+        return f"v{match.group('version').removeprefix('v')}"
+
+    async def fetch_latest(
+        self,
+        session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
+    ) -> VersionInfo:
+        """Resolve the rusty_v8 release from Codex's generated dependency graph."""
+        _ = session
+        return VersionInfo(
+            version=self._codex_v8_version(self._cargo_nix_text(context))
+        )
 
     @staticmethod
     def _release_version(version: str) -> str:

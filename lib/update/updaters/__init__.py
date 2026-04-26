@@ -21,6 +21,7 @@ CargoLockGitDep = _updaters_base.CargoLockGitDep
 ChecksumProvidedUpdater = _updaters_base.ChecksumProvidedUpdater
 DenoDepsHashUpdater = _updaters_base.DenoDepsHashUpdater
 DownloadHashUpdater = _updaters_base.DownloadHashUpdater
+FixedOutputHashStep = _updaters_base.FixedOutputHashStep
 FlakeInputHashUpdater = _updaters_base.FlakeInputHashUpdater
 FlakeInputMetadataUpdater = _updaters_base.FlakeInputMetadataUpdater
 FlakeInputUpdater = _updaters_base.FlakeInputUpdater
@@ -40,6 +41,8 @@ go_vendor_updater = _updaters_base.go_vendor_updater
 npm_deps_updater = _updaters_base.npm_deps_updater
 uv_lock_hash_updater = _updaters_base.uv_lock_hash_updater
 uv_lock_updater = _updaters_base.uv_lock_updater
+stream_fixed_output_hashes = _updaters_base.stream_fixed_output_hashes
+stream_url_hash_mapping = _updaters_base.stream_url_hash_mapping
 GitHubRawFileUpdater = _github_raw_file_module.GitHubRawFileUpdater
 github_raw_file_updater = _github_raw_file_module.github_raw_file_updater
 GitHubReleaseUpdater = _github_release_module.GitHubReleaseUpdater
@@ -109,6 +112,7 @@ __all__ = [
     "DenoDepsHashUpdater",
     "DownloadHashUpdater",
     "DownloadingPlatformAPIUpdater",
+    "FixedOutputHashStep",
     "FlakeInputHashUpdater",
     "FlakeInputMetadataUpdater",
     "FlakeInputUpdater",
@@ -132,6 +136,8 @@ __all__ = [
     "npm_deps_updater",
     "register_updater",
     "resolve_registry_alias",
+    "stream_fixed_output_hashes",
+    "stream_url_hash_mapping",
     "uv_lock_hash_updater",
     "uv_lock_updater",
 ]

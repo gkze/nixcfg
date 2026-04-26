@@ -58,6 +58,8 @@ jobs:
             'packages/**/sources.json',
             'overlays/**/sources.json',
             'packages/**/uv.lock',
+            'packages/**/deno-deps.json',
+            'packages/**/build.zig.zon.nix',
             'packages/**/Cargo.nix',
             'packages/**/crate-hashes.json',
             'overlays/**/Cargo.nix',
@@ -126,6 +128,8 @@ jobs:
             'packages/**/sources.json',
             'overlays/**/sources.json',
             'packages/**/uv.lock',
+            'packages/**/deno-deps.json',
+            'packages/**/build.zig.zon.nix',
             'packages/**/Cargo.nix',
             'packages/**/crate-hashes.json',
             'overlays/**/Cargo.nix',
@@ -234,9 +238,12 @@ jobs:
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: matrix.platform == 'x86_64-linux'
         with:
-          name: uv-locks-${{ matrix.platform }}
+          name: generated-artifacts-${{ matrix.platform }}
           if-no-files-found: error
-          path: packages/**/uv.lock
+          path: |
+            packages/**/uv.lock
+            packages/**/deno-deps.json
+            packages/**/build.zig.zon.nix
 
   # Phase 5: Merge platform-specific hashes
   merge-hashes:
@@ -260,13 +267,13 @@ jobs:
         with:
           name: sources-aarch64-linux
           path: sources-aarch64-linux
-      - name: Materialize checked-in uv.lock artifacts
-        # uv.lock is platform-independent generated metadata. Download one
-        # canonical artifact at the repository root so the checked-in lockfiles
-        # are carried forward into merged-sources and the PR branch.
+      - name: Materialize checked-in generated updater artifacts
+        # These generated files are platform-independent metadata. Download one
+        # canonical artifact at the repository root so checked-in lockfiles and
+        # manifests are carried forward into merged-sources and the PR branch.
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          name: uv-locks-x86_64-linux
+          name: generated-artifacts-x86_64-linux
           path: packages
       - *cache_nix
       - name: Merge per-package sources files
@@ -285,6 +292,8 @@ jobs:
             packages/superset/bun.lock
             packages/**/sources.json
             packages/**/uv.lock
+            packages/**/deno-deps.json
+            packages/**/build.zig.zon.nix
             overlays/**/sources.json
 
   # Phase 6: Refresh checked-in generated artifacts on native platforms
@@ -376,6 +385,8 @@ jobs:
             packages/superset/bun.lock
             packages/**/sources.json
             packages/**/uv.lock
+            packages/**/deno-deps.json
+            packages/**/build.zig.zon.nix
             overlays/**/sources.json
             packages/codex/Cargo.nix
             packages/codex/crate-hashes.json
@@ -416,6 +427,8 @@ jobs:
             packages/superset/bun.lock
             packages/**/sources.json
             packages/**/uv.lock
+            packages/**/deno-deps.json
+            packages/**/build.zig.zon.nix
             overlays/**/sources.json
             packages/codex/Cargo.nix
             packages/codex/crate-hashes.json
@@ -425,7 +438,6 @@ jobs:
             packages/zed-editor-nightly/crate-hashes.json
             packages/opencode-desktop/Cargo.nix
             packages/opencode-desktop/crate-hashes.json
-            flake.nix
 
   # Phase 8: Create PR with updates
   create-pr:

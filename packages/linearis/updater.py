@@ -19,7 +19,7 @@ from lib.update.events import (
 from lib.update.net import fetch_json
 from lib.update.process import compute_url_hashes
 from lib.update.updaters.base import HashEntryUpdater, UpdateContext, VersionInfo
-from lib.update.updaters.metadata import metadata_get_str
+from lib.update.updaters.metadata import DownloadUrlMetadata, metadata_get_str
 from lib.update.updaters.registry import register_updater
 
 
@@ -69,7 +69,7 @@ class LinearisUpdater(HashEntryUpdater):
         if not tarball:
             msg = f"Missing dist.tarball in npm metadata from {self.LATEST_URL}"
             raise RuntimeError(msg)
-        return VersionInfo(version=version, metadata={"tarball": tarball})
+        return VersionInfo(version=version, metadata=DownloadUrlMetadata(url=tarball))
 
     async def fetch_hashes(
         self,
@@ -81,7 +81,7 @@ class LinearisUpdater(HashEntryUpdater):
         """Compute a single sha256 entry for the published npm tarball."""
         _ = (session, context)
         metadata = info.metadata
-        tarball = metadata_get_str(metadata, "tarball", context=f"{self.name} metadata")
+        tarball = metadata_get_str(metadata, "url", context=f"{self.name} metadata")
         if not tarball:
             msg = f"Missing tarball metadata for {self.name}: {metadata!r}"
             raise RuntimeError(msg)

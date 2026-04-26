@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
+from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel
 
 from lib.nix.models.flake_lock import FlakeLockNode
+from lib.update.events import UpdateEvent
+from lib.update.updaters import materialization as materialization_module
 from lib.update.updaters import metadata as metadata_module
+from lib.update.updaters import registry as registry_module
+from lib.update.updaters.base import FlakeInputMetadataUpdater
+from lib.update.updaters.materialization import MaterializesArtifactsMixin
 from lib.update.updaters.metadata import (
     NO_METADATA,
     DownloadUrlMetadata,
     FlakeInputMetadata,
+    GranolaFeedMetadata,
     PlatformAPIMetadata,
     ReleasePayloadMetadata,
     VersionInfo,
@@ -95,6 +103,67 @@ def test_flake_input_metadata_validation_errors() -> None:
         })
 
 
+def test_typed_metadata_coercion_helpers() -> None:
+    """Coerce legacy metadata mappings into typed runtime metadata objects."""
+    node = FlakeLockNode(locked=None)
+
+    assert FlakeInputMetadata.from_metadata(None, context="flake") is None
+    assert FlakeInputMetadata.from_metadata(
+        FlakeInputMetadata(node=node, commit="abc123"),
+        context="flake metadata",
+    ) == FlakeInputMetadata(node=node, commit="abc123")
+
+    flake_metadata = FlakeInputMetadata.from_metadata(
+        {"node": node, "commit": "abc123"},
+        context="flake metadata",
+    )
+    assert isinstance(flake_metadata, FlakeInputMetadata)
+    assert flake_metadata.node is node
+    assert flake_metadata.commit == "abc123"
+
+    with pytest.raises(TypeError, match="invalid commit metadata"):
+        FlakeInputMetadata.from_metadata(
+            {"node": node, "commit": 1},
+            context="flake metadata",
+        )
+
+    serialized_flake_metadata = FlakeInputMetadata.from_metadata(
+        {
+            "node": {
+                "locked": {
+                    "type": "github",
+                    "owner": "owner",
+                    "repo": "repo",
+                    "rev": "abc",
+                    "narHash": "sha256-test",
+                }
+            },
+            "commit": "abc",
+        },
+        context="flake metadata",
+    )
+    assert isinstance(serialized_flake_metadata, FlakeInputMetadata)
+    assert serialized_flake_metadata.commit == "abc"
+
+    platform_metadata = PlatformAPIMetadata.from_metadata(
+        {
+            "platform_info": {"x86_64-linux": {"sha256hash": "x"}},
+            "build": "2026-03-01",
+            "commit": "abc123",
+        },
+        context="dummy metadata",
+    )
+    assert platform_metadata.platform_info == {"x86_64-linux": {"sha256hash": "x"}}
+    assert platform_metadata.equality_fields == {"build": "2026-03-01"}
+    assert platform_metadata.commit == "abc123"
+
+    with pytest.raises(TypeError, match="Expected flake lock node"):
+        FlakeInputMetadata.from_metadata({"node": 1}, context="flake metadata")
+
+    with pytest.raises(TypeError, match="Expected platform_info mapping"):
+        PlatformAPIMetadata.from_metadata({}, context="dummy metadata")
+
+
 def test_serialize_and_deserialize_metadata_paths() -> None:
     """Cover typed, legacy, passthrough, and error metadata serialization paths."""
 
@@ -107,6 +176,9 @@ def test_serialize_and_deserialize_metadata_paths() -> None:
     assert metadata_module._json_safe_value(
         DownloadUrlMetadata(url="https://example.test")
     ) == {"url": "https://example.test"}
+    assert metadata_module._json_safe_value(
+        GranolaFeedMetadata(path="Granola-mac.zip", sha512="deadbeef")
+    ) == {"path": "Granola-mac.zip", "sha512": "deadbeef"}
     release = ReleasePayloadMetadata(release={"version": "1.0.0"})
     serialized = serialize_metadata(release)
     assert isinstance(serialized, dict)
@@ -126,6 +198,13 @@ def test_serialize_and_deserialize_metadata_paths() -> None:
             "payload": {"url": "https://example.test"},
         })["url"]
         == "https://example.test"
+    )
+    assert (
+        deserialize_metadata({
+            "__kind__": "granola_feed",
+            "payload": {"path": "Granola-mac.zip", "sha512": "deadbeef"},
+        })["sha512"]
+        == "deadbeef"
     )
     assert (
         deserialize_metadata({
@@ -162,6 +241,9 @@ def test_serialize_and_deserialize_metadata_paths() -> None:
 
     with pytest.raises(TypeError, match="payload must be an object"):
         deserialize_metadata({"__kind__": "download_url", "payload": "bad"})
+
+    with pytest.raises(TypeError, match="invalid platform_api metadata"):
+        deserialize_metadata({"__kind__": "platform_api", "payload": {}})
 
 
 def test_dataclass_payload_rejects_non_instances() -> None:
@@ -215,3 +297,98 @@ def test_register_updater_allows_test_duplicates_and_detects_test_classes() -> N
     assert UPDATERS["test-only-updater"] is _Replacement
 
     UPDATERS.pop("test-only-updater", None)
+
+
+def test_registry_crate2nix_helper_edge_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cover optional crate2nix import and auto-materialization guard branches."""
+    original_import_module = registry_module.importlib.import_module
+
+    def _raise_import_error(_name: str) -> object:
+        msg = "missing optional module"
+        raise ImportError(msg)
+
+    monkeypatch.setattr(
+        registry_module.importlib,
+        "import_module",
+        _raise_import_error,
+    )
+    assert registry_module._crate2nix_module() is None
+    assert registry_module._has_crate2nix_target(None) is False
+    assert registry_module._has_crate2nix_target("") is False
+    assert registry_module._has_crate2nix_target("demo") is False
+
+    monkeypatch.setattr(
+        registry_module.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(MaterializesArtifactsMixin=object()),
+    )
+    with pytest.raises(TypeError, match="Could not resolve MaterializesArtifactsMixin"):
+        registry_module._materialization_mixin_class()
+
+    async def _stream(name: str) -> object:
+        yield UpdateEvent.status(name, "materialized")
+
+    fake_crate2nix = SimpleNamespace(
+        TARGETS={
+            "already-wrapped-test": object(),
+            "mixin-wrapped-test": object(),
+            "stream-none-test": object(),
+        },
+        stream_crate2nix_artifact_updates=_stream,
+    )
+
+    def _import_for_wrap(name: str) -> object:
+        if name == "lib.update.crate2nix":
+            return fake_crate2nix
+        if name == "lib.update.updaters.materialization":
+            return materialization_module
+        return original_import_module(name)
+
+    monkeypatch.setattr(
+        registry_module.importlib,
+        "import_module",
+        _import_for_wrap,
+    )
+
+    class _AlreadyWrapped(FlakeInputMetadataUpdater):
+        name = "already-wrapped-test"
+        input_name = "already-input"
+
+    setattr(_AlreadyWrapped, registry_module._AUTO_CRATE2NIX_WRAPPED_ATTR, True)
+    assert registry_module._auto_enable_crate2nix_materialization(_AlreadyWrapped) is (
+        _AlreadyWrapped
+    )
+
+    class _MixinWrapped(MaterializesArtifactsMixin, FlakeInputMetadataUpdater):
+        name = "mixin-wrapped-test"
+        input_name = "mixin-input"
+
+    assert registry_module._auto_enable_crate2nix_materialization(_MixinWrapped) is (
+        _MixinWrapped
+    )
+    assert getattr(_MixinWrapped, registry_module._AUTO_CRATE2NIX_WRAPPED_ATTR) is True
+
+    class _StreamNone(FlakeInputMetadataUpdater):
+        name = "stream-none-test"
+        input_name = "stream-input"
+
+    registry_module._auto_enable_crate2nix_materialization(_StreamNone)
+
+    def _import_missing_crate2nix(name: str) -> object:
+        if name == "lib.update.crate2nix":
+            msg = "crate2nix unavailable"
+            raise ImportError(msg)
+        return original_import_module(name)
+
+    monkeypatch.setattr(
+        registry_module.importlib,
+        "import_module",
+        _import_missing_crate2nix,
+    )
+
+    async def _events() -> list[UpdateEvent]:
+        return [event async for event in _StreamNone().stream_materialized_artifacts()]
+
+    assert asyncio.run(_events()) == []

@@ -68,13 +68,13 @@ def test_hash_entry_updater_build_result_preserves_version() -> None:
     assert result.version == "v1.2.3"
 
 
-def test_hash_entry_updater_skips_hash_fetch_when_version_matches() -> None:
-    """Matching versions should short-circuit before recomputing hashes."""
+def test_hash_entry_updater_recomputes_before_confirming_equivalence() -> None:
+    """Generic hash-entry updaters must recompute before declaring no change."""
 
     async def _collect_events() -> list[UpdateEvent]:
-        updater = _FakeHashEntryUpdater(version="v2.0.0")
+        updater = _FakeHashEntryUpdater(version="v9.9.9")
         current = SourceEntry(
-            version="v2.0.0",
+            version="v9.9.9",
             hashes=HashCollection(
                 entries=[
                     HashEntry.create(
@@ -88,7 +88,7 @@ def test_hash_entry_updater_skips_hash_fetch_when_version_matches() -> None:
         async with aiohttp.ClientSession() as session:
             events = [event async for event in updater.update_stream(current, session)]
 
-        assert updater.fetch_hashes_called is False
+        assert updater.fetch_hashes_called is True
         return events
 
     events = asyncio.run(_collect_events())
@@ -96,7 +96,7 @@ def test_hash_entry_updater_skips_hash_fetch_when_version_matches() -> None:
         event.message for event in events if event.kind == UpdateEventKind.STATUS
     ]
 
-    assert "Up to date (version: v2.0.0)" in status_messages
+    assert "Up to date" in status_messages
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +163,7 @@ def test_flake_input_updater_recomputes_when_version_differs() -> None:
     """Version mismatch must force recomputation before fingerprint checks."""
 
     async def _run() -> bool:
-        updater = _FakeFlakeInputUpdater(version="v2.0.0")
+        updater = _FakeFlakeInputUpdater(version="v9.9.9")
         current = SourceEntry.model_validate(
             {
                 "version": "v1.0.0",
@@ -176,7 +176,7 @@ def test_flake_input_updater_recomputes_when_version_differs() -> None:
                 "drvHash": "abc123deadbeef",
             },
         )
-        info = VersionInfo(version="v2.0.0", metadata={})
+        info = VersionInfo(version="v9.9.9", metadata={})
         with patch(
             "lib.update.updaters.base.compute_drv_fingerprint",
             new_callable=AsyncMock,

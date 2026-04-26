@@ -12,17 +12,17 @@ if TYPE_CHECKING:
     from nix_manipulator.expressions.expression import NixExpression
 
     from lib.nix.models.sources import SourceEntry
+    from lib.update.events import EventStream
 
-from lib.nix.models.sources import HashEntry, SourceHashes
-from lib.update.events import (
-    CapturedValue,
-    EventStream,
-    UpdateEvent,
-    capture_stream_value,
-)
-from lib.update.nix import _build_nix_expr, compute_fixed_output_hash
+from lib.update.nix import _build_nix_expr
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
-from lib.update.updaters.base import UpdateContext, VersionInfo, register_updater
+from lib.update.updaters.base import (
+    FixedOutputHashStep,
+    UpdateContext,
+    VersionInfo,
+    register_updater,
+    stream_fixed_output_hashes,
+)
 from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 
@@ -95,46 +95,25 @@ class SentryCliUpdater(GitHubReleaseUpdater):
     ) -> EventStream:
         """Compute ``srcHash`` and ``cargoHash`` via fixed-output builds."""
         _ = (session, context)
-        src_hash: str | None = None
-        async for item in capture_stream_value(
-            compute_fixed_output_hash(
-                self.name,
-                _build_nix_expr(self._src_nix_expr(info.version)),
-            ),
-            error="Missing srcHash output",
-        ):
-            if isinstance(item, CapturedValue):
-                if not isinstance(item.captured, str):
-                    msg = f"Expected srcHash as string, got {item.captured!r}"
-                    raise TypeError(msg)
-                src_hash = item.captured
-            else:
-                yield item
-        if src_hash is None:
-            msg = "Missing srcHash output"
-            raise RuntimeError(msg)
 
-        cargo_hash: str | None = None
-        async for item in capture_stream_value(
-            compute_fixed_output_hash(
-                self.name,
-                _build_nix_expr(self._cargo_nix_expr(info.version, src_hash)),
+        async for event in stream_fixed_output_hashes(
+            self.name,
+            steps=(
+                FixedOutputHashStep(
+                    hash_type="srcHash",
+                    error="Missing srcHash output",
+                    expr=lambda _resolved: _build_nix_expr(
+                        self._src_nix_expr(info.version)
+                    ),
+                ),
+                FixedOutputHashStep(
+                    hash_type="cargoHash",
+                    error="Missing cargoHash output",
+                    expr=lambda resolved: _build_nix_expr(
+                        self._cargo_nix_expr(info.version, resolved["srcHash"])
+                    ),
+                ),
             ),
-            error="Missing cargoHash output",
+            config=self.config,
         ):
-            if isinstance(item, CapturedValue):
-                if not isinstance(item.captured, str):
-                    msg = f"Expected cargoHash as string, got {item.captured!r}"
-                    raise TypeError(msg)
-                cargo_hash = item.captured
-            else:
-                yield item
-        if cargo_hash is None:
-            msg = "Missing cargoHash output"
-            raise RuntimeError(msg)
-
-        hashes: SourceHashes = [
-            HashEntry.create("srcHash", src_hash),
-            HashEntry.create("cargoHash", cargo_hash),
-        ]
-        yield UpdateEvent.value(self.name, hashes)
+            yield event

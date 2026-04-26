@@ -93,6 +93,7 @@ let
         dust
         gping
         killport
+        ookla-speedtest
         procs
         tokei
         viddy

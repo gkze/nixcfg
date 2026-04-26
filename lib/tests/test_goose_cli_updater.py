@@ -2,32 +2,24 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
-from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import HashEntry
-from lib.update.paths import REPO_ROOT
+from lib.tests._updater_helpers import collect_events as _collect
+from lib.tests._updater_helpers import load_repo_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.updaters.base import VersionInfo
 
 
-def _run[T](coro):
-    return asyncio.run(coro)
-
-
-async def _collect(stream):
-    return [event async for event in stream]
+def _load_module(module_name: str):
+    return load_repo_module("overlays/goose-cli/updater.py", module_name)
 
 
 def test_goose_cli_updater_builds_github_tagged_src_expr(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The source hash should come from the GitHub release tag for the chosen version."""
-    module = load_module_from_path(
-        REPO_ROOT / "overlays/goose-cli/updater.py",
-        "goose_cli_updater_hash_test",
-    )
+    module = _load_module("goose_cli_updater_hash_test")
     updater = module.GooseCliUpdater()
     calls: list[str] = []
 
@@ -61,10 +53,7 @@ def test_goose_cli_updater_forwards_fixed_hash_progress_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Non-value events from the source hash stream should pass through."""
-    module = load_module_from_path(
-        REPO_ROOT / "overlays/goose-cli/updater.py",
-        "goose_cli_updater_progress_test",
-    )
+    module = _load_module("goose_cli_updater_progress_test")
     updater = module.GooseCliUpdater()
 
     async def _artifacts():
@@ -91,10 +80,7 @@ def test_goose_cli_updater_forwards_materialized_artifact_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Artifact events emitted before hashing should be preserved."""
-    module = load_module_from_path(
-        REPO_ROOT / "overlays/goose-cli/updater.py",
-        "goose_cli_updater_artifact_test",
-    )
+    module = _load_module("goose_cli_updater_artifact_test")
     updater = module.GooseCliUpdater()
 
     async def _artifacts():
@@ -119,10 +105,7 @@ def test_goose_cli_updater_requires_src_hash_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An empty fixed-output stream should fail instead of silently succeeding."""
-    module = load_module_from_path(
-        REPO_ROOT / "overlays/goose-cli/updater.py",
-        "goose_cli_updater_missing_hash_test",
-    )
+    module = _load_module("goose_cli_updater_missing_hash_test")
     updater = module.GooseCliUpdater()
 
     async def _artifacts():

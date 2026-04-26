@@ -11,7 +11,7 @@ import pathlib
 import re
 import shutil
 import sys
-from typing import TYPE_CHECKING, Annotated, TypeGuard
+from typing import TYPE_CHECKING, Annotated, TypeIs
 
 import typer
 from deepdiff import DeepDiff
@@ -41,11 +41,15 @@ class _MissingType:
 _MISSING = _MissingType()
 
 
+class DeepDiffPathError(RuntimeError):
+    """Raised when a DeepDiff tree node path cannot be decoded safely."""
+
+
 _coerce_json_value = json_utils.coerce_json_value
 _coerce_json_object = json_utils.coerce_json_object
 
 
-def _is_json_value(value: JsonValue | _MissingType) -> TypeGuard[JsonValue]:
+def _is_json_value(value: JsonValue | _MissingType) -> TypeIs[JsonValue]:
     return not isinstance(value, _MissingType)
 
 
@@ -149,22 +153,34 @@ def _parse_deepdiff_path(path: str) -> PathTuple:
 def _path_from_deepdiff_node(node: object) -> PathTuple:
     path_func = getattr(node, "path", None)
     if not callable(path_func):
-        return ()
-    with contextlib.suppress(TypeError):
+        msg = f"DeepDiff node {type(node).__name__} does not expose a callable path()"
+        raise DeepDiffPathError(msg)
+
+    try:
         path_list = path_func(output_format="list")
-        if isinstance(path_list, list):
-            segments: list[PathSegment] = []
-            for segment in path_list:
-                if isinstance(segment, (int, str)):
-                    segments.append(segment)
-                else:
-                    segments.append(str(segment))
-            return tuple(segments)
-    with contextlib.suppress(TypeError):
+    except TypeError:
+        path_list = None
+    if isinstance(path_list, list):
+        segments: list[PathSegment] = []
+        for segment in path_list:
+            if isinstance(segment, (int, str)):
+                segments.append(segment)
+            else:
+                segments.append(str(segment))
+        return tuple(segments)
+
+    try:
         path_text = path_func()
-        if isinstance(path_text, str):
-            return _parse_deepdiff_path(path_text)
-    return ()
+    except TypeError as exc:
+        msg = f"Could not decode DeepDiff path from {type(node).__name__}"
+        raise DeepDiffPathError(msg) from exc
+    if isinstance(path_text, str):
+        parsed = _parse_deepdiff_path(path_text)
+        if path_text == "root" or parsed:
+            return parsed
+
+    msg = f"Could not decode DeepDiff path from {type(node).__name__}: {path_text!r}"
+    raise DeepDiffPathError(msg)
 
 
 def _extract_change_value(node: object, attr: str) -> JsonValue | _MissingType:

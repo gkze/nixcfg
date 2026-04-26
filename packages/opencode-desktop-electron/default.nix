@@ -110,7 +110,7 @@ let
 
       export BUN_INSTALL_CACHE_DIR="$(mktemp -d)"
       # desktop-electron shells into packages/opencode during prepare/build and
-      # pulls renderer code from app/ui/shared, SDK helpers from packages/sdk/js,
+      # pulls renderer code from app/ui/core, SDK helpers from packages/sdk/js,
       # and version metadata helpers from packages/script.
       bun install \
         --cpu="${bunTarget.cpu}" \
@@ -119,6 +119,7 @@ let
         --filter './packages/opencode' \
         --filter './packages/desktop-electron' \
         --filter './packages/app' \
+        --filter './packages/core' \
         --filter './packages/shared' \
         --filter './packages/ui' \
         --filter './packages/sdk/js' \
@@ -148,6 +149,7 @@ let
         packages/opencode \
         packages/desktop-electron \
         packages/app \
+        packages/core \
         packages/shared \
         packages/ui \
         packages/sdk/js \

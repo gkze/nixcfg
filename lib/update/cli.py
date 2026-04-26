@@ -51,7 +51,7 @@ from lib.update.config import (
     resolve_config,
 )
 from lib.update.constants import ALL_TOOLS, NIX_BUILD_FAILURE_TAIL_LINES, REQUIRED_TOOLS
-from lib.update.events import UpdateEvent
+from lib.update.events import UpdateEvent, UpdateEventKind, expect_artifact_updates
 from lib.update.flake import (
     load_flake_lock,
     resolve_root_input_node,
@@ -78,7 +78,13 @@ from lib.update.sources import (
 from lib.update.ui_consumer import ConsumeEventsOptions, consume_events
 from lib.update.ui_state import ItemMeta, OperationKind, SummaryStatus
 from lib.update.updaters import UPDATERS, UpdaterClass, ensure_updaters_loaded
-from lib.update.updaters.base import FlakeInputHashUpdater, Updater, VersionInfo
+from lib.update.updaters.base import (
+    FlakeInputHashUpdater,
+    UpdateContext,
+    Updater,
+    VersionInfo,
+    _call_with_optional_context,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -111,6 +117,13 @@ def _shows_materialize_artifacts_phase(updater_cls: type[Updater] | None) -> boo
     return bool(getattr(updater_cls, "shows_materialize_artifacts_phase", False))
 
 
+def _companion_source_name(updater_cls: type[Updater] | None) -> str | None:
+    if updater_cls is None:
+        return None
+    companion_of = getattr(updater_cls, "companion_of", None)
+    return companion_of if isinstance(companion_of, str) and companion_of else None
+
+
 def _build_update_options(values: UpdateOptionsKwargs) -> UpdateOptions:
     """Compatibility wrapper for shared option construction."""
     return UpdateOptions.from_mapping(values)
@@ -139,11 +152,13 @@ def check_required_tools(
         # refs-only (or explicit --no-sources) mode: don't require hash tooling.
         tools = [str(tool) for tool in REQUIRED_TOOLS]
     elif source:
-        if source in updaters:
-            updater_cls = updaters[source]
-            tools = [
-                str(tool) for tool in getattr(updater_cls, "required_tools", ALL_TOOLS)
-            ]
+        selected_sources = _select_source_names(source, updaters)
+        if selected_sources:
+            tools = sorted({
+                str(tool)
+                for selected in selected_sources
+                for tool in getattr(updaters[selected], "required_tools", ALL_TOOLS)
+            })
         else:
             # ref-only source - only needs nix (and possibly flake-edit)
             tools = [str(tool) for tool in REQUIRED_TOOLS]
@@ -304,24 +319,131 @@ class UpdateSummary:
 _SUMMARY_STATUS_PRIORITY = {"no_change": 0, "updated": 1, "error": 2}
 
 
+def _companion_source_parent(
+    updaters: dict[str, UpdaterClass],
+    name: str,
+) -> str | None:
+    return _companion_source_name(updaters.get(name))
+
+
+def _companion_source_depths(
+    names: set[str],
+    updaters: dict[str, UpdaterClass],
+) -> dict[str, int]:
+    memo: dict[str, int] = {}
+    visiting: list[str] = []
+
+    def _depth(name: str) -> int:
+        if name in memo:
+            return memo[name]
+        if name in visiting:
+            cycle = " -> ".join((*visiting, name))
+            msg = f"Companion source cycle detected: {cycle}"
+            raise RuntimeError(msg)
+
+        visiting.append(name)
+        parent = _companion_source_parent(updaters, name)
+        value = 0 if parent is None or parent not in names else _depth(parent) + 1
+        visiting.pop()
+        memo[name] = value
+        return value
+
+    for name in sorted(names):
+        _depth(name)
+    return memo
+
+
+def _add_companion_source_parents(
+    names: set[str],
+    updaters: dict[str, UpdaterClass],
+) -> None:
+    visited: set[str] = set()
+    visiting: list[str] = []
+
+    def _visit(name: str) -> None:
+        if name in visited:
+            return
+        if name in visiting:
+            cycle = " -> ".join((*visiting, name))
+            msg = f"Companion source cycle detected: {cycle}"
+            raise RuntimeError(msg)
+
+        visiting.append(name)
+        parent = _companion_source_parent(updaters, name)
+        if parent is not None and parent in updaters:
+            names.add(parent)
+            _visit(parent)
+        visiting.pop()
+        visited.add(name)
+
+    for name in sorted(names):
+        _visit(name)
+
+
+def _add_companion_source_children(
+    names: set[str],
+    *,
+    roots: set[str],
+    updaters: dict[str, UpdaterClass],
+) -> None:
+    frontier = sorted(roots)
+    visited: set[str] = set()
+    while frontier:
+        parent = frontier.pop(0)
+        if parent in visited:
+            continue
+        visited.add(parent)
+        for name, updater_cls in updaters.items():
+            companion_of = _companion_source_name(updater_cls)
+            if companion_of == parent and name not in names:
+                names.add(name)
+                frontier.append(name)
+
+
 def _select_source_names(
     source: str | None,
     updaters: dict[str, UpdaterClass],
 ) -> list[str]:
-    """Resolve source targets, expanding backing-input names to dependent sources."""
+    """Resolve source targets, expanding backing-input and companion sources."""
     if source is None:
-        return list(updaters.keys())
+        selected = set(updaters)
+        roots = set(selected)
+    else:
+        selected = {
+            name
+            for name, updater_cls in updaters.items()
+            if _source_backing_input_name(name, updater_cls, None) == source
+        }
+        if not selected and source in updaters:
+            selected = {source}
+        if not selected:
+            return []
+        roots = set(selected)
 
-    dependent_sources = sorted(
-        name
-        for name, updater_cls in updaters.items()
-        if _source_backing_input_name(name, updater_cls, None) == source
-    )
-    if dependent_sources:
-        return dependent_sources
-    if source in updaters:
-        return [source]
-    return []
+    _add_companion_source_parents(selected, updaters)
+    _add_companion_source_children(selected, roots=roots, updaters=updaters)
+
+    depths = _companion_source_depths(selected, updaters)
+    if source is None:
+        source_order = {name: index for index, name in enumerate(updaters)}
+        return sorted(selected, key=lambda name: (depths[name], source_order[name]))
+    return sorted(selected, key=lambda name: (depths[name], name))
+
+
+def _source_update_waves(
+    source_names: list[str],
+    updaters: dict[str, UpdaterClass],
+) -> list[list[str]]:
+    """Group source updates into dependency-respecting execution waves."""
+    if not source_names:
+        return []
+
+    depths = _companion_source_depths(set(source_names), updaters)
+    max_depth = max(depths.values(), default=0)
+    return [
+        [name for name in source_names if depths[name] == depth]
+        for depth in range(max_depth + 1)
+    ]
 
 
 @dataclass(frozen=True)
@@ -506,6 +628,7 @@ class _SourceTaskContext:
     update_input_lock: asyncio.Lock
     update_input_tasks: dict[str, asyncio.Task[None]]
     queue: asyncio.Queue[UpdateEvent | None]
+    generated_artifacts: dict[Path, str]
     config: UpdateConfig | None = None
     pinned_version: VersionInfo | None = None
 
@@ -519,6 +642,12 @@ class _SourcesPhaseContext:
     native_only: bool
     config: UpdateConfig
     pinned: dict[str, VersionInfo]
+
+
+@dataclass(frozen=True)
+class _SourceTaskResult:
+    completed: bool
+    artifacts: tuple[GeneratedArtifact, ...] = ()
 
 
 async def _refresh_input_task(
@@ -575,8 +704,12 @@ async def _update_source_task(
     name: str,
     *,
     context: _SourceTaskContext,
-) -> None:
+) -> _SourceTaskResult:
+    artifacts_by_path: dict[Path, GeneratedArtifact] = {}
+    completed = False
+
     async def _run() -> None:
+        nonlocal completed
         resolved_config = resolve_active_config(context.config)
         current = context.sources.entries.get(name)
         updater = _get_updaters()[name](config=resolved_config)
@@ -584,19 +717,40 @@ async def _update_source_task(
             updater.native_only = context.native_only
         input_name = getattr(updater, "input_name", None)
         put = context.queue.put
+        update_context = UpdateContext(
+            current=current,
+            generated_artifacts=context.generated_artifacts,
+        )
 
         await put(UpdateEvent.status(name, "Starting update"))
         if context.update_input and input_name:
             await _ensure_input_refreshed(name, input_name, context=context)
 
-        async for event in updater.update_stream(
+        async for event in _call_with_optional_context(
+            updater.update_stream,
             current,
             context.session,
             pinned_version=context.pinned_version,
+            context=update_context,
         ):
+            if event.kind is UpdateEventKind.ARTIFACT and event.payload is not None:
+                for artifact in expect_artifact_updates(event.payload):
+                    artifacts_by_path[artifact.path] = artifact
             await put(event)
 
+        completed = True
+
     await run_queue_task(source=name, queue=context.queue, task=_run)
+    return _SourceTaskResult(
+        completed=completed,
+        artifacts=tuple(
+            artifact
+            for _, artifact in sorted(
+                artifacts_by_path.items(),
+                key=lambda item: item[0],
+            )
+        ),
+    )
 
 
 def _resolve_runtime_config(opts: UpdateOptions) -> UpdateConfig:
@@ -753,6 +907,9 @@ async def _run_sources_phase(
     async with aiohttp.ClientSession() as session:
         update_input_lock = asyncio.Lock()
         update_input_tasks: dict[str, asyncio.Task[None]] = {}
+        generated_artifacts: dict[Path, str] = {}
+        updaters = _get_updaters()
+        source_waves = _source_update_waves(context.source_names, updaters)
 
         def _source_task_context(name: str) -> _SourceTaskContext:
             return _SourceTaskContext(
@@ -763,20 +920,58 @@ async def _run_sources_phase(
                 update_input_lock=update_input_lock,
                 update_input_tasks=update_input_tasks,
                 queue=context.queue,
+                generated_artifacts=generated_artifacts,
                 config=context.config,
                 pinned_version=context.pinned.get(name),
             )
 
-        if context.config.max_nix_builds == 1:
-            for name in context.source_names:
-                await _update_source_task(name, context=_source_task_context(name))
-            return
+        completed_sources: dict[str, bool] = {}
+        for wave in source_waves:
+            runnable: list[str] = []
+            for name in wave:
+                parent = _companion_source_name(updaters.get(name))
+                if (
+                    parent is not None
+                    and parent in completed_sources
+                    and not completed_sources[parent]
+                ):
+                    await context.queue.put(
+                        UpdateEvent.error(name, f"Prerequisite update failed: {parent}")
+                    )
+                    completed_sources[name] = False
+                    continue
+                runnable.append(name)
 
-        async with asyncio.TaskGroup() as group:
-            for name in context.source_names:
-                group.create_task(
-                    _update_source_task(name, context=_source_task_context(name))
-                )
+            if not runnable:
+                continue
+
+            wave_results: dict[str, _SourceTaskResult] = {}
+            if context.config.max_nix_builds == 1 or len(runnable) == 1:
+                for name in runnable:
+                    result = await _update_source_task(
+                        name,
+                        context=_source_task_context(name),
+                    )
+                    wave_results[name] = result
+            else:
+                async with asyncio.TaskGroup() as group:
+                    tasks = {
+                        name: group.create_task(
+                            _update_source_task(
+                                name, context=_source_task_context(name)
+                            )
+                        )
+                        for name in runnable
+                    }
+                wave_results = {name: task.result() for name, task in tasks.items()}
+
+            for name in runnable:
+                result = wave_results[name]
+                completed_sources[name] = result.completed
+                if not result.completed:
+                    continue
+                for artifact in result.artifacts:
+                    generated_artifacts[artifact.path] = artifact.content
 
 
 def _flatten_artifact_updates(

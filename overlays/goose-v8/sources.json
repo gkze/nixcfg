@@ -1,10 +1,6 @@
 {
   "hashes": [
     {
-      "hash": "sha256-UtbHrrBQleMb0KMyuX+7ELJJos3la7ZPtYv9Ri+kBTw=",
-      "hashType": "srcHash"
-    },
-    {
       "hash": "sha256-chV1PAx40UH3Ute5k3lLrgfhih39Rm3KqE+mTna6ysE=",
       "hashType": "rustyV8ArchiveHash",
       "platform": "x86_64-linux"
@@ -13,6 +9,10 @@
       "hash": "sha256-Rzab+z7pp+bg9FGuICQlldWn8LOvzAuUR+T5n/F0aGo=",
       "hashType": "rustyV8BindingHash",
       "platform": "x86_64-linux"
+    },
+    {
+      "hash": "sha256-UtbHrrBQleMb0KMyuX+7ELJJos3la7ZPtYv9Ri+kBTw=",
+      "hashType": "srcHash"
     }
   ],
   "input": "goose-v8",

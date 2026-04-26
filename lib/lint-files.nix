@@ -96,14 +96,32 @@ in
     ];
   };
 
+  jsonl = {
+    regex = "\\.jsonl$";
+    globs = [ "*.jsonl" ];
+  };
+
   go = {
     regex = "\\.go$";
     globs = [ "*.go" ];
   };
 
+  goMod = {
+    regex = "(^|.*/)go\\.mod$";
+    globs = [
+      "go.mod"
+      "**/go.mod"
+    ];
+  };
+
   markdown = {
     regex = "\\.md$";
     globs = [ "*.md" ];
+  };
+
+  protobuf = {
+    regex = "\\.proto$";
+    globs = [ "*.proto" ];
   };
 
   shell = {
@@ -116,6 +134,11 @@ in
     ];
     excludeRegex = [ "misc/zsh-plugins/go\\.plugin\\.zsh" ];
     excludeGlobs = [ "misc/zsh-plugins/go.plugin.zsh" ];
+  };
+
+  twilightAutoconfig = {
+    regex = "(^|.*/)twilight\\.cfg$";
+    globs = [ "home/george/zen/autoconfig/twilight.cfg" ];
   };
 
   text = {

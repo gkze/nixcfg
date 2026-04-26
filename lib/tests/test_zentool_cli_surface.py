@@ -235,6 +235,17 @@ def test_add_scoped_operation_arguments_sets_shared_defaults(
     assert parsed.user_js_source == "/tmp/user.js"
 
 
+def test_scoped_operation_arguments_reject_app_bundle_autoconfig_flags(
+    zentool: ModuleType,
+) -> None:
+    """Asset sync must not expose app-bundle mutation flags."""
+    parser = argparse.ArgumentParser()
+    zentool._add_scoped_operation_arguments(parser)
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--app-bundle", "/Applications/Twilight.app"])
+
+
 def test_build_parser_parses_nested_cli_shapes(zentool: ModuleType) -> None:
     """The public parser should expose the targeted inspect/profile/main flags."""
     parser = zentool.build_parser()
@@ -260,6 +271,91 @@ def test_build_parser_parses_nested_cli_shapes(zentool: ModuleType) -> None:
     check_args = parser.parse_args(["check", "-p", "Default"])
     assert check_args.command == "check"
     assert check_args.profile == "Default"
+
+
+def test_typer_wrappers_forward_to_existing_argparse_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Typer command functions should preserve the legacy handler namespaces."""
+    calls: list[tuple[str, argparse.Namespace]] = []
+
+    def _handler(name: str):
+        def _inner(args: argparse.Namespace) -> int:
+            calls.append((name, args))
+            return len(calls)
+
+        return _inner
+
+    for handler_name in (
+        "cmd_apply",
+        "cmd_check",
+        "cmd_diff",
+        "cmd_inspect_folders",
+        "cmd_inspect_raw",
+        "cmd_inspect_tabs",
+        "cmd_inspect_workspaces",
+        "cmd_profile_is_running",
+        "cmd_profile_path",
+        "cmd_validate",
+    ):
+        monkeypatch.setattr(zentool, handler_name, _handler(handler_name))
+
+    root_ctx = SimpleNamespace(obj={"profile": "Root"}, parent=None)
+    child_ctx = SimpleNamespace(obj={}, parent=root_ctx)
+    assert zentool._context_profile(child_ctx) == "Root"
+
+    assert zentool._typer_validate(config="folders.yaml") == 1
+    assert (
+        zentool._typer_diff(
+            child_ctx,
+            profile=None,
+            config="folders.yaml",
+            asset_dir="assets",
+            chrome_source="chrome",
+            user_js_source="user.js",
+            state=True,
+            assets=False,
+        )
+        == 2
+    )
+    assert (
+        zentool._typer_apply(
+            child_ctx,
+            profile="Local",
+            config="folders.yaml",
+            asset_dir="assets",
+            chrome_source=None,
+            user_js_source=None,
+            state=False,
+            assets=True,
+            yes=True,
+        )
+        == 3
+    )
+    assert zentool._typer_check(child_ctx, profile=None) == 4
+
+    inspect_ctx = SimpleNamespace(obj={}, parent=root_ctx)
+    zentool._typer_inspect_root(inspect_ctx, profile=None)
+    assert inspect_ctx.obj == {"profile": "Root"}
+    assert zentool._typer_inspect_folders(inspect_ctx) == 5
+    assert zentool._typer_inspect_tabs(inspect_ctx) == 6
+    assert zentool._typer_inspect_workspaces(inspect_ctx) == 7
+    assert zentool._typer_inspect_raw(inspect_ctx, literal=True, output="raw.json") == 8
+
+    profile_ctx = SimpleNamespace(obj={}, parent=root_ctx)
+    zentool._typer_profile_root(profile_ctx, profile="Profile")
+    assert profile_ctx.obj == {"profile": "Profile"}
+    assert zentool._typer_profile_path(profile_ctx) == 9
+    assert zentool._typer_profile_is_running(profile_ctx) == 10
+
+    by_name = dict(calls)
+    assert by_name["cmd_validate"].command == "validate"
+    assert by_name["cmd_diff"].profile == "Root"
+    assert by_name["cmd_apply"].profile == "Local"
+    assert by_name["cmd_apply"].yes is True
+    assert by_name["cmd_inspect_raw"].literal is True
+    assert by_name["cmd_profile_path"].profile == "Profile"
 
 
 def test_dispatch_nested_command_routes_known_nested_commands(
@@ -404,3 +500,74 @@ def test_main_handles_help_errors_interrupts_and_missing_nested_handler(
     monkeypatch.setattr(zentool, "_dispatch_nested_command", lambda *_args: None)
     assert zentool.main(["inspect", "raw"]) == 0
     assert parser.help_calls == 1
+
+
+def test_legacy_argparse_main_prints_help_without_command(
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Legacy argparse fallback should keep the no-command help behavior."""
+
+    class FakeParser:
+        help_calls = 0
+
+        def parse_args(self, _argv: object = None) -> argparse.Namespace:
+            return argparse.Namespace(command=None)
+
+        def print_help(self) -> None:
+            self.help_calls += 1
+
+    parser = FakeParser()
+    monkeypatch.setattr(zentool, "build_parser", lambda: parser)
+
+    assert zentool._legacy_argparse_main([]) == 0
+    assert parser.help_calls == 1
+
+
+def test_main_maps_typer_interrupt_and_click_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Typer execution should map interrupts and Click errors to stable codes."""
+    stderr_lines: list[str] = []
+    shown: list[str] = []
+
+    class _Command:
+        def __init__(self, exc: BaseException) -> None:
+            self.exc = exc
+
+        def main(self, **_kwargs: object) -> object:
+            raise self.exc
+
+    class _ClickError(zentool.click.ClickException):
+        exit_code = 9
+
+        def show(self, file: object | None = None) -> None:
+            _ = file
+            shown.append(self.message)
+
+    monkeypatch.setattr(zentool, "_stderr", stderr_lines.append)
+
+    monkeypatch.setattr(
+        zentool,
+        "get_command",
+        lambda _app: _Command(KeyboardInterrupt()),
+    )
+    assert zentool.main(["check"]) == 130
+    assert stderr_lines == ["Interrupted."]
+
+    monkeypatch.setattr(
+        zentool,
+        "get_command",
+        lambda _app: _Command(zentool.click.Abort()),
+    )
+    assert zentool.main(["check"]) == 130
+    assert stderr_lines[-1] == "Interrupted."
+
+    monkeypatch.setattr(
+        zentool,
+        "get_command",
+        lambda _app: _Command(_ClickError("bad click")),
+    )
+    assert zentool.main(["check"]) == 9
+    assert shown == ["bad click"]

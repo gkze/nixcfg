@@ -452,6 +452,7 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
         "opencode-desktop-crate2nix-src",
         "raycast",
         "wispr-flow",
+        "zen-twilight",
     ]
     assert overrides["sculptor"]["constraint"] == [
         "aarch64-darwin",

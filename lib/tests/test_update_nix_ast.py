@@ -214,7 +214,7 @@ def test_build_fetch_from_github_expr_supports_tag_post_fetch_and_expr_hash() ->
     expr = _build_fetch_from_github_expr(
         "getsentry",
         "sentry-cli",
-        tag="v2.0.0",
+        tag="v9.9.9",
         hash_value=StringPrimitive(
             value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         ),
@@ -226,7 +226,7 @@ def test_build_fetch_from_github_expr_supports_tag_post_fetch_and_expr_hash() ->
         _build_fetch_from_github_call(
             "getsentry",
             "sentry-cli",
-            tag="v2.0.0",
+            tag="v9.9.9",
             hash_value=StringPrimitive(
                 value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
             ),

@@ -54,16 +54,6 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "goose-acp" = rec {
-      packageId = "goose-acp";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "goose-acp";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
     "goose-acp-macros" = rec {
       packageId = "goose-acp-macros";
       build = internal.buildRustCrateWithFeatures {
@@ -88,6 +78,16 @@ rec {
       packageId = "goose-mcp";
       build = internal.buildRustCrateWithFeatures {
         packageId = "goose-mcp";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "goose-sdk" = rec {
+      packageId = "goose-sdk";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "goose-sdk";
       };
 
       # Debug support which might change between releases.
@@ -618,7 +618,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_System_Console" "Win32_Foundation" ];
           }
@@ -643,7 +643,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_System_Console" "Win32_Foundation" ];
           }
@@ -711,6 +711,120 @@ rec {
           "derive_arbitrary" = [ "dep:derive_arbitrary" ];
         };
         resolvedDefaultFeatures = [ "derive" "derive_arbitrary" ];
+      };
+      "arboard" = rec {
+        crateName = "arboard";
+        version = "3.6.1";
+        edition = "2021";
+        sha256 = "1byx6q5iipxkb0pyjp80k7c4akp4n5m7nsmqdbz4n7s9ak0a2j03";
+        dependencies = [
+          {
+            name = "clipboard-win";
+            packageId = "clipboard-win";
+            target = { target, features }: (target."windows" or false);
+            features = [ "std" ];
+          }
+          {
+            name = "image";
+            packageId = "image 0.25.10";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ((target."unix" or false) && (!(("macos" == target."os" or null) || ("android" == target."os" or null) || ("emscripten" == target."os" or null))));
+            features = [ "png" ];
+          }
+          {
+            name = "image";
+            packageId = "image 0.25.10";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ("macos" == target."os" or null);
+            features = [ "tiff" ];
+          }
+          {
+            name = "image";
+            packageId = "image 0.25.10";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (target."windows" or false);
+            features = [ "png" "bmp" ];
+          }
+          {
+            name = "log";
+            packageId = "log";
+            target = { target, features }: ((target."unix" or false) && (!(("macos" == target."os" or null) || ("android" == target."os" or null) || ("emscripten" == target."os" or null))));
+          }
+          {
+            name = "log";
+            packageId = "log";
+            target = { target, features }: (target."windows" or false);
+          }
+          {
+            name = "objc2";
+            packageId = "objc2";
+            target = { target, features }: ("macos" == target."os" or null);
+          }
+          {
+            name = "objc2-app-kit";
+            packageId = "objc2-app-kit";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("macos" == target."os" or null);
+            features = [ "std" "objc2-core-graphics" "NSPasteboard" "NSPasteboardItem" "NSImage" ];
+          }
+          {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ("macos" == target."os" or null);
+            features = [ "std" "CFCGTypes" ];
+          }
+          {
+            name = "objc2-core-graphics";
+            packageId = "objc2-core-graphics";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ("macos" == target."os" or null);
+            features = [ "std" "CGImage" "CGColorSpace" "CGDataProvider" ];
+          }
+          {
+            name = "objc2-foundation";
+            packageId = "objc2-foundation";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("macos" == target."os" or null);
+            features = [ "std" "NSArray" "NSString" "NSEnumerator" "NSGeometry" "NSValue" ];
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot";
+            target = { target, features }: ((target."unix" or false) && (!(("macos" == target."os" or null) || ("android" == target."os" or null) || ("emscripten" == target."os" or null))));
+          }
+          {
+            name = "percent-encoding";
+            packageId = "percent-encoding";
+            target = { target, features }: ((target."unix" or false) && (!(("macos" == target."os" or null) || ("android" == target."os" or null) || ("emscripten" == target."os" or null))));
+          }
+          {
+            name = "windows-sys";
+            packageId = "windows-sys 0.60.2";
+            target = { target, features }: (target."windows" or false);
+            features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_DataExchange" "Win32_System_Memory" "Win32_System_Ole" "Win32_UI_Shell" ];
+          }
+          {
+            name = "x11rb";
+            packageId = "x11rb";
+            target = { target, features }: ((target."unix" or false) && (!(("macos" == target."os" or null) || ("android" == target."os" or null) || ("emscripten" == target."os" or null))));
+          }
+        ];
+        features = {
+          "core-graphics" = [ "dep:objc2-core-graphics" ];
+          "default" = [ "image-data" ];
+          "image" = [ "dep:image" ];
+          "image-data" = [ "dep:objc2-core-graphics" "dep:objc2-core-foundation" "image" "windows-sys" "core-graphics" ];
+          "wayland-data-control" = [ "wl-clipboard-rs" ];
+          "windows-sys" = [ "windows-sys/Win32_Graphics_Gdi" ];
+          "wl-clipboard-rs" = [ "dep:wl-clipboard-rs" ];
+        };
+        resolvedDefaultFeatures = [ "core-graphics" "default" "image" "image-data" "windows-sys" ];
       };
       "arc-swap" = rec {
         crateName = "arc-swap";
@@ -5599,9 +5713,9 @@ rec {
       };
       "cc" = rec {
         crateName = "cc";
-        version = "1.2.57";
+        version = "1.2.59";
         edition = "2018";
-        sha256 = "08q464b62d03zm7rgiixavkrh5lzfq18lwf884vgycj9735d23bs";
+        sha256 = "10sjxshjiyvglpqnap8z8fqdggf9mnxm8dn5kwr8mli4cpnd795p";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -6140,6 +6254,7 @@ rec {
           "std" = [ "error-code/std" ];
           "windows-win" = [ "dep:windows-win" ];
         };
+        resolvedDefaultFeatures = [ "std" ];
       };
       "clircle" = rec {
         crateName = "clircle";
@@ -9899,7 +10014,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_UI_Shell" "Win32_Foundation" "Win32_Globalization" "Win32_System_Com" ];
           }
@@ -10548,7 +10663,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" ];
           }
@@ -10570,6 +10685,7 @@ rec {
         ];
         features = {
         };
+        resolvedDefaultFeatures = [ "std" ];
       };
       "esaxx-rs" = rec {
         crateName = "esaxx-rs";
@@ -12852,6 +12968,30 @@ rec {
         };
         resolvedDefaultFeatures = [ "more_lengths" ];
       };
+      "gethostname" = rec {
+        crateName = "gethostname";
+        version = "1.1.0";
+        edition = "2021";
+        sha256 = "1n6bj9gh503ggjblfjcai96gmxynxsrykaynljlrfdra34q95m0v";
+        authors = [
+          "Sebastian Wiesner <sebastian@swsnr.de>"
+        ];
+        dependencies = [
+          {
+            name = "rustix";
+            packageId = "rustix 1.1.4";
+            usesDefaultFeatures = false;
+            target = { target, features }: (!(target."windows" or false));
+            features = [ "system" ];
+          }
+          {
+            name = "windows-link";
+            packageId = "windows-link";
+            target = { target, features }: (target."windows" or false);
+          }
+        ];
+
+      };
       "getopts" = rec {
         crateName = "getopts";
         version = "0.2.24";
@@ -13233,7 +13373,7 @@ rec {
       };
       "goose" = rec {
         crateName = "goose";
-        version = "1.29.1";
+        version = "1.32.0";
         edition = "2021";
         crateBin = [
           {
@@ -13246,10 +13386,15 @@ rec {
             path = "src/providers/canonical/build_canonical_models.rs";
             requiredFeatures = [ ];
           }
+          {
+            name = "generate-acp-schema";
+            path = "src/bin/generate_acp_schema.rs";
+            requiredFeatures = [ ];
+          }
         ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose"; };
         authors = [
-          "Block <ai-oss-tools@block.xyz>"
+          "AAIF <ai-oss-tools@block.xyz>"
         ];
         dependencies = [
           {
@@ -13266,6 +13411,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "arboard";
+            packageId = "arboard";
+          }
+          {
             name = "async-stream";
             packageId = "async-stream";
           }
@@ -13276,27 +13425,32 @@ rec {
           {
             name = "aws-config";
             packageId = "aws-config";
+            optional = true;
             features = [ "behavior-version-latest" ];
           }
           {
             name = "aws-sdk-bedrockruntime";
             packageId = "aws-sdk-bedrockruntime";
+            optional = true;
             usesDefaultFeatures = false;
             features = [ "default-https-client" "rt-tokio" ];
           }
           {
             name = "aws-sdk-sagemakerruntime";
             packageId = "aws-sdk-sagemakerruntime";
+            optional = true;
             usesDefaultFeatures = false;
             features = [ "default-https-client" "rt-tokio" ];
           }
           {
             name = "aws-smithy-types";
             packageId = "aws-smithy-types";
+            optional = true;
           }
           {
             name = "axum";
             packageId = "axum";
+            features = [ "ws" ];
           }
           {
             name = "base64";
@@ -13384,6 +13538,18 @@ rec {
             packageId = "futures";
           }
           {
+            name = "goose-acp-macros";
+            packageId = "goose-acp-macros";
+          }
+          {
+            name = "goose-sdk";
+            packageId = "goose-sdk";
+          }
+          {
+            name = "http-body-util";
+            packageId = "http-body-util";
+          }
+          {
             name = "ignore";
             packageId = "ignore";
           }
@@ -13410,29 +13576,53 @@ rec {
           {
             name = "jsonwebtoken";
             packageId = "jsonwebtoken";
-            features = [ "aws_lc_rs" ];
+            usesDefaultFeatures = false;
+            features = [ "use_pem" ];
           }
           {
             name = "keyring";
             packageId = "keyring";
-            features = [ "apple-native" "windows-native" "sync-secret-service" "vendored" ];
+            features = [ "vendored" ];
+          }
+          {
+            name = "keyring";
+            packageId = "keyring";
+            target = { target, features }: ("linux" == target."os" or null);
+            features = [ "sync-secret-service" ];
+          }
+          {
+            name = "keyring";
+            packageId = "keyring";
+            target = { target, features }: ("macos" == target."os" or null);
+            features = [ "apple-native" ];
+          }
+          {
+            name = "keyring";
+            packageId = "keyring";
+            target = { target, features }: ("windows" == target."os" or null);
+            features = [ "windows-native" ];
           }
           {
             name = "lazy_static";
             packageId = "lazy_static";
           }
           {
+            name = "libc";
+            packageId = "libc";
+            target = { target, features }: ("linux" == target."os" or null);
+          }
+          {
             name = "llama-cpp-2";
             packageId = "llama-cpp-2";
             optional = true;
-            features = [ "sampler" ];
+            features = [ "sampler" "mtmd" ];
           }
           {
             name = "llama-cpp-2";
             packageId = "llama-cpp-2";
             optional = true;
             target = { target, features }: ("macos" == target."os" or null);
-            features = [ "sampler" "metal" ];
+            features = [ "sampler" "metal" "mtmd" ];
           }
           {
             name = "lru";
@@ -13450,6 +13640,7 @@ rec {
           {
             name = "oauth2";
             packageId = "oauth2";
+            usesDefaultFeatures = false;
           }
           {
             name = "once_cell";
@@ -13458,24 +13649,29 @@ rec {
           {
             name = "opentelemetry";
             packageId = "opentelemetry";
+            optional = true;
           }
           {
             name = "opentelemetry-appender-tracing";
             packageId = "opentelemetry-appender-tracing";
+            optional = true;
             features = [ "experimental_span_attributes" ];
           }
           {
             name = "opentelemetry-otlp";
             packageId = "opentelemetry-otlp";
+            optional = true;
           }
           {
             name = "opentelemetry-stdout";
             packageId = "opentelemetry-stdout";
+            optional = true;
             features = [ "trace" "metrics" "logs" ];
           }
           {
             name = "opentelemetry_sdk";
             packageId = "opentelemetry_sdk";
+            optional = true;
             features = [ "metrics" ];
           }
           {
@@ -13507,12 +13703,12 @@ rec {
             name = "reqwest";
             packageId = "reqwest 0.13.2";
             usesDefaultFeatures = false;
-            features = [ "multipart" "form" "rustls" "json" "cookies" "gzip" "brotli" "deflate" "zstd" "charset" "http2" "stream" "blocking" "multipart" "system-proxy" ];
+            features = [ "multipart" "form" "json" "cookies" "gzip" "brotli" "deflate" "zstd" "charset" "http2" "stream" "blocking" "multipart" "system-proxy" ];
           }
           {
             name = "rmcp";
             packageId = "rmcp";
-            features = [ "schemars" "auth" "client" "reqwest" "transport-child-process" "transport-streamable-http-client" "transport-streamable-http-client-reqwest" ];
+            features = [ "schemars" "auth" "client" "transport-child-process" "transport-streamable-http-client" "transport-streamable-http-client-reqwest" "transport-streamable-http-client-unix-socket" ];
           }
           {
             name = "rubato";
@@ -13563,7 +13759,7 @@ rec {
             name = "sqlx";
             packageId = "sqlx";
             usesDefaultFeatures = false;
-            features = [ "runtime-tokio-rustls" "sqlite" "chrono" "json" "macros" "migrate" ];
+            features = [ "sqlite" "chrono" "json" "macros" "migrate" ];
           }
           {
             name = "strum";
@@ -13619,6 +13815,11 @@ rec {
             features = [ "compat" ];
           }
           {
+            name = "tower-http";
+            packageId = "tower-http";
+            features = [ "cors" ];
+          }
+          {
             name = "tracing";
             packageId = "tracing";
           }
@@ -13630,6 +13831,7 @@ rec {
           {
             name = "tracing-opentelemetry";
             packageId = "tracing-opentelemetry";
+            optional = true;
           }
           {
             name = "tracing-subscriber";
@@ -13695,7 +13897,7 @@ rec {
           {
             name = "uuid";
             packageId = "uuid";
-            features = [ "v4" ];
+            features = [ "v4" "v7" ];
           }
           {
             name = "v_htmlescape";
@@ -13724,6 +13926,10 @@ rec {
         ];
         devDependencies = [
           {
+            name = "bytes";
+            packageId = "bytes";
+          }
+          {
             name = "ctor";
             packageId = "ctor";
           }
@@ -13736,8 +13942,16 @@ rec {
             packageId = "env-lock";
           }
           {
+            name = "goose-mcp";
+            packageId = "goose-mcp";
+          }
+          {
             name = "goose-test-support";
             packageId = "goose-test-support";
+          }
+          {
+            name = "http";
+            packageId = "http 1.4.0";
           }
           {
             name = "mockall";
@@ -13777,207 +13991,26 @@ rec {
           }
         ];
         features = {
+          "aws-providers" = [ "dep:aws-config" "dep:aws-smithy-types" "dep:aws-sdk-bedrockruntime" "dep:aws-sdk-sagemakerruntime" ];
           "code-mode" = [ "dep:pctx_code_mode" ];
           "cuda" = [ "local-inference" "candle-core/cuda" "candle-nn/cuda" "llama-cpp-2/cuda" ];
-          "default" = [ "code-mode" "local-inference" ];
+          "default" = [ "code-mode" "local-inference" "aws-providers" "telemetry" "otel" "rustls-tls" ];
           "local-inference" = [ "dep:candle-core" "dep:candle-nn" "dep:candle-transformers" "dep:llama-cpp-2" "dep:tokenizers" "dep:symphonia" "dep:rubato" "dep:byteorder" ];
+          "native-tls" = [ "dep:pem" "dep:pkcs1" "dep:pkcs8" "dep:sec1" "reqwest/native-tls" "rmcp/reqwest-native-tls" "sqlx/runtime-tokio-native-tls" "jsonwebtoken/rust_crypto" "oauth2/reqwest" "oauth2/native-tls" ];
+          "otel" = [ "dep:tracing-opentelemetry" "dep:opentelemetry" "dep:opentelemetry_sdk" "dep:opentelemetry-appender-tracing" "dep:opentelemetry-otlp" "dep:opentelemetry-stdout" ];
+          "rustls-tls" = [ "reqwest/rustls" "rmcp/reqwest" "sqlx/runtime-tokio-rustls" "jsonwebtoken/aws_lc_rs" "oauth2/reqwest" "oauth2/rustls-tls" ];
         };
-        resolvedDefaultFeatures = [ "code-mode" "default" "local-inference" ];
-      };
-      "goose-acp" = rec {
-        crateName = "goose-acp";
-        version = "1.29.1";
-        edition = "2021";
-        crateBin = [
-          {
-            name = "generate-acp-schema";
-            path = "src/bin/generate_acp_schema.rs";
-            requiredFeatures = [ ];
-          }
-          {
-            name = "goose-acp-server";
-            path = "src/bin/server.rs";
-            requiredFeatures = [ ];
-          }
-        ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-acp"; };
-        libName = "goose_acp";
-        authors = [
-          "Block <ai-oss-tools@block.xyz>"
-        ];
-        dependencies = [
-          {
-            name = "agent-client-protocol-schema";
-            packageId = "agent-client-protocol-schema";
-            features = [ "unstable" ];
-          }
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-          }
-          {
-            name = "async-stream";
-            packageId = "async-stream";
-          }
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "axum";
-            packageId = "axum";
-            features = [ "ws" ];
-          }
-          {
-            name = "clap";
-            packageId = "clap";
-            features = [ "derive" ];
-          }
-          {
-            name = "fs-err";
-            packageId = "fs-err";
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "goose";
-            packageId = "goose";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "goose-acp-macros";
-            packageId = "goose-acp-macros";
-          }
-          {
-            name = "goose-mcp";
-            packageId = "goose-mcp";
-          }
-          {
-            name = "http-body-util";
-            packageId = "http-body-util";
-          }
-          {
-            name = "regex";
-            packageId = "regex";
-          }
-          {
-            name = "rmcp";
-            packageId = "rmcp";
-            features = [ "schemars" "auth" ];
-          }
-          {
-            name = "sacp";
-            packageId = "sacp";
-            features = [ "unstable" ];
-          }
-          {
-            name = "schemars";
-            packageId = "schemars 1.2.1";
-            usesDefaultFeatures = false;
-            features = [ "derive" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "derive" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "strum";
-            packageId = "strum 0.27.2";
-            features = [ "derive" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            features = [ "full" ];
-          }
-          {
-            name = "tokio-util";
-            packageId = "tokio-util";
-            features = [ "compat" "rt" ];
-          }
-          {
-            name = "tower-http";
-            packageId = "tower-http";
-            features = [ "cors" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "tracing-subscriber";
-            packageId = "tracing-subscriber";
-            features = [ "env-filter" "json" ];
-          }
-          {
-            name = "url";
-            packageId = "url";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v7" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "axum";
-            packageId = "axum";
-          }
-          {
-            name = "goose-test-support";
-            packageId = "goose-test-support";
-          }
-          {
-            name = "rmcp";
-            packageId = "rmcp";
-            features = [ "schemars" "auth" "transport-streamable-http-server" ];
-          }
-          {
-            name = "sqlx";
-            packageId = "sqlx";
-            usesDefaultFeatures = false;
-            features = [ "runtime-tokio-rustls" "sqlite" ];
-          }
-          {
-            name = "tempfile";
-            packageId = "tempfile";
-          }
-          {
-            name = "test-case";
-            packageId = "test-case";
-          }
-          {
-            name = "wiremock";
-            packageId = "wiremock";
-          }
-        ];
-        features = {
-          "code-mode" = [ "goose/code-mode" ];
-          "default" = [ "code-mode" ];
-        };
-        resolvedDefaultFeatures = [ "code-mode" "default" ];
+        resolvedDefaultFeatures = [ "aws-providers" "code-mode" "default" "local-inference" "otel" "rustls-tls" "telemetry" ];
       };
       "goose-acp-macros" = rec {
         crateName = "goose-acp-macros";
-        version = "1.29.1";
+        version = "1.32.0";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-acp-macros"; };
         procMacro = true;
         libName = "goose_acp_macros";
         authors = [
-          "Block <ai-oss-tools@block.xyz>"
+          "AAIF <ai-oss-tools@block.xyz>"
         ];
         dependencies = [
           {
@@ -13994,7 +14027,7 @@ rec {
       };
       "goose-cli" = rec {
         crateName = "goose-cli";
-        version = "1.29.1";
+        version = "1.32.0";
         edition = "2021";
         crateBin = [
           {
@@ -14011,7 +14044,7 @@ rec {
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-cli"; };
         libName = "goose_cli";
         authors = [
-          "Block <ai-oss-tools@block.xyz>"
+          "AAIF <ai-oss-tools@block.xyz>"
         ];
         dependencies = [
           {
@@ -14025,6 +14058,10 @@ rec {
           {
             name = "async-trait";
             packageId = "async-trait";
+          }
+          {
+            name = "axum";
+            packageId = "axum";
           }
           {
             name = "base64";
@@ -14088,11 +14125,6 @@ rec {
             usesDefaultFeatures = false;
           }
           {
-            name = "goose-acp";
-            packageId = "goose-acp";
-            usesDefaultFeatures = false;
-          }
-          {
             name = "goose-mcp";
             packageId = "goose-mcp";
           }
@@ -14116,7 +14148,7 @@ rec {
             name = "reqwest";
             packageId = "reqwest 0.13.2";
             usesDefaultFeatures = false;
-            features = [ "multipart" "form" "blocking" "rustls" ];
+            features = [ "multipart" "form" "blocking" ];
           }
           {
             name = "rmcp";
@@ -14152,7 +14184,6 @@ rec {
             name = "sigstore-verify";
             packageId = "sigstore-verify";
             usesDefaultFeatures = false;
-            features = [ "rustls" ];
           }
           {
             name = "strum";
@@ -14231,21 +14262,26 @@ rec {
           }
         ];
         features = {
-          "code-mode" = [ "goose/code-mode" "goose-acp/code-mode" ];
+          "aws-providers" = [ "goose/aws-providers" ];
+          "code-mode" = [ "goose/code-mode" ];
           "cuda" = [ "goose/cuda" "local-inference" ];
-          "default" = [ "code-mode" "local-inference" ];
+          "default" = [ "code-mode" "local-inference" "aws-providers" "telemetry" "otel" "rustls-tls" ];
           "local-inference" = [ "goose/local-inference" ];
+          "native-tls" = [ "reqwest/native-tls" "sigstore-verify/native-tls" "goose/native-tls" "goose-mcp/native-tls" ];
+          "otel" = [ "goose/otel" ];
+          "rustls-tls" = [ "reqwest/rustls" "sigstore-verify/rustls" "goose/rustls-tls" "goose-mcp/rustls-tls" ];
+          "telemetry" = [ "goose/telemetry" ];
         };
-        resolvedDefaultFeatures = [ "code-mode" "default" "local-inference" ];
+        resolvedDefaultFeatures = [ "aws-providers" "code-mode" "default" "local-inference" "otel" "rustls-tls" "telemetry" ];
       };
       "goose-mcp" = rec {
         crateName = "goose-mcp";
-        version = "1.29.1";
+        version = "1.32.0";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-mcp"; };
         libName = "goose_mcp";
         authors = [
-          "Block <ai-oss-tools@block.xyz>"
+          "AAIF <ai-oss-tools@block.xyz>"
         ];
         dependencies = [
           {
@@ -14294,7 +14330,7 @@ rec {
             name = "reqwest";
             packageId = "reqwest 0.13.2";
             usesDefaultFeatures = false;
-            features = [ "multipart" "form" "json" "rustls" "system-proxy" ];
+            features = [ "multipart" "form" "json" "system-proxy" ];
           }
           {
             name = "rmcp";
@@ -14350,11 +14386,65 @@ rec {
             packageId = "url";
           }
         ];
+        features = {
+          "native-tls" = [ "reqwest/native-tls" ];
+          "rustls-tls" = [ "reqwest/rustls" ];
+        };
+        resolvedDefaultFeatures = [ "rustls-tls" ];
+      };
+      "goose-sdk" = rec {
+        crateName = "goose-sdk";
+        version = "1.32.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-sdk"; };
+        libName = "goose_sdk";
+        authors = [
+          "AAIF <ai-oss-tools@block.xyz>"
+        ];
+        dependencies = [
+          {
+            name = "agent-client-protocol-schema";
+            packageId = "agent-client-protocol-schema";
+            features = [ "unstable" ];
+          }
+          {
+            name = "sacp";
+            packageId = "sacp";
+            features = [ "unstable" ];
+          }
+          {
+            name = "schemars";
+            packageId = "schemars 1.2.1";
+            usesDefaultFeatures = false;
+            features = [ "derive" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "full" ];
+          }
+          {
+            name = "tokio-util";
+            packageId = "tokio-util";
+            features = [ "compat" "rt" ];
+          }
+        ];
 
       };
       "goose-server" = rec {
         crateName = "goose-server";
-        version = "1.29.1";
+        version = "1.32.0";
         edition = "2021";
         crateBin = [
           {
@@ -14371,7 +14461,7 @@ rec {
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-server"; };
         libName = "goose_server";
         authors = [
-          "Block <ai-oss-tools@block.xyz>"
+          "AAIF <ai-oss-tools@block.xyz>"
         ];
         dependencies = [
           {
@@ -14381,6 +14471,7 @@ rec {
           {
             name = "aws-lc-rs";
             packageId = "aws-lc-rs";
+            optional = true;
           }
           {
             name = "axum";
@@ -14390,7 +14481,6 @@ rec {
           {
             name = "axum-server";
             packageId = "axum-server";
-            features = [ "tls-rustls" ];
           }
           {
             name = "base64";
@@ -14441,6 +14531,10 @@ rec {
             packageId = "http 1.4.0";
           }
           {
+            name = "pem";
+            packageId = "pem";
+          }
+          {
             name = "rand";
             packageId = "rand 0.8.5";
           }
@@ -14452,7 +14546,7 @@ rec {
             name = "reqwest";
             packageId = "reqwest 0.13.2";
             usesDefaultFeatures = false;
-            features = [ "multipart" "form" "json" "rustls" "blocking" "multipart" "system-proxy" ];
+            features = [ "multipart" "form" "json" "blocking" "multipart" "system-proxy" ];
           }
           {
             name = "rmcp";
@@ -14462,6 +14556,7 @@ rec {
           {
             name = "rustls";
             packageId = "rustls";
+            optional = true;
             features = [ "aws_lc_rs" ];
           }
           {
@@ -14506,7 +14601,6 @@ rec {
           {
             name = "tokio-tungstenite";
             packageId = "tokio-tungstenite";
-            features = [ "rustls-tls-native-roots" ];
           }
           {
             name = "tokio-util";
@@ -14557,16 +14651,21 @@ rec {
           }
         ];
         features = {
+          "aws-providers" = [ "goose/aws-providers" ];
           "code-mode" = [ "goose/code-mode" ];
           "cuda" = [ "goose/cuda" "local-inference" ];
-          "default" = [ "code-mode" "local-inference" ];
+          "default" = [ "code-mode" "local-inference" "aws-providers" "telemetry" "otel" "rustls-tls" ];
           "local-inference" = [ "goose/local-inference" ];
+          "native-tls" = [ "reqwest/native-tls" "tokio-tungstenite/native-tls" "axum-server/tls-openssl" "dep:openssl" "goose/native-tls" "goose-mcp/native-tls" ];
+          "otel" = [ "goose/otel" ];
+          "rustls-tls" = [ "reqwest/rustls" "tokio-tungstenite/rustls-tls-native-roots" "axum-server/tls-rustls" "dep:rustls" "dep:aws-lc-rs" "goose/rustls-tls" "goose-mcp/rustls-tls" ];
+          "telemetry" = [ "goose/telemetry" ];
         };
-        resolvedDefaultFeatures = [ "code-mode" "default" "local-inference" ];
+        resolvedDefaultFeatures = [ "aws-providers" "code-mode" "default" "local-inference" "otel" "rustls-tls" "telemetry" ];
       };
       "goose-test" = rec {
         crateName = "goose-test";
-        version = "1.29.1";
+        version = "1.32.0";
         edition = "2021";
         crateBin = [
           {
@@ -14578,7 +14677,7 @@ rec {
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-test"; };
         libName = "goose_test";
         authors = [
-          "Block <ai-oss-tools@block.xyz>"
+          "AAIF <ai-oss-tools@block.xyz>"
         ];
         dependencies = [
           {
@@ -14595,12 +14694,12 @@ rec {
       };
       "goose-test-support" = rec {
         crateName = "goose-test-support";
-        version = "1.29.1";
+        version = "1.32.0";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-test-support"; };
         libName = "goose_test_support";
         authors = [
-          "Block <ai-oss-tools@block.xyz>"
+          "AAIF <ai-oss-tools@block.xyz>"
         ];
         dependencies = [
           {
@@ -17225,6 +17324,7 @@ rec {
           "default" = [ "use_std" ];
           "use_std" = [ "use_alloc" "either/use_std" ];
         };
+        resolvedDefaultFeatures = [ "default" "use_alloc" "use_std" ];
       };
       "itertools 0.14.0" = rec {
         crateName = "itertools";
@@ -17323,7 +17423,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             optional = true;
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
@@ -17925,7 +18025,7 @@ rec {
           "simple_asn1" = [ "dep:simple_asn1" ];
           "use_pem" = [ "pem" "simple_asn1" ];
         };
-        resolvedDefaultFeatures = [ "aws-lc-rs" "aws_lc_rs" "default" "pem" "simple_asn1" "use_pem" ];
+        resolvedDefaultFeatures = [ "aws-lc-rs" "aws_lc_rs" "pem" "simple_asn1" "use_pem" ];
       };
       "keyring" = rec {
         crateName = "keyring";
@@ -18145,9 +18245,9 @@ rec {
       };
       "libc" = rec {
         crateName = "libc";
-        version = "0.2.183";
+        version = "0.2.184";
         edition = "2021";
-        sha256 = "17c9gyia7rrzf9gsssvk3vq9ca2jp6rh32fsw6ciarpn5djlddmm";
+        sha256 = "1bz4525m7lwzr63iidh7lp9ppz2c9va1pn6fyjh5wsp1ajjd5xa8";
         authors = [
           "The Rust Project Developers"
         ];
@@ -18230,9 +18330,9 @@ rec {
       };
       "libredox" = rec {
         crateName = "libredox";
-        version = "0.1.14";
+        version = "0.1.15";
         edition = "2021";
-        sha256 = "02p3pxlqf54znf1jhiyyjs0i4caf8ckrd5l8ygs4i6ba3nfy6i0p";
+        sha256 = "022g34brmdis15kji0w9kla6xk6098xvs416ihgnn92isj7z9nvx";
         authors = [
           "4lDO2 <4lDO2@protonmail.com>"
         ];
@@ -18362,7 +18462,7 @@ rec {
           "default" = [ "std" "general" "errno" ];
           "rustc-dep-of-std" = [ "core" "no_std" ];
         };
-        resolvedDefaultFeatures = [ "auxvec" "elf" "errno" "general" "ioctl" "no_std" ];
+        resolvedDefaultFeatures = [ "auxvec" "elf" "errno" "general" "if_ether" "ioctl" "net" "netlink" "no_std" "system" "xdp" ];
       };
       "linux-raw-sys 0.4.15" = rec {
         crateName = "linux-raw-sys";
@@ -18414,9 +18514,9 @@ rec {
       };
       "llama-cpp-2" = rec {
         crateName = "llama-cpp-2";
-        version = "0.1.140";
+        version = "0.1.143";
         edition = "2021";
-        sha256 = "1wpj20sx9g6w5wpzh2ckf24k0ky9sz8n96j7f1s1aiy8p49lqq75";
+        sha256 = "1jwwihj2rag2j6xl2y3wia9lqzzjw14xbzrnfrp5k3z8g9fynr6m";
         libName = "llama_cpp_2";
         dependencies = [
           {
@@ -18471,14 +18571,14 @@ rec {
           "system-ggml" = [ "llama-cpp-sys-2/system-ggml" ];
           "vulkan" = [ "llama-cpp-sys-2/vulkan" ];
         };
-        resolvedDefaultFeatures = [ "android-shared-stdcxx" "default" "metal" "openmp" "sampler" ];
+        resolvedDefaultFeatures = [ "android-shared-stdcxx" "default" "metal" "mtmd" "openmp" "sampler" ];
       };
       "llama-cpp-sys-2" = rec {
         crateName = "llama-cpp-sys-2";
-        version = "0.1.140";
+        version = "0.1.143";
         edition = "2021";
         links = "llama";
-        sha256 = "1wv6993r8dvafv48pf35ypz4gbg98rcp6cd6crsa9agk0qn3xpfb";
+        sha256 = "0ggkjq6rh79gsgfs32vf091rvn4ch5f3558ags0qgnxsbm1z6b1g";
         libName = "llama_cpp_sys_2";
         buildDependencies = [
           {
@@ -18510,7 +18610,7 @@ rec {
         features = {
           "cuda-no-vmm" = [ "cuda" ];
         };
-        resolvedDefaultFeatures = [ "metal" "openmp" "shared-stdcxx" ];
+        resolvedDefaultFeatures = [ "metal" "mtmd" "openmp" "shared-stdcxx" ];
       };
       "lock_api" = rec {
         crateName = "lock_api";
@@ -19680,7 +19780,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             rename = "windows";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_Security" ];
@@ -19916,9 +20016,9 @@ rec {
       };
       "num-conv" = rec {
         crateName = "num-conv";
-        version = "0.2.0";
+        version = "0.2.1";
         edition = "2021";
-        sha256 = "0l4hj7lp8zbb9am4j3p7vlcv47y9bbazinvnxx9zjhiwkibyr5yg";
+        sha256 = "0rqrr29brafaa2za352pbmhkk556n7f8z9rrkgmjp1idvdl3fry6";
         libName = "num_conv";
         authors = [
           "Jacob Pratt <jacob@jhpratt.dev>"
@@ -20206,7 +20306,7 @@ rec {
           "rustls-tls" = [ "reqwest/rustls-tls" ];
           "ureq" = [ "dep:ureq" ];
         };
-        resolvedDefaultFeatures = [ "default" "reqwest" "rustls-tls" ];
+        resolvedDefaultFeatures = [ "reqwest" "rustls-tls" ];
       };
       "objc" = rec {
         crateName = "objc";
@@ -20263,6 +20363,343 @@ rec {
         };
         resolvedDefaultFeatures = [ "alloc" "default" "std" ];
       };
+      "objc2-app-kit" = rec {
+        crateName = "objc2-app-kit";
+        version = "0.3.2";
+        edition = "2021";
+        sha256 = "132ijwni8lsi8phq7wnmialkxp46zx998fns3zq5np0ya1mr77nl";
+        libName = "objc2_app_kit";
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.11.0";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "objc2";
+            packageId = "objc2";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "objc2-core-graphics";
+            packageId = "objc2-core-graphics";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "CGColor" "CGColorSpace" "CGContext" "CGDirectDisplay" "CGEventTypes" "CGFont" "CGImage" "CGPath" "objc2" ];
+          }
+          {
+            name = "objc2-foundation";
+            packageId = "objc2-foundation";
+            usesDefaultFeatures = false;
+            features = [ "alloc" ];
+          }
+        ];
+        features = {
+          "NSATSTypesetter" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSGeometry" "objc2-foundation/NSRange" "objc2-foundation/objc2-core-foundation" ];
+          "NSAccessibility" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSAccessibilityColor" = [ "objc2-foundation/NSString" ];
+          "NSAccessibilityConstants" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSAccessibilityCustomAction" = [ "objc2-foundation/NSString" ];
+          "NSAccessibilityCustomRotor" = [ "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "NSAccessibilityElement" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSAccessibilityProtocols" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSData" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSValue" "objc2-foundation/objc2-core-foundation" ];
+          "NSActionCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSAdaptiveImageGlyph" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSAffineTransform" = [ "objc2-foundation/NSAffineTransform" ];
+          "NSAlert" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSString" ];
+          "NSAlignmentFeedbackFilter" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/objc2-core-foundation" ];
+          "NSAnimation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "NSAnimationContext" = [ "objc2-foundation/NSDate" ];
+          "NSAppearance" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSAppleScriptExtensions" = [ "objc2-foundation/NSAppleScript" "objc2-foundation/NSAttributedString" ];
+          "NSApplication" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSException" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSUserActivity" ];
+          "NSApplicationScripting" = [ "objc2-foundation/NSArray" ];
+          "NSArrayController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSIndexSet" "objc2-foundation/NSObject" "objc2-foundation/NSPredicate" "objc2-foundation/NSSortDescriptor" "objc2-foundation/NSString" ];
+          "NSAttributedString" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSFileWrapper" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSBackgroundExtensionView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSBezierPath" = [ "objc2-foundation/NSAffineTransform" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSBitmapImageRep" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSBox" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSBrowser" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexPath" "objc2-foundation/NSIndexSet" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSBrowserCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSButton" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSButtonCell" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSButtonTouchBarItem" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSCIImageRep" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSCachedImageRep" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSCandidateListTouchBarItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "NSCell" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSFormatter" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSClickGestureRecognizer" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "NSClipView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSCollectionView" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexPath" "objc2-foundation/NSIndexSet" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSCollectionViewCompositionalLayout" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSCollectionViewFlowLayout" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSCollectionViewGridLayout" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSCollectionViewLayout" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSCollectionViewTransitionLayout" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSColor" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSColorList" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSColorPanel" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSColorPicker" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSColorPickerTouchBarItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSColorPicking" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSColorSpace" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSColorWell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSComboBox" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSComboBoxCell" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSComboButton" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSControl" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSFormatter" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSController" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "NSCursor" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSCustomImageRep" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSCustomTouchBarItem" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSDataAsset" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSData" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSDatePicker" = [ "objc2-foundation/NSCalendar" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSTimeZone" "objc2-foundation/objc2-core-foundation" ];
+          "NSDatePickerCell" = [ "bitflags" "objc2-foundation/NSCalendar" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSTimeZone" ];
+          "NSDictionaryController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSDiffableDataSource" = [ "objc2-foundation/NSArray" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSDirection" = [ "bitflags" ];
+          "NSDockTile" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSDocument" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSFilePresenter" "objc2-foundation/NSFileVersion" "objc2-foundation/NSFileWrapper" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSUndoManager" ];
+          "NSDocumentController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSDocumentScripting" = [ "objc2-foundation/NSScriptCommand" "objc2-foundation/NSScriptObjectSpecifiers" "objc2-foundation/NSScriptStandardSuiteCommands" "objc2-foundation/NSString" ];
+          "NSDragging" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSDraggingItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSDraggingSession" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSDrawer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSEPSImageRep" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSErrors" = [ "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSString" ];
+          "NSEvent" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSFilePromiseProvider" = [ "objc2-foundation/NSError" "objc2-foundation/NSOperation" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSFilePromiseReceiver" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSOperation" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSFileWrapperExtensions" = [ "objc2-foundation/NSFileWrapper" ];
+          "NSFont" = [ "objc2-foundation/NSAffineTransform" "objc2-foundation/NSCharacterSet" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSFontAssetRequest" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSProgress" ];
+          "NSFontCollection" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSLocale" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "NSFontDescriptor" = [ "bitflags" "objc2-foundation/NSAffineTransform" "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "NSFontManager" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
+          "NSFontPanel" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSForm" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSFormCell" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSGestureRecognizer" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSGlassEffectView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSGlyphGenerator" = [ "objc2-foundation/NSAttributedString" ];
+          "NSGlyphInfo" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSGradient" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSGraphics" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSGraphicsContext" = [ "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSGridView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/objc2-core-foundation" ];
+          "NSGroupTouchBarItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSHelpManager" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSBundle" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSImage" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSItemProvider" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSImageCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSImageRep" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSImageView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSInputManager" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSGeometry" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSInputServer" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSInterfaceStyle" = [ "objc2-foundation/NSString" ];
+          "NSItemBadge" = [ "objc2-foundation/NSString" ];
+          "NSItemProvider" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSKeyValueBinding" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSLayoutAnchor" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSLayoutConstraint" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSLayoutGuide" = [ "objc2-foundation/NSArray" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSLayoutManager" = [ "bitflags" "objc2-foundation/NSAffineTransform" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSLevelIndicator" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSLevelIndicatorCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSMagnificationGestureRecognizer" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "NSMatrix" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSMediaLibraryBrowserController" = [ "bitflags" "objc2-foundation/NSGeometry" "objc2-foundation/objc2-core-foundation" ];
+          "NSMenu" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSZone" "objc2-foundation/objc2-core-foundation" ];
+          "NSMenuItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSMenuItemBadge" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSMenuItemCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSMenuToolbarItem" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSMovie" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "NSNib" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSNibConnector" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSNibControlConnector" = [ "objc2-foundation/NSObject" ];
+          "NSNibOutletConnector" = [ "objc2-foundation/NSObject" ];
+          "NSObjectController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSPredicate" "objc2-foundation/NSString" ];
+          "NSOpenGL" = [ "objc2-foundation/NSData" "objc2-foundation/NSLock" "objc2-foundation/NSObject" ];
+          "NSOpenGLLayer" = [ "objc2-foundation/NSObject" ];
+          "NSOpenGLView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSOpenPanel" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSOutlineView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexSet" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSSortDescriptor" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSPDFImageRep" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSPDFInfo" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSPDFPanel" = [ "bitflags" "objc2-foundation/NSString" ];
+          "NSPICTImageRep" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSPageController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSPageLayout" = [ "objc2-foundation/NSArray" ];
+          "NSPanGestureRecognizer" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSPanel" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSParagraphStyle" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCharacterSet" "objc2-foundation/NSDictionary" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSPasteboard" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSFileWrapper" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSPasteboardItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "NSPathCell" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSPathComponentCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSPathControl" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSPathControlItem" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSPersistentDocument" = [ "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSFilePresenter" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSPickerTouchBarItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSPopUpButton" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSPopUpButtonCell" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSPopover" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSPopoverTouchBarItem" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSPredicateEditor" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSPredicateEditorRowTemplate" = [ "objc2-foundation/NSArray" "objc2-foundation/NSComparisonPredicate" "objc2-foundation/NSExpression" "objc2-foundation/NSObject" "objc2-foundation/NSPredicate" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "NSPressGestureRecognizer" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
+          "NSPreviewRepresentingActivityItem" = [ "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" ];
+          "NSPrintInfo" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSPrintOperation" = [ "objc2-foundation/NSData" "objc2-foundation/NSGeometry" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSPrintPanel" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "NSPrinter" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSProgressIndicator" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-foundation/objc2-core-foundation" ];
+          "NSResponder" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSUndoManager" ];
+          "NSRotationGestureRecognizer" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "NSRuleEditor" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexSet" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSPredicate" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSRulerMarker" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSRulerView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSValue" "objc2-foundation/objc2-core-foundation" ];
+          "NSRunningApplication" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSSavePanel" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSScreen" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSScrollView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSScroller" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSScrubber" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexSet" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSScrubberItemView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSScrubberLayout" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexSet" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/objc2-core-foundation" ];
+          "NSSearchField" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSSearchFieldCell" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSSearchToolbarItem" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSSecureTextField" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSSegmentedCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSSegmentedControl" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSShadow" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSSharingCollaborationModeRestriction" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSSharingService" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSGeometry" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSSharingServicePickerToolbarItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSSharingServicePickerTouchBarItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSSlider" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSSliderAccessory" = [ "objc2-foundation/NSObject" ];
+          "NSSliderCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSSliderTouchBarItem" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSSound" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSSpeechRecognizer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
+          "NSSpeechSynthesizer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSSpellChecker" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSOrthography" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSTextCheckingResult" "objc2-foundation/objc2-core-foundation" ];
+          "NSSplitView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSSplitViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSSplitViewItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "NSSplitViewItemAccessoryViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSStackView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSStatusBarButton" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSStatusItem" = [ "bitflags" "objc2-foundation/NSAttributedString" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSStepper" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSStepperCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSStepperTouchBarItem" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSFormatter" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSStoryboard" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSString" ];
+          "NSStoryboardSegue" = [ "objc2-foundation/NSString" ];
+          "NSStringDrawing" = [ "bitflags" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSSwitch" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSTabView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSTabViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTabViewItem" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSTableCellView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSTableColumn" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSSortDescriptor" "objc2-foundation/NSString" ];
+          "NSTableHeaderCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSTableHeaderView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSTableRowView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSTableView" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSEnumerator" "objc2-foundation/NSGeometry" "objc2-foundation/NSIndexSet" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSSortDescriptor" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/objc2-core-foundation" ];
+          "NSTableViewRowAction" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSText" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSTextAlternatives" = [ "objc2-foundation/NSArray" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTextAttachment" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSFileWrapper" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTextAttachmentCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSTextCheckingClient" = [ "bitflags" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSTextCheckingController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSTextCheckingResult" ];
+          "NSTextContainer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSTextContent" = [ "objc2-foundation/NSString" ];
+          "NSTextContentManager" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "NSTextElement" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" ];
+          "NSTextField" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSTextCheckingResult" "objc2-foundation/objc2-core-foundation" ];
+          "NSTextFieldCell" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTextFinder" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSValue" "objc2-foundation/objc2-core-foundation" ];
+          "NSTextInputClient" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSGeometry" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSTextInputContext" = [ "objc2-foundation/NSArray" "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
+          "NSTextInsertionIndicator" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSTextLayoutFragment" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSOperation" ];
+          "NSTextLayoutManager" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
+          "NSTextLineFragment" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "NSTextList" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTextListElement" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
+          "NSTextRange" = [ "objc2-foundation/NSObjCRuntime" ];
+          "NSTextSelection" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTextSelectionNavigation" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
+          "NSTextStorage" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "NSTextStorageScripting" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" ];
+          "NSTextTable" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/objc2-core-foundation" ];
+          "NSTextView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSOrthography" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSTextCheckingResult" "objc2-foundation/NSURL" "objc2-foundation/NSUndoManager" "objc2-foundation/NSValue" "objc2-foundation/objc2-core-foundation" ];
+          "NSTintConfiguration" = [ "objc2-foundation/NSObject" ];
+          "NSTitlebarAccessoryViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTokenField" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCharacterSet" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSTokenFieldCell" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCharacterSet" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSToolbar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSNotification" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "NSToolbarItem" = [ "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSToolbarItemGroup" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTouch" = [ "bitflags" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSTouchBar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "NSTouchBarItem" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTrackingArea" = [ "bitflags" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSTrackingSeparatorToolbarItem" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTreeController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSSortDescriptor" "objc2-foundation/NSString" ];
+          "NSTreeNode" = [ "objc2-foundation/NSArray" "objc2-foundation/NSIndexPath" "objc2-foundation/NSSortDescriptor" ];
+          "NSTypesetter" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSUserActivity" = [ "objc2-foundation/NSString" "objc2-foundation/NSUserActivity" ];
+          "NSUserDefaultsController" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSUserDefaults" ];
+          "NSUserInterfaceCompression" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSUserInterfaceItemIdentification" = [ "objc2-foundation/NSString" ];
+          "NSUserInterfaceItemSearching" = [ "objc2-foundation/NSArray" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "NSView" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSViewController" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSExtensionContext" "objc2-foundation/NSExtensionRequestHandling" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/objc2-core-foundation" ];
+          "NSViewLayoutRegion" = [ "objc2-foundation/NSGeometry" "objc2-foundation/objc2-core-foundation" ];
+          "NSVisualEffectView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSGeometry" "objc2-foundation/NSObject" "objc2-foundation/objc2-core-foundation" ];
+          "NSWindow" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSUndoManager" "objc2-foundation/NSValue" "objc2-foundation/objc2-core-foundation" ];
+          "NSWindowController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSWindowRestoration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSNotification" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
+          "NSWindowScripting" = [ "objc2-foundation/NSScriptCommand" "objc2-foundation/NSScriptStandardSuiteCommands" ];
+          "NSWindowTab" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSString" ];
+          "NSWindowTabGroup" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
+          "NSWorkspace" = [ "bitflags" "objc2-foundation/NSAppleEventDescriptor" "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSFileManager" "objc2-foundation/NSGeometry" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSValue" "objc2-foundation/objc2-core-foundation" ];
+          "NSWritingToolsCoordinator" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSGeometry" "objc2-foundation/NSRange" "objc2-foundation/NSUUID" "objc2-foundation/NSValue" "objc2-foundation/objc2-core-foundation" ];
+          "NSWritingToolsCoordinatorContext" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSRange" "objc2-foundation/NSUUID" ];
+          "bitflags" = [ "dep:bitflags" ];
+          "block2" = [ "dep:block2" ];
+          "default" = [ "std" "AppKitDefines" "AppKitErrors" "NSATSTypesetter" "NSAccessibility" "NSAccessibilityColor" "NSAccessibilityConstants" "NSAccessibilityCustomAction" "NSAccessibilityCustomRotor" "NSAccessibilityElement" "NSAccessibilityProtocols" "NSActionCell" "NSAdaptiveImageGlyph" "NSAffineTransform" "NSAlert" "NSAlignmentFeedbackFilter" "NSAnimation" "NSAnimationContext" "NSAppearance" "NSAppleScriptExtensions" "NSApplication" "NSApplicationScripting" "NSArrayController" "NSAttributedString" "NSBackgroundExtensionView" "NSBezierPath" "NSBitmapImageRep" "NSBox" "NSBrowser" "NSBrowserCell" "NSButton" "NSButtonCell" "NSButtonTouchBarItem" "NSCIImageRep" "NSCachedImageRep" "NSCandidateListTouchBarItem" "NSCell" "NSClickGestureRecognizer" "NSClipView" "NSCollectionView" "NSCollectionViewCompositionalLayout" "NSCollectionViewFlowLayout" "NSCollectionViewGridLayout" "NSCollectionViewLayout" "NSCollectionViewTransitionLayout" "NSColor" "NSColorList" "NSColorPanel" "NSColorPicker" "NSColorPickerTouchBarItem" "NSColorPicking" "NSColorSampler" "NSColorSpace" "NSColorWell" "NSComboBox" "NSComboBoxCell" "NSComboButton" "NSControl" "NSController" "NSCursor" "NSCustomImageRep" "NSCustomTouchBarItem" "NSDataAsset" "NSDatePicker" "NSDatePickerCell" "NSDictionaryController" "NSDiffableDataSource" "NSDirection" "NSDockTile" "NSDocument" "NSDocumentController" "NSDocumentScripting" "NSDragging" "NSDraggingItem" "NSDraggingSession" "NSDrawer" "NSEPSImageRep" "NSErrors" "NSEvent" "NSFilePromiseProvider" "NSFilePromiseReceiver" "NSFileWrapperExtensions" "NSFont" "NSFontAssetRequest" "NSFontCollection" "NSFontDescriptor" "NSFontManager" "NSFontPanel" "NSForm" "NSFormCell" "NSGestureRecognizer" "NSGlassEffectView" "NSGlyphGenerator" "NSGlyphInfo" "NSGradient" "NSGraphics" "NSGraphicsContext" "NSGridView" "NSGroupTouchBarItem" "NSHapticFeedback" "NSHelpManager" "NSImage" "NSImageCell" "NSImageRep" "NSImageView" "NSInputManager" "NSInputServer" "NSInterfaceStyle" "NSItemBadge" "NSItemProvider" "NSKeyValueBinding" "NSLayoutAnchor" "NSLayoutConstraint" "NSLayoutGuide" "NSLayoutManager" "NSLevelIndicator" "NSLevelIndicatorCell" "NSMagnificationGestureRecognizer" "NSMatrix" "NSMediaLibraryBrowserController" "NSMenu" "NSMenuItem" "NSMenuItemBadge" "NSMenuItemCell" "NSMenuToolbarItem" "NSMovie" "NSNib" "NSNibConnector" "NSNibControlConnector" "NSNibDeclarations" "NSNibLoading" "NSNibOutletConnector" "NSObjectController" "NSOpenGL" "NSOpenGLLayer" "NSOpenGLView" "NSOpenPanel" "NSOutlineView" "NSPDFImageRep" "NSPDFInfo" "NSPDFPanel" "NSPICTImageRep" "NSPageController" "NSPageLayout" "NSPanGestureRecognizer" "NSPanel" "NSParagraphStyle" "NSPasteboard" "NSPasteboardItem" "NSPathCell" "NSPathComponentCell" "NSPathControl" "NSPathControlItem" "NSPersistentDocument" "NSPickerTouchBarItem" "NSPopUpButton" "NSPopUpButtonCell" "NSPopover" "NSPopoverTouchBarItem" "NSPredicateEditor" "NSPredicateEditorRowTemplate" "NSPressGestureRecognizer" "NSPressureConfiguration" "NSPreviewRepresentingActivityItem" "NSPrintInfo" "NSPrintOperation" "NSPrintPanel" "NSPrinter" "NSProgressIndicator" "NSResponder" "NSRotationGestureRecognizer" "NSRuleEditor" "NSRulerMarker" "NSRulerView" "NSRunningApplication" "NSSavePanel" "NSScreen" "NSScrollView" "NSScroller" "NSScrubber" "NSScrubberItemView" "NSScrubberLayout" "NSSearchField" "NSSearchFieldCell" "NSSearchToolbarItem" "NSSecureTextField" "NSSegmentedCell" "NSSegmentedControl" "NSShadow" "NSSharingCollaborationModeRestriction" "NSSharingService" "NSSharingServicePickerToolbarItem" "NSSharingServicePickerTouchBarItem" "NSSlider" "NSSliderAccessory" "NSSliderCell" "NSSliderTouchBarItem" "NSSound" "NSSpeechRecognizer" "NSSpeechSynthesizer" "NSSpellChecker" "NSSpellProtocol" "NSSplitView" "NSSplitViewController" "NSSplitViewItem" "NSSplitViewItemAccessoryViewController" "NSStackView" "NSStatusBar" "NSStatusBarButton" "NSStatusItem" "NSStepper" "NSStepperCell" "NSStepperTouchBarItem" "NSStoryboard" "NSStoryboardSegue" "NSStringDrawing" "NSSwitch" "NSTabView" "NSTabViewController" "NSTabViewItem" "NSTableCellView" "NSTableColumn" "NSTableHeaderCell" "NSTableHeaderView" "NSTableRowView" "NSTableView" "NSTableViewDiffableDataSource" "NSTableViewRowAction" "NSText" "NSTextAlternatives" "NSTextAttachment" "NSTextAttachmentCell" "NSTextCheckingClient" "NSTextCheckingController" "NSTextContainer" "NSTextContent" "NSTextContentManager" "NSTextElement" "NSTextField" "NSTextFieldCell" "NSTextFinder" "NSTextInputClient" "NSTextInputContext" "NSTextInsertionIndicator" "NSTextLayoutFragment" "NSTextLayoutManager" "NSTextLineFragment" "NSTextList" "NSTextListElement" "NSTextRange" "NSTextSelection" "NSTextSelectionNavigation" "NSTextStorage" "NSTextStorageScripting" "NSTextTable" "NSTextView" "NSTextViewportLayoutController" "NSTintConfiguration" "NSTintProminence" "NSTitlebarAccessoryViewController" "NSTokenField" "NSTokenFieldCell" "NSToolbar" "NSToolbarItem" "NSToolbarItemGroup" "NSTouch" "NSTouchBar" "NSTouchBarItem" "NSTrackingArea" "NSTrackingSeparatorToolbarItem" "NSTreeController" "NSTreeNode" "NSTypesetter" "NSUserActivity" "NSUserDefaultsController" "NSUserInterfaceCompression" "NSUserInterfaceItemIdentification" "NSUserInterfaceItemSearching" "NSUserInterfaceLayout" "NSUserInterfaceValidation" "NSView" "NSViewController" "NSViewLayoutRegion" "NSVisualEffectView" "NSWindow" "NSWindowController" "NSWindowRestoration" "NSWindowScripting" "NSWindowTab" "NSWindowTabGroup" "NSWorkspace" "NSWritingToolsCoordinator" "NSWritingToolsCoordinatorAnimationParameters" "NSWritingToolsCoordinatorContext" "bitflags" "block2" "libc" "objc2-cloud-kit" "objc2-core-data" "objc2-core-foundation" "objc2-core-graphics" "objc2-core-image" "objc2-core-text" "objc2-core-video" "objc2-quartz-core" ];
+          "gnustep-1-7" = [ "objc2/gnustep-1-7" "block2?/gnustep-1-7" "objc2-foundation/gnustep-1-7" "objc2-core-data?/gnustep-1-7" "objc2-quartz-core?/gnustep-1-7" ];
+          "gnustep-1-8" = [ "gnustep-1-7" "objc2/gnustep-1-8" "block2?/gnustep-1-8" "objc2-foundation/gnustep-1-8" "objc2-core-data?/gnustep-1-8" "objc2-quartz-core?/gnustep-1-8" ];
+          "gnustep-1-9" = [ "gnustep-1-8" "objc2/gnustep-1-9" "block2?/gnustep-1-9" "objc2-foundation/gnustep-1-9" "objc2-core-data?/gnustep-1-9" "objc2-quartz-core?/gnustep-1-9" ];
+          "gnustep-2-0" = [ "gnustep-1-9" "objc2/gnustep-2-0" "block2?/gnustep-2-0" "objc2-foundation/gnustep-2-0" "objc2-core-data?/gnustep-2-0" "objc2-quartz-core?/gnustep-2-0" ];
+          "gnustep-2-1" = [ "gnustep-2-0" "objc2/gnustep-2-1" "block2?/gnustep-2-1" "objc2-foundation/gnustep-2-1" "objc2-core-data?/gnustep-2-1" "objc2-quartz-core?/gnustep-2-1" ];
+          "libc" = [ "dep:libc" ];
+          "objc2-cloud-kit" = [ "dep:objc2-cloud-kit" ];
+          "objc2-core-data" = [ "dep:objc2-core-data" ];
+          "objc2-core-foundation" = [ "dep:objc2-core-foundation" ];
+          "objc2-core-graphics" = [ "dep:objc2-core-graphics" ];
+          "objc2-core-image" = [ "dep:objc2-core-image" ];
+          "objc2-core-text" = [ "dep:objc2-core-text" ];
+          "objc2-core-video" = [ "dep:objc2-core-video" ];
+          "objc2-open-gl" = [ "dep:objc2-open-gl" ];
+          "objc2-quartz-core" = [ "dep:objc2-quartz-core" ];
+          "objc2-uniform-type-identifiers" = [ "dep:objc2-uniform-type-identifiers" ];
+          "std" = [ "alloc" ];
+        };
+        resolvedDefaultFeatures = [ "NSImage" "NSPasteboard" "NSPasteboardItem" "alloc" "bitflags" "objc2-core-graphics" "std" ];
+      };
       "objc2-core-foundation" = rec {
         crateName = "objc2-core-foundation";
         version = "0.3.2";
@@ -20316,7 +20753,103 @@ rec {
           "objc2" = [ "dep:objc2" "dispatch2?/objc2" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "CFArray" "CFAttributedString" "CFCGTypes" "CFCalendar" "CFCharacterSet" "CFData" "CFDate" "CFDictionary" "CFError" "CFFileSecurity" "CFLocale" "CFMachPort" "CFMessagePort" "CFRunLoop" "CFSet" "CFStream" "CFURL" "bitflags" "objc2" ];
+        resolvedDefaultFeatures = [ "CFArray" "CFAttributedString" "CFCGTypes" "CFCalendar" "CFCharacterSet" "CFData" "CFDate" "CFDictionary" "CFError" "CFFileSecurity" "CFLocale" "CFMachPort" "CFMessagePort" "CFRunLoop" "CFSet" "CFStream" "CFURL" "alloc" "bitflags" "objc2" "std" ];
+      };
+      "objc2-core-graphics" = rec {
+        crateName = "objc2-core-graphics";
+        version = "0.3.2";
+        edition = "2021";
+        sha256 = "01x8413pxq0m5rwidlaczni8v5cz9dc3xqzq8l9zlpl9cv8cj8p0";
+        libName = "objc2_core_graphics";
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.11.0";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "dispatch2";
+            packageId = "dispatch2";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "alloc" ];
+          }
+          {
+            name = "objc2";
+            packageId = "objc2";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "objc2-io-surface";
+            packageId = "objc2-io-surface";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("watchos" == target."os" or null));
+            features = [ "IOSurfaceRef" ];
+          }
+        ];
+        features = {
+          "CGAffineTransform" = [ "objc2-core-foundation/CFCGTypes" ];
+          "CGBitmapContext" = [ "bitflags" "objc2-core-foundation/CFByteOrder" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFError" ];
+          "CGColor" = [ "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" ];
+          "CGColorConversionInfo" = [ "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFError" ];
+          "CGColorSpace" = [ "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFData" ];
+          "CGContext" = [ "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" ];
+          "CGConvertColorDataWithFormat" = [ "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" ];
+          "CGDataConsumer" = [ "objc2-core-foundation/CFData" "objc2-core-foundation/CFURL" ];
+          "CGDataProvider" = [ "objc2-core-foundation/CFData" "objc2-core-foundation/CFURL" ];
+          "CGDirectDisplay" = [ "bitflags" "objc2-core-foundation/CFArray" "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" ];
+          "CGDisplayConfiguration" = [ "bitflags" "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" ];
+          "CGDisplayStream" = [ "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFRunLoop" ];
+          "CGEXRToneMappingGamma" = [ "objc2-core-foundation/CFDictionary" ];
+          "CGEvent" = [ "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFData" "objc2-core-foundation/CFMachPort" ];
+          "CGEventSource" = [ "objc2-core-foundation/CFDate" ];
+          "CGEventTypes" = [ "bitflags" ];
+          "CGFont" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFData" "objc2-core-foundation/CFDictionary" ];
+          "CGFunction" = [ "objc2-core-foundation/CFCGTypes" ];
+          "CGGeometry" = [ "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" ];
+          "CGGradient" = [ "bitflags" "objc2-core-foundation/CFArray" "objc2-core-foundation/CFCGTypes" ];
+          "CGImage" = [ "bitflags" "objc2-core-foundation/CFCGTypes" ];
+          "CGLayer" = [ "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" ];
+          "CGPDFArray" = [ "objc2-core-foundation/CFCGTypes" ];
+          "CGPDFContentStream" = [ "objc2-core-foundation/CFArray" ];
+          "CGPDFContext" = [ "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFData" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFURL" ];
+          "CGPDFDictionary" = [ "objc2-core-foundation/CFCGTypes" ];
+          "CGPDFDocument" = [ "bitflags" "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFURL" ];
+          "CGPDFObject" = [ "objc2-core-foundation/CFCGTypes" ];
+          "CGPDFPage" = [ "objc2-core-foundation/CFCGTypes" ];
+          "CGPDFScanner" = [ "objc2-core-foundation/CFCGTypes" ];
+          "CGPDFStream" = [ "objc2-core-foundation/CFData" ];
+          "CGPDFString" = [ "objc2-core-foundation/CFDate" ];
+          "CGPSConverter" = [ "objc2-core-foundation/CFDictionary" ];
+          "CGPath" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFCGTypes" ];
+          "CGPattern" = [ "objc2-core-foundation/CFCGTypes" ];
+          "CGRemoteOperation" = [ "bitflags" "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDate" "objc2-core-foundation/CFMachPort" ];
+          "CGRenderingBufferProvider" = [ "objc2-core-foundation/CFData" ];
+          "CGSession" = [ "objc2-core-foundation/CFDictionary" ];
+          "CGShading" = [ "objc2-core-foundation/CFCGTypes" ];
+          "CGToneMapping" = [ "objc2-core-foundation/CFDictionary" ];
+          "CGWindow" = [ "bitflags" "objc2-core-foundation/CFArray" "objc2-core-foundation/CFCGTypes" ];
+          "bitflags" = [ "dep:bitflags" ];
+          "block2" = [ "dep:block2" ];
+          "default" = [ "std" "CGAffineTransform" "CGBase" "CGBitmapContext" "CGColor" "CGColorConversionInfo" "CGColorSpace" "CGContext" "CGConvertColorDataWithFormat" "CGDataConsumer" "CGDataProvider" "CGDirectDisplay" "CGDirectDisplayMetal" "CGDirectPalette" "CGDisplayConfiguration" "CGDisplayFade" "CGDisplayStream" "CGEXRToneMappingGamma" "CGError" "CGEvent" "CGEventSource" "CGEventTypes" "CGFont" "CGFunction" "CGGeometry" "CGGradient" "CGITUToneMapping" "CGImage" "CGLayer" "CGPDFArray" "CGPDFContentStream" "CGPDFContext" "CGPDFDictionary" "CGPDFDocument" "CGPDFObject" "CGPDFOperatorTable" "CGPDFPage" "CGPDFScanner" "CGPDFStream" "CGPDFString" "CGPSConverter" "CGPath" "CGPattern" "CGRemoteOperation" "CGRenderingBufferProvider" "CGSession" "CGShading" "CGToneMapping" "CGWindow" "CGWindowLevel" "bitflags" "block2" "dispatch2" "libc" "objc2" "objc2-metal" ];
+          "dispatch2" = [ "dep:dispatch2" ];
+          "libc" = [ "dep:libc" ];
+          "objc2" = [ "dep:objc2" "dispatch2?/objc2" "objc2-core-foundation/objc2" "objc2-io-surface?/objc2" ];
+          "objc2-io-surface" = [ "dep:objc2-io-surface" ];
+          "objc2-metal" = [ "dep:objc2-metal" ];
+          "std" = [ "alloc" ];
+        };
+        resolvedDefaultFeatures = [ "CGColor" "CGColorSpace" "CGContext" "CGDataProvider" "CGDirectDisplay" "CGEventTypes" "CGFont" "CGImage" "CGPath" "alloc" "bitflags" "objc2" "std" ];
       };
       "objc2-encode" = rec {
         crateName = "objc2-encode";
@@ -20436,6 +20969,49 @@ rec {
           "unstable-mutation-return-null" = [ "NSNull" ];
         };
         resolvedDefaultFeatures = [ "FoundationErrors" "FoundationLegacySwiftCompatibility" "NSAffineTransform" "NSAppleEventDescriptor" "NSAppleEventManager" "NSAppleScript" "NSArchiver" "NSArray" "NSAttributedString" "NSAutoreleasePool" "NSBackgroundActivityScheduler" "NSBundle" "NSByteCountFormatter" "NSByteOrder" "NSCache" "NSCalendar" "NSCalendarDate" "NSCharacterSet" "NSClassDescription" "NSCoder" "NSComparisonPredicate" "NSCompoundPredicate" "NSConnection" "NSData" "NSDate" "NSDateComponentsFormatter" "NSDateFormatter" "NSDateInterval" "NSDateIntervalFormatter" "NSDebug" "NSDecimal" "NSDecimalNumber" "NSDictionary" "NSDistantObject" "NSDistributedLock" "NSDistributedNotificationCenter" "NSEnergyFormatter" "NSEnumerator" "NSError" "NSException" "NSExpression" "NSExtensionContext" "NSExtensionItem" "NSExtensionRequestHandling" "NSFileCoordinator" "NSFileHandle" "NSFileManager" "NSFilePresenter" "NSFileVersion" "NSFileWrapper" "NSFormatter" "NSGarbageCollector" "NSGeometry" "NSHFSFileTypes" "NSHTTPCookie" "NSHTTPCookieStorage" "NSHashTable" "NSHost" "NSISO8601DateFormatter" "NSIndexPath" "NSIndexSet" "NSInflectionRule" "NSInvocation" "NSItemProvider" "NSJSONSerialization" "NSKeyValueCoding" "NSKeyValueObserving" "NSKeyValueSharedObservers" "NSKeyedArchiver" "NSLengthFormatter" "NSLinguisticTagger" "NSListFormatter" "NSLocale" "NSLocalizedNumberFormatRule" "NSLock" "NSMapTable" "NSMassFormatter" "NSMeasurement" "NSMeasurementFormatter" "NSMetadata" "NSMetadataAttributes" "NSMethodSignature" "NSMorphology" "NSNetServices" "NSNotification" "NSNotificationQueue" "NSNull" "NSNumberFormatter" "NSObjCRuntime" "NSObject" "NSObjectScripting" "NSOperation" "NSOrderedCollectionChange" "NSOrderedCollectionDifference" "NSOrderedSet" "NSOrthography" "NSPathUtilities" "NSPersonNameComponents" "NSPersonNameComponentsFormatter" "NSPointerArray" "NSPointerFunctions" "NSPort" "NSPortCoder" "NSPortMessage" "NSPortNameServer" "NSPredicate" "NSProcessInfo" "NSProgress" "NSPropertyList" "NSProtocolChecker" "NSProxy" "NSRange" "NSRegularExpression" "NSRelativeDateTimeFormatter" "NSRunLoop" "NSScanner" "NSScriptClassDescription" "NSScriptCoercionHandler" "NSScriptCommand" "NSScriptCommandDescription" "NSScriptExecutionContext" "NSScriptKeyValueCoding" "NSScriptObjectSpecifiers" "NSScriptStandardSuiteCommands" "NSScriptSuiteRegistry" "NSScriptWhoseTests" "NSSet" "NSSortDescriptor" "NSSpellServer" "NSStream" "NSString" "NSTask" "NSTermOfAddress" "NSTextCheckingResult" "NSThread" "NSTimeZone" "NSTimer" "NSURL" "NSURLAuthenticationChallenge" "NSURLCache" "NSURLConnection" "NSURLCredential" "NSURLCredentialStorage" "NSURLDownload" "NSURLError" "NSURLHandle" "NSURLProtectionSpace" "NSURLProtocol" "NSURLRequest" "NSURLResponse" "NSURLSession" "NSUUID" "NSUbiquitousKeyValueStore" "NSUndoManager" "NSUnit" "NSUserActivity" "NSUserDefaults" "NSUserNotification" "NSUserScriptTask" "NSValue" "NSValueTransformer" "NSXMLDTD" "NSXMLDTDNode" "NSXMLDocument" "NSXMLElement" "NSXMLNode" "NSXMLNodeOptions" "NSXMLParser" "NSXPCConnection" "NSZone" "alloc" "bitflags" "block2" "default" "libc" "objc2-core-foundation" "std" ];
+      };
+      "objc2-io-surface" = rec {
+        crateName = "objc2-io-surface";
+        version = "0.3.2";
+        edition = "2021";
+        sha256 = "07fqx4fmwydf2arrc4xs4awv7zyzzxh60fyqdfmrpm9n148qh1qq";
+        libName = "objc2_io_surface";
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.11.0";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "objc2";
+            packageId = "objc2";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "CFDictionary" ];
+          }
+        ];
+        features = {
+          "IOSurfaceRef" = [ "bitflags" ];
+          "IOSurfaceTypes" = [ "bitflags" ];
+          "ObjC" = [ "objc2" ];
+          "bitflags" = [ "dep:bitflags" ];
+          "default" = [ "std" "IOSurface" "IOSurfaceAPI" "IOSurfaceBase" "IOSurfaceRef" "IOSurfaceTypes" "bitflags" "libc" "objc2" "objc2-core-foundation" "objc2-foundation" ];
+          "libc" = [ "dep:libc" ];
+          "objc2" = [ "dep:objc2" "objc2-core-foundation?/objc2" ];
+          "objc2-core-foundation" = [ "dep:objc2-core-foundation" ];
+          "objc2-foundation" = [ "dep:objc2-foundation" ];
+          "std" = [ "alloc" ];
+        };
+        resolvedDefaultFeatures = [ "IOSurfaceRef" "bitflags" "objc2" ];
       };
       "objc2-metal" = rec {
         crateName = "objc2-metal";
@@ -21834,9 +22410,9 @@ rec {
       };
       "pctx_config" = rec {
         crateName = "pctx_config";
-        version = "0.1.4";
+        version = "0.1.5";
         edition = "2024";
-        sha256 = "0ky21zs8xw4baw9ra4bfc4d5nmp9gya06mvwicz183h0nwkhyxc8";
+        sha256 = "178r0d0l2l952rw871bhpbsl7gpqmw3c0f9qs4pdsgxxm94ar7n8";
         dependencies = [
           {
             name = "anyhow";
@@ -21943,9 +22519,9 @@ rec {
       };
       "pctx_executor" = rec {
         crateName = "pctx_executor";
-        version = "0.2.0";
+        version = "0.2.1";
         edition = "2024";
-        sha256 = "0r5s6r7jqiy1wlz9w58am2vjfrny68z64q3zglaj16s0mvlzdijj";
+        sha256 = "1q9nd0wfp0l3n1v4jwps85qapm58z52fcdq52q74xabm4z26i6s5";
         dependencies = [
           {
             name = "deno_core";
@@ -22020,9 +22596,9 @@ rec {
       };
       "pctx_registry" = rec {
         crateName = "pctx_registry";
-        version = "0.1.0";
+        version = "0.1.1";
         edition = "2024";
-        sha256 = "0myimdxbsav71vhdf7yr96psz7rwa0400bkbwxbp7h68zx4cjjcs";
+        sha256 = "083f6d8wr18b24qf2r3cd5n0kbrkgks930vq5qssb65sffzm6nig";
         dependencies = [
           {
             name = "deno_error";
@@ -22035,6 +22611,11 @@ rec {
           {
             name = "rmcp";
             packageId = "rmcp";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
           }
           {
             name = "serde_json";
@@ -23118,7 +23699,7 @@ rec {
           }
           {
             name = "itertools";
-            packageId = "itertools 0.14.0";
+            packageId = "itertools 0.13.0";
           }
           {
             name = "proc-macro2";
@@ -25367,9 +25948,9 @@ rec {
       };
       "rmcp" = rec {
         crateName = "rmcp";
-        version = "1.2.0";
+        version = "1.5.0";
         edition = "2024";
-        sha256 = "0kw6syb3050l281imy6nqb4wmysc0phgkwb76yr5h8py1qprssxs";
+        sha256 = "09j8i9l7ish4yghiaypk7j362y4sngrh1xrmqjfcs30bvrl9dmk7";
         dependencies = [
           {
             name = "async-trait";
@@ -25416,6 +25997,18 @@ rec {
             name = "http-body-util";
             packageId = "http-body-util";
             optional = true;
+          }
+          {
+            name = "hyper";
+            packageId = "hyper 1.8.1";
+            optional = true;
+            features = [ "client" "http1" ];
+          }
+          {
+            name = "hyper-util";
+            packageId = "hyper-util";
+            optional = true;
+            features = [ "tokio" ];
           }
           {
             name = "oauth2";
@@ -25520,6 +26113,16 @@ rec {
             packageId = "async-trait";
           }
           {
+            name = "hyper";
+            packageId = "hyper 1.8.1";
+            features = [ "server" "http1" ];
+          }
+          {
+            name = "hyper-util";
+            packageId = "hyper-util";
+            features = [ "tokio" ];
+          }
+          {
             name = "schemars";
             packageId = "schemars 1.2.1";
             features = [ "chrono04" ];
@@ -25528,6 +26131,10 @@ rec {
             name = "tokio";
             packageId = "tokio";
             features = [ "full" ];
+          }
+          {
+            name = "tower-service";
+            packageId = "tower-service";
           }
           {
             name = "url";
@@ -25543,6 +26150,7 @@ rec {
           "client-side-sse" = [ "dep:sse-stream" "dep:http" ];
           "default" = [ "base64" "macros" "server" ];
           "elicitation" = [ "dep:url" ];
+          "local" = [ "rmcp-macros?/local" ];
           "macros" = [ "dep:rmcp-macros" "dep:pastey" ];
           "reqwest" = [ "__reqwest" "reqwest?/rustls" ];
           "reqwest-native-tls" = [ "__reqwest" "reqwest?/native-tls" ];
@@ -25556,18 +26164,20 @@ rec {
           "transport-io" = [ "transport-async-rw" "tokio/io-std" ];
           "transport-streamable-http-client" = [ "client-side-sse" "transport-worker" ];
           "transport-streamable-http-client-reqwest" = [ "transport-streamable-http-client" "__reqwest" ];
+          "transport-streamable-http-client-unix-socket" = [ "transport-streamable-http-client" "dep:hyper" "dep:hyper-util" "dep:http-body-util" "dep:http" "dep:bytes" "tokio/net" ];
           "transport-streamable-http-server" = [ "transport-streamable-http-server-session" "server-side-http" "transport-worker" ];
           "transport-streamable-http-server-session" = [ "transport-async-rw" "dep:tokio-stream" ];
           "transport-worker" = [ "dep:tokio-stream" ];
           "uuid" = [ "dep:uuid" ];
+          "which-command" = [ "transport-child-process" "dep:which" ];
         };
-        resolvedDefaultFeatures = [ "__reqwest" "auth" "base64" "client" "client-side-sse" "default" "macros" "reqwest" "schemars" "server" "server-side-http" "tower" "transport-async-rw" "transport-child-process" "transport-io" "transport-streamable-http-client" "transport-streamable-http-client-reqwest" "transport-streamable-http-server" "transport-streamable-http-server-session" "transport-worker" "uuid" ];
+        resolvedDefaultFeatures = [ "__reqwest" "auth" "base64" "client" "client-side-sse" "default" "macros" "reqwest" "schemars" "server" "server-side-http" "tower" "transport-async-rw" "transport-child-process" "transport-io" "transport-streamable-http-client" "transport-streamable-http-client-reqwest" "transport-streamable-http-client-unix-socket" "transport-streamable-http-server" "transport-streamable-http-server-session" "transport-worker" "uuid" ];
       };
       "rmcp-macros" = rec {
         crateName = "rmcp-macros";
-        version = "1.2.0";
+        version = "1.5.0";
         edition = "2024";
-        sha256 = "17mabjhhl88dg64lamlh4wkjn8lknl2my39b6l387b96xpbrb7db";
+        sha256 = "0990p50i4z2rzss5dpy1isks7vwz4rp6fgk333nhlyq9h4fc1za8";
         procMacro = true;
         libName = "rmcp_macros";
         dependencies = [
@@ -25593,7 +26203,8 @@ rec {
             features = [ "full" ];
           }
         ];
-
+        features = {
+        };
       };
       "roff" = rec {
         crateName = "roff";
@@ -26106,7 +26717,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" ];
           }
@@ -26145,7 +26756,7 @@ rec {
           "thread" = [ "linux-raw-sys/prctl" ];
           "use-libc" = [ "libc_errno" "libc" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "default" "fs" "std" "stdio" "termios" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "event" "fs" "net" "std" "stdio" "system" "termios" ];
       };
       "rustls" = rec {
         crateName = "rustls";
@@ -26378,7 +26989,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Security_Cryptography" ];
@@ -26416,9 +27027,9 @@ rec {
       };
       "rustls-webpki" = rec {
         crateName = "rustls-webpki";
-        version = "0.103.10";
+        version = "0.103.13";
         edition = "2021";
-        sha256 = "1vyipcdbazvhl6kyi1m8n0bg98sk25iv12bby2xcly653awb4cyz";
+        sha256 = "0vkm7z9pnxz5qz66p2kmyy2pwx0g4jnsbqk5xzfhs4czcjl2ki31";
         libName = "webpki";
         dependencies = [
           {
@@ -28923,7 +29534,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" "Win32_System_IO" "Win32_System_Threading" "Win32_System_WindowsProgramming" ];
           }
@@ -32672,7 +33283,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Storage_FileSystem" "Win32_Foundation" ];
           }
@@ -33045,9 +33656,9 @@ rec {
       };
       "thin-vec" = rec {
         crateName = "thin-vec";
-        version = "0.2.14";
+        version = "0.2.16";
         edition = "2018";
-        sha256 = "0zbi73v2in3ay5h1q17gw8y09z5vmf3zqscx5xwsq5c4656pakql";
+        sha256 = "1in4k314mipna22b5mrp0qnlllizsl5y24fhx7qsdb74sj7dz715";
         libName = "thin_vec";
         authors = [
           "Aria Beingessner <a.beingessner@gmail.com>"
@@ -36179,9 +36790,9 @@ rec {
       };
       "unicode-segmentation" = rec {
         crateName = "unicode-segmentation";
-        version = "1.12.0";
+        version = "1.13.2";
         edition = "2018";
-        sha256 = "14qla2jfx74yyb9ds3d2mpwpa4l4lzb9z57c6d2ba511458z5k7n";
+        sha256 = "135a26m4a0wj319gcw28j6a5aqvz00jmgwgmcs6szgxjf942facn";
         libName = "unicode_segmentation";
         authors = [
           "kwantam <kwantam@gmail.com>"
@@ -38055,7 +38666,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.48.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" "Win32_System_SystemInformation" ];
           }
@@ -40405,7 +41016,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_SystemInformation" "Win32_UI" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_System" "Win32_System_Com" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.52.0" = rec {
         crateName = "windows-sys";
@@ -40653,7 +41264,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_Threading" "Win32_System_Time" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_System" "Win32_System_Threading" "default" ];
       };
       "windows-sys 0.59.0" = rec {
         crateName = "windows-sys";
@@ -40912,7 +41523,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_Time" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_Time" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "default" ];
       };
       "windows-sys 0.60.2" = rec {
         crateName = "windows-sys";
@@ -41177,7 +41788,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Credentials" "Win32_System" "Win32_System_Console" "Win32_System_IO" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Credentials" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Ole" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.61.2" = rec {
         crateName = "windows-sys";
@@ -41439,7 +42050,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Time" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "default" ];
       };
       "windows-targets 0.42.2" = rec {
         crateName = "windows-targets";
@@ -42484,6 +43095,106 @@ rec {
           "std" = [ "alloc" ];
           "typemap" = [ "dep:typemap" ];
         };
+      };
+      "x11rb" = rec {
+        crateName = "x11rb";
+        version = "0.13.2";
+        edition = "2021";
+        sha256 = "053lvnaw9ycbl791mgwly2hw27q6vqgzrb1y5kz1as52wmdsm4wr";
+        authors = [
+          "Uli Schlachter <psychon@znc.in>"
+          "Eduardo Sánchez Muñoz <eduardosm-dev@e64.io>"
+          "notgull <jtnunley01@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "gethostname";
+            packageId = "gethostname";
+          }
+          {
+            name = "rustix";
+            packageId = "rustix 1.1.4";
+            usesDefaultFeatures = false;
+            features = [ "std" "event" "fs" "net" "system" ];
+          }
+          {
+            name = "x11rb-protocol";
+            packageId = "x11rb-protocol";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+        ];
+        features = {
+          "all-extensions" = [ "x11rb-protocol/all-extensions" "composite" "damage" "dbe" "dpms" "dri2" "dri3" "glx" "present" "randr" "record" "render" "res" "screensaver" "shape" "shm" "sync" "xevie" "xf86dri" "xf86vidmode" "xfixes" "xinerama" "xinput" "xkb" "xprint" "xselinux" "xtest" "xv" "xvmc" ];
+          "allow-unsafe-code" = [ "libc" "as-raw-xcb-connection" ];
+          "as-raw-xcb-connection" = [ "dep:as-raw-xcb-connection" ];
+          "composite" = [ "x11rb-protocol/composite" "xfixes" ];
+          "cursor" = [ "render" "resource_manager" "xcursor" ];
+          "damage" = [ "x11rb-protocol/damage" "xfixes" ];
+          "dbe" = [ "x11rb-protocol/dbe" ];
+          "dl-libxcb" = [ "allow-unsafe-code" "libloading" "once_cell" ];
+          "dpms" = [ "x11rb-protocol/dpms" ];
+          "dri2" = [ "x11rb-protocol/dri2" ];
+          "dri3" = [ "x11rb-protocol/dri3" ];
+          "extra-traits" = [ "x11rb-protocol/extra-traits" ];
+          "glx" = [ "x11rb-protocol/glx" ];
+          "libc" = [ "dep:libc" ];
+          "libloading" = [ "dep:libloading" ];
+          "once_cell" = [ "dep:once_cell" ];
+          "present" = [ "x11rb-protocol/present" "randr" "xfixes" "sync" ];
+          "randr" = [ "x11rb-protocol/randr" "render" ];
+          "raw-window-handle" = [ "dep:raw-window-handle" ];
+          "record" = [ "x11rb-protocol/record" ];
+          "render" = [ "x11rb-protocol/render" ];
+          "request-parsing" = [ "x11rb-protocol/request-parsing" ];
+          "res" = [ "x11rb-protocol/res" ];
+          "resource_manager" = [ "x11rb-protocol/resource_manager" ];
+          "screensaver" = [ "x11rb-protocol/screensaver" ];
+          "shape" = [ "x11rb-protocol/shape" ];
+          "shm" = [ "x11rb-protocol/shm" ];
+          "sync" = [ "x11rb-protocol/sync" ];
+          "tracing" = [ "dep:tracing" ];
+          "xcursor" = [ "dep:xcursor" ];
+          "xevie" = [ "x11rb-protocol/xevie" ];
+          "xf86dri" = [ "x11rb-protocol/xf86dri" ];
+          "xf86vidmode" = [ "x11rb-protocol/xf86vidmode" ];
+          "xfixes" = [ "x11rb-protocol/xfixes" "render" "shape" ];
+          "xinerama" = [ "x11rb-protocol/xinerama" ];
+          "xinput" = [ "x11rb-protocol/xinput" "xfixes" ];
+          "xkb" = [ "x11rb-protocol/xkb" ];
+          "xprint" = [ "x11rb-protocol/xprint" ];
+          "xselinux" = [ "x11rb-protocol/xselinux" ];
+          "xtest" = [ "x11rb-protocol/xtest" ];
+          "xv" = [ "x11rb-protocol/xv" "shm" ];
+          "xvmc" = [ "x11rb-protocol/xvmc" "xv" ];
+        };
+      };
+      "x11rb-protocol" = rec {
+        crateName = "x11rb-protocol";
+        version = "0.13.2";
+        edition = "2021";
+        sha256 = "1g81cznbyn522b0fbis0i44wh3adad2vhsz5pzf99waf3sbc4vza";
+        libName = "x11rb_protocol";
+        authors = [
+          "Uli Schlachter <psychon@znc.in>"
+          "Eduardo Sánchez Muñoz <eduardosm-dev@e64.io>"
+          "notgull <jtnunley01@gmail.com>"
+        ];
+        features = {
+          "all-extensions" = [ "composite" "damage" "dbe" "dpms" "dri2" "dri3" "glx" "present" "randr" "record" "render" "res" "screensaver" "shape" "shm" "sync" "xevie" "xf86dri" "xf86vidmode" "xfixes" "xinerama" "xinput" "xkb" "xprint" "xselinux" "xtest" "xv" "xvmc" ];
+          "composite" = [ "xfixes" ];
+          "damage" = [ "xfixes" ];
+          "default" = [ "std" ];
+          "present" = [ "randr" "xfixes" "sync" "dri3" ];
+          "randr" = [ "render" ];
+          "resource_manager" = [ "std" ];
+          "serde" = [ "dep:serde" ];
+          "xfixes" = [ "render" "shape" ];
+          "xinput" = [ "xfixes" ];
+          "xv" = [ "shm" ];
+          "xvmc" = [ "xv" ];
+        };
+        resolvedDefaultFeatures = [ "std" ];
       };
       "x509-cert" = rec {
         crateName = "x509-cert";

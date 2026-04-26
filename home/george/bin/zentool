@@ -36,13 +36,17 @@ import sys
 import time
 import uuid
 from collections import defaultdict, deque
-from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any, Final, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, cast
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Iterator, Sequence
+
+import click
 import lz4.block
+import typer
 import yaml
 from deepdiff import DeepDiff
 from pydantic import (
@@ -53,6 +57,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from typer.main import get_command
 from yaml.constructor import ConstructorError
 from yaml.resolver import BaseResolver
 
@@ -75,6 +80,53 @@ PROFILE_HELP: Final = (
     "Zen profile directory name, a direct path to a profile directory/session file, "
     "or a human profile name from profiles.ini. Default: auto-detect from profiles.ini"
 )
+ProfileOption = Annotated[
+    str | None,
+    typer.Option("-p", "--profile", help=PROFILE_HELP),
+]
+ConfigOption = Annotated[
+    str,
+    typer.Option("-c", "--config", help=f"Config file (default: {DEFAULT_YAML})"),
+]
+OutputOption = Annotated[
+    str | None,
+    typer.Option("-o", "--output", metavar="FILE", help="Write output to file"),
+]
+AssetDirOption = Annotated[
+    str,
+    typer.Option(
+        "-d",
+        "--asset-dir",
+        help=f"Managed asset directory (default: {DEFAULT_CONFIG_DIR})",
+    ),
+]
+ChromeSourceOption = Annotated[
+    str | None,
+    typer.Option(
+        "-C",
+        "--chrome-source",
+        help=(
+            "Chrome source directory override. Defaults to ASSET_DIR/chrome when "
+            f"present. Also accepts ${DEFAULT_CHROME_SOURCE_ENV}."
+        ),
+    ),
+]
+UserJsSourceOption = Annotated[
+    str | None,
+    typer.Option(
+        "-u",
+        "--user-js-source",
+        help="user.js source file override. Defaults to ASSET_DIR/user.js when present.",
+    ),
+]
+StateOption = Annotated[
+    bool,
+    typer.Option("-s", "--state", help="Limit the operation to Zen session state"),
+]
+AssetsOption = Annotated[
+    bool,
+    typer.Option("-a", "--assets", help="Limit the operation to theme/profile assets"),
+]
 GROUP_COLOR: Final = "zen-workspace-color"
 DEFAULT_THEME_TYPE: Final = "gradient"
 DEFAULT_THEME_OPACITY: Final = 0.5
@@ -101,14 +153,14 @@ class UniqueKeyLoader(yaml.SafeLoader):
 class ThemeSpec(BaseModel):
     """Declarative workspace theme settings."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     type: Literal["gradient"] = DEFAULT_THEME_TYPE
-    gradientColors: list[str] = Field(default_factory=list)
+    gradient_colors: list[str] = Field(default_factory=list, alias="gradientColors")
     opacity: float = DEFAULT_THEME_OPACITY
     texture: int = DEFAULT_THEME_TEXTURE
 
-    @field_validator("gradientColors")
+    @field_validator("gradient_colors")
     @classmethod
     def validate_gradient_colors(cls, value: list[str]) -> list[str]:
         """Require non-empty color strings."""
@@ -206,11 +258,14 @@ FolderSpec.model_rebuild()
 class WorkspaceSpec(BaseModel):
     """Canonical workspace config used by the internal compiler."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str
     icon: str | None = None
-    hasCollapsedPinnedTabs: bool = False
+    has_collapsed_pinned_tabs: bool = Field(
+        default=False,
+        alias="hasCollapsedPinnedTabs",
+    )
     theme: ThemeSpec = Field(default_factory=ThemeSpec)
     essentials: list[TabSpec] = Field(default_factory=list)
     items: list[ItemSpec] = Field(default_factory=list)
@@ -334,10 +389,14 @@ class ZenConfig(BaseModel):
 class SessionTheme(BaseModel):
     """Managed subset of Zen workspace theme data."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+        serialize_by_alias=True,
+    )
 
     type: str = DEFAULT_THEME_TYPE
-    gradientColors: list[str] = Field(default_factory=list)
+    gradient_colors: list[str] = Field(default_factory=list, alias="gradientColors")
     opacity: float = DEFAULT_THEME_OPACITY
     texture: int = DEFAULT_THEME_TEXTURE
 
@@ -345,14 +404,21 @@ class SessionTheme(BaseModel):
 class SessionSpace(BaseModel):
     """Managed subset of a workspace record in the session file."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+        serialize_by_alias=True,
+    )
 
     uuid: str
     name: str
     theme: SessionTheme = Field(default_factory=SessionTheme)
-    containerTabId: int = 0
+    container_tab_id: int = Field(default=0, alias="containerTabId")
     icon: str | None = None
-    hasCollapsedPinnedTabs: bool = False
+    has_collapsed_pinned_tabs: bool = Field(
+        default=False,
+        alias="hasCollapsedPinnedTabs",
+    )
 
 
 class PrevSiblingInfo(BaseModel):
@@ -367,35 +433,44 @@ class PrevSiblingInfo(BaseModel):
 class SessionFolder(BaseModel):
     """Managed subset of a folder record in the session file."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+        serialize_by_alias=True,
+    )
 
     pinned: bool = True
-    splitViewGroup: bool = False
+    split_view_group: bool = Field(default=False, alias="splitViewGroup")
     id: str
     name: str
     collapsed: bool = True
-    saveOnWindowClose: bool = True
-    parentId: str | None = None
-    prevSiblingInfo: PrevSiblingInfo | None = Field(
-        default_factory=lambda: PrevSiblingInfo(type="start", id=None)
+    save_on_window_close: bool = Field(default=True, alias="saveOnWindowClose")
+    parent_id: str | None = Field(default=None, alias="parentId")
+    prev_sibling_info: PrevSiblingInfo | None = Field(
+        default_factory=lambda: PrevSiblingInfo(type="start", id=None),
+        alias="prevSiblingInfo",
     )
-    emptyTabIds: list[str] = Field(default_factory=list)
-    userIcon: str = ""
-    workspaceId: str
+    empty_tab_ids: list[str] = Field(default_factory=list, alias="emptyTabIds")
+    user_icon: str = Field(default="", alias="userIcon")
+    workspace_id: str = Field(alias="workspaceId")
 
 
 class SessionGroup(BaseModel):
     """Managed subset of a tab-group record in the session file."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+        serialize_by_alias=True,
+    )
 
     pinned: bool = True
-    splitView: bool = False
+    split_view: bool = Field(default=False, alias="splitView")
     id: str
     name: str
     color: str = GROUP_COLOR
     collapsed: bool = True
-    saveOnWindowClose: bool = True
+    save_on_window_close: bool = Field(default=True, alias="saveOnWindowClose")
 
 
 class SessionEntry(BaseModel):
@@ -410,27 +485,37 @@ class SessionEntry(BaseModel):
 class SessionTab(BaseModel):
     """Managed subset of a tab record in the session file."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+        serialize_by_alias=True,
+    )
 
     entries: list[SessionEntry] = Field(default_factory=list)
     index: int = 1
-    lastAccessed: int = 0
+    last_accessed: int = Field(default=0, alias="lastAccessed")
     hidden: bool = False
     pinned: bool = False
-    zenWorkspace: str | None = None
-    zenSyncId: str
-    zenEssential: bool = False
-    zenDefaultUserContextId: str | None = None
-    zenPinnedIcon: str | None = None
-    zenIsEmpty: bool = False
-    zenStaticLabel: str | None = None
-    zenHasStaticIcon: bool = False
-    zenGlanceId: str | None = None
-    zenIsGlance: bool = False
-    zenLiveFolderItemId: str | None = None
-    searchMode: Any = None
-    userContextId: int = 0
-    groupId: str | None = None
+    zen_workspace: str | None = Field(default=None, alias="zenWorkspace")
+    zen_sync_id: str = Field(alias="zenSyncId")
+    zen_essential: bool = Field(default=False, alias="zenEssential")
+    zen_default_user_context_id: str | None = Field(
+        default=None,
+        alias="zenDefaultUserContextId",
+    )
+    zen_pinned_icon: str | None = Field(default=None, alias="zenPinnedIcon")
+    zen_is_empty: bool = Field(default=False, alias="zenIsEmpty")
+    zen_static_label: str | None = Field(default=None, alias="zenStaticLabel")
+    zen_has_static_icon: bool = Field(default=False, alias="zenHasStaticIcon")
+    zen_glance_id: str | None = Field(default=None, alias="zenGlanceId")
+    zen_is_glance: bool = Field(default=False, alias="zenIsGlance")
+    zen_live_folder_item_id: str | None = Field(
+        default=None,
+        alias="zenLiveFolderItemId",
+    )
+    search_mode: Any = Field(default=None, alias="searchMode")
+    user_context_id: int = Field(default=0, alias="userContextId")
+    group_id: str | None = Field(default=None, alias="groupId")
     attributes: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -448,8 +533,8 @@ class SessionState(BaseModel):
     def normalize_nullable_folder_links(self) -> SessionState:
         """Normalize raw folder sibling metadata that may be null in live sessions."""
         for folder in self.folders:
-            if folder.prevSiblingInfo is None:
-                folder.prevSiblingInfo = PrevSiblingInfo(type="start", id=None)
+            if folder.prev_sibling_info is None:
+                folder.prev_sibling_info = PrevSiblingInfo(type="start", id=None)
         return self
 
 
@@ -738,11 +823,14 @@ def _authored_node_to_item(node: AuthoredNode) -> ItemSpec:
 class AuthoredWorkspace(BaseModel):
     """Authored workspace entry in the public YAML schema."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str
     icon: str | None = None
-    hasCollapsedPinnedTabs: bool = False
+    has_collapsed_pinned_tabs: bool = Field(
+        default=False,
+        alias="hasCollapsedPinnedTabs",
+    )
     theme: ThemeSpec = Field(default_factory=ThemeSpec)
     tree: list[AuthoredNode] = Field(default_factory=list)
 
@@ -816,7 +904,7 @@ def _coerce_authored_workspace(name: str, value: object) -> AuthoredWorkspace:
     return AuthoredWorkspace(
         name=name,
         icon=cast("str | None", value_map.get("icon")),
-        hasCollapsedPinnedTabs=bool(value_map.get("hasCollapsedPinnedTabs", False)),
+        has_collapsed_pinned_tabs=bool(value_map.get("hasCollapsedPinnedTabs", False)),
         theme=ThemeSpec.model_validate(theme_raw),
         tree=tree,
     )
@@ -846,7 +934,7 @@ def _authored_workspace_to_spec(name: str, value: object) -> WorkspaceSpec:
     return WorkspaceSpec(
         name=workspace.name,
         icon=workspace.icon,
-        hasCollapsedPinnedTabs=workspace.hasCollapsedPinnedTabs,
+        has_collapsed_pinned_tabs=workspace.has_collapsed_pinned_tabs,
         theme=workspace.theme,
         essentials=essentials,
         items=items,
@@ -1242,8 +1330,8 @@ def active_title(tab: SessionTab) -> str:
 
 def display_name(tab: SessionTab) -> str:
     """Return the declared label for *tab*."""
-    if isinstance(tab.zenStaticLabel, str) and tab.zenStaticLabel.strip():
-        return tab.zenStaticLabel.strip()
+    if isinstance(tab.zen_static_label, str) and tab.zen_static_label.strip():
+        return tab.zen_static_label.strip()
     title = active_title(tab).strip()
     if title:
         return title
@@ -1286,24 +1374,24 @@ def build_tab(
     current_url = active_url(tab)
     if placeholder or current_url != desired_url:
         reset_active_entry(tab, name=spec.name, url=desired_url)
-    tab.zenSyncId = sync_id
+    tab.zen_sync_id = sync_id
     tab.pinned = pinned or essential
     tab.hidden = False
-    tab.zenWorkspace = workspace_uuid
-    tab.zenEssential = essential
-    tab.groupId = folder_id
-    tab.zenIsEmpty = placeholder
-    tab.userContextId = user_context_id
-    tab.zenStaticLabel = None if placeholder else spec.name
-    tab.zenHasStaticIcon = False
-    tab.zenPinnedIcon = None
-    tab.zenGlanceId = None
-    tab.zenIsGlance = False
-    tab.zenLiveFolderItemId = None
-    tab.searchMode = None
+    tab.zen_workspace = workspace_uuid
+    tab.zen_essential = essential
+    tab.group_id = folder_id
+    tab.zen_is_empty = placeholder
+    tab.user_context_id = user_context_id
+    tab.zen_static_label = None if placeholder else spec.name
+    tab.zen_has_static_icon = False
+    tab.zen_pinned_icon = None
+    tab.zen_glance_id = None
+    tab.zen_is_glance = False
+    tab.zen_live_folder_item_id = None
+    tab.search_mode = None
     tab.attributes = dict(tab.attributes)
-    tab.lastAccessed = tab.lastAccessed or int(time.time() * 1000)
-    tab.zenDefaultUserContextId = "true" if user_context_id else None
+    tab.last_accessed = tab.last_accessed or int(time.time() * 1000)
+    tab.zen_default_user_context_id = "true" if user_context_id else None
     return tab
 
 
@@ -1318,23 +1406,23 @@ def build_placeholder_tab(
     return SessionTab(
         entries=[],
         index=1,
-        lastAccessed=0,
+        last_accessed=0,
         hidden=False,
         pinned=True,
-        zenWorkspace=workspace_uuid,
+        zen_workspace=workspace_uuid,
         zenSyncId=sync_id,
-        zenEssential=False,
-        zenDefaultUserContextId="true" if user_context_id else None,
-        zenPinnedIcon=None,
-        zenIsEmpty=True,
-        zenStaticLabel=None,
-        zenHasStaticIcon=False,
-        zenGlanceId=None,
-        zenIsGlance=False,
-        zenLiveFolderItemId=None,
-        searchMode=None,
-        userContextId=user_context_id,
-        groupId=folder_id,
+        zen_essential=False,
+        zen_default_user_context_id="true" if user_context_id else None,
+        zen_pinned_icon=None,
+        zen_is_empty=True,
+        zen_static_label=None,
+        zen_has_static_icon=False,
+        zen_glance_id=None,
+        zen_is_glance=False,
+        zen_live_folder_item_id=None,
+        search_mode=None,
+        user_context_id=user_context_id,
+        group_id=folder_id,
         attributes={},
     )
 
@@ -1359,8 +1447,8 @@ def folder_path_map(session: SessionState) -> dict[str, ExistingFolderRecord]:
             return paths_by_id[folder_id]
         folder = folders_by_id[folder_id]
         parent_path: tuple[str, ...] = ()
-        if folder.parentId is not None and folder.parentId in folders_by_id:
-            parent_path = build_path(folder.parentId)
+        if folder.parent_id is not None and folder.parent_id in folders_by_id:
+            parent_path = build_path(folder.parent_id)
         path = (*parent_path, folder.name)
         paths_by_id[folder_id] = path
         return path
@@ -1381,7 +1469,7 @@ def folder_lookup_by_path(
     records = folder_path_map(session)
     lookup: dict[tuple[str, tuple[str, ...]], SessionFolder] = {}
     for record in records.values():
-        workspace = spaces_by_uuid.get(record.folder.workspaceId)
+        workspace = spaces_by_uuid.get(record.folder.workspace_id)
         if workspace is None:
             continue
         key = (
@@ -1434,8 +1522,8 @@ def compile_items(
             existing=existing_folder,
             group_existing=existing_groups.get(folder_id),
             placeholder_sync_id=(
-                existing_folder.emptyTabIds[0]
-                if existing_folder and existing_folder.emptyTabIds
+                existing_folder.empty_tab_ids[0]
+                if existing_folder and existing_folder.empty_tab_ids
                 else None
             ),
         )
@@ -1495,7 +1583,7 @@ def build_workspace_compilation(
     )
     space.name = spec.name
     space.icon = spec.icon
-    space.hasCollapsedPinnedTabs = spec.hasCollapsedPinnedTabs
+    space.has_collapsed_pinned_tabs = spec.has_collapsed_pinned_tabs
     space.theme = SessionTheme.model_validate(spec.theme.model_dump())
 
     workspace_key = spec.name.casefold()
@@ -1503,7 +1591,7 @@ def build_workspace_compilation(
         spec.items,
         workspace_key=workspace_key,
         workspace_uuid=space.uuid,
-        inherited_container_id=space.containerTabId,
+        inherited_container_id=space.container_tab_id,
         existing_folders=existing_folders,
         existing_groups=existing_groups,
     )
@@ -1515,7 +1603,7 @@ def build_workspace_compilation(
             workspace_key=workspace_key,
             workspace_uuid=space.uuid,
             folder_id=None,
-            user_context_id=space.containerTabId,
+            user_context_id=space.container_tab_id,
         )
         for tab in spec.tabs
     ]
@@ -1574,28 +1662,28 @@ def match_tabs_to_existing(
         essential_pools[uuid_value] = TabPool(
             tab
             for tab in session.tabs
-            if tab.zenEssential
-            and tab.zenWorkspace == uuid_value
-            and not tab.zenIsEmpty
+            if tab.zen_essential
+            and tab.zen_workspace == uuid_value
+            and not tab.zen_is_empty
         )
         workspace_pools[workspace.key] = TabPool(
             tab
             for tab in session.tabs
             if tab.pinned
-            and not tab.zenEssential
-            and tab.zenWorkspace == uuid_value
-            and not tab.zenIsEmpty
+            and not tab.zen_essential
+            and tab.zen_workspace == uuid_value
+            and not tab.zen_is_empty
         )
         workspace_tab_pools[workspace.key] = TabPool(
             tab
             for tab in session.tabs
-            if not tab.pinned and tab.zenWorkspace == uuid_value and not tab.zenIsEmpty
+            if not tab.pinned and tab.zen_workspace == uuid_value and not tab.zen_is_empty
         )
 
     essential_pools[None] = TabPool(
         tab
         for tab in session.tabs
-        if tab.zenEssential and tab.zenWorkspace is None and not tab.zenIsEmpty
+        if tab.zen_essential and tab.zen_workspace is None and not tab.zen_is_empty
     )
 
     for tab in essentials:
@@ -1604,10 +1692,10 @@ def match_tabs_to_existing(
             essential_pool.claim(tab.spec.url) if essential_pool is not None else None
         )
         tab.sync_id = (
-            tab.existing.zenSyncId if tab.existing is not None else new_item_id()
+            tab.existing.zen_sync_id if tab.existing is not None else new_item_id()
         )
         if tab.existing is not None:
-            tab.user_context_id = tab.existing.userContextId
+            tab.user_context_id = tab.existing.user_context_id
 
     for workspace in workspaces:
         pinned_pool = workspace_pools[workspace.key]
@@ -1617,18 +1705,18 @@ def match_tabs_to_existing(
                 continue
             tab.existing = pinned_pool.claim(tab.spec.url)
             tab.sync_id = (
-                tab.existing.zenSyncId if tab.existing is not None else new_item_id()
+                tab.existing.zen_sync_id if tab.existing is not None else new_item_id()
             )
             if tab.existing is not None:
-                tab.user_context_id = tab.existing.userContextId
+                tab.user_context_id = tab.existing.user_context_id
         regular_pool = workspace_tab_pools[workspace.key]
         for tab in workspace.tabs:
             tab.existing = regular_pool.claim(tab.spec.url)
             tab.sync_id = (
-                tab.existing.zenSyncId if tab.existing is not None else new_item_id()
+                tab.existing.zen_sync_id if tab.existing is not None else new_item_id()
             )
             if tab.existing is not None:
-                tab.user_context_id = tab.existing.userContextId
+                tab.user_context_id = tab.existing.user_context_id
 
 
 def direct_tab_count(items: Sequence[CompiledItem]) -> int:
@@ -1651,7 +1739,7 @@ def prepare_folder_placeholders(workspaces: Sequence[WorkspaceCompilation]) -> N
                 workspace_key=folder.workspace_key,
                 workspace_uuid=folder.workspace_uuid,
                 folder_id=folder.id,
-                user_context_id=workspace.space.containerTabId,
+                user_context_id=workspace.space.container_tab_id,
                 sync_id=sync_id,
                 placeholder=True,
             )
@@ -1682,18 +1770,16 @@ def assign_folder_links(
             else PrevSiblingInfo(type=previous_type, id=previous_id)
         )
         if item.existing is not None:
-            item.existing.parentId = parent_id
-            item.existing.prevSiblingInfo = info
+            item.existing.parent_id = parent_id
+            item.existing.prev_sibling_info = info
         else:
             item.existing = SessionFolder(
                 id=item.id,
                 name=item.spec.name,
                 workspaceId=item.workspace_uuid,
-                parentId=parent_id,
-                prevSiblingInfo=info,
             )
-        item.existing.parentId = parent_id
-        item.existing.prevSiblingInfo = info
+        item.existing.parent_id = parent_id
+        item.existing.prev_sibling_info = info
         assign_folder_links(item.items, parent_id=item.id)
         previous_type = "group"
         previous_id = item.id
@@ -1711,8 +1797,8 @@ def build_group(folder: CompiledFolder) -> SessionGroup:
     group.collapsed = folder.spec.collapsed
     group.pinned = True
     group.color = GROUP_COLOR
-    group.splitView = False
-    group.saveOnWindowClose = True
+    group.split_view = False
+    group.save_on_window_close = True
     return group
 
 
@@ -1727,13 +1813,13 @@ def build_folder(folder: CompiledFolder) -> SessionFolder:
     )
     session_folder.id = folder.id
     session_folder.name = folder.spec.name
-    session_folder.workspaceId = folder.workspace_uuid
+    session_folder.workspace_id = folder.workspace_uuid
     session_folder.collapsed = folder.spec.collapsed
     session_folder.pinned = True
-    session_folder.splitViewGroup = False
-    session_folder.saveOnWindowClose = True
-    session_folder.userIcon = session_folder.userIcon or ""
-    session_folder.emptyTabIds = (
+    session_folder.split_view_group = False
+    session_folder.save_on_window_close = True
+    session_folder.user_icon = session_folder.user_icon or ""
+    session_folder.empty_tab_ids = (
         [folder.placeholder_tab.sync_id] if folder.placeholder_tab else []
     )
     return session_folder
@@ -1799,7 +1885,7 @@ def build_desired_state(existing: SessionState, config: ZenConfig) -> SessionSta
             workspace_key=workspace.key,
             workspace_uuid=workspace.space.uuid,
             folder_id=None,
-            user_context_id=workspace.space.containerTabId,
+            user_context_id=workspace.space.container_tab_id,
         )
         for workspace, spec in (
             (workspace, spec)
@@ -1838,7 +1924,7 @@ def build_desired_state(existing: SessionState, config: ZenConfig) -> SessionSta
 
 def top_level_essentials(session: SessionState) -> list[SessionTab]:
     """Return essential tabs in persisted order."""
-    return [tab for tab in session.tabs if tab.zenEssential and not tab.zenIsEmpty]
+    return [tab for tab in session.tabs if tab.zen_essential and not tab.zen_is_empty]
 
 
 def top_level_pinned_tabs(
@@ -1849,17 +1935,17 @@ def top_level_pinned_tabs(
         tab
         for tab in session.tabs
         if tab.pinned
-        and not tab.zenEssential
-        and not tab.zenIsEmpty
-        and tab.zenWorkspace == workspace_uuid
-        and tab.groupId is None
+        and not tab.zen_essential
+        and not tab.zen_is_empty
+        and tab.zen_workspace == workspace_uuid
+        and tab.group_id is None
     ]
 
 
 def direct_folder_tabs(session: SessionState, folder_id: str) -> list[SessionTab]:
     """Return direct non-placeholder tabs for one folder."""
     return [
-        tab for tab in session.tabs if tab.groupId == folder_id and not tab.zenIsEmpty
+        tab for tab in session.tabs if tab.group_id == folder_id and not tab.zen_is_empty
     ]
 
 
@@ -1871,9 +1957,9 @@ def top_level_workspace_tabs(
         tab
         for tab in session.tabs
         if not tab.pinned
-        and not tab.zenIsEmpty
-        and tab.zenWorkspace == workspace_uuid
-        and tab.groupId is None
+        and not tab.zen_is_empty
+        and tab.zen_workspace == workspace_uuid
+        and tab.group_id is None
     ]
 
 
@@ -1888,7 +1974,7 @@ def insert_folder_nodes(
     while pending:
         progress = False
         for folder in list(pending):
-            prev = folder.prevSiblingInfo or PrevSiblingInfo(type="start", id=None)
+            prev = folder.prev_sibling_info or PrevSiblingInfo(type="start", id=None)
             insert_at: int | None = None
             if prev.type == "start":
                 insert_at = 0
@@ -1924,7 +2010,7 @@ def build_folder_tree(
     )
     tab_nodes = [
         (
-            tab.zenSyncId,
+            tab.zen_sync_id,
             ItemTabSpec.model_validate({
                 "name": display_name(tab),
                 "url": active_url(tab),
@@ -1956,9 +2042,9 @@ def export_config(session: SessionState) -> ZenConfig:
     for space in session.spaces:
         folders_by_parent: dict[str | None, list[SessionFolder]] = defaultdict(list)
         for folder in session.folders:
-            if folder.workspaceId != space.uuid:
+            if folder.workspace_id != space.uuid:
                 continue
-            folders_by_parent[folder.parentId].append(folder)
+            folders_by_parent[folder.parent_id].append(folder)
         workspace_items = build_folder_tree(
             session,
             workspace_uuid=space.uuid,
@@ -1971,14 +2057,14 @@ def export_config(session: SessionState) -> ZenConfig:
         workspace_essentials = [
             tab_to_spec(tab)
             for tab in top_level_essentials(session)
-            if tab.zenWorkspace == space.uuid
+            if tab.zen_workspace == space.uuid
         ]
 
         workspaces.append(
             WorkspaceSpec(
                 name=space.name,
                 icon=space.icon,
-                hasCollapsedPinnedTabs=space.hasCollapsedPinnedTabs,
+                has_collapsed_pinned_tabs=space.has_collapsed_pinned_tabs,
                 theme=ThemeSpec.model_validate(space.theme.model_dump()),
                 essentials=workspace_essentials,
                 items=workspace_items,
@@ -1991,8 +2077,8 @@ def export_config(session: SessionState) -> ZenConfig:
 def _theme_to_dict(theme: ThemeSpec) -> dict[str, object]:
     """Serialize a theme spec while omitting default values."""
     data: dict[str, object] = {}
-    if theme.gradientColors:
-        data["gradientColors"] = list(theme.gradientColors)
+    if theme.gradient_colors:
+        data["gradientColors"] = list(theme.gradient_colors)
     if theme.opacity != DEFAULT_THEME_OPACITY:
         data["opacity"] = theme.opacity
     if theme.texture != DEFAULT_THEME_TEXTURE:
@@ -2073,7 +2159,7 @@ def config_to_dict(config: ZenConfig) -> dict[str, object]:
         workspace_data: dict[str, object] = {}
         if workspace.icon is not None:
             workspace_data["icon"] = workspace.icon
-        if workspace.hasCollapsedPinnedTabs:
+        if workspace.has_collapsed_pinned_tabs:
             workspace_data["hasCollapsedPinnedTabs"] = True
         theme = _theme_to_dict(workspace.theme)
         if theme:
@@ -2126,8 +2212,8 @@ def iter_folder_records(session: SessionState) -> Iterator[tuple[str, SessionFol
     records = folder_path_map(session)
     for folder in session.folders:
         record = records[folder.id]
-        workspace = spaces_by_uuid.get(folder.workspaceId)
-        workspace_name = workspace.name if workspace is not None else folder.workspaceId
+        workspace = spaces_by_uuid.get(folder.workspace_id)
+        workspace_name = workspace.name if workspace is not None else folder.workspace_id
         yield (" / ".join((workspace_name, *record.path)), folder)
 
 
@@ -2140,22 +2226,22 @@ def session_check(session: SessionState) -> list[str]:
     for folder in session.folders:
         if folder.id not in group_ids:
             errors.append(f"Folder {folder.name!r} has no matching group")
-        key = (folder.workspaceId, folder.parentId, folder.name.casefold())
+        key = (folder.workspace_id, folder.parent_id, folder.name.casefold())
         if key in folder_names:
             errors.append(f"Duplicate folder name in one container: {folder.name!r}")
         folder_names.add(key)
-        if folder.parentId is not None and folder.parentId not in folder_ids:
+        if folder.parent_id is not None and folder.parent_id not in folder_ids:
             errors.append(
-                f"Folder {folder.name!r} has unknown parentId {folder.parentId!r}"
+                f"Folder {folder.name!r} has unknown parentId {folder.parent_id!r}"
             )
     for tab in session.tabs:
-        if tab.zenIsEmpty:
+        if tab.zen_is_empty:
             continue
-        if tab.groupId is not None and tab.groupId not in folder_ids:
+        if tab.group_id is not None and tab.group_id not in folder_ids:
             errors.append(
-                f"Tab {active_url(tab)!r} references unknown folder {tab.groupId!r}"
+                f"Tab {active_url(tab)!r} references unknown folder {tab.group_id!r}"
             )
-        if tab.zenEssential and not tab.pinned:
+        if tab.zen_essential and not tab.pinned:
             errors.append(f"Essential tab {active_url(tab)!r} is not pinned")
     return errors
 
@@ -2189,7 +2275,7 @@ def cmd_tabs(args: argparse.Namespace) -> int:
             for tab in pinned:
                 _stdout(f"    {display_name(tab)} -> {active_url(tab)}")
         folders = [
-            folder for folder in session.folders if folder.workspaceId == workspace.uuid
+            folder for folder in session.folders if folder.workspace_id == workspace.uuid
         ]
         for folder in folders:
             folder_tabs = direct_folder_tabs(session, folder.id)
@@ -2824,8 +2910,290 @@ def _dispatch_nested_command(
     return None
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI."""
+_ARGPARSE_BUILD_PARSER: Final = build_parser
+_ARGPARSE_DISPATCH_NESTED_COMMAND: Final = _dispatch_nested_command
+
+
+_TYPER_CONTEXT_SETTINGS: Final = {"help_option_names": ["-h", "--help"]}
+
+TYPER_APP = typer.Typer(
+    help="Inspect and reconcile Zen session state.",
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+    context_settings=_TYPER_CONTEXT_SETTINGS,
+)
+_INSPECT_APP = typer.Typer(
+    help="Inspect live Zen session state views.",
+    no_args_is_help=True,
+    context_settings=_TYPER_CONTEXT_SETTINGS,
+)
+_PROFILE_APP = typer.Typer(
+    help="Inspect profile/runtime state.",
+    no_args_is_help=True,
+    context_settings=_TYPER_CONTEXT_SETTINGS,
+)
+TYPER_APP.add_typer(_INSPECT_APP, name="inspect")
+TYPER_APP.add_typer(_PROFILE_APP, name="profile")
+
+
+def _context_profile(ctx: typer.Context) -> str | None:
+    """Return the nearest Typer context profile value."""
+    current: click.Context | None = ctx
+    while current is not None:
+        obj = current.obj
+        if isinstance(obj, dict) and isinstance(obj.get("profile"), str):
+            return obj["profile"]
+        current = current.parent
+    return None
+
+
+def _effective_profile(ctx: typer.Context, profile: str | None) -> str | None:
+    """Prefer a local profile option, then a parent Typer context profile."""
+    return profile if profile is not None else _context_profile(ctx)
+
+
+def _run_handler(handler: Callable[[argparse.Namespace], int], **values: object) -> int:
+    """Call an existing argparse-shaped handler from the Typer command tree."""
+    return handler(argparse.Namespace(**values))
+
+
+def _scoped_values(
+    ctx: typer.Context,
+    *,
+    assets: bool,
+    asset_dir: str,
+    chrome_source: str | None,
+    command: str,
+    config: str,
+    profile: str | None,
+    state: bool,
+    user_js_source: str | None,
+) -> dict[str, object]:
+    """Build the shared diff/apply argument namespace payload."""
+    return {
+        "asset_dir": asset_dir,
+        "assets": assets,
+        "chrome_source": chrome_source,
+        "command": command,
+        "config": config,
+        "profile": _effective_profile(ctx, profile),
+        "state": state,
+        "user_js_source": user_js_source,
+    }
+
+
+@TYPER_APP.callback()
+def _typer_root(
+    ctx: typer.Context,
+    *,
+    profile: ProfileOption = None,
+) -> None:
+    """Store global CLI options for subcommands."""
+    ctx.obj = {"profile": profile}
+
+
+@TYPER_APP.command(name="validate")
+def _typer_validate(
+    *,
+    config: ConfigOption = str(DEFAULT_YAML),
+) -> int:
+    """Validate the authored workspace-map config."""
+    return _run_handler(cmd_validate, command="validate", config=config)
+
+
+@TYPER_APP.command(name="dump")
+def _typer_dump(
+    ctx: typer.Context,
+    *,
+    profile: ProfileOption = None,
+    output: OutputOption = None,
+) -> int:
+    """Dump declarative YAML from the current session."""
+    return _run_handler(
+        cmd_dump,
+        command="dump",
+        output=output,
+        profile=_effective_profile(ctx, profile),
+    )
+
+
+@TYPER_APP.command(name="diff")
+def _typer_diff(
+    ctx: typer.Context,
+    *,
+    profile: ProfileOption = None,
+    config: ConfigOption = str(DEFAULT_YAML),
+    asset_dir: AssetDirOption = str(DEFAULT_CONFIG_DIR),
+    chrome_source: ChromeSourceOption = None,
+    user_js_source: UserJsSourceOption = None,
+    state: StateOption = False,
+    assets: AssetsOption = False,
+) -> int:
+    """Show what changes would be made."""
+    return _run_handler(
+        cmd_diff,
+        **_scoped_values(
+            ctx,
+            assets=assets,
+            asset_dir=asset_dir,
+            chrome_source=chrome_source,
+            command="diff",
+            config=config,
+            profile=profile,
+            state=state,
+            user_js_source=user_js_source,
+        ),
+    )
+
+
+@TYPER_APP.command(name="apply")
+def _typer_apply(
+    ctx: typer.Context,
+    *,
+    profile: ProfileOption = None,
+    config: ConfigOption = str(DEFAULT_YAML),
+    asset_dir: AssetDirOption = str(DEFAULT_CONFIG_DIR),
+    chrome_source: ChromeSourceOption = None,
+    user_js_source: UserJsSourceOption = None,
+    state: StateOption = False,
+    assets: AssetsOption = False,
+    yes: Annotated[
+        bool,
+        typer.Option("-y", "--yes", help="Skip confirmation prompts"),
+    ] = False,
+) -> int:
+    """Apply changes to the Zen session file."""
+    values = _scoped_values(
+        ctx,
+        assets=assets,
+        asset_dir=asset_dir,
+        chrome_source=chrome_source,
+        command="apply",
+        config=config,
+        profile=profile,
+        state=state,
+        user_js_source=user_js_source,
+    )
+    values["yes"] = yes
+    return _run_handler(cmd_apply, **values)
+
+
+@TYPER_APP.command(name="check")
+def _typer_check(
+    ctx: typer.Context,
+    *,
+    profile: ProfileOption = None,
+) -> int:
+    """Validate structural invariants in the current session."""
+    return _run_handler(
+        cmd_check,
+        command="check",
+        profile=_effective_profile(ctx, profile),
+    )
+
+
+@_INSPECT_APP.callback()
+def _typer_inspect_root(
+    ctx: typer.Context,
+    *,
+    profile: ProfileOption = None,
+) -> None:
+    """Store inspect-level profile options for nested commands."""
+    ctx.obj = {"profile": _effective_profile(ctx, profile)}
+
+
+@_INSPECT_APP.command(name="folders")
+def _typer_inspect_folders(ctx: typer.Context) -> int:
+    """List folders."""
+    return _run_handler(
+        cmd_inspect_folders,
+        command="inspect",
+        inspect_command="folders",
+        profile=_effective_profile(ctx, None),
+    )
+
+
+@_INSPECT_APP.command(name="tabs")
+def _typer_inspect_tabs(ctx: typer.Context) -> int:
+    """List managed tab locations."""
+    return _run_handler(
+        cmd_inspect_tabs,
+        command="inspect",
+        inspect_command="tabs",
+        profile=_effective_profile(ctx, None),
+    )
+
+
+@_INSPECT_APP.command(name="workspaces")
+def _typer_inspect_workspaces(ctx: typer.Context) -> int:
+    """List workspaces."""
+    return _run_handler(
+        cmd_inspect_workspaces,
+        command="inspect",
+        inspect_command="workspaces",
+        profile=_effective_profile(ctx, None),
+    )
+
+
+@_INSPECT_APP.command(name="raw")
+def _typer_inspect_raw(
+    ctx: typer.Context,
+    *,
+    literal: Annotated[
+        bool,
+        typer.Option(
+            "-l",
+            "--literal",
+            help="Print the literal decoded session payload without Pydantic normalization",
+        ),
+    ] = False,
+    output: OutputOption = None,
+) -> int:
+    """Print decoded session JSON."""
+    return _run_handler(
+        cmd_inspect_raw,
+        command="inspect",
+        inspect_command="raw",
+        literal=literal,
+        output=output,
+        profile=_effective_profile(ctx, None),
+    )
+
+
+@_PROFILE_APP.callback()
+def _typer_profile_root(
+    ctx: typer.Context,
+    *,
+    profile: ProfileOption = None,
+) -> None:
+    """Store profile-level profile options for nested commands."""
+    ctx.obj = {"profile": _effective_profile(ctx, profile)}
+
+
+@_PROFILE_APP.command(name="path")
+def _typer_profile_path(ctx: typer.Context) -> int:
+    """Print the resolved profile directory path."""
+    return _run_handler(
+        cmd_profile_path,
+        command="profile",
+        profile=_effective_profile(ctx, None),
+        profile_command="path",
+    )
+
+
+@_PROFILE_APP.command(name="is-running")
+def _typer_profile_is_running(ctx: typer.Context) -> int:
+    """Exit 0 if Zen appears to be using the target profile."""
+    return _run_handler(
+        cmd_profile_is_running,
+        command="profile",
+        profile=_effective_profile(ctx, None),
+        profile_command="is-running",
+    )
+
+
+def _legacy_argparse_main(argv: Sequence[str] | None = None) -> int:
+    """Run the legacy argparse dispatcher for parser-focused tests."""
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.command:
@@ -2852,9 +3220,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         _stderr("Interrupted.")
         return 130
-    else:
-        parser.print_help()
+
+    parser.print_help()
+    return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the CLI."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not args:
+        build_parser().print_help()
         return 0
+    if (
+        build_parser is not _ARGPARSE_BUILD_PARSER
+        or _dispatch_nested_command is not _ARGPARSE_DISPATCH_NESTED_COMMAND
+    ):
+        return _legacy_argparse_main(args)
+    try:
+        result = get_command(TYPER_APP).main(
+            args=args,
+            prog_name="zentool",
+            standalone_mode=False,
+        )
+        return result if isinstance(result, int) else 0
+    except ZentoolError as exc:
+        _stderr(f"Error: {exc}")
+        return 1
+    except KeyboardInterrupt:
+        _stderr("Interrupted.")
+        return 130
+    except click.Abort:
+        _stderr("Interrupted.")
+        return 130
+    except click.ClickException as exc:
+        exc.show()
+        return exc.exit_code
 
 
 __all__ = [

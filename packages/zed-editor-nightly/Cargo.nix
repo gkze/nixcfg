@@ -2493,6 +2493,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
             name = "base64";
             packageId = "base64 0.22.1";
           }
@@ -2586,10 +2590,6 @@ rec {
           {
             name = "settings";
             packageId = "settings";
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "task";
@@ -2688,6 +2688,14 @@ rec {
             features = [ "unstable" ];
           }
           {
+            name = "agent_servers";
+            packageId = "agent_servers";
+          }
+          {
+            name = "agent_ui";
+            packageId = "agent_ui";
+          }
+          {
             name = "collections";
             packageId = "collections";
           }
@@ -2699,11 +2707,6 @@ rec {
           {
             name = "language";
             packageId = "language";
-          }
-          {
-            name = "log";
-            packageId = "log";
-            features = [ "kv_unstable_serde" "serde" ];
           }
           {
             name = "markdown";
@@ -2728,10 +2731,6 @@ rec {
             packageId = "settings";
           }
           {
-            name = "smol";
-            packageId = "smol";
-          }
-          {
             name = "theme_settings";
             packageId = "theme_settings";
           }
@@ -2751,7 +2750,6 @@ rec {
         features = {
           "test-support" = [ "workspace/test-support" ];
         };
-        resolvedDefaultFeatures = [ "test-support" ];
       };
       "action_log" = rec {
         crateName = "action_log";
@@ -3105,6 +3103,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
             name = "chrono";
             packageId = "chrono";
             features = [ "serde" ];
@@ -3259,10 +3261,6 @@ rec {
             features = [ "union" "const_new" ];
           }
           {
-            name = "smol";
-            packageId = "smol";
-          }
-          {
             name = "sqlez";
             packageId = "sqlez";
           }
@@ -3329,6 +3327,10 @@ rec {
             name = "agent_servers";
             packageId = "agent_servers";
             features = [ "test-support" ];
+          }
+          {
+            name = "async-io";
+            packageId = "async-io";
           }
           {
             name = "client";
@@ -3649,10 +3651,6 @@ rec {
             packageId = "acp_thread";
           }
           {
-            name = "acp_tools";
-            packageId = "acp_tools";
-          }
-          {
             name = "action_log";
             packageId = "action_log";
           }
@@ -3664,6 +3662,10 @@ rec {
           {
             name = "anyhow";
             packageId = "anyhow";
+          }
+          {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
           }
           {
             name = "chrono";
@@ -3768,10 +3770,6 @@ rec {
             packageId = "settings";
           }
           {
-            name = "smol";
-            packageId = "smol";
-          }
-          {
             name = "task";
             packageId = "task";
           }
@@ -3860,7 +3858,7 @@ rec {
         ];
         features = {
           "reqwest_client" = [ "dep:reqwest_client" ];
-          "test-support" = [ "acp_tools/test-support" "acp_thread/test-support" "gpui/test-support" "project/test-support" "dep:env_logger" "client/test-support" "dep:gpui_tokio" "reqwest_client/test-support" ];
+          "test-support" = [ "acp_thread/test-support" "gpui/test-support" "project/test-support" "dep:env_logger" "client/test-support" "dep:gpui_tokio" "reqwest_client/test-support" ];
         };
         resolvedDefaultFeatures = [ "reqwest_client" "test-support" ];
       };
@@ -4009,6 +4007,10 @@ rec {
           {
             name = "anyhow";
             packageId = "anyhow";
+          }
+          {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
           }
           {
             name = "audio";
@@ -4192,6 +4194,10 @@ rec {
             packageId = "picker";
           }
           {
+            name = "platform_title_bar";
+            packageId = "platform_title_bar";
+          }
+          {
             name = "postage";
             packageId = "postage";
             features = [ "futures-traits" ];
@@ -4260,10 +4266,6 @@ rec {
           {
             name = "settings";
             packageId = "settings";
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "streaming_diff";
@@ -5857,7 +5859,7 @@ rec {
         dependencies = [
           {
             name = "async-lock";
-            packageId = "async-lock 3.4.2";
+            packageId = "async-lock";
           }
           {
             name = "blocking";
@@ -5895,7 +5897,7 @@ rec {
           }
           {
             name = "async-lock";
-            packageId = "async-lock 3.4.2";
+            packageId = "async-lock";
           }
           {
             name = "blocking";
@@ -5986,24 +5988,7 @@ rec {
           "tracing" = [ "dep:tracing" ];
         };
       };
-      "async-lock 2.8.0" = rec {
-        crateName = "async-lock";
-        version = "2.8.0";
-        edition = "2018";
-        sha256 = "0asq5xdzgp3d5m82y5rg7a0k9q0g95jy6mgc7ivl334x7qlp4wi8";
-        libName = "async_lock";
-        authors = [
-          "Stjepan Glavina <stjepang@gmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "event-listener";
-            packageId = "event-listener 2.5.3";
-          }
-        ];
-
-      };
-      "async-lock 3.4.2" = rec {
+      "async-lock" = rec {
         crateName = "async-lock";
         version = "3.4.2";
         edition = "2021";
@@ -6113,7 +6098,7 @@ rec {
           }
           {
             name = "async-lock";
-            packageId = "async-lock 3.4.2";
+            packageId = "async-lock";
             target = { target, features }: (target."unix" or false);
           }
           {
@@ -6202,7 +6187,7 @@ rec {
           }
           {
             name = "async-lock";
-            packageId = "async-lock 3.4.2";
+            packageId = "async-lock";
             target = { target, features }: (target."windows" or false);
           }
           {
@@ -6294,7 +6279,7 @@ rec {
           }
           {
             name = "async-lock";
-            packageId = "async-lock 3.4.2";
+            packageId = "async-lock";
             optional = true;
           }
           {
@@ -7154,6 +7139,10 @@ rec {
             packageId = "notifications";
           }
           {
+            name = "project";
+            packageId = "project";
+          }
+          {
             name = "release_channel";
             packageId = "release_channel";
           }
@@ -7171,6 +7160,10 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
+          }
+          {
+            name = "settings";
+            packageId = "settings";
           }
           {
             name = "smol";
@@ -12995,6 +12988,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
             name = "async-tungstenite";
             packageId = "async-tungstenite";
             features = [ "tokio" "tokio-rustls-manual-roots" ];
@@ -13310,6 +13307,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-lock";
+            packageId = "async-lock";
+          }
+          {
             name = "cloud_api_types";
             packageId = "cloud_api_types";
           }
@@ -13338,10 +13339,6 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "thiserror";
@@ -13999,6 +13996,10 @@ rec {
             name = "agent";
             packageId = "agent";
             features = [ "test-support" ];
+          }
+          {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
           }
           {
             name = "async-trait";
@@ -15268,6 +15269,14 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
+            name = "async-process";
+            packageId = "async-process";
+          }
+          {
             name = "async-trait";
             packageId = "async-trait";
           }
@@ -15282,6 +15291,10 @@ rec {
           {
             name = "futures";
             packageId = "futures";
+          }
+          {
+            name = "futures-lite";
+            packageId = "futures-lite 1.13.0";
           }
           {
             name = "gpui";
@@ -15343,10 +15356,6 @@ rec {
             packageId = "slotmap";
           }
           {
-            name = "smol";
-            packageId = "smol";
-          }
-          {
             name = "tempfile";
             packageId = "tempfile";
           }
@@ -15370,6 +15379,10 @@ rec {
             packageId = "gpui";
             usesDefaultFeatures = false;
             features = [ "test-support" ];
+          }
+          {
+            name = "pollster";
+            packageId = "pollster 0.4.0";
           }
         ];
         features = {
@@ -17162,6 +17175,10 @@ rec {
         libPath = "src/crashes.rs";
         dependencies = [
           {
+            name = "async-process";
+            packageId = "async-process";
+          }
+          {
             name = "cfg-if";
             packageId = "cfg-if";
           }
@@ -17208,10 +17225,6 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "system_specs";
@@ -18825,10 +18838,6 @@ rec {
             packageId = "release_channel";
           }
           {
-            name = "smol";
-            packageId = "smol";
-          }
-          {
             name = "sqlez";
             packageId = "sqlez";
           }
@@ -19713,6 +19722,10 @@ rec {
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/dev_container"; };
         dependencies = [
           {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
             name = "async-tar";
             packageId = "async-tar";
           }
@@ -19808,6 +19821,10 @@ rec {
           {
             name = "worktree";
             packageId = "worktree";
+          }
+          {
+            name = "yaml-rust2";
+            packageId = "yaml-rust2";
           }
         ];
         devDependencies = [
@@ -21840,6 +21857,10 @@ rec {
             packageId = "futures";
           }
           {
+            name = "futures-lite";
+            packageId = "futures-lite 1.13.0";
+          }
+          {
             name = "fuzzy";
             packageId = "fuzzy";
           }
@@ -21956,10 +21977,6 @@ rec {
             name = "smallvec";
             packageId = "smallvec";
             features = [ "union" "const_new" ];
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "snippet";
@@ -24724,6 +24741,10 @@ rec {
             packageId = "ui";
           }
           {
+            name = "ui_input";
+            packageId = "ui_input";
+          }
+          {
             name = "util";
             packageId = "util";
           }
@@ -25542,6 +25563,10 @@ rec {
             features = [ "async-io" "notification" "open_uri" "file_chooser" "settings" "trash" ];
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
             name = "async-tar";
             packageId = "async-tar";
           }
@@ -25621,6 +25646,10 @@ rec {
           {
             name = "smol";
             packageId = "smol";
+          }
+          {
+            name = "telemetry";
+            packageId = "telemetry";
           }
           {
             name = "tempfile";
@@ -27861,6 +27890,10 @@ rec {
             packageId = "askpass";
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
             name = "async-trait";
             packageId = "async-trait";
           }
@@ -28199,6 +28232,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
             name = "collections";
             packageId = "collections";
           }
@@ -28236,6 +28273,10 @@ rec {
             packageId = "project";
           }
           {
+            name = "project_panel";
+            packageId = "project_panel";
+          }
+          {
             name = "search";
             packageId = "search";
           }
@@ -28247,10 +28288,6 @@ rec {
             name = "smallvec";
             packageId = "smallvec";
             features = [ "union" "const_new" ];
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "theme";
@@ -28295,6 +28332,10 @@ rec {
             packageId = "gpui";
             usesDefaultFeatures = false;
             features = [ "test-support" ];
+          }
+          {
+            name = "language_model";
+            packageId = "language_model";
           }
           {
             name = "project";
@@ -28481,6 +28522,10 @@ rec {
             packageId = "futures";
           }
           {
+            name = "futures-lite";
+            packageId = "futures-lite 1.13.0";
+          }
+          {
             name = "fuzzy";
             packageId = "fuzzy";
           }
@@ -28589,10 +28634,6 @@ rec {
             name = "smallvec";
             packageId = "smallvec";
             features = [ "union" "const_new" ];
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "strum";
@@ -28706,6 +28747,10 @@ rec {
             name = "settings";
             packageId = "settings";
             features = [ "test-support" ];
+          }
+          {
+            name = "task";
+            packageId = "task";
           }
           {
             name = "unindent";
@@ -30504,15 +30549,6 @@ rec {
         libPath = "gpui_shared_string.rs";
         dependencies = [
           {
-            name = "derive_more";
-            packageId = "derive_more";
-            features = [ "add" "add_assign" "deref" "deref_mut" "display" "from_str" "mul" "mul_assign" "not" ];
-          }
-          {
-            name = "gpui_util";
-            packageId = "gpui_util";
-          }
-          {
             name = "schemars";
             packageId = "schemars 1.0.4";
             features = [ "indexmap2" ];
@@ -30521,6 +30557,10 @@ rec {
             name = "serde";
             packageId = "serde";
             features = [ "derive" "rc" ];
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
           }
         ];
 
@@ -31058,9 +31098,9 @@ rec {
       };
       "grid" = rec {
         crateName = "grid";
-        version = "0.18.0";
+        version = "1.0.0";
         edition = "2018";
-        sha256 = "10cnvyr90rf6w1piihi1jq3njqdb9q3n60n7bdknvsi5hb61w40j";
+        sha256 = "0842jhglqh7vndcvanmv21xb31jxl0643610h3c7hq99m30d9qpr";
         authors = [
           "Armin Becher <armin.becher@gmai.com>"
         ];
@@ -34194,6 +34234,10 @@ rec {
             features = [ "serde" ];
           }
           {
+            name = "collections";
+            packageId = "collections";
+          }
+          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
@@ -34202,6 +34246,10 @@ rec {
           {
             name = "hdrhistogram";
             packageId = "hdrhistogram";
+          }
+          {
+            name = "telemetry";
+            packageId = "telemetry";
           }
         ];
 
@@ -35885,6 +35933,10 @@ rec {
             packageId = "futures";
           }
           {
+            name = "futures-lite";
+            packageId = "futures-lite 1.13.0";
+          }
+          {
             name = "fuzzy";
             packageId = "fuzzy";
           }
@@ -35971,10 +36023,6 @@ rec {
             name = "smallvec";
             packageId = "smallvec";
             features = [ "union" "const_new" ];
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "streaming-iterator";
@@ -36430,6 +36478,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-lock";
+            packageId = "async-lock";
+          }
+          {
             name = "cloud_llm_client";
             packageId = "cloud_llm_client";
           }
@@ -36465,10 +36517,6 @@ rec {
             features = [ "preserve_order" "raw_value" ];
           }
           {
-            name = "smol";
-            packageId = "smol";
-          }
-          {
             name = "strum";
             packageId = "strum 0.27.2";
             features = [ "derive" ];
@@ -36499,6 +36547,10 @@ rec {
           {
             name = "anyhow";
             packageId = "anyhow";
+          }
+          {
+            name = "async-lock";
+            packageId = "async-lock";
           }
           {
             name = "aws-config";
@@ -36677,10 +36729,6 @@ rec {
             packageId = "settings";
           }
           {
-            name = "smol";
-            packageId = "smol";
-          }
-          {
             name = "strum";
             packageId = "strum 0.27.2";
             features = [ "derive" ];
@@ -36793,10 +36841,6 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "thiserror";
@@ -37273,6 +37317,11 @@ rec {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
             features = [ "unstable" ];
+          }
+          {
+            name = "settings";
+            packageId = "settings";
+            features = [ "test-support" ];
           }
           {
             name = "theme";
@@ -39330,6 +39379,10 @@ rec {
             packageId = "settings";
           }
           {
+            name = "theme";
+            packageId = "theme";
+          }
+          {
             name = "theme_settings";
             packageId = "theme_settings";
           }
@@ -40407,6 +40460,10 @@ rec {
         libPath = "src/miniprofiler_ui.rs";
         dependencies = [
           {
+            name = "command_palette_hooks";
+            packageId = "command_palette_hooks";
+          }
+          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
@@ -40419,6 +40476,10 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
+          }
+          {
+            name = "settings";
+            packageId = "settings";
           }
           {
             name = "smol";
@@ -40790,6 +40851,10 @@ rec {
             packageId = "ctor";
           }
           {
+            name = "futures-lite";
+            packageId = "futures-lite 1.13.0";
+          }
+          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
@@ -40832,10 +40897,6 @@ rec {
             name = "smallvec";
             packageId = "smallvec";
             features = [ "union" "const_new" ];
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "sum_tree";
@@ -41594,8 +41655,8 @@ rec {
             packageId = "component";
           }
           {
-            name = "db";
-            packageId = "db";
+            name = "futures-lite";
+            packageId = "futures-lite 1.13.0";
           }
           {
             name = "gpui";
@@ -44188,7 +44249,7 @@ rec {
           }
           {
             name = "async-lock";
-            packageId = "async-lock 3.4.2";
+            packageId = "async-lock";
             optional = true;
           }
           {
@@ -45017,10 +45078,6 @@ rec {
             packageId = "settings";
           }
           {
-            name = "smol";
-            packageId = "smol";
-          }
-          {
             name = "theme";
             packageId = "theme";
           }
@@ -45050,6 +45107,10 @@ rec {
             name = "editor";
             packageId = "editor";
             features = [ "test-support" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
           }
           {
             name = "gpui";
@@ -45113,6 +45174,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
             name = "collections";
             packageId = "collections";
           }
@@ -45127,6 +45192,10 @@ rec {
           {
             name = "file_icons";
             packageId = "file_icons";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
           }
           {
             name = "fuzzy";
@@ -45184,10 +45253,6 @@ rec {
             name = "smallvec";
             packageId = "smallvec";
             features = [ "union" "const_new" ];
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "theme";
@@ -49318,6 +49383,10 @@ rec {
             packageId = "askpass";
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
             name = "async-trait";
             packageId = "async-trait";
           }
@@ -52641,10 +52710,6 @@ rec {
             packageId = "settings";
           }
           {
-            name = "smol";
-            packageId = "smol";
-          }
-          {
             name = "task";
             packageId = "task";
           }
@@ -53515,6 +53580,10 @@ rec {
           {
             name = "askpass";
             packageId = "askpass";
+          }
+          {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
           }
           {
             name = "clap";
@@ -58143,6 +58212,10 @@ rec {
             packageId = "futures";
           }
           {
+            name = "futures-lite";
+            packageId = "futures-lite 1.13.0";
+          }
+          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
@@ -58180,10 +58253,6 @@ rec {
           {
             name = "settings";
             packageId = "settings";
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "theme";
@@ -60116,6 +60185,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
             name = "chrono";
             packageId = "chrono";
             features = [ "serde" ];
@@ -60183,10 +60256,6 @@ rec {
           {
             name = "settings";
             packageId = "settings";
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "telemetry";
@@ -60839,7 +60908,7 @@ rec {
           }
           {
             name = "async-lock";
-            packageId = "async-lock 3.4.2";
+            packageId = "async-lock";
           }
           {
             name = "async-net";
@@ -60863,12 +60932,26 @@ rec {
       };
       "smol_str" = rec {
         crateName = "smol_str";
-        version = "0.3.5";
+        version = "0.3.6";
         edition = "2024";
-        sha256 = "05sfs2yq2yjbrmdz0b6jlnlp73iyhivg0j3fxqc1v5d9sa5r2yhg";
+        sha256 = "08qm7y1k2fkzrs8k78m03h4z4wbarv5g0bfr5m62m1glzil77aja";
         authors = [
           "Aleksey Kladov <aleksey.kladov@gmail.com>"
           "Lukas Wirth <lukastw97@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "borsh";
+            packageId = "borsh";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "serde_core";
+            packageId = "serde_core";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
         ];
         features = {
           "arbitrary" = [ "dep:arbitrary" ];
@@ -60877,6 +60960,7 @@ rec {
           "serde" = [ "dep:serde_core" ];
           "std" = [ "serde_core?/std" "borsh?/std" ];
         };
+        resolvedDefaultFeatures = [ "default" "std" ];
       };
       "snafu" = rec {
         crateName = "snafu";
@@ -61362,8 +61446,8 @@ rec {
             packageId = "parking_lot";
           }
           {
-            name = "smol";
-            packageId = "smol";
+            name = "pollster";
+            packageId = "pollster 0.4.0";
           }
           {
             name = "sqlformat";
@@ -64447,9 +64531,9 @@ rec {
       };
       "taffy" = rec {
         crateName = "taffy";
-        version = "0.9.0";
+        version = "0.10.1";
         edition = "2021";
-        sha256 = "0150r61qrajrx56q0rwl8bd9j3nam0n0g61s6mfqnmcxyw9msgm1";
+        sha256 = "0nc8r1kv1kr8ryns7chm255l5q8b2yi77i1s9prw65kw0ia218mf";
         authors = [
           "Alice Cecile <alice.i.cecile@gmail.com>"
           "Johnathan Kelley <jkelleyrtp@gmail.com>"
@@ -64484,15 +64568,17 @@ rec {
         features = {
           "alloc" = [ "serde?/alloc" ];
           "debug" = [ "std" ];
-          "default" = [ "std" "taffy_tree" "flexbox" "grid" "block_layout" "calc" "content_size" "detailed_layout_info" ];
+          "default" = [ "std" "taffy_tree" "flexbox" "grid" "block_layout" "float_layout" "calc" "content_size" "detailed_layout_info" ];
           "document-features" = [ "dep:document-features" ];
           "grid" = [ "alloc" "dep:grid" ];
+          "parse" = [ "dep:cssparser" ];
+          "parse_faster" = [ "parse" "cssparser/fast_match_byte" ];
           "profile" = [ "std" ];
           "serde" = [ "dep:serde" ];
           "std" = [ "grid?/std" "serde?/std" "slotmap?/std" ];
           "taffy_tree" = [ "dep:slotmap" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "block_layout" "calc" "content_size" "default" "detailed_layout_info" "flexbox" "grid" "std" "taffy_tree" ];
+        resolvedDefaultFeatures = [ "alloc" "block_layout" "calc" "content_size" "default" "detailed_layout_info" "flexbox" "float_layout" "grid" "std" "taffy_tree" ];
       };
       "tagptr" = rec {
         crateName = "tagptr";
@@ -64956,12 +65042,20 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
             name = "collections";
             packageId = "collections";
           }
           {
             name = "futures";
             packageId = "futures";
+          }
+          {
+            name = "futures-lite";
+            packageId = "futures-lite 1.13.0";
           }
           {
             name = "gpui";
@@ -64986,6 +65080,10 @@ rec {
             packageId = "parking_lot";
           }
           {
+            name = "percent-encoding";
+            packageId = "percent-encoding";
+          }
+          {
             name = "regex";
             packageId = "regex";
           }
@@ -65006,10 +65104,6 @@ rec {
           {
             name = "settings";
             packageId = "settings";
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "sysinfo";
@@ -66322,6 +66416,10 @@ rec {
         libPath = "src/title_bar.rs";
         dependencies = [
           {
+            name = "agent_settings";
+            packageId = "agent_settings";
+          }
+          {
             name = "anyhow";
             packageId = "anyhow";
           }
@@ -66357,6 +66455,10 @@ rec {
           {
             name = "db";
             packageId = "db";
+          }
+          {
+            name = "fs";
+            packageId = "fs";
           }
           {
             name = "git_ui";
@@ -83896,6 +83998,10 @@ rec {
             packageId = "futures";
           }
           {
+            name = "futures-lite";
+            packageId = "futures-lite 1.13.0";
+          }
+          {
             name = "git";
             packageId = "git";
           }
@@ -84065,6 +84171,15 @@ rec {
             features = [ "test-support" ];
           }
           {
+            name = "proptest";
+            packageId = "proptest";
+            features = [ "attr-macro" ];
+          }
+          {
+            name = "proptest-derive";
+            packageId = "proptest-derive";
+          }
+          {
             name = "remote";
             packageId = "remote";
             features = [ "test-support" ];
@@ -84105,8 +84220,12 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
             name = "async-lock";
-            packageId = "async-lock 2.8.0";
+            packageId = "async-lock";
           }
           {
             name = "chardetng";
@@ -84200,10 +84319,6 @@ rec {
             name = "smallvec";
             packageId = "smallvec";
             features = [ "union" "const_new" ];
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "sum_tree";
@@ -85376,7 +85491,7 @@ rec {
           }
           {
             name = "async-lock";
-            packageId = "async-lock 3.4.2";
+            packageId = "async-lock";
             optional = true;
           }
           {

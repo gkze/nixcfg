@@ -1,7 +1,8 @@
 {
+  "drvHash": "m3jkwxaqh6r5wwyi4m117z8pj2af7k1r",
   "hashes": [
     {
-      "hash": "sha256-RMPfaE3oWHOhvH9j+anxfJOJK/cBFISBWhj0E2WOatI=",
+      "hash": "sha256-+pPJvFY3CO6nQUzyPtGFzGY7yQmbBYIAprPwjfigiE4=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     },
@@ -17,5 +18,5 @@
     }
   ],
   "input": "mux",
-  "version": "v0.21.0"
+  "version": "v0.23.1"
 }

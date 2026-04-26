@@ -32,33 +32,31 @@ def test_artifact_contract_helper_error_paths(tmp_path: Path) -> None:
     ) == {"name": "linux"}
     assert contracts._substitute_matrix(1, {"os": "linux"}) == 1
 
-    try:
+    with pytest.raises(RuntimeError, match="Exclude paths"):
         contracts._parse_path_specs("!foo")
-    except RuntimeError as exc:
-        assert "Exclude paths" in str(exc)
-    else:
-        msg = "expected exclude-path failure"
-        raise AssertionError(msg)
 
-    try:
+    with pytest.raises(RuntimeError, match="Absolute artifact paths"):
         contracts._parse_path_specs("/tmp/foo")
-    except RuntimeError as exc:
-        assert "Absolute artifact paths" in str(exc)
-    else:
-        msg = "expected absolute-path failure"
-        raise AssertionError(msg)
 
     _write_file(tmp_path / "packages/demo/sources.json")
     _write_file(tmp_path / "overlays/demo/sources.json")
     assert contracts._resolve_spec_paths(tmp_path, "packages") == (
         "packages/demo/sources.json",
     )
+    with pytest.raises(RuntimeError, match="does not exist"):
+        contracts._resolve_spec_paths(tmp_path, "missing.txt")
     assert set(
         contracts._materialized_paths_from_run_step(
             {"run": "nix run .#nixcfg -- ci pipeline sources"},
             repo_root=tmp_path,
         )
     ) == {"overlays/demo/sources.json", "packages/demo/sources.json"}
+    assert contracts._materialized_paths_from_run_step(
+        {
+            "run": "nix run .#nixcfg -- ci pipeline versions --output pinned-versions.json"
+        },
+        repo_root=tmp_path,
+    ) == ("pinned-versions.json",)
     assert (
         contracts._materialized_paths_from_run_step({"run": 1}, repo_root=tmp_path)
         == ()
@@ -67,26 +65,16 @@ def test_artifact_contract_helper_error_paths(tmp_path: Path) -> None:
 
 def test_expand_jobs_reject_invalid_shapes() -> None:
     """Reject malformed workflow job shapes with clear errors."""
-    try:
+    with pytest.raises(TypeError, match="does not define steps as a list"):
         contracts._expand_jobs({"bad": {"steps": "nope"}})
-    except TypeError as exc:
-        assert "does not define steps as a list" in str(exc)
-    else:
-        msg = "expected invalid-steps failure"
-        raise AssertionError(msg)
 
-    try:
+    with pytest.raises(TypeError, match="Unsupported matrix include entry"):
         contracts._expand_jobs({
             "bad": {
                 "steps": ["skip-me"],
                 "strategy": {"matrix": {"include": [1]}},
             }
         })
-    except TypeError as exc:
-        assert "Unsupported matrix include entry" in str(exc)
-    else:
-        msg = "expected invalid-matrix failure"
-        raise AssertionError(msg)
 
     assert contracts._expand_jobs({"ok": {"steps": ["skip-me"]}})[0].steps == ()
     assert contracts._expand_jobs({"none": {"steps": None}})[0].steps == ()
@@ -103,18 +91,13 @@ def test_expand_jobs_reject_invalid_matrix_substitutions() -> None:
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(contracts, "_substitute_matrix", _bad_substitute)
     try:
-        try:
+        with pytest.raises(TypeError, match=r"expanded to \[\]"):
             contracts._expand_jobs({
                 "bad": {
                     "steps": [{"run": "${{ matrix.os }}"}, "skip-me"],
                     "strategy": {"matrix": {"include": [{"os": "linux"}]}},
                 }
             })
-        except TypeError as exc:
-            assert "expanded to []" in str(exc)
-        else:
-            msg = "expected invalid-substitution failure"
-            raise AssertionError(msg)
     finally:
         monkeypatch.undo()
 
@@ -129,7 +112,7 @@ def test_expand_jobs_reject_invalid_matrix_substitutions() -> None:
 
 def test_build_upload_and_download_reject_invalid_shapes(tmp_path: Path) -> None:
     """Reject malformed upload/download steps with clear errors."""
-    try:
+    with pytest.raises(TypeError, match="missing 'with'"):
         contracts._build_upload(
             {},
             job_id="job",
@@ -137,13 +120,8 @@ def test_build_upload_and_download_reject_invalid_shapes(tmp_path: Path) -> None
             repo_root=tmp_path,
             step_index=1,
         )
-    except TypeError as exc:
-        assert "missing 'with'" in str(exc)
-    else:
-        msg = "expected upload-with failure"
-        raise AssertionError(msg)
 
-    try:
+    with pytest.raises(RuntimeError, match="missing a name"):
         contracts._build_upload(
             {"with": {}},
             job_id="job",
@@ -151,11 +129,6 @@ def test_build_upload_and_download_reject_invalid_shapes(tmp_path: Path) -> None
             repo_root=tmp_path,
             step_index=1,
         )
-    except RuntimeError as exc:
-        assert "missing a name" in str(exc)
-    else:
-        msg = "expected upload-name failure"
-        raise AssertionError(msg)
 
     dummy_upload = contracts.ArtifactUpload(
         artifact_name="demo",
@@ -166,13 +139,8 @@ def test_build_upload_and_download_reject_invalid_shapes(tmp_path: Path) -> None
         step_name="upload",
         stored_paths=("foo.txt",),
     )
-    try:
+    with pytest.raises(TypeError, match="missing 'with'"):
         contracts._build_download({}, job_id="job", step_index=1, upload=dummy_upload)
-    except TypeError as exc:
-        assert "missing 'with'" in str(exc)
-    else:
-        msg = "expected download-with failure"
-        raise AssertionError(msg)
 
 
 def test_collect_uploads_and_validate_job_flows_cover_error_branches(
@@ -206,6 +174,24 @@ def test_collect_uploads_and_validate_job_flows_cover_error_branches(
         duplicate_jobs, repo_root=tmp_path
     )
     assert any("uploaded multiple times" in error for error in duplicate_errors)
+
+    download_probe_job = contracts.WorkflowJob(
+        job_id="download-probe",
+        instance_id="download-probe",
+        steps=(
+            {"uses": "actions/download-artifact@v7"},
+            {"uses": "actions/download-artifact@v7", "with": {"name": "missing"}},
+            {
+                "uses": "actions/upload-artifact@v6",
+                "with": {"name": "after-download", "path": "foo.txt"},
+            },
+        ),
+    )
+    download_uploads, download_errors = contracts._collect_uploads(
+        (download_probe_job,), repo_root=tmp_path
+    )
+    assert download_errors == []
+    assert "after-download" in download_uploads
 
     malformed_job = contracts.WorkflowJob(
         job_id="consumer",
@@ -307,15 +293,10 @@ def test_validate_workflow_artifact_contracts_rejects_invalid_top_level_shapes(
         encoding="utf-8",
     )
 
-    try:
+    with pytest.raises(TypeError, match="does not contain a jobs mapping"):
         validate_workflow_artifact_contracts(
             workflow_path=workflow_path, repo_root=tmp_path
         )
-    except TypeError as exc:
-        assert "does not contain a jobs mapping" in str(exc)
-    else:
-        msg = "expected invalid-jobs failure"
-        raise AssertionError(msg)
 
 
 def test_validate_workflow_artifact_contracts_defaults_workflow_path_from_repo_root(
@@ -339,17 +320,11 @@ def test_validate_workflow_artifact_contracts_defaults_workflow_path_from_repo_r
 
 def test_build_needs_graph_rejects_unknown_needs() -> None:
     """Reject jobs that depend on undeclared producers."""
-    try:
+    with pytest.raises(RuntimeError, match=r"references unknown needs.*`missing`"):
         contracts._build_needs_graph({
             "consumer": {"needs": ["missing"], "steps": []},
             "producer": {"steps": []},
         })
-    except RuntimeError as exc:
-        assert "references unknown needs" in str(exc)
-        assert "`missing`" in str(exc)
-    else:
-        msg = "expected unknown-needs failure"
-        raise AssertionError(msg)
 
 
 def test_validate_workflow_artifact_contracts_detects_path_re_rooting(
@@ -397,16 +372,12 @@ jobs:
         encoding="utf-8",
     )
 
-    try:
+    with pytest.raises(RuntimeError) as exc_info:
         validate_workflow_artifact_contracts(
             workflow_path=workflow_path,
             repo_root=tmp_path,
         )
-    except RuntimeError as exc:
-        message = str(exc)
-    else:
-        msg = "expected validation failure"
-        raise AssertionError(msg)
+    message = str(exc_info.value)
 
     assert "crate2nix-darwin" in message
     assert "packages/zed-editor-nightly/Cargo.nix" in message
@@ -492,19 +463,70 @@ jobs:
         encoding="utf-8",
     )
 
-    try:
+    with pytest.raises(RuntimeError) as exc_info:
         validate_workflow_artifact_contracts(
             workflow_path=workflow_path,
             repo_root=tmp_path,
         )
-    except RuntimeError as exc:
-        message = str(exc)
-    else:
-        msg = "expected validation failure"
-        raise AssertionError(msg)
+    message = str(exc_info.value)
 
     assert "does not depend on `producer`" in message
     assert "downloads artifact `foo`" in message
+
+
+def test_validate_workflow_artifact_contracts_rejects_unmaterialized_upload_paths(
+    tmp_path: Path,
+) -> None:
+    """Reject uploads whose files are neither present nor produced earlier in the job."""
+    workflow_path = tmp_path / "workflow.yml"
+    workflow_path.write_text(
+        """
+on: workflow_dispatch
+jobs:
+  producer:
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: generated
+          path: pinned-versions.json
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="pinned-versions.json"):
+        validate_workflow_artifact_contracts(
+            workflow_path=workflow_path,
+            repo_root=tmp_path,
+        )
+
+
+def test_validate_workflow_artifact_contracts_allows_known_generated_upload_paths(
+    tmp_path: Path,
+) -> None:
+    """Allow uploads after known workflow helpers materialize their outputs."""
+    workflow_path = tmp_path / "workflow.yml"
+    workflow_path.write_text(
+        """
+on: workflow_dispatch
+jobs:
+  producer:
+    runs-on: ubuntu-latest
+    steps:
+      - run: nix run .#nixcfg -- ci pipeline versions --output pinned-versions.json
+      - uses: actions/upload-artifact@v6
+        with:
+          name: generated
+          path: pinned-versions.json
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    validate_workflow_artifact_contracts(
+        workflow_path=workflow_path,
+        repo_root=tmp_path,
+    )
 
 
 def test_validate_workflow_artifact_contracts_allows_transitive_needs(
@@ -547,6 +569,64 @@ jobs:
     )
 
 
+def test_refresh_final_artifact_scope_rejects_non_update_paths(
+    tmp_path: Path,
+) -> None:
+    """The PR artifact must not carry ordinary source files like flake.nix."""
+    _write_file(tmp_path / "flake.lock")
+    _write_file(tmp_path / "flake.nix")
+
+    errors = contracts._validate_refresh_final_artifact_scope(
+        {
+            "merged-generated-formatted": contracts.ArtifactUpload(
+                artifact_name="merged-generated-formatted",
+                artifact_root="",
+                job_id="refresh-sanity",
+                job_instance_id="refresh-sanity",
+                source_paths=("flake.lock", "flake.nix"),
+                step_name="upload",
+                stored_paths=("flake.lock", "flake.nix"),
+            )
+        },
+        repo_root=tmp_path,
+    )
+
+    assert errors == [
+        "Artifact `merged-generated-formatted` includes non-update path(s): `flake.nix`"
+    ]
+
+
+def test_refresh_final_artifact_scope_requires_generated_update_paths(
+    tmp_path: Path,
+) -> None:
+    """The final PR artifact must include generated updater artifacts."""
+    _write_file(tmp_path / "flake.lock")
+    _write_file(tmp_path / "packages/demo/sources.json")
+    _write_file(tmp_path / "packages/linear-cli/deno-deps.json")
+    _write_file(tmp_path / "packages/neutils/build.zig.zon.nix")
+
+    errors = contracts._validate_refresh_final_artifact_scope(
+        {
+            "merged-generated-formatted": contracts.ArtifactUpload(
+                artifact_name="merged-generated-formatted",
+                artifact_root="",
+                job_id="refresh-sanity",
+                job_instance_id="refresh-sanity",
+                source_paths=("flake.lock", "packages/demo/sources.json"),
+                step_name="upload",
+                stored_paths=("flake.lock", "packages/demo/sources.json"),
+            )
+        },
+        repo_root=tmp_path,
+    )
+
+    assert errors == [
+        "Artifact `merged-generated-formatted` is missing update path(s): "
+        "`packages/linear-cli/deno-deps.json`, "
+        "`packages/neutils/build.zig.zon.nix`"
+    ]
+
+
 def test_validate_workflow_artifact_contracts_rejects_cyclic_needs(
     tmp_path: Path,
 ) -> None:
@@ -570,16 +650,12 @@ jobs:
         encoding="utf-8",
     )
 
-    try:
+    with pytest.raises(RuntimeError) as exc_info:
         validate_workflow_artifact_contracts(
             workflow_path=workflow_path,
             repo_root=tmp_path,
         )
-    except RuntimeError as exc:
-        message = str(exc)
-    else:
-        msg = "expected validation failure"
-        raise AssertionError(msg)
+    message = str(exc_info.value)
 
     assert "contain a cycle" in message
     assert "alpha" in message

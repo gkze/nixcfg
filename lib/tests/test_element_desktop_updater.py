@@ -2,31 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
 
-from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import HashEntry
+from lib.tests._updater_helpers import collect_events as _collect_events
+from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEventKind
-from lib.update.paths import REPO_ROOT
+from lib.update.updaters import base as updater_base
 from lib.update.updaters.base import VersionInfo
 
 
-def _run[T](coro):
-    return asyncio.run(coro)
-
-
-async def _collect_events(stream):
-    return [event async for event in stream]
-
-
 def _load_module(module_name: str = "element_desktop_updater_test"):
-    return load_module_from_path(
-        REPO_ROOT / "overlays/element-desktop/updater.py",
-        module_name,
-    )
+    return load_repo_module("overlays/element-desktop/updater.py", module_name)
 
 
 def test_element_desktop_fetch_latest_reads_pinned_version(
@@ -37,10 +27,10 @@ def test_element_desktop_fetch_latest_reads_pinned_version(
     updater = module.ElementDesktopUpdater()
 
     monkeypatch.setattr(
-        module, "package_dir_for", lambda _name: Path("/tmp/element-desktop")
+        updater_base, "package_dir_for", lambda _name: Path("/tmp/element-desktop")
     )
     monkeypatch.setattr(
-        module.update_sources,
+        updater_base.update_sources,
         "load_source_entry",
         lambda path: type("Entry", (), {"path": path, "version": "1.11.99"})(),
     )
@@ -69,9 +59,9 @@ def test_element_desktop_fetch_latest_rejects_missing_package_or_version(
     module = _load_module("element_desktop_updater_test_fetch_latest_error")
     updater = module.ElementDesktopUpdater()
 
-    monkeypatch.setattr(module, "package_dir_for", lambda _name: pkg_dir)
+    monkeypatch.setattr(updater_base, "package_dir_for", lambda _name: pkg_dir)
     monkeypatch.setattr(
-        module.update_sources,
+        updater_base.update_sources,
         "load_source_entry",
         lambda _path: type("Entry", (), {"version": version})(),
     )
@@ -114,20 +104,10 @@ def test_element_desktop_fetch_hashes_streams_events_and_emits_hash_entries(
     module = _load_module("element_desktop_updater_test_fetch_hashes")
     updater = module.ElementDesktopUpdater()
     info = VersionInfo(version="1.11.99")
-    calls: list[tuple[str, str]] = []
-
-    async def _fixed_hash(name: str, expr: str, *, config=None):
-        assert name == updater.name
-        assert config == updater.config
-        calls.append((name, expr))
-        if len(calls) == 1:
-            yield module.UpdateEvent.status(name, "building src")
-            yield module.UpdateEvent.value(name, "sha256-src")
-            return
-        yield module.UpdateEvent.status(name, "building offline cache")
-        yield module.UpdateEvent.value(name, "sha256-offline")
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+    calls = install_fixed_hash_stream(
+        monkeypatch,
+        (("building src", "sha256-src"), ("building offline cache", "sha256-offline")),
+    )
 
     events = _run(_collect_events(updater.fetch_hashes(info, object())))
 
@@ -141,160 +121,20 @@ def test_element_desktop_fetch_hashes_streams_events_and_emits_hash_entries(
         "building offline cache",
     ]
     assert calls == [
-        ("element-desktop", updater._src_expr("1.11.99")),
-        ("element-desktop", updater._offline_expr("1.11.99", "sha256-src")),
+        {
+            "name": "element-desktop",
+            "expr": updater._src_expr("1.11.99"),
+            "env": None,
+            "config": updater.config,
+        },
+        {
+            "name": "element-desktop",
+            "expr": updater._offline_expr("1.11.99", "sha256-src"),
+            "env": None,
+            "config": updater.config,
+        },
     ]
     assert events[-1].payload == [
         HashEntry.create("srcHash", "sha256-src"),
         HashEntry.create("sha256", "sha256-offline"),
     ]
-
-
-def test_element_desktop_fetch_hashes_requires_src_hash(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Raise when the source hash stream never captures a hash value."""
-    module = _load_module("element_desktop_updater_test_missing_src")
-    updater = module.ElementDesktopUpdater()
-
-    async def _no_src_hash(_name: str, _expr: str, *, config=None):
-        _ = config
-        if False:
-            yield module.UpdateEvent.status("element-desktop", "never")
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _no_src_hash)
-
-    with pytest.raises(RuntimeError, match="Missing srcHash output"):
-        _run(
-            _collect_events(
-                updater.fetch_hashes(VersionInfo(version="1.11.99"), object())
-            )
-        )
-
-
-def test_element_desktop_fetch_hashes_falls_back_when_src_capture_is_missing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Raise from the updater when the wrapped source capture yields no final value."""
-    module = _load_module("element_desktop_updater_test_missing_src_fallback")
-    updater = module.ElementDesktopUpdater()
-
-    async def _fixed_hash(_name: str, _expr: str, *, config=None):
-        _ = config
-        yield module.UpdateEvent.status("element-desktop", "building src")
-
-    async def _capture_without_value(events, *, error: str):
-        assert error == "Missing srcHash output"
-        async for event in events:
-            yield event
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
-    monkeypatch.setattr(module, "capture_stream_value", _capture_without_value)
-
-    with pytest.raises(RuntimeError, match="Missing srcHash output"):
-        _run(
-            _collect_events(
-                updater.fetch_hashes(VersionInfo(version="1.11.99"), object())
-            )
-        )
-
-
-def test_element_desktop_fetch_hashes_requires_sha256(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Raise when the offline cache hash stream never captures a hash value."""
-    module = _load_module("element_desktop_updater_test_missing_sha")
-    updater = module.ElementDesktopUpdater()
-
-    async def _missing_sha(_name: str, expr: str, *, config=None):
-        _ = config
-        if expr == updater._src_expr("1.11.99"):
-            yield module.UpdateEvent.value("element-desktop", "sha256-src")
-            return
-        if False:
-            yield module.UpdateEvent.status("element-desktop", "never")
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _missing_sha)
-
-    with pytest.raises(RuntimeError, match="Missing sha256 output"):
-        _run(
-            _collect_events(
-                updater.fetch_hashes(VersionInfo(version="1.11.99"), object())
-            )
-        )
-
-
-def test_element_desktop_fetch_hashes_falls_back_when_sha_capture_is_missing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Raise from the updater when the wrapped offline capture yields no final value."""
-    module = _load_module("element_desktop_updater_test_missing_sha_fallback")
-    updater = module.ElementDesktopUpdater()
-
-    async def _fixed_hash(_name: str, expr: str, *, config=None):
-        _ = config
-        if expr == updater._src_expr("1.11.99"):
-            yield module.UpdateEvent.value("element-desktop", "sha256-src")
-            return
-        yield module.UpdateEvent.status("element-desktop", "building offline cache")
-
-    async def _capture_selectively(events, *, error: str):
-        async for event in events:
-            yield event
-        if error == "Missing srcHash output":
-            yield module.CapturedValue("sha256-src")
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
-    monkeypatch.setattr(module, "capture_stream_value", _capture_selectively)
-
-    with pytest.raises(RuntimeError, match="Missing sha256 output"):
-        _run(
-            _collect_events(
-                updater.fetch_hashes(VersionInfo(version="1.11.99"), object())
-            )
-        )
-
-
-def test_element_desktop_fetch_hashes_rejects_non_string_src_hash(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Fail fast when the source hash capture payload has the wrong type."""
-    module = _load_module("element_desktop_updater_test_bad_src_type")
-    updater = module.ElementDesktopUpdater()
-
-    async def _bad_src_hash(_name: str, _expr: str, *, config=None):
-        _ = config
-        yield module.UpdateEvent.value("element-desktop", {"hash": "sha256-src"})
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _bad_src_hash)
-
-    with pytest.raises(TypeError, match="Expected srcHash string"):
-        _run(
-            _collect_events(
-                updater.fetch_hashes(VersionInfo(version="1.11.99"), object())
-            )
-        )
-
-
-def test_element_desktop_fetch_hashes_rejects_non_string_sha256(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Fail fast when the offline cache hash capture payload has the wrong type."""
-    module = _load_module("element_desktop_updater_test_bad_sha_type")
-    updater = module.ElementDesktopUpdater()
-
-    async def _bad_sha(_name: str, expr: str, *, config=None):
-        _ = config
-        if expr == updater._src_expr("1.11.99"):
-            yield module.UpdateEvent.value("element-desktop", "sha256-src")
-            return
-        yield module.UpdateEvent.value("element-desktop", ["sha256-offline"])
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _bad_sha)
-
-    with pytest.raises(TypeError, match="Expected sha256 string"):
-        _run(
-            _collect_events(
-                updater.fetch_hashes(VersionInfo(version="1.11.99"), object())
-            )
-        )

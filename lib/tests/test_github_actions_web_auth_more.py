@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
 import aiohttp
 import httpx
@@ -274,7 +275,6 @@ def test_cookies_from_playwright_and_default_chrome_executable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    jar = httpx.Cookies()
     output = io.StringIO()
 
     class _FakePage:
@@ -444,7 +444,7 @@ def test_default_chrome_executable_missing_platform_candidates(
             assert wait_until == "domcontentloaded"
 
     class _NeverAuthContext:
-        pages: list[object] = []
+        pages: ClassVar[list[object]] = []
 
         async def new_page(self) -> _NeverAuthPage:
             return _NeverAuthPage()

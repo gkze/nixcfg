@@ -7,8 +7,7 @@ import json
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from lib.schema_codegen import lockfile as codegen_lockfile
 from lib.schema_codegen.lockfile import (
@@ -18,6 +17,9 @@ from lib.schema_codegen.lockfile import (
 )
 from lib.schema_codegen.models._generated import CodegenLockfile
 from lib.update.paths import REPO_ROOT
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class _MonkeyPatchLike:

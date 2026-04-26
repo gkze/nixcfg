@@ -2,31 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
 from types import ModuleType
 
 import pytest
 
-from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import HashEntry
+from lib.tests._updater_helpers import collect_events as _collect_events
+from lib.tests._updater_helpers import load_repo_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEvent, UpdateEventKind
-from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import VersionInfo
-
-
-def _run[T](coro):
-    return asyncio.run(coro)
-
-
-async def _collect_events(stream):
-    return [event async for event in stream]
+from lib.update.updaters.metadata import DownloadUrlMetadata
 
 
 def _load_module() -> ModuleType:
-    return load_module_from_path(
-        REPO_ROOT / "packages/linearis/updater.py",
-        "linearis_updater_test",
-    )
+    return load_repo_module("packages/linearis/updater.py", "linearis_updater_test")
 
 
 def test_linearis_fetch_latest_reads_version_and_tarball(
@@ -50,9 +40,9 @@ def test_linearis_fetch_latest_reads_version_and_tarball(
 
     assert info == VersionInfo(
         version="1.2.3",
-        metadata={
-            "tarball": "https://registry.npmjs.org/linearis/-/linearis-1.2.3.tgz"
-        },
+        metadata=DownloadUrlMetadata(
+            url="https://registry.npmjs.org/linearis/-/linearis-1.2.3.tgz"
+        ),
     )
 
 
@@ -118,7 +108,10 @@ def test_linearis_fetch_hashes_emits_single_tarball_hash(
     events = _run(
         _collect_events(
             updater.fetch_hashes(
-                VersionInfo(version="1.2.3", metadata={"tarball": tarball}),
+                VersionInfo(
+                    version="1.2.3",
+                    metadata=DownloadUrlMetadata(url=tarball),
+                ),
                 object(),
             )
         )

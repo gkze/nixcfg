@@ -10,14 +10,18 @@ import aiohttp
 import pytest
 
 from lib.nix.models.sources import SourceEntry, SourcesFile
+from lib.update.artifacts import GeneratedArtifact
 from lib.update.cli import (
     OutputOptions,
     ResolvedTargets,
     UpdateOptions,
     UpdateSummary,
+    _add_companion_source_children,
+    _add_companion_source_parents,
     _build_item_meta,
     _build_run_plan,
     _build_update_options,
+    _companion_source_depths,
     _emit_summary,
     _execute_run_plan,
     _handle_list_targets_request,
@@ -27,8 +31,11 @@ from lib.update.cli import (
     _run_ref_phase,
     _run_sources_phase,
     _RunPlan,
+    _select_source_names,
+    _source_update_waves,
     _SourcesPhaseContext,
     _SourceTaskContext,
+    _SourceTaskResult,
     _update_source_task,
     run_update_command,
 )
@@ -131,6 +138,55 @@ def test_resolved_targets_ref_source_and_item_meta_variants(
     assert meta["flake-only"].origin.endswith("flake.nix)")
     assert meta["src-with-input"].origin.endswith("sources.json)")
     assert meta["src-no-input"].origin.endswith("sources.json)")
+
+
+def test_source_selection_detects_companion_cycles_and_empty_waves() -> None:
+    """Reject cyclic companion source graphs before scheduling update waves."""
+
+    class _A:
+        companion_of = "b"
+
+    class _B:
+        companion_of = "a"
+
+    with pytest.raises(RuntimeError, match="Companion source cycle"):
+        _select_source_names(None, {"a": _A, "b": _B})
+
+    assert _source_update_waves([], {}) == []
+
+
+def test_companion_source_graph_helpers_cover_cycles_and_revisits() -> None:
+    """Exercise helper-only branches that protect companion source graph traversal."""
+
+    class _Root:
+        pass
+
+    class _Child:
+        companion_of = "root"
+
+    class _CycleA:
+        companion_of = "cycle-b"
+
+    class _CycleB:
+        companion_of = "cycle-a"
+
+    with pytest.raises(RuntimeError, match="cycle-a -> cycle-b -> cycle-a"):
+        _companion_source_depths(
+            {"cycle-a", "cycle-b"},
+            {"cycle-a": _CycleA, "cycle-b": _CycleB},
+        )
+
+    names = {"child", "root"}
+    _add_companion_source_parents(names, {"child": _Child, "root": _Root})
+    assert names == {"child", "root"}
+
+    children: set[str] = set()
+    _add_companion_source_children(
+        children,
+        roots={"child", "root"},
+        updaters={"child": _Child, "root": _Root},
+    )
+    assert children == {"child"}
 
 
 def test_emit_summary_dry_run_updates_and_errors(
@@ -349,6 +405,7 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
                     update_input_lock=asyncio.Lock(),
                     update_input_tasks={},
                     queue=queue,
+                    generated_artifacts={},
                     config=resolve_config(),
                 ),
             )
@@ -399,8 +456,11 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
 
     calls: list[tuple[str, int]] = []
 
-    async def _update_source(name: str, *, context: _SourceTaskContext) -> None:
+    async def _update_source(
+        name: str, *, context: _SourceTaskContext
+    ) -> _SourceTaskResult:
         calls.append((name, id(context.update_input_tasks)))
+        return _SourceTaskResult(completed=True)
 
     monkeypatch.setattr("lib.update.cli._update_source_task", _update_source)
     _run(
@@ -425,6 +485,68 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
     assert len({task_map_id for _name, task_map_id in calls}) == 1
 
 
+def test_update_source_task_collects_artifact_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Return generated artifacts emitted by updater streams in stable path order."""
+
+    class _ArtifactUpdater:
+        def __init__(self, *, config: object | None = None) -> None:
+            _ = config
+
+        async def update_stream(
+            self,
+            current: SourceEntry | None,
+            session: aiohttp.ClientSession,
+            *,
+            pinned_version: VersionInfo | None = None,
+        ) -> AsyncIterator[UpdateEvent]:
+            _ = (current, session, pinned_version)
+            yield UpdateEvent.artifact(
+                "demo",
+                [
+                    GeneratedArtifact.text("packages/demo/z.txt", "z\n"),
+                    GeneratedArtifact.text("packages/demo/a.txt", "a\n"),
+                ],
+            )
+            yield UpdateEvent.result("demo")
+
+    async def _run_queue_task(
+        *, source: str, queue: asyncio.Queue[UpdateEvent | None], task
+    ) -> None:
+        _ = (source, queue)
+        await task()
+
+    monkeypatch.setattr("lib.update.cli.UPDATERS", {"demo": _ArtifactUpdater})
+    monkeypatch.setattr("lib.update.cli.run_queue_task", _run_queue_task)
+
+    async def _run_case() -> _SourceTaskResult:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        async with aiohttp.ClientSession() as session:
+            return await _update_source_task(
+                "demo",
+                context=_SourceTaskContext(
+                    sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
+                    update_input=False,
+                    native_only=False,
+                    session=session,
+                    update_input_lock=asyncio.Lock(),
+                    update_input_tasks={},
+                    queue=queue,
+                    generated_artifacts={},
+                    config=resolve_config(),
+                ),
+            )
+
+    result = _run(_run_case())
+
+    assert result.completed is True
+    assert [artifact.path for artifact in result.artifacts] == [
+        GeneratedArtifact.text("packages/demo/a.txt", "a\n").path,
+        GeneratedArtifact.text("packages/demo/z.txt", "z\n").path,
+    ]
+
+
 def test_run_sources_phase_serializes_when_max_nix_builds_is_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -432,13 +554,16 @@ def test_run_sources_phase_serializes_when_max_nix_builds_is_one(
     active = 0
     max_active = 0
 
-    async def _update_source(_name: str, *, context: _SourceTaskContext) -> None:
+    async def _update_source(
+        _name: str, *, context: _SourceTaskContext
+    ) -> _SourceTaskResult:
         nonlocal active, max_active
         _ = context
         active += 1
         max_active = max(max_active, active)
         await asyncio.sleep(0)
         active -= 1
+        return _SourceTaskResult(completed=True)
 
     monkeypatch.setattr("lib.update.cli._update_source_task", _update_source)
 
@@ -462,6 +587,124 @@ def test_run_sources_phase_serializes_when_max_nix_builds_is_one(
     )
 
     assert max_active == 1
+
+
+def test_run_sources_phase_passes_companion_artifacts_between_waves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Companion waves should see generated artifacts emitted by earlier primaries."""
+
+    class _CodexUpdater:
+        pass
+
+    class _CodexV8Updater:
+        companion_of = "codex"
+
+    seen_overrides: list[dict[str, str]] = []
+
+    async def _update_source(
+        name: str, *, context: _SourceTaskContext
+    ) -> _SourceTaskResult:
+        if name == "codex":
+            return _SourceTaskResult(
+                completed=True,
+                artifacts=(
+                    GeneratedArtifact.text(
+                        "packages/codex/Cargo.nix",
+                        '{ "v8" = rec { version = "147.4.0"; }; }\n',
+                    ),
+                ),
+            )
+
+        seen_overrides.append({
+            str(path): content for path, content in context.generated_artifacts.items()
+        })
+        return _SourceTaskResult(completed=True)
+
+    monkeypatch.setattr(
+        "lib.update.cli.UPDATERS",
+        {"codex": _CodexUpdater, "codex-v8": _CodexV8Updater},
+    )
+    monkeypatch.setattr("lib.update.cli._update_source_task", _update_source)
+
+    _run(
+        _run_sources_phase(
+            context=_SourcesPhaseContext(
+                source_names=["codex", "codex-v8"],
+                sources=SourcesFile(
+                    entries={
+                        "codex": SourceEntry(hashes={}),
+                        "codex-v8": SourceEntry(hashes={}),
+                    }
+                ),
+                queue=asyncio.Queue(),
+                update_input=False,
+                native_only=False,
+                config=resolve_config(),
+                pinned={},
+            )
+        )
+    )
+
+    assert seen_overrides == [
+        {"packages/codex/Cargo.nix": '{ "v8" = rec { version = "147.4.0"; }; }\n'}
+    ]
+
+
+def test_run_sources_phase_skips_companions_after_failed_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not run companion sources after their prerequisite source fails."""
+
+    class _ParentUpdater:
+        pass
+
+    class _ChildUpdater:
+        companion_of = "parent"
+
+    async def _update_source(
+        name: str, *, context: _SourceTaskContext
+    ) -> _SourceTaskResult:
+        _ = context
+        if name == "parent":
+            return _SourceTaskResult(completed=False)
+        msg = "child updater should not run after parent failure"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(
+        "lib.update.cli.UPDATERS",
+        {"parent": _ParentUpdater, "child": _ChildUpdater},
+    )
+    monkeypatch.setattr("lib.update.cli._update_source_task", _update_source)
+
+    async def _run_case() -> list[UpdateEvent]:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        await _run_sources_phase(
+            context=_SourcesPhaseContext(
+                source_names=["parent", "child"],
+                sources=SourcesFile(
+                    entries={
+                        "parent": SourceEntry(hashes={}),
+                        "child": SourceEntry(hashes={}),
+                    }
+                ),
+                queue=queue,
+                update_input=False,
+                native_only=False,
+                config=resolve_config(),
+                pinned={},
+            )
+        )
+        events: list[UpdateEvent] = []
+        while not queue.empty():
+            item = queue.get_nowait()
+            if isinstance(item, UpdateEvent):
+                events.append(item)
+        return events
+
+    events = _run(_run_case())
+
+    assert [event.message for event in events] == ["Prerequisite update failed: parent"]
 
 
 def test_update_source_task_dedupes_shared_input_refreshes(
@@ -526,6 +769,7 @@ def test_update_source_task_dedupes_shared_input_refreshes(
                         update_input_lock=shared_lock,
                         update_input_tasks=shared_tasks,
                         queue=queue,
+                        generated_artifacts={},
                         config=resolve_config(),
                     ),
                 ),
@@ -539,6 +783,7 @@ def test_update_source_task_dedupes_shared_input_refreshes(
                         update_input_lock=shared_lock,
                         update_input_tasks=shared_tasks,
                         queue=queue,
+                        generated_artifacts={},
                         config=resolve_config(),
                     ),
                 ),
@@ -619,6 +864,7 @@ def test_update_source_task_sets_native_only_for_deno_updater(
                     update_input_lock=asyncio.Lock(),
                     update_input_tasks={},
                     queue=queue,
+                    generated_artifacts={},
                     config=resolve_config(),
                 ),
             )
@@ -685,6 +931,7 @@ def test_update_source_task_skips_input_update_when_disabled(
                     update_input_lock=asyncio.Lock(),
                     update_input_tasks={},
                     queue=queue,
+                    generated_artifacts={},
                     config=resolve_config(),
                 ),
             )

@@ -146,8 +146,32 @@ class HashEntry(BaseModel):
         if self.url is not None:
             result["url"] = self.url
         if self.urls is not None:
-            result["urls"] = dict(self.urls)
+            result["urls"] = dict(sorted(self.urls.items()))
         return result
+
+    def equivalence_key(
+        self,
+    ) -> tuple[
+        str,
+        str,
+        str,
+        str,
+        tuple[tuple[str, str], ...],
+        str,
+    ]:
+        """Return a stable key for order-insensitive semantic comparison."""
+        return (
+            self.hash_type,
+            "" if self.platform is None else self.platform,
+            "" if self.git_dep is None else self.git_dep,
+            "" if self.url is None else self.url,
+            tuple(sorted((self.urls or {}).items())),
+            self.hash,
+        )
+
+    def normalized_dict(self) -> JsonObject:
+        """Return this entry in canonical form for semantic equality."""
+        return self.to_dict()
 
 
 # ---------------------------------------------------------------------------
@@ -204,10 +228,17 @@ class HashCollection(BaseModel):
     def to_json(self) -> HashMapping | list[JsonObject]:
         """Return hashes in their canonical JSON representation."""
         if self.entries is not None:
-            return [entry.to_dict() for entry in self.entries]
+            return [
+                entry.normalized_dict()
+                for entry in sorted(self.entries, key=HashEntry.equivalence_key)
+            ]
         if self.mapping is not None:
-            return dict(self.mapping)
+            return dict(sorted(self.mapping.items()))
         return {}
+
+    def equivalent_to(self, other: HashCollection) -> bool:
+        """Return whether *other* has the same semantic hash content."""
+        return self.to_json() == other.to_json()
 
     def primary_hash(self) -> str | None:
         """Return the single effective hash when one can be inferred."""
@@ -308,10 +339,14 @@ class SourceEntry(BaseModel):
         if self.input is not None:
             result["input"] = self.input
         if self.urls is not None:
-            result["urls"] = dict(self.urls)
+            result["urls"] = dict(sorted(self.urls.items()))
         if self.version is not None:
             result["version"] = self.version
         return result
+
+    def equivalent_to(self, other: SourceEntry) -> bool:
+        """Return whether *other* represents the same semantic source state."""
+        return self.to_dict() == other.to_dict()
 
     def merge(self, other: SourceEntry) -> SourceEntry:
         """Merge *other* into this entry (other takes priority for scalars)."""

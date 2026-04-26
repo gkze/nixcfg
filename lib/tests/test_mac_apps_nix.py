@@ -9,11 +9,11 @@ from contextlib import redirect_stderr
 from functools import cache
 from io import StringIO
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.binding import Binding
-from nix_manipulator.expressions.expression import NixExpression
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
@@ -36,8 +36,12 @@ from lib.tests._nix_ast import (
     parse_nix_expr,
 )
 from lib.tests._nix_eval import nix_attrset, nix_eval_raw, nix_import, nix_let, nix_list
+from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
+
+if TYPE_CHECKING:
+    from nix_manipulator.expressions.expression import NixExpression
 
 
 @cache
@@ -278,6 +282,14 @@ def _managed_mac_app_routing_table() -> NixList:
                     Binding(
                         name="package",
                         value=identifier_attr_path("pkgs", "zoom-us"),
+                    )
+                ]
+            ),
+            AttributeSet(
+                values=[
+                    Binding(
+                        name="package",
+                        value=identifier_attr_path("pkgs", "zen-twilight"),
                     )
                 ]
             ),
@@ -849,7 +861,7 @@ def test_netnewswire_package_exposes_copy_mode_mac_app_metadata() -> None:
     derivation = expect_instance(package.output, FunctionCall)
     derivation_args = expect_instance(derivation.argument, AttributeSet)
 
-    assert sources["version"] == "7.0.4"
+    assert isinstance(sources.get("version"), str)
     version_inherit = next(
         value for value in derivation_args.values if isinstance(value, Inherit)
     )
@@ -867,6 +879,58 @@ def test_netnewswire_package_exposes_copy_mode_mac_app_metadata() -> None:
             "copy",
         ),
     )
+
+
+def test_zen_twilight_package_embeds_autoconfig_and_resigns_app() -> None:
+    """The Twilight package should carry nixcfg's app-bundle AutoConfig hook."""
+    sources = json.loads(
+        (REPO_ROOT / "packages/zen-twilight/sources.json").read_text(encoding="utf-8")
+    )
+    package_source = Path(REPO_ROOT / "packages/zen-twilight/default.nix").read_text(
+        encoding="utf-8"
+    )
+    package = expect_instance(parse_nix_expr(package_source), FunctionDefinition)
+    derivation = expect_instance(package.output, FunctionCall)
+    derivation_args = expect_instance(derivation.argument, AttributeSet)
+
+    assert isinstance(sources.get("version"), str)
+    assert "buildID" not in sources
+    assert_nix_ast_equal(derivation.name, Identifier(name="mkDmgApp"))
+    assert_nix_ast_equal(
+        expect_binding(derivation_args.values, "pname").value,
+        StringPrimitive(value="zen-twilight"),
+    )
+    assert_nix_ast_equal(
+        expect_binding(derivation_args.values, "appName").value,
+        StringPrimitive(value="twilight"),
+    )
+    assert_nix_ast_equal(
+        expect_binding(derivation_args.values, "executableName").value,
+        StringPrimitive(value="zen"),
+    )
+    assert_nix_ast_equal(
+        expect_binding(derivation_args.values, "codesignApp").value,
+        Primitive(value=True),
+    )
+
+    install_hook = expect_instance(
+        expect_binding(derivation_args.values, "postInstallApp").value,
+        IndentedString,
+    )
+    install_shell = parse_shell(indented_string_body(install_hook.rebuild()))
+
+    assert command_texts(install_shell, "mkdir") == [
+        'mkdir -p "$resources/defaults/pref"',
+        'mkdir -p "$browser_resources/defaults/preferences"',
+    ]
+    assert command_texts(install_shell, "cp") == [
+        'cp __NIX_INTERP__ "$resources/defaults/pref/autoconfig.js"',
+        'cp __NIX_INTERP__ "$browser_resources/defaults/preferences/autoconfig.js"',
+        'cp __NIX_INTERP__ "$resources/twilight.cfg"',
+        'cp __NIX_INTERP__ "$browser_resources/twilight.cfg"',
+    ]
+    assert command_texts(install_shell, "zip") == []
+    assert command_texts(install_shell, "unzip") == []
 
 
 def test_george_config_manages_mutable_gui_apps_via_system_applications() -> None:

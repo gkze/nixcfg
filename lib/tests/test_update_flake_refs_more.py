@@ -92,9 +92,9 @@ def test_flake_helpers_and_fetch_expr_error_paths(
     assert get_root_input_name("missing") == "missing"
 
     version_from_ref = get_flake_input_version(
-        FlakeLockNode(original=OriginalRef(type="github", ref="v2.0.0"))
+        FlakeLockNode(original=OriginalRef(type="github", ref="v9.9.9"))
     )
-    assert version_from_ref == "v2.0.0"
+    assert version_from_ref == "v9.9.9"
 
     version_from_original_rev = get_flake_input_version(
         cast(
@@ -271,13 +271,13 @@ def test_refs_version_parsing_and_selection_helpers() -> None:
 
     releases = [
         {"tag_name": "v1.2.3", "draft": False, "prerelease": False},
-        {"tag_name": "v2.0.0-rc1", "draft": False, "prerelease": True},
+        {"tag_name": "v9.9.9-rc1", "draft": False, "prerelease": True},
         {"tag_name": "v3.0.0", "draft": True, "prerelease": False},
     ]
     assert _select_tag_from_releases(releases, "v") == "v1.2.3"
 
-    tags = [{"name": "v1.0.0"}, {"name": "v2.0.0"}, {"name": 1}]
-    assert _select_tag_from_tags(tags, "v") == "v2.0.0"
+    tags = [{"name": "v1.0.0"}, {"name": "v9.9.9"}, {"name": 1}]
+    assert _select_tag_from_tags(tags, "v") == "v9.9.9"
 
 
 def test_get_flake_inputs_with_refs_filters_expected_items(
@@ -359,7 +359,7 @@ def test_fetch_first_matching_tag_falls_back_to_tags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Handle release API failure and select from tags endpoint."""
-    calls: list[str] = []
+    calls: list[tuple[str, int, int, int | None]] = []
 
     async def _fetch_paginated(
         _session: aiohttp.ClientSession,
@@ -368,9 +368,10 @@ def test_fetch_first_matching_tag_falls_back_to_tags(
         config: object,
         per_page: int,
         max_pages: int,
+        item_limit: int | None = None,
     ) -> list[object]:
-        _ = (config, per_page, max_pages)
-        calls.append(path)
+        _ = config
+        calls.append((path, per_page, max_pages, item_limit))
         if path.endswith("/releases"):
             msg = "release API down"
             raise RuntimeError(msg)
@@ -390,7 +391,10 @@ def test_fetch_first_matching_tag_falls_back_to_tags(
 
     latest = _run_async(_run())
     assert latest == "v1.3.0"
-    assert calls == ["repos/owner/repo/releases", "repos/owner/repo/tags"]
+    assert calls == [
+        ("repos/owner/repo/releases", 50, 5, 250),
+        ("repos/owner/repo/tags", 100, 5, 500),
+    ]
 
 
 def test_fetch_first_matching_tag_returns_none_when_no_match(
@@ -398,7 +402,12 @@ def test_fetch_first_matching_tag_returns_none_when_no_match(
 ) -> None:
     """Continue through both candidates and return ``None`` if nothing matches."""
 
-    async def _fetch_paginated(*_args: object, **_kwargs: object) -> list[object]:
+    async def _fetch_paginated(
+        *_args: object,
+        item_limit: int | None = None,
+        **_kwargs: object,
+    ) -> list[object]:
+        assert item_limit in {250, 500}
         return [{"name": "stable"}, {"tag_name": "preview"}]
 
     monkeypatch.setattr("lib.update.refs.fetch_github_api_paginated", _fetch_paginated)
@@ -472,6 +481,80 @@ def test_fetch_github_latest_version_ref_returns_none_when_unmatched(
     assert _run_async(_run()) is None
 
 
+def test_fetch_first_matching_tag_falls_back_to_tags_after_release_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep searching when releases fail but tags can still answer the query."""
+    calls: list[str] = []
+
+    async def _fake_fetch(
+        _session: aiohttp.ClientSession,
+        path: str,
+        *,
+        config: object,
+        per_page: int,
+        max_pages: int,
+        item_limit: int,
+    ) -> list[dict[str, object]]:
+        del config, per_page, max_pages, item_limit
+        calls.append(path)
+        if path.endswith("/releases"):
+            msg = "rate limited"
+            raise RuntimeError(msg)
+        return [{"name": "v1.2.3"}]
+
+    monkeypatch.setattr("lib.update.refs.fetch_github_api_paginated", _fake_fetch)
+
+    async def _run() -> str | None:
+        async with aiohttp.ClientSession() as session:
+            return await _fetch_first_matching_tag(
+                session,
+                "owner",
+                "repo",
+                "v",
+                config=resolve_config(),
+            )
+
+    assert _run_async(_run()) == "v1.2.3"
+    assert calls == ["repos/owner/repo/releases", "repos/owner/repo/tags"]
+
+
+def test_fetch_first_matching_tag_raises_when_tags_lookup_fails_after_no_release_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Treat a failed tags lookup as authoritative lookup failure."""
+
+    async def _fake_fetch(
+        _session: aiohttp.ClientSession,
+        path: str,
+        *,
+        config: object,
+        per_page: int,
+        max_pages: int,
+        item_limit: int,
+    ) -> list[dict[str, object]]:
+        del config, per_page, max_pages, item_limit
+        if path.endswith("/releases"):
+            return []
+        msg = "bad gateway"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr("lib.update.refs.fetch_github_api_paginated", _fake_fetch)
+
+    async def _run() -> str | None:
+        async with aiohttp.ClientSession() as session:
+            return await _fetch_first_matching_tag(
+                session,
+                "owner",
+                "repo",
+                "v",
+                config=resolve_config(),
+            )
+
+    with pytest.raises(RuntimeError, match="GitHub API lookup failed for owner/repo"):
+        _run_async(_run())
+
+
 def test_check_flake_ref_update_supported_and_error_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -515,6 +598,29 @@ def test_check_flake_ref_update_supported_and_error_paths(
     )
     assert isinstance(unsupported, RefUpdateResult)
     assert "Unsupported input type" in (unsupported.error or "")
+
+
+def test_check_flake_ref_update_preserves_lookup_failure_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Report upstream lookup failures instead of collapsing them into no-update."""
+
+    async def _fail(*_args: object, **_kwargs: object) -> str | None:
+        msg = "GitHub API lookup failed for owner/repo: rate limited"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr("lib.update.refs.fetch_github_latest_version_ref", _fail)
+
+    async def _run() -> RefUpdateResult:
+        async with aiohttp.ClientSession() as session:
+            return await check_flake_ref_update(
+                FlakeInputRef("demo", "owner", "repo", "v1", "github"),
+                session,
+            )
+
+    result = _run_async(_run())
+    assert isinstance(result, RefUpdateResult)
+    assert result.error == "GitHub API lookup failed for owner/repo: rate limited"
 
 
 def test_run_checked_command_and_update_flake_ref_paths(

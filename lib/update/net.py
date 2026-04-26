@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from typing import cast
 
 import aiohttp
+from githubkit import GitHub
+from githubkit.exception import GitHubException
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt
 from tenacity.wait import wait_exponential
 
@@ -58,6 +60,7 @@ def _expect_json_string_field(
 HTTP_BAD_REQUEST = 400
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 logger = logging.getLogger(__name__)
+_GITHUB_API_VERSION = "2022-11-28"
 
 
 class _RetryableStatusError(RuntimeError):
@@ -98,6 +101,53 @@ def _build_request_headers(url: str, user_agent: str | None) -> dict[str, str]:
         token=_get_github_token(),
         user_agent=user_agent,
     )
+
+
+def _build_githubkit_client(config: UpdateConfig) -> GitHub:
+    """Create a GitHubKit client using the update pipeline defaults."""
+    return GitHub(
+        _get_github_token(),
+        user_agent=config.default_user_agent,
+        timeout=config.default_timeout,
+    )
+
+
+async def _fetch_github_repo(owner: str, repo: str, *, config: UpdateConfig) -> object:
+    """Fetch one GitHub repository model through GitHubKit."""
+    client = _build_githubkit_client(config)
+    try:
+        return (
+            await client.rest(_GITHUB_API_VERSION).repos.async_get(owner, repo)
+        ).parsed_data
+    except GitHubException as exc:
+        msg = f"GitHub repo metadata request failed for {owner}/{repo}: {exc}"
+        raise RuntimeError(msg) from exc
+
+
+async def _fetch_github_commits(
+    owner: str,
+    repo: str,
+    *,
+    branch: str,
+    config: UpdateConfig,
+    file_path: str,
+) -> tuple[object, ...]:
+    """Fetch recent commits for one path through GitHubKit."""
+    client = _build_githubkit_client(config)
+    try:
+        commits = (
+            await client.rest(_GITHUB_API_VERSION).repos.async_list_commits(
+                owner,
+                repo,
+                path=file_path,
+                sha=branch,
+                per_page=1,
+            )
+        ).parsed_data
+        return tuple(commits)
+    except GitHubException as exc:
+        msg = f"GitHub commits request failed for {owner}/{repo}:{file_path}: {exc}"
+        raise RuntimeError(msg) from exc
 
 
 def _format_http_error(response: aiohttp.ClientResponse, payload: bytes) -> str:
@@ -426,26 +476,24 @@ async def fetch_github_api_paginated(
 
 
 async def fetch_github_default_branch(
-    session: aiohttp.ClientSession,
+    _session: aiohttp.ClientSession,
     owner: str,
     repo: str,
     *,
     config: UpdateConfig | None = None,
 ) -> str:
     """Fetch the default branch name for a GitHub repository."""
-    data = _expect_json_dict(
-        await fetch_github_api(session, f"repos/{owner}/{repo}", config=config),
-        context=f"GitHub repo metadata for {owner}/{repo}",
-    )
-    return _expect_json_string_field(
-        data,
-        "default_branch",
-        context=f"GitHub repo metadata for {owner}/{repo}",
-    )
+    active_config = resolve_active_config(config)
+    repo_model = await _fetch_github_repo(owner, repo, config=active_config)
+    default_branch = getattr(repo_model, "default_branch", None)
+    if not isinstance(default_branch, str):
+        msg = f"Expected default_branch in GitHub repo metadata for {owner}/{repo}"
+        raise TypeError(msg)
+    return default_branch
 
 
 async def fetch_github_latest_commit(
-    session: aiohttp.ClientSession,
+    _session: aiohttp.ClientSession,
     repository: tuple[str, str],
     *,
     file_path: str,
@@ -454,29 +502,22 @@ async def fetch_github_latest_commit(
 ) -> str:
     """Fetch the latest commit SHA that touched ``file_path`` on ``branch``."""
     owner, repo = repository
-    data = _expect_json_list(
-        await fetch_github_api(
-            session,
-            f"repos/{owner}/{repo}/commits",
-            path=file_path,
-            sha=branch,
-            per_page="1",
-            config=config,
-        ),
-        context=f"GitHub commits for {owner}/{repo}:{file_path}",
+    active_config = resolve_active_config(config)
+    commits = await _fetch_github_commits(
+        owner,
+        repo,
+        branch=branch,
+        config=active_config,
+        file_path=file_path,
     )
-    if not data:
+    if not commits:
         msg = f"No commits found for {owner}/{repo}:{file_path}"
         raise RuntimeError(msg)
-    first_commit = _expect_json_dict(
-        data[0],
-        context=f"first commit for {owner}/{repo}:{file_path}",
-    )
-    return _expect_json_string_field(
-        first_commit,
-        "sha",
-        context=f"first commit for {owner}/{repo}:{file_path}",
-    )
+    sha = getattr(commits[0], "sha", None)
+    if not isinstance(sha, str):
+        msg = f"Expected commit sha in first commit for {owner}/{repo}:{file_path}"
+        raise TypeError(msg)
+    return sha
 
 
 __all__ = [

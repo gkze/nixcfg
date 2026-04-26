@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pytest
 
 from lib.nix.commands.base import CommandResult, ProcessDone, ProcessLine
 from lib.update.ci import build_shared_closure as bsc
 from lib.update.ci import profile_generations as pg
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def test_nix_verbosity_helpers_cover_zero_and_positive() -> None:
@@ -71,12 +69,8 @@ def test_query_deriver_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> N
         )
 
     monkeypatch.setattr(pg, "run_nix", _unknown)
-    try:
+    with pytest.raises(RuntimeError, match="Could not resolve deriver"):
         asyncio.run(object.__getattribute__(pg, "_query_deriver")("/profile"))
-    except RuntimeError as exc:
-        assert "Could not resolve deriver" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
 
 def test_resolve_targets_raises_for_required_missing_profile(
@@ -85,7 +79,7 @@ def test_resolve_targets_raises_for_required_missing_profile(
     """Error when a required target profile path does not exist."""
     monkeypatch.setattr(pg, "_path_exists", lambda _path: False)
 
-    try:
+    with pytest.raises(RuntimeError, match="Profile path not found"):
         asyncio.run(
             object.__getattribute__(pg, "_resolve_targets")(
                 target="system",
@@ -93,10 +87,6 @@ def test_resolve_targets_raises_for_required_missing_profile(
                 home_profile="/unused",
             )
         )
-    except RuntimeError as exc:
-        assert "Profile path not found" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
 
 def test_resolve_targets_raises_when_deriver_fails_for_required_target(
@@ -111,7 +101,7 @@ def test_resolve_targets_raises_when_deriver_fails_for_required_target(
 
     monkeypatch.setattr(pg, "_query_deriver", _boom)
 
-    try:
+    with pytest.raises(RuntimeError, match="bad deriver"):
         asyncio.run(
             object.__getattribute__(pg, "_resolve_targets")(
                 target="system",
@@ -119,10 +109,6 @@ def test_resolve_targets_raises_when_deriver_fails_for_required_target(
                 home_profile="/hm",
             )
         )
-    except RuntimeError as exc:
-        assert "bad deriver" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
 
 def test_resolve_targets_skips_optional_home_when_deriver_fails(
@@ -161,7 +147,7 @@ def test_resolve_targets_raises_when_no_targets_resolved(
     monkeypatch.setattr(
         pg, "_query_deriver", lambda _path: asyncio.sleep(0, result="/nix/store/x.drv")
     )
-    try:
+    with pytest.raises(RuntimeError, match="No generation targets resolved"):
         asyncio.run(
             object.__getattribute__(pg, "_resolve_targets")(
                 target="none",  # type: ignore[arg-type]
@@ -169,10 +155,6 @@ def test_resolve_targets_raises_when_no_targets_resolved(
                 home_profile="/missing-home",
             )
         )
-    except RuntimeError as exc:
-        assert "No generation targets resolved" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
 
 def test_build_rebuild_args_respect_custom_substituters() -> None:
@@ -354,7 +336,7 @@ def test_profile_target_handles_nonzero_exit_and_success_path(
 
 def test_async_main_validates_public_cache_flag_combo() -> None:
     """Reject substituter overrides with public-cache-only mode."""
-    try:
+    with pytest.raises(RuntimeError, match="cannot be combined"):
         asyncio.run(
             object.__getattribute__(pg, "_async_main")(
                 target="system",
@@ -368,10 +350,6 @@ def test_async_main_validates_public_cache_flag_combo() -> None:
                 verbosity=0,
             )
         )
-    except RuntimeError as exc:
-        assert "cannot be combined" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
 
 def test_async_main_dry_run_logs_commands(monkeypatch: pytest.MonkeyPatch) -> None:

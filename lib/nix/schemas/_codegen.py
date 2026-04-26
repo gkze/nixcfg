@@ -16,7 +16,7 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, TypeGuard, cast
+from typing import Protocol, TypeIs, cast
 
 import yaml
 
@@ -58,7 +58,7 @@ def _emit_progress(progress: ProgressReporter | None, message: str) -> None:
     progress(message)
 
 
-def _is_registry_like(value: object) -> TypeGuard[_RegistryLike]:
+def _is_registry_like(value: object) -> TypeIs[_RegistryLike]:
     """Return ``True`` when *value* exposes a ``resolver()`` method."""
     return hasattr(value, "resolver")
 

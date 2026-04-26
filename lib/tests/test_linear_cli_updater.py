@@ -2,31 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
 from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import HashEntry, SourceEntry
+from lib.tests._updater_helpers import collect_events as _collect_events
+from lib.tests._updater_helpers import load_repo_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEvent, UpdateEventKind
-from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import VersionInfo
 
 
-def _run[T](coro):
-    return asyncio.run(coro)
-
-
-async def _collect_events(stream):
-    return [event async for event in stream]
-
-
 def _load_module() -> ModuleType:
-    return load_module_from_path(
-        REPO_ROOT / "packages/linear-cli/updater.py",
-        "linear_cli_updater_test",
-    )
+    return load_repo_module("packages/linear-cli/updater.py", "linear_cli_updater_test")
 
 
 def _current_source_entry(*entries: HashEntry) -> SourceEntry:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import aiohttp
@@ -404,22 +405,21 @@ def test_github_url_helpers_and_api_calls(monkeypatch: pytest.MonkeyPatch) -> No
     assert calls[0][0] == "https://api.github.com/repos/a/b?x=1"
     assert calls[0][1]["user_agent"] == "ua"
 
-    monkeypatch.setattr(
-        net,
-        "fetch_github_api",
-        lambda *_a, **_k: asyncio.sleep(0, result={"default_branch": "trunk"}),
-    )
+    async def _fetch_repo(*_args: object, **_kwargs: object) -> object:
+        return SimpleNamespace(default_branch="trunk")
+
+    monkeypatch.setattr(net, "_fetch_github_repo", _fetch_repo)
     assert (
         _run_with_session(
             lambda session: net.fetch_github_default_branch(session, "a", "b")
         )
         == "trunk"
     )
-    monkeypatch.setattr(
-        net,
-        "fetch_github_api",
-        lambda *_a, **_k: asyncio.sleep(0, result=[{"sha": "deadbeef"}]),
-    )
+
+    async def _fetch_commits(*_args: object, **_kwargs: object) -> tuple[object, ...]:
+        return (SimpleNamespace(sha="deadbeef"),)
+
+    monkeypatch.setattr(net, "_fetch_github_commits", _fetch_commits)
     sha = _run_with_session(
         lambda session: net.fetch_github_latest_commit(
             session,
@@ -430,9 +430,12 @@ def test_github_url_helpers_and_api_calls(monkeypatch: pytest.MonkeyPatch) -> No
     )
     assert sha == "deadbeef"
 
-    monkeypatch.setattr(
-        net, "fetch_github_api", lambda *_a, **_k: asyncio.sleep(0, result=[])
-    )
+    async def _fetch_no_commits(
+        *_args: object, **_kwargs: object
+    ) -> tuple[object, ...]:
+        return ()
+
+    monkeypatch.setattr(net, "_fetch_github_commits", _fetch_no_commits)
     with pytest.raises(RuntimeError, match="No commits found"):
         _run_with_session(
             lambda session: net.fetch_github_latest_commit(
@@ -440,6 +443,133 @@ def test_github_url_helpers_and_api_calls(monkeypatch: pytest.MonkeyPatch) -> No
                 ("a", "b"),
                 file_path="p",
                 branch="main",
+            )
+        )
+
+    async def _fetch_bad_repo(*_args: object, **_kwargs: object) -> object:
+        return SimpleNamespace(default_branch=1)
+
+    monkeypatch.setattr(net, "_fetch_github_repo", _fetch_bad_repo)
+    with pytest.raises(TypeError, match="Expected default_branch"):
+        _run_with_session(
+            lambda session: net.fetch_github_default_branch(session, "a", "b")
+        )
+
+    async def _fetch_bad_commits(
+        *_args: object, **_kwargs: object
+    ) -> tuple[object, ...]:
+        return (SimpleNamespace(sha=1),)
+
+    monkeypatch.setattr(net, "_fetch_github_commits", _fetch_bad_commits)
+    with pytest.raises(TypeError, match="Expected commit sha"):
+        _run_with_session(
+            lambda session: net.fetch_github_latest_commit(
+                session,
+                ("a", "b"),
+                file_path="p",
+                branch="main",
+            )
+        )
+
+
+def test_githubkit_fetch_helpers_wrap_client_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use GitHubKit through the narrow async wrappers and normalize failures."""
+    created: list[tuple[str | None, str | None, float]] = []
+
+    class _Repos:
+        async def async_get(self, owner: str, repo: str) -> object:
+            return SimpleNamespace(
+                parsed_data=SimpleNamespace(
+                    owner=owner, repo=repo, default_branch="main"
+                )
+            )
+
+        async def async_list_commits(
+            self,
+            owner: str,
+            repo: str,
+            *,
+            path: str,
+            sha: str,
+            per_page: int,
+        ) -> object:
+            return SimpleNamespace(
+                parsed_data=(
+                    SimpleNamespace(
+                        owner=owner,
+                        repo=repo,
+                        path=path,
+                        branch=sha,
+                        per_page=per_page,
+                        sha="deadbeef",
+                    ),
+                )
+            )
+
+    class _Client:
+        def __init__(
+            self,
+            token: str | None,
+            *,
+            user_agent: str | None,
+            timeout: float,
+        ) -> None:
+            created.append((token, user_agent, timeout))
+
+        def rest(self, version: str) -> object:
+            assert version == "2022-11-28"
+            return SimpleNamespace(repos=_Repos())
+
+    monkeypatch.setattr(net, "_get_github_token", lambda: "token")
+    monkeypatch.setattr(net, "GitHub", _Client)
+    cfg = resolve_config(user_agent="ua", http_timeout=3)
+
+    repo = asyncio.run(net._fetch_github_repo("acme", "demo", config=cfg))
+    commits = asyncio.run(
+        net._fetch_github_commits(
+            "acme",
+            "demo",
+            branch="main",
+            config=cfg,
+            file_path="flake.lock",
+        )
+    )
+
+    assert repo.default_branch == "main"
+    assert commits[0].sha == "deadbeef"
+    assert created == [("token", "ua", 3), ("token", "ua", 3)]
+
+    class _FailingRepos:
+        async def async_get(self, *_args: object, **_kwargs: object) -> object:
+            msg = "repo failed"
+            raise RuntimeError(msg)
+
+        async def async_list_commits(self, *_args: object, **_kwargs: object) -> object:
+            msg = "commits failed"
+            raise RuntimeError(msg)
+
+    class _FailingClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def rest(self, _version: str) -> object:
+            return SimpleNamespace(repos=_FailingRepos())
+
+    monkeypatch.setattr(net, "GitHubException", RuntimeError)
+    monkeypatch.setattr(net, "GitHub", _FailingClient)
+
+    with pytest.raises(RuntimeError, match="repo metadata request failed"):
+        asyncio.run(net._fetch_github_repo("acme", "demo", config=cfg))
+    with pytest.raises(RuntimeError, match="commits request failed"):
+        asyncio.run(
+            net._fetch_github_commits(
+                "acme",
+                "demo",
+                branch="main",
+                config=cfg,
+                file_path="flake.lock",
             )
         )
 

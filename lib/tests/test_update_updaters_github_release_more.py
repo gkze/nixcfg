@@ -8,11 +8,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from lib.update.events import EventStream, UpdateEvent
-from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 if TYPE_CHECKING:
     import aiohttp
+
+    from lib.update.updaters.base import VersionInfo
 
 
 class _DemoReleaseUpdater(GitHubReleaseUpdater):
@@ -55,11 +56,11 @@ def test_fetch_latest_success_and_error_paths(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
-        lambda *_args, **_kwargs: asyncio.sleep(0, result={"tag_name": "v2.0.0"}),
+        lambda *_args, **_kwargs: asyncio.sleep(0, result={"tag_name": "v9.9.9"}),
     )
     info = asyncio.run(updater.fetch_latest(object()))
-    assert info.version == "2.0.0"
-    assert info.metadata["tag"] == "v2.0.0"
+    assert info.version == "9.9.9"
+    assert info.metadata["tag"] == "v9.9.9"
 
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",

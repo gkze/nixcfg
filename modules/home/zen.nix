@@ -17,10 +17,12 @@ let
   managedConfigDir = "${config.xdg.configHome}/zen";
   zenPython = pkgs.python3.withPackages (
     ps: with ps; [
+      click
       deepdiff
       lz4
       pydantic
       pyyaml
+      typer
     ]
   );
   mkZenWrapper =

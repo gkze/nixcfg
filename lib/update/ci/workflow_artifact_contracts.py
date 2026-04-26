@@ -6,7 +6,7 @@ import os
 import posixpath
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from lib.update.ci._workflow_analysis import (
     WorkflowAnalysis,
@@ -19,11 +19,32 @@ from lib.update.paths import REPO_ROOT
 _DOWNLOAD_ACTION_PREFIX = "actions/download-artifact@"
 _GLOB_CHARS = frozenset("*?[")
 _MATRIX_EXPR = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_]+)\s*\}\}")
+_OUTPUT_PATH_RE = re.compile(r"--output\s+([^\s\\]+)")
 _SOURCES_MATERIALIZER_MARKERS = (
     "nix run .#nixcfg -- ci pipeline sources",
     "nix run path:.#nixcfg -- ci pipeline sources",
 )
 _UPLOAD_ACTION_PREFIX = "actions/upload-artifact@"
+_REFRESH_FINAL_ARTIFACT_NAME = "merged-generated-formatted"
+_REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS = (
+    "flake.lock",
+    "packages/superset/bun.nix",
+    "packages/superset/bun.lock",
+    "packages/**/sources.json",
+    "packages/**/uv.lock",
+    "packages/**/deno-deps.json",
+    "packages/**/build.zig.zon.nix",
+    "overlays/**/sources.json",
+    "packages/codex/Cargo.nix",
+    "packages/codex/crate-hashes.json",
+    "overlays/goose-cli/Cargo.nix",
+    "overlays/goose-cli/crate-hashes.json",
+    "packages/zed-editor-nightly/Cargo.nix",
+    "packages/zed-editor-nightly/crate-hashes.json",
+    "packages/opencode-desktop/Cargo.nix",
+    "packages/opencode-desktop/crate-hashes.json",
+)
+_REFRESH_FINAL_ARTIFACT_REQUIRED_SPECS = _REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS
 
 
 @dataclass(frozen=True)
@@ -104,16 +125,23 @@ def _parse_path_specs(raw_value: WorkflowValue | None) -> tuple[str, ...]:
     return tuple(parsed)
 
 
-def _resolve_spec_paths(repo_root: Path, path_spec: str) -> tuple[str, ...]:
+def _resolve_spec_paths(
+    repo_root: Path,
+    path_spec: str,
+    *,
+    available_paths: frozenset[str] = frozenset(),
+) -> tuple[str, ...]:
     """Resolve one upload path spec into logical repo-relative file paths."""
     if _has_glob(path_spec):
-        return tuple(
-            sorted(
-                _normalize_relpath(path.relative_to(repo_root).as_posix())
-                for path in repo_root.glob(path_spec)
-                if path.is_file()
-            )
+        matched_paths = {
+            _normalize_relpath(path.relative_to(repo_root).as_posix())
+            for path in repo_root.glob(path_spec)
+            if path.is_file()
+        }
+        matched_paths.update(
+            path for path in available_paths if PurePosixPath(path).match(path_spec)
         )
+        return tuple(sorted(matched_paths))
 
     candidate = repo_root / path_spec
     if candidate.is_dir():
@@ -125,18 +153,60 @@ def _resolve_spec_paths(repo_root: Path, path_spec: str) -> tuple[str, ...]:
             )
         )
 
-    return (path_spec,)
+    if candidate.is_file() or path_spec in available_paths:
+        return (path_spec,)
+
+    msg = (
+        f"Artifact path {path_spec!r} does not exist under {repo_root} and was not "
+        "materialized earlier in the job"
+    )
+    raise RuntimeError(msg)
 
 
 def _resolve_source_paths(
-    repo_root: Path, path_specs: tuple[str, ...]
+    repo_root: Path,
+    path_specs: tuple[str, ...],
+    *,
+    available_paths: frozenset[str] = frozenset(),
 ) -> tuple[str, ...]:
     """Resolve upload path specs into unique logical file paths."""
     resolved: dict[str, None] = {}
     for path_spec in path_specs:
-        for path in _resolve_spec_paths(repo_root, path_spec):
+        for path in _resolve_spec_paths(
+            repo_root, path_spec, available_paths=available_paths
+        ):
             resolved[path] = None
     return tuple(resolved)
+
+
+def _resolve_existing_specs(
+    repo_root: Path,
+    path_specs: tuple[str, ...],
+    *,
+    available_paths: frozenset[str] = frozenset(),
+) -> tuple[str, ...]:
+    """Resolve path specs that exist now or were materialized earlier."""
+    resolved: dict[str, None] = {}
+    for path_spec in path_specs:
+        if _has_glob(path_spec):
+            for path in _resolve_spec_paths(
+                repo_root,
+                path_spec,
+                available_paths=available_paths,
+            ):
+                resolved[path] = None
+            continue
+
+        candidate = repo_root / path_spec
+        if candidate.exists() or path_spec in available_paths:
+            resolved[path_spec] = None
+    return tuple(resolved)
+
+
+def _path_matches_any(path: str, specs: tuple[str, ...]) -> bool:
+    """Return whether one repo-relative path matches any allowed spec."""
+    candidate = PurePosixPath(path)
+    return any(candidate.match(spec) for spec in specs)
 
 
 def _artifact_root_for(source_paths: tuple[str, ...]) -> str:
@@ -236,6 +306,7 @@ def _step_name(step: WorkflowObject, *, fallback: str) -> str:
 def _build_upload(
     step: WorkflowObject,
     *,
+    available_paths: frozenset[str] = frozenset(),
     job_id: str,
     job_instance_id: str,
     repo_root: Path,
@@ -259,7 +330,11 @@ def _build_upload(
         raise RuntimeError(msg)
 
     path_specs = _parse_path_specs(with_data.get("path"))
-    source_paths = _resolve_source_paths(repo_root, path_specs)
+    source_paths = _resolve_source_paths(
+        repo_root,
+        path_specs,
+        available_paths=available_paths,
+    )
     return ArtifactUpload(
         artifact_name=artifact_name,
         artifact_root=_artifact_root_for(source_paths),
@@ -352,16 +427,24 @@ def _materialized_paths_from_run_step(
     if not isinstance(run_value, str):
         return ()
 
+    materialized_paths: dict[str, None] = {}
     if any(marker in run_value for marker in _SOURCES_MATERIALIZER_MARKERS):
-        return _resolve_source_paths(
+        for path in _resolve_source_paths(
             repo_root,
             (
                 "packages/**/sources.json",
                 "overlays/**/sources.json",
             ),
-        )
+        ):
+            materialized_paths[path] = None
 
-    return ()
+    for match in _OUTPUT_PATH_RE.findall(run_value):
+        output_path = _normalize_relpath(match.strip("\"'"))
+        if not output_path or "$" in output_path or posixpath.isabs(output_path):
+            continue
+        materialized_paths[output_path] = None
+
+    return tuple(materialized_paths)
 
 
 def _collect_uploads(
@@ -372,18 +455,40 @@ def _collect_uploads(
     uploads: dict[str, ArtifactUpload] = {}
 
     for job in jobs:
+        materialized_paths: set[str] = set()
         for step_index, step in enumerate(job.steps, start=1):
             uses = str(step.get("uses", "")).strip()
+            materialized_paths.update(
+                _materialized_paths_from_run_step(step, repo_root=repo_root)
+            )
+            if uses.startswith(_DOWNLOAD_ACTION_PREFIX):
+                with_data = step.get("with")
+                if isinstance(with_data, dict):
+                    artifact_name = str(with_data.get("name", "")).strip()
+                    producer_upload = uploads.get(artifact_name)
+                    if artifact_name and producer_upload is not None:
+                        materialized_paths.update(
+                            _materialized_paths_for(
+                                producer_upload,
+                                _normalize_relpath(str(with_data.get("path", "."))),
+                            )
+                        )
+                continue
             if not uses.startswith(_UPLOAD_ACTION_PREFIX):
                 continue
 
-            upload = _build_upload(
-                step,
-                job_id=job.job_id,
-                job_instance_id=job.instance_id,
-                repo_root=repo_root,
-                step_index=step_index,
-            )
+            try:
+                upload = _build_upload(
+                    step,
+                    available_paths=frozenset(materialized_paths),
+                    job_id=job.job_id,
+                    job_instance_id=job.instance_id,
+                    repo_root=repo_root,
+                    step_index=step_index,
+                )
+            except (RuntimeError, TypeError) as exc:
+                errors.append(str(exc))
+                continue
             existing = uploads.get(upload.artifact_name)
             if existing is not None:
                 errors.append(
@@ -472,18 +577,24 @@ def _validate_job_artifact_flows(
                     ),
                     step_name=existing_download.step_name,
                 )
+            materialized_paths.update(download.materialized_paths)
             continue
 
         if not uses.startswith(_UPLOAD_ACTION_PREFIX):
             continue
 
-        consumer_upload = _build_upload(
-            step,
-            job_id=job.job_id,
-            job_instance_id=job.instance_id,
-            repo_root=repo_root,
-            step_index=step_index,
-        )
+        try:
+            consumer_upload = _build_upload(
+                step,
+                available_paths=frozenset(materialized_paths),
+                job_id=job.job_id,
+                job_instance_id=job.instance_id,
+                repo_root=repo_root,
+                step_index=step_index,
+            )
+        except (RuntimeError, TypeError) as exc:
+            errors.append(str(exc))
+            continue
         consumer_sources = set(consumer_upload.source_paths)
 
         for artifact_name, download in downloaded_artifacts.items():
@@ -513,6 +624,48 @@ def _validate_job_artifact_flows(
     return errors
 
 
+def _validate_refresh_final_artifact_scope(
+    uploads: dict[str, ArtifactUpload],
+    *,
+    repo_root: Path,
+) -> list[str]:
+    """Ensure the PR artifact contains only generated update outputs."""
+    upload = uploads.get(_REFRESH_FINAL_ARTIFACT_NAME)
+    if upload is None:
+        return []
+
+    errors: list[str] = []
+    source_paths = set(upload.source_paths)
+    unexpected_paths = sorted(
+        path
+        for path in source_paths
+        if not _path_matches_any(path, _REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS)
+    )
+    if unexpected_paths:
+        preview = ", ".join(f"`{path}`" for path in unexpected_paths[:4])
+        errors.append(
+            f"Artifact `{_REFRESH_FINAL_ARTIFACT_NAME}` includes non-update "
+            f"path(s): {preview}"
+        )
+
+    required_paths = set(
+        _resolve_existing_specs(
+            repo_root,
+            _REFRESH_FINAL_ARTIFACT_REQUIRED_SPECS,
+            available_paths=frozenset(source_paths),
+        )
+    )
+    missing_paths = sorted(required_paths - source_paths)
+    if missing_paths:
+        preview = ", ".join(f"`{path}`" for path in missing_paths[:4])
+        errors.append(
+            f"Artifact `{_REFRESH_FINAL_ARTIFACT_NAME}` is missing update "
+            f"path(s): {preview}"
+        )
+
+    return errors
+
+
 def validate_workflow_artifact_contracts(
     *,
     workflow_path: Path | os.PathLike[str] | None = None,
@@ -534,6 +687,7 @@ def validate_workflow_artifact_contracts(
     _, transitive_needs = workflow.needs_graph()
     jobs = _expand_jobs(workflow.jobs)
     uploads, errors = _collect_uploads(jobs, repo_root=repo_root)
+    errors.extend(_validate_refresh_final_artifact_scope(uploads, repo_root=repo_root))
     for job in jobs:
         errors.extend(
             _validate_job_artifact_flows(

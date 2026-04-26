@@ -7,10 +7,11 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import HashCollection, HashEntry
+from lib.tests._updater_helpers import collect_events as _collect_events
+from lib.tests._updater_helpers import load_repo_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEvent, UpdateEventKind
-from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import VersionInfo
 
 HASH_A = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -37,18 +38,9 @@ source = "git+https://example.invalid/tauri-specta"
 """
 
 
-def _run[T](coro):
-    return asyncio.run(coro)
-
-
-async def _collect_events(stream):
-    return [event async for event in stream]
-
-
 def _load_module() -> ModuleType:
-    return load_module_from_path(
-        REPO_ROOT / "packages/opencode-desktop/updater.py",
-        "opencode_desktop_updater_test",
+    return load_repo_module(
+        "packages/opencode-desktop/updater.py", "opencode_desktop_updater_test"
     )
 
 

@@ -135,10 +135,7 @@ def run_diff(old_lock_path: pathlib.Path, new_lock_path: pathlib.Path) -> str:
     """Compare two flake.lock files and return a readable summary."""
     old_lock_path = pathlib.Path(old_lock_path)
     new_lock_path = pathlib.Path(new_lock_path)
-    old_lock = FlakeLock.from_file(old_lock_path)
-    new_lock = FlakeLock.from_file(new_lock_path)
-
-    added, removed, updated = _collect_changes(old_lock, new_lock)
+    added, removed, updated = collect_changes(old_lock_path, new_lock_path)
 
     if not (added or removed or updated):
         return ""
@@ -187,6 +184,16 @@ def run_diff(old_lock_path: pathlib.Path, new_lock_path: pathlib.Path) -> str:
     )
 
     return "\n".join(lines)
+
+
+def collect_changes(
+    old_lock_path: pathlib.Path,
+    new_lock_path: pathlib.Path,
+) -> tuple[list[InputInfo], list[InputInfo], list[tuple[InputInfo, InputInfo]]]:
+    """Load two flake.lock files and return structured added/removed/updated rows."""
+    old_lock = FlakeLock.from_file(pathlib.Path(old_lock_path))
+    new_lock = FlakeLock.from_file(pathlib.Path(new_lock_path))
+    return _collect_changes(old_lock, new_lock)
 
 
 def get_input_info(lock: FlakeLock, name: str) -> InputInfo | None:

@@ -257,11 +257,10 @@ def test_drain_value_events_and_require_value() -> None:
     assert [event.kind for event in forwarded] == [UpdateEventKind.STATUS]
     assert require_value(drain, "missing") == "value"
 
+    async def _missing_value() -> AsyncIterator[UpdateEvent]:
+        yield UpdateEvent(source="demo", kind=UpdateEventKind.VALUE, payload=None)
+
     with pytest.raises(RuntimeError, match="missing payload"):
-
-        async def _missing_value() -> AsyncIterator[UpdateEvent]:
-            yield UpdateEvent(source="demo", kind=UpdateEventKind.VALUE, payload=None)
-
         _collect_async(
             drain_value_events(_missing_value(), ValueDrain(), parse=expect_str)
         )
@@ -297,39 +296,36 @@ def test_gather_event_streams_success_and_errors() -> None:
     )
     statuses = [item for item in items if isinstance(item, UpdateEvent)]
     assert len(statuses) == 2
-    gathered = [item for item in items if isinstance(item, GatheredValues)][0]
+    gathered = next(item for item in items if isinstance(item, GatheredValues))
     assert gathered.values == {"a": "1", "b": "2"}
 
+    async def _missing_payload() -> AsyncIterator[UpdateEvent]:
+        yield UpdateEvent(source="x", kind=UpdateEventKind.VALUE, payload=None)
+
     with pytest.raises(RuntimeError, match="missing payload"):
-
-        async def _missing_payload() -> AsyncIterator[UpdateEvent]:
-            yield UpdateEvent(source="x", kind=UpdateEventKind.VALUE, payload=None)
-
         _collect_async(gather_event_streams({"x": _missing_payload()}))
 
+    async def _boom() -> AsyncIterator[UpdateEvent]:
+        msg = "boom"
+        raise RuntimeError(msg)
+        yield UpdateEvent.status("never", "never")
+
     with pytest.raises(RuntimeError, match="boom") as exc_info:
-
-        async def _boom() -> AsyncIterator[UpdateEvent]:
-            msg = "boom"
-            raise RuntimeError(msg)
-            yield UpdateEvent.status("never", "never")
-
         _collect_async(gather_event_streams({"x": _boom()}))
 
     assert "event stream key: 'x'" in "\n".join(exc_info.value.__notes__)
 
+    async def _boom_one() -> AsyncIterator[UpdateEvent]:
+        msg = "first"
+        raise RuntimeError(msg)
+        yield UpdateEvent.status("never", "never")
+
+    async def _boom_two() -> AsyncIterator[UpdateEvent]:
+        msg = "second"
+        raise RuntimeError(msg)
+        yield UpdateEvent.status("never", "never")
+
     with pytest.raises(RuntimeError, match="Multiple event streams failed") as exc_info:
-
-        async def _boom_one() -> AsyncIterator[UpdateEvent]:
-            msg = "first"
-            raise RuntimeError(msg)
-            yield UpdateEvent.status("never", "never")
-
-        async def _boom_two() -> AsyncIterator[UpdateEvent]:
-            msg = "second"
-            raise RuntimeError(msg)
-            yield UpdateEvent.status("never", "never")
-
         _collect_async(gather_event_streams({"a": _boom_one(), "b": _boom_two()}))
 
     notes = "\n".join(exc_info.value.__notes__)

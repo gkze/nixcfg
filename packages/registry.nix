@@ -77,6 +77,9 @@ let
     "wispr-flow" = {
       constraint = "darwin";
     };
+    "zen-twilight" = {
+      constraint = "darwin";
+    };
     emdash = {
       constraint = [
         "aarch64-darwin"

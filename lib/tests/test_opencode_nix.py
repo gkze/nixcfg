@@ -95,7 +95,7 @@ def _opencode_options_attrset() -> AttributeSet:
 
 @cache
 def _profiles_module_source() -> str:
-    """Read the work profiles module once for source-level assertions."""
+    """Read the work profiles module once for targeted fragment parsing."""
     return Path(REPO_ROOT / "modules/home/profiles.nix").read_text(encoding="utf-8")
 
 

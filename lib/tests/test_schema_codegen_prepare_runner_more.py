@@ -131,7 +131,9 @@ def _install_fake_referencing(monkeypatch: pytest.MonkeyPatch) -> None:
             resolver=_FakeResolver({}),
         )
 
-    registry_factory = lambda: _FakeRegistry()
+    def registry_factory() -> _FakeRegistry:
+        return _FakeRegistry()
+
     monkeypatch.setattr(
         _prepare,
         "_import_optional",
@@ -702,7 +704,7 @@ def test_generate_schema_codegen_target_preserves_existing_trailing_newline(
     monkeypatch.setattr(
         codegen_runner._render,
         "apply_python_transforms",
-        lambda rendered, target: rendered,
+        lambda rendered, target: f"{rendered}\n",
     )
 
     codegen_runner.generate_schema_codegen_target(target_name="demo")

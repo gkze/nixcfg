@@ -180,10 +180,10 @@ def test_session_state_normalizes_nullable_folder_links(
         ]
     )
 
-    assert state.folders[0].prevSiblingInfo == zentool.PrevSiblingInfo(
+    assert state.folders[0].prev_sibling_info == zentool.PrevSiblingInfo(
         type="start", id=None
     )
-    assert state.folders[1].prevSiblingInfo == zentool.PrevSiblingInfo(
+    assert state.folders[1].prev_sibling_info == zentool.PrevSiblingInfo(
         type="group", id="group-1"
     )
 

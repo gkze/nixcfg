@@ -115,10 +115,12 @@ def test_zen_module_python_runtime_includes_schema_sync_dependencies() -> None:
         package_lambda.output,
         """
 with ps; [
+  click
   deepdiff
   lz4
   pydantic
   pyyaml
+  typer
 ]
 """,
     )

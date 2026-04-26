@@ -229,8 +229,8 @@ def test_build_workspace_compilation_reuses_existing_space_and_builds_tabs(
     assert compiled.space.uuid == "{ws-existing}"
     assert compiled.space.name == "Work"
     assert compiled.space.icon == "briefcase"
-    assert compiled.space.hasCollapsedPinnedTabs is True
-    assert compiled.space.containerTabId == 42
+    assert compiled.space.has_collapsed_pinned_tabs is True
+    assert compiled.space.container_tab_id == 42
     assert compiled.space.theme.model_dump() == {
         "type": "gradient",
         "gradientColors": ["#111", "#222"],
@@ -635,19 +635,19 @@ def test_assign_folder_links_and_build_folder_group_update_existing_records(
     )
 
     assert primary_folder.existing is existing_folder
-    assert primary_folder.existing.parentId is None
-    assert primary_folder.existing.prevSiblingInfo == zentool.PrevSiblingInfo(
+    assert primary_folder.existing.parent_id is None
+    assert primary_folder.existing.prev_sibling_info == zentool.PrevSiblingInfo(
         type="tab",
         id="sync-leading",
     )
     assert nested_folder.existing is not None
-    assert nested_folder.existing.parentId == "folder-existing"
-    assert nested_folder.existing.prevSiblingInfo == zentool.PrevSiblingInfo(
+    assert nested_folder.existing.parent_id == "folder-existing"
+    assert nested_folder.existing.prev_sibling_info == zentool.PrevSiblingInfo(
         type="start",
         id=None,
     )
     assert trailing_folder.existing is not None
-    assert trailing_folder.existing.prevSiblingInfo == zentool.PrevSiblingInfo(
+    assert trailing_folder.existing.prev_sibling_info == zentool.PrevSiblingInfo(
         type="group",
         id="folder-existing",
     )
@@ -664,11 +664,11 @@ def test_assign_folder_links_and_build_folder_group_update_existing_records(
     assert built_folder is not existing_folder
     assert built_folder.id == "folder-existing"
     assert built_folder.name == "Primary"
-    assert built_folder.workspaceId == "{ws}"
+    assert built_folder.workspace_id == "{ws}"
     assert built_folder.collapsed is False
-    assert built_folder.userIcon == "star"
-    assert built_folder.emptyTabIds == ["sync-placeholder"]
-    assert built_folder.prevSiblingInfo == zentool.PrevSiblingInfo(
+    assert built_folder.user_icon == "star"
+    assert built_folder.empty_tab_ids == ["sync-placeholder"]
+    assert built_folder.prev_sibling_info == zentool.PrevSiblingInfo(
         type="tab",
         id="sync-leading",
     )

@@ -659,6 +659,88 @@ def test_run_keeps_artifacts_on_merge_failure_and_exception(
     assert any(log == f"Artifacts kept at: {temp_root}" for log in seen_logs)
 
 
+def test_run_reports_cleanup_failure_and_keeps_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Cleanup failures should be surfaced instead of silently suppressed."""
+    temp_root = tmp_path / "temp"
+    temp_root.mkdir()
+    repo_root = tmp_path / "repo-root"
+    repo_root.mkdir()
+    workspace_path = temp_root / "repo"
+    source_path = workspace_path / "packages" / "demo" / "sources.json"
+    entry = SourceEntry.model_validate({
+        "hashes": [],
+        "input": "demo",
+        "version": "main",
+    })
+    seen_logs: list[str] = []
+    cleaned: list[Path] = []
+
+    monkeypatch.setattr(merge_probe.tempfile, "mkdtemp", lambda prefix: str(temp_root))
+    monkeypatch.setattr(merge_probe, "get_repo_root", lambda: repo_root)
+    monkeypatch.setattr(merge_probe, "_log", seen_logs.append)
+
+    def _fake_run_checked(args: list[str], *, cwd: Path | None = None) -> None:
+        del cwd
+        if args[:3] == ["git", "worktree", "add"]:
+            workspace_path.mkdir(parents=True, exist_ok=True)
+            return
+        if args[:3] == ["git", "worktree", "remove"]:
+            msg = "worktree remove failed"
+            raise RuntimeError(msg)
+
+    async def _fake_compute_hashes(
+        _source: str,
+        *,
+        platforms: tuple[str, ...],
+        workspace: Path,
+    ) -> dict[str, str]:
+        assert workspace == workspace_path.resolve()
+        return dict.fromkeys(
+            platforms,
+            "sha256-KZpnZ45k/KVjpGQC4eRBZgV3k29RIbsnjygJ3A23cF0=",
+        )
+
+    monkeypatch.setattr(merge_probe, "_run_checked", _fake_run_checked)
+    monkeypatch.setattr(
+        merge_probe,
+        "_get_updater",
+        lambda _source: SimpleNamespace(hash_type="vendorHash"),
+    )
+    monkeypatch.setattr(
+        merge_probe,
+        "_load_source_entry",
+        lambda _source, _workspace: (source_path, entry),
+    )
+    monkeypatch.setattr(merge_probe, "_compute_hashes", _fake_compute_hashes)
+    monkeypatch.setattr(merge_probe, "_write_artifact_entry", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        merge_probe.merge_sources,
+        "run",
+        lambda *, roots, output_root: 0,
+    )
+    monkeypatch.setattr(
+        merge_probe.shutil,
+        "rmtree",
+        lambda path: cleaned.append(Path(path)),
+    )
+
+    status = merge_probe.run(
+        source="demo",
+        revision="HEAD",
+        seed_root=None,
+        keep_artifacts=False,
+        platforms=("x86_64-linux",),
+    )
+
+    assert status == 1
+    assert cleaned == []
+    assert any("Cleanup failed: worktree remove failed" in log for log in seen_logs)
+    assert any(log == f"Artifacts kept at: {temp_root}" for log in seen_logs)
+
+
 def test_run_skips_cleanup_steps_when_workspace_and_temp_root_are_absent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

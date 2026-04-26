@@ -11,7 +11,6 @@ import pytest
 from lib.tests._zen_tooling import load_zen_script_module
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from types import ModuleType
 
 

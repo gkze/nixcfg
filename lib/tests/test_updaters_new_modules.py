@@ -5,34 +5,20 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 
-from lib.import_utils import load_module_from_path
-from lib.nix.models.sources import HashEntry, SourceEntry
+from lib.nix.models.sources import HashEntry
 from lib.tests._assertions import expect_instance
+from lib.tests._updater_helpers import collect_events as _collect
+from lib.tests._updater_helpers import load_repo_module as _load_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
-from lib.update.paths import REPO_ROOT
 from lib.update.updaters import materialization as materialization_mod
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
-
-if TYPE_CHECKING:
-    from collections.abc import Coroutine
-
-
-def _load_module(path: str, name: str) -> ModuleType:
-    return load_module_from_path(REPO_ROOT / path, name)
-
-
-def _run[T](coro: Coroutine[object, object, T]) -> T:
-    return asyncio.run(coro)
-
-
-async def _collect(stream: EventStream) -> list[UpdateEvent]:
-    return [event async for event in stream]
 
 
 @pytest.fixture(scope="module")
@@ -301,12 +287,18 @@ def test_commander_falls_back_to_latest_download_url_when_versioned_asset_is_mis
 ) -> None:
     """Use the stable latest DMG URL when versioned release assets 404."""
     updater = commander_module.CommanderUpdater()
+    changelog_version = "7.8.9"
+    versioned_url = (
+        f"https://download.thecommander.app/release/Commander-{changelog_version}.dmg"
+    )
     monkeypatch.setattr(
         commander_module,
         "fetch_url",
         lambda *_a, **_k: asyncio.sleep(
             0,
-            result=b"# Changelog\n\n## 0.7.967 - 2026-03-30\n\n- Fix stuff\n",
+            result=(
+                f"# Changelog\n\n## {changelog_version} - 2026-03-30\n\n- Fix stuff\n"
+            ).encode(),
         ),
     )
 
@@ -318,7 +310,7 @@ def test_commander_falls_back_to_latest_download_url_when_versioned_asset_is_mis
         **_kwargs: object,
     ) -> dict[str, str]:
         calls.append(url)
-        if url.endswith("Commander-0.7.967.dmg"):
+        if url == versioned_url:
             raise RuntimeError(
                 "Request to versioned asset failed after 3 attempts: HTTP error 404"
             )
@@ -327,7 +319,7 @@ def test_commander_falls_back_to_latest_download_url_when_versioned_asset_is_mis
     monkeypatch.setattr(commander_module, "fetch_headers", _fetch_headers)
 
     latest = _run(updater.fetch_latest(object()))
-    assert latest.version == "0.7.967"
+    assert latest.version == changelog_version
     assert (
         latest.metadata["url"]
         == "https://download.thecommander.app/release/Commander.dmg"
@@ -337,7 +329,7 @@ def test_commander_falls_back_to_latest_download_url_when_versioned_asset_is_mis
         == "https://download.thecommander.app/release/Commander.dmg"
     )
     assert calls == [
-        "https://download.thecommander.app/release/Commander-0.7.967.dmg",
+        versioned_url,
         "https://download.thecommander.app/release/Commander.dmg",
     ]
 
@@ -348,12 +340,15 @@ def test_commander_propagates_non_404_probe_failures(
 ) -> None:
     """Do not silently mask transient or unexpected probe errors."""
     updater = commander_module.CommanderUpdater()
+    changelog_version = "7.8.9"
     monkeypatch.setattr(
         commander_module,
         "fetch_url",
         lambda *_a, **_k: asyncio.sleep(
             0,
-            result=b"# Changelog\n\n## 0.7.967 - 2026-03-30\n\n- Fix stuff\n",
+            result=(
+                f"# Changelog\n\n## {changelog_version} - 2026-03-30\n\n- Fix stuff\n"
+            ).encode(),
         ),
     )
 
@@ -565,16 +560,14 @@ def test_element_desktop_reads_pinned_version_from_sources(
 ) -> None:
     """Load pinned version from per-package sources file."""
     updater = element_desktop_module.ElementDesktopUpdater()
+    pinned_version = "fixture-version"
     monkeypatch.setattr(
-        element_desktop_module, "package_dir_for", lambda _n: Path("/tmp/x")
-    )
-    monkeypatch.setattr(
-        element_desktop_module.update_sources,
-        "load_source_entry",
-        lambda _p: SourceEntry.model_validate({"version": "1.12.8", "hashes": []}),
+        element_desktop_module,
+        "read_pinned_source_version",
+        lambda _n: pinned_version,
     )
     latest = _run(updater.fetch_latest(object()))
-    assert latest.version == "1.12.8"
+    assert latest.version == pinned_version
 
     is_latest = _run(updater._is_latest(None, latest))
     assert is_latest is False
@@ -695,6 +688,8 @@ def test_crush_prefers_newest_release_compatible_with_repo_go_floor(
 ) -> None:
     """Scan far enough back to find the newest release the current Go can build."""
     updater = crush_module.CrushUpdater()
+    compatible_tag = "v1.2.3"
+    compatible_version = compatible_tag.removeprefix("v")
     monkeypatch.setattr(
         updater,
         "_resolve_supported_go_version",
@@ -712,7 +707,7 @@ def test_crush_prefers_newest_release_compatible_with_repo_go_floor(
                 {"tag_name": f"v0.{minor}.0", "draft": False, "prerelease": False}
                 for minor in range(67, 56, -1)
             ],
-            {"tag_name": "v0.56.0", "draft": False, "prerelease": False},
+            {"tag_name": compatible_tag, "draft": False, "prerelease": False},
         ]
 
     monkeypatch.setattr(
@@ -725,15 +720,15 @@ def test_crush_prefers_newest_release_compatible_with_repo_go_floor(
             0,
             result=(
                 b"module github.com/charmbracelet/crush\n\ngo 1.26.1\n"
-                if "v0.56.0" in _a[1]
+                if compatible_tag in _a[1]
                 else b"module github.com/charmbracelet/crush\n\ngo 1.27.0\n"
             ),
         ),
     )
 
     latest = _run(updater.fetch_latest(object()))
-    assert latest.version == "0.56.0"
-    assert latest.metadata.tag == "v0.56.0"
+    assert latest.version == compatible_version
+    assert latest.metadata.tag == compatible_tag
     assert captured_kwargs["per_page"] == 100
     assert "item_limit" not in captured_kwargs
 
@@ -744,6 +739,7 @@ def test_crush_falls_back_to_current_pin_when_no_release_is_compatible(
 ) -> None:
     """Preserve the current crush pin until nixpkgs can build newer releases."""
     updater = crush_module.CrushUpdater()
+    pinned_version = "fixture-version"
     monkeypatch.setattr(
         updater,
         "_resolve_supported_go_version",
@@ -767,13 +763,12 @@ def test_crush_falls_back_to_current_pin_when_no_release_is_compatible(
             result=b"module github.com/charmbracelet/crush\n\ngo 1.26.2\n",
         ),
     )
-    monkeypatch.setattr(crush_module, "package_dir_for", lambda _n: Path("/tmp/crush"))
     monkeypatch.setattr(
-        crush_module.update_sources,
-        "load_source_entry",
-        lambda _p: SourceEntry.model_validate({"version": "0.55.0", "hashes": []}),
+        crush_module,
+        "read_pinned_source_version",
+        lambda _n: pinned_version,
     )
 
     latest = _run(updater.fetch_latest(object()))
-    assert latest.version == "0.55.0"
-    assert latest.metadata.tag == "v0.55.0"
+    assert latest.version == pinned_version
+    assert latest.metadata.tag == f"v{pinned_version}"

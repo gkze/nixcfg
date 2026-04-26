@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 from lib import json_utils
 from lib.update.net import fetch_url
 from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
-from lib.update.updaters.metadata import require_metadata_str
+from lib.update.updaters.metadata import GranolaFeedMetadata, require_metadata_str
 
 
 @register_updater
@@ -66,4 +66,7 @@ class GranolaUpdater(DownloadHashUpdater):
             "sha512",
             context="Granola feed",
         )
-        return VersionInfo(version=version, metadata={"path": path, "sha512": sha512})
+        return VersionInfo(
+            version=version,
+            metadata=GranolaFeedMetadata(path=path, sha512=sha512),
+        )

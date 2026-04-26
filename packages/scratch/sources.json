@@ -1,15 +1,15 @@
 {
-  "commit": "7e2158a4ddf6e82701c3f4e4264bcfcdebca8609",
+  "commit": "6d443e9a6eb3e0742d84c2b5abdca46a0270f7c7",
   "hashes": [
     {
-      "hash": "sha256-3mAQkwa4Qr3YKZBgQjQT7soqVgubM31sYhPIibuBHrw=",
-      "hashType": "npmDepsHash"
+      "hash": "sha256-h72pm9a/2IVk+cKMQ9yxFoXiN8mCoZ2/kDlZUEUOY7k=",
+      "hashType": "cargoHash"
     },
     {
-      "hash": "sha256-hFcmPhKOd2EvtTSZfHkrHrf+5gunnbcSLLDIj48Ax48=",
-      "hashType": "cargoHash"
+      "hash": "sha256-/fFQ7rEdsPDi6CoAKh6ibbDcXADAyElbu7zjt1RYrD0=",
+      "hashType": "npmDepsHash"
     }
   ],
   "input": "scratch",
-  "version": "v0.8.0"
+  "version": "v0.10.0"
 }

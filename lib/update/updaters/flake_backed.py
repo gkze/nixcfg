@@ -11,7 +11,6 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import (
     HashCollection,
     HashEntry,
@@ -41,13 +40,12 @@ from lib.update.updaters.core import (
 from lib.update.updaters.metadata import (
     FlakeInputMetadata,
     VersionInfo,
-    metadata_as_mapping,
-    metadata_get,
 )
 
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.nix.models.flake_lock import FlakeLockNode
     from lib.update.config import UpdateConfig
 
 from lib.update.updaters._base_proxy import base_module as _base_module
@@ -83,20 +81,12 @@ class FlakeInputUpdater(Updater):
         return self.input_name
 
     def _resolve_flake_node(self, info: VersionInfo) -> FlakeLockNode:
-        metadata = info.metadata
-        if isinstance(metadata, FlakeInputMetadata):
+        metadata = FlakeInputMetadata.from_metadata(
+            info.metadata,
+            context=f"{self.name} metadata",
+        )
+        if metadata is not None:
             return metadata.node
-        if isinstance(metadata, dict):
-            node = metadata_get(
-                metadata_as_mapping(metadata, context=f"{self.name} metadata"),
-                "node",
-            )
-            if node is None:
-                return _base_module().get_flake_input_node(self._input)
-            if isinstance(node, FlakeLockNode):
-                return node
-            msg = f"Expected flake lock node in metadata, got {type(node)}"
-            raise TypeError(msg)
         return _base_module().get_flake_input_node(self._input)
 
     async def fetch_latest(
@@ -125,6 +115,18 @@ class FlakeInputMetadataUpdater(FlakeInputUpdater):
             input=self._input,
             commit=info.commit,
         )
+
+    async def _is_latest(
+        self,
+        context: UpdateContext | SourceEntry | None,
+        info: VersionInfo,
+    ) -> bool:
+        context = _coerce_context(context)
+        current = context.current
+        if current is None:
+            return False
+        expected = self.build_result(info, [])
+        return current.equivalent_to(expected)
 
     async def fetch_hashes(
         self,
@@ -424,6 +426,15 @@ class DenoManifestUpdater(FlakeInputUpdater):
     required_tools: ClassVar[tuple[str, ...]] = ()
     materialize_when_current: ClassVar[bool] = True
 
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
+        """Build a source entry carrying the backing input identity."""
+        return SourceEntry(
+            version=info.version,
+            hashes=HashCollection.from_value(hashes),
+            input=self._input,
+            commit=info.commit,
+        )
+
     async def fetch_hashes(
         self,
         info: VersionInfo,
@@ -509,6 +520,7 @@ class UvLockUpdater(FlakeInputUpdater):
             version=info.version,
             hashes=HashCollection.from_value(hashes),
             input=self._input,
+            commit=info.commit,
         )
 
     def _render_lock_env(self, info: VersionInfo) -> dict[str, str]:

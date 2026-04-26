@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -114,8 +115,6 @@ def test_tail_workflow_async_converts_missing_workflow_and_run_states(
     )
 
     with pytest.raises(gha_cli.typer.BadParameter, match="unknown workflow"):
-        import asyncio
-
         asyncio.run(
             gha_cli._tail_workflow_async(
                 workflow_name="missing",
@@ -133,8 +132,6 @@ def test_tail_workflow_async_converts_missing_workflow_and_run_states(
     )
 
     with pytest.raises(gha_cli.typer.BadParameter, match="has no runs yet"):
-        import asyncio
-
         asyncio.run(
             gha_cli._tail_workflow_async(
                 workflow_name=workflow.name,
@@ -165,8 +162,6 @@ def test_tail_workflow_async_converts_missing_workflow_and_run_states(
         gha_cli.typer.BadParameter,
         match=r"has no active run; latest run is #12 \[success\]",
     ):
-        import asyncio
-
         asyncio.run(
             gha_cli._tail_workflow_async(
                 workflow_name=workflow.name,

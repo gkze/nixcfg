@@ -9,32 +9,22 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance, expect_not_none
 from lib.tests._nix_ast import assert_nix_ast_equal, parse_nix_expr
+from lib.tests._updater_helpers import collect_events as _collect
+from lib.tests._updater_helpers import load_repo_module as _load_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters.base import VersionInfo, source_override_env
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine, Iterable
+    from collections.abc import Callable, Iterable
 
 HASH_A = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 HASH_B = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
-
-
-def _load_module(path: str, name: str) -> ModuleType:
-    return load_module_from_path(REPO_ROOT / path, name)
-
-
-def _run[T](coro: Coroutine[object, object, T]) -> T:
-    return asyncio.run(coro)
-
-
-async def _collect(stream: EventStream) -> list[UpdateEvent]:
-    return [event async for event in stream]
 
 
 def _require_hash_entries(payload: object) -> list[HashEntry]:
@@ -295,7 +285,7 @@ def test_netnewswire_updater_paths(
         b'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
         b"<channel><item>"
         b'<enclosure url="https://example.com/NetNewsWire.zip" '
-        b'sparkle:shortVersionString="7.0.4" />'
+        b'sparkle:shortVersionString="6.2.1" />'
         b"</item></channel></rss>"
     )
 
@@ -305,7 +295,7 @@ def test_netnewswire_updater_paths(
         lambda *_a, **_k: asyncio.sleep(0, result=xml),
     )
     latest = _run(updater.fetch_latest(object()))
-    assert latest.version == "7.0.4"
+    assert latest.version == "6.2.1"
     assert latest.metadata["url"] == "https://example.com/NetNewsWire.zip"
 
     assert (
@@ -349,7 +339,7 @@ def test_netnewswire_updater_paths(
 
     no_url = (
         b'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
-        b"<channel><item><enclosure sparkle:shortVersionString='7.0.4' />"
+        b"<channel><item><enclosure sparkle:shortVersionString='6.2.1' />"
         b"</item></channel></rss>"
     )
     monkeypatch.setattr(
@@ -368,7 +358,7 @@ def test_goose_v8_updater_skips_unchanged_pinned_revision(
     """Unchanged pinned goose-v8 revisions should not trigger rehash churn."""
     updater = goose_v8_module.GooseV8Updater()
     current = SourceEntry.model_validate({
-        "version": "dbb64c20b9062b358b101e4592abb3ca8f646c2b",
+        "version": "0123456789abcdef0123456789abcdef01234567",
         "input": "goose-v8",
         "hashes": [
             {
@@ -435,16 +425,16 @@ def test_sentry_cli_updater_paths(
     updater = sentry_cli_module.SentryCliUpdater()
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
-        lambda *_a, **_k: asyncio.sleep(0, result={"tag_name": "v2.0.0"}),
+        lambda *_a, **_k: asyncio.sleep(0, result={"tag_name": "v9.9.9"}),
     )
     latest = _run(updater.fetch_latest(object()))
-    assert latest.version == "v2.0.0"
+    assert latest.version == "v9.9.9"
 
-    src_expr = object.__getattribute__(updater, "_src_nix_expr")("v2.0.0")
-    cargo_expr = object.__getattribute__(updater, "_cargo_nix_expr")("v2.0.0", HASH_A)
+    src_expr = object.__getattribute__(updater, "_src_nix_expr")("v9.9.9")
+    cargo_expr = object.__getattribute__(updater, "_cargo_nix_expr")("v9.9.9", HASH_A)
     assert_nix_ast_equal(
         src_expr,
-        object.__getattribute__(updater, "_src_nix_expression")("v2.0.0"),
+        object.__getattribute__(updater, "_src_nix_expression")("v9.9.9"),
     )
     cargo_call = expect_instance(
         parse_nix_expr(cargo_expr), sentry_cli_module.FunctionCall
@@ -460,24 +450,26 @@ def test_sentry_cli_updater_paths(
 
     call_count = 0
 
-    async def _fixed_hash(_name: str, expr: str) -> EventStream:
+    async def _fixed_hash(_name: str, expr: str, **_kwargs: object) -> EventStream:
         nonlocal call_count
         call_count += 1
         yield UpdateEvent.status("sentry-cli", f"build {expr[:5]}")
         yield UpdateEvent.value("sentry-cli", HASH_A if call_count == 1 else HASH_B)
 
-    monkeypatch.setattr(sentry_cli_module, "compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_fixed_output_hash", _fixed_hash
+    )
     events = _run(_collect(updater.fetch_hashes(latest, object())))
     values = [e for e in events if e.kind == UpdateEventKind.VALUE]
     payload = _require_hash_entries(values[-1].payload)
     assert payload[0].hash_type == "srcHash"
     assert payload[1].hash_type == "cargoHash"
 
-    async def _no_hash(_name: str, _expr: str) -> EventStream:
+    async def _no_hash(_name: str, _expr: str, **_kwargs: object) -> EventStream:
         if False:
             yield UpdateEvent.status("x", "y")
 
-    monkeypatch.setattr(sentry_cli_module, "compute_fixed_output_hash", _no_hash)
+    monkeypatch.setattr("lib.update.updaters.base.compute_fixed_output_hash", _no_hash)
     with pytest.raises(RuntimeError, match="Missing srcHash output"):
         _run(_collect(updater.fetch_hashes(latest, object())))
 
@@ -586,7 +578,9 @@ def test_scratch_updater_paths(
         else:
             yield UpdateEvent.value("scratch", HASH_B)
 
-    monkeypatch.setattr(scratch_module, "compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_fixed_output_hash", _fixed_hash
+    )
     events = _run(_collect(updater.fetch_hashes(latest, object())))
     payload = _require_hash_entries(
         [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload
@@ -597,13 +591,13 @@ def test_scratch_updater_paths(
         if False:
             yield UpdateEvent.status("scratch", "none")
 
-    monkeypatch.setattr(scratch_module, "compute_fixed_output_hash", _no_hash)
+    monkeypatch.setattr("lib.update.updaters.base.compute_fixed_output_hash", _no_hash)
     with pytest.raises(RuntimeError, match="Missing npmDepsHash output"):
         _run(_collect(updater.fetch_hashes(latest, object())))
 
     built = updater.build_result(
         latest,
-        [scratch_module.HashEntry.create("npmDepsHash", HASH_A)],
+        [HashEntry.create("npmDepsHash", HASH_A)],
     )
     assert built.input == "scratch"
     assert built.commit == "f" * 40
@@ -622,7 +616,13 @@ def test_oxlint_tsgolint_updater_paths(
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == "0.21.0"
 
-    env = updater._override_env(latest.version, HASH_A, HASH_B)
+    env = source_override_env(
+        "oxlint-tsgolint",
+        version=latest.version,
+        src_hash=HASH_A,
+        dependency_hash_type="vendorHash",
+        dependency_hash=HASH_B,
+    )
     payload = json.loads(env["UPDATE_SOURCE_OVERRIDES_JSON"])
     assert payload == {
         "oxlint-tsgolint": {

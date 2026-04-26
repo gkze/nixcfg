@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, ClassVar
 
@@ -11,19 +13,25 @@ import pytest
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance, expect_not_none
+from lib.tests._updater_helpers import collect_events as _collect_events
+from lib.tests._updater_helpers import install_fixed_hash_stream
 from lib.update import updaters as updater_module
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import resolve_config
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.updaters import UPDATERS
 from lib.update.updaters import flake_backed as flake_backed_module
+from lib.update.updaters import materialization as materialization_module
 from lib.update.updaters.base import (
     ChecksumProvidedUpdater,
     CommandResult,
+    Crate2NixMetadataUpdater,
     DenoDepsHashUpdater,
     DenoManifestUpdater,
     DownloadHashUpdater,
+    FixedOutputHashStep,
     FlakeInputHashUpdater,
+    FlakeInputMetadataUpdater,
     HashEntryUpdater,
     Updater,
     UvLockUpdater,
@@ -37,13 +45,13 @@ from lib.update.updaters.base import (
     go_vendor_updater,
     npm_deps_updater,
     register_updater,
+    stream_fixed_output_hashes,
     uv_lock_hash_updater,
     uv_lock_updater,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable
-    from pathlib import Path
 
 HASH_A = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 HASH_B = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
@@ -296,6 +304,112 @@ def test_updater_registration_rejects_duplicate_names_from_different_files(
     UPDATERS.pop(duplicate_name, None)
 
 
+def test_register_updater_auto_wraps_crate2nix_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Crate2nix-backed updaters should gain artifact materialization automatically."""
+    updater_name = "auto-crate2nix-demo"
+    UPDATERS.pop(updater_name, None)
+
+    async def _stream(name: str, *, operation: str = "materialize_artifacts"):
+        yield UpdateEvent.status(name, "refreshing", operation=operation)
+        yield UpdateEvent.artifact(
+            name,
+            GeneratedArtifact.text("packages/demo/Cargo.nix", "{ demo = true; }\n"),
+        )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "lib.update.crate2nix",
+        SimpleNamespace(
+            TARGETS={updater_name: object()},
+            stream_crate2nix_artifact_updates=_stream,
+        ),
+    )
+
+    @register_updater
+    class _AutoCrate2NixUpdater(FlakeInputMetadataUpdater):
+        name = updater_name
+        input_name = "demo-input"
+
+        async def fetch_latest(self, session: object) -> VersionInfo:
+            _ = session
+            return VersionInfo(version="1.0.0", metadata={})
+
+    try:
+        updater = _AutoCrate2NixUpdater()
+        assert updater.materialize_when_current is True
+        assert updater.shows_materialize_artifacts_phase is True
+
+        events = asyncio.run(
+            _collect_events(
+                updater.fetch_hashes(
+                    VersionInfo(version="1.0.0", metadata={}), object()
+                )
+            )
+        )
+
+        assert [event.kind for event in events] == [
+            UpdateEventKind.STATUS,
+            UpdateEventKind.ARTIFACT,
+            UpdateEventKind.VALUE,
+        ]
+        artifact_payload = expect_instance(events[1].payload, list)
+        artifact = expect_instance(artifact_payload[0], GeneratedArtifact)
+        assert artifact.path == Path("packages/demo/Cargo.nix")
+        assert events[2].payload == []
+    finally:
+        UPDATERS.pop(updater_name, None)
+
+
+def test_flake_metadata_latest_and_crate2nix_materialization_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cover metadata-only flake updater and explicit materialization mixin paths."""
+
+    class _MetadataOnlyUpdater(FlakeInputMetadataUpdater):
+        name = "metadata-only-test"
+        input_name = "metadata-input"
+
+    assert (
+        asyncio.run(
+            _MetadataOnlyUpdater()._is_latest(
+                None,
+                VersionInfo(version="1.0.0", metadata={}),
+            )
+        )
+        is False
+    )
+
+    async def _stream(name: str, *, operation: str = "materialize_artifacts"):
+        yield UpdateEvent.status(name, f"{operation} started")
+
+    monkeypatch.setattr(
+        materialization_module,
+        "stream_crate2nix_artifact_updates",
+        _stream,
+    )
+
+    class _Crate2NixUpdater(Crate2NixMetadataUpdater):
+        name = "crate2nix-materialization-test"
+        input_name = "crate2nix-input"
+
+    events = asyncio.run(
+        _collect_events(
+            _Crate2NixUpdater().fetch_hashes(
+                VersionInfo(version="1.0.0", metadata={}),
+                object(),
+            )
+        )
+    )
+
+    assert [event.kind for event in events] == [
+        UpdateEventKind.STATUS,
+        UpdateEventKind.VALUE,
+    ]
+    assert events[-1].payload == []
+
+
 async def _with_session[T](
     run: Callable[[aiohttp.ClientSession], Awaitable[T]],
 ) -> T:
@@ -329,18 +443,10 @@ def test_updater_is_latest_and_update_stream_paths() -> None:
         )
         is False
     )
-    current_commit = SourceEntry(
-        version="1.0.0",
-        hashes=HashCollection(entries=[HashEntry.create("sha256", HASH_A)]),
-        commit="0" * 40,
-    )
-    info_commit = VersionInfo(version="1.0.0", metadata={"commit": "0" * 40})
-    assert (
-        asyncio.run(
-            object.__getattribute__(updater, "_is_latest")(current_commit, info_commit)
-        )
-        is True
-    )
+    current = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "hashes": {"x86_64-linux": HASH_A},
+    })
 
     async def _collect(
         current: SourceEntry | None,
@@ -357,16 +463,225 @@ def test_updater_is_latest_and_update_stream_paths() -> None:
             ]
 
     pinned_events = asyncio.run(
-        _collect(_entry(), pinned=VersionInfo(version="1.0.0", metadata={}))
+        _collect(current, pinned=VersionInfo(version="1.0.0", metadata={}))
     )
     assert any(e.message == "Using pinned version: 1.0.0" for e in pinned_events)
-    assert any(e.message == "Up to date (version: 1.0.0)" for e in pinned_events)
+    assert any(e.message and e.message.startswith("Up to date") for e in pinned_events)
 
     changed_events = asyncio.run(_collect(_entry(version="0.9.0")))
     assert any(
         e.kind == UpdateEventKind.RESULT and isinstance(e.payload, SourceEntry)
         for e in changed_events
     )
+
+
+def test_flake_input_metadata_updater_is_latest_requires_exact_witness() -> None:
+    """Metadata-only flake inputs should only short-circuit on exact state matches."""
+
+    class _MetadataUpdater(FlakeInputMetadataUpdater):
+        name = "meta"
+        input_name = "meta-input"
+
+    updater = _MetadataUpdater()
+    latest = VersionInfo(version="1.0.0", metadata={"commit": "a" * 40})
+    exact = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "input": "meta-input",
+        "commit": "a" * 40,
+        "hashes": [],
+    })
+    missing_commit = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "input": "meta-input",
+        "hashes": [],
+    })
+
+    assert asyncio.run(updater._is_latest(exact, latest)) is True
+    assert asyncio.run(updater._is_latest(missing_commit, latest)) is False
+
+
+def test_default_updater_is_latest_uses_version_and_optional_commit_witness() -> None:
+    """The shared default freshness check should still short-circuit unchanged versions."""
+    updater = _DummyUpdater()
+    current = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "commit": "a" * 40,
+        "hashes": [],
+    })
+
+    assert (
+        asyncio.run(
+            updater._is_latest(current, VersionInfo(version="1.0.0", metadata={}))
+        )
+        is True
+    )
+    assert (
+        asyncio.run(
+            updater._is_latest(
+                current,
+                VersionInfo(version="1.0.0", metadata={"commit": "a" * 40}),
+            )
+        )
+        is True
+    )
+    assert (
+        asyncio.run(
+            updater._is_latest(
+                current,
+                VersionInfo(version="1.0.0", metadata={"commit": "b" * 40}),
+            )
+        )
+        is False
+    )
+    assert (
+        asyncio.run(
+            updater._is_latest(current, VersionInfo(version="2.0.0", metadata={}))
+        )
+        is False
+    )
+
+
+def test_results_equivalent_merges_native_only_partial_updates() -> None:
+    """Native-only comparison should use the effective merged source state."""
+    updater = _DummyDenoDeps()
+    updater.native_only = True
+    native_hash = "sha256-CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+    foreign_hash = "sha256-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
+    current = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "input": "deno-input",
+        "hashes": [
+            {
+                "hashType": "denoDepsHash",
+                "hash": native_hash,
+                "platform": "x86_64-linux",
+            },
+            {
+                "hashType": "denoDepsHash",
+                "hash": foreign_hash,
+                "platform": "aarch64-linux",
+            },
+        ],
+    })
+    partial = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "input": "deno-input",
+        "hashes": [
+            {
+                "hashType": "denoDepsHash",
+                "hash": native_hash,
+                "platform": "x86_64-linux",
+            }
+        ],
+    })
+
+    assert updater.results_equivalent(current, partial, context=current)
+
+
+def test_stream_fixed_output_hashes_emits_entries_in_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The shared fixed-output helper should forward progress and emit typed entries."""
+    seen: list[str] = []
+
+    async def _fixed_hash(
+        source: str,
+        expr: str,
+        *,
+        env: dict[str, str] | None = None,
+        config: object | None = None,
+    ) -> EventStream:
+        _ = config
+        seen.append(expr)
+        yield UpdateEvent.status(source, f"hashing {expr}")
+        if expr == "src":
+            yield UpdateEvent.value(source, HASH_A)
+            return
+        assert env == {"FROM": HASH_A}
+        yield UpdateEvent.value(source, HASH_B)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_fixed_output_hash", _fixed_hash
+    )
+
+    async def _collect() -> list[UpdateEvent]:
+        return [
+            event
+            async for event in stream_fixed_output_hashes(
+                "demo",
+                steps=(
+                    FixedOutputHashStep(
+                        hash_type="srcHash",
+                        error="Missing srcHash output",
+                        expr=lambda _resolved: "src",
+                    ),
+                    FixedOutputHashStep(
+                        hash_type="vendorHash",
+                        error="Missing vendorHash output",
+                        expr=lambda resolved: f"vendor:{resolved['srcHash']}",
+                        env=lambda resolved, _config: {"FROM": resolved["srcHash"]},
+                    ),
+                ),
+            )
+        ]
+
+    events = asyncio.run(_collect())
+
+    assert seen == ["src", f"vendor:{HASH_A}"]
+    assert [event.kind for event in events] == [
+        UpdateEventKind.STATUS,
+        UpdateEventKind.STATUS,
+        UpdateEventKind.VALUE,
+    ]
+    assert events[-1].payload == [
+        HashEntry.create("srcHash", HASH_A),
+        HashEntry.create("vendorHash", HASH_B),
+    ]
+
+
+def _fixed_hash_steps() -> tuple[FixedOutputHashStep, ...]:
+    return (
+        FixedOutputHashStep(
+            hash_type="srcHash",
+            error="Missing srcHash output",
+            expr=lambda _resolved: "src",
+        ),
+        FixedOutputHashStep(
+            hash_type="vendorHash",
+            error="Missing vendorHash output",
+            expr=lambda resolved: f"vendor:{resolved['srcHash']}",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("outputs", "error_type", "match"),
+    [
+        ((), RuntimeError, "Missing srcHash output"),
+        (((None, HASH_A),), RuntimeError, "Missing vendorHash output"),
+        (((None, {"hash": HASH_A}),), TypeError, "Expected string payload, got dict"),
+        (
+            ((None, HASH_A), (None, [HASH_B])),
+            TypeError,
+            "Expected string payload, got list",
+        ),
+    ],
+)
+def test_stream_fixed_output_hashes_rejects_missing_or_wrong_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+    outputs: tuple[tuple[str | None, object], ...],
+    error_type: type[Exception],
+    match: str,
+) -> None:
+    """The shared fixed-output helper owns missing and wrong-type failures."""
+    install_fixed_hash_stream(monkeypatch, outputs)
+
+    with pytest.raises(error_type, match=match):
+        asyncio.run(
+            _collect_events(
+                stream_fixed_output_hashes("demo", steps=_fixed_hash_steps())
+            )
+        )
 
 
 def test_updater_skips_update_stream_on_unsupported_current_platform(
@@ -475,10 +790,6 @@ def test_updater_materializes_artifacts_when_current() -> None:
 
     events = asyncio.run(_collect())
     assert any(event.kind == UpdateEventKind.ARTIFACT for event in events)
-    assert any(
-        event.message == "Version up to date; refreshing generated artifacts..."
-        for event in events
-    )
     assert any(event.message == "Source metadata unchanged" for event in events)
     assert any(
         event.kind == UpdateEventKind.RESULT and event.payload is None
@@ -1187,10 +1498,11 @@ def test_uv_lock_updater_build_result_and_helper_paths(
         }
 
     updater = _EnvUvLockUpdater(config=resolve_config())
-    info = VersionInfo(version="1.2.3", metadata={})
+    info = VersionInfo(version="1.2.3", metadata={"commit": "a" * 40})
     entry = updater.build_result(info, {"x86_64-linux": HASH_A})
     assert entry.version == "1.2.3"
     assert entry.input == "uv-lock"
+    assert entry.commit == "a" * 40
     assert entry.hashes.model_dump(mode="json") == HashCollection.from_value({
         "x86_64-linux": HASH_A
     }).model_dump(mode="json")
@@ -1210,6 +1522,18 @@ def test_uv_lock_updater_build_result_and_helper_paths(
 
     assert target.stat().st_mode & 0o200
     assert symlink.is_symlink()
+
+
+def test_deno_manifest_updater_build_result_includes_backing_input_identity() -> None:
+    """Deno manifest materializers should persist input and commit witnesses."""
+    updater = _DummyDenoManifest()
+    info = VersionInfo(version="2.0.0", metadata={"commit": "b" * 40})
+
+    entry = updater.build_result(info, [])
+
+    assert entry.version == "2.0.0"
+    assert entry.input == "deno-manifest"
+    assert entry.commit == "b" * 40
 
 
 def test_uv_lock_updater_rejects_empty_source_path(
@@ -1313,7 +1637,3 @@ def test_linearis_tracks_the_published_npm_tarball() -> None:
     updater = _fresh_loaded_updaters()["linearis"]
     assert issubclass(updater, HashEntryUpdater)
     assert not issubclass(updater, FlakeInputHashUpdater)
-
-
-async def _collect_events(stream: EventStream) -> list[UpdateEvent]:
-    return [event async for event in stream]

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
-
-import pytest
+from typing import TYPE_CHECKING
 
 from lib.recover import _cli as rc
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_emit_error_supports_plain_and_json_output(

@@ -2,34 +2,23 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 from lib.nix.commands.base import run_nix
-from lib.nix.models.sources import HashEntry, SourceHashes
-from lib.update import sources as update_sources
-from lib.update.events import (
-    EventStream,
-    UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_str,
-    require_value,
-)
 from lib.update.net import fetch_github_api_paginated, fetch_url, github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_expr,
     _build_flake_attr_expr,
     _build_overlay_expr,
-    compute_fixed_output_hash,
     get_current_nix_platform,
 )
 from lib.update.paths import get_repo_file
 from lib.update.updaters.base import (
     UpdateContext,
     VersionInfo,
-    package_dir_for,
+    read_pinned_source_version,
     register_updater,
+    stream_source_then_overlay_hashes,
 )
 from lib.update.updaters.github_release import GitHubReleaseUpdater
 from lib.update.updaters.metadata import GitHubReleaseMetadata
@@ -38,6 +27,7 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry
+    from lib.update.events import EventStream
 
 
 _MIN_VERSION_PARTS = 2
@@ -124,16 +114,7 @@ class CrushUpdater(GitHubReleaseUpdater):
 
     def _current_version(self) -> str:
         """Read the currently pinned crush version from ``sources.json``."""
-        pkg_dir = package_dir_for(self.name)
-        if pkg_dir is None:
-            msg = f"Package directory not found for {self.name}"
-            raise RuntimeError(msg)
-        entry = update_sources.load_source_entry(pkg_dir / "sources.json")
-        version = entry.version
-        if not isinstance(version, str) or not version:
-            msg = "crush sources.json is missing a pinned version"
-            raise RuntimeError(msg)
-        return version
+        return read_pinned_source_version(self.name)
 
     async def fetch_latest(
         self,
@@ -194,19 +175,6 @@ class CrushUpdater(GitHubReleaseUpdater):
             tag=f"v{version}",
         )
 
-    @staticmethod
-    def _override_env(version: str, src_hash: str, fake_hash: str) -> dict[str, str]:
-        payload = {
-            "crush": {
-                "version": version,
-                "hashes": [
-                    {"hashType": "srcHash", "hash": src_hash},
-                    {"hashType": "vendorHash", "hash": fake_hash},
-                ],
-            },
-        }
-        return {"UPDATE_SOURCE_OVERRIDES_JSON": json.dumps(payload)}
-
     async def fetch_hashes(
         self,
         info: VersionInfo,
@@ -217,35 +185,12 @@ class CrushUpdater(GitHubReleaseUpdater):
         """Compute source and vendor fixed-output hashes for the release."""
         _ = (session, context)
 
-        src_hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            compute_fixed_output_hash(
-                self.name,
-                self._src_expr(info.version),
-                config=self.config,
-            ),
-            src_hash_drain,
-            parse=expect_str,
+        async for event in stream_source_then_overlay_hashes(
+            self.name,
+            version=info.version,
+            src_expr=self._src_expr(info.version),
+            overlay_expr=_build_overlay_expr(self.name),
+            dependency_hash_type="vendorHash",
+            config=self.config,
         ):
             yield event
-        src_hash = require_value(src_hash_drain, "Missing srcHash output")
-
-        vendor_hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            compute_fixed_output_hash(
-                self.name,
-                _build_overlay_expr(self.name),
-                env=self._override_env(info.version, src_hash, self.config.fake_hash),
-                config=self.config,
-            ),
-            vendor_hash_drain,
-            parse=expect_str,
-        ):
-            yield event
-        vendor_hash = require_value(vendor_hash_drain, "Missing vendorHash output")
-
-        hashes: SourceHashes = [
-            HashEntry.create("srcHash", src_hash),
-            HashEntry.create("vendorHash", vendor_hash),
-        ]
-        yield UpdateEvent.value(self.name, hashes)

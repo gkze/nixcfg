@@ -152,22 +152,22 @@ def test_top_level_selection_helpers_filter_by_role_workspace_and_placeholder(
         ]
     )
 
-    assert [tab.zenSyncId for tab in zentool.top_level_essentials(session)] == [
+    assert [tab.zen_sync_id for tab in zentool.top_level_essentials(session)] == [
         "essential-1",
         "other-1",
     ]
     assert [
-        tab.zenSyncId for tab in zentool.top_level_pinned_tabs(session, "ws-1")
+        tab.zen_sync_id for tab in zentool.top_level_pinned_tabs(session, "ws-1")
     ] == [
         "pinned-1",
     ]
     assert [
-        tab.zenSyncId for tab in zentool.direct_folder_tabs(session, "folder-1")
+        tab.zen_sync_id for tab in zentool.direct_folder_tabs(session, "folder-1")
     ] == [
         "nested-1",
     ]
     assert [
-        tab.zenSyncId for tab in zentool.top_level_workspace_tabs(session, "ws-1")
+        tab.zen_sync_id for tab in zentool.top_level_workspace_tabs(session, "ws-1")
     ] == [
         "tab-1",
     ]

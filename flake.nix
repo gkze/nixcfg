@@ -35,7 +35,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v0.4.32";
+      url = "github:generalaction/emdash/v0.4.50";
       flake = false;
     };
     flake-edit = {
@@ -72,7 +72,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.4.3";
+      url = "github:NousResearch/hermes-agent/v2026.4.23";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -105,7 +105,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     scratch = {
-      url = "github:erictli/scratch/v0.8.0";
+      url = "github:erictli/scratch/v0.10.0";
       flake = false;
     };
     stylix = {
@@ -122,15 +122,15 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     lumen = {
-      url = "github:jnsahaj/lumen/v2.21.0";
+      url = "github:jnsahaj/lumen/v2.22.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.29.2";
+      url = "github:max-sixty/worktrunk/v0.44.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
-      url = "github:axiomhq/cli/v0.15.0";
+      url = "github:axiomhq/cli/v0.16.0";
       flake = false;
     };
     catppuccin = {
@@ -147,7 +147,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.122.0";
+      url = "github:openai/codex/rust-v0.125.0";
       flake = false;
     };
     curator = {
@@ -156,7 +156,7 @@
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
     gogcli = {
-      url = "github:steipete/gogcli/v0.12.0";
+      url = "github:steipete/gogcli/v0.13.0";
       flake = false;
     };
     goose-v8 = {
@@ -176,7 +176,9 @@
       flake = false;
     };
     homebrew-cask = {
-      url = "github:homebrew/homebrew-cask";
+      # Newer cask revisions use bare `depends_on :macos`, which requires
+      # unreleased Homebrew code that currently requires Ruby 4.0.
+      url = "github:homebrew/homebrew-cask/2a7a61418c95a7192253bc463dfb03f2719fb12d";
       flake = false;
     };
     homebrew-core = {
@@ -184,7 +186,7 @@
       flake = false;
     };
     linear-cli = {
-      url = "github:schpet/linear-cli/v1.11.1";
+      url = "github:schpet/linear-cli/v2.0.0";
       flake = false;
     };
     macfuse = {
@@ -196,7 +198,7 @@
       flake = false;
     };
     mux = {
-      url = "github:coder/mux/v0.21.0";
+      url = "github:coder/mux/v0.23.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mountpoint-s3 = {
@@ -224,7 +226,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad/v0.6.12";
+      url = "github:batrachianai/toad/v0.6.14";
       flake = false;
     };
     treewalker-nvim = {
@@ -418,6 +420,49 @@
                 for raw_path in sys.argv[1:]:
                     format_path(Path(raw_path))
               '';
+              jsonlFormat = pkgs.writeShellScriptBin "format-jsonl" ''
+                set -euo pipefail
+
+                for file in "$@"; do
+                  tmp="$(${lib.getExe' pkgs.coreutils "mktemp"} "''${TMPDIR:-/tmp}/jsonl.XXXXXX")"
+                  ${lib.getExe pkgs.jq} -c . "$file" > "$tmp"
+                  if ! ${lib.getExe' pkgs.diffutils "cmp"} -s "$tmp" "$file"; then
+                    ${lib.getExe' pkgs.coreutils "cat"} "$tmp" > "$file"
+                  fi
+                  ${lib.getExe' pkgs.coreutils "rm"} "$tmp"
+                done
+              '';
+              goModFormat = pkgs.writeShellScriptBin "format-go-mod" ''
+                set -euo pipefail
+
+                for file in "$@"; do
+                  tmp_dir="$(${lib.getExe' pkgs.coreutils "mktemp"} -d "''${TMPDIR:-/tmp}/go-mod.XXXXXX")"
+                  ${lib.getExe' pkgs.coreutils "cp"} "$file" "$tmp_dir/go.mod"
+                  (
+                    cd "$tmp_dir"
+                    ${lib.getExe' pkgs.go "go"} mod edit -fmt go.mod
+                  )
+                  if ! ${lib.getExe' pkgs.diffutils "cmp"} -s "$tmp_dir/go.mod" "$file"; then
+                    ${lib.getExe' pkgs.coreutils "cat"} "$tmp_dir/go.mod" > "$file"
+                  fi
+                  ${lib.getExe' pkgs.coreutils "rm"} -rf "$tmp_dir"
+                done
+              '';
+              twilightAutoconfigFormat = pkgs.writeShellScriptBin "format-twilight-autoconfig" ''
+                set -euo pipefail
+
+                for file in "$@"; do
+                  tmp="$(${lib.getExe' pkgs.coreutils "mktemp"} "''${TMPDIR:-/tmp}/twilight-autoconfig.XXXXXX")"
+                  ${lib.getExe pkgs.biome} format \
+                    --config-path biome.jsonc \
+                    --stdin-file-path twilight.js \
+                    < "$file" > "$tmp"
+                  if ! ${lib.getExe' pkgs.diffutils "cmp"} -s "$tmp" "$file"; then
+                    ${lib.getExe' pkgs.coreutils "cat"} "$tmp" > "$file"
+                  fi
+                  ${lib.getExe' pkgs.coreutils "rm"} "$tmp"
+                done
+              '';
               inherit
                 (evalModule pkgs {
                   projectRootFile = "flake.nix";
@@ -425,6 +470,19 @@
                     nixfmt.enable = true;
                     deadnix.enable = true;
                     statix.enable = true;
+                    biome = {
+                      enable = true;
+                      includes = lintFiles.biome.globs;
+                      excludes = lintFiles.biome.excludeGlobs;
+                    };
+                    buf = {
+                      enable = true;
+                      includes = lintFiles.protobuf.globs;
+                    };
+                    gofmt = {
+                      enable = true;
+                      includes = lintFiles.go.globs;
+                    };
                     ruff-check = {
                       enable = true;
                       includes = lintFiles.ruff.globs;
@@ -503,21 +561,19 @@
                         "-conf"
                         ".yamlfmt"
                       ];
-                      biome-web = {
-                        command = lib.getExe pkgs.biome;
-                        options = [
-                          "format"
-                          "--config-path"
-                          "biome.jsonc"
-                          "--write"
-                        ];
-                        includes = lintFiles.biome.globs;
-                        excludes = lintFiles.biome.excludeGlobs;
+                      biome.options = lib.mkForce [
+                        "format"
+                        "--config-path"
+                        "biome.jsonc"
+                        "--write"
+                      ];
+                      go-mod-format = {
+                        command = lib.getExe goModFormat;
+                        includes = lintFiles.goMod.globs;
                       };
-                      gofmt = {
-                        command = lib.getExe' pkgs.go "gofmt";
-                        options = [ "-w" ];
-                        includes = lintFiles.go.globs;
+                      jsonl-format = {
+                        command = lib.getExe jsonlFormat;
+                        includes = lintFiles.jsonl.globs;
                       };
                       "markdown-table-formatter" = {
                         command = lib.getExe' (pkgs.python3.withPackages (
@@ -527,6 +583,10 @@
                           ]
                         )) "mdformat";
                         includes = lintFiles.markdown.globs;
+                      };
+                      twilight-autoconfig-format = {
+                        command = lib.getExe twilightAutoconfigFormat;
+                        includes = lintFiles.twilightAutoconfig.globs;
                       };
                       "text-hygiene" = {
                         command = lib.getExe pkgs.python3;

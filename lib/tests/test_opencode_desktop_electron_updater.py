@@ -2,29 +2,24 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from types import ModuleType
 
 import pytest
 
-from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import SourceEntry
+from lib.tests._updater_helpers import load_repo_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import VersionInfo
 
 
 def _load_updater_module() -> ModuleType:
     """Load the updater module under test."""
-    return load_module_from_path(
-        REPO_ROOT / "packages/opencode-desktop-electron/updater.py",
+    return load_repo_module(
+        "packages/opencode-desktop-electron/updater.py",
         "opencode_desktop_electron_updater_test",
     )
-
-
-def _run(awaitable):
-    """Run a small updater coroutine in tests."""
-    return asyncio.run(awaitable)
 
 
 def test_opencode_desktop_electron_updater_tracks_all_supported_platform_hashes() -> (

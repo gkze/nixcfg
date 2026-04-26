@@ -3,28 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
-from types import ModuleType
+from datetime import UTC, datetime
 
 import pytest
 
-from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import HashEntry
-from lib.update.events import UpdateEvent, UpdateEventKind
-from lib.update.paths import REPO_ROOT
+from lib.tests._updater_helpers import collect_events as _collect_events
+from lib.tests._updater_helpers import install_fixed_hash_stream
+from lib.tests._updater_helpers import load_repo_module as _load_updater
+from lib.tests._updater_helpers import run_async as _run
+from lib.update.events import UpdateEventKind
 from lib.update.updaters.base import VersionInfo
-
-
-def _run[T](coro):
-    return asyncio.run(coro)
-
-
-async def _collect_events(stream):
-    return [event async for event in stream]
-
-
-def _load_updater(path: str, module_name: str) -> ModuleType:
-    return load_module_from_path(REPO_ROOT / path, module_name)
+from lib.update.updaters.metadata import GranolaFeedMetadata
 
 
 def test_granola_fetch_latest_and_download_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -44,7 +34,7 @@ def test_granola_fetch_latest_and_download_url(monkeypatch: pytest.MonkeyPatch) 
 
     assert latest == VersionInfo(
         version="2.3.4",
-        metadata={"path": "Granola-mac.zip", "sha512": "deadbeef"},
+        metadata=GranolaFeedMetadata(path="Granola-mac.zip", sha512="deadbeef"),
     )
     assert (
         updater.get_download_url("aarch64-darwin", latest)
@@ -319,7 +309,9 @@ def test_sculptor_accepts_naive_last_modified_timestamp(
     monkeypatch.setattr(
         module,
         "parsedate_to_datetime",
-        lambda _value: datetime(2024, 2, 20, 12, 34, 56),
+        lambda _value: datetime(2024, 2, 20, 12, 34, 56, tzinfo=UTC).replace(
+            tzinfo=None
+        ),
     )
     monkeypatch.setattr(
         module,
@@ -351,6 +343,31 @@ def test_sculptor_rejects_missing_last_modified_header(
         _run(updater.fetch_latest(object()))
 
 
+def test_zen_twilight_reads_pinned_channel_and_recomputes_hashes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep Twilight pinned to its channel artifact while forcing hash refreshes."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py", "zen_twilight_updater_test"
+    )
+    updater = module.ZenTwilightUpdater()
+    pinned_version = "1.2.3"
+    monkeypatch.setattr(
+        module,
+        "read_pinned_source_version",
+        lambda name: pinned_version if name == "zen-twilight" else "",
+    )
+
+    latest = _run(updater.fetch_latest(object()))
+
+    assert latest == VersionInfo(version=pinned_version)
+    assert updater.PLATFORMS == {
+        "aarch64-darwin": updater.TWILIGHT_DMG_URL,
+        "x86_64-darwin": updater.TWILIGHT_DMG_URL,
+    }
+    assert _run(updater._is_latest(None, latest)) is False
+
+
 def test_scratch_expr_builders_fetch_hashes_and_build_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -372,17 +389,10 @@ def test_scratch_expr_builders_fetch_hashes_and_build_result(
     assert "fetchCargoVendor" in cargo_expr
     assert '"/src-tauri"' in cargo_expr
 
-    async def _fixed_hash(name: str, expr: str, *, config=None):
-        assert name == "scratch"
-        assert config == updater.config
-        if "fetchNpmDeps" in expr:
-            yield UpdateEvent.status(name, "hashing npm deps")
-            yield UpdateEvent.value(name, "sha256-npm")
-            return
-        yield UpdateEvent.status(name, "hashing cargo vendor")
-        yield UpdateEvent.value(name, "sha256-cargo")
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+    calls = install_fixed_hash_stream(
+        monkeypatch,
+        (("hashing npm deps", "sha256-npm"), ("hashing cargo vendor", "sha256-cargo")),
+    )
 
     events = _run(_collect_events(updater.fetch_hashes(latest, object())))
 
@@ -395,6 +405,20 @@ def test_scratch_expr_builders_fetch_hashes_and_build_result(
         "hashing npm deps",
         "hashing cargo vendor",
     ]
+    assert calls == [
+        {
+            "name": "scratch",
+            "expr": npm_expr,
+            "env": None,
+            "config": updater.config,
+        },
+        {
+            "name": "scratch",
+            "expr": cargo_expr,
+            "env": None,
+            "config": updater.config,
+        },
+    ]
     assert events[-1].payload == [
         HashEntry.create("npmDepsHash", "sha256-npm"),
         HashEntry.create("cargoHash", "sha256-cargo"),
@@ -404,92 +428,3 @@ def test_scratch_expr_builders_fetch_hashes_and_build_result(
     assert result.version == "9.9.9"
     assert result.input == "scratch"
     assert result.commit == "f" * 40
-
-
-def test_scratch_requires_cargo_hash_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Raise when the cargo vendor build never emits a final hash value."""
-    module = _load_updater(
-        "packages/scratch/updater.py", "scratch_updater_test_missing_cargo"
-    )
-    updater = module.ScratchUpdater()
-
-    async def _fixed_hash(name: str, expr: str, *, config=None):
-        assert name == "scratch"
-        assert config == updater.config
-        if "fetchNpmDeps" in expr:
-            yield UpdateEvent.value(name, "sha256-npm")
-            return
-        if False:
-            yield UpdateEvent.status(name, "never")
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
-
-    with pytest.raises(RuntimeError, match="Missing cargoHash output"):
-        _run(
-            _collect_events(
-                updater.fetch_hashes(VersionInfo(version="9.9.9"), object())
-            )
-        )
-
-
-def test_scratch_requires_npm_hash_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Raise when the npm dependency build never emits a final hash value."""
-    module = _load_updater(
-        "packages/scratch/updater.py", "scratch_updater_test_missing_npm"
-    )
-    updater = module.ScratchUpdater()
-
-    async def _fixed_hash(name: str, _expr: str, *, config=None):
-        assert name == "scratch"
-        assert config == updater.config
-        if False:
-            yield UpdateEvent.status(name, "never")
-
-    async def _capture_without_value(events, *, error: str):
-        assert error == "Missing npmDepsHash output"
-        async for event in events:
-            yield event
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
-    monkeypatch.setattr(module, "capture_stream_value", _capture_without_value)
-
-    with pytest.raises(RuntimeError, match="Missing npmDepsHash output"):
-        _run(
-            _collect_events(
-                updater.fetch_hashes(VersionInfo(version="9.9.9"), object())
-            )
-        )
-
-
-def test_scratch_falls_back_when_cargo_capture_yields_no_value(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Raise from the updater when cargo capture forwarding yields no final value."""
-    module = _load_updater(
-        "packages/scratch/updater.py", "scratch_updater_test_missing_cargo_fallback"
-    )
-    updater = module.ScratchUpdater()
-
-    async def _fixed_hash(name: str, expr: str, *, config=None):
-        assert name == "scratch"
-        assert config == updater.config
-        if "fetchNpmDeps" in expr:
-            yield UpdateEvent.value(name, "sha256-npm")
-            return
-        yield UpdateEvent.status(name, "hashing cargo vendor")
-
-    async def _capture_selectively(events, *, error: str):
-        async for event in events:
-            yield event
-        if error == "Missing npmDepsHash output":
-            yield module.CapturedValue("sha256-npm")
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
-    monkeypatch.setattr(module, "capture_stream_value", _capture_selectively)
-
-    with pytest.raises(RuntimeError, match="Missing cargoHash output"):
-        _run(
-            _collect_events(
-                updater.fetch_hashes(VersionInfo(version="9.9.9"), object())
-            )
-        )

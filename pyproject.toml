@@ -16,12 +16,15 @@ requires-python = ">=3.14"
 # Install runtime libraries required by nixcfg commands.
 dependencies = [
   "aiohttp>=3.13.3",
+  "beautifulsoup4>=4.14.2",
   "defusedxml>=0.7.1",
   "deepdiff>=8.6.1",
   "filelock>=3.24.3",
   "httpx-retries>=0.4.6",
   "httpx>=0.28.1",
+  "isort>=8.0.1",
   "keyring>=25.7.0",
+  "libcst>=1.8.6",
   "lz4>=4.4.5",
   "nix-manipulator",
   "packaging>=26.0",
@@ -72,7 +75,7 @@ exclude = [
 [tool.ruff.lint]
 # Start from the full Ruff rule set.
 select = ["ALL"]
-# Keep only conflict-driven exemptions for formatter/docstyle compatibility.
+# Keep only formatter/docstyle convention conflicts out of the active set.
 ignore = ["COM812", "D203", "D213"]
 # Enable preview lint rules in addition to stable rules.
 preview = true
@@ -94,40 +97,26 @@ explicit-preview-rules = true
   "D103",
   "D105",
   "D107",
-  "DTZ001",
   "EM101",
   "E501",
-  "E731",
   "FBT001",
   "FLY002",
-  "F841",
   "PERF401",
   "PLC0415",
   "PLR2004",
   "PLW0108",
-  "PT012",
-  "PT017",
   "PYI034",
-  "RUF012",
-  "RUF015",
   "RUF043",
   "S101",
-  "S607",
   "S108",
-  "SIM103",
   "SLF001",
-  "TC001",
-  "TC002",
   "TC003",
-  "TC004",
   "TRY003",
   "TRY004",
-  "UP028",
 ]
 # SchemaStore's workflow schema generates very long prose docstrings and a few
 # legacy typing constructs that are valid at runtime but noisy under Ruff.
-"lib/github_actions/models/_generated.py" = ["D205", "D404", "E501", "UP007"]
-"home/george/bin/zentool" = ["N815", "TC003"]
+"lib/github_actions/models/_generated.py" = ["D205", "D404", "E501"]
 
 [tool.ruff.lint.isort]
 # Classify these imports as first-party for stable import ordering.
@@ -186,28 +175,29 @@ include = [
 all = "error"
 
 [[tool.ty.overrides]]
-# Apply this override only to generated model modules.
-include = ["lib/**/_generated.py"]
-
-[tool.ty.overrides.rules]
-# Ignore a generated-code pattern that is valid at runtime but noisy for static typing.
-invalid-type-form = "ignore"
-
-[[tool.ty.overrides]]
-# SchemaStore's GitHub workflow models carry generated enum defaults that are
-# valid at runtime but noisy for strict static typing.
-include = ["lib/github_actions/models/_generated.py"]
-
-[tool.ty.overrides.rules]
-all = "ignore"
-
-[[tool.ty.overrides]]
-# Ignore type-checking diagnostics in test modules.
+# Test modules still contain intentionally dynamic fixtures and negative type
+# examples. Runtime modules remain checked with all Ty diagnostics as errors.
 include = ["lib/tests/**/*.py"]
 
 [tool.ty.overrides.rules]
-# Prefer runtime-focused tests over full static typing constraints.
 all = "ignore"
+
+[[tool.ty.overrides]]
+# datamodel-code-generator still emits constrained-type expressions that Ty
+# rejects even though they are valid for Pydantic at runtime.
+include = ["lib/schema_codegen/models/_generated.py"]
+
+[tool.ty.overrides.rules]
+invalid-type-form = "ignore"
+
+[[tool.ty.overrides]]
+# SchemaStore's generated workflow models still rely on constrained-type
+# expressions and enum-default assignments that Ty flags but Pydantic accepts.
+include = ["lib/github_actions/models/_generated.py"]
+
+[tool.ty.overrides.rules]
+invalid-assignment = "ignore"
+invalid-type-form = "ignore"
 
 [tool.ty.terminal]
 # Return non-zero when Ty emits warnings.

@@ -2,26 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from types import ModuleType
 
 import pytest
 
-from lib.import_utils import load_module_from_path
-from lib.update.paths import REPO_ROOT
+from lib.tests._updater_helpers import load_repo_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.updaters.base import VersionInfo
 
 
 def _load_module() -> ModuleType:
-    return load_module_from_path(
-        REPO_ROOT / "overlays/zoom-us/updater.py",
-        "zoom_us_updater_test",
-    )
-
-
-def _run(awaitable):
-    return asyncio.run(awaitable)
+    return load_repo_module("overlays/zoom-us/updater.py", "zoom_us_updater_test")
 
 
 @dataclass(slots=True)
@@ -53,15 +45,15 @@ def test_extract_version_accepts_zoom_cdn_paths_and_rejects_unknown_urls() -> No
 
     assert (
         module.ZoomUsUpdater._extract_version(
-            "https://cdn.zoom.us/prod/7.0.0.77593/zoomusInstallerFull.pkg"
+            "https://cdn.zoom.us/prod/9.9.9.99999/zoomusInstallerFull.pkg"
         )
-        == "7.0.0.77593"
+        == "9.9.9.99999"
     )
     assert (
         module.ZoomUsUpdater._extract_version(
-            "https://cdn.zoom.us/prod/7.0.0.77593/arm64/zoomusInstallerFull.pkg"
+            "https://cdn.zoom.us/prod/9.9.9.99999/arm64/zoomusInstallerFull.pkg"
         )
-        == "7.0.0.77593"
+        == "9.9.9.99999"
     )
 
     with pytest.raises(RuntimeError, match="Could not extract Zoom version"):
@@ -97,16 +89,16 @@ def test_fetch_latest_resolves_shared_version_from_latest_redirects() -> None:
     updater = module.ZoomUsUpdater()
     session = _FakeSession({
         updater._LATEST_URLS["aarch64-darwin"]: _FakeResponse(
-            url="https://cdn.zoom.us/prod/7.0.0.77593/arm64/zoomusInstallerFull.pkg"
+            url="https://cdn.zoom.us/prod/9.9.9.99999/arm64/zoomusInstallerFull.pkg"
         ),
         updater._LATEST_URLS["x86_64-darwin"]: _FakeResponse(
-            url="https://cdn.zoom.us/prod/7.0.0.77593/zoomusInstallerFull.pkg"
+            url="https://cdn.zoom.us/prod/9.9.9.99999/zoomusInstallerFull.pkg"
         ),
     })
 
     info = _run(updater.fetch_latest(session))
 
-    assert info == VersionInfo(version="7.0.0.77593", metadata=module.NO_METADATA)
+    assert info == VersionInfo(version="9.9.9.99999", metadata=module.NO_METADATA)
     assert [(method, url) for method, url, _kwargs in session.calls] == [
         ("HEAD", updater._LATEST_URLS["aarch64-darwin"]),
         ("HEAD", updater._LATEST_URLS["x86_64-darwin"]),
@@ -138,10 +130,10 @@ def test_fetch_latest_rejects_failed_or_mismatched_redirects() -> None:
 
     mismatched_session = _FakeSession({
         updater._LATEST_URLS["aarch64-darwin"]: _FakeResponse(
-            url="https://cdn.zoom.us/prod/7.0.0.77593/arm64/zoomusInstallerFull.pkg"
+            url="https://cdn.zoom.us/prod/9.9.9.99999/arm64/zoomusInstallerFull.pkg"
         ),
         updater._LATEST_URLS["x86_64-darwin"]: _FakeResponse(
-            url="https://cdn.zoom.us/prod/7.0.1.99999/zoomusInstallerFull.pkg"
+            url="https://cdn.zoom.us/prod/9.9.8.99999/zoomusInstallerFull.pkg"
         ),
     })
     with pytest.raises(RuntimeError, match="mismatched versions"):
@@ -152,13 +144,13 @@ def test_get_download_url_uses_pinned_zoom_paths_and_rejects_unknown_platform() 
     """Zoom download URLs should stay in the versioned zoom.us path format."""
     module = _load_module()
     updater = module.ZoomUsUpdater()
-    info = VersionInfo(version="7.0.0.77593")
+    info = VersionInfo(version="9.9.9.99999")
 
     assert updater.get_download_url("aarch64-darwin", info) == (
-        "https://zoom.us/client/7.0.0.77593/zoomusInstallerFull.pkg?archType=arm64"
+        "https://zoom.us/client/9.9.9.99999/zoomusInstallerFull.pkg?archType=arm64"
     )
     assert updater.get_download_url("x86_64-darwin", info) == (
-        "https://zoom.us/client/7.0.0.77593/zoomusInstallerFull.pkg"
+        "https://zoom.us/client/9.9.9.99999/zoomusInstallerFull.pkg"
     )
 
     with pytest.raises(RuntimeError, match="Unsupported platform for zoom-us updater"):

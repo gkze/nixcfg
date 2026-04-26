@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass
-from typing import ClassVar
+from typing import ClassVar, cast, override
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from lib import json_utils
 from lib.nix.models.flake_lock import FlakeLockNode
@@ -15,6 +15,15 @@ type JsonValue = json_utils.JsonValue
 
 _METADATA_KIND_KEY = "__kind__"
 _METADATA_PAYLOAD_KEY = "payload"
+
+
+class _MetadataEnvelope(BaseModel):
+    """Serialized tagged metadata envelope stored in pinned-version JSON."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True, populate_by_name=True)
+
+    kind: str = Field(alias=_METADATA_KIND_KEY)
+    payload: dict[str, object] = Field(default_factory=dict)
 
 
 def _dataclass_payload(obj: object) -> dict[str, object]:
@@ -80,6 +89,16 @@ class GitHubRawFileMetadata(MappingMetadata):
 
 
 @dataclass(frozen=True, slots=True)
+class GranolaFeedMetadata(MappingMetadata):
+    """Metadata for Granola's Electron updater feed."""
+
+    path: str
+    sha512: str
+
+    KIND: ClassVar[str] = "granola_feed"
+
+
+@dataclass(frozen=True, slots=True)
 class AssetURLsMetadata(MappingMetadata):
     """Metadata carrying resolved per-platform asset URLs."""
 
@@ -97,6 +116,7 @@ class FlakeInputMetadata(MappingMetadata):
 
     KIND: ClassVar[str] = "flake_input"
 
+    @override
     def to_dict(self) -> dict[str, object]:
         """Return flake metadata with the live validated node object."""
         payload: dict[str, object] = {"node": self.node}
@@ -122,6 +142,34 @@ class FlakeInputMetadata(MappingMetadata):
             raise TypeError(msg)
         return cls(node=node, commit=raw_commit)
 
+    @classmethod
+    def from_metadata(
+        cls, metadata: object | None, *, context: str
+    ) -> FlakeInputMetadata | None:
+        """Coerce runtime metadata into typed flake-input metadata."""
+        if metadata is None:
+            return None
+        if isinstance(metadata, cls):
+            return metadata
+        if not isinstance(metadata, MappingMetadata | dict):
+            return None
+        payload = metadata_as_mapping(metadata, context=context)
+        raw_node = payload.get("node")
+        if raw_node is None:
+            return None
+        if isinstance(raw_node, FlakeLockNode):
+            raw_commit = payload.get("commit")
+            if raw_commit is not None and not isinstance(raw_commit, str):
+                msg = (
+                    f"Pinned version entry has invalid commit metadata: {raw_commit!r}"
+                )
+                raise TypeError(msg)
+            return cls(node=raw_node, commit=raw_commit)
+        if isinstance(raw_node, dict):
+            return cls.from_json(payload)
+        msg = f"Expected flake lock node in metadata, got {type(raw_node)}"
+        raise TypeError(msg)
+
 
 @dataclass(frozen=True, slots=True)
 class PlatformAPIMetadata(MappingMetadata):
@@ -133,6 +181,7 @@ class PlatformAPIMetadata(MappingMetadata):
 
     KIND: ClassVar[str] = "platform_api"
 
+    @override
     def to_dict(self) -> dict[str, object]:
         """Return platform API metadata in its legacy mapping form."""
         payload: dict[str, object] = {
@@ -142,6 +191,42 @@ class PlatformAPIMetadata(MappingMetadata):
         if self.commit is not None:
             payload["commit"] = self.commit
         return payload
+
+    @classmethod
+    def from_metadata(
+        cls, metadata: object | None, *, context: str
+    ) -> PlatformAPIMetadata:
+        """Coerce runtime metadata into validated platform API metadata."""
+        if isinstance(metadata, cls):
+            return metadata
+
+        if not isinstance(metadata, MappingMetadata | dict):
+            msg = f"Expected platform_info mapping in {context}"
+            raise TypeError(msg)
+
+        metadata_map = metadata_as_mapping(metadata, context=context)
+        platform_info_obj = metadata_map.get("platform_info")
+        if not isinstance(platform_info_obj, dict):
+            msg = f"Expected platform_info mapping in {context}"
+            raise TypeError(msg)
+        try:
+            platform_info = TypeAdapter(dict[str, JsonObject]).validate_python(
+                platform_info_obj,
+                strict=True,
+            )
+        except ValidationError as exc:
+            msg = f"Malformed platform payload for {context.removesuffix(' metadata')}"
+            raise TypeError(msg) from exc
+        equality_fields = {
+            key: value
+            for key, value in metadata_map.items()
+            if key not in {"commit", "platform_info"} and isinstance(value, str)
+        }
+        return cls(
+            platform_info=platform_info,
+            equality_fields=equality_fields,
+            commit=metadata_get_str(metadata_map, "commit"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +242,7 @@ type VersionMetadata = (
     AssetURLsMetadata
     | DownloadUrlMetadata
     | FlakeInputMetadata
+    | GranolaFeedMetadata
     | GitHubRawFileMetadata
     | GitHubReleaseMetadata
     | NoMetadata
@@ -236,6 +322,7 @@ _METADATA_TYPES: dict[str, type[MappingMetadata]] = {
     AssetURLsMetadata.KIND: AssetURLsMetadata,
     DownloadUrlMetadata.KIND: DownloadUrlMetadata,
     FlakeInputMetadata.KIND: FlakeInputMetadata,
+    GranolaFeedMetadata.KIND: GranolaFeedMetadata,
     GitHubRawFileMetadata.KIND: GitHubRawFileMetadata,
     GitHubReleaseMetadata.KIND: GitHubReleaseMetadata,
     NoMetadata.KIND: NoMetadata,
@@ -291,7 +378,12 @@ def _deserialize_dataclass_metadata(
         return FlakeInputMetadata.from_json(payload)
     if metadata_type is NoMetadata:
         return NO_METADATA
-    return metadata_type(**payload)
+    try:
+        adapter = TypeAdapter(cast("type[MappingMetadata]", metadata_type))
+        return adapter.validate_python(payload)
+    except ValidationError as exc:
+        msg = f"Pinned version entry has invalid {kind} metadata: {payload!r}"
+        raise TypeError(msg) from exc
 
 
 def deserialize_metadata(payload: object) -> object | None:
@@ -302,14 +394,14 @@ def deserialize_metadata(payload: object) -> object | None:
         return payload
     payload_map = {str(key): value for key, value in payload.items()}
 
-    kind = payload_map.get(_METADATA_KIND_KEY)
-    if isinstance(kind, str):
-        data = payload_map.get(_METADATA_PAYLOAD_KEY, {})
-        if not isinstance(data, dict):
+    if isinstance(payload_map.get(_METADATA_KIND_KEY), str):
+        try:
+            envelope = _MetadataEnvelope.model_validate(payload_map)
+        except ValidationError as exc:
             msg = f"Pinned version metadata payload must be an object: {payload!r}"
-            raise TypeError(msg)
-        normalized = {str(key): value for key, value in data.items()}
-        return _deserialize_dataclass_metadata(kind, normalized)
+            raise TypeError(msg) from exc
+        normalized = {str(key): value for key, value in envelope.payload.items()}
+        return _deserialize_dataclass_metadata(envelope.kind, normalized)
 
     legacy_node = payload_map.get("node")
     if isinstance(legacy_node, dict):
@@ -326,6 +418,7 @@ __all__ = [
     "FlakeInputMetadata",
     "GitHubRawFileMetadata",
     "GitHubReleaseMetadata",
+    "GranolaFeedMetadata",
     "NoMetadata",
     "PlatformAPIMetadata",
     "ReleasePayloadMetadata",

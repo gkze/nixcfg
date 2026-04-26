@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import dataclasses
 import inspect
 import json
@@ -405,14 +404,18 @@ def run(
         if keep:
             _log(f"Artifacts kept at: {temp_root}")
         else:
-            if workspace_path.exists():
-                with contextlib.suppress(RuntimeError):
+            try:
+                if workspace_path.exists():
                     _run_checked(
                         ["git", "worktree", "remove", "--force", str(workspace_path)],
                         cwd=repo_root,
                     )
-            if temp_root.exists():
-                shutil.rmtree(temp_root)
+                if temp_root.exists():
+                    shutil.rmtree(temp_root)
+            except (OSError, RuntimeError) as exc:
+                _log(f"Cleanup failed: {exc}")
+                _log(f"Artifacts kept at: {temp_root}")
+                status = 1
 
     return status
 

@@ -237,17 +237,17 @@ def test_build_tab_reuses_active_entry_when_url_already_matches(
     assert built is not existing
     assert built.entries == existing.entries
     assert built.index == existing.index
-    assert built.zenSyncId == "sync-new"
+    assert built.zen_sync_id == "sync-new"
     assert built.pinned is True
     assert built.hidden is False
-    assert built.zenWorkspace == "{workspace}"
-    assert built.zenEssential is True
-    assert built.groupId == "folder-1"
-    assert built.zenIsEmpty is False
-    assert built.zenStaticLabel == "Pinned Label"
-    assert built.userContextId == 7
-    assert built.zenDefaultUserContextId == "true"
-    assert built.lastAccessed == 456
+    assert built.zen_workspace == "{workspace}"
+    assert built.zen_essential is True
+    assert built.group_id == "folder-1"
+    assert built.zen_is_empty is False
+    assert built.zen_static_label == "Pinned Label"
+    assert built.user_context_id == 7
+    assert built.zen_default_user_context_id == "true"
+    assert built.last_accessed == 456
     assert built.attributes == {"nested": ["value"]}
     assert built.attributes is not original_attributes
 
@@ -293,14 +293,14 @@ def test_build_tab_resets_entry_for_mismatched_url_and_placeholder(
         zentool.SessionEntry(url="https://new.example", title="Folder Tab")
     ]
     assert built.index == 1
-    assert built.zenStaticLabel == "Folder Tab"
-    assert built.zenIsEmpty is False
-    assert built.lastAccessed == 1234500
-    assert built.zenDefaultUserContextId is None
+    assert built.zen_static_label == "Folder Tab"
+    assert built.zen_is_empty is False
+    assert built.last_accessed == 1234500
+    assert built.zen_default_user_context_id is None
 
     assert placeholder.entries == [zentool.SessionEntry(url="", title="Folder Tab")]
-    assert placeholder.zenStaticLabel is None
-    assert placeholder.zenIsEmpty is True
+    assert placeholder.zen_static_label is None
+    assert placeholder.zen_is_empty is True
 
 
 def test_build_placeholder_tab_creates_empty_folder_sentinel(

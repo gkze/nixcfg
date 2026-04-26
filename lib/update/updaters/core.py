@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import (
@@ -32,7 +33,8 @@ from lib.update.events import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
+    from pathlib import Path
 
     import aiohttp
 
@@ -49,6 +51,18 @@ class CargoLockGitDep:
     git_dep: str
     hash_type: HashType
     match_name: str
+
+
+@dataclass(frozen=True)
+class FixedOutputHashStep:
+    """One fixed-output hash computation in a sequential hash pipeline."""
+
+    hash_type: HashType
+    error: str
+    expr: Callable[[dict[str, str]], str]
+    env: Callable[[dict[str, str], UpdateConfig], Mapping[str, str] | None] | None = (
+        None
+    )
 
 
 def _verify_platform_versions(versions: dict[str, str], source_name: str) -> str:
@@ -80,6 +94,7 @@ class UpdateContext:
 
     current: SourceEntry | None
     drv_fingerprint: str | None = None
+    generated_artifacts: dict[Path, str] = field(default_factory=dict)
 
 
 def _coerce_context(context: UpdateContext | SourceEntry | None) -> UpdateContext:
@@ -120,6 +135,116 @@ async def _emit_single_hash_entry(
     )
 
 
+async def stream_url_hash_mapping(
+    source_name: str,
+    urls_by_key: Mapping[str, str],
+    *,
+    error: str = "Missing hash output",
+) -> EventStream:
+    """Hash a keyed URL mapping while forwarding progress events."""
+    hash_drain = ValueDrain[HashMapping]()
+    async for event in drain_value_events(
+        _base_module().compute_url_hashes(source_name, urls_by_key.values()),
+        hash_drain,
+        parse=expect_hash_mapping,
+    ):
+        yield event
+    hashes_by_url = require_value(hash_drain, error)
+    yield UpdateEvent.value(
+        source_name,
+        {key: hashes_by_url[url] for key, url in urls_by_key.items()},
+    )
+
+
+async def stream_fixed_output_hashes(
+    source_name: str,
+    *,
+    steps: tuple[FixedOutputHashStep, ...],
+    config: UpdateConfig | None = None,
+) -> EventStream:
+    """Compute one or more fixed-output hashes and emit structured hash entries."""
+    config = resolve_active_config(config)
+    resolved_hashes: dict[str, str] = {}
+    entries: list[HashEntry] = []
+
+    for step in steps:
+        hash_drain = ValueDrain[str]()
+        env = step.env(resolved_hashes, config) if step.env is not None else None
+        async for event in drain_value_events(
+            _base_module().compute_fixed_output_hash(
+                source_name,
+                step.expr(resolved_hashes),
+                env=env,
+                config=config,
+            ),
+            hash_drain,
+            parse=expect_str,
+        ):
+            yield event
+        hash_value = require_value(hash_drain, step.error)
+        resolved_hashes[step.hash_type] = hash_value
+        entries.append(HashEntry.create(step.hash_type, hash_value))
+
+    yield UpdateEvent.value(source_name, entries)
+
+
+def source_override_env(
+    source_name: str,
+    *,
+    version: str,
+    src_hash: str,
+    dependency_hash_type: HashType,
+    dependency_hash: str,
+) -> dict[str, str]:
+    """Build source override JSON for second-pass dependency hash evaluation."""
+    payload = {
+        source_name: {
+            "version": version,
+            "hashes": [
+                {"hashType": "srcHash", "hash": src_hash},
+                {"hashType": dependency_hash_type, "hash": dependency_hash},
+            ],
+        },
+    }
+    return {"UPDATE_SOURCE_OVERRIDES_JSON": json.dumps(payload)}
+
+
+async def stream_source_then_overlay_hashes(
+    source_name: str,
+    *,
+    version: str,
+    src_expr: str,
+    overlay_expr: str,
+    dependency_hash_type: HashType,
+    config: UpdateConfig | None = None,
+) -> EventStream:
+    """Compute srcHash, then an overlay dependency hash using source overrides."""
+    async for event in stream_fixed_output_hashes(
+        source_name,
+        steps=(
+            FixedOutputHashStep(
+                hash_type="srcHash",
+                error="Missing srcHash output",
+                expr=lambda _resolved: src_expr,
+            ),
+            FixedOutputHashStep(
+                hash_type=dependency_hash_type,
+                error=f"Missing {dependency_hash_type} output",
+                expr=lambda _resolved: overlay_expr,
+                env=lambda resolved, active_config: source_override_env(
+                    source_name,
+                    version=version,
+                    src_hash=resolved["srcHash"],
+                    dependency_hash_type=dependency_hash_type,
+                    dependency_hash=active_config.fake_hash,
+                ),
+            ),
+        ),
+        config=config,
+    ):
+        yield event
+
+
 class Updater(ABC):
     """Abstract base class for all update sources."""
 
@@ -129,6 +254,7 @@ class Updater(ABC):
     materialize_when_current: ClassVar[bool] = False
     shows_materialize_artifacts_phase: ClassVar[bool] = False
     generated_artifact_files: ClassVar[tuple[str, ...]] = ()
+    companion_of: ClassVar[str | None] = None
     # Optional tuple of Nix system strings (for example ``"aarch64-darwin"``)
     # this updater may run on. ``None`` means "all platforms" (the default).
     # When set, ``update_stream`` short-circuits on other platforms before
@@ -186,6 +312,7 @@ class Updater(ABC):
         context: UpdateContext | SourceEntry | None,
         info: VersionInfo,
     ) -> bool:
+        """Return a proof that recomputing would be a semantic no-op."""
         context = _coerce_context(context)
         current = context.current
         if current is None:
@@ -196,6 +323,31 @@ class Updater(ABC):
         if isinstance(upstream_commit, str) and current.commit:
             return current.commit == upstream_commit
         return True
+
+    def _comparison_result(
+        self,
+        result: SourceEntry,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
+    ) -> SourceEntry:
+        """Return the effective result to compare against the persisted state."""
+        context = _coerce_context(context)
+        current = context.current
+        if current is not None and getattr(self, "native_only", False):
+            return current.merge(result)
+        return result
+
+    def results_equivalent(
+        self,
+        current: SourceEntry,
+        result: SourceEntry,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
+    ) -> bool:
+        """Return whether *result* is semantically unchanged from *current*."""
+        return current.equivalent_to(
+            self._comparison_result(result, context=context),
+        )
 
     async def _finalize_result(
         self,
@@ -214,6 +366,7 @@ class Updater(ABC):
         session: aiohttp.ClientSession,
         *,
         pinned_version: VersionInfo | None = None,
+        context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Run fetch/check/hash/update flow and emit update events."""
         if self.supported_platforms is not None:
@@ -228,7 +381,8 @@ class Updater(ABC):
                 )
                 yield UpdateEvent.result(self.name)
                 return
-        context = UpdateContext(current=current)
+        context = _coerce_context(context)
+        context.current = current
         if pinned_version is not None:
             yield UpdateEvent.status(
                 self.name,
@@ -244,7 +398,11 @@ class Updater(ABC):
                 f"Fetching latest {self.name} version...",
                 operation="check_version",
             )
-            info = await self.fetch_latest(session)
+            info = await _call_with_optional_context(
+                self.fetch_latest,
+                session,
+                context=context,
+            )
 
             yield UpdateEvent.status(
                 self.name,
@@ -306,7 +464,11 @@ class Updater(ABC):
             yield event
         result = require_value(result_drain, "Missing finalized result")
 
-        if context.current is not None and result == context.current:
+        if context.current is not None and self.results_equivalent(
+            context.current,
+            result,
+            context=context,
+        ):
             unchanged_message = (
                 "Source metadata unchanged"
                 if self.materialize_when_current
@@ -338,6 +500,17 @@ class ChecksumProvidedUpdater(Updater):
         """Fetch hex checksums keyed by platform."""
         raise NotImplementedError
 
+    async def _fetch_checksums_stream(
+        self,
+        info: VersionInfo,
+        session: aiohttp.ClientSession,
+    ) -> EventStream:
+        """Emit checksum mappings while allowing subclasses to stream progress."""
+        yield UpdateEvent.value(
+            self.name,
+            await self.fetch_checksums(info, session),
+        )
+
     async def fetch_hashes(
         self,
         info: VersionInfo,
@@ -347,7 +520,14 @@ class ChecksumProvidedUpdater(Updater):
     ) -> EventStream:
         """Convert fetched hex checksums to SRI hashes."""
         _ = _coerce_context(context)
-        checksums = await self.fetch_checksums(info, session)
+        checksums_drain = ValueDrain[dict[str, str]]()
+        async for event in drain_value_events(
+            self._fetch_checksums_stream(info, session),
+            checksums_drain,
+            parse=_ensure_str_mapping,
+        ):
+            yield event
+        checksums = require_value(checksums_drain, "Missing checksum output")
         streams = {
             platform: _base_module().convert_nix_hash_to_sri(self.name, hex_hash)
             for platform, hex_hash in checksums.items()
@@ -426,20 +606,11 @@ class DownloadHashUpdater(Updater):
         """Compute platform hashes from prefetched artifact URLs."""
         _ = (session, _coerce_context(context))
         platform_urls = self._platform_urls(info)
-        hashes_drain = ValueDrain[HashMapping]()
-        async for event in drain_value_events(
-            _base_module().compute_url_hashes(self.name, platform_urls.values()),
-            hashes_drain,
-            parse=expect_hash_mapping,
+        async for event in stream_url_hash_mapping(
+            self.name,
+            platform_urls,
         ):
             yield event
-        hashes_by_url = require_value(hashes_drain, "Missing hash output")
-
-        hashes: dict[str, str] = {
-            platform: hashes_by_url[platform_urls[platform]]
-            for platform in self.PLATFORMS
-        }
-        yield UpdateEvent.value(self.name, hashes)
 
 
 class HashEntryUpdater(Updater):
@@ -455,6 +626,15 @@ class HashEntryUpdater(Updater):
             hashes=HashCollection.from_value(hashes),
             input=self.input_name,
         )
+
+    async def _is_latest(
+        self,
+        context: UpdateContext | SourceEntry | None,
+        info: VersionInfo,
+    ) -> bool:
+        """Hash-entry updaters must recompute before comparing semantic equality."""
+        _ = (context, info)
+        return False
 
     async def _emit_single_hash_entry(
         self,
@@ -476,6 +656,7 @@ __all__ = [
     "CargoLockGitDep",
     "ChecksumProvidedUpdater",
     "DownloadHashUpdater",
+    "FixedOutputHashStep",
     "HashEntryUpdater",
     "UpdateContext",
     "Updater",
@@ -484,4 +665,6 @@ __all__ = [
     "_emit_single_hash_entry",
     "_ensure_str_mapping",
     "_verify_platform_versions",
+    "stream_fixed_output_hashes",
+    "stream_url_hash_mapping",
 ]

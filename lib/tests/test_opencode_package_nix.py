@@ -7,6 +7,7 @@ from pathlib import Path
 
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.primitive import StringPrimitive
@@ -14,6 +15,7 @@ from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
+from lib.tests._shell_ast import command_texts, parse_shell
 from lib.update.paths import REPO_ROOT
 
 
@@ -83,6 +85,18 @@ def test_opencode_overlay_keeps_platform_specific_node_modules_hash_lookup() -> 
     )
 
 
+def test_opencode_overlay_guards_removed_shared_workspace_workaround() -> None:
+    """The stale packages/shared glob workaround must not fail after upstream removal."""
+    pre_build = expect_instance(
+        expect_binding(_opencode_override_args().values, "preBuild").value,
+        IndentedString,
+    ).value
+    commands = command_texts(parse_shell(pre_build))
+
+    assert "[ -d packages/shared ]" in commands
+    assert "mkdir -p packages/shared/node_modules" in commands
+
+
 def test_opencode_overlay_keeps_build_phase_as_ast_transform() -> None:
     """The node_modules buildPhase should remain a Nix-level string rewrite."""
     build_phase = expect_binding(
@@ -103,8 +117,14 @@ def test_opencode_overlay_keeps_build_phase_as_ast_transform() -> None:
         for item in expect_instance(replacement_call.argument, NixList).value
     ]
 
-    assert len(search_values) == 3
-    assert len(replacement_values) == 3
-    assert any("packages/shared" in value for value in search_values)
-    assert any("packages/script" in value for value in replacement_values)
+    assert search_values == [
+        r"--filter '!./' \\\n",
+        r"--filter './packages/shared' \\\n",
+        "bun --bun",
+    ]
+    assert replacement_values == [
+        r"--filter './' \\\n",
+        r"--filter './packages/shared' \\\n      --filter './packages/script' \\\n",
+        "[ -d node_modules/.bun/node_modules ] && bun --bun",
+    ]
     assert_nix_ast_equal(final_call.argument, '(nodeOld.buildPhase or "")')

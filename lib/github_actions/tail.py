@@ -15,11 +15,12 @@ import asyncio
 import json
 import sys
 from dataclasses import dataclass, field
-from html.parser import HTMLParser
 from typing import TYPE_CHECKING, TextIO
 from urllib.parse import urljoin, urlsplit
 
 import httpx
+from bs4 import BeautifulSoup
+from pydantic import BaseModel, ConfigDict, StrictInt, ValidationError
 
 from lib import http_utils, json_utils
 from lib.github_actions.client import (
@@ -33,7 +34,7 @@ from lib.github_actions.client import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
 
     from lib.github_actions.web_auth import GitHubWebCookieProvider
 
@@ -82,6 +83,30 @@ class LiveStepRecord:
 @dataclass(frozen=True)
 class LiveLogLine:
     """One log line from a step backscroll response."""
+
+    id: str
+    line: str
+
+
+class _LiveStepPayload(BaseModel):
+    """Validated live-step payload from GitHub's web transport."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: str
+    name: str
+    status: str
+    conclusion: str | None = None
+    number: StrictInt
+    change_id: StrictInt
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
+class _LiveLogLinePayload(BaseModel):
+    """Validated backscroll log-line payload."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
     id: str
     line: str
@@ -680,44 +705,70 @@ class GitHubActionsTailer:
         self.output.flush()
 
 
-class _CheckStepsHTMLParser(HTMLParser):
-    """Extract hidden live-log transport metadata from one job page."""
+def _html_attr(node: object, *names: str) -> str | None:
+    """Return the first string-valued HTML attribute from a BeautifulSoup node."""
+    getter = getattr(node, "get", None)
+    if not callable(getter):
+        return None
+    for name in names:
+        value = getter(name)
+        if isinstance(value, str):
+            return value
+    return None
+
+
+class _CheckStepsHTMLParser:
+    """Compatibility wrapper around BeautifulSoup-backed job-page extraction."""
 
     def __init__(self) -> None:
-        super().__init__()
         self.steps_url: str | None = None
         self.streaming_url: str | None = None
         self.backscroll_urls: dict[str, str] = {}
 
+    def feed(self, html: str) -> None:
+        """Parse a full job page and record embedded live-log attributes."""
+        soup = BeautifulSoup(html, "html.parser")
+        for check_steps in soup.find_all("check-steps"):
+            self._record_check_steps(check_steps.attrs)
+        for check_step in soup.find_all("check-step"):
+            self._record_check_step(check_step.attrs)
+
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Record one start tag in the shape previously exposed by HTMLParser."""
         mapping = {key: value for key, value in attrs if value is not None}
         if tag == "check-steps":
-            for attribute in _JOB_STEPS_URL_ATTRIBUTES:
-                if attribute in mapping:
-                    self.steps_url = mapping[attribute]
-                    break
-            for attribute in _STREAMING_URL_ATTRIBUTES:
-                if attribute in mapping:
-                    self.streaming_url = mapping[attribute]
-                    break
-            return
-        if tag != "check-step":
-            return
-        step_id = mapping.get(_STEP_ID_ATTRIBUTE)
-        backscroll_url = mapping.get(_STEP_BACKSCROLL_URL_ATTRIBUTE)
-        if step_id is None or backscroll_url is None:
-            return
-        self.backscroll_urls[step_id] = backscroll_url
+            self._record_check_steps(mapping)
+        elif tag == "check-step":
+            self._record_check_step(mapping)
+
+    def _record_check_steps(self, attrs: Mapping[str, object]) -> None:
+        for attribute in _JOB_STEPS_URL_ATTRIBUTES:
+            value = attrs.get(attribute)
+            if isinstance(value, str):
+                self.steps_url = value
+                break
+        for attribute in _STREAMING_URL_ATTRIBUTES:
+            value = attrs.get(attribute)
+            if isinstance(value, str):
+                self.streaming_url = value
+                break
+
+    def _record_check_step(self, attrs: Mapping[str, object]) -> None:
+        step_id = attrs.get(_STEP_ID_ATTRIBUTE)
+        backscroll_url = attrs.get(_STEP_BACKSCROLL_URL_ATTRIBUTE)
+        if isinstance(step_id, str) and isinstance(backscroll_url, str):
+            self.backscroll_urls[step_id] = backscroll_url
 
 
 def _parse_live_job_page_from_html(html: str, *, job_url: str) -> LiveJobPageInfo:
-    parser = _CheckStepsHTMLParser()
-    parser.feed(html)
+    soup = BeautifulSoup(html, "html.parser")
     info = LiveJobPageInfo()
-    if parser.steps_url is not None:
+    check_steps = soup.find("check-steps")
+    steps_url = _html_attr(check_steps, *_JOB_STEPS_URL_ATTRIBUTES)
+    if steps_url is not None:
         info.steps_url = _parse_steps_url_candidate(
             job_url=job_url,
-            candidate=parser.steps_url,
+            candidate=steps_url,
         )
     else:
         for key in _JOB_STEPS_URL_JSON_KEYS:
@@ -729,13 +780,18 @@ def _parse_live_job_page_from_html(html: str, *, job_url: str) -> LiveJobPageInf
                 candidate=candidate,
             )
             break
-    if parser.streaming_url is not None:
+    streaming_url = _html_attr(check_steps, *_STREAMING_URL_ATTRIBUTES)
+    if streaming_url is not None:
         info.streaming_url = _parse_same_origin_url_candidate(
             job_url=job_url,
-            candidate=parser.streaming_url,
+            candidate=streaming_url,
             context="streaming URL",
         )
-    for step_id, candidate in parser.backscroll_urls.items():
+    for check_step in soup.find_all("check-step"):
+        step_id = _html_attr(check_step, _STEP_ID_ATTRIBUTE)
+        candidate = _html_attr(check_step, _STEP_BACKSCROLL_URL_ATTRIBUTE)
+        if step_id is None or candidate is None:
+            continue
         info.backscroll_urls[step_id] = _parse_same_origin_url_candidate(
             job_url=job_url,
             candidate=candidate,
@@ -844,43 +900,30 @@ def _parse_same_origin_url_candidate(
 
 
 def _parse_live_step(value: object) -> LiveStepRecord:
-    payload = json_utils.as_object_dict(value, context="live step")
+    try:
+        payload = _LiveStepPayload.model_validate(value)
+    except ValidationError as exc:
+        msg = "Malformed GitHub Actions live step payload"
+        raise TypeError(msg) from exc
     return LiveStepRecord(
-        id=json_utils.get_required_str(payload, "id", context="live step"),
-        name=json_utils.get_required_str(payload, "name", context="live step"),
-        status=json_utils.get_required_str(payload, "status", context="live step"),
-        conclusion=_optional_str(payload, "conclusion"),
-        number=_required_int(payload, "number", context="live step"),
-        change_id=_required_int(payload, "change_id", context="live step"),
-        started_at=_optional_str(payload, "started_at"),
-        completed_at=_optional_str(payload, "completed_at"),
+        id=payload.id,
+        name=payload.name,
+        status=payload.status,
+        conclusion=payload.conclusion,
+        number=payload.number,
+        change_id=payload.change_id,
+        started_at=payload.started_at,
+        completed_at=payload.completed_at,
     )
 
 
 def _parse_live_line(value: object) -> LiveLogLine:
-    payload = json_utils.as_object_dict(value, context="live log line")
-    return LiveLogLine(
-        id=json_utils.get_required_str(payload, "id", context="live log line"),
-        line=json_utils.get_required_str(payload, "line", context="live log line"),
-    )
-
-
-def _required_int(mapping: dict[str, object], key: str, *, context: str) -> int:
-    value = mapping.get(key)
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    msg = f"Expected integer field {key!r} in {context}"
-    raise TypeError(msg)
-
-
-def _optional_str(mapping: dict[str, object], key: str) -> str | None:
-    value = mapping.get(key)
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    msg = f"Expected optional string field {key!r}"
-    raise TypeError(msg)
+    try:
+        payload = _LiveLogLinePayload.model_validate(value)
+    except ValidationError as exc:
+        msg = "Malformed GitHub Actions live log line payload"
+        raise TypeError(msg) from exc
+    return LiveLogLine(id=payload.id, line=payload.line)
 
 
 def _job_by_id(jobs: tuple[JobSummary, ...], job_id: int) -> JobSummary | None:

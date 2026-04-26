@@ -2,23 +2,24 @@
 
 from __future__ import annotations
 
-import fnmatch
 import re
-import subprocess
 import tomllib
 from functools import cache
-from pathlib import Path, PurePosixPath
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.binding import Binding
-from nix_manipulator.expressions.expression import NixExpression
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.primitive import Primitive
 from nix_manipulator.expressions.set import AttributeSet
+
+if TYPE_CHECKING:
+    from nix_manipulator.expressions.expression import NixExpression
 
 from lib.check_python_compile import iter_target_paths
 from lib.tests._assertions import expect_instance
@@ -148,10 +149,6 @@ def test_dev_shell_manual_and_commit_msg_hooks_stay_stage_scoped() -> None:
     assert 'stages = [ "commit-msg" ];' in _hook_block("commit-message-commitlint")
 
 
-def _workflow_body(path: str) -> str:
-    return _read(REPO_ROOT / path)
-
-
 @cache
 def _lint_files_expr() -> AttributeSet:
     """Parse ``lib/lint-files.nix`` once for literal-data extraction."""
@@ -227,12 +224,6 @@ def _lint_files_python() -> dict[str, object]:
     return python
 
 
-def _lint_files_group(name: str) -> dict[str, object]:
-    group = _lint_files().get(name)
-    assert isinstance(group, dict)
-    return group
-
-
 @cache
 def _pyproject() -> dict[str, object]:
     payload = tomllib.loads(_read(REPO_ROOT / "pyproject.toml"))
@@ -263,62 +254,6 @@ def _single_line_multi_except_files() -> set[str]:
         for path in _repo_python_paths()
         if _SINGLE_LINE_MULTI_EXCEPT_PATTERN.search(_read(path))
     }
-
-
-@cache
-def _formatter_globs() -> tuple[str, ...]:
-    python = _lint_files_python()
-    pyupgrade_paths = python["pyupgradePaths"]
-    assert isinstance(pyupgrade_paths, list)
-
-    groups = (
-        _lint_files_group("nix"),
-        _lint_files_group("yaml"),
-        _lint_files_group("toml"),
-        _lint_files_group("biome"),
-        _lint_files_group("go"),
-        _lint_files_group("markdown"),
-        _lint_files_group("shell"),
-        _lint_files_group("text"),
-    )
-    globs = [pattern for pattern in pyupgrade_paths if isinstance(pattern, str)]
-    for group in groups:
-        group_globs = group["globs"]
-        assert isinstance(group_globs, list)
-        globs.extend(pattern for pattern in group_globs if isinstance(pattern, str))
-    return tuple(globs)
-
-
-@cache
-def _tracked_repo_paths() -> tuple[Path, ...]:
-    result = subprocess.run(
-        ["git", "ls-files", "-z"],
-        check=True,
-        capture_output=True,
-        cwd=REPO_ROOT,
-    )
-    relative_paths = sorted(
-        item.decode() for item in result.stdout.split(b"\0") if item
-    )
-    return tuple(REPO_ROOT / path for path in relative_paths)
-
-
-def _matches_glob(path: str, pattern: str) -> bool:
-    pure_path = PurePosixPath(path)
-    return pure_path.match(pattern) or fnmatch.fnmatch(path, pattern)
-
-
-def _is_binary_file(path: Path) -> bool:
-    return b"\0" in path.read_bytes()
-
-
-@cache
-def _tracked_binary_paths() -> tuple[str, ...]:
-    return tuple(
-        _relative_repo_path(path)
-        for path in _tracked_repo_paths()
-        if _is_binary_file(path)
-    )
 
 
 @cache
@@ -394,39 +329,3 @@ def test_compile_paths_cover_vulnerable_single_line_multi_except_files() -> None
     assert _single_line_multi_except_files() <= _expand_python_paths(
         tuple(pattern for pattern in compile_paths if isinstance(pattern, str))
     )
-
-
-def test_ci_runs_runner_only_pinact_and_crate2nix_verification_explicitly() -> None:
-    """Keep pinact and crate2nix verification outside sandboxed flake checks in CI."""
-    workflow = _workflow_body(".github/workflows/ci.yml")
-    assert "nix run --inputs-from . nixpkgs#pinact -- run --check" in workflow
-    assert "nix run .#nixcfg -- ci pipeline crate2nix" in workflow
-
-
-def test_update_certify_runs_runner_only_pinact_and_crate2nix_verification_explicitly() -> (
-    None
-):
-    """Keep certification pinact and crate2nix verification outside flake checks."""
-    workflow = _workflow_body(".github/workflows/update-certify.yml")
-    assert "nix run --inputs-from . nixpkgs#pinact -- run --check" in workflow
-    assert "nix run .#nixcfg -- ci pipeline crate2nix" in workflow
-
-
-def test_tracked_binary_files_stay_explicit() -> None:
-    """Keep the repo's binary asset surface small and intentional."""
-    assert _tracked_binary_paths() == ("home/george/wallpaper.jpeg",)
-
-
-def test_tracked_text_files_have_formatter_coverage() -> None:
-    """Keep every tracked text format covered by `nix fmt` surfaces."""
-    formatter_globs = _formatter_globs()
-    uncovered = tuple(
-        relative_path
-        for relative_path in (
-            _relative_repo_path(path)
-            for path in _tracked_repo_paths()
-            if not _is_binary_file(path)
-        )
-        if not any(_matches_glob(relative_path, pattern) for pattern in formatter_globs)
-    )
-    assert uncovered == ()

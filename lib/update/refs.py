@@ -179,6 +179,9 @@ async def _fetch_first_matching_tag(
     *,
     config: UpdateConfig,
 ) -> str | None:
+    max_pages = 5
+    last_error: RuntimeError | None = None
+    saw_tags_fetch = False
     candidates = (
         (
             f"repos/{owner}/{repo}/releases",
@@ -198,14 +201,21 @@ async def _fetch_first_matching_tag(
                 path,
                 config=config,
                 per_page=per_page,
-                max_pages=5,
+                max_pages=max_pages,
+                item_limit=per_page * max_pages,
             )
-        except RuntimeError:
+        except RuntimeError as exc:
+            last_error = exc
             continue
+        if path.endswith("/tags"):
+            saw_tags_fetch = True
         payload = [item for item in payload_raw if isinstance(item, dict)]
         tag = selector(payload, prefix)
         if tag:
             return tag
+    if not saw_tags_fetch and last_error is not None:
+        msg = f"GitHub API lookup failed for {owner}/{repo}: {last_error}"
+        raise RuntimeError(msg) from last_error
     return None
 
 
@@ -262,13 +272,21 @@ async def check_flake_ref_update(
     prefix = _extract_version_prefix(input_ref.ref)
 
     if input_ref.input_type == "github":
-        latest = await fetch_github_latest_version_ref(
-            session,
-            input_ref.owner,
-            input_ref.repo,
-            prefix,
-            config=config,
-        )
+        try:
+            latest = await fetch_github_latest_version_ref(
+                session,
+                input_ref.owner,
+                input_ref.repo,
+                prefix,
+                config=config,
+            )
+        except RuntimeError as exc:
+            return RefUpdateResult(
+                name=input_ref.name,
+                current_ref=input_ref.ref,
+                latest_ref=None,
+                error=str(exc),
+            )
     else:
         return RefUpdateResult(
             name=input_ref.name,

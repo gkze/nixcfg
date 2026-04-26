@@ -6,12 +6,10 @@ import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+
+import pytest
 
 from lib.update.ci import sources_json_diff as sdiff
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def test_buffer_writer_and_format_helpers() -> None:
@@ -29,26 +27,14 @@ def test_buffer_writer_and_format_helpers() -> None:
 
 def test_coerce_json_value_rejects_bad_types() -> None:
     """Raise TypeError for unsupported values and keys."""
-    try:
+    with pytest.raises(TypeError, match="Expected string key"):
         sdiff._coerce_json_value({1: "v"}, context="root")
-    except TypeError as exc:
-        assert "Expected string key" in str(exc)
-    else:
-        raise AssertionError("expected TypeError")
 
-    try:
+    with pytest.raises(TypeError, match="Unsupported JSON value"):
         sdiff._coerce_json_value({"x": object()}, context="root")
-    except TypeError as exc:
-        assert "Unsupported JSON value" in str(exc)
-    else:
-        raise AssertionError("expected TypeError")
 
-    try:
+    with pytest.raises(TypeError, match="Expected JSON object"):
         sdiff._coerce_json_object(["not", "obj"], context="root")
-    except TypeError as exc:
-        assert "Expected JSON object" in str(exc)
-    else:
-        raise AssertionError("expected TypeError")
 
 
 def test_path_parsing_and_node_fallbacks() -> None:
@@ -58,7 +44,8 @@ def test_path_parsing_and_node_fallbacks() -> None:
     assert parse("root['a'][2]['b']") == ("a", 2, "b")
 
     node_no_path = SimpleNamespace()
-    assert sdiff._path_from_deepdiff_node(node_no_path) == ()
+    with pytest.raises(sdiff.DeepDiffPathError, match="callable path"):
+        sdiff._path_from_deepdiff_node(node_no_path)
 
     class _NodeList:
         def path(self, *, output_format: str = "list") -> list[object]:
@@ -73,6 +60,27 @@ def test_path_parsing_and_node_fallbacks() -> None:
 
     assert sdiff._path_from_deepdiff_node(_NodeText()) == ("p", 0)
 
+    class _NodeTextWithoutListFormat:
+        def path(self) -> str:
+            return "root['fallback']"
+
+    assert sdiff._path_from_deepdiff_node(_NodeTextWithoutListFormat()) == ("fallback",)
+
+    class _NodeAlwaysTypeError:
+        def path(self, **_kwargs: object) -> str:
+            msg = "unsupported path signature"
+            raise TypeError(msg)
+
+    with pytest.raises(sdiff.DeepDiffPathError, match="Could not decode DeepDiff path"):
+        sdiff._path_from_deepdiff_node(_NodeAlwaysTypeError())
+
+    class _NodeUnparseableText:
+        def path(self, **_kwargs: object) -> str:
+            return "not-a-deepdiff-path"
+
+    with pytest.raises(sdiff.DeepDiffPathError, match="not-a-deepdiff-path"):
+        sdiff._path_from_deepdiff_node(_NodeUnparseableText())
+
     class _NodeListWithObject:
         def path(self, *, output_format: str = "list") -> list[object]:
             _ = output_format
@@ -86,7 +94,8 @@ def test_path_parsing_and_node_fallbacks() -> None:
         def path(self, **_kwargs: object) -> int:
             return 42
 
-    assert sdiff._path_from_deepdiff_node(_NodeWeird()) == ()
+    with pytest.raises(sdiff.DeepDiffPathError, match="Could not decode DeepDiff path"):
+        sdiff._path_from_deepdiff_node(_NodeWeird())
 
 
 def test_iter_leaf_values_and_change_extraction() -> None:

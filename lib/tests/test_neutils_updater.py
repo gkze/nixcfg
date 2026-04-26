@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import io
 import tarfile
 from pathlib import Path
@@ -10,8 +9,10 @@ from types import ModuleType
 
 import pytest
 
-from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import HashEntry
+from lib.tests._updater_helpers import collect_events as _collect_events
+from lib.tests._updater_helpers import load_repo_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import (
     CommandResult,
     UpdateEvent,
@@ -22,16 +23,8 @@ from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import VersionInfo
 
 
-def _run[T](coro):
-    return asyncio.run(coro)
-
-
-async def _collect_events(stream):
-    return [event async for event in stream]
-
-
 def _load_module(name: str = "neutils_updater_test") -> ModuleType:
-    return load_module_from_path(REPO_ROOT / "packages/neutils/updater.py", name)
+    return load_repo_module("packages/neutils/updater.py", name)
 
 
 def _build_archive(*, include_build_zig_zon: bool = True) -> bytes:

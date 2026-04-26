@@ -98,6 +98,8 @@ jobs:
             'packages/**/sources.json',
             'overlays/**/sources.json',
             'packages/**/uv.lock',
+            'packages/**/deno-deps.json',
+            'packages/**/build.zig.zon.nix',
             'packages/**/Cargo.nix',
             'packages/**/crate-hashes.json',
             'overlays/**/Cargo.nix',

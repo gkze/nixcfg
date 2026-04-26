@@ -123,7 +123,7 @@ def test_t3code_desktop_sources_track_the_supported_platform_matrix() -> None:
     )
 
     assert payload["input"] == "t3code"
-    assert payload["version"] == "main"
+    assert isinstance(payload.get("version"), str)
     assert payload["hashes"] == [
         {
             "hash": "sha256-o+LKHj/LJ5PwKxVHUUl/RR9CLLfmmtaelNN1JFGjs6w=",

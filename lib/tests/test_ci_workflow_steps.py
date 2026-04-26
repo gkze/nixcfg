@@ -41,9 +41,10 @@ def test_generate_pr_body_includes_sources_section(
         *,
         check: bool = True,
         capture_output: bool = False,
+        cwd: Path | None = None,
         text: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        del check, capture_output, text
+        del check, capture_output, cwd, text
         if args == ["git", "show", "HEAD:flake.lock"]:
             return _completed(args, stdout='{"nodes":{}}\n')
         if args == ["git", "ls-files", "--others", "--exclude-standard"]:
@@ -63,9 +64,14 @@ def test_generate_pr_body_includes_sources_section(
         msg = f"unexpected command: {args}"
         raise AssertionError(msg)
 
-    monkeypatch.chdir(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    monkeypatch.setattr(workflow_steps, "get_repo_root", lambda: tmp_path)
     monkeypatch.setattr(workflow_steps, "_run", _fake_run)
-    monkeypatch.setattr(workflow_steps, "run_flake_lock_diff", lambda _old, _new: "")
+    monkeypatch.setattr(
+        workflow_steps, "collect_changes", lambda _old, _new: ([], [], [])
+    )
     _unified_diff = (
         "--- old/source-entry.json\n"
         "+++ new/source-entry.json\n"
@@ -107,6 +113,7 @@ def test_generate_pr_body_includes_sources_section(
         "https://github.com/acme/nixcfg/blob/update_flake_lock_action/packages/demo/sources.json"
         in rendered
     )
+    assert "nixcfg-pr-body-model:start" in rendered
 
 
 def test_free_disk_space_requires_ci_or_force(

@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import NotRequired, TypedDict, TypeGuard, cast
+from typing import NotRequired, ReadOnly, TypedDict, TypeIs
 
 from lib.nix.models.sources import HashEntry, HashMapping, SourceEntry, SourceHashes
 from lib.update.artifacts import GeneratedArtifact
@@ -31,8 +31,8 @@ class UpdateEventKind(StrEnum):
 class RefUpdatePayload(TypedDict):
     """Payload emitted when a flake ref moves from current to latest."""
 
-    current: str
-    latest: str
+    current: ReadOnly[str]
+    latest: ReadOnly[str]
 
 
 class StatusPayload(TypedDict):
@@ -73,7 +73,7 @@ type UpdateEventPayload = (
 )
 
 
-def _is_hash_mapping(value: object) -> TypeGuard[HashMapping]:
+def _is_hash_mapping(value: object) -> TypeIs[HashMapping]:
     if not isinstance(value, dict):
         return False
     return all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
@@ -164,14 +164,13 @@ class UpdateEvent:
         """Create a status event."""
         payload: StatusPayload | None = None
         if operation is not None or status is not None or detail is not None:
-            payload_dict: dict[str, object] = {}
+            payload = {}
             if operation is not None:
-                payload_dict["operation"] = operation
+                payload["operation"] = operation
             if status is not None:
-                payload_dict["status"] = status
+                payload["status"] = status
             if detail is not None:
-                payload_dict["detail"] = detail
-            payload = cast("StatusPayload", payload_dict)
+                payload["detail"] = detail
         return cls(
             source=source,
             kind=UpdateEventKind.STATUS,
@@ -336,7 +335,7 @@ async def gather_event_streams[K](
 
         while remaining > 0:
             item = await queue.get()
-            if item == done:
+            if isinstance(item, _GatherDone):
                 remaining -= 1
                 continue
             if isinstance(item, _StreamError):
@@ -345,7 +344,7 @@ async def gather_event_streams[K](
                     if not task.done():
                         task.cancel()
                 continue
-            yield cast("UpdateEvent", item)
+            yield item
 
     if errors:
         if len(errors) == 1:

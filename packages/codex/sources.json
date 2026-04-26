@@ -1,6 +1,6 @@
 {
-  "commit": "230dcadee609fa99d6162fe1107457030e5270a7",
+  "commit": "637f7dd6d737f3961e6bf32fbb3861c4953269c5",
   "hashes": [],
   "input": "codex",
-  "version": "rust-v0.122.0"
+  "version": "rust-v0.125.0"
 }

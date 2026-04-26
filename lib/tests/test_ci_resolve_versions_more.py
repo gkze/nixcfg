@@ -35,31 +35,19 @@ def test_make_json_safe_handles_models_and_tuples() -> None:
 
 def test_make_json_safe_rejects_unsupported_value() -> None:
     """Raise TypeError for values that cannot be serialized."""
-    try:
+    with pytest.raises(TypeError, match="not JSON-serializable"):
         object.__getattribute__(rv, "_make_json_safe")({"bad": {1, 2}})
-    except TypeError as exc:
-        assert "not JSON-serializable" in str(exc)
-    else:
-        raise AssertionError("expected TypeError")
 
 
 def test_deserialize_validates_required_fields() -> None:
     """Reject malformed pinned-version entries."""
     deserialize = object.__getattribute__(rv, "_deserialize_version_info")
 
-    try:
+    with pytest.raises(TypeError, match="missing string 'version'"):
         deserialize({"version": 123, "metadata": {}})
-    except TypeError as exc:
-        assert "missing string 'version'" in str(exc)
-    else:
-        raise AssertionError("expected TypeError for invalid version")
 
-    try:
+    with pytest.raises(TypeError, match="invalid 'metadata'"):
         deserialize({"version": "1.2.3", "metadata": []})
-    except TypeError as exc:
-        assert "invalid 'metadata'" in str(exc)
-    else:
-        raise AssertionError("expected TypeError for invalid metadata")
 
 
 def test_deserialize_rehydrates_flake_lock_node() -> None:
@@ -97,7 +85,7 @@ def test_deserialize_rejects_invalid_node_metadata() -> None:
     """Reject pinned node payloads that fail flake lock validation."""
     deserialize = object.__getattribute__(rv, "_deserialize_version_info")
 
-    try:
+    with pytest.raises(TypeError, match="invalid node metadata"):
         deserialize({
             "version": "1.2.3",
             "metadata": {
@@ -111,10 +99,6 @@ def test_deserialize_rejects_invalid_node_metadata() -> None:
                 }
             },
         })
-    except TypeError as exc:
-        assert "invalid node metadata" in str(exc)
-    else:
-        raise AssertionError("expected TypeError for invalid node metadata")
 
 
 def test_load_pinned_versions_validates_top_level_shape(tmp_path: Path) -> None:
@@ -122,20 +106,12 @@ def test_load_pinned_versions_validates_top_level_shape(tmp_path: Path) -> None:
     path = tmp_path / "pinned.json"
 
     path.write_text(json.dumps(["bad"]), encoding="utf-8")
-    try:
+    with pytest.raises(TypeError, match="must be a JSON object"):
         rv.load_pinned_versions(path)
-    except TypeError as exc:
-        assert "must be a JSON object" in str(exc)
-    else:
-        raise AssertionError("expected TypeError for non-object payload")
 
     path.write_text(json.dumps({"pkg": "bad"}), encoding="utf-8")
-    try:
+    with pytest.raises(TypeError, match="Invalid pinned versions entry"):
         rv.load_pinned_versions(path)
-    except TypeError as exc:
-        assert "Invalid pinned versions entry" in str(exc)
-    else:
-        raise AssertionError("expected TypeError for invalid entry")
 
 
 def test_resolve_all_handles_fallback_init_and_failures(
@@ -172,6 +148,12 @@ def test_resolve_all_handles_fallback_init_and_failures(
             msg = "boom"
             raise RuntimeError(msg)
 
+    class _Companion:
+        companion_of = "needs-config"
+
+        async def fetch_latest(self, _session: object) -> VersionInfo:
+            raise AssertionError("companion versions resolve during source waves")
+
     monkeypatch.setattr(rv.aiohttp, "ClientSession", _Session)
     monkeypatch.setattr(rv, "resolve_active_config", lambda _x: {"k": "v"})
     monkeypatch.setattr(
@@ -181,6 +163,7 @@ def test_resolve_all_handles_fallback_init_and_failures(
             "needs-config": _NeedsConfig,
             "no-config": _NoConfigArg,
             "fails": _Fails,
+            "companion": _Companion,
         },
     )
 
@@ -215,12 +198,8 @@ def test_resolve_all_rejects_non_version_payload(
     monkeypatch.setattr(rv, "resolve_active_config", lambda _x: {})
     monkeypatch.setattr(rv, "UPDATERS", {"bad": _BadUpdater})
 
-    try:
+    with pytest.raises(TypeError, match="unexpected version payload"):
         asyncio.run(object.__getattribute__(rv, "_resolve_all")())
-    except TypeError as exc:
-        assert "unexpected version payload" in str(exc)
-    else:
-        raise AssertionError("expected TypeError")
 
 
 def test_resolve_all_reraises_type_error_not_related_to_config(
@@ -245,12 +224,8 @@ def test_resolve_all_reraises_type_error_not_related_to_config(
     monkeypatch.setattr(rv, "resolve_active_config", lambda _x: {})
     monkeypatch.setattr(rv, "UPDATERS", {"bad": _BadInit})
 
-    try:
+    with pytest.raises(TypeError, match="totally unrelated"):
         asyncio.run(object.__getattribute__(rv, "_resolve_all")())
-    except TypeError as exc:
-        assert "totally unrelated" in str(exc)
-    else:
-        raise AssertionError("expected TypeError")
 
 
 def test_resolve_all_reraises_multiple_taskgroup_failures(

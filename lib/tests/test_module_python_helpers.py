@@ -168,9 +168,7 @@ def test_git_delta_cache_needs_rebuild_and_rebuild_cache(
 
     def _fake_tree_has_newer_regular_files(directory: Path, reference: Path) -> bool:
         seen.append(directory)
-        if directory.name == "themes":
-            return True
-        return False
+        return directory.name == "themes"
 
     monkeypatch.setattr(
         module,

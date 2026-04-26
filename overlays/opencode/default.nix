@@ -48,7 +48,8 @@
       # Bun only materializes glob in packages/opencode/node_modules. Mirror it
       # into packages/shared so the desktop bundle can resolve the shared
       # workspace package during compilation.
-      if [ -e packages/opencode/node_modules/glob ] && [ ! -e packages/shared/node_modules/glob ]; then
+      if [ -d packages/shared ] && [ -e packages/opencode/node_modules/glob ] && [ ! -e packages/shared/node_modules/glob ]; then
+        mkdir -p packages/shared/node_modules
         chmod u+w packages/shared/node_modules
         ln -s ../../opencode/node_modules/glob packages/shared/node_modules/glob
       fi

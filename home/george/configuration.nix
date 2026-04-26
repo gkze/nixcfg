@@ -176,18 +176,24 @@
       "${config.home.homeDirectory}/Library/Application Support/${config.programs.vscode.nameShort}/User/settings.json".enable =
         false;
 
-      "${config.programs.gpg.homedir}/gpg-agent.conf".text =
+      "${config.programs.gpg.homedir}/gpg-agent.conf" =
         let
-          prog =
+          pinentryProgram =
             {
               darwin = lib.getExe pkgs.pinentry_mac;
               linux = lib.getExe pkgs.pinentry;
             }
             .${slib.kernel pkgs.stdenv.hostPlatform.system};
+          gpgconf = lib.getExe' pkgs.gnupg "gpgconf";
         in
-        ''
-          pinentry-program ${prog}
-        '';
+        {
+          text = ''
+            pinentry-program ${pinentryProgram}
+          '';
+          onChange = ''
+            GNUPGHOME=${lib.escapeShellArg config.programs.gpg.homedir} ${gpgconf} --kill gpg-agent
+          '';
+        };
 
       ".local/bin/git-ignore" = {
         source = ./bin/git-ignore;
@@ -262,6 +268,7 @@
           package = pkgs.wispr-flow;
         }
         { package = pkgs.zoom-us; }
+        { package = pkgs.zen-twilight; }
       ];
       managedMacAppProjection = macAppHelpers.managedMacAppRoutingProjection managedMacAppRouting;
     in

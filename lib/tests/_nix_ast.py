@@ -7,16 +7,19 @@ import subprocess
 from collections.abc import Iterable
 from dataclasses import fields, is_dataclass
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from nix_manipulator import parse
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.expression import NixExpression
-from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.source_code import NixSourceCode
 
 from lib.tests._assertions import expect_not_none
 from lib.update.paths import REPO_ROOT
+
+if TYPE_CHECKING:
+    from nix_manipulator.expressions.inherit import Inherit
 
 _NON_SEMANTIC_FIELD_NAMES = {
     "after",

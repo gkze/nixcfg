@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import ast
 import importlib
-import io
 import json
 import re
 import tempfile
-import tokenize
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol, cast, override
+
+import isort
+import libcst as cst
 
 from lib import codegen_utils, json_utils
 from lib.schema_codegen.config import CodegenTarget, PythonTransform
@@ -72,23 +73,19 @@ def strip_generated_headers(code: str) -> str:
 
 def collect_imports(code: str) -> tuple[set[str], str]:
     """Extract import statements and return them separately from the body."""
-    tree = ast.parse(code)
-    lines = code.splitlines()
     imports: set[str] = set()
-    import_line_numbers: set[int] = set()
+    body: list[cst.CSTNode] = []
+    module = cst.parse_module(code)
 
-    for node in tree.body:
-        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+    for statement in module.body:
+        if isinstance(statement, cst.SimpleStatementLine) and all(
+            isinstance(item, cst.Import | cst.ImportFrom) for item in statement.body
+        ):
+            imports.add(module.code_for_node(statement).strip())
             continue
-        start = node.lineno - 1
-        end = node.end_lineno if node.end_lineno is not None else node.lineno
-        imports.add("\n".join(lines[start:end]))
-        import_line_numbers.update(range(start, end))
+        body.append(statement)
 
-    body = [
-        line for index, line in enumerate(lines) if index not in import_line_numbers
-    ]
-    return imports, "\n".join(body)
+    return imports, module.with_changes(body=tuple(body)).code.strip("\n")
 
 
 def _format_import_alias(alias: ast.alias) -> str:
@@ -103,36 +100,33 @@ def _import_module_sort_key(module: str) -> tuple[int, str]:
 
 def compose_imports_block(all_imports: set[str]) -> str:
     """Compose one deduplicated import block."""
-    from_imports: dict[str, set[str]] = {}
-    bare_imports: set[str] = set()
+    import_lines: list[str] = []
     for import_stmt in all_imports:
-        node = ast.parse(import_stmt).body[0]
-        if isinstance(node, ast.ImportFrom):
-            module_name = node.module or ""
-            if module_name == "__future__":
-                continue
-            from_imports.setdefault(module_name, set()).update(
-                _format_import_alias(alias) for alias in node.names
-            )
-        elif isinstance(node, ast.Import):
-            bare_imports.update(_format_import_alias(alias) for alias in node.names)
-
-    lines: list[str] = [f"import {name}" for name in sorted(bare_imports)]
-    previous_group: int | None = None
-    for module_name in sorted(from_imports, key=_import_module_sort_key):
-        group, _ = _import_module_sort_key(module_name)
-        if (
-            previous_group is not None
-            and group != previous_group
-            and lines
-            and lines[-1] != ""
+        try:
+            module = cst.parse_module(import_stmt)
+        except cst.ParserSyntaxError:
+            continue
+        if len(module.body) != 1:
+            continue
+        [statement] = module.body
+        if not isinstance(statement, cst.SimpleStatementLine):
+            continue
+        if not all(
+            isinstance(item, cst.Import | cst.ImportFrom) for item in statement.body
         ):
-            lines.append("")
-        lines.append(
-            f"from {module_name} import {', '.join(sorted(from_imports[module_name]))}"
-        )
-        previous_group = group
-    return "\n".join(lines)
+            continue
+        if any(
+            isinstance(item, cst.ImportFrom)
+            and isinstance(item.module, cst.Name)
+            and item.module.value == "__future__"
+            for item in statement.body
+        ):
+            continue
+        import_lines.append(module.code.strip())
+
+    if not import_lines:
+        return ""
+    return isort.code("\n".join(sorted(set(import_lines))) + "\n").strip()
 
 
 def entrypoint_class_suffix(entrypoint: str) -> str:
@@ -150,19 +144,51 @@ def _rename_name_tokens(code: str, *, rename_map: dict[str, str]) -> str:
     """Rename Python identifiers without touching strings or comments."""
     if not rename_map:
         return code
-    tokens: list[tokenize.TokenInfo] = []
-    for token_info in tokenize.generate_tokens(io.StringIO(code).readline):
-        replacement = token_info
-        if token_info.type == tokenize.NAME and token_info.string in rename_map:
-            replacement = tokenize.TokenInfo(
-                type=token_info.type,
-                string=rename_map[token_info.string],
-                start=token_info.start,
-                end=token_info.end,
-                line=token_info.line,
-            )
-        tokens.append(replacement)
-    return tokenize.untokenize(tokens)
+
+    class _RenameTransformer(cst.CSTTransformer):
+        @override
+        def leave_Name(
+            self, original_node: cst.Name, updated_node: cst.Name
+        ) -> cst.Name:
+            _ = original_node
+            replacement = rename_map.get(updated_node.value)
+            if replacement is None:
+                return updated_node
+            return updated_node.with_changes(value=replacement)
+
+    return cst.parse_module(code).visit(_RenameTransformer()).code
+
+
+class _TopLevelClassDedupe(cst.CSTTransformer):
+    """Remove duplicate top-level class definitions after composition."""
+
+    def __init__(self) -> None:
+        self._dropped_class = False
+
+    @override
+    def leave_Module(
+        self, original_node: cst.Module, updated_node: cst.Module
+    ) -> cst.Module:
+        _ = original_node
+        seen_classes: set[str] = set()
+        body: list[cst.CSTNode] = []
+        for statement in updated_node.body:
+            next_statement = statement
+            if isinstance(statement, cst.ClassDef):
+                class_name = statement.name.value
+                if class_name in seen_classes:
+                    self._dropped_class = True
+                    continue
+                seen_classes.add(class_name)
+            if self._dropped_class and hasattr(statement, "leading_lines"):
+                leading_lines = tuple(statement.leading_lines)
+                if not leading_lines:
+                    next_statement = statement.with_changes(
+                        leading_lines=(cst.EmptyLine(),)
+                    )
+                self._dropped_class = False
+            body.append(next_statement)
+        return updated_node.with_changes(body=tuple(body))
 
 
 def resolve_body_class_conflicts(
@@ -213,25 +239,7 @@ def resolve_body_class_conflicts(
 
 def dedupe_classes(code: str) -> str:
     """Keep only the first generated definition for duplicate class names."""
-    seen_classes: set[str] = set()
-    deduped: list[str] = []
-    skip_body = False
-    for line in code.splitlines():
-        class_match = re.match(r"^class (\w+)\(", line)
-        if class_match:
-            class_name = class_match.group(1)
-            if class_name in seen_classes:
-                skip_body = True
-                continue
-            seen_classes.add(class_name)
-            skip_body = False
-        elif skip_body:
-            if line.strip() == "" or (line and not line[0].isspace()):
-                skip_body = False
-            else:
-                continue
-        deduped.append(line)
-    return "\n".join(deduped)
+    return cst.parse_module(code).visit(_TopLevelClassDedupe()).code.rstrip("\n")
 
 
 def collapse_excess_blank_lines(code: str) -> str:

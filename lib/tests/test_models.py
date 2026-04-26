@@ -538,6 +538,63 @@ class TestSourcesFile:
         assert empty_constructed.merge(other) is other
         assert empty_constructed.to_json() == {}
 
+    def test_hash_collection_and_source_entry_equivalence_are_order_insensitive(
+        self,
+    ) -> None:
+        """Semantic equality should ignore entry ordering and URL insertion order."""
+        h1 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        h2 = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+
+        left = SourceEntry.model_validate({
+            "hashes": [
+                {
+                    "hashType": "sha256",
+                    "hash": h2,
+                    "platform": "x86_64-linux",
+                    "urls": {
+                        "linux": "https://example.invalid/linux.tar.gz",
+                        "darwin": "https://example.invalid/darwin.tar.gz",
+                    },
+                },
+                {
+                    "hashType": "sha256",
+                    "hash": h1,
+                    "platform": "aarch64-darwin",
+                },
+            ],
+            "urls": {
+                "mirror": "https://example.invalid/mirror.tar.gz",
+                "upstream": "https://example.invalid/source.tar.gz",
+            },
+            "version": "1.0.0",
+        })
+        right = SourceEntry.model_validate({
+            "hashes": [
+                {
+                    "hashType": "sha256",
+                    "hash": h1,
+                    "platform": "aarch64-darwin",
+                },
+                {
+                    "hashType": "sha256",
+                    "hash": h2,
+                    "platform": "x86_64-linux",
+                    "urls": {
+                        "darwin": "https://example.invalid/darwin.tar.gz",
+                        "linux": "https://example.invalid/linux.tar.gz",
+                    },
+                },
+            ],
+            "urls": {
+                "upstream": "https://example.invalid/source.tar.gz",
+                "mirror": "https://example.invalid/mirror.tar.gz",
+            },
+            "version": "1.0.0",
+        })
+
+        assert left.equivalent_to(right)
+        assert left.hashes.equivalent_to(right.hashes)
+
     def test_source_entry_sources_file_merge_load_save(
         self,
         tmp_path: Path,

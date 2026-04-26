@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from lib.update import paths as update_paths
 from lib.update import process as update_process
+from lib.update import sources as update_sources
 from lib.update.config import UpdateConfig
 from lib.update.events import CommandResult, expect_hash_mapping, expect_str
 from lib.update.flake import (
@@ -17,6 +18,7 @@ from lib.update.flake import (
 from lib.update.net import fetch_url
 from lib.update.nix import (
     compute_drv_fingerprint,
+    compute_fixed_output_hash,
     compute_overlay_hash,
     get_current_nix_platform,
 )
@@ -26,6 +28,7 @@ from lib.update.updaters.core import (
     CargoLockGitDep,
     ChecksumProvidedUpdater,
     DownloadHashUpdater,
+    FixedOutputHashStep,
     HashEntryUpdater,
     UpdateContext,
     Updater,
@@ -34,6 +37,10 @@ from lib.update.updaters.core import (
     _emit_single_hash_entry,
     _ensure_str_mapping,
     _verify_platform_versions,
+    source_override_env,
+    stream_fixed_output_hashes,
+    stream_source_then_overlay_hashes,
+    stream_url_hash_mapping,
 )
 from lib.update.updaters.flake_backed import (
     DenoDepsHashUpdater,
@@ -75,6 +82,20 @@ compute_url_hashes: Callable[[str, Iterable[str]], EventStream] = _compute_url_h
 convert_nix_hash_to_sri: Callable[[str, str], EventStream] = _convert_nix_hash_to_sri
 
 
+def read_pinned_source_version(name: str) -> str:
+    """Read the pinned version from one updater-managed ``sources.json`` file."""
+    pkg_dir = package_dir_for(name)
+    if pkg_dir is None:
+        msg = f"Package directory not found for {name}"
+        raise RuntimeError(msg)
+    entry = update_sources.load_source_entry(pkg_dir / "sources.json")
+    version = entry.version
+    if not isinstance(version, str) or not version:
+        msg = f"{name} sources.json is missing a pinned version"
+        raise RuntimeError(msg)
+    return version
+
+
 def _updater_sourcefile(cls: type[Updater]) -> str | None:
     return resolve_sourcefile(cls, inspect_module=inspect)
 
@@ -101,6 +122,7 @@ __all__ = [
     "DenoDepsHashUpdater",
     "DenoManifestUpdater",
     "DownloadHashUpdater",
+    "FixedOutputHashStep",
     "FlakeInputHashUpdater",
     "FlakeInputMetadataUpdater",
     "FlakeInputUpdater",
@@ -120,6 +142,7 @@ __all__ = [
     "cargo_vendor_updater",
     "compute_deno_deps_hash",
     "compute_drv_fingerprint",
+    "compute_fixed_output_hash",
     "compute_overlay_hash",
     "compute_url_hashes",
     "convert_nix_hash_to_sri",
@@ -136,7 +159,12 @@ __all__ = [
     "go_vendor_updater",
     "npm_deps_updater",
     "package_dir_for",
+    "read_pinned_source_version",
     "register_updater",
+    "source_override_env",
+    "stream_fixed_output_hashes",
+    "stream_source_then_overlay_hashes",
+    "stream_url_hash_mapping",
     "uv_lock_hash_updater",
     "uv_lock_updater",
 ]

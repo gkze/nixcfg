@@ -12,8 +12,8 @@ from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
-from lib.import_utils import load_module_from_path
 from lib.tests._nix_ast import assert_nix_ast_equal
+from lib.tests._updater_helpers import load_repo_module
 from lib.update.flake import nixpkgs_expression
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
@@ -24,13 +24,13 @@ if TYPE_CHECKING:
 
 
 def _load_sentry_cli_updater_module() -> ModuleType:
-    module_path = REPO_ROOT / "overlays" / "sentry-cli" / "updater.py"
-    return load_module_from_path(module_path, "_sentry_cli_updater")
+    return load_repo_module("overlays/sentry-cli/updater.py", "_sentry_cli_updater")
 
 
 def _load_t3code_workspace_updater_module() -> ModuleType:
-    module_path = REPO_ROOT / "packages" / "t3code-workspace" / "updater.py"
-    return load_module_from_path(module_path, "_t3code_workspace_updater")
+    return load_repo_module(
+        "packages/t3code-workspace/updater.py", "_t3code_workspace_updater"
+    )
 
 
 def test_scratch_npm_expr_is_parseable() -> None:
@@ -107,9 +107,9 @@ def test_sentry_src_expr_is_parseable() -> None:
     module = _load_sentry_cli_updater_module()
     updater = module.SentryCliUpdater()
 
-    expr = object.__getattribute__(updater, "_src_nix_expr")("v2.0.0")
+    expr = object.__getattribute__(updater, "_src_nix_expr")("v9.9.9")
 
-    assert_nix_ast_equal(expr, updater._src_nix_expression("v2.0.0"))
+    assert_nix_ast_equal(expr, updater._src_nix_expression("v9.9.9"))
 
 
 def test_sentry_cargo_expr_is_parseable() -> None:
@@ -118,7 +118,7 @@ def test_sentry_cargo_expr_is_parseable() -> None:
     updater = module.SentryCliUpdater()
 
     expr = object.__getattribute__(updater, "_cargo_nix_expr")(
-        "v2.0.0", "sha256-someHashValue="
+        "v9.9.9", "sha256-someHashValue="
     )
 
     assert_nix_ast_equal(
@@ -128,7 +128,7 @@ def test_sentry_cargo_expr_is_parseable() -> None:
             argument=AttributeSet.from_dict(
                 {
                     "src": updater._src_nix_expression(
-                        "v2.0.0",
+                        "v9.9.9",
                         "sha256-someHashValue=",
                     ),
                     "hash": identifier_attr_path("pkgs", "lib", "fakeHash"),

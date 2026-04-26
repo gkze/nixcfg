@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pytest
 
 from lib.nix.commands.base import (
     CommandResult,
@@ -14,9 +15,6 @@ from lib.nix.commands.base import (
     ProcessLine,
 )
 from lib.update.ci import build_shared_closure as bsc
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def test_parse_dry_run_derivations_covers_section_termination() -> None:
@@ -111,17 +109,13 @@ def test_realise_batch_with_profiling_missing_terminal_result(
 
     monkeypatch.setattr(bsc, "stream_process", _stream)
 
-    try:
+    with pytest.raises(RuntimeError, match="without a terminal result"):
         asyncio.run(
             object.__getattribute__(bsc, "_realise_batch_with_profiling")(
                 ["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"],
                 profiler=bsc.BuildProfiler(),
             )
         )
-    except RuntimeError as exc:
-        assert "without a terminal result" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
 
 def test_combine_derivation_sets_union_intersection_and_empty() -> None:
@@ -154,17 +148,13 @@ def test_stream_nix_build_dry_run_timeout_and_nonzero(
         yield ProcessLine(stream="stdout", text="unreachable")
 
     monkeypatch.setattr(bsc, "stream_process", _timeout)
-    try:
+    with pytest.raises(NixCommandError, match="timed out"):
         asyncio.run(
             object.__getattribute__(bsc, "_stream_nix_build_dry_run")(
                 ".#demo",
                 nix_verbosity=0,
             )
         )
-    except NixCommandError as exc:
-        assert "timed out" in str(exc)
-    else:
-        raise AssertionError("expected NixCommandError")
 
 
 def test_stream_nix_build_dry_run_success_and_missing_result(
@@ -203,17 +193,13 @@ def test_stream_nix_build_dry_run_success_and_missing_result(
         yield ProcessLine(stream="stdout", text="just logs\n")
 
     monkeypatch.setattr(bsc, "stream_process", _missing_done)
-    try:
+    with pytest.raises(RuntimeError, match="without a terminal result"):
         asyncio.run(
             object.__getattribute__(bsc, "_stream_nix_build_dry_run")(
                 ".#demo",
                 nix_verbosity=0,
             )
         )
-    except RuntimeError as exc:
-        assert "without a terminal result" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
     async def _nonzero(*_args: object, **_kwargs: object):
         yield ProcessDone(

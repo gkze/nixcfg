@@ -16,23 +16,19 @@ if TYPE_CHECKING:
     import aiohttp
     from nix_manipulator.expressions.expression import NixExpression
 
-from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
-from lib.update.events import (
-    CapturedValue,
-    EventStream,
-    UpdateEvent,
-    capture_stream_value,
-    expect_str,
-)
+    from lib.update.events import EventStream
+
+from lib.nix.models.sources import HashCollection, SourceEntry, SourceHashes
 from lib.update.flake import nixpkgs_expression
-from lib.update.nix import compute_fixed_output_hash
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import (
+    FixedOutputHashStep,
     FlakeInputUpdater,
     UpdateContext,
     VersionInfo,
     register_updater,
+    stream_fixed_output_hashes,
 )
 
 
@@ -103,45 +99,23 @@ class ScratchUpdater(FlakeInputUpdater):
         """Compute npmDepsHash and cargoHash from the package derivation."""
         _ = (info, session, context)
 
-        npm_hash: str | None = None
-        async for item in capture_stream_value(
-            compute_fixed_output_hash(
-                self.name,
-                self._expr_for_npm_deps(),
-                config=self.config,
+        async for event in stream_fixed_output_hashes(
+            self.name,
+            steps=(
+                FixedOutputHashStep(
+                    hash_type="npmDepsHash",
+                    error="Missing npmDepsHash output",
+                    expr=lambda _resolved: self._expr_for_npm_deps(),
+                ),
+                FixedOutputHashStep(
+                    hash_type="cargoHash",
+                    error="Missing cargoHash output",
+                    expr=lambda _resolved: self._expr_for_cargo_vendor(),
+                ),
             ),
-            error="Missing npmDepsHash output",
+            config=self.config,
         ):
-            if isinstance(item, CapturedValue):
-                npm_hash = expect_str(item.captured)
-            else:
-                yield item
-        if npm_hash is None:
-            msg = "Missing npmDepsHash output"
-            raise RuntimeError(msg)
-
-        cargo_hash: str | None = None
-        async for item in capture_stream_value(
-            compute_fixed_output_hash(
-                self.name,
-                self._expr_for_cargo_vendor(),
-                config=self.config,
-            ),
-            error="Missing cargoHash output",
-        ):
-            if isinstance(item, CapturedValue):
-                cargo_hash = expect_str(item.captured)
-            else:
-                yield item
-        if cargo_hash is None:
-            msg = "Missing cargoHash output"
-            raise RuntimeError(msg)
-
-        entries: list[HashEntry] = [
-            HashEntry.create("npmDepsHash", npm_hash),
-            HashEntry.create("cargoHash", cargo_hash),
-        ]
-        yield UpdateEvent.value(self.name, entries)
+            yield event
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build source entry including resolved version and commit."""

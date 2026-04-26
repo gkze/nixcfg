@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
@@ -10,12 +11,13 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Self
 
 import httpx
 import pytest
 
-from lib import http_utils, mac_apps_helper
+from lib import codegen_utils, http_utils, mac_apps_helper
 from lib.schema_codegen import _render
 from lib.schema_codegen import lockfile as codegen_lockfile
 
@@ -326,6 +328,16 @@ def test_render_helpers_cover_additional_branches(
         "from pydantic import BaseModel",
     ])
     assert _render.compose_imports_block({"x = 1"}) == ""
+    assert _render.compose_imports_block({"import"}) == ""
+    assert _render.compose_imports_block({"import os\nimport sys"}) == ""
+    assert _render.compose_imports_block({"if True:\n    pass"}) == ""
+    assert _render._format_import_alias(ast.alias(name="os")) == "os"
+    assert (
+        _render._format_import_alias(ast.alias(name="os", asname="operating_system"))
+        == "os as operating_system"
+    )
+    assert _render._import_module_sort_key("os") == (0, "os")
+    assert _render._import_module_sort_key("pydantic") == (1, "pydantic")
 
     seen_signatures = {"Thing": "previous"}
     used_names = {"ThingLock", "ThingLock2"}
@@ -343,6 +355,10 @@ def test_render_helpers_cover_additional_branches(
             "class A(Base):\n    x = 1\n\nclass A(Base):\n    y = 2\nvalue = 3\n"
         )
         == "class A(Base):\n    x = 1\n\nvalue = 3"
+    )
+    assert (
+        _render.dedupe_classes("class A:\n    pass\nclass A:\n    pass\n\nvalue = 1\n")
+        == "class A:\n    pass\n\nvalue = 1"
     )
     assert _render.collapse_excess_blank_lines("a\n\n\n\n\nb") == "a\n\n\nb"
 
@@ -370,6 +386,53 @@ def test_render_helpers_cover_additional_branches(
     )()
     assert (
         _render.apply_python_transforms("code", target=target) == "code|constr|imports"
+    )
+
+
+def test_codegen_utils_defensive_transform_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cover generated-code normalizers that only see unusual CST shapes."""
+    cst = codegen_utils.cst
+
+    constr_transformer = codegen_utils._ConstrAnnotationTransformer()
+    non_constr_call = cst.parse_expression("Field(default=1)")
+    multi_arg_call = cst.parse_expression("constr(pattern='a', min_length=1)")
+    positional_call = cst.parse_expression("constr('a')")
+
+    assert (
+        constr_transformer.leave_Call(non_constr_call, non_constr_call)
+        is non_constr_call
+    )
+    assert (
+        constr_transformer.leave_Call(multi_arg_call, multi_arg_call) is multi_arg_call
+    )
+    assert (
+        constr_transformer.leave_Call(positional_call, positional_call)
+        is positional_call
+    )
+
+    assert codegen_utils.normalize_pydantic_imports("from . import constr\n") == (
+        "from . import constr"
+    )
+    assert codegen_utils.normalize_pydantic_imports("from pydantic import *\n") == (
+        "from pydantic import *"
+    )
+
+    import_transformer = codegen_utils._PydanticImportTransformer()
+    non_alias_import = SimpleNamespace(module=cst.Name("pydantic"), names=(object(),))
+
+    assert (
+        import_transformer.leave_ImportFrom(non_alias_import, non_alias_import)
+        is non_alias_import
+    )
+    assert (
+        codegen_utils._import_alias_name(
+            cst.ImportAlias(
+                name=cst.Attribute(value=cst.Name("typing"), attr=cst.Name("Annotated"))
+            )
+        )
+        == "Annotated"
     )
 
     monkeypatch.setattr(
@@ -887,6 +950,80 @@ def test_mac_apps_helper_additional_paths(  # noqa: PLR0915
     )
     assert mac_apps_helper.main(["prog", "unknown", str(audit_payload)]) == 2
     assert "unknown command: unknown" in capsys.readouterr().err
+
+
+def test_mac_apps_helper_payload_validation_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject malformed helper payloads before touching the filesystem."""
+    valid_system_payload = {
+        "entries": [],
+        "rsyncPath": "/usr/bin/rsync",
+        "stateDirectory": "/tmp/state",
+        "stateName": "main",
+        "targetDirectory": "/tmp/apps",
+        "writable": False,
+    }
+    cases = [
+        (
+            lambda: mac_apps_helper._profile_bundle_leak_audit({
+                "managedBundleNames": [],
+                "packagePaths": [],
+            }),
+            "missing required payload field: label",
+        ),
+        (
+            lambda: mac_apps_helper._profile_bundle_leak_audit({
+                "label": 1,
+                "managedBundleNames": [],
+                "packagePaths": [],
+            }),
+            "payload field 'label' must be a string",
+        ),
+        (
+            lambda: mac_apps_helper._profile_bundle_leak_audit({
+                "label": "home.packages",
+                "managedBundleNames": [1],
+                "packagePaths": [],
+            }),
+            "payload field 'managedBundleNames' must be a list of strings",
+        ),
+        (
+            lambda: mac_apps_helper._system_applications({
+                **valid_system_payload,
+                "entries": "bad",
+            }),
+            "payload field 'entries' must be a list of objects",
+        ),
+        (
+            lambda: mac_apps_helper._system_applications({
+                **valid_system_payload,
+                "entries": [1],
+            }),
+            "payload field 'entries[0]' must be an object",
+        ),
+        (
+            lambda: mac_apps_helper._system_applications({
+                **valid_system_payload,
+                "writable": "false",
+            }),
+            "payload field 'writable' must be a boolean",
+        ),
+    ]
+
+    for run_case, message in cases:
+        with pytest.raises(SystemExit) as exc:
+            run_case()
+        assert exc.value.code == 2
+        assert message in capsys.readouterr().err
+
+    with pytest.raises(
+        TypeError, match=r"Expected string key in entries\[0\], got int"
+    ):
+        mac_apps_helper._system_applications({
+            **valid_system_payload,
+            "entries": [{1: "bad"}],
+        })
 
 
 def test_mac_apps_helper_module_main_guard_executes(

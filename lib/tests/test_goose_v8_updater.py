@@ -2,31 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
 import tomllib
 
 import pytest
 
-from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import HashEntry
+from lib.tests._updater_helpers import collect_events as _collect_events
+from lib.tests._updater_helpers import load_repo_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEventKind
-from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import VersionInfo
 
 
-def _run[T](coro):
-    return asyncio.run(coro)
-
-
-async def _collect_events(stream):
-    return [event async for event in stream]
-
-
 def _load_module(module_name: str = "goose_v8_updater_test"):
-    return load_module_from_path(
-        REPO_ROOT / "overlays/goose-v8/updater.py",
-        module_name,
-    )
+    return load_repo_module("overlays/goose-v8/updater.py", module_name)
 
 
 def test_goose_v8_helper_urls_and_src_expr_shape() -> None:
@@ -34,8 +23,8 @@ def test_goose_v8_helper_urls_and_src_expr_shape() -> None:
     module = _load_module("goose_v8_updater_test_helpers")
 
     src_expr = module.GooseV8Updater._src_expr("abcdef123456")
-    archive_url = module.GooseV8Updater._archive_url("v146.4.0", "x86_64-linux")
-    binding_url = module.GooseV8Updater._binding_url("146.4.0", "x86_64-linux")
+    archive_url = module.GooseV8Updater._archive_url("v999.0.0", "x86_64-linux")
+    binding_url = module.GooseV8Updater._binding_url("999.0.0", "x86_64-linux")
 
     assert "fetchgit" in src_expr
     assert 'url = "https://github.com/jh-block/rusty_v8.git"' in src_expr
@@ -43,11 +32,11 @@ def test_goose_v8_helper_urls_and_src_expr_shape() -> None:
     assert "fetchSubmodules = true" in src_expr
     assert archive_url == (
         "https://github.com/denoland/rusty_v8/releases/download/"
-        "v146.4.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz"
+        "v999.0.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz"
     )
     assert binding_url == (
         "https://github.com/denoland/rusty_v8/releases/download/"
-        "v146.4.0/src_binding_release_x86_64-unknown-linux-gnu.rs"
+        "v999.0.0/src_binding_release_x86_64-unknown-linux-gnu.rs"
     )
 
 
@@ -161,7 +150,7 @@ def test_goose_v8_fetch_hashes_success_path(monkeypatch: pytest.MonkeyPatch) -> 
 
     async def _fetch_url(session, url: str, *, request_timeout=None, config=None):
         fetched_urls.append((session, url, request_timeout, config))
-        return b'[package]\nversion = "146.4.0"\n'
+        return b'[package]\nversion = "999.0.0"\n'
 
     async def _url_hashes(name: str, urls):
         batch = list(urls)
@@ -204,8 +193,8 @@ def test_goose_v8_fetch_hashes_success_path(monkeypatch: pytest.MonkeyPatch) -> 
     ]
     assert url_hash_batches == [
         [
-            "https://github.com/denoland/rusty_v8/releases/download/v146.4.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz",
-            "https://github.com/denoland/rusty_v8/releases/download/v146.4.0/src_binding_release_x86_64-unknown-linux-gnu.rs",
+            "https://github.com/denoland/rusty_v8/releases/download/v999.0.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz",
+            "https://github.com/denoland/rusty_v8/releases/download/v999.0.0/src_binding_release_x86_64-unknown-linux-gnu.rs",
         ]
     ]
     assert events[-1].payload == [
@@ -217,13 +206,13 @@ def test_goose_v8_fetch_hashes_success_path(monkeypatch: pytest.MonkeyPatch) -> 
             "rustyV8ArchiveHash",
             "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
             platform="x86_64-linux",
-            url="https://github.com/denoland/rusty_v8/releases/download/v146.4.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz",
+            url="https://github.com/denoland/rusty_v8/releases/download/v999.0.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz",
         ),
         HashEntry.create(
             "rustyV8BindingHash",
             "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
             platform="x86_64-linux",
-            url="https://github.com/denoland/rusty_v8/releases/download/v146.4.0/src_binding_release_x86_64-unknown-linux-gnu.rs",
+            url="https://github.com/denoland/rusty_v8/releases/download/v999.0.0/src_binding_release_x86_64-unknown-linux-gnu.rs",
         ),
     ]
 
@@ -304,7 +293,7 @@ def test_goose_v8_fetch_hashes_rejects_missing_asset_hash(
 
     async def _fetch_url(_session, _url: str, *, request_timeout=None, config=None):
         _ = (request_timeout, config)
-        return b'[package]\nversion = "146.4.0"\n'
+        return b'[package]\nversion = "999.0.0"\n'
 
     async def _url_hashes(name: str, urls):
         batch = list(urls)
@@ -345,7 +334,7 @@ def test_goose_v8_fetch_hashes_requires_asset_hash_capture(
 
     async def _fetch_url(_session, _url: str, *, request_timeout=None, config=None):
         _ = (request_timeout, config)
-        return b'[package]\nversion = "146.4.0"\n'
+        return b'[package]\nversion = "999.0.0"\n'
 
     async def _missing_assets(name: str, _urls):
         yield module.UpdateEvent.status(name, "hashing release assets")
@@ -378,7 +367,7 @@ def test_goose_v8_fetch_hashes_handles_missing_wrapped_asset_capture(
 
     async def _fetch_url(_session, _url: str, *, request_timeout=None, config=None):
         _ = (request_timeout, config)
-        return b'[package]\nversion = "146.4.0"\n'
+        return b'[package]\nversion = "999.0.0"\n'
 
     async def _url_hashes(name: str, _urls):
         yield module.UpdateEvent.status(name, "hashing release assets")

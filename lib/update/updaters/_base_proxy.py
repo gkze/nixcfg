@@ -12,7 +12,7 @@ import importlib
 from typing import TYPE_CHECKING, Protocol, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterable
+    from collections.abc import Awaitable, Callable, Iterable, Mapping
     from pathlib import Path
 
     import aiohttp
@@ -42,6 +42,15 @@ class BaseModule(Protocol):
         input_name: str,
         *,
         native_only: bool = False,
+        config: UpdateConfig | None = None,
+    ) -> EventStream: ...
+
+    def compute_fixed_output_hash(
+        self,
+        source: str,
+        expr: str,
+        *,
+        env: Mapping[str, str] | None = None,
         config: UpdateConfig | None = None,
     ) -> EventStream: ...
 

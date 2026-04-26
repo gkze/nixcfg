@@ -6,11 +6,13 @@ import asyncio
 import json
 import subprocess
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from lib.recover import hashes as rh
 from lib.recover.snapshot import SnapshotPlan
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _write_markers(root: Path) -> None:

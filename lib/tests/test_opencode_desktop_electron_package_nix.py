@@ -150,11 +150,17 @@ def test_opencode_desktop_electron_node_modules_derivation_tracks_platform_hashe
         'slib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system',
     )
 
+    build_phase = expect_instance(
+        expect_binding(override_args.values, "buildPhase").value,
+        IndentedString,
+    )
     install_phase = expect_instance(
         expect_binding(override_args.values, "installPhase").value,
         IndentedString,
     )
+    assert "--filter './packages/core'" in build_phase.value
     assert 'cp -R node_modules "$out/node_modules"' in install_phase.value
+    assert "packages/core" in install_phase.value
     assert "packages/sdk/js" in install_phase.value
     assert "packages/script" in install_phase.value
     assert 'cp -R --parents "$workspace/node_modules" "$out"' in install_phase.value

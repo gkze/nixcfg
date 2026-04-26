@@ -1,16 +1,16 @@
 syntax = "proto3";
 
+package api.plugin_command;
+
 import "action.proto";
+import "command.proto";
 import "event.proto";
 import "file.proto";
-import "command.proto";
-import "message.proto";
-import "resize.proto";
-import "plugin_permission.proto";
 import "input_mode.proto";
 import "key.proto";
-
-package api.plugin_command;
+import "message.proto";
+import "plugin_permission.proto";
+import "resize.proto";
 
 enum CommandName {
   Subscribe = 0;
@@ -650,12 +650,12 @@ message MessageToPluginPayload {
 }
 
 message NewPluginArgs {
-    optional bool should_float = 1;
-    optional PaneId pane_id_to_replace = 2;
-    optional string pane_title = 3;
-    optional string cwd = 4;
-    bool skip_cache = 5;
-    optional bool should_focus = 6;
+  optional bool should_float = 1;
+  optional PaneId pane_id_to_replace = 2;
+  optional string pane_title = 3;
+  optional string cwd = 4;
+  bool skip_cache = 5;
+  optional bool should_focus = 6;
 }
 
 message PaneId {
@@ -1046,32 +1046,32 @@ message GetTabInfoResponse {
 message NewTabResponse {
   oneof result {
     uint64 tab_id = 1;
-    bool none = 2;  // Indicates None
+    bool none = 2; // Indicates None
   }
 }
 
 message NewTabsResponse {
-  repeated uint64 tab_ids = 1;  // Only includes successfully created tabs
+  repeated uint64 tab_ids = 1; // Only includes successfully created tabs
 }
 
 message FocusOrCreateTabResponse {
   oneof result {
     uint64 tab_id = 1;
-    bool none = 2;  // Indicates None
+    bool none = 2; // Indicates None
   }
 }
 
 message BreakPanesToNewTabResponse {
   oneof result {
     uint64 tab_id = 1;
-    bool none = 2;  // Indicates None
+    bool none = 2; // Indicates None
   }
 }
 
 message BreakPanesToTabWithIndexResponse {
   oneof result {
     uint64 tab_id = 1;
-    bool none = 2;  // Indicates None
+    bool none = 2; // Indicates None
   }
 }
 

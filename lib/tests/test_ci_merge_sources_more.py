@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pytest
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.update.ci import merge_sources as ms
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def _entry(*, version: str, hashes: list[dict[str, str]]) -> SourceEntry:
@@ -62,16 +60,12 @@ def test_merge_hash_entries_platform_filter_and_conflict() -> None:
     merged_without_platform = ms._merge_hash_entries(base, incoming, platform=None)
     assert any(item.platform == "x86_64-linux" for item in merged_without_platform)
 
-    try:
+    with pytest.raises(RuntimeError, match="Conflicting non-platform hash entry"):
         ms._merge_hash_entries(
             [HashEntry(hash_type="sha256", hash="sha256-old")],
             [HashEntry(hash_type="sha256", hash="sha256-new")],
             platform=None,
         )
-    except RuntimeError as exc:
-        assert "Conflicting non-platform hash entry" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
     preserved = ms._merge_hash_entries(
         [HashEntry(hash_type="sha256", hash="sha256-same")],
@@ -117,16 +111,12 @@ def test_merge_hash_mapping_filters_and_conflicts() -> None:
     )
     assert merged_all == {"aarch64-darwin": "sha256-a", "x86_64-linux": "sha256-b"}
 
-    try:
+    with pytest.raises(RuntimeError, match="Conflicting non-platform hash mapping"):
         ms._merge_hash_mapping(
             {"x86_64-linux": "sha256-old"},
             {"x86_64-linux": "sha256-new"},
             platform=None,
         )
-    except RuntimeError as exc:
-        assert "Conflicting non-platform hash mapping" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
     filtered = ms._merge_hash_mapping(
         {"aarch64-darwin": "sha256-a"},
@@ -151,17 +141,13 @@ def test_merge_hash_mapping_filters_and_conflicts() -> None:
     )
     assert preserved_existing == {"shared": "sha256-new"}
 
-    try:
+    with pytest.raises(RuntimeError, match="Conflicting non-platform hash mapping"):
         ms._merge_hash_mapping(
             {"shared": "sha256-new"},
             {"shared": "sha256-newer"},
             platform=None,
             baseline={"shared": "sha256-old"},
         )
-    except RuntimeError as exc:
-        assert "Conflicting non-platform hash mapping" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
 
 def test_merge_optional_scalar_prefers_changed_value_over_baseline() -> None:
@@ -212,42 +198,26 @@ def test_merge_optional_scalar_and_urls_conflicts() -> None:
         "darwin": "b",
     }
 
-    try:
+    with pytest.raises(RuntimeError, match="Conflicting version"):
         ms._merge_optional_scalar("version", "1.0.0", "2.0.0")
-    except RuntimeError as exc:
-        assert "Conflicting version" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
-    try:
+    with pytest.raises(RuntimeError, match="Conflicting version"):
         ms._merge_optional_scalar(
             "version",
             "2.0.0",
             "3.0.0",
             baseline="1.0.0",
         )
-    except RuntimeError as exc:
-        assert "Conflicting version" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
-    try:
+    with pytest.raises(RuntimeError, match="Conflicting urls entry"):
         ms._merge_urls({"linux": "a"}, {"linux": "b"})
-    except RuntimeError as exc:
-        assert "Conflicting urls entry" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
-    try:
+    with pytest.raises(RuntimeError, match="Conflicting urls entry"):
         ms._merge_urls(
             {"linux": "https://example.invalid/newer"},
             {"linux": "https://example.invalid/newest"},
             baseline={"linux": "https://example.invalid/old"},
         )
-    except RuntimeError as exc:
-        assert "Conflicting urls entry" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
 
 def test_write_merged_entries_reports_missing_destinations(
@@ -265,13 +235,8 @@ def test_write_merged_entries_reports_missing_destinations(
     monkeypatch.setattr(ms, "package_file_map_in", lambda *_a: {})
     monkeypatch.setattr(ms, "package_dir_for_in", lambda *_a: None)
 
-    try:
+    with pytest.raises(RuntimeError, match="no output destination.*demo"):
         ms._write_merged_entries(tmp_path, merged)
-    except RuntimeError as exc:
-        assert "no output destination" in str(exc)
-        assert "demo" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
 
 def test_merge_entry_hash_mapping_branch() -> None:
@@ -305,12 +270,8 @@ def test_merge_entry_fallback_to_hash_collection_merge() -> None:
         "version": "1.0.0",
         "hashes": [{"hashType": "sha256", "hash": "sha256-b"}],
     })
-    try:
+    with pytest.raises(ValueError, match="Cannot merge hash mapping with hash entries"):
         ms._merge_entry(existing, incoming, platform=None)
-    except ValueError as exc:
-        assert "Cannot merge hash mapping with hash entries" in str(exc)
-    else:
-        raise AssertionError("expected ValueError")
 
 
 def test_collect_and_run_exit_paths(
@@ -329,26 +290,14 @@ def test_collect_and_run_exit_paths(
         "_collect_merged_entries",
         lambda _roots, *, baseline=None: ({}, 1, ["missing"], ["empty"]),
     )
-    try:
+    with pytest.raises(RuntimeError, match="Invalid merge input roots"):
         ms.run(roots=["x"], output_root=tmp_path)
-    except RuntimeError as exc:
-        assert "Invalid merge input roots" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
 
 def test_validate_input_roots_individual_lists() -> None:
     """Validate message construction for missing-only and empty-only roots."""
-    try:
+    with pytest.raises(RuntimeError, match="missing roots"):
         ms._validate_input_roots(["missing-a"], [])
-    except RuntimeError as exc:
-        assert "missing roots" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
-    try:
+    with pytest.raises(RuntimeError, match="roots with no sources.json files"):
         ms._validate_input_roots([], ["empty-a"])
-    except RuntimeError as exc:
-        assert "roots with no sources.json files" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")

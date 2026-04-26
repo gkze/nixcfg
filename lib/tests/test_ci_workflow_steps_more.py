@@ -2,19 +2,265 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from lib.update.ci import workflow_certification as cert
+from lib.update.ci import workflow_pr_body as wpr
 from lib.update.ci import workflow_steps as ws
+from lib.update.ci._workflow_analysis import WorkflowAnalysis
+from lib.update.ci.flake_lock_diff import InputInfo
 
 
 def _completed(
     args: list[str], *, stdout: str = "", returncode: int = 0
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(args=args, returncode=returncode, stdout=stdout)
+
+
+def _write_certification_workflow(path: Path) -> Path:
+    path.write_text(
+        """
+name: certify
+on: workflow_dispatch
+jobs:
+  darwin-priority-heavy:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - package: alpha
+            target: .#pkgs.aarch64-darwin.alpha
+    steps:
+      - run: nix build --impure ${{ matrix.target }}
+  darwin-extra-heavy:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - package: beta
+            target: .#pkgs.aarch64-darwin.beta
+    steps:
+      - run: nix build --impure ${{ matrix.target }}
+  darwin-shared:
+    runs-on: macos-latest
+    steps:
+      - run: |
+          nix run .#nixcfg -- ci cache closure \
+            --mode intersection \
+            --exclude-ref .#pkgs.aarch64-darwin.alpha \
+            --exclude-ref .#pkgs.aarch64-darwin.beta \
+            .#darwinConfigurations.argus.system \
+            .#darwinConfigurations.rocinante.system
+  darwin-argus:
+    runs-on: macos-latest
+    steps:
+      - run: nix run .#nixcfg -- ci workflow build-darwin-config argus
+  darwin-rocinante:
+    runs-on: macos-latest
+    steps:
+      - run: nix run .#nixcfg -- ci workflow build-darwin-config rocinante
+  linux-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+      - run: nix build .#pkgs.x86_64-linux.nixcfg
+""".lstrip(),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_existing_pr_body(path: Path) -> Path:
+    ws.write_pr_body(
+        output=path,
+        model=ws.PRBodyModel(
+            workflow_run_url="https://example.test/workflow",
+            compare_url="https://example.test/compare/main...update_flake_lock_action",
+        ),
+    )
+    return path
+
+
+def _input_info(
+    name: str,
+    *,
+    input_type: str = "github",
+    owner: str = "acme",
+    repo: str = "demo",
+    rev: str = "abc1234",
+    rev_full: str = "abc123456789",
+) -> InputInfo:
+    return InputInfo(
+        name=name,
+        type=input_type,
+        owner=owner,
+        repo=repo,
+        rev=rev,
+        rev_full=rev_full,
+        date="2026-04-24",
+    )
+
+
+def test_workflow_pr_body_helper_edge_paths(tmp_path: Path) -> None:
+    """Cover direct helper branches that full PR-body rendering normally skips."""
+
+    def _git_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "cwd" not in kwargs
+        return _completed(args, stdout="historical\n")
+
+    assert wpr.git_show("HEAD:flake.lock", run=_git_run, cwd=None) == "historical\n"
+
+    def _source_file_run(
+        args: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        assert "cwd" not in kwargs
+        if args[:4] == ["git", "diff", "--name-only", "HEAD"]:
+            return _completed(args, stdout="packages/demo/sources.json\n")
+        return _completed(
+            args,
+            stdout="packages/other/sources.json\nREADME.md\n",
+        )
+
+    assert wpr.collect_changed_source_files(
+        cwd=None,
+        run=_source_file_run,
+        pathspecs=("packages/*/sources.json",),
+        is_sources_file_path=lambda path: path.endswith("sources.json"),
+    ) == ["packages/demo/sources.json", "packages/other/sources.json"]
+
+    github = _input_info("github-input")
+    plain = _input_info(
+        "plain-input",
+        input_type="path",
+        owner="",
+        repo="",
+        rev_full="",
+    )
+    assert wpr._flake_source_link(github).url == "https://github.com/acme/demo"
+    assert wpr._flake_source_link(plain).label == "plain-input"
+    assert wpr._flake_revision_link(github).url == (
+        "https://github.com/acme/demo/commit/abc123456789"
+    )
+    assert wpr._flake_revision_link(plain).label == "abc1234"
+    assert wpr._flake_compare_link(
+        github, _input_info("github-input", rev_full="def456")
+    ) == (
+        wpr.LinkValue(
+            label="Diff",
+            url="https://github.com/acme/demo/compare/abc123456789...def456",
+        )
+    )
+    assert wpr._flake_compare_link(github, plain).label == "-"
+
+    with pytest.raises(FileNotFoundError, match="Expected flake.lock"):
+        wpr.build_update_pr_body_model(
+            repo_root=tmp_path,
+            temp_root=tmp_path,
+            options=wpr.PRBodyOptions(
+                workflow_url="https://example.test/workflow",
+                server_url="https://example.test",
+                repository="org/repo",
+                base_ref="main",
+            ),
+            git_show=lambda *_args, **_kwargs: "{}\n",
+            collect_changes=lambda *_args: ([], [], []),
+            collect_changed_source_files=list,
+            run_sources_diff=lambda *_args, **_kwargs: ws.NoChangesMessage,
+            no_changes_message=ws.NoChangesMessage,
+        )
+
+
+def test_workflow_certification_helper_error_paths() -> None:
+    """Exercise malformed certification workflow metadata branches."""
+    with pytest.raises(TypeError, match="non-empty string field"):
+        cert.required_string_field({"name": "   "}, field="name", context="payload")
+
+    assert cert.parse_github_timestamp("2026-04-24T12:00:00") == datetime(
+        2026,
+        4,
+        24,
+        12,
+        0,
+        tzinfo=UTC,
+    )
+    with pytest.raises(ValueError, match="Invalid GitHub timestamp"):
+        cert.parse_github_timestamp("not-a-timestamp")
+
+    assert cert._ordered_unique(["a", "a", "b"]) == ("a", "b")
+
+    invalid_matrix = WorkflowAnalysis.from_jobs({
+        "darwin-priority-heavy": {
+            "strategy": {"matrix": {"include": [{"target": ""}]}},
+            "steps": [],
+        }
+    })
+    with pytest.raises(TypeError, match="non-empty string target"):
+        cert._certification_matrix_targets(
+            invalid_matrix,
+            job_id="darwin-priority-heavy",
+        )
+
+    with pytest.raises(RuntimeError, match="exactly one shared-closure step"):
+        cert._certification_shared_closure_refs(
+            WorkflowAnalysis.from_jobs({"darwin-shared": {"steps": []}})
+        )
+
+    with pytest.raises(RuntimeError, match="--exclude-ref"):
+        cert._certification_shared_closure_refs(
+            WorkflowAnalysis.from_jobs({
+                "darwin-shared": {
+                    "steps": [
+                        {
+                            "run": (
+                                "nix run .#nixcfg -- ci cache closure "
+                                ".#darwinConfigurations.argus.system"
+                            )
+                        }
+                    ]
+                }
+            })
+        )
+
+    with pytest.raises(RuntimeError, match="at least one flake ref"):
+        cert._certification_shared_closure_refs(
+            WorkflowAnalysis.from_jobs({
+                "darwin-shared": {
+                    "steps": [
+                        {
+                            "run": (
+                                "nix run .#nixcfg -- ci cache closure "
+                                "--exclude-ref .#darwinConfigurations.argus.system "
+                                ".#darwinConfigurations.argus.system .#nixcfg"
+                            )
+                        }
+                    ]
+                }
+            })
+        )
+
+    with pytest.raises(RuntimeError, match="must build exactly one darwin host"):
+        cert._certification_darwin_host_targets(
+            WorkflowAnalysis.from_jobs({
+                "darwin-argus": {"steps": []},
+                "darwin-rocinante": {
+                    "steps": [
+                        {
+                            "run": "nix run .#nixcfg -- ci workflow build-darwin-config rocinante"
+                        }
+                    ]
+                },
+            })
+        )
+
+    with pytest.raises(RuntimeError, match="at least one nix build target"):
+        cert._certification_linux_targets(
+            WorkflowAnalysis.from_jobs({"linux-x86_64": {"steps": []}})
+        )
 
 
 def test_xcode_version_key_and_git_show_fallback(
@@ -73,6 +319,7 @@ def test_source_diff_pathspecs_switches_for_flat_layout(
     overlay_root.mkdir()
 
     monkeypatch.setattr(ws, "PACKAGE_DIRS", (str(pkg_root), str(overlay_root)))
+    monkeypatch.setattr(ws, "get_repo_root", lambda: tmp_path)
     assert ws._source_diff_pathspecs() == (
         ":(glob)packages/**/sources.json",
         ":(glob)overlays/**/sources.json",
@@ -534,6 +781,7 @@ def test_command_routing_for_new_and_legacy_aliases(
     monkeypatch.setattr(ws, "_cmd_smoke_check_update_app", lambda: 16)
     monkeypatch.setattr(ws, "_cmd_list_update_targets", lambda: 17)
     monkeypatch.setattr(ws, "_cmd_generate_pr_body", lambda **_kwargs: 18)
+    monkeypatch.setattr(ws, "_cmd_render_certification_pr_body", lambda **_kwargs: 27)
     monkeypatch.setattr(ws, "_cmd_verify_artifacts", lambda *, workflow: 19)
     monkeypatch.setattr(ws, "_cmd_verify_structure", lambda *, workflow: 23)
     monkeypatch.setattr(ws, "_cmd_validate_bun_lock", lambda *, lock_file: 20)
@@ -632,6 +880,20 @@ def test_command_routing_for_new_and_legacy_aliases(
         ])
         == 18
     )
+    assert (
+        ws.main([
+            "render-certification-pr-body",
+            "--existing-body",
+            str(output),
+            "--output",
+            str(output),
+            "--run-json",
+            str(snapshot),
+            "--cachix-name",
+            "gkze",
+        ])
+        == 27
+    )
 
 
 def test_registered_command_metadata_preserves_cli_surface() -> None:
@@ -653,6 +915,10 @@ def test_registered_command_metadata_preserves_cli_surface() -> None:
         ("prefetch-flake-inputs", "Alias for `flake prefetch`."),
         ("nix-flake-update", "Alias for `flake update`."),
         ("generate-pr-body", "Alias for `pr-body`."),
+        (
+            "render-certification-pr-body",
+            "Render certification details into an existing PR body.",
+        ),
         ("smoke-check-update-app", "Alias for `update-app`."),
         ("list-update-targets", "Alias for `update-targets`."),
     ]
@@ -780,6 +1046,9 @@ def test_generate_pr_body_skips_no_change_package_diffs(
     """Do not render per-package section when all package diffs are empty."""
     output = tmp_path / "pr.md"
     (tmp_path / "flake.lock").write_text("{}\n", encoding="utf-8")
+    demo_sources = tmp_path / "packages/demo/sources.json"
+    demo_sources.parent.mkdir(parents=True, exist_ok=True)
+    demo_sources.write_text("{}\n", encoding="utf-8")
 
     def _fake_run(
         args: list[str], **_kwargs: object
@@ -793,8 +1062,9 @@ def test_generate_pr_body_skips_no_change_package_diffs(
         return _completed(args, stdout="")
 
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ws, "get_repo_root", lambda: tmp_path)
     monkeypatch.setattr(ws, "_run", _fake_run)
-    monkeypatch.setattr(ws, "run_flake_lock_diff", lambda *_a: "flake diff")
+    monkeypatch.setattr(ws, "collect_changes", lambda *_a: ([], [], []))
     monkeypatch.setattr(ws, "run_sources_diff", lambda *_a, **_k: ws.NoChangesMessage)
 
     rc = ws.generate_pr_body(
@@ -808,15 +1078,15 @@ def test_generate_pr_body_skips_no_change_package_diffs(
     )
     assert rc == 0
     rendered = output.read_text(encoding="utf-8")
-    assert "flake diff" in rendered
+    assert "No flake.lock input changes detected." in rendered
     assert "Per-package sources.json changes" not in rendered
 
 
-def test_generate_pr_body_renders_package_diff_and_missing_current_file(
+def test_generate_pr_body_renders_package_diff_for_deleted_sources_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Render per-package section and handle missing working-tree file."""
+    """Render a per-package diff when a changed sources file was deleted."""
     output = tmp_path / "pr.md"
     (tmp_path / "flake.lock").write_text("{}\n", encoding="utf-8")
 
@@ -832,8 +1102,9 @@ def test_generate_pr_body_renders_package_diff_and_missing_current_file(
         return _completed(args, stdout="")
 
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ws, "get_repo_root", lambda: tmp_path)
     monkeypatch.setattr(ws, "_run", _fake_run)
-    monkeypatch.setattr(ws, "run_flake_lock_diff", lambda *_a: "flake diff")
+    monkeypatch.setattr(ws, "collect_changes", lambda *_a: ([], [], []))
     monkeypatch.setattr(ws, "run_sources_diff", lambda *_a, **_k: "@@ diff")
 
     rc = ws.generate_pr_body(
@@ -845,6 +1116,7 @@ def test_generate_pr_body_renders_package_diff_and_missing_current_file(
             base_ref="main",
         ),
     )
+
     assert rc == 0
     rendered = output.read_text(encoding="utf-8")
     assert "Per-package sources.json changes" in rendered
@@ -858,7 +1130,10 @@ def test_generate_pr_body_renders_sources_header_once_for_multiple_diffs(
     """Render sources section once when multiple package diffs are present."""
     output = tmp_path / "pr.md"
     (tmp_path / "flake.lock").write_text("{}\n", encoding="utf-8")
-    (tmp_path / "packages").mkdir()
+    for relative_path in ("packages/a/sources.json", "packages/b/sources.json"):
+        current_path = tmp_path / relative_path
+        current_path.parent.mkdir(parents=True, exist_ok=True)
+        current_path.write_text('{"new":1}\n', encoding="utf-8")
 
     def _fake_run(
         args: list[str], **_kwargs: object
@@ -875,8 +1150,9 @@ def test_generate_pr_body_renders_sources_header_once_for_multiple_diffs(
         return _completed(args, stdout="")
 
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ws, "get_repo_root", lambda: tmp_path)
     monkeypatch.setattr(ws, "_run", _fake_run)
-    monkeypatch.setattr(ws, "run_flake_lock_diff", lambda *_a: "flake diff")
+    monkeypatch.setattr(ws, "collect_changes", lambda *_a: ([], [], []))
     monkeypatch.setattr(ws, "run_sources_diff", lambda *_a, **_k: "@@ diff")
 
     rc = ws.generate_pr_body(
@@ -891,3 +1167,279 @@ def test_generate_pr_body_renders_sources_header_once_for_multiple_diffs(
     assert rc == 0
     rendered = output.read_text(encoding="utf-8")
     assert rendered.count("### Per-package sources.json changes") == 1
+
+
+def test_cmd_generate_pr_body_reports_history_errors(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Return a clean CLI error when PR-body generation cannot read git history."""
+
+    def _fail(*, output: str | Path, options: ws.PRBodyOptions) -> int:
+        del output, options
+        msg = "bad revision 'HEAD'"
+        raise ws.GitHistoryReadError(msg)
+
+    monkeypatch.setattr(ws, "generate_pr_body", _fail)
+
+    rc = ws._cmd_generate_pr_body(
+        output=Path("pr.md"),
+        workflow_url="https://example.test/workflow",
+        server_url="https://example.test",
+        repository="org/repo",
+        base_ref="main",
+        compare_head="update_flake_lock_action",
+    )
+
+    assert rc == 1
+    assert "bad revision 'HEAD'" in capsys.readouterr().err
+
+
+def test_render_certification_pr_body_appends_section(
+    tmp_path: Path,
+) -> None:
+    """Append certification details onto an existing PR body."""
+    existing_body = tmp_path / "body.md"
+    output = tmp_path / "updated.md"
+    workflow = _write_certification_workflow(tmp_path / "workflow.yml")
+    _write_existing_pr_body(existing_body)
+
+    rc = ws.render_certification_pr_body(
+        existing_body=existing_body,
+        output=output,
+        options=ws.CertificationPRBodyOptions(
+            workflow_url="https://example.test/actions/runs/42",
+            started_at="2026-04-24T12:00:00Z",
+            updated_at="2026-04-24T14:15:00Z",
+            cachix_name="gkze",
+            workflow_path=workflow,
+        ),
+    )
+
+    assert rc == 0
+    rendered = output.read_text(encoding="utf-8")
+    assert rendered.startswith("**[Workflow run](https://example.test/workflow)**")
+    assert "## Certification" in rendered
+    assert (
+        "Latest certification: [workflow run](https://example.test/actions/runs/42)"
+        in rendered
+    )
+    assert "Updated: `2026-04-24 14:15 UTC`" in rendered
+    assert "Elapsed: `2h 15m`" in rendered
+    assert "Closures pushed to Cachix (`gkze`):" in rendered
+    assert "- `.#pkgs.aarch64-darwin.alpha`" in rendered
+    assert "- `.#pkgs.aarch64-darwin.beta`" in rendered
+    assert (
+        "- Shared Darwin closure for `.#darwinConfigurations.argus.system` and "
+        "`.#darwinConfigurations.rocinante.system` excluding 2 heavy package closures"
+        in rendered
+    )
+    assert "- `.#darwinConfigurations.argus.system`" in rendered
+    assert "- `.#darwinConfigurations.rocinante.system`" in rendered
+    assert "- `.#pkgs.x86_64-linux.nixcfg`" in rendered
+    assert ws.extract_pr_body_model(rendered).certification is not None
+
+
+def test_render_certification_pr_body_replaces_existing_section(
+    tmp_path: Path,
+) -> None:
+    """Replace the prior certification block instead of duplicating it."""
+    existing_body = tmp_path / "body.md"
+    output = tmp_path / "updated.md"
+    workflow = _write_certification_workflow(tmp_path / "workflow.yml")
+    _write_existing_pr_body(existing_body)
+    assert (
+        ws.render_certification_pr_body(
+            existing_body=existing_body,
+            output=output,
+            options=ws.CertificationPRBodyOptions(
+                workflow_url="https://example.test/actions/runs/42",
+                started_at="2026-04-24T12:00:00Z",
+                updated_at="2026-04-24T14:15:00Z",
+                cachix_name="gkze",
+                workflow_path=workflow,
+            ),
+        )
+        == 0
+    )
+    output.replace(existing_body)
+
+    rc = ws.render_certification_pr_body(
+        existing_body=existing_body,
+        output=output,
+        options=ws.CertificationPRBodyOptions(
+            workflow_url="https://example.test/actions/runs/99",
+            started_at="2026-04-24T12:00:00Z",
+            updated_at="2026-04-24T12:45:00Z",
+            cachix_name="gkze",
+            workflow_path=workflow,
+        ),
+    )
+
+    assert rc == 0
+    rendered = output.read_text(encoding="utf-8")
+    assert rendered.count("## Certification") == 1
+    assert "https://example.test/actions/runs/42" not in rendered
+    assert "https://example.test/actions/runs/99" in rendered
+    assert "Elapsed: `45m 0s`" in rendered
+
+
+def test_render_certification_pr_body_replaces_legacy_marker_section(
+    tmp_path: Path,
+) -> None:
+    """Keep certification updates working for PR bodies from the old renderer."""
+    existing_body = tmp_path / "body.md"
+    output = tmp_path / "updated.md"
+    workflow = _write_certification_workflow(tmp_path / "workflow.yml")
+    existing_body.write_text(
+        "\n".join([
+            "**[Workflow run](https://example.test/workflow)**",
+            "",
+            "<!-- update-certification:start -->",
+            "## Certification",
+            "old certification",
+            "<!-- update-certification:end -->",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+
+    rc = ws.render_certification_pr_body(
+        existing_body=existing_body,
+        output=output,
+        options=ws.CertificationPRBodyOptions(
+            workflow_url="https://example.test/actions/runs/42",
+            started_at="2026-04-24T12:00:00Z",
+            updated_at="2026-04-24T14:15:00Z",
+            cachix_name="gkze",
+            workflow_path=workflow,
+        ),
+    )
+
+    assert rc == 0
+    rendered = output.read_text(encoding="utf-8")
+    assert rendered.count("<!-- update-certification:start -->") == 1
+    assert rendered.count("<!-- update-certification:end -->") == 1
+    assert "old certification" not in rendered
+    assert (
+        "Latest certification: [workflow run](https://example.test/actions/runs/42)"
+        in rendered
+    )
+    with pytest.raises(ValueError, match="does not contain"):
+        ws.extract_pr_body_model(rendered)
+
+
+@pytest.mark.parametrize(
+    ("body", "match"),
+    [
+        pytest.param(
+            "<!-- update-certification:start -->\nmissing end\n",
+            "unbalanced certification section markers",
+            id="unbalanced",
+        ),
+        pytest.param(
+            "\n".join([
+                "<!-- update-certification:start -->",
+                "one",
+                "<!-- update-certification:end -->",
+                "<!-- update-certification:start -->",
+                "two",
+                "<!-- update-certification:end -->",
+            ]),
+            "multiple certification sections",
+            id="multiple",
+        ),
+    ],
+)
+def test_legacy_certification_section_rejects_invalid_marker_shapes(
+    body: str,
+    match: str,
+) -> None:
+    """Reject malformed legacy certification marker pairs."""
+    with pytest.raises(ValueError, match=match):
+        cert._replace_legacy_certification_section(body=body, section="new")
+
+
+def test_legacy_certification_section_handles_empty_and_unmarked_bodies() -> None:
+    """Render legacy certification sections into empty or unmarked PR bodies."""
+    empty = cert._replace_legacy_certification_section(body=" \n", section="new\n")
+    appended = cert._replace_legacy_certification_section(
+        body="Existing body\n",
+        section="new\n",
+    )
+
+    assert empty == (
+        "<!-- update-certification:start -->\nnew\n<!-- update-certification:end -->\n"
+    )
+    assert appended == (
+        "Existing body\n\n"
+        "<!-- update-certification:start -->\n"
+        "new\n"
+        "<!-- update-certification:end -->\n"
+    )
+
+
+def test_render_certification_pr_body_preserves_unexpected_model_errors(
+    tmp_path: Path,
+) -> None:
+    """Only the known missing-model error should fall back to legacy markers."""
+    existing_body = tmp_path / "body.md"
+    output = tmp_path / "updated.md"
+    workflow = _write_certification_workflow(tmp_path / "workflow.yml")
+    existing_body.write_text("Existing body\n", encoding="utf-8")
+
+    def _extract(_body: str) -> ws.PRBodyModel:
+        msg = "bad serialized model"
+        raise ValueError(msg)
+
+    def _write(**_kwargs: object) -> int:
+        msg = "write_pr_body should not be called"
+        raise AssertionError(msg)
+
+    with pytest.raises(ValueError, match="bad serialized model"):
+        cert.render_certification_pr_body(
+            existing_body=existing_body,
+            output=output,
+            options=cert.CertificationPRBodyOptions(
+                workflow_url="https://example.test/actions/runs/42",
+                started_at="2026-04-24T12:00:00Z",
+                updated_at="2026-04-24T14:15:00Z",
+                cachix_name="gkze",
+                workflow_path=workflow,
+            ),
+            extract_pr_body_model=_extract,
+            write_pr_body=_write,
+        )
+
+    assert not output.exists()
+
+
+def test_cmd_render_certification_pr_body_reports_invalid_run_payload(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fail clearly when the GitHub run payload is missing required fields."""
+    existing_body = tmp_path / "body.md"
+    output = tmp_path / "updated.md"
+    run_json = tmp_path / "run.json"
+    workflow = _write_certification_workflow(tmp_path / "workflow.yml")
+    existing_body.write_text("Existing PR body\n", encoding="utf-8")
+    run_json.write_text(
+        json.dumps({
+            "html_url": "https://example.test/actions/runs/42",
+            "updated_at": "2026-04-24T14:15:00Z",
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rc = ws._cmd_render_certification_pr_body(
+        existing_body=existing_body,
+        output=output,
+        run_json=run_json,
+        cachix_name="gkze",
+        workflow=workflow,
+    )
+
+    assert rc == 1
+    assert "run_started_at" in capsys.readouterr().err

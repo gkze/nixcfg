@@ -1,9 +1,12 @@
 """Resolve upstream versions for all updaters and write a pinned-versions manifest.
 
-This runs ``fetch_latest()`` for every updater once, producing a JSON file
-that the per-platform ``compute-hashes`` jobs consume via ``--pinned-versions``.
-By resolving versions in a single job we eliminate the race condition where
-different CI runners see different upstream versions for the same package.
+This runs ``fetch_latest()`` for each independently resolvable updater once,
+producing a JSON file that the per-platform ``compute-hashes`` jobs consume via
+``--pinned-versions``. By resolving versions in a single job we eliminate the
+race condition where different CI runners see different upstream versions for
+the same package. Companion updaters are intentionally left unpinned because
+their versions may depend on artifacts materialized by their primary source
+during the source update waves.
 """
 
 from __future__ import annotations
@@ -45,6 +48,12 @@ def _instantiate_updater(updater_cls: UpdaterClass, *, config: UpdateConfig) -> 
     if "config" in init_params:
         return updater_cls(config=config)
     return updater_cls()
+
+
+def _is_companion_updater(updater_cls: UpdaterClass) -> bool:
+    """Return whether an updater should resolve after its primary source."""
+    companion_of = getattr(updater_cls, "companion_of", None)
+    return isinstance(companion_of, str) and bool(companion_of)
 
 
 def _make_json_safe(obj: object) -> _JsonSafe:
@@ -133,6 +142,8 @@ async def _resolve_all() -> tuple[dict[str, _JsonObject], list[str]]:
         try:
             async with asyncio.TaskGroup() as group:
                 for name, updater_cls in _get_updaters().items():
+                    if _is_companion_updater(updater_cls):
+                        continue
                     group.create_task(_resolve_one(name, updater_cls))
         except* Exception as exc_group:
             if len(exc_group.exceptions) == 1:

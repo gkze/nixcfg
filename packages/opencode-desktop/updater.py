@@ -20,7 +20,6 @@ from lib.update.net import fetch_url
 from lib.update.nix_cargo import compute_import_cargo_lock_output_hashes
 from lib.update.updaters.base import (
     CargoLockGitDep,
-    Crate2NixArtifactsMixin,
     FlakeInputUpdater,
     UpdateContext,
     VersionInfo,
@@ -29,7 +28,7 @@ from lib.update.updaters.base import (
 
 
 @register_updater
-class OpencodeDesktopUpdater(Crate2NixArtifactsMixin, FlakeInputUpdater):
+class OpencodeDesktopUpdater(FlakeInputUpdater):
     """Resolve Cargo git deps from upstream lockfile and refresh output hashes."""
 
     name = "opencode-desktop"
@@ -122,9 +121,6 @@ class OpencodeDesktopUpdater(Crate2NixArtifactsMixin, FlakeInputUpdater):
     ) -> EventStream:
         """Compute importCargoLock output hashes for specta/tauri git deps."""
         _ = context
-
-        async for event in self.stream_materialized_artifacts():
-            yield event
 
         lockfile_content = await self._fetch_lockfile_content(info, session)
         keys_by_match = self._resolve_git_dep_keys(lockfile_content)

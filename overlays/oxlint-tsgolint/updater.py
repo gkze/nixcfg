@@ -2,29 +2,22 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry
+    from lib.update.events import EventStream
 
-from lib.nix.models.sources import HashCollection, HashEntry, SourceHashes
-from lib.update.events import (
-    EventStream,
-    UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_str,
-    require_value,
+from lib.nix.models.sources import HashCollection
+from lib.update.nix import _build_fetchgit_expr, _build_overlay_expr
+from lib.update.updaters.base import (
+    UpdateContext,
+    VersionInfo,
+    register_updater,
+    stream_source_then_overlay_hashes,
 )
-from lib.update.nix import (
-    _build_fetchgit_expr,
-    _build_overlay_expr,
-    compute_fixed_output_hash,
-)
-from lib.update.updaters.base import UpdateContext, VersionInfo, register_updater
 from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 
@@ -79,19 +72,6 @@ class OxlintTsgolintUpdater(GitHubReleaseUpdater):
 
         return False
 
-    @staticmethod
-    def _override_env(version: str, src_hash: str, fake_hash: str) -> dict[str, str]:
-        payload = {
-            "oxlint-tsgolint": {
-                "version": version,
-                "hashes": [
-                    {"hashType": "srcHash", "hash": src_hash},
-                    {"hashType": "vendorHash", "hash": fake_hash},
-                ],
-            },
-        }
-        return {"UPDATE_SOURCE_OVERRIDES_JSON": json.dumps(payload)}
-
     async def fetch_hashes(
         self,
         info: VersionInfo,
@@ -102,35 +82,12 @@ class OxlintTsgolintUpdater(GitHubReleaseUpdater):
         """Compute source and vendor hashes for the latest released backend."""
         _ = (session, context)
 
-        src_hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            compute_fixed_output_hash(
-                self.name,
-                self._src_expr(info.version),
-                config=self.config,
-            ),
-            src_hash_drain,
-            parse=expect_str,
+        async for event in stream_source_then_overlay_hashes(
+            self.name,
+            version=info.version,
+            src_expr=self._src_expr(info.version),
+            overlay_expr=_build_overlay_expr(self.name),
+            dependency_hash_type="vendorHash",
+            config=self.config,
         ):
             yield event
-        src_hash = require_value(src_hash_drain, "Missing srcHash output")
-
-        vendor_hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            compute_fixed_output_hash(
-                self.name,
-                _build_overlay_expr(self.name),
-                env=self._override_env(info.version, src_hash, self.config.fake_hash),
-                config=self.config,
-            ),
-            vendor_hash_drain,
-            parse=expect_str,
-        ):
-            yield event
-        vendor_hash = require_value(vendor_hash_drain, "Missing vendorHash output")
-
-        hashes: SourceHashes = [
-            HashEntry.create("srcHash", src_hash),
-            HashEntry.create("vendorHash", vendor_hash),
-        ]
-        yield UpdateEvent.value(self.name, hashes)

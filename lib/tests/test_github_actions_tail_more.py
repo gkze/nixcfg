@@ -607,10 +607,22 @@ def test_tailer_named_job_and_data_helpers(monkeypatch: pytest.MonkeyPatch) -> N
         )
         is None
     )
-    with pytest.raises(TypeError, match="integer field 'number'"):
-        gha_tail._required_int({"number": True}, "number", context="live step")
-    with pytest.raises(TypeError, match="optional string field 'name'"):
-        gha_tail._optional_str({"name": 1}, "name")
+    with pytest.raises(TypeError, match="Malformed GitHub Actions live step payload"):
+        gha_tail._parse_live_step({
+            "id": "step",
+            "name": "build",
+            "status": "queued",
+            "number": True,
+            "change_id": 1,
+        })
+    with pytest.raises(TypeError, match="Malformed GitHub Actions live step payload"):
+        gha_tail._parse_live_step({
+            "id": "step",
+            "name": "build",
+            "status": "queued",
+            "number": "1",
+            "change_id": 1,
+        })
     assert gha_tail._job_by_id((_job(1, "a", "queued"),), 2) is None
     assert [
         step.id
@@ -638,6 +650,55 @@ def test_tailer_named_job_and_data_helpers(monkeypatch: pytest.MonkeyPatch) -> N
             job_url="https://github.com/acme/demo/actions/runs/9/job/1",
             candidate="/too-short/steps",
         )
+
+
+def test_live_parser_and_payload_error_edges() -> None:
+    """Cover live-log parser branches that do not need a full tailer instance."""
+    assert gha_tail._parse_live_step({
+        "id": "step",
+        "name": "build",
+        "status": "queued",
+        "number": 7,
+        "change_id": 3,
+    }) == gha_tail.LiveStepRecord(
+        id="step",
+        name="build",
+        status="queued",
+        conclusion=None,
+        number=7,
+        change_id=3,
+        started_at=None,
+        completed_at=None,
+    )
+    with pytest.raises(TypeError, match="Malformed GitHub Actions live step payload"):
+        gha_tail._parse_live_step({"id": 1})
+    with pytest.raises(
+        TypeError, match="Malformed GitHub Actions live log line payload"
+    ):
+        gha_tail._parse_live_line({"id": "line"})
+
+    parser = gha_tail._CheckStepsHTMLParser()
+    parser.feed(
+        '<check-steps job-steps-url="/steps" data-streaming-url="/stream">'
+        '<check-step data-external-id="step-1" '
+        'data-job-step-backscroll-url="/backscroll"></check-step>'
+        "</check-steps>"
+    )
+    assert parser.steps_url == "/steps"
+    assert parser.streaming_url == "/stream"
+    assert parser.backscroll_urls == {"step-1": "/backscroll"}
+    parser.handle_starttag("check-steps", [("job-steps-url", "/other-steps")])
+    assert parser.steps_url == "/other-steps"
+    parser.handle_starttag("check-step", [("data-external-id", "only-id")])
+    assert parser.backscroll_urls == {"step-1": "/backscroll"}
+    parser.handle_starttag("check-steps", [])
+    parser.handle_starttag("div", [])
+    assert parser.steps_url == "/other-steps"
+    partial_step_info = gha_tail._parse_live_job_page_from_html(
+        '<check-steps><check-step data-external-id="step-1"></check-step></check-steps>',
+        job_url="https://github.com/acme/demo/actions/runs/9/job/42",
+    )
+    assert partial_step_info.backscroll_urls == {}
 
 
 def test_tailer_waits_for_steps_then_completes(monkeypatch: pytest.MonkeyPatch) -> None:

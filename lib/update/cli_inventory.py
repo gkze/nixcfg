@@ -20,6 +20,7 @@ from lib.update.updaters.base import (
     FlakeInputUpdater,
     HashEntryUpdater,
     Updater,
+    UvLockUpdater,
 )
 from lib.update.updaters.platform_api import PlatformAPIUpdater
 
@@ -335,7 +336,7 @@ def _generated_artifact_paths(
     crate2nix_paths = _crate2nix_generated_artifact_paths(name)
     declared_paths = getattr(updater_cls, "generated_artifact_files", ())
     needs_package_dir = bool(declared_paths) or issubclass(
-        updater_cls, DenoManifestUpdater
+        updater_cls, (DenoManifestUpdater, UvLockUpdater)
     )
     if not needs_package_dir:
         return crate2nix_paths
@@ -344,22 +345,27 @@ def _generated_artifact_paths(
     if pkg_dir is None:
         return ()
 
+    artifact_paths: tuple[str, ...] = ()
     if declared_paths:
-        paths = tuple(
+        artifact_paths = tuple(
             resolved
             for relative in declared_paths
             if (resolved := repo_relative_path(pkg_dir / relative)) is not None
         )
-        if paths:
-            return tuple(dict.fromkeys((*paths, *crate2nix_paths)))
 
-    if not issubclass(updater_cls, DenoManifestUpdater):
-        return crate2nix_paths
-    manifest_name = getattr(updater_cls, "manifest_file", "deno-deps.json")
-    path = repo_relative_path(pkg_dir / manifest_name)
-    if path is None:
-        return crate2nix_paths
-    return tuple(dict.fromkeys((path, *crate2nix_paths)))
+    if not artifact_paths:
+        artifact_name: str | None = None
+        if issubclass(updater_cls, UvLockUpdater):
+            artifact_name = getattr(updater_cls, "lock_file", "uv.lock")
+        elif issubclass(updater_cls, DenoManifestUpdater):
+            artifact_name = getattr(updater_cls, "manifest_file", "deno-deps.json")
+
+        if artifact_name is not None:
+            path = repo_relative_path(pkg_dir / artifact_name)
+            if path is not None:
+                artifact_paths = (path,)
+
+    return tuple(dict.fromkeys((*artifact_paths, *crate2nix_paths)))
 
 
 def _crate2nix_generated_artifact_paths(name: str) -> tuple[str, ...]:

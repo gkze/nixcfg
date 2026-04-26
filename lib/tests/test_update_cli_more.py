@@ -13,6 +13,7 @@ import typer
 
 if TYPE_CHECKING:
     from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
+    from lib.update.events import UpdateEvent
 
 import lib.update.cli as update_cli_module
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourcesFile
@@ -70,7 +71,6 @@ from lib.update.cli_inventory import (
     _source_backing_input_name,
     _source_hash_kinds,
 )
-from lib.update.events import UpdateEvent
 from lib.update.paths import REPO_ROOT
 from lib.update.refs import FlakeInputRef
 from lib.update.ui_state import OperationKind
@@ -83,6 +83,7 @@ from lib.update.updaters.base import (
     FlakeInputUpdater,
     HashEntryUpdater,
     Updater,
+    UvLockUpdater,
 )
 from lib.update.updaters.platform_api import PlatformAPIUpdater
 
@@ -250,6 +251,43 @@ def test_resolved_targets_expand_flake_input_to_backing_sources(
     )
     assert resolved_no_refs.ref_inputs == []
     assert resolved_no_refs.source_names == resolved.source_names
+
+
+def test_resolved_targets_expand_primary_source_to_companion_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Selecting a primary source should also select its managed companions."""
+
+    class _CodexUpdater(FlakeInputUpdater):
+        pass
+
+    class _CodexV8Updater(HashEntryUpdater):
+        companion_of = "codex"
+
+    class _CodexOtherUpdater(HashEntryUpdater):
+        companion_of = "codex"
+
+    monkeypatch.setattr(
+        "lib.update.cli.UPDATERS",
+        {
+            "codex": _CodexUpdater,
+            "codex-v8": _CodexV8Updater,
+            "codex-other": _CodexOtherUpdater,
+        },
+    )
+    monkeypatch.setattr("lib.update.cli.get_flake_inputs_with_refs", list)
+
+    resolved = ResolvedTargets.from_options(UpdateOptions(source="codex", no_refs=True))
+
+    assert resolved.ref_inputs == []
+    assert resolved.source_names == ["codex", "codex-other", "codex-v8"]
+
+    direct_companion = ResolvedTargets.from_options(
+        UpdateOptions(source="codex-v8", no_refs=True)
+    )
+
+    assert direct_companion.ref_inputs == []
+    assert direct_companion.source_names == ["codex", "codex-v8"]
 
 
 def test_preflight_handlers_schema_list_validate(
@@ -753,6 +791,13 @@ def test_inventory_helpers_and_sorting() -> None:  # noqa: PLR0915
         name = "custom-artifact"
         generated_artifact_files = ("generated.nix",)
 
+    class _UvLock(UvLockUpdater):
+        name = "uv-lock"
+
+    class _CustomUvLock(UvLockUpdater):
+        name = "custom-uv-lock"
+        lock_file = "pinned.lock"
+
     def _handles(
         *,
         ref_update: bool,
@@ -860,6 +905,22 @@ def test_inventory_helpers_and_sorting() -> None:  # noqa: PLR0915
         )
         == ()
     )
+    assert _generated_artifact_paths(
+        "uv-lock",
+        _UvLock,
+        package_dir_for=lambda name: (
+            None if name == "missing" else REPO_ROOT / "packages" / name
+        ),
+        repo_relative_path=repo_relative_path,
+    ) == ("packages/uv-lock/uv.lock",)
+    assert _generated_artifact_paths(
+        "custom-uv-lock",
+        _CustomUvLock,
+        package_dir_for=lambda name: (
+            None if name == "missing" else REPO_ROOT / "packages" / name
+        ),
+        repo_relative_path=repo_relative_path,
+    ) == ("packages/custom-uv-lock/pinned.lock",)
 
     assert (
         repo_relative_path(REPO_ROOT / "packages" / "demo" / "sources.json")
@@ -1039,7 +1100,7 @@ def test_inventory_helpers_and_sorting() -> None:  # noqa: PLR0915
             source_type="github",
             owner="o",
             repo="r",
-            selector="v2.0.0",
+            selector="v9.9.9",
             locked_rev=None,
         ),
         source_target=None,
@@ -1130,7 +1191,7 @@ def test_build_update_inventory_uses_logical_targets() -> None:
                 commit="b" * 40,
             ),
             "deno": SourceEntry(
-                version="v2.0.0",
+                version="v9.9.9",
                 hashes={"x86_64-linux": "sha256-mno="},
             ),
         }

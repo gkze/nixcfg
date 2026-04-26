@@ -179,7 +179,7 @@ def test_compile_items_and_build_workspace_compilation_reuse_existing_state(
     assert compiled.space.uuid == "{space}"
     assert compiled.space.name == "Work"
     assert compiled.space.icon == "briefcase"
-    assert compiled.space.hasCollapsedPinnedTabs is True
+    assert compiled.space.has_collapsed_pinned_tabs is True
     assert compiled.space.theme == zentool.SessionTheme(
         gradientColors=["#111111", "#222222"],
         opacity=0.75,
@@ -413,7 +413,7 @@ def test_prepare_match_and_build_desired_tabs_cover_placeholder_and_ordering(
 
     desired = zentool.build_desired_tabs(essentials, [workspace])
 
-    assert [tab.zenSyncId for tab in desired] == [
+    assert [tab.zen_sync_id for tab in desired] == [
         "sync-essential",
         "sync-pinned",
         "placeholder-empty",
@@ -423,7 +423,7 @@ def test_prepare_match_and_build_desired_tabs_cover_placeholder_and_ordering(
         "sync-regular",
         "sync-global",
     ]
-    assert [tab.groupId for tab in desired] == [
+    assert [tab.group_id for tab in desired] == [
         None,
         None,
         "folder-empty",
@@ -433,7 +433,7 @@ def test_prepare_match_and_build_desired_tabs_cover_placeholder_and_ordering(
         None,
         None,
     ]
-    assert [tab.zenIsEmpty for tab in desired] == [
+    assert [tab.zen_is_empty for tab in desired] == [
         False,
         False,
         True,
@@ -520,18 +520,18 @@ def test_assign_folder_links_and_build_records_cover_existing_and_new_nodes(
         parent_id=None,
     )
 
-    assert primary_folder.existing.parentId is None
-    assert primary_folder.existing.prevSiblingInfo == zentool.PrevSiblingInfo(
+    assert primary_folder.existing.parent_id is None
+    assert primary_folder.existing.prev_sibling_info == zentool.PrevSiblingInfo(
         type="tab",
         id="tab-1",
     )
-    assert nested_folder.existing.parentId == "folder-primary"
-    assert nested_folder.existing.prevSiblingInfo == zentool.PrevSiblingInfo(
+    assert nested_folder.existing.parent_id == "folder-primary"
+    assert nested_folder.existing.prev_sibling_info == zentool.PrevSiblingInfo(
         type="start",
         id=None,
     )
-    assert trailing_folder.existing.parentId is None
-    assert trailing_folder.existing.prevSiblingInfo == zentool.PrevSiblingInfo(
+    assert trailing_folder.existing.parent_id is None
+    assert trailing_folder.existing.prev_sibling_info == zentool.PrevSiblingInfo(
         type="group",
         id="folder-primary",
     )
@@ -546,11 +546,11 @@ def test_assign_folder_links_and_build_records_cover_existing_and_new_nodes(
     assert built_group.pinned is True
 
     assert built_folder.id == "folder-primary"
-    assert built_folder.workspaceId == "{ws}"
+    assert built_folder.workspace_id == "{ws}"
     assert built_folder.collapsed is False
-    assert built_folder.userIcon == "custom-icon"
-    assert built_folder.emptyTabIds == ["placeholder-primary"]
-    assert built_folder.prevSiblingInfo == zentool.PrevSiblingInfo(
+    assert built_folder.user_icon == "custom-icon"
+    assert built_folder.empty_tab_ids == ["placeholder-primary"]
+    assert built_folder.prev_sibling_info == zentool.PrevSiblingInfo(
         type="tab",
         id="tab-1",
     )
@@ -606,9 +606,9 @@ def test_build_desired_state_sets_split_view_data_for_plain_and_extra_states(
     assert [space.uuid for space in extra_result.spaces] == ["{generated-space}"]
     assert [folder.name for folder in extra_result.folders] == ["Empty Folder"]
     assert [group.name for group in extra_result.groups] == ["Empty Folder"]
-    assert [tab.zenSyncId for tab in extra_result.tabs] == [
+    assert [tab.zen_sync_id for tab in extra_result.tabs] == [
         "generated-item",
         "generated-item",
         "generated-item",
     ]
-    assert [tab.zenIsEmpty for tab in extra_result.tabs] == [False, True, False]
+    assert [tab.zen_is_empty for tab in extra_result.tabs] == [False, True, False]

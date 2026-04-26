@@ -7,17 +7,18 @@ from typing import TYPE_CHECKING
 
 from lib.update.net import fetch_url
 from lib.update.updaters.base import (
-    Crate2NixMetadataUpdater,
+    FlakeInputMetadataUpdater,
     VersionInfo,
     register_updater,
 )
+from lib.update.updaters.metadata import FlakeInputMetadata
 
 if TYPE_CHECKING:
     import aiohttp
 
 
 @register_updater
-class ZedEditorNightlyUpdater(Crate2NixMetadataUpdater):
+class ZedEditorNightlyUpdater(FlakeInputMetadataUpdater):
     """Track the current Zed nightly app version and locked commit."""
 
     name = "zed-editor-nightly"
@@ -53,4 +54,7 @@ class ZedEditorNightlyUpdater(Crate2NixMetadataUpdater):
             msg = "Zed manifest is missing package.version"
             raise RuntimeError(msg)
 
-        return VersionInfo(version=version, metadata={"commit": rev})
+        return VersionInfo(
+            version=version,
+            metadata=FlakeInputMetadata(node=node, commit=rev),
+        )

@@ -7,21 +7,16 @@ from types import ModuleType
 
 import pytest
 
-from lib.import_utils import load_module_from_path
-from lib.update.paths import REPO_ROOT
+from lib.tests._updater_helpers import load_repo_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 
 def _load_module() -> ModuleType:
-    return load_module_from_path(
-        REPO_ROOT / "packages/superset/updater.py",
-        "superset_updater_dedicated_test",
+    return load_repo_module(
+        "packages/superset/updater.py", "superset_updater_dedicated_test"
     )
-
-
-def _run(awaitable):
-    return asyncio.run(awaitable)
 
 
 @pytest.mark.parametrize(

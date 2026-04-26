@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from types import ModuleType
 
 import pytest
 
-from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import HashEntry
+from lib.tests._updater_helpers import collect_events as _collect_events
+from lib.tests._updater_helpers import install_fixed_hash_stream
+from lib.tests._updater_helpers import load_repo_module as _load_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEvent, UpdateEventKind
-from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.metadata import (
     DownloadUrlMetadata,
@@ -20,18 +21,6 @@ from lib.update.updaters.metadata import (
 
 HASH_A = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 HASH_B = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
-
-
-def _load_module(path: str, name: str) -> ModuleType:
-    return load_module_from_path(REPO_ROOT / path, name)
-
-
-def _run[T](coro):
-    return asyncio.run(coro)
-
-
-async def _collect_events(stream):
-    return [event async for event in stream]
 
 
 def test_chatgpt_fetch_latest_passes_expected_request_options(
@@ -170,8 +159,7 @@ def test_code_cursor_fetch_checksums_and_download_url_validation(
         )
 
     monkeypatch.setattr(
-        "lib.update.updaters.platform_api.update_process.compute_url_hashes",
-        _compute_url_hashes,
+        "lib.update.updaters.base.compute_url_hashes", _compute_url_hashes
     )
 
     checksums = _run(updater.fetch_checksums(info, object()))
@@ -451,21 +439,13 @@ def test_sentry_cli_fetch_hashes_handles_event_flow_and_type_errors(
     module = _load_module("overlays/sentry-cli/updater.py", "sentry_cli_lane_test")
     updater = module.SentryCliUpdater()
     info = VersionInfo(version="2.40.0")
-    calls: list[str] = []
 
     monkeypatch.setattr(module, "_build_nix_expr", lambda expr: expr)
 
-    async def _fixed_hash(name: str, expr: str):
-        assert name == updater.name
-        calls.append(expr)
-        if len(calls) == 1:
-            yield UpdateEvent.status(name, "building src")
-            yield UpdateEvent.value(name, HASH_A)
-            return
-        yield UpdateEvent.status(name, "building cargo")
-        yield UpdateEvent.value(name, HASH_B)
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+    calls = install_fixed_hash_stream(
+        monkeypatch,
+        (("building src", HASH_A), ("building cargo", HASH_B)),
+    )
 
     events = _run(_collect_events(updater.fetch_hashes(info, object())))
 
@@ -479,123 +459,23 @@ def test_sentry_cli_fetch_hashes_handles_event_flow_and_type_errors(
         "building cargo",
     ]
     assert calls == [
-        updater._src_nix_expr(info.version),
-        updater._cargo_nix_expr(info.version, HASH_A),
+        {
+            "name": updater.name,
+            "expr": updater._src_nix_expr(info.version),
+            "env": None,
+            "config": updater.config,
+        },
+        {
+            "name": updater.name,
+            "expr": updater._cargo_nix_expr(info.version, HASH_A),
+            "env": None,
+            "config": updater.config,
+        },
     ]
     assert events[-1].payload == [
         HashEntry.create("srcHash", HASH_A),
         HashEntry.create("cargoHash", HASH_B),
     ]
-
-    async def _missing_cargo(name: str, expr: str):
-        if expr == updater._src_nix_expr(info.version):
-            yield UpdateEvent.value(name, HASH_A)
-            return
-        if False:
-            yield UpdateEvent.status(name, "never")
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _missing_cargo)
-    with pytest.raises(RuntimeError, match="Missing cargoHash output"):
-        _run(_collect_events(updater.fetch_hashes(info, object())))
-
-    async def _bad_src(_name: str, _expr: str):
-        yield UpdateEvent.value("sentry-cli", {"hash": HASH_A})
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _bad_src)
-    with pytest.raises(TypeError, match="Expected srcHash as string"):
-        _run(_collect_events(updater.fetch_hashes(info, object())))
-
-
-def test_sentry_cli_requires_src_and_cargo_hash_outputs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Sentry should raise when either fixed-output build yields no captured hash."""
-    module = _load_module(
-        "overlays/sentry-cli/updater.py", "sentry_cli_lane_missing_values"
-    )
-    updater = module.SentryCliUpdater()
-    info = VersionInfo(version="2.40.0")
-
-    monkeypatch.setattr(module, "_build_nix_expr", lambda expr: expr)
-
-    async def _no_src(_name: str, _expr: str):
-        if False:
-            yield UpdateEvent.status("sentry-cli", "never")
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _no_src)
-    with pytest.raises(RuntimeError, match="Missing srcHash output"):
-        _run(_collect_events(updater.fetch_hashes(info, object())))
-
-    async def _no_cargo(name: str, expr: str):
-        if expr == updater._src_nix_expr(info.version):
-            yield UpdateEvent.value(name, HASH_A)
-            return
-        if False:
-            yield UpdateEvent.status(name, "never")
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _no_cargo)
-    with pytest.raises(RuntimeError, match="Missing cargoHash output"):
-        _run(_collect_events(updater.fetch_hashes(info, object())))
-
-
-def test_sentry_cli_fallback_raises_when_capture_wrapper_never_captures(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Sentry should raise from its own fallback when capture_stream_value yields no value."""
-    module = _load_module(
-        "overlays/sentry-cli/updater.py", "sentry_cli_lane_capture_fallback"
-    )
-    updater = module.SentryCliUpdater()
-    info = VersionInfo(version="2.40.0")
-
-    monkeypatch.setattr(module, "_build_nix_expr", lambda expr: expr)
-
-    async def _fixed_hash(_name: str, expr: str):
-        if expr == updater._src_nix_expr(info.version):
-            yield UpdateEvent.status("sentry-cli", "building src")
-            return
-        yield UpdateEvent.status("sentry-cli", "building cargo")
-
-    async def _capture_without_value(events, *, error: str):
-        async for event in events:
-            yield event
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
-    monkeypatch.setattr(module, "capture_stream_value", _capture_without_value)
-    with pytest.raises(RuntimeError, match="Missing srcHash output"):
-        _run(_collect_events(updater.fetch_hashes(info, object())))
-
-    async def _capture_src_only(events, *, error: str):
-        async for event in events:
-            yield event
-        if error == "Missing srcHash output":
-            yield module.CapturedValue(HASH_A)
-
-    monkeypatch.setattr(module, "capture_stream_value", _capture_src_only)
-    with pytest.raises(RuntimeError, match="Missing cargoHash output"):
-        _run(_collect_events(updater.fetch_hashes(info, object())))
-
-
-def test_sentry_cli_rejects_non_string_cargo_hash(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Sentry should reject wrong-type cargo hash captures after a valid src hash."""
-    module = _load_module("overlays/sentry-cli/updater.py", "sentry_cli_lane_bad_cargo")
-    updater = module.SentryCliUpdater()
-    info = VersionInfo(version="2.40.0")
-
-    monkeypatch.setattr(module, "_build_nix_expr", lambda expr: expr)
-
-    async def _bad_cargo(_name: str, expr: str):
-        if expr == updater._src_nix_expr(info.version):
-            yield UpdateEvent.value("sentry-cli", HASH_A)
-            return
-        yield UpdateEvent.value("sentry-cli", [HASH_B])
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _bad_cargo)
-
-    with pytest.raises(TypeError, match="Expected cargoHash as string"):
-        _run(_collect_events(updater.fetch_hashes(info, object())))
 
 
 def test_vscode_insiders_fetch_latest_checksums_and_urls(

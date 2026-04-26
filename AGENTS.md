@@ -15,9 +15,10 @@ Before changing code, do the smallest possible orientation pass:
 1. If the task is part of ongoing work, inspect continuity sources:
    - `.dex/tasks.jsonl`
    - `git stash list`
-   - recent Pi sessions under `~/.pi/agent/sessions/--Users-george-.config-nixcfg--/`
-   - recent OpenCode sessions in `~/.local/share/opencode/opencode.db` for worktree
-     `/Users/george/.config/nixcfg`
+   - recent Pi sessions under the repo-specific directory in `~/.pi/agent/sessions/`
+   - recent Claude sessions under the repo-specific directory in `~/.claude/projects/`
+   - recent OpenCode sessions in `~/.local/share/opencode/opencode.db` filtered to this worktree
+   - recent Codex sessions under `~/.codex/sessions/` that mention this worktree
 1. Prefer a narrow reproduction before a full build or full-closure apply.
 1. Before handoff, review your own diff for regressions, generated-file drift, CI/update fallout,
    and platform-specific breakage.
@@ -154,6 +155,12 @@ A recurring pattern: failures often surface through `argus`, but the real bug li
 Examples include temporary forks, pinned revisions, and disabled integrations. Do not casually
 “clean up” those pins without checking why they were introduced.
 
+Homebrew tap inputs are part of this rule. For example, `homebrew-cask` may be pinned because
+upstream cask syntax can get ahead of the Homebrew/Ruby runtime available through this flake, such
+as bare `depends_on :macos` requiring newer Homebrew behavior. If Homebrew activation fails, inspect
+`flake.nix`, `modules/darwin/homebrew.nix`, and the relevant tap pin before unpinning or updating
+the tap.
+
 ### 2. Package discovery is structured, not ad hoc
 
 - `packages/default.nix` and `packages/registry.nix` are part of the packaging architecture.
@@ -236,6 +243,12 @@ Use this testing order by default:
 When Python produces, rewrites, or composes Nix, test the result structurally. Prefer
 `nix-manipulator` builders and AST assertions through the shared test helpers. Prefer AST equality
 over string equality unless exact rendered text is itself the contract.
+
+Do not assert that source files contain or omit raw string fragments. If a test needs to protect
+source behavior, parse the source and assert on the semantic structure: Nix ASTs for Nix, Python AST
+or CST for Python, JSON/TOML/YAML parsers for data files, and shell/JS syntax or runtime harnesses
+for embedded scripts. Keep substring assertions for presentation output only when the text itself is
+the user-facing contract.
 
 Do not use Nix evaluation merely to prove that Python emitted the right Nix. If production code
 currently returns Nix text, parse it in the test and compare ASTs. If that is awkward, prefer
@@ -405,6 +418,31 @@ If you think the chrome theme is broken, the first diagnostic is almost always o
 1. Missing `ui.systemUsesDarkTheme` pref in `home/george/zen/user.js`.
 1. Drift between the fork branch and current Zen internals — fix in the fork, not here.
 
+Known Twilight quit-dialog lessons from the 2026-04 upgrade:
+
+- Do not treat a bad quit dialog as proof that `userChrome.css` is not loading. First prove chrome
+  CSS loading with a temporary, unmistakable wrapper/background marker outside
+  `@media (prefers-color-scheme: dark)`, restart Twilight, and remove the marker after the check.
+- The quit warning is `chrome://global/content/commonDialog.xhtml`. Its buttons are created inside
+  the `<dialog id="commonDialog">` shadow root, and every button is only exposed to outer
+  `userChrome.css` as `part="dialog-button"`. Pure `dialog::part(dialog-button)` rules can theme
+  the dialog shell and secondary buttons, but cannot reliably target only the accept/`Quit` button
+  or its internal `.button-box` / `.button-text`.
+- For accept-button fixes, use the repo-managed AutoConfig path in
+  `home/george/zen/autoconfig/`. Keep it as a minimal bridge: run in the common-dialog document,
+  strip the native `default` attribute from `button[dlgtype="accept"]` / `label^="Quit "`, preserve
+  the existing `dialog-button` part, and add the `catppuccin-primary-button` part token so the
+  Catppuccin `userChrome.css` can own the actual colors and hover/active states. In AutoConfig,
+  prefer XPCOM services from `Components.classes[...]`; importing `Services.sys.mjs` can fail in
+  that context.
+- The safe package path is loose AutoConfig files plus ad-hoc re-signing: install
+  `autoconfig.js` under both `Contents/Resources/defaults/pref/` and
+  `Contents/Resources/browser/defaults/preferences/`, install `twilight.cfg` under both
+  `Contents/Resources/` and `Contents/Resources/browser/`, then sign the final app bundle. Do not
+  patch `browser/omni.ja` with `/usr/bin/zip`; that made Twilight launch and immediately quit.
+- Do not leave exploratory diagnostics in `prefs.js` or the app bundle. If you add temporary prefs,
+  visible CSS markers, copied files, or backup bundles while debugging, remove them before handoff.
+
 ## Validation Ladder
 
 Use the narrowest relevant checks first. Do not jump straight to the most expensive command unless
@@ -518,8 +556,10 @@ If the user asks “where were we?”, “what is this worktree trying to do?”
 - inspect `git status`, `git diff`, and `git diff --cached`
 - inspect `git stash list`
 - inspect `.dex/tasks.jsonl`
-- inspect recent Pi sessions under `~/.pi/agent/sessions/--Users-george-.config-nixcfg--/`
-- inspect recent OpenCode sessions in `~/.local/share/opencode/opencode.db`
+- inspect recent Pi sessions under the repo-specific directory in `~/.pi/agent/sessions/`
+- inspect recent Claude sessions under the repo-specific directory in `~/.claude/projects/`
+- inspect recent OpenCode sessions in `~/.local/share/opencode/opencode.db` filtered to this worktree
+- inspect recent Codex sessions under `~/.codex/sessions/` that mention this worktree
 - for `ghawfr` work, inspect `.ghawfr/runs/` and related runtime artifacts
 
 The local histories are genuinely useful here; this repo has a lot of long-running, iterative

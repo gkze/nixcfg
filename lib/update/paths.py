@@ -5,9 +5,16 @@ from __future__ import annotations
 import os
 from functools import cache
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Protocol, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 ROOT_MARKER = ".root"
+
+
+class _CacheClearable(Protocol):
+    cache_clear: Callable[[], None]
 
 
 def _search_anchor(start: os.PathLike[str] | str | None = None) -> Path:
@@ -51,7 +58,7 @@ def find_root(start: os.PathLike[str] | str | None = None) -> Path:
     return _find_root_cached(os.environ.get("REPO_ROOT"), os.fspath(anchor))
 
 
-cast("Any", find_root).cache_clear = _clear_root_cache
+cast("_CacheClearable", find_root).cache_clear = _clear_root_cache
 
 
 def find_repo_root(start: os.PathLike[str] | str | None = None) -> Path:
@@ -59,7 +66,7 @@ def find_repo_root(start: os.PathLike[str] | str | None = None) -> Path:
     return find_root(start)
 
 
-cast("Any", find_repo_root).cache_clear = _clear_root_cache
+cast("_CacheClearable", find_repo_root).cache_clear = _clear_root_cache
 
 
 def get_repo_root() -> Path:
@@ -67,7 +74,7 @@ def get_repo_root() -> Path:
     return find_root()
 
 
-cast("Any", get_repo_root).cache_clear = _clear_root_cache
+cast("_CacheClearable", get_repo_root).cache_clear = _clear_root_cache
 
 
 class _RepoPathProxy(os.PathLike[str]):

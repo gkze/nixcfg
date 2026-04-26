@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from lib.import_utils import load_module_from_path
 from lib.nix.models.sources import SourceEntry
+from lib.tests._updater_helpers import collect_events as _collect
+from lib.tests._updater_helpers import load_repo_module
+from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEventKind
-from lib.update.paths import REPO_ROOT
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.core import UpdateContext
 
@@ -18,18 +18,9 @@ HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 
 def _load_module() -> ModuleType:
-    return load_module_from_path(
-        REPO_ROOT / "packages/t3code-workspace/updater.py",
-        "t3code_workspace_updater_test",
+    return load_repo_module(
+        "packages/t3code-workspace/updater.py", "t3code_workspace_updater_test"
     )
-
-
-def _run(awaitable):
-    return asyncio.run(awaitable)
-
-
-async def _collect(stream):
-    return [event async for event in stream]
 
 
 def _source_entry(*, drv_hash: str | None = None) -> SourceEntry:

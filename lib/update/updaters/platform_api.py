@@ -11,9 +11,9 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
+    from lib.update.events import EventStream
 
 from lib import json_utils
-from lib.update import process as update_process
 from lib.update.events import (
     ValueDrain,
     drain_value_events,
@@ -25,11 +25,10 @@ from lib.update.updaters.base import (
     ChecksumProvidedUpdater,
     VersionInfo,
     _verify_platform_versions,
+    stream_url_hash_mapping,
 )
 from lib.update.updaters.metadata import (
     PlatformAPIMetadata,
-    metadata_as_mapping,
-    metadata_get_str,
 )
 
 type JsonObject = json_utils.JsonObject
@@ -68,38 +67,10 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
         return values
 
     def _metadata(self, info: VersionInfo) -> PlatformAPIMetadata:
-        metadata = info.metadata
-        if isinstance(metadata, PlatformAPIMetadata):
-            return metadata
-        if isinstance(metadata, dict):
-            metadata_map = metadata_as_mapping(
-                metadata,
-                context=f"{self.name} metadata",
-            )
-            platform_info_obj = metadata_map.get("platform_info")
-            if not isinstance(platform_info_obj, dict):
-                msg = f"Expected platform_info mapping in {self.name} metadata"
-                raise TypeError(msg)
-            try:
-                platform_info = _PLATFORM_INFO_ADAPTER.validate_python(
-                    platform_info_obj,
-                    strict=True,
-                )
-            except ValidationError as exc:
-                msg = f"Malformed platform payload for {self.name}"
-                raise TypeError(msg) from exc
-            equality_fields = {
-                key: value
-                for key, value in metadata_map.items()
-                if key not in {"commit", "platform_info"} and isinstance(value, str)
-            }
-            return PlatformAPIMetadata(
-                platform_info=platform_info,
-                equality_fields=equality_fields,
-                commit=metadata_get_str(metadata_map, "commit"),
-            )
-        msg = f"Expected platform_info mapping in {self.name} metadata"
-        raise TypeError(msg)
+        return PlatformAPIMetadata.from_metadata(
+            info.metadata,
+            context=f"{self.name} metadata",
+        )
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch platform metadata and verify versions match across platforms."""
@@ -184,17 +155,34 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build result with platform download URLs and computed hashes."""
-        urls = {
-            nix_plat: self._download_url(api_plat, info)
-            for nix_plat, api_plat in self.PLATFORMS.items()
-        }
+        urls = self._download_urls(info)
         metadata = self._metadata(info)
         commit = metadata.commit
         return self._build_result_with_urls(info, hashes, urls, commit=commit)
 
+    def _download_urls(self, info: VersionInfo) -> dict[str, str]:
+        """Build per-platform download URLs from the validated API payload."""
+        return {
+            nix_plat: self._download_url(api_plat, info)
+            for nix_plat, api_plat in self.PLATFORMS.items()
+        }
+
 
 class DownloadingPlatformAPIUpdater(PlatformAPIUpdater):
     """Platform API updater that computes hashes from download URLs."""
+
+    async def _fetch_checksums_stream(
+        self,
+        info: VersionInfo,
+        session: aiohttp.ClientSession,
+    ) -> EventStream:
+        """Hash download URLs while forwarding the shared prefetch progress events."""
+        _ = session
+        async for event in stream_url_hash_mapping(
+            self.name,
+            self._download_urls(info),
+        ):
+            yield event
 
     async def fetch_checksums(
         self,
@@ -202,20 +190,14 @@ class DownloadingPlatformAPIUpdater(PlatformAPIUpdater):
         session: aiohttp.ClientSession,
     ) -> dict[str, str]:
         """Download artifacts and derive per-platform hashes."""
-        _ = session
-        urls = {
-            nix_plat: self._download_url(api_plat, info)
-            for nix_plat, api_plat in self.PLATFORMS.items()
-        }
         hashes_drain = ValueDrain[dict[str, str]]()
         async for _event in drain_value_events(
-            update_process.compute_url_hashes(self.name, urls.values()),
+            self._fetch_checksums_stream(info, session),
             hashes_drain,
             parse=expect_hash_mapping,
         ):
             pass
-        hashes_by_url = require_value(hashes_drain, "Missing hash output")
-        return {plat: hashes_by_url[url] for plat, url in urls.items()}
+        return require_value(hashes_drain, "Missing hash output")
 
 
 __all__ = ["DownloadingPlatformAPIUpdater", "PlatformAPIUpdater"]

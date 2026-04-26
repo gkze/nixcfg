@@ -9,9 +9,13 @@ import aiohttp
 import pytest
 
 from lib.tests._assertions import expect_instance
+from lib.update.events import UpdateEvent, UpdateEventKind
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.metadata import PlatformAPIMetadata
-from lib.update.updaters.platform_api import PlatformAPIUpdater
+from lib.update.updaters.platform_api import (
+    DownloadingPlatformAPIUpdater,
+    PlatformAPIUpdater,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -44,6 +48,10 @@ class _NoChecksumUpdater(_DummyPlatformUpdater):
 
 class _NoCommitUpdater(_DummyPlatformUpdater):
     COMMIT_METADATA_KEY = None
+
+
+class _DownloadingPlatformUpdater(DownloadingPlatformAPIUpdater, _DummyPlatformUpdater):
+    pass
 
 
 def _run_with_session[T](
@@ -129,6 +137,77 @@ def test_fetch_checksums_uses_checksum_field_only() -> None:
     assert payload == {
         "x86_64-linux": "hash-linux-x64",
         "aarch64-linux": "hash-linux-arm64",
+    }
+
+
+def test_downloading_platform_fetch_hashes_forwards_hash_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Download-backed platform APIs should preserve compute_url_hashes progress events."""
+    updater = _DownloadingPlatformUpdater()
+    info = VersionInfo(
+        version="1.110.0-insider",
+        metadata=PlatformAPIMetadata(
+            platform_info={
+                "x86_64-linux": {"downloadUrl": "unused"},
+                "aarch64-linux": {"downloadUrl": "unused"},
+            },
+            equality_fields={"build": "2026-02-24"},
+            commit="67c59a1440590a328f6fd0f15c37383c7576a236",
+        ),
+    )
+
+    async def _compute_url_hashes(name: str, urls: object) -> object:
+        url_list = list(urls)  # type: ignore[arg-type]
+        assert name == updater.name
+        assert url_list == [
+            "https://download.example/1.110.0-insider/linux-x64",
+            "https://download.example/1.110.0-insider/linux-arm64",
+        ]
+        yield UpdateEvent.status(name, "prefetching artifacts")
+        yield UpdateEvent.value(
+            name,
+            {
+                url_list[0]: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                url_list[1]: "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+            },
+        )
+
+    async def _convert_hash(name: str, hash_value: str) -> object:
+        yield UpdateEvent.status(name, f"converting {hash_value}")
+        yield UpdateEvent.value(name, hash_value)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_url_hashes",
+        _compute_url_hashes,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.convert_nix_hash_to_sri",
+        _convert_hash,
+    )
+
+    async def _collect() -> list[UpdateEvent]:
+        async with aiohttp.ClientSession() as session:
+            return [
+                event
+                async for event in updater.fetch_hashes(
+                    info,
+                    session,
+                )
+            ]
+
+    events = asyncio.run(_collect())
+
+    assert [event.kind for event in events] == [
+        UpdateEventKind.STATUS,
+        UpdateEventKind.STATUS,
+        UpdateEventKind.STATUS,
+        UpdateEventKind.VALUE,
+    ]
+    assert events[0].message == "prefetching artifacts"
+    assert events[-1].payload == {
+        "x86_64-linux": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "aarch64-linux": "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
     }
 
 
