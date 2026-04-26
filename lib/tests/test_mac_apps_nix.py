@@ -912,6 +912,10 @@ def test_zen_twilight_package_embeds_autoconfig_and_resigns_app() -> None:
         expect_binding(derivation_args.values, "codesignApp").value,
         Primitive(value=True),
     )
+    assert_nix_ast_equal(
+        expect_binding(derivation_args.values, "macApp").value,
+        '{ installMode = "copy"; }',
+    )
 
     install_hook = expect_instance(
         expect_binding(derivation_args.values, "postInstallApp").value,

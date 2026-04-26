@@ -10,6 +10,9 @@ mkDmgApp {
   executableName = "zen";
   info = selfSource;
   codesignApp = true;
+  # Keep Firefox's install hash stable across rebuilds by launching from
+  # /Applications/Twilight.app instead of a changing Nix store path.
+  macApp.installMode = "copy";
   postInstallApp = ''
     app="$out/Applications/Twilight.app"
     resources="$app/Contents/Resources"

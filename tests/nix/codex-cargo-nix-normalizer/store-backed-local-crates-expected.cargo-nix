@@ -1,0 +1,14 @@
+{ nixpkgs ? <nixpkgs>
+, pkgs ? import nixpkgs { config = {}; }
+, crateConfig ? {}
+, rootSrc ? ./.
+}:
+rec {
+  agentIdentity = { src = "${rootSrc}/agent-identity"; };
+  analytics = { src = "${rootSrc}/analytics"; };
+  awsAuth = { src = "${rootSrc}/aws-auth"; };
+  deviceKey = { src = "${rootSrc}/device-key"; };
+  plugin = { src = "${rootSrc}/plugin"; };
+  rolloutTrace = { src = "${rootSrc}/rollout-trace"; };
+  uds = { src = "${rootSrc}/uds"; };
+}

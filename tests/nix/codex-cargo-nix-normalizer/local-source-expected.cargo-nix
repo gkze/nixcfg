@@ -1,0 +1,12 @@
+{ nixpkgs ? <nixpkgs>
+, pkgs ? import nixpkgs { config = {}; }
+, crateConfig
+  ? if builtins.pathExists ./crate-config.nix
+    then pkgs.callPackage ./crate-config.nix {}
+    else {}
+, rootSrc ? ./.
+}:
+rec {
+  foo = { src = "${rootSrc}/cli"; };
+  bar = { src = "${rootSrc}/utils/git"; };
+}

@@ -6908,7 +6908,7 @@ rec {
         crateName = "codex-agent-identity";
         version = "0.125.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/zkzvbbhm8xx6c42ac24x5z9pxmr3g2fz-codex-0.125.0-src/agent-identity; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/agent-identity"; };
         libName = "codex_agent_identity";
         dependencies = [
           {
@@ -8012,7 +8012,7 @@ rec {
         crateName = "codex-aws-auth";
         version = "0.125.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/zkzvbbhm8xx6c42ac24x5z9pxmr3g2fz-codex-0.125.0-src/aws-auth; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/aws-auth"; };
         libName = "codex_aws_auth";
         dependencies = [
           {
@@ -9951,7 +9951,7 @@ rec {
         crateName = "codex-device-key";
         version = "0.125.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/zkzvbbhm8xx6c42ac24x5z9pxmr3g2fz-codex-0.125.0-src/device-key; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/device-key"; };
         libName = "codex_device_key";
         dependencies = [
           {
@@ -12614,7 +12614,7 @@ rec {
         crateName = "codex-rollout-trace";
         version = "0.125.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/zkzvbbhm8xx6c42ac24x5z9pxmr3g2fz-codex-0.125.0-src/rollout-trace; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/rollout-trace"; };
         libName = "codex_rollout_trace";
         dependencies = [
           {
@@ -13785,7 +13785,7 @@ rec {
         crateName = "codex-uds";
         version = "0.125.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../../../../../../nix/store/zkzvbbhm8xx6c42ac24x5z9pxmr3g2fz-codex-0.125.0-src/uds; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/uds"; };
         libName = "codex_uds";
         dependencies = [
           {

@@ -13,71 +13,45 @@ from lib.import_utils import load_module_from_path
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.update.paths import REPO_ROOT
 
+_FIXTURES = REPO_ROOT / "tests" / "nix" / "codex-cargo-nix-normalizer"
+
 
 def _load_normalizer_module() -> ModuleType:
     module_path = REPO_ROOT / "packages" / "codex" / "normalize_cargo_nix.py"
     return load_module_from_path(module_path, "_codex_normalizer")
 
 
+def _fixture(name: str) -> str:
+    return (_FIXTURES / name).read_text(encoding="utf-8")
+
+
 def test_normalize_adds_root_src_and_rewrites_local_source_paths() -> None:
     """Generated Cargo.nix should gain rootSrc and root-relative sources."""
     module = _load_normalizer_module()
 
-    sample = """{ nixpkgs ? <nixpkgs>
-, pkgs ? import nixpkgs { config = {}; }
-, crateConfig
-  ? if builtins.pathExists ./crate-config.nix
-    then pkgs.callPackage ./crate-config.nix {}
-    else {}
-}:
-rec {
-  foo = { src = ./cli; };
-  bar = { src = ./utils/git; };
-}
-"""
+    sample = _fixture("local-source-input.cargo-nix")
 
     normalized, rewrites, added_root_src = module.normalize(sample)
 
     assert added_root_src is True
     assert rewrites == 2
-    assert_nix_ast_equal(
-        normalized,
-        """{ nixpkgs ? <nixpkgs>
-, pkgs ? import nixpkgs { config = {}; }
-, crateConfig
-  ? if builtins.pathExists ./crate-config.nix
-    then pkgs.callPackage ./crate-config.nix {}
-    else {}
-, rootSrc ? ./.
-}:
-rec {
-  foo = { src = "${rootSrc}/cli"; };
-  bar = { src = "${rootSrc}/utils/git"; };
-}
-""",
-    )
+    assert_nix_ast_equal(normalized, _fixture("local-source-expected.cargo-nix"))
 
 
 def test_normalize_rewrites_supported_store_backed_local_crates() -> None:
     """Store-backed local Codex crates should normalize back to ``rootSrc`` paths."""
     module = _load_normalizer_module()
 
-    sample = """{ nixpkgs ? <nixpkgs>
-, pkgs ? import nixpkgs { config = {}; }
-, crateConfig ? {}
-}:
-rec {
-  analytics = { src = ../../../nix/store/demo-source/analytics; };
-  plugin = { src = ../../../nix/store/demo-source/plugin; };
-}
-"""
+    sample = _fixture("store-backed-local-crates-input.cargo-nix")
 
     normalized, rewrites, added_root_src = module.normalize(sample)
 
     assert added_root_src is True
-    assert rewrites == 2
-    assert 'analytics = { src = "${rootSrc}/analytics"; };' in normalized
-    assert 'plugin = { src = "${rootSrc}/plugin"; };' in normalized
+    assert rewrites == 7
+    assert_nix_ast_equal(
+        normalized,
+        _fixture("store-backed-local-crates-expected.cargo-nix"),
+    )
 
 
 def test_normalize_is_noop_for_checked_in_codex_cargo_nix() -> None:

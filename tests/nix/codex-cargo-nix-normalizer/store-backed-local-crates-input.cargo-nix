@@ -1,0 +1,13 @@
+{ nixpkgs ? <nixpkgs>
+, pkgs ? import nixpkgs { config = {}; }
+, crateConfig ? {}
+}:
+rec {
+  agentIdentity = { src = ../../../nix/store/demo-source/agent-identity; };
+  analytics = { src = ../../../nix/store/demo-source/analytics; };
+  awsAuth = { src = ../../../../../../../nix/store/demo-source/aws-auth; };
+  deviceKey = { src = ../../../nix/store/demo-source/device-key; };
+  plugin = { src = ../../../nix/store/demo-source/plugin; };
+  rolloutTrace = { src = ../../../nix/store/demo-source/rollout-trace; };
+  uds = { src = ../../../nix/store/demo-source/uds; };
+}

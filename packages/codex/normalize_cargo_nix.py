@@ -39,6 +39,7 @@ from lib.cargo_nix_normalizer import normalize as normalize_cargo_nix  # noqa: E
 from lib.update.paths import get_repo_root  # noqa: E402
 
 _LOCAL_PATH_PREFIXES = (
+    "agent-identity",
     "analytics",
     "ansi-escape",
     "app-server",
@@ -49,6 +50,7 @@ _LOCAL_PATH_PREFIXES = (
     "arg0",
     "artifacts",
     "async-utils",
+    "aws-auth",
     "backend-client",
     "chatgpt",
     "cli",
@@ -69,6 +71,7 @@ _LOCAL_PATH_PREFIXES = (
     "core-plugins",
     "core-skills",
     "debug-client",
+    "device-key",
     "exec",
     "exec-server",
     "execpolicy",
@@ -100,6 +103,7 @@ _LOCAL_PATH_PREFIXES = (
     "response-debug-context",
     "rmcp-client",
     "rollout",
+    "rollout-trace",
     "sandboxing",
     "secrets",
     "shell-command",
@@ -113,6 +117,7 @@ _LOCAL_PATH_PREFIXES = (
     "tools",
     "test-macros",
     "tui",
+    "uds",
     "utils",
     "v8-poc",
     "windows-sandbox-rs",

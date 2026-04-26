@@ -85,6 +85,37 @@ def test_resolve_profile_dir_reports_auto_detect_non_directory_and_absolute_miss
         zentool.resolve_profile_dir(str(missing))
 
 
+def test_resolve_profile_dir_matches_firefox_style_directory_display_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Human profile selectors should work without profiles.ini."""
+    profiles_dir = tmp_path / "Profiles"
+    profile_dir = profiles_dir / "vb4m4ab8.Default (twilight)"
+    profile_dir.mkdir(parents=True)
+    monkeypatch.setattr(zentool, "ZEN_PROFILES", profiles_dir)
+    monkeypatch.setattr(zentool, "_profiles_from_ini", list)
+
+    assert zentool.resolve_profile_dir("Default (twilight)") == profile_dir
+
+
+def test_resolve_profile_dir_rejects_ambiguous_directory_display_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Display-name fallback should not pick an arbitrary profile."""
+    profiles_dir = tmp_path / "Profiles"
+    (profiles_dir / "aaaaaaaa.Default").mkdir(parents=True)
+    (profiles_dir / "bbbbbbbb.Default").mkdir()
+    monkeypatch.setattr(zentool, "ZEN_PROFILES", profiles_dir)
+    monkeypatch.setattr(zentool, "_profiles_from_ini", list)
+
+    with pytest.raises(zentool.ZenFoldersError, match="Profile 'Default' is ambiguous"):
+        zentool.resolve_profile_dir("Default")
+
+
 def test_session_file_rejects_non_file_session_target(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

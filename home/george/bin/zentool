@@ -1046,6 +1046,28 @@ def _available_profile_hints() -> str:
     return "<none found>"
 
 
+def _profile_display_name_from_directory(path: Path) -> str:
+    """Return the Firefox-style display name for a profile directory."""
+    _prefix, separator, display_name = path.name.partition(".")
+    if separator and display_name:
+        return display_name
+    return path.name
+
+
+def _matching_profile_directories(profile: str) -> list[Path]:
+    """Find profile directories matching either full directory or display name."""
+    if not ZEN_PROFILES.exists():
+        return []
+    profile_key = profile.strip().casefold()
+    directories = sorted(path for path in ZEN_PROFILES.iterdir() if path.is_dir())
+    return [
+        path
+        for path in directories
+        if path.name.casefold() == profile_key
+        or _profile_display_name_from_directory(path).casefold() == profile_key
+    ]
+
+
 def resolve_profile_dir(profile: str | None) -> Path:
     """Resolve a profile selector into an on-disk profile directory path."""
     if profile is None or not profile.strip():
@@ -1081,6 +1103,14 @@ def resolve_profile_dir(profile: str | None) -> Path:
     for profile_name, path, _is_default in _profiles_from_ini():
         if profile_name and profile_name.casefold() == profile_key:
             return path
+
+    matching_directories = _matching_profile_directories(profile)
+    if len(matching_directories) == 1:
+        return matching_directories[0]
+    if len(matching_directories) > 1:
+        matches = ", ".join(path.name for path in matching_directories)
+        msg = f"Profile {profile!r} is ambiguous. Matches: {matches}"
+        raise ZenFoldersError(msg)
 
     msg = f"Profile {profile!r} not found. Available: {_available_profile_hints()}"
     raise ZenFoldersError(msg)
