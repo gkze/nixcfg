@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import lz4.block
@@ -31,7 +31,7 @@ def _minimal_session(zentool: ModuleType) -> object:
     )
 
 
-def _make_args(**overrides: object) -> argparse.Namespace:
+def _make_args(**overrides: object) -> SimpleNamespace:
     values: dict[str, object] = {
         "profile": None,
         "asset_dir": "/tmp/assets",
@@ -41,7 +41,7 @@ def _make_args(**overrides: object) -> argparse.Namespace:
         "assets": False,
     }
     values.update(overrides)
-    return argparse.Namespace(**values)
+    return SimpleNamespace(**values)
 
 
 def _encode_session_bytes(zentool: ModuleType, payload: object) -> bytes:

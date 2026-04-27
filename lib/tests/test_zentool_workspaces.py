@@ -87,7 +87,7 @@ def test_coerce_authored_workspace_accepts_explicit_tree_mapping(
         "Work",
         {
             "icon": "  briefcase  ",
-            "hasCollapsedPinnedTabs": 1,
+            "hasCollapsedPinnedTabs": True,
             "theme": {"gradientColors": ["#123456"], "opacity": 0.75, "texture": 2},
             "tree": [
                 {"Docs": {"url": "https://docs.example.com", "role": "essential"}},
@@ -166,6 +166,11 @@ def test_coerce_authored_workspace_accepts_implicit_tree_mapping(
             {"theme": []},
             "workspace 'Work' theme must be a mapping",
             id="theme-not-mapping",
+        ),
+        pytest.param(
+            {"hasCollapsedPinnedTabs": 1},
+            "workspace 'Work' hasCollapsedPinnedTabs must be a boolean",
+            id="collapsed-pinned-not-bool",
         ),
     ],
 )

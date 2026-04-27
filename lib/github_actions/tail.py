@@ -60,6 +60,9 @@ class LiveJobPageInfo:
     steps_url: str | None = None
     streaming_url: str | None = None
     backscroll_urls: dict[str, str] = field(default_factory=dict)
+    check_steps_found: bool = False
+    static_step_count: int = 0
+    logged_in: bool = False
 
     def backscroll_url_for(self, step_id: str) -> str | None:
         """Return the exact per-step backscroll URL embedded in the job page."""
@@ -515,6 +518,10 @@ class GitHubActionsTailer:
                             f"[{current_job.conclusion or current_job.status}] =="
                         )
                         return
+                    if _job_page_has_static_steps_without_live_metadata(job_page):
+                        raise RuntimeError(
+                            _missing_live_metadata_message(job=current_job)
+                        )
                     await self._sleep()
                     continue
 
@@ -717,6 +724,14 @@ def _html_attr(node: object, *names: str) -> str | None:
     return None
 
 
+def _html_has_attr(node: object, *names: str) -> bool:
+    """Return whether a BeautifulSoup node has any of the named attributes."""
+    has_attr = getattr(node, "has_attr", None)
+    if not callable(has_attr):
+        return False
+    return any(has_attr(name) for name in names)
+
+
 class _CheckStepsHTMLParser:
     """Compatibility wrapper around BeautifulSoup-backed job-page extraction."""
 
@@ -764,6 +779,10 @@ def _parse_live_job_page_from_html(html: str, *, job_url: str) -> LiveJobPageInf
     soup = BeautifulSoup(html, "html.parser")
     info = LiveJobPageInfo()
     check_steps = soup.find("check-steps")
+    if check_steps is not None:
+        info.check_steps_found = True
+        info.static_step_count = len(soup.find_all("check-step"))
+        info.logged_in = _html_has_attr(check_steps, "data-logged-in", "logged-in")
     steps_url = _html_attr(check_steps, *_JOB_STEPS_URL_ATTRIBUTES)
     if steps_url is not None:
         info.steps_url = _parse_steps_url_candidate(
@@ -808,13 +827,41 @@ def _job_page_has_live_metadata(info: LiveJobPageInfo) -> bool:
     return info.steps_url is not None or bool(info.backscroll_urls)
 
 
+def _job_page_has_static_steps_without_live_metadata(info: LiveJobPageInfo) -> bool:
+    return (
+        info.check_steps_found and info.static_step_count > 0 and info.steps_url is None
+    )
+
+
+def _missing_live_metadata_message(*, job: JobSummary) -> str:
+    return (
+        "GitHub did not expose live log metadata for job "
+        f"{job.name!r}. The job page has static check-step records but no "
+        "jobStepsUrl endpoint, so nixcfg cannot poll live log lines. "
+        "This usually means GitHub served a logged-out Actions page; retry with "
+        "--chrome-debugging-url for a logged-in Chrome session or "
+        "--allow-playwright-login."
+    )
+
+
 def _prefer_richer_job_page_info(
     primary: LiveJobPageInfo,
     secondary: LiveJobPageInfo,
 ) -> LiveJobPageInfo:
+    primary.check_steps_found = primary.check_steps_found or secondary.check_steps_found
+    primary.static_step_count = max(
+        primary.static_step_count, secondary.static_step_count
+    )
+    primary.logged_in = primary.logged_in or secondary.logged_in
     if _job_page_has_live_metadata(secondary) and not _job_page_has_live_metadata(
         primary
     ):
+        secondary.check_steps_found = primary.check_steps_found
+        secondary.static_step_count = max(
+            primary.static_step_count,
+            secondary.static_step_count,
+        )
+        secondary.logged_in = primary.logged_in or secondary.logged_in
         return secondary
     if secondary.steps_url is not None and primary.steps_url is None:
         primary.steps_url = secondary.steps_url

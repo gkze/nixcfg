@@ -8,7 +8,7 @@ from pathlib import Path
 from lib.update.paths import REPO_ROOT
 
 _REPO_ROOT = Path(REPO_ROOT)
-_EXCLUDED_PARTS = {".venv", "venv", "__pycache__", "mutants"}
+_EXCLUDED_PARTS = {".claude", ".venv", "venv", "__pycache__", "mutants"}
 _SELF_PATH = Path(__file__).resolve()
 _FORBIDDEN_NIX_TEMPLATE_FRAGMENTS = (
     "fetchFromGitHub {",

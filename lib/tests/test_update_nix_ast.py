@@ -6,12 +6,14 @@ import pytest
 from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.let import LetExpression
 from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.path import NixPath
-from nix_manipulator.expressions.primitive import StringPrimitive
+from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
@@ -26,6 +28,7 @@ from lib.update.flake import (
 from lib.update.nix import (
     _build_fetch_from_github_call,
     _build_fetch_from_github_expr,
+    _build_fetch_pnpm_deps_expr,
     _build_fetch_yarn_deps_expr,
     _build_fetchgit_call,
     _build_fetchgit_expr,
@@ -34,6 +37,7 @@ from lib.update.nix import (
     _build_overlay_attr_expr,
     _build_overlay_expr,
     _build_overlay_expression,
+    _build_package_path_attr_expr,
 )
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
@@ -331,6 +335,49 @@ def test_build_fetch_yarn_deps_expr_is_parseable() -> None:
     )
 
 
+def test_build_fetch_pnpm_deps_expr_is_parseable() -> None:
+    """FetchPnpmDeps helper should build the dependency derivation via the Nix AST."""
+    src_call = _build_fetch_from_github_call(
+        "element-hq",
+        "element-web",
+        tag="v1.12.14",
+        hash_value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    )
+    expr = _build_fetch_pnpm_deps_expr(
+        src_call,
+        pname="element",
+        version="1.12.14",
+        fetcher_version=3,
+    )
+
+    assert_nix_ast_equal(
+        expr,
+        LetExpression(
+            local_variables=[
+                Binding(
+                    name="src",
+                    value=src_call,
+                ),
+            ],
+            value=FunctionCall(
+                name=identifier_attr_path("pkgs", "fetchPnpmDeps"),
+                argument=AttributeSet(
+                    values=[
+                        Binding(name="pname", value=StringPrimitive(value="element")),
+                        Binding(name="version", value=StringPrimitive(value="1.12.14")),
+                        Inherit(names=[Identifier(name="src")]),
+                        Binding(name="fetcherVersion", value=Primitive(value=3)),
+                        Binding(
+                            name="hash",
+                            value=identifier_attr_path("pkgs", "lib", "fakeHash"),
+                        ),
+                    ],
+                ),
+            ),
+        ),
+    )
+
+
 def test_build_fetchgit_expr_is_parseable() -> None:
     """Fetchgit helper should emit valid Nix via nix-manipulator."""
     expr = _build_fetchgit_expr(
@@ -405,6 +452,94 @@ def test_build_overlay_attr_expr_skips_empty_attr_segments() -> None:
                 attribute="passthru",
             ),
             attribute="denoDeps",
+        ),
+    )
+
+
+def test_build_package_path_attr_expr_calls_package_with_flake_context() -> None:
+    """Package path helper should evaluate helper packages outside overlay exports."""
+    expr = _build_package_path_attr_expr(
+        "t3code-workspace",
+        "",
+        system="aarch64-darwin",
+        repo_root=str(REPO_ROOT),
+    )
+
+    flake_url = f"git+file://{REPO_ROOT}?dirty=1"
+    package_expr = FunctionCall(
+        name=FunctionCall(
+            name=identifier_attr_path("pkgs", "callPackage"),
+            argument=NixPath(path="./packages/t3code-workspace/default.nix"),
+        ),
+        argument=AttributeSet(
+            values=[
+                Binding(name="inputs", value=identifier_attr_path("flake", "inputs")),
+                Binding(name="outputs", value=Identifier(name="flake")),
+            ]
+        ),
+    )
+    expected = LetExpression(
+        local_variables=[
+            Binding(
+                name="flake",
+                value=FunctionCall(
+                    name=identifier_attr_path("builtins", "getFlake"),
+                    argument=StringPrimitive(value=flake_url),
+                ),
+            ),
+            Binding(name="system", value=StringPrimitive(value="aarch64-darwin")),
+            Binding(
+                name="pkgs",
+                value=FunctionCall(
+                    name=FunctionCall(
+                        name=Identifier(name="import"),
+                        argument=identifier_attr_path("flake", "inputs", "nixpkgs"),
+                    ),
+                    argument=AttributeSet(
+                        values=[
+                            Inherit(names=[Identifier(name="system")]),
+                            Binding(
+                                name="config",
+                                value=AttributeSet(
+                                    values=[
+                                        Binding(
+                                            name="allowUnfree",
+                                            value=Primitive(value=True),
+                                        ),
+                                        Binding(
+                                            name="allowInsecurePredicate",
+                                            value=FunctionDefinition(
+                                                argument_set=Identifier(name="_"),
+                                                output=Primitive(value=True),
+                                            ),
+                                        ),
+                                    ]
+                                ),
+                            ),
+                        ],
+                    ),
+                ),
+            ),
+        ],
+        value=package_expr,
+    )
+
+    assert_nix_ast_equal(expr, expected)
+
+    attr_expr = _build_package_path_attr_expr(
+        "t3code-workspace",
+        ".passthru.node_modules",
+        system="aarch64-darwin",
+        repo_root=str(REPO_ROOT),
+    )
+    assert_nix_ast_equal(
+        attr_expr,
+        LetExpression(
+            local_variables=expected.local_variables,
+            value=Select(
+                expression=Select(expression=package_expr, attribute="passthru"),
+                attribute="node_modules",
+            ),
         ),
     )
 

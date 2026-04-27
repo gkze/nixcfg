@@ -1,89 +1,110 @@
 ---
-Work:
-  icon: "🏢"
-  tree:
-    - Gmail:
-        url: https://mail.google.com/mail/u/0/#inbox
-        role: essential
-    - Calendar:
-        url: https://calendar.google.com/calendar/u/0/r
-        role: essential
-    - Drive:
-        url: https://drive.google.com/drive/u/0/home
-        role: essential
-    - Rippling:
-        url: https://app.rippling.com/dashboard
-        role: essential
-    - Town:
-        url: https://www.town.com/
-        role: essential
-    - GitHub:
-        url: https://github.com/
-        role: essential
-    - AI / LLM:
-        - Anthropic: https://platform.claude.com
-        - Cursor: https://cursor.com/dashboard
-        - Exa: https://dashboard.exa.ai/home
-        - OpenAI: https://platform.openai.com
-        - OpenRouter: https://openrouter.ai
-    - Voice AI:
-        - Cartesia: https://play.cartesia.ai/dashboard
-        - Deepgram: https://console.deepgram.com/project/0bae0bb4-0800-481e-a23a-796a283fe168
-        - ElevenLabs: https://elevenlabs.io/app/home
-        - Inworld: https://platform.inworld.ai/v2/workspaces/default-gqjfmzgft0udjm4nixzfma
-    - AI Tooling:
-        - Browserbase: https://browserbase.com
-        - E2B: https://e2b.dev
-    - Auth:
-        - Clerk: https://dashboard.clerk.com
-    - CRM & Marketing:
-        - HubSpot: https://hubspot.com
-        - NewsData: https://newsdata.io
-    - Data & Backend:
-        children:
-          - Convex: https://dashboard.convex.dev
-          - PlanetScale: https://app.planetscale.com
-          - Supabase: https://supabase.com
-    - Finance & HR:
-        - Branch: https://app.link.com
-        - Ramp: https://app.ramp.com
-        - Rippling: https://app.rippling.com
-    - Email:
-        - Resend: https://resend.com
-        - SendGrid: https://sendgrid.com
-    - Infrastructure:
-        children:
-          - AWS: https://us-west-2.console.aws.amazon.com/console/home?region=us-west-2#
-          - Fly.io: https://fly.io
-          - Google Cloud: https://console.cloud.google.com
-          - Hatchet: https://cloud.onhatchet.run
-          - Meter: https://dashboard.meter.com
-          - Render: https://dashboard.render.com
-          - Temporal: https://cloud.temporal.io
-          - Vercel: https://vercel.com
-    - News:
-        children:
-          - DevHunt: https://devhunt.org
-          - Hacker News: https://news.ycombinator.com
-          - Lobsters: https://lobste.rs
-          - Product Hunt: https://producthunt.com
-          - Reddit: https://reddit.com
-          - Terminal Trove: https://terminaltrove.com
-          - X: https://x.com
-    - Observability & Analytics:
-        children:
-          - Axiom: https://app.axiom.co
-          - Datadog: https://us5.datadoghq.com
-          - LangSmith: https://smith.langchain.com
-          - PostHog: https://posthog.com
-          - Sentry: https://sentry.io
-          - Statsig: https://console.statsig.com
-    - Productivity:
-        children:
-          - Dropbox: https://dropbox.com
-          - Linear: https://linear.app
-          - Notion: https://notion.so
-          - Slack: https://app.slack.com
-Home:
-  icon: "🏡"
-  tree: []
+containers:
+  Town:
+    name: Town
+    icon: briefcase
+    color: orange
+  Personal:
+    name: Personal
+    icon: fingerprint
+    color: blue
+workspaces:
+  Work:
+    icon: "🏢"
+    container: Town
+    tree:
+      - Gmail:
+          url: https://mail.google.com/mail/u/0/#inbox
+          role: essential
+      - Calendar:
+          url: https://calendar.google.com/calendar/u/0/r
+          role: essential
+      - Drive:
+          url: https://drive.google.com/drive/u/0/home
+          role: essential
+      - Rippling:
+          url: https://app.rippling.com/dashboard
+          role: essential
+      - Town:
+          url: https://www.town.com/
+          role: essential
+      - GitHub:
+          url: https://github.com/
+          role: essential
+      - AI / LLM:
+          - Anthropic: https://platform.claude.com
+          - Cursor: https://cursor.com/dashboard
+          - Exa: https://dashboard.exa.ai/home
+          - OpenAI: https://platform.openai.com
+          - OpenRouter: https://openrouter.ai
+      - Voice AI:
+          - Cartesia: https://play.cartesia.ai/dashboard
+          - Deepgram: https://console.deepgram.com/project/0bae0bb4-0800-481e-a23a-796a283fe168
+          - ElevenLabs: https://elevenlabs.io/app/home
+          - Inworld: https://platform.inworld.ai/v2/workspaces/default-gqjfmzgft0udjm4nixzfma
+      - AI Tooling:
+          - Browserbase: https://browserbase.com
+          - E2B: https://e2b.dev
+      - Auth:
+          - Clerk: https://dashboard.clerk.com
+      - CRM & Marketing:
+          - HubSpot: https://hubspot.com
+          - NewsData: https://newsdata.io
+      - Data & Backend:
+          children:
+            - Convex: https://dashboard.convex.dev
+            - PlanetScale: https://app.planetscale.com
+            - Supabase: https://supabase.com
+      - Finance & HR:
+          - Branch: https://app.link.com
+          - Ramp: https://app.ramp.com
+          - Rippling: https://app.rippling.com
+      - Email:
+          - Resend: https://resend.com
+          - SendGrid: https://sendgrid.com
+      - Infrastructure:
+          children:
+            - AWS: https://us-west-2.console.aws.amazon.com/console/home?region=us-west-2#
+            - Fly.io: https://fly.io
+            - Google Cloud: https://console.cloud.google.com
+            - Hatchet: https://cloud.onhatchet.run
+            - Meter: https://dashboard.meter.com
+            - Render: https://dashboard.render.com
+            - Temporal: https://cloud.temporal.io
+            - Vercel: https://vercel.com
+      - News:
+          children:
+            - DevHunt: https://devhunt.org
+            - Hacker News: https://news.ycombinator.com
+            - Lobsters: https://lobste.rs
+            - Product Hunt: https://producthunt.com
+            - Reddit: https://reddit.com
+            - Terminal Trove: https://terminaltrove.com
+            - X: https://x.com
+      - Observability & Analytics:
+          children:
+            - Axiom: https://app.axiom.co
+            - Datadog: https://us5.datadoghq.com
+            - LangSmith: https://smith.langchain.com
+            - PostHog: https://posthog.com
+            - Sentry: https://sentry.io
+            - Statsig: https://console.statsig.com
+      - Productivity:
+          children:
+            - Dropbox: https://dropbox.com
+            - Linear: https://linear.app
+            - Notion: https://notion.so
+            - Slack: https://app.slack.com
+  Home:
+    icon: "🏡"
+    container: Personal
+    tree:
+      - Gmail:
+          url: https://mail.google.com/mail/u/0/#inbox
+          role: essential
+      - Calendar:
+          url: https://calendar.google.com/calendar/u/0/r
+          role: essential
+      - Drive:
+          url: https://drive.google.com/drive/u/0/home
+          role: essential

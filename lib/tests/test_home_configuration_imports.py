@@ -5,7 +5,6 @@ from __future__ import annotations
 from functools import cache
 from pathlib import Path
 
-from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.set import AttributeSet
 
@@ -59,8 +58,8 @@ def test_george_home_configuration_imports_canonical_exported_modules() -> None:
     )
 
 
-def test_george_home_configuration_preserves_opencode_settings_store_filename() -> None:
-    """The shared opencode state links should keep the persisted settings filename."""
+def test_george_home_configuration_drops_opencode_electron_state_bridge() -> None:
+    """OpenCode Electron should use the normalized app id without a side bridge."""
     home = expect_instance(
         expect_binding(_configuration_output().values, "home").value,
         AttributeSet,
@@ -69,15 +68,10 @@ def test_george_home_configuration_preserves_opencode_settings_store_filename() 
         expect_binding(home.values, "activation").value,
         AttributeSet,
     )
-    link_step = expect_instance(
-        expect_binding(activation.values, "opencodeElectronStateLinks").value,
-        FunctionCall,
-    )
 
-    assert (
-        'link_state_file "$OPENCODE_TAURI_STATE_DIR/opencode.settings.dat" '
-        '"$OPENCODE_ELECTRON_STATE_DIR/opencode.settings.dat"' in str(link_step)
-    )
+    assert "opencodeElectronStateLinks" not in {
+        binding.name for binding in activation.values
+    }
 
 
 def test_george_home_configuration_materializes_vscode_settings_after_link_generation() -> (

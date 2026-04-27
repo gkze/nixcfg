@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -142,6 +143,34 @@ def test_session_file_rejects_non_file_session_target(
         zentool.session_file("default")
 
 
+def test_backup_file_uses_unique_timestamped_path_and_wraps_copy_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Generic profile-file backups should avoid collisions and report copy failures."""
+    source = tmp_path / "containers.json"
+    source.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(zentool.time, "strftime", lambda _fmt: "20260427-120000")
+    monkeypatch.setattr(zentool.time, "time_ns", lambda: 7)
+    (tmp_path / "containers.json.20260427-120000-000000007.bak").write_text(
+        "old\n",
+        encoding="utf-8",
+    )
+
+    backup = zentool.backup_file(source)
+
+    assert backup.name == "containers.json.20260427-120000-000000007.1.bak"
+    assert backup.read_text(encoding="utf-8") == "{}\n"
+
+    def raise_oserror(_source: Path, _backup: Path) -> None:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(zentool.shutil, "copy2", raise_oserror)
+    with pytest.raises(zentool.ZenFoldersError, match="Failed to create backup"):
+        zentool.backup_file(source)
+
+
 @pytest.mark.parametrize(
     ("decompress_error", "payload"),
     [
@@ -174,6 +203,23 @@ def test_read_session_wraps_decode_failures(
     with pytest.raises(
         zentool.SessionFormatError, match="Unable to decode session file"
     ):
+        zentool.read_session(session_path)
+
+
+def test_read_session_wraps_payload_validation_failures(
+    tmp_path: Path,
+    zentool: ModuleType,
+) -> None:
+    """Session shape errors should stay behind the user-facing session error."""
+    session_path = tmp_path / zentool.SESSION_FILENAME
+    payload = json.dumps({"tabs": [{"entries": []}]}).encode("utf-8")
+    session_path.write_bytes(
+        zentool.SESSION_HEADER_PREFIX
+        + len(payload).to_bytes(4, "little")
+        + zentool.lz4.block.compress(payload, store_size=False)
+    )
+
+    with pytest.raises(zentool.SessionFormatError, match="Invalid session payload"):
         zentool.read_session(session_path)
 
 

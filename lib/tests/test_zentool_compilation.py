@@ -171,6 +171,7 @@ def test_compile_folder_children_only_assigns_parent_to_direct_tabs(
             "workspace_key": "work",
             "workspace_uuid": "{ws}",
             "inherited_container_id": 7,
+            "preserve_existing_context": True,
             "existing_folders": {},
             "existing_groups": {},
             "parent_path": ("Parent",),
@@ -254,6 +255,7 @@ def test_build_workspace_compilation_reuses_existing_space_and_builds_tabs(
             "workspace_key": "work",
             "workspace_uuid": "{ws-existing}",
             "inherited_container_id": 42,
+            "preserve_existing_context": True,
             "existing_folders": {},
             "existing_groups": {},
         }

@@ -60,6 +60,12 @@
       url = "github:nix-community/nixvim";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    nh = {
+      # v4.3.x captures and drops Darwin activation logs even with
+      # --show-activation-logs; keep the last release before that change.
+      url = "github:nix-community/nh/v4.2.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     bun2nix = {
       # Temporary fork until upstream bun2nix handles 3-tuple tarball entries.
       url = "github:gkze/bun2nix?ref=fix-source-package-routing";
@@ -277,6 +283,7 @@
         inputs.lumen.overlays.default
         inputs.neovim-nightly-overlay.overlays.default
         inputs.rust-overlay.overlays.default
+        inputs.nh.overlays.default
         (
           final: prev:
           let

@@ -15,10 +15,10 @@ from lib.update.paths import REPO_ROOT
 _NODE = shutil.which("node")
 
 
-def _run_node_json(script: str, source_path: Path) -> object:
+def _run_node_json(script: str, source_path: Path, *extra_paths: Path) -> object:
     assert _NODE is not None
     result = subprocess.run(  # noqa: S603
-        [_NODE, "-e", script, str(source_path)],
+        [_NODE, "-e", script, str(source_path), *(str(path) for path in extra_paths)],
         capture_output=True,
         check=True,
         text=True,
@@ -65,14 +65,25 @@ def test_twilight_cfg_targets_common_dialog_accept_button_inside_shadow_root() -
             const fs = require("node:fs");
             const vm = require("node:vm");
             const sourcePath = process.argv[1];
+            const cssPath = process.argv[2];
             const source = fs.readFileSync(sourcePath, "utf8");
+            const cssSource = fs.readFileSync(cssPath, "utf8");
             const observed = [];
             const reports = [];
+            let resolvedCssPath = null;
             const ObserverService = {
               addObserver(observer, topic) {
                 observed.push({ observer, topic });
               },
             };
+            class FakeFile {
+              constructor() {
+                this.pathSegments = [];
+              }
+              append(segment) {
+                this.pathSegments.push(segment);
+              }
+            }
             const classTargets = {
               "@mozilla.org/observer-service;1": {
                 getService(service) {
@@ -80,6 +91,54 @@ def test_twilight_cfg_targets_common_dialog_accept_button_inside_shadow_root() -
                     throw new Error("unexpected observer service interface");
                   }
                   return ObserverService;
+                },
+              },
+              "@mozilla.org/file/directory_service;1": {
+                getService(service) {
+                  if (service !== Components.interfaces.nsIProperties) {
+                    throw new Error("unexpected directory service interface");
+                  }
+                  return {
+                    get(name, iface) {
+                      if (name !== "Home" || iface !== Components.interfaces.nsIFile) {
+                        throw new Error("unexpected directory lookup");
+                      }
+                      return new FakeFile();
+                    },
+                  };
+                },
+              },
+              "@mozilla.org/network/file-input-stream;1": {
+                createInstance(service) {
+                  if (service !== Components.interfaces.nsIFileInputStream) {
+                    throw new Error("unexpected file input stream interface");
+                  }
+                  return {
+                    init(file) {
+                      resolvedCssPath = file.pathSegments.join("/");
+                    },
+                    close() {},
+                  };
+                },
+              },
+              "@mozilla.org/intl/converter-input-stream;1": {
+                createInstance(service) {
+                  if (service !== Components.interfaces.nsIConverterInputStream) {
+                    throw new Error("unexpected converter stream interface");
+                  }
+                  let done = false;
+                  return {
+                    init() {},
+                    readString(_count, out) {
+                      if (done) {
+                        return 0;
+                      }
+                      done = true;
+                      out.value = cssSource;
+                      return cssSource.length;
+                    },
+                    close() {},
+                  };
                 },
               },
             };
@@ -92,7 +151,13 @@ def test_twilight_cfg_targets_common_dialog_accept_button_inside_shadow_root() -
                   throw new Error(`unexpected XPCOM class lookup: ${String(prop)}`);
                 },
               }),
-              interfaces: { nsIObserverService: Symbol("nsIObserverService") },
+              interfaces: {
+                nsIConverterInputStream: Symbol("nsIConverterInputStream"),
+                nsIFile: Symbol("nsIFile"),
+                nsIFileInputStream: Symbol("nsIFileInputStream"),
+                nsIObserverService: Symbol("nsIObserverService"),
+                nsIProperties: Symbol("nsIProperties"),
+              },
               utils: {
                 reportError(error) {
                   reports.push(String(error && error.stack ? error.stack : error));
@@ -119,6 +184,14 @@ def test_twilight_cfg_targets_common_dialog_accept_button_inside_shadow_root() -
               },
             });
 
+            class FakeStyleDeclaration {
+              constructor() {
+                this.values = {};
+              }
+              setProperty(name, value, priority) {
+                this.values[name] = { value, priority };
+              }
+            }
             class FakeMutationObserver {
               constructor(callback) {
                 this.callback = callback;
@@ -128,13 +201,17 @@ def test_twilight_cfg_targets_common_dialog_accept_button_inside_shadow_root() -
                 target.observerCallback = this.callback;
               }
             }
-            class FakeButton {
+            class FakeElement {
               constructor() {
-                this.attrs = new Map([
-                  ["part", "dialog-button"],
-                  ["default", "true"],
-                ]);
-                this.ownerGlobal = { MutationObserver: FakeMutationObserver };
+                this.attrs = new Map();
+                this.children = new Map();
+                this.style = new FakeStyleDeclaration();
+              }
+              addChild(selector, child) {
+                this.children.set(selector, child);
+              }
+              querySelector(selector) {
+                return this.children.get(selector) || null;
               }
               getAttribute(name) {
                 return this.attrs.has(name) ? this.attrs.get(name) : null;
@@ -146,11 +223,41 @@ def test_twilight_cfg_targets_common_dialog_accept_button_inside_shadow_root() -
                 this.attrs.delete(name);
               }
             }
+            class FakeButton extends FakeElement {
+              constructor() {
+                super();
+                this.attrs = new Map([
+                  ["part", "dialog-button"],
+                  ["default", "true"],
+                ]);
+                this.ownerGlobal = { MutationObserver: FakeMutationObserver };
+              }
+            }
 
             const button = new FakeButton();
+            const buttonBox = new FakeElement();
+            const buttonIcon = new FakeElement();
+            const buttonText = new FakeElement();
+            button.addChild(".button-box", buttonBox);
+            button.addChild(".button-icon", buttonIcon);
+            button.addChild(".button-text", buttonText);
+
             let selector = null;
             let commonDialogId = null;
+            let appendedStyle = null;
             const timeouts = [];
+            const shadowRoot = {
+              getElementById(id) {
+                return appendedStyle && appendedStyle.id === id ? appendedStyle : null;
+              },
+              appendChild(element) {
+                appendedStyle = element;
+              },
+              querySelectorAll(value) {
+                selector = value;
+                return [button];
+              },
+            };
             const document = {
               documentURI: "chrome://global/content/commonDialog.xhtml?x",
               defaultView: {
@@ -159,19 +266,15 @@ def test_twilight_cfg_targets_common_dialog_accept_button_inside_shadow_root() -
                   fn();
                 },
               },
+              createElementNS(namespace, name) {
+                if (namespace !== "http://www.w3.org/1999/xhtml" || name !== "style") {
+                  throw new Error(`unexpected element creation: ${namespace} ${name}`);
+                }
+                return { id: null, textContent: "" };
+              },
               getElementById(id) {
                 commonDialogId = id;
-                return {
-                  shadowRoot: {
-                    appendChild() {
-                      throw new Error("style injection should not happen");
-                    },
-                    querySelectorAll(value) {
-                      selector = value;
-                      return [button];
-                    },
-                  },
-                };
+                return { shadowRoot };
               },
             };
 
@@ -185,21 +288,37 @@ def test_twilight_cfg_targets_common_dialog_accept_button_inside_shadow_root() -
               registeredEvent,
               commonDialogId,
               selector,
+              appendedStyle,
+              resolvedCssPath,
               timeouts,
               attrs: Object.fromEntries(button.attrs),
+              buttonStyles: button.style.values,
+              buttonBoxStyles: buttonBox.style.values,
+              buttonIconStyles: buttonIcon.style.values,
+              buttonTextStyles: buttonText.style.values,
               mutationOptions: button.mutationOptions,
             }));
             """
         ),
         REPO_ROOT / "home/george/zen/autoconfig/twilight.cfg",
+        REPO_ROOT / "home/george/zen/quit-dialog-primary.css",
     )
 
     assert result == {
         "attrs": {
             "data-catppuccin-primary-button": "true",
             "data-catppuccin-primary-button-watched": "true",
+            "data-nixcfg-catppuccin-patched": "true",
             "part": "dialog-button catppuccin-primary-button",
         },
+        "appendedStyle": {
+            "id": "nixcfg-catppuccin-quit-dialog-accept-style",
+            "textContent": result["appendedStyle"]["textContent"],
+        },
+        "buttonBoxStyles": {},
+        "buttonIconStyles": {},
+        "buttonStyles": {},
+        "buttonTextStyles": {},
         "commonDialogId": "commonDialog",
         "mutationOptions": {
             "attributeFilter": ["default", "part"],
@@ -210,7 +329,13 @@ def test_twilight_cfg_targets_common_dialog_accept_button_inside_shadow_root() -
             "sameHandler": True,
             "type": "DOMContentLoaded",
         },
-        "selector": 'button:is([dlgtype="accept"], [label^="Quit "])',
+        "resolvedCssPath": ".config/zen/quit-dialog-primary.css",
+        "selector": 'button:is([dlgtype="accept"], [default="true"], [label^="Quit "])',
         "timeouts": [0],
         "topic": "chrome-document-global-created",
     }
+    css = Path(REPO_ROOT / "home/george/zen/quit-dialog-primary.css").read_text(
+        encoding="utf-8"
+    )
+    assert result["appendedStyle"]["textContent"] == css
+    assert result["appendedStyle"]["textContent"].strip()

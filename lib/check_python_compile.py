@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
 _IGNORED_SCAN_DIRS: Final = frozenset({
+    ".claude",
     ".direnv",
     ".git",
     ".pytest_cache",

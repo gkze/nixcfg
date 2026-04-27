@@ -781,11 +781,11 @@ in
         treesitter = {
           enable = true;
           folding.enable = true;
+          highlight.disable = [ "alpha" ];
           nixvimInjections = true;
           settings = {
             highlight = {
               enable = true;
-              disable = [ "alpha" ];
               additional_vim_regex_highlighting = true;
             };
             incremental_selection = {

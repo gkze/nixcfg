@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import lz4.block
 import pytest
@@ -675,7 +675,7 @@ def test_cmd_dump_emits_clean_schema(
         ZENTOOL.build_desired_state(base_session, config),
     )
 
-    args = argparse.Namespace(profile=str(session_path), output=str(output_path))
+    args = SimpleNamespace(profile=str(session_path), output=str(output_path))
     assert ZENTOOL.cmd_dump(args) == 0
 
     dumped = yaml.safe_load(output_path.read_text(encoding="utf-8"))
@@ -820,7 +820,7 @@ def test_cmd_inspect_raw_literal_preserves_nullable_prev_sibling_info(
     )
     session_path.write_bytes(data)
 
-    args = argparse.Namespace(
+    args = SimpleNamespace(
         profile=str(session_path),
         output=str(output_path),
         literal=True,
@@ -899,37 +899,57 @@ def test_resolve_profile_dir_auto_detects_install_default(
     assert ZENTOOL.resolve_profile_dir(None) == twilight_dir
 
 
-def test_build_parser_accepts_profile_after_subcommand() -> None:
+def test_main_accepts_profile_after_subcommand(monkeypatch: pytest.MonkeyPatch) -> None:
     """Subcommands should accept a local profile flag in addition to the global one."""
-    args = ZENTOOL.build_parser().parse_args([
-        "apply",
-        "--profile",
-        "Default (twilight)",
-        "--state",
-        "--yes",
-    ])
+    seen: list[SimpleNamespace] = []
+    monkeypatch.setattr(ZENTOOL, "cmd_apply", lambda args: seen.append(args) or 0)
 
+    assert (
+        ZENTOOL.main([
+            "apply",
+            "--profile",
+            "Default (twilight)",
+            "--state",
+            "--yes",
+        ])
+        == 0
+    )
+
+    args = seen[0]
     assert args.command == "apply"
     assert args.profile == "Default (twilight)"
     assert args.state is True
     assert args.assets is False
 
 
-def test_build_parser_accepts_dump_and_check_subcommands() -> None:
+def test_main_accepts_dump_and_check_subcommands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Dump and check should remain exposed as direct CLI subcommands."""
-    dump_args = ZENTOOL.build_parser().parse_args([
-        "dump",
-        "--profile",
-        "Default (twilight)",
-        "--output",
-        "dump.yaml",
-    ])
-    check_args = ZENTOOL.build_parser().parse_args([
-        "check",
-        "--profile",
-        "Default (twilight)",
-    ])
+    seen: list[SimpleNamespace] = []
+    monkeypatch.setattr(ZENTOOL, "cmd_dump", lambda args: seen.append(args) or 0)
+    monkeypatch.setattr(ZENTOOL, "cmd_check", lambda args: seen.append(args) or 0)
 
+    assert (
+        ZENTOOL.main([
+            "dump",
+            "--profile",
+            "Default (twilight)",
+            "--output",
+            "dump.yaml",
+        ])
+        == 0
+    )
+    assert (
+        ZENTOOL.main([
+            "check",
+            "--profile",
+            "Default (twilight)",
+        ])
+        == 0
+    )
+
+    dump_args, check_args = seen
     assert dump_args.command == "dump"
     assert dump_args.profile == "Default (twilight)"
     assert dump_args.output == "dump.yaml"

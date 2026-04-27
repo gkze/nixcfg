@@ -243,6 +243,8 @@ def test_parse_steps_url_from_html_supports_attribute_and_json_key() -> None:
         info.backscroll_url_for("step-1")
         == "https://github.com/acme/demo/actions/runs/9/jobs/55/steps/step-1/backscroll"
     )
+    assert info.check_steps_found is True
+    assert info.static_step_count == 1
 
     regex_html = '{"jobStepsUrl":"/acme/demo/actions/runs/9/jobs/66/steps?change_id=0"}'
     assert (
@@ -260,6 +262,22 @@ def test_parse_steps_url_from_html_supports_attribute_and_json_key() -> None:
     assert empty_info.steps_url is None
     assert empty_info.streaming_url is None
     assert empty_info.backscroll_urls == {}
+    assert empty_info.check_steps_found is False
+
+    static_steps_info = gha_tail._parse_live_job_page_from_html(
+        (
+            '<check-steps data-job-status="in_progress">'
+            '<check-step data-name="Set up job" data-number="1" '
+            'data-external-id="step-1" data-log-url="/acme/demo/logs/1">'
+            "</check-step>"
+            "</check-steps>"
+        ),
+        job_url="https://github.com/acme/demo/actions/runs/9/job/42",
+    )
+    assert static_steps_info.steps_url is None
+    assert static_steps_info.check_steps_found is True
+    assert static_steps_info.static_step_count == 1
+    assert static_steps_info.logged_in is False
 
     with pytest.raises(ValueError, match="steps URL path"):
         gha_tail._parse_steps_url_from_html(

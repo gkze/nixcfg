@@ -447,8 +447,10 @@ class TestSourcesFile:
         entry = HashEntry.create(
             "sha256",
             h1,
+            git_dep="specta",
             urls={"linux": "https://example.invalid/src.tar.gz"},
         )
+        assert entry.to_dict()["gitDep"] == "specta"
         assert entry.to_dict()["urls"] == {
             "linux": "https://example.invalid/src.tar.gz"
         }

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import ModuleType
-from typing import Any
 
 import pytest
 
@@ -45,14 +44,6 @@ def codex_module() -> ModuleType:
 def goose_cli_module() -> ModuleType:
     """Load the goose-cli updater module."""
     return _load_module("overlays/goose-cli/updater.py", "goose_cli_updater_test")
-
-
-@pytest.fixture(scope="module")
-def opencode_desktop_module() -> ModuleType:
-    """Load the opencode-desktop updater module."""
-    return _load_module(
-        "packages/opencode-desktop/updater.py", "opencode_desktop_updater_test"
-    )
 
 
 @pytest.fixture(scope="module")
@@ -431,127 +422,6 @@ def test_codex_desktop_invalid_content_md5_raises(
     )
     with pytest.raises(RuntimeError, match="Invalid Content-MD5"):
         _run(updater.fetch_latest(object()))
-
-
-def test_opencode_dep_key_resolution_is_exact(
-    opencode_desktop_module: ModuleType,
-) -> None:
-    """Resolve exact crate names and ignore similarly prefixed crates."""
-    lockfile = "\n".join([
-        "[[package]]",
-        'name = "specta-macros"',
-        'version = "2.0.0-rc.18"',
-        'source = "git+https://github.com/specta-rs/specta?branch=main#111111"',
-        "[[package]]",
-        'name = "specta"',
-        'version = "2.0.0-rc.22"',
-        'source = "git+https://github.com/specta-rs/specta?branch=main#222222"',
-        "[[package]]",
-        'name = "tauri"',
-        'version = "2.9.5"',
-        'source = "git+https://github.com/tauri-apps/tauri?branch=dev#333333"',
-        "[[package]]",
-        'name = "tauri-specta"',
-        'version = "2.0.0-rc.21"',
-        'source = "git+https://github.com/specta-rs/tauri-specta?branch=main#444444"',
-    ])
-    keys = opencode_desktop_module.OpencodeDesktopUpdater._resolve_git_dep_keys(
-        lockfile
-    )
-    assert keys["specta"] == "specta-2.0.0-rc.22"
-    assert keys["tauri"] == "tauri-2.9.5"
-    assert keys["tauri-specta"] == "tauri-specta-2.0.0-rc.21"
-
-
-def test_opencode_hash_fetch_passes_direct_match_names(
-    opencode_desktop_module: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Pass direct git dep keys to cargo hash helper."""
-    updater = opencode_desktop_module.OpencodeDesktopUpdater()
-    assert updater.materialize_when_current is True
-    assert updater.shows_materialize_artifacts_phase is True
-    lockfile = "\n".join([
-        "[[package]]",
-        'name = "specta"',
-        'version = "2.0.0-rc.22"',
-        'source = "git+https://github.com/specta-rs/specta?branch=main#222222"',
-        "[[package]]",
-        'name = "tauri"',
-        'version = "2.9.5"',
-        'source = "git+https://github.com/tauri-apps/tauri?branch=dev#333333"',
-        "[[package]]",
-        'name = "tauri-specta"',
-        'version = "2.0.0-rc.21"',
-        'source = "git+https://github.com/specta-rs/tauri-specta?branch=main#444444"',
-    ])
-
-    monkeypatch.setattr(
-        updater,
-        "_fetch_lockfile_content",
-        lambda *_a, **_k: asyncio.sleep(0, result=lockfile),
-    )
-
-    async def _stream(name: str) -> EventStream:
-        yield UpdateEvent.artifact(
-            name,
-            GeneratedArtifact.text(
-                "packages/opencode-desktop/Cargo.nix",
-                "{ opencode = true; }\n",
-            ),
-        )
-
-    monkeypatch.setattr(
-        opencode_desktop_module.OpencodeDesktopUpdater,
-        "stream_materialized_artifacts",
-        lambda _self: _stream("opencode-desktop"),
-    )
-
-    captured: dict[str, object] = {}
-
-    async def _compute_hashes(
-        source: str,
-        input_name: str,
-        *,
-        lockfile_path: str,
-        git_deps: list[Any],
-        lockfile_content: str | None = None,
-        config: object,
-    ):
-        _ = (source, input_name, lockfile_path, lockfile_content, config)
-        captured["git_deps"] = git_deps
-        payload = {
-            expect_instance(
-                dep.git_dep, str
-            ): "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-            for dep in git_deps
-        }
-        yield UpdateEvent.value("opencode-desktop", payload)
-
-    monkeypatch.setattr(
-        opencode_desktop_module,
-        "compute_import_cargo_lock_output_hashes",
-        _compute_hashes,
-    )
-
-    events = _run(_collect(updater.fetch_hashes(VersionInfo("main", {}), object())))
-    artifact_index = next(
-        index
-        for index, event in enumerate(events)
-        if event.kind == UpdateEventKind.ARTIFACT
-    )
-    value_events = [event for event in events if event.kind == UpdateEventKind.VALUE]
-    value_index = max(
-        index
-        for index, event in enumerate(events)
-        if event.kind == UpdateEventKind.VALUE
-    )
-    assert artifact_index < value_index
-    payload = expect_instance(value_events[-1].payload, list)
-    assert len(payload) == 3
-
-    deps = expect_instance(captured["git_deps"], list)
-    assert all(dep.match_name == dep.git_dep for dep in deps)
 
 
 def test_element_desktop_reads_pinned_version_from_sources(

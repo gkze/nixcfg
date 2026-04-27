@@ -24,13 +24,13 @@ Anything in the managed subset that is not declared by config is removed.
 
 from __future__ import annotations
 
-import argparse
 import configparser
 import contextlib
 import errno
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -39,6 +39,7 @@ from collections import defaultdict, deque
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, cast
 
 if TYPE_CHECKING:
@@ -54,6 +55,7 @@ from pydantic import (
     ConfigDict,
     Field,
     TypeAdapter,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -69,6 +71,8 @@ ZEN_APPLICATION_SUPPORT: Final = Path.home() / "Library/Application Support/zen"
 ZEN_PROFILES: Final = ZEN_APPLICATION_SUPPORT / "Profiles"
 PROFILES_INI: Final = ZEN_APPLICATION_SUPPORT / "profiles.ini"
 SESSION_FILENAME: Final = "zen-sessions.jsonlz4"
+CONTAINERS_FILENAME: Final = "containers.json"
+COOKIES_FILENAME: Final = "cookies.sqlite"
 SESSION_HEADER_PREFIX: Final[bytes] = b"mozLz40\0"
 SESSION_HEADER_SIZE: Final[int] = 12
 DEFAULT_YAML: Final = Path.home() / ".config/zen/folders.yaml"
@@ -76,6 +80,7 @@ DEFAULT_CONFIG_DIR: Final = Path.home() / ".config" / "zen"
 DEFAULT_CHROME_SOURCE_ENV: Final = "ZEN_CHROME_SOURCE"
 MANAGED_CHROME_MANIFEST: Final = ".zentool-managed-chrome"
 MANAGED_USER_JS_MANIFEST: Final = ".zentool-managed-user-js"
+INTERRUPTED_EXIT_CODE: Final = 130
 PROFILE_HELP: Final = (
     "Zen profile directory name, a direct path to a profile directory/session file, "
     "or a human profile name from profiles.ini. Default: auto-detect from profiles.ini"
@@ -133,6 +138,16 @@ DEFAULT_THEME_OPACITY: Final = 0.5
 DEFAULT_THEME_TEXTURE: Final = 0
 MAX_SESSION_UNCOMPRESSED_BYTES: Final = 256 * 1024 * 1024
 PROFILE_LOCK_FILENAMES: Final[tuple[str, ...]] = ("parent.lock", ".parentlock", "lock")
+SPECIAL_CONTEXT_IDS: Final[frozenset[int]] = frozenset({4294967295})
+DEFAULT_CONTAINER_REFS: Final[frozenset[str]] = frozenset(
+    {"default", "none", "no-container"}
+)
+BUILTIN_CONTAINER_NAMES: Final[dict[str, str]] = {
+    "user-context-personal": "Personal",
+    "user-context-work": "Work",
+    "user-context-banking": "Banking",
+    "user-context-shopping": "Shopping",
+}
 
 
 class ZentoolError(RuntimeError):
@@ -262,6 +277,7 @@ class WorkspaceSpec(BaseModel):
 
     name: str
     icon: str | None = None
+    container: str | None = None
     has_collapsed_pinned_tabs: bool = Field(
         default=False,
         alias="hasCollapsedPinnedTabs",
@@ -290,6 +306,18 @@ class WorkspaceSpec(BaseModel):
         stripped = value.strip()
         if not stripped:
             msg = "workspace icons must be non-empty strings"
+            raise ValueError(msg)
+        return stripped
+
+    @field_validator("container")
+    @classmethod
+    def validate_container(cls, value: str | None) -> str | None:
+        """Trim optional workspace container references."""
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            msg = "workspace containers must be non-empty strings"
             raise ValueError(msg)
         return stripped
 
@@ -366,12 +394,80 @@ AuthoredFolderNode.model_rebuild()
 AuthoredNodeAdapter = TypeAdapter(AuthoredNode)
 
 
+class ContainerSpec(BaseModel):
+    """Declarative browser container identity used by workspaces."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    key: str
+    name: str | None = None
+    icon: str = "fingerprint"
+    color: str = "blue"
+    public: bool = True
+    access_key: str = Field(default="", alias="accessKey")
+
+    @field_validator("key", "icon", "color")
+    @classmethod
+    def validate_non_empty_strings(cls, value: str) -> str:
+        """Trim and validate required string fields."""
+        stripped = value.strip()
+        if not stripped:
+            msg = "container fields must be non-empty strings"
+            raise ValueError(msg)
+        return stripped
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        """Trim optional container display names."""
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            msg = "container names must be non-empty strings"
+            raise ValueError(msg)
+        return stripped
+
+    @field_validator("access_key")
+    @classmethod
+    def validate_access_key(cls, value: str) -> str:
+        """Normalize optional access keys."""
+        return value.strip()
+
+    @model_validator(mode="after")
+    def default_name_to_key(self) -> ContainerSpec:
+        """Use the map key as the display name when none is authored."""
+        if self.name is None:
+            self.name = self.key
+        return self
+
+
 class ZenConfig(BaseModel):
     """Canonical root config used by the internal compiler."""
 
     model_config = ConfigDict(extra="forbid")
 
+    containers: list[ContainerSpec] = Field(default_factory=list)
     workspaces: list[WorkspaceSpec] = Field(default_factory=list)
+    manage_containers: bool = False
+
+    @model_validator(mode="after")
+    def validate_unique_container_keys(self) -> ZenConfig:
+        """Reject duplicate container keys."""
+        keys: set[str] = set()
+        names: set[str] = set()
+        for container in self.containers:
+            key = container.key.casefold()
+            if key in keys:
+                msg = f"duplicate container key {container.key!r}"
+                raise ValueError(msg)
+            keys.add(key)
+            name_key = (container.name or container.key).casefold()
+            if name_key in names:
+                msg = f"duplicate container name {container.name!r}"
+                raise ValueError(msg)
+            names.add(name_key)
+        return self
 
     @model_validator(mode="after")
     def validate_unique_workspace_names(self) -> ZenConfig:
@@ -383,6 +479,69 @@ class ZenConfig(BaseModel):
                 msg = f"duplicate workspace name {workspace.name!r}"
                 raise ValueError(msg)
             names.add(key)
+        return self
+
+    @model_validator(mode="after")
+    def validate_workspace_container_refs(self) -> ZenConfig:
+        """Require managed workspace containers to reference declared containers."""
+        if not self.manage_containers:
+            return self
+        keys = {container.key.casefold() for container in self.containers}
+        for workspace in self.workspaces:
+            if workspace.container is None or is_default_container_ref(
+                workspace.container
+            ):
+                continue
+            if workspace.container.casefold() not in keys:
+                msg = (
+                    f"workspace {workspace.name!r} references unknown container "
+                    f"{workspace.container!r}"
+                )
+                raise ValueError(msg)
+        return self
+
+
+class ContainerIdentity(BaseModel):
+    """Managed subset of one Firefox/Zen contextual identity."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+        serialize_by_alias=True,
+    )
+
+    user_context_id: int = Field(alias="userContextId")
+    public: bool = True
+    icon: str = ""
+    color: str = ""
+    name: str | None = None
+    l10n_id: str | None = Field(default=None, alias="l10nId")
+    access_key: str = Field(default="", alias="accessKey")
+
+
+class ContainerState(BaseModel):
+    """Managed subset of Firefox/Zen ``containers.json``."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+        serialize_by_alias=True,
+    )
+
+    version: int = 5
+    last_user_context_id: int = Field(default=0, alias="lastUserContextId")
+    identities: list[ContainerIdentity] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_context_ids(self) -> ContainerState:
+        """Reject duplicate context IDs in the raw container file."""
+        seen: set[int] = set()
+        for identity in self.identities:
+            context_id = identity.user_context_id
+            if context_id in seen:
+                msg = f"duplicate container userContextId {context_id}"
+                raise ValueError(msg)
+            seen.add(context_id)
         return self
 
 
@@ -561,6 +720,7 @@ class CompiledTab:
     existing: SessionTab | None = None
     sync_id: str = ""
     placeholder: bool = False
+    preserve_existing_context: bool = True
 
 
 @dataclass(slots=True)
@@ -729,6 +889,34 @@ def load_yaml(path: Path) -> object:
         loader.dispose()
 
 
+def _string_key_mapping(raw: dict[Any, Any], *, label: str) -> dict[str, object]:
+    """Return a mapping only when all authored YAML keys are strings."""
+    mapping: dict[str, object] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            msg = f"{label} keys must be strings"
+            raise ZenFoldersError(msg)
+        mapping[key] = value
+    return mapping
+
+
+def _optional_bool_field(
+    mapping: dict[str, object],
+    key: str,
+    *,
+    default: bool,
+    label: str,
+) -> bool:
+    """Read an authored boolean without Python truthiness coercion."""
+    if key not in mapping:
+        return default
+    value = mapping[key]
+    if not isinstance(value, bool):
+        msg = f"{label} {key} must be a boolean"
+        raise ZenFoldersError(msg)
+    return value
+
+
 def _coerce_authored_node_input(raw: object) -> object:
     """Convert one shorthand authored node into a model-friendly mapping."""
     if not isinstance(raw, dict) or len(raw) != 1:
@@ -757,12 +945,12 @@ def _coerce_authored_node_input(raw: object) -> object:
         msg = f"unable to parse node {name!r}"
         raise ZenFoldersError(msg)
 
-    value_map = {str(key): value for key, value in value.items()}
+    value_map = _string_key_mapping(value, label=f"node {name!r} mapping")
 
     if "url" in value_map:
         return {
             "name": name,
-            "url": str(value_map["url"]),
+            "url": value_map["url"],
             "role": value_map.get("role"),
         }
 
@@ -773,7 +961,12 @@ def _coerce_authored_node_input(raw: object) -> object:
             raise ZenFoldersError(msg)
         return {
             "name": name,
-            "collapsed": bool(value_map.get("collapsed", True)),
+            "collapsed": _optional_bool_field(
+                value_map,
+                "collapsed",
+                default=True,
+                label=f"folder {name!r}",
+            ),
             "children": [_normalize_authored_node(item) for item in children_raw],
         }
 
@@ -782,7 +975,12 @@ def _coerce_authored_node_input(raw: object) -> object:
     }
     return {
         "name": name,
-        "collapsed": bool(value_map.get("collapsed", True)),
+        "collapsed": _optional_bool_field(
+            value_map,
+            "collapsed",
+            default=True,
+            label=f"folder {name!r}",
+        ),
         "children": [
             _normalize_authored_node({child_name: child_value})
             for child_name, child_value in child_entries.items()
@@ -827,6 +1025,7 @@ class AuthoredWorkspace(BaseModel):
 
     name: str
     icon: str | None = None
+    container: str | None = None
     has_collapsed_pinned_tabs: bool = Field(
         default=False,
         alias="hasCollapsedPinnedTabs",
@@ -856,6 +1055,18 @@ class AuthoredWorkspace(BaseModel):
             raise ValueError(msg)
         return stripped
 
+    @field_validator("container")
+    @classmethod
+    def validate_container(cls, value: str | None) -> str | None:
+        """Trim optional workspace container references."""
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            msg = "workspace containers must be non-empty strings"
+            raise ValueError(msg)
+        return stripped
+
     @model_validator(mode="after")
     def validate_unique_top_level_folder_names(self) -> AuthoredWorkspace:
         """Reject ambiguous same-name top-level folders."""
@@ -882,7 +1093,7 @@ def _coerce_authored_workspace(name: str, value: object) -> AuthoredWorkspace:
         msg = f"workspace {name!r} must be a list or mapping"
         raise ZenFoldersError(msg)
 
-    value_map = {str(key): value for key, value in value.items()}
+    value_map = _string_key_mapping(value, label=f"workspace {name!r} mapping")
     if "tree" in value_map:
         tree_raw = value_map["tree"]
         if not isinstance(tree_raw, list):
@@ -893,7 +1104,7 @@ def _coerce_authored_workspace(name: str, value: object) -> AuthoredWorkspace:
         tree = [
             _normalize_authored_node({child_name: child_value})
             for child_name, child_value in value_map.items()
-            if child_name not in {"icon", "hasCollapsedPinnedTabs", "theme"}
+            if child_name not in {"icon", "container", "hasCollapsedPinnedTabs", "theme"}
         ]
 
     theme_raw = value_map.get("theme", {})
@@ -904,7 +1115,13 @@ def _coerce_authored_workspace(name: str, value: object) -> AuthoredWorkspace:
     return AuthoredWorkspace(
         name=name,
         icon=cast("str | None", value_map.get("icon")),
-        has_collapsed_pinned_tabs=bool(value_map.get("hasCollapsedPinnedTabs", False)),
+        container=cast("str | None", value_map.get("container")),
+        has_collapsed_pinned_tabs=_optional_bool_field(
+            value_map,
+            "hasCollapsedPinnedTabs",
+            default=False,
+            label=f"workspace {name!r}",
+        ),
         theme=ThemeSpec.model_validate(theme_raw),
         tree=tree,
     )
@@ -934,12 +1151,50 @@ def _authored_workspace_to_spec(name: str, value: object) -> WorkspaceSpec:
     return WorkspaceSpec(
         name=workspace.name,
         icon=workspace.icon,
+        container=workspace.container,
         has_collapsed_pinned_tabs=workspace.has_collapsed_pinned_tabs,
         theme=workspace.theme,
         essentials=essentials,
         items=items,
         tabs=tabs,
     )
+
+
+def _coerce_container_spec(key: str, value: object) -> ContainerSpec:
+    """Convert one authored container map entry into a canonical spec."""
+    if value is None:
+        return ContainerSpec(key=key)
+    if isinstance(value, str):
+        return ContainerSpec(key=key, name=value)
+    if not isinstance(value, dict):
+        msg = f"container {key!r} must be a mapping, string, or null"
+        raise ZenFoldersError(msg)
+    data = _string_key_mapping(value, label=f"container {key!r} mapping")
+    data.setdefault("key", key)
+    _optional_bool_field(data, "public", default=True, label=f"container {key!r}")
+    return ContainerSpec.model_validate(data)
+
+
+def _coerce_container_specs(raw: object) -> list[ContainerSpec]:
+    """Convert the authored root ``containers`` map into canonical specs."""
+    if raw is None:
+        return []
+    if not isinstance(raw, dict):
+        msg = "Config root containers must be a mapping"
+        raise ZenFoldersError(msg)
+    containers = _string_key_mapping(raw, label="Config root containers")
+    return [_coerce_container_spec(name, value) for name, value in containers.items()]
+
+
+def _coerce_workspace_specs(raw: object) -> list[WorkspaceSpec]:
+    """Convert the authored root ``workspaces`` map into canonical specs."""
+    if raw is None:
+        return []
+    if not isinstance(raw, dict):
+        msg = "Config root workspaces must be a mapping"
+        raise ZenFoldersError(msg)
+    workspaces = _string_key_mapping(raw, label="Config root workspaces")
+    return [_authored_workspace_to_spec(name, value) for name, value in workspaces.items()]
 
 
 def load_config(path: Path) -> ZenConfig:
@@ -950,11 +1205,20 @@ def load_config(path: Path) -> ZenConfig:
     if not isinstance(raw, dict):
         msg = "Config root must be a mapping"
         raise ZenFoldersError(msg)
+    raw_map = _string_key_mapping(raw, label="Config root")
 
     try:
-        workspaces = [
-            _authored_workspace_to_spec(str(name), value) for name, value in raw.items()
-        ]
+        if "containers" in raw_map or "workspaces" in raw_map:
+            containers_raw = raw_map.get("containers", {})
+            workspaces_raw = raw_map.get("workspaces", {})
+            containers = _coerce_container_specs(containers_raw)
+            workspaces = _coerce_workspace_specs(workspaces_raw)
+            return ZenConfig(
+                containers=containers,
+                workspaces=workspaces,
+                manage_containers=True,
+            )
+        workspaces = _coerce_workspace_specs(raw_map)
         return ZenConfig(workspaces=workspaces)
     except Exception as exc:  # pragma: no cover - exercised by callers
         msg = f"Invalid config file {path}: {exc}"
@@ -1137,6 +1401,16 @@ def session_file(profile: str | None) -> Path:
     return path
 
 
+def containers_file(profile: str | None) -> Path:
+    """Resolve a profile argument to its ``containers.json`` path."""
+    return zen_profile_dir(profile) / CONTAINERS_FILENAME
+
+
+def cookies_file(profile: str | None) -> Path:
+    """Resolve a profile argument to its cookie database path."""
+    return zen_profile_dir(profile) / COOKIES_FILENAME
+
+
 def read_session(path: Path) -> SessionState:
     """Read and validate a Mozilla LZ4 session file."""
     try:
@@ -1168,7 +1442,11 @@ def read_session(path: Path) -> SessionState:
     if not isinstance(raw, dict):
         msg = "Session payload root must be an object"
         raise SessionFormatError(msg)
-    return SessionState.model_validate(raw)
+    try:
+        return SessionState.model_validate(raw)
+    except ValidationError as exc:
+        msg = f"Invalid session payload {path}: {exc}"
+        raise SessionFormatError(msg) from exc
 
 
 def write_session(path: Path, session: SessionState) -> None:
@@ -1191,6 +1469,49 @@ def load_session(profile: str | None) -> tuple[Path, SessionState]:
     """Load and decode a profile's session payload."""
     path = session_file(profile)
     return path, read_session(path)
+
+
+def read_containers(path: Path) -> ContainerState:
+    """Read and validate a Firefox/Zen containers file."""
+    if not path.exists():
+        return ContainerState()
+    if not path.is_file():
+        msg = f"Container path is not a file: {path}"
+        raise ZenFoldersError(msg)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        msg = f"Unable to read containers file {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
+    if not isinstance(raw, dict):
+        msg = "Container payload root must be an object"
+        raise ZenFoldersError(msg)
+    try:
+        return ContainerState.model_validate(raw)
+    except ValidationError as exc:
+        msg = f"Invalid containers file {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
+
+
+def write_containers(path: Path, containers: ContainerState) -> None:
+    """Write ``containers.json`` using stable pretty JSON."""
+    payload = json.dumps(
+        containers.model_dump(mode="json", exclude_none=True),
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=False,
+    )
+    try:
+        path.write_text(f"{payload}\n", encoding="utf-8")
+    except OSError as exc:
+        msg = f"Unable to write containers file {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
+
+
+def load_containers(profile: str | None) -> tuple[Path, ContainerState]:
+    """Load a profile's contextual identity payload."""
+    path = containers_file(profile)
+    return path, read_containers(path)
 
 
 def zen_lock_paths(profile: str | None) -> list[Path]:
@@ -1303,6 +1624,22 @@ def require_zen_closed(profile: str | None) -> ZenRuntimeState:
 
 def backup_session(path: Path) -> Path:
     """Create a timestamped backup alongside the session file."""
+    stem = f"{path.name}.{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns() % 1_000_000_000:09d}"
+    backup = path.with_name(f"{stem}.bak")
+    suffix = 0
+    while backup.exists():
+        suffix += 1
+        backup = path.with_name(f"{stem}.{suffix}.bak")
+    try:
+        shutil.copy2(path, backup)
+    except OSError as exc:
+        msg = f"Failed to create backup {backup.name}: {exc}"
+        raise ZenFoldersError(msg) from exc
+    return backup
+
+
+def backup_file(path: Path) -> Path:
+    """Create a timestamped backup for one profile file."""
     stem = f"{path.name}.{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns() % 1_000_000_000:09d}"
     backup = path.with_name(f"{stem}.bak")
     suffix = 0
@@ -1467,6 +1804,322 @@ def new_item_id() -> str:
     return f"zf-{uuid.uuid4().hex}"
 
 
+@dataclass(slots=True)
+class ContainerPlan:
+    """Resolved container identities plus workspace reference mapping."""
+
+    state: ContainerState
+    context_ids_by_key: dict[str, int]
+    removed_context_ids: set[int] = field(default_factory=set)
+
+
+@dataclass(slots=True)
+class StateApplyPlan:
+    """Prepared state/session/container mutation for one apply command."""
+
+    session_path: Path
+    containers_path: Path
+    desired_state: SessionState
+    desired_containers: ContainerState
+    diff_text: str | None
+    containers_changed: bool
+    removed_context_ids: set[int] = field(default_factory=set)
+
+
+def is_default_container_ref(value: str) -> bool:
+    """Return whether an authored container ref means the default context."""
+    return value.strip().casefold() in DEFAULT_CONTAINER_REFS
+
+
+def _container_key(value: str) -> str:
+    """Return the normalized lookup key for container names and refs."""
+    return value.strip().casefold()
+
+
+def builtin_container_name(identity: ContainerIdentity) -> str | None:
+    """Return the display name for a built-in localized identity."""
+    if identity.l10n_id is None:
+        return None
+    return BUILTIN_CONTAINER_NAMES.get(identity.l10n_id, identity.l10n_id)
+
+
+def identity_display_name(identity: ContainerIdentity) -> str:
+    """Return the best stable display name for one identity."""
+    if identity.name is not None and identity.name.strip():
+        return identity.name.strip()
+    builtin = builtin_container_name(identity)
+    if builtin is not None:
+        return builtin
+    return str(identity.user_context_id)
+
+
+def is_custom_public_identity(identity: ContainerIdentity) -> bool:
+    """Return whether an identity is user-authored container state."""
+    return identity.public and identity.l10n_id is None
+
+
+def _copy_identity(identity: ContainerIdentity) -> ContainerIdentity:
+    """Return a deep copy of one identity record."""
+    return identity.model_copy(deep=True)
+
+
+def _identity_lookup_keys(identity: ContainerIdentity) -> set[str]:
+    """Return casefolded names that may refer to an identity."""
+    keys = {_container_key(identity_display_name(identity))}
+    if identity.name:
+        keys.add(_container_key(identity.name))
+    if identity.l10n_id:
+        keys.add(_container_key(identity.l10n_id))
+    return keys
+
+
+def _next_context_id(used_ids: set[int], last_user_context_id: int) -> int:
+    """Return the next non-special user context ID."""
+    candidate = max({last_user_context_id, *used_ids, 0}) + 1
+    while candidate in SPECIAL_CONTEXT_IDS or candidate in used_ids:
+        candidate += 1
+    return candidate
+
+
+def _preferred_context_ids_by_container(
+    session: SessionState, config: ZenConfig
+) -> dict[str, int]:
+    """Find existing workspace container IDs worth reifying as identities."""
+    existing_spaces = {space.name.casefold(): space for space in session.spaces}
+    preferred: dict[str, int] = {}
+    for workspace in config.workspaces:
+        if workspace.container is None or is_default_container_ref(workspace.container):
+            continue
+        existing = existing_spaces.get(workspace.name.casefold())
+        if existing is None or existing.container_tab_id <= 0:
+            continue
+        preferred.setdefault(_container_key(workspace.container), existing.container_tab_id)
+    return preferred
+
+
+def _index_existing_identities(
+    existing: ContainerState,
+) -> tuple[
+    list[ContainerIdentity],
+    dict[str, ContainerIdentity],
+    dict[str, ContainerIdentity],
+    set[int],
+]:
+    """Split existing identities into preserved records and lookup tables."""
+    preserved: list[ContainerIdentity] = []
+    builtin_by_key: dict[str, ContainerIdentity] = {}
+    custom_by_key: dict[str, ContainerIdentity] = {}
+    used_ids = {
+        identity.user_context_id
+        for identity in existing.identities
+        if identity.user_context_id not in SPECIAL_CONTEXT_IDS
+    }
+    for identity in existing.identities:
+        if identity.l10n_id is not None:
+            copied = _copy_identity(identity)
+            preserved.append(copied)
+            for key in _identity_lookup_keys(identity):
+                builtin_by_key[key] = copied
+            continue
+        if not identity.public:
+            preserved.append(_copy_identity(identity))
+            continue
+        for key in _identity_lookup_keys(identity):
+            custom_by_key[key] = identity
+    return preserved, builtin_by_key, custom_by_key, used_ids
+
+
+def _resolve_custom_context_id(
+    spec: ContainerSpec,
+    *,
+    custom_by_key: dict[str, ContainerIdentity],
+    preferred_ids: dict[str, int],
+    matched_existing_ids: set[int],
+    used_ids: set[int],
+    last_user_context_id: int,
+) -> int:
+    """Return an existing, preferred, or freshly allocated custom context ID."""
+    lookup_keys = {_container_key(spec.key), _container_key(spec.name or spec.key)}
+    existing_match = next(
+        (custom_by_key[key] for key in lookup_keys if key in custom_by_key),
+        None,
+    )
+    if existing_match is not None:
+        context_id = existing_match.user_context_id
+        matched_existing_ids.add(context_id)
+        return context_id
+
+    preferred_id = preferred_ids.get(_container_key(spec.key))
+    if preferred_id and preferred_id not in used_ids:
+        used_ids.add(preferred_id)
+        return preferred_id
+
+    context_id = _next_context_id(used_ids, last_user_context_id)
+    used_ids.add(context_id)
+    return context_id
+
+
+def _removed_custom_context_ids(
+    existing: ContainerState,
+    *,
+    matched_existing_ids: set[int],
+    desired_identities: Sequence[ContainerIdentity],
+) -> set[int]:
+    """Return custom public context IDs absent from desired declarative state."""
+    desired_ids = {identity.user_context_id for identity in desired_identities}
+    return {
+        identity.user_context_id
+        for identity in existing.identities
+        if is_custom_public_identity(identity)
+        and identity.user_context_id not in matched_existing_ids
+        and identity.user_context_id not in desired_ids
+    }
+
+
+def _last_user_context_id(
+    existing: ContainerState,
+    identities: Sequence[ContainerIdentity],
+) -> int:
+    """Return the desired lastUserContextId for a container state."""
+    max_context_id = max(
+        (
+            identity.user_context_id
+            for identity in identities
+            if identity.user_context_id not in SPECIAL_CONTEXT_IDS
+        ),
+        default=0,
+    )
+    return max(existing.last_user_context_id, max_context_id)
+
+
+def build_desired_containers(
+    existing: ContainerState,
+    config: ZenConfig,
+    session: SessionState,
+) -> ContainerPlan:
+    """Compile declarative containers into a desired ``containers.json`` model."""
+    if not config.manage_containers:
+        return ContainerPlan(state=existing.model_copy(deep=True), context_ids_by_key={})
+
+    preferred_ids = _preferred_context_ids_by_container(session, config)
+    desired_identities: list[ContainerIdentity] = []
+    context_ids_by_key: dict[str, int] = {}
+    matched_existing_ids: set[int] = set()
+    preserved_identities, builtin_by_key, custom_by_key, used_ids = (
+        _index_existing_identities(existing)
+    )
+
+    for spec in config.containers:
+        lookup_keys = {_container_key(spec.key), _container_key(spec.name or spec.key)}
+        builtin_match = next(
+            (builtin_by_key[key] for key in lookup_keys if key in builtin_by_key),
+            None,
+        )
+        if builtin_match is not None:
+            context_ids_by_key[_container_key(spec.key)] = builtin_match.user_context_id
+            continue
+
+        context_id = _resolve_custom_context_id(
+            spec,
+            custom_by_key=custom_by_key,
+            preferred_ids=preferred_ids,
+            matched_existing_ids=matched_existing_ids,
+            used_ids=used_ids,
+            last_user_context_id=existing.last_user_context_id,
+        )
+
+        desired_identities.append(
+            ContainerIdentity(
+                userContextId=context_id,
+                public=spec.public,
+                icon=spec.icon,
+                color=spec.color,
+                name=spec.name or spec.key,
+                access_key=spec.access_key,
+            )
+        )
+        context_ids_by_key[_container_key(spec.key)] = context_id
+
+    removed_context_ids = _removed_custom_context_ids(
+        existing,
+        matched_existing_ids=matched_existing_ids,
+        desired_identities=desired_identities,
+    )
+    desired_state = existing.model_copy(deep=True)
+    desired_state.identities = [*preserved_identities, *desired_identities]
+    desired_state.last_user_context_id = _last_user_context_id(
+        existing, desired_state.identities
+    )
+    return ContainerPlan(
+        state=desired_state,
+        context_ids_by_key=context_ids_by_key,
+        removed_context_ids=removed_context_ids,
+    )
+
+
+def workspace_container_id(
+    workspace: WorkspaceSpec,
+    plan: ContainerPlan | None,
+    existing_space: SessionSpace | None,
+    *,
+    manage_containers: bool,
+) -> int:
+    """Resolve the desired container ID for a workspace."""
+    if workspace.container is None:
+        if manage_containers:
+            return 0
+        return existing_space.container_tab_id if existing_space is not None else 0
+    if is_default_container_ref(workspace.container):
+        return 0
+    if plan is None:
+        if manage_containers:
+            msg = "managed workspace containers require a container plan"
+            raise ZenFoldersError(msg)
+        return existing_space.container_tab_id if existing_space is not None else 0
+    return plan.context_ids_by_key[_container_key(workspace.container)]
+
+
+def cookie_origin_attributes_match_context(value: str, context_id: int) -> bool:
+    """Return whether an originAttributes string belongs to a context ID."""
+    token = f"userContextId={context_id}"
+    return (
+        value == f"^{token}"
+        or value.startswith(f"^{token}&")
+        or value.endswith(f"&{token}")
+        or f"&{token}&" in value
+    )
+
+
+def prune_cookie_contexts(path: Path, context_ids: set[int]) -> int:
+    """Delete cookies for removed contextual identities."""
+    if not context_ids or not path.exists():
+        return 0
+    try:
+        with sqlite3.connect(path) as connection:
+            rows = connection.execute(
+                "SELECT id, originAttributes FROM moz_cookies"
+            ).fetchall()
+            delete_ids = [
+                row_id
+                for row_id, origin_attributes in rows
+                if any(
+                    cookie_origin_attributes_match_context(
+                        str(origin_attributes),
+                        context_id,
+                    )
+                    for context_id in context_ids
+                )
+            ]
+            connection.executemany(
+                "DELETE FROM moz_cookies WHERE id = ?",
+                [(row_id,) for row_id in delete_ids],
+            )
+            return len(delete_ids)
+    except sqlite3.Error as exc:
+        msg = f"Unable to prune cookies in {path}: {exc}"
+        raise ZenFoldersError(msg) from exc
+
+
 def folder_path_map(session: SessionState) -> dict[str, ExistingFolderRecord]:
     """Return existing folder records keyed by folder ID."""
     folders_by_id = {folder.id: folder for folder in session.folders}
@@ -1519,6 +2172,7 @@ def compile_items(
     workspace_key: str,
     workspace_uuid: str,
     inherited_container_id: int,
+    preserve_existing_context: bool = True,
     existing_folders: dict[tuple[str, tuple[str, ...]], SessionFolder],
     existing_groups: dict[str, SessionGroup],
     parent_path: tuple[str, ...] = (),
@@ -1536,6 +2190,7 @@ def compile_items(
                     workspace_uuid=workspace_uuid,
                     folder_id=None,
                     user_context_id=inherited_container_id,
+                    preserve_existing_context=preserve_existing_context,
                 )
             )
             continue
@@ -1562,6 +2217,7 @@ def compile_items(
             workspace_key=workspace_key,
             workspace_uuid=workspace_uuid,
             inherited_container_id=inherited_container_id,
+            preserve_existing_context=preserve_existing_context,
             folder_id=folder_id,
             existing_folders=existing_folders,
             existing_groups=existing_groups,
@@ -1577,6 +2233,7 @@ def compile_folder_children(
     workspace_key: str,
     workspace_uuid: str,
     inherited_container_id: int,
+    preserve_existing_context: bool = True,
     folder_id: str,
     existing_folders: dict[tuple[str, tuple[str, ...]], SessionFolder],
     existing_groups: dict[str, SessionGroup],
@@ -1588,6 +2245,7 @@ def compile_folder_children(
         workspace_key=workspace_key,
         workspace_uuid=workspace_uuid,
         inherited_container_id=inherited_container_id,
+        preserve_existing_context=preserve_existing_context,
         existing_folders=existing_folders,
         existing_groups=existing_groups,
         parent_path=parent_path,
@@ -1602,6 +2260,8 @@ def build_workspace_compilation(
     spec: WorkspaceSpec,
     *,
     existing_space: SessionSpace | None,
+    manage_containers: bool = False,
+    container_plan: ContainerPlan | None = None,
     existing_folders: dict[tuple[str, tuple[str, ...]], SessionFolder],
     existing_groups: dict[str, SessionGroup],
 ) -> WorkspaceCompilation:
@@ -1615,13 +2275,21 @@ def build_workspace_compilation(
     space.icon = spec.icon
     space.has_collapsed_pinned_tabs = spec.has_collapsed_pinned_tabs
     space.theme = SessionTheme.model_validate(spec.theme.model_dump())
+    space.container_tab_id = workspace_container_id(
+        spec,
+        container_plan,
+        existing_space,
+        manage_containers=manage_containers,
+    )
 
     workspace_key = spec.name.casefold()
+    preserve_existing_context = spec.container is None and not manage_containers
     items = compile_items(
         spec.items,
         workspace_key=workspace_key,
         workspace_uuid=space.uuid,
         inherited_container_id=space.container_tab_id,
+        preserve_existing_context=preserve_existing_context,
         existing_folders=existing_folders,
         existing_groups=existing_groups,
     )
@@ -1634,6 +2302,7 @@ def build_workspace_compilation(
             workspace_uuid=space.uuid,
             folder_id=None,
             user_context_id=space.container_tab_id,
+            preserve_existing_context=preserve_existing_context,
         )
         for tab in spec.tabs
     ]
@@ -1724,7 +2393,7 @@ def match_tabs_to_existing(
         tab.sync_id = (
             tab.existing.zen_sync_id if tab.existing is not None else new_item_id()
         )
-        if tab.existing is not None:
+        if tab.existing is not None and tab.preserve_existing_context:
             tab.user_context_id = tab.existing.user_context_id
 
     for workspace in workspaces:
@@ -1737,7 +2406,7 @@ def match_tabs_to_existing(
             tab.sync_id = (
                 tab.existing.zen_sync_id if tab.existing is not None else new_item_id()
             )
-            if tab.existing is not None:
+            if tab.existing is not None and tab.preserve_existing_context:
                 tab.user_context_id = tab.existing.user_context_id
         regular_pool = workspace_tab_pools[workspace.key]
         for tab in workspace.tabs:
@@ -1745,7 +2414,7 @@ def match_tabs_to_existing(
             tab.sync_id = (
                 tab.existing.zen_sync_id if tab.existing is not None else new_item_id()
             )
-            if tab.existing is not None:
+            if tab.existing is not None and tab.preserve_existing_context:
                 tab.user_context_id = tab.existing.user_context_id
 
 
@@ -1890,7 +2559,11 @@ def build_desired_tabs(
     return tabs
 
 
-def build_desired_state(existing: SessionState, config: ZenConfig) -> SessionState:
+def build_desired_state(
+    existing: SessionState,
+    config: ZenConfig,
+    container_plan: ContainerPlan | None = None,
+) -> SessionState:
     """Compile *config* into the managed session subset."""
     result = existing.model_copy(deep=True)
     existing_spaces = {space.name.casefold(): space for space in existing.spaces}
@@ -1902,6 +2575,8 @@ def build_desired_state(existing: SessionState, config: ZenConfig) -> SessionSta
         build_workspace_compilation(
             workspace,
             existing_space=existing_spaces.get(workspace.name.casefold()),
+            manage_containers=config.manage_containers,
+            container_plan=container_plan,
             existing_folders=existing_folders,
             existing_groups=existing_groups,
         )
@@ -1916,6 +2591,8 @@ def build_desired_state(existing: SessionState, config: ZenConfig) -> SessionSta
             workspace_uuid=workspace.space.uuid,
             folder_id=None,
             user_context_id=workspace.space.container_tab_id,
+            preserve_existing_context=workspace.spec.container is None
+            and not config.manage_containers,
         )
         for workspace, spec in (
             (workspace, spec)
@@ -2066,8 +2743,46 @@ def build_folder_tree(
     )
 
 
-def export_config(session: SessionState) -> ZenConfig:
+def _container_specs_from_state(
+    containers: ContainerState,
+    used_context_ids: set[int],
+) -> tuple[list[ContainerSpec], dict[int, str]]:
+    """Export container identities referenced by workspaces."""
+    specs: list[ContainerSpec] = []
+    keys_by_id: dict[int, str] = {}
+    for identity in containers.identities:
+        context_id = identity.user_context_id
+        if context_id not in used_context_ids or context_id <= 0:
+            continue
+        key = identity_display_name(identity)
+        specs.append(
+            ContainerSpec(
+                key=key,
+                name=key,
+                icon=identity.icon or "fingerprint",
+                color=identity.color or "blue",
+                public=identity.public,
+                access_key=identity.access_key,
+            )
+        )
+        keys_by_id[context_id] = key
+    return specs, keys_by_id
+
+
+def export_config(
+    session: SessionState,
+    containers: ContainerState | None = None,
+) -> ZenConfig:
     """Convert a session payload into the canonical declarative config model."""
+    used_context_ids = {
+        space.container_tab_id for space in session.spaces if space.container_tab_id > 0
+    }
+    container_specs: list[ContainerSpec] = []
+    container_keys_by_id: dict[int, str] = {}
+    if containers is not None:
+        container_specs, container_keys_by_id = _container_specs_from_state(
+            containers, used_context_ids
+        )
     workspaces: list[WorkspaceSpec] = []
     for space in session.spaces:
         folders_by_parent: dict[str | None, list[SessionFolder]] = defaultdict(list)
@@ -2094,6 +2809,7 @@ def export_config(session: SessionState) -> ZenConfig:
             WorkspaceSpec(
                 name=space.name,
                 icon=space.icon,
+                container=container_keys_by_id.get(space.container_tab_id),
                 has_collapsed_pinned_tabs=space.has_collapsed_pinned_tabs,
                 theme=ThemeSpec.model_validate(space.theme.model_dump()),
                 essentials=workspace_essentials,
@@ -2101,7 +2817,11 @@ def export_config(session: SessionState) -> ZenConfig:
                 tabs=workspace_tabs,
             )
         )
-    return ZenConfig(workspaces=workspaces)
+    return ZenConfig(
+        containers=container_specs,
+        workspaces=workspaces,
+        manage_containers=bool(container_specs),
+    )
 
 
 def _theme_to_dict(theme: ThemeSpec) -> dict[str, object]:
@@ -2173,40 +2893,76 @@ def _item_to_authored_dict(item: ItemSpec) -> dict[str, object]:
     return _authored_folder_to_dict(item)
 
 
+def _container_to_dict(container: ContainerSpec) -> dict[str, object]:
+    """Serialize one container spec to the authored YAML shape."""
+    data: dict[str, object] = {
+        "name": container.name or container.key,
+        "icon": container.icon,
+        "color": container.color,
+    }
+    if not container.public:
+        data["public"] = False
+    if container.access_key:
+        data["accessKey"] = container.access_key
+    return data
+
+
+def _workspace_to_authored_value(workspace: WorkspaceSpec) -> object:
+    """Serialize one workspace spec to the authored YAML shape."""
+    tree: list[dict[str, object]] = []
+    tree.extend(
+        _authored_leaf_to_dict(tab, role="essential")
+        for tab in workspace.essentials
+    )
+    tree.extend(_item_to_authored_dict(item) for item in workspace.items)
+    tree.extend(_authored_leaf_to_dict(tab, role="tab") for tab in workspace.tabs)
+
+    workspace_data: dict[str, object] = {}
+    if workspace.icon is not None:
+        workspace_data["icon"] = workspace.icon
+    if workspace.container is not None:
+        workspace_data["container"] = workspace.container
+    if workspace.has_collapsed_pinned_tabs:
+        workspace_data["hasCollapsedPinnedTabs"] = True
+    theme = _theme_to_dict(workspace.theme)
+    if theme:
+        workspace_data["theme"] = theme
+
+    if workspace_data:
+        workspace_data["tree"] = tree
+        return workspace_data
+    return tree
+
+
 def config_to_dict(config: ZenConfig) -> dict[str, object]:
     """Serialize one config model to the public authored YAML shape."""
-    data: dict[str, object] = {}
+    workspaces = {
+        workspace.name: _workspace_to_authored_value(workspace)
+        for workspace in config.workspaces
+    }
 
-    for workspace in config.workspaces:
-        tree: list[dict[str, object]] = []
-        tree.extend(
-            _authored_leaf_to_dict(tab, role="essential")
-            for tab in workspace.essentials
-        )
-        tree.extend(_item_to_authored_dict(item) for item in workspace.items)
-        tree.extend(_authored_leaf_to_dict(tab, role="tab") for tab in workspace.tabs)
+    if config.manage_containers:
+        data: dict[str, object] = {}
+        if config.containers:
+            data["containers"] = {
+                container.key: _container_to_dict(container)
+                for container in config.containers
+            }
+        data["workspaces"] = workspaces
+        return data
 
-        workspace_data: dict[str, object] = {}
-        if workspace.icon is not None:
-            workspace_data["icon"] = workspace.icon
-        if workspace.has_collapsed_pinned_tabs:
-            workspace_data["hasCollapsedPinnedTabs"] = True
-        theme = _theme_to_dict(workspace.theme)
-        if theme:
-            workspace_data["theme"] = theme
-
-        if workspace_data:
-            workspace_data["tree"] = tree
-            data[workspace.name] = workspace_data
-        else:
-            data[workspace.name] = tree
+    data = {}
+    data.update(workspaces)
 
     return data
 
 
-def snapshot(session: SessionState) -> dict[str, Any]:
+def snapshot(
+    session: SessionState,
+    containers: ContainerState | None = None,
+) -> dict[str, Any]:
     """Return a compact declarative snapshot for diffing and dump output."""
-    return config_to_dict(export_config(session))
+    return config_to_dict(export_config(session, containers))
 
 
 def format_config_yaml(config: ZenConfig) -> str:
@@ -2219,21 +2975,48 @@ def format_config_yaml(config: ZenConfig) -> str:
     )
 
 
-def format_snapshot_yaml(session: SessionState) -> str:
+def format_snapshot_yaml(
+    session: SessionState,
+    containers: ContainerState | None = None,
+) -> str:
     """Serialize the current session snapshot to YAML."""
     return yaml.safe_dump(
-        snapshot(session),
+        snapshot(session, containers),
         allow_unicode=True,
         default_flow_style=False,
         sort_keys=False,
     )
 
 
-def diff_session(session: SessionState, config: ZenConfig) -> DeepDiff:
+def diff_session(
+    session: SessionState,
+    config: ZenConfig,
+    containers: ContainerState | None = None,
+) -> DeepDiff:
     """Return the structural diff between current and desired managed state."""
-    desired = snapshot(build_desired_state(session, config))
-    current = snapshot(session)
+    plan = (
+        build_desired_containers(containers, config, session)
+        if containers is not None
+        else None
+    )
+    desired_state = build_desired_state(session, config, plan)
+    desired_containers = plan.state if plan is not None and config.manage_containers else None
+    current_containers = containers if config.manage_containers else None
+    desired = snapshot(desired_state, desired_containers)
+    current = snapshot(session, current_containers)
     return DeepDiff(current, desired, ignore_order=False)
+
+
+def _container_state_diff(
+    current: ContainerState,
+    desired: ContainerState,
+) -> DeepDiff:
+    """Return the raw ``containers.json`` diff for unmanaged identity changes."""
+    return DeepDiff(
+        current.model_dump(mode="json", exclude_none=True),
+        desired.model_dump(mode="json", exclude_none=True),
+        ignore_order=False,
+    )
 
 
 def iter_folder_records(session: SessionState) -> Iterator[tuple[str, SessionFolder]]:
@@ -2247,7 +3030,10 @@ def iter_folder_records(session: SessionState) -> Iterator[tuple[str, SessionFol
         yield (" / ".join((workspace_name, *record.path)), folder)
 
 
-def session_check(session: SessionState) -> list[str]:
+def session_check(
+    session: SessionState,
+    containers: ContainerState | None = None,
+) -> list[str]:
     """Return structural errors in the managed subset."""
     errors: list[str] = []
     group_ids = {group.id for group in session.groups}
@@ -2273,10 +3059,27 @@ def session_check(session: SessionState) -> list[str]:
             )
         if tab.zen_essential and not tab.pinned:
             errors.append(f"Essential tab {active_url(tab)!r} is not pinned")
+    if containers is not None:
+        known_context_ids = {
+            identity.user_context_id for identity in containers.identities
+        }
+        errors.extend(
+            f"Workspace {space.name!r} references unknown container "
+            f"{space.container_tab_id}"
+            for space in session.spaces
+            if space.container_tab_id > 0
+            and space.container_tab_id not in known_context_ids
+        )
+        errors.extend(
+            f"Tab {active_url(tab)!r} references unknown container "
+            f"{tab.user_context_id}"
+            for tab in session.tabs
+            if tab.user_context_id > 0 and tab.user_context_id not in known_context_ids
+        )
     return errors
 
 
-def cmd_list(args: argparse.Namespace) -> int:
+def cmd_list(args: SimpleNamespace) -> int:
     """List folders in path order."""
     _path, session = load_session(args.profile)
     folders = list(iter_folder_records(session))
@@ -2288,7 +3091,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_tabs(args: argparse.Namespace) -> int:
+def cmd_tabs(args: SimpleNamespace) -> int:
     """List declarative tab locations from the current session."""
     _path, session = load_session(args.profile)
     essentials = top_level_essentials(session)
@@ -2322,10 +3125,11 @@ def cmd_tabs(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_dump(args: argparse.Namespace) -> int:
+def cmd_dump(args: SimpleNamespace) -> int:
     """Dump the current session as declarative config YAML."""
     _path, session = load_session(args.profile)
-    output = format_snapshot_yaml(session)
+    _containers_path, containers = load_containers(args.profile)
+    output = format_snapshot_yaml(session, containers)
     if args.output:
         out_path = Path(args.output)
         out_path.write_text(output, encoding="utf-8")
@@ -2335,7 +3139,7 @@ def cmd_dump(args: argparse.Namespace) -> int:
     return 0
 
 
-def _selected_scope(args: argparse.Namespace) -> tuple[bool, bool]:
+def _selected_scope(args: SimpleNamespace) -> tuple[bool, bool]:
     """Resolve the requested diff/apply scope flags."""
     selected_state = bool(getattr(args, "state", False))
     selected_assets = bool(getattr(args, "assets", False))
@@ -2453,7 +3257,7 @@ def sync_chrome_tree(
 
 
 def _load_asset_sources(
-    args: argparse.Namespace,
+    args: SimpleNamespace,
 ) -> tuple[Path, Path | None, Path | None]:
     """Resolve managed asset inputs from the configured asset directory."""
     config_dir = _expand_path(args.asset_dir)
@@ -2472,7 +3276,7 @@ def _load_asset_sources(
 
 
 def _resolve_asset_targets(
-    args: argparse.Namespace,
+    args: SimpleNamespace,
 ) -> tuple[Path, Path | None, Path | None, Path, Path, Path]:
     """Resolve managed asset sources and live profile target paths."""
     _config_dir, chrome_source, user_js_source = _load_asset_sources(args)
@@ -2492,7 +3296,7 @@ def _resolve_asset_targets(
     )
 
 
-def _asset_diff_lines(args: argparse.Namespace) -> list[str]:
+def _asset_diff_lines(args: SimpleNamespace) -> list[str]:
     """Return human-readable differences between managed assets and the live profile."""
     (
         profile_dir,
@@ -2509,7 +3313,7 @@ def _asset_diff_lines(args: argparse.Namespace) -> list[str]:
     if chrome_source is not None:
         for source in _iter_source_files(chrome_source):
             rel = source.relative_to(chrome_source).as_posix()
-            managed_entries[rel] = source.resolve()
+            managed_entries[rel] = source
 
     previous_entries: set[str] = set()
     if manifest_path.is_file():
@@ -2546,7 +3350,7 @@ def _asset_diff_lines(args: argparse.Namespace) -> list[str]:
     return lines
 
 
-def _apply_assets(args: argparse.Namespace) -> bool:
+def _apply_assets(args: SimpleNamespace) -> bool:
     """Synchronize managed assets into the live profile and return whether anything changed."""
     (
         profile_dir,
@@ -2577,22 +3381,23 @@ def _apply_assets(args: argparse.Namespace) -> bool:
     return changes
 
 
-def cmd_validate(args: argparse.Namespace) -> int:
+def cmd_validate(args: SimpleNamespace) -> int:
     """Validate the declarative config file."""
     load_config(Path(args.config))
     _stdout("Config is valid.")
     return 0
 
 
-def cmd_diff(args: argparse.Namespace) -> int:
+def cmd_diff(args: SimpleNamespace) -> int:
     """Show the structural diff between current and desired state."""
     want_state, want_assets = _selected_scope(args)
     sections: list[str] = []
 
     if want_state:
         _path, session = load_session(args.profile)
+        _containers_path, containers = load_containers(args.profile)
         config = load_config(Path(args.config))
-        diff = diff_session(session, config)
+        diff = diff_session(session, config, containers)
         if diff:
             sections.append(diff.pretty())
 
@@ -2609,27 +3414,97 @@ def cmd_diff(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_apply(args: argparse.Namespace) -> int:
+def build_state_apply_plan(args: SimpleNamespace) -> StateApplyPlan:
+    """Build the desired state mutation for ``apply --state``."""
+    runtime = require_zen_closed(args.profile)
+    _print_runtime_warnings(runtime)
+    state_path, session = load_session(args.profile)
+    containers_path, containers = load_containers(args.profile)
+    config = load_config(Path(args.config))
+    container_plan = build_desired_containers(containers, config, session)
+    desired_state = build_desired_state(session, config, container_plan)
+    desired_containers = container_plan.state
+    current_snapshot = snapshot(
+        session,
+        containers if config.manage_containers else None,
+    )
+    desired_snapshot = snapshot(
+        desired_state,
+        desired_containers if config.manage_containers else None,
+    )
+    diff = DeepDiff(current_snapshot, desired_snapshot, ignore_order=False)
+    diff_text = diff.pretty() if diff else None
+    containers_changed = config.manage_containers and containers != desired_containers
+    if diff_text is None and containers_changed:
+        containers_diff = _container_state_diff(containers, desired_containers)
+        diff_text = containers_diff.pretty() if containers_diff else None
+    return StateApplyPlan(
+        session_path=state_path,
+        containers_path=containers_path,
+        desired_state=desired_state,
+        desired_containers=desired_containers,
+        diff_text=diff_text,
+        containers_changed=containers_changed,
+        removed_context_ids=container_plan.removed_context_ids,
+    )
+
+
+def confirm_apply(
+    *,
+    want_state: bool,
+    want_assets: bool,
+) -> bool:
+    """Prompt for apply confirmation."""
+    prompt = "Apply changes? [y/N] "
+    if want_state and not want_assets:
+        prompt = "Apply state changes? [y/N] "
+    elif want_assets and not want_state:
+        prompt = "Apply asset changes? [y/N] "
+    try:
+        answer = input(prompt).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        _stdout("\nAborted.")
+        return False
+    if answer not in {"y", "yes"}:
+        _stdout("Aborted.")
+        return False
+    return True
+
+
+def apply_state_plan(args: SimpleNamespace, plan: StateApplyPlan) -> None:
+    """Write a prepared state mutation after confirmation."""
+    backup = backup_session(plan.session_path)
+    _stdout(f"Backup: {backup.name}")
+    if (plan.containers_changed or plan.removed_context_ids) and (
+        plan.containers_path.exists()
+    ):
+        containers_backup = backup_file(plan.containers_path)
+        _stdout(f"Backup: {containers_backup.name}")
+    if plan.removed_context_ids:
+        cookie_path = cookies_file(args.profile)
+        if cookie_path.exists():
+            cookies_backup = backup_file(cookie_path)
+            _stdout(f"Backup: {cookies_backup.name}")
+            pruned = prune_cookie_contexts(cookie_path, plan.removed_context_ids)
+            if pruned:
+                _stdout(f"Pruned {pruned} cookie(s) for removed containers.")
+    if plan.containers_changed:
+        write_containers(plan.containers_path, plan.desired_containers)
+    write_session(plan.session_path, plan.desired_state)
+    _stdout("Applied state successfully.")
+
+
+def cmd_apply(args: SimpleNamespace) -> int:
     """Apply the declarative config to the session file."""
     want_state, want_assets = _selected_scope(args)
 
-    state_runtime: ZenRuntimeState | None = None
-    state_path: Path | None = None
-    desired_state: SessionState | None = None
+    state_plan: StateApplyPlan | None = None
     state_diff_text: str | None = None
     asset_lines: list[str] = []
 
     if want_state:
-        state_runtime = require_zen_closed(args.profile)
-        _print_runtime_warnings(state_runtime)
-        state_path, session = load_session(args.profile)
-        config = load_config(Path(args.config))
-        desired_state = build_desired_state(session, config)
-        state_diff = DeepDiff(
-            snapshot(session), snapshot(desired_state), ignore_order=False
-        )
-        if state_diff:
-            state_diff_text = state_diff.pretty()
+        state_plan = build_state_apply_plan(args)
+        state_diff_text = state_plan.diff_text
 
     if want_assets:
         asset_lines = _asset_diff_lines(args)
@@ -2645,31 +3520,14 @@ def cmd_apply(args: argparse.Namespace) -> int:
             _stdout()
         _stdout("\n".join(asset_lines))
 
-    if not args.yes:
-        prompt = "Apply changes? [y/N] "
-        if want_state and not want_assets:
-            prompt = "Apply state changes? [y/N] "
-        elif want_assets and not want_state:
-            prompt = "Apply asset changes? [y/N] "
-        try:
-            answer = input(prompt).strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            _stdout("\nAborted.")
-            return 1
-        if answer not in {"y", "yes"}:
-            _stdout("Aborted.")
-            return 1
-
-    if (
-        want_state
-        and state_path is not None
-        and desired_state is not None
-        and state_diff_text is not None
+    if not args.yes and not confirm_apply(
+        want_state=want_state,
+        want_assets=want_assets,
     ):
-        backup = backup_session(state_path)
-        _stdout(f"Backup: {backup.name}")
-        write_session(state_path, desired_state)
-        _stdout("Applied state successfully.")
+        return 1
+
+    if want_state and state_plan is not None and state_plan.diff_text is not None:
+        apply_state_plan(args, state_plan)
 
     if want_assets and asset_lines:
         _apply_assets(args)
@@ -2678,17 +3536,17 @@ def cmd_apply(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_inspect_folders(args: argparse.Namespace) -> int:
+def cmd_inspect_folders(args: SimpleNamespace) -> int:
     """List folders in path order."""
     return cmd_list(args)
 
 
-def cmd_inspect_tabs(args: argparse.Namespace) -> int:
+def cmd_inspect_tabs(args: SimpleNamespace) -> int:
     """List declarative tab locations from the current session."""
     return cmd_tabs(args)
 
 
-def cmd_inspect_workspaces(args: argparse.Namespace) -> int:
+def cmd_inspect_workspaces(args: SimpleNamespace) -> int:
     """List workspaces from the current session."""
     _path, session = load_session(args.profile)
     if not session.spaces:
@@ -2699,7 +3557,7 @@ def cmd_inspect_workspaces(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_inspect_raw(args: argparse.Namespace) -> int:
+def cmd_inspect_raw(args: SimpleNamespace) -> int:
     """Print the decoded session payload."""
     path = session_file(args.profile)
     if args.literal:
@@ -2732,10 +3590,11 @@ def cmd_inspect_raw(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_check(args: argparse.Namespace) -> int:
+def cmd_check(args: SimpleNamespace) -> int:
     """Validate structural invariants in the current session subset."""
     _path, session = load_session(args.profile)
-    errors = session_check(session)
+    _containers_path, containers = load_containers(args.profile)
+    errors = session_check(session, containers)
     if not errors:
         _stdout("Session check passed: no structural errors found.")
         return 0
@@ -2745,7 +3604,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 1
 
 
-def cmd_profile_is_running(args: argparse.Namespace) -> int:
+def cmd_profile_is_running(args: SimpleNamespace) -> int:
     """Return whether Zen appears to be actively using the target profile."""
     state = inspect_zen_runtime(args.profile)
     _print_runtime_warnings(state)
@@ -2756,192 +3615,10 @@ def cmd_profile_is_running(args: argparse.Namespace) -> int:
     return 1
 
 
-def cmd_profile_path(args: argparse.Namespace) -> int:
+def cmd_profile_path(args: SimpleNamespace) -> int:
     """Print the resolved profile directory path and exit."""
     _stdout(str(zen_profile_dir(args.profile)))
     return 0
-
-
-def _add_profile_argument(parser: argparse.ArgumentParser) -> None:
-    """Add the shared profile selection argument to one parser."""
-    parser.add_argument(
-        "-p",
-        "--profile",
-        default=None,
-        help=PROFILE_HELP,
-    )
-
-
-def _add_scoped_operation_arguments(parser: argparse.ArgumentParser) -> None:
-    """Add shared diff/apply scope and asset arguments to one parser."""
-    _add_profile_argument(parser)
-    parser.add_argument(
-        "-c",
-        "--config",
-        default=str(DEFAULT_YAML),
-        help=f"Config file (default: {DEFAULT_YAML})",
-    )
-    parser.add_argument(
-        "-d",
-        "--asset-dir",
-        default=str(DEFAULT_CONFIG_DIR),
-        help=f"Managed asset directory (default: {DEFAULT_CONFIG_DIR})",
-    )
-    parser.add_argument(
-        "-C",
-        "--chrome-source",
-        default=None,
-        help=(
-            "Chrome source directory override. Defaults to ASSET_DIR/chrome when present. "
-            f"Also accepts ${DEFAULT_CHROME_SOURCE_ENV}."
-        ),
-    )
-    parser.add_argument(
-        "-u",
-        "--user-js-source",
-        default=None,
-        help="user.js source file override. Defaults to ASSET_DIR/user.js when present.",
-    )
-    parser.add_argument(
-        "-s",
-        "--state",
-        action="store_true",
-        help="Limit the operation to Zen session state",
-    )
-    parser.add_argument(
-        "-a",
-        "--assets",
-        action="store_true",
-        help="Limit the operation to theme/profile assets",
-    )
-
-
-def build_parser() -> argparse.ArgumentParser:
-    """Build the CLI parser."""
-    parser = argparse.ArgumentParser(
-        description="Inspect and reconcile Zen session state.",
-    )
-    _add_profile_argument(parser)
-
-    sub = parser.add_subparsers(dest="command", metavar="command")
-
-    validate_parser = sub.add_parser(
-        "validate",
-        help="Validate the authored workspace-map config",
-    )
-    validate_parser.add_argument(
-        "-c",
-        "--config",
-        default=str(DEFAULT_YAML),
-        help=f"Config file (default: {DEFAULT_YAML})",
-    )
-
-    dump_parser = sub.add_parser(
-        "dump",
-        help="Dump declarative YAML from the current session",
-    )
-    _add_profile_argument(dump_parser)
-    dump_parser.add_argument(
-        "-o",
-        "--output",
-        metavar="FILE",
-        help="Write output to file",
-    )
-
-    diff_parser = sub.add_parser("diff", help="Show what changes would be made")
-    _add_scoped_operation_arguments(diff_parser)
-
-    apply_parser = sub.add_parser("apply", help="Apply changes to the Zen session file")
-    _add_scoped_operation_arguments(apply_parser)
-    apply_parser.add_argument(
-        "-y",
-        "--yes",
-        action="store_true",
-        help="Skip confirmation prompts",
-    )
-
-    check_parser = sub.add_parser(
-        "check",
-        help="Validate structural invariants in the current session",
-    )
-    _add_profile_argument(check_parser)
-
-    inspect_parser = sub.add_parser(
-        "inspect",
-        help="Inspect live Zen session state views",
-    )
-    _add_profile_argument(inspect_parser)
-    inspect_sub = inspect_parser.add_subparsers(
-        dest="inspect_command", metavar="inspect-command"
-    )
-    inspect_sub.add_parser("folders", help="List folders")
-    inspect_sub.add_parser("tabs", help="List managed tab locations")
-    inspect_sub.add_parser("workspaces", help="List workspaces")
-    inspect_raw_parser = inspect_sub.add_parser(
-        "raw",
-        help="Print decoded session JSON",
-    )
-    inspect_raw_parser.add_argument(
-        "-l",
-        "--literal",
-        action="store_true",
-        help="Print the literal decoded session payload without Pydantic normalization",
-    )
-    inspect_raw_parser.add_argument(
-        "-o",
-        "--output",
-        metavar="FILE",
-        help="Write output to file",
-    )
-
-    profile_parser = sub.add_parser("profile", help="Inspect profile/runtime state")
-    _add_profile_argument(profile_parser)
-    profile_sub = profile_parser.add_subparsers(
-        dest="profile_command", metavar="profile-command"
-    )
-    profile_sub.add_parser("path", help="Print the resolved profile directory path")
-    profile_sub.add_parser(
-        "is-running",
-        help="Exit 0 if Zen appears to be using the target profile",
-    )
-
-    return parser
-
-
-def _dispatch_nested_command(
-    parser: argparse.ArgumentParser,
-    args: argparse.Namespace,
-) -> Callable[[argparse.Namespace], int] | None:
-    """Resolve nested inspect/profile commands to their handlers."""
-    if args.command == "inspect":
-        inspect_command = getattr(args, "inspect_command", None)
-        if inspect_command is None:
-            parser.parse_args([args.command, "-h"])
-            return None
-        inspect_dispatch: dict[str, Callable[[argparse.Namespace], int]] = {
-            "folders": cmd_inspect_folders,
-            "tabs": cmd_inspect_tabs,
-            "workspaces": cmd_inspect_workspaces,
-            "raw": cmd_inspect_raw,
-        }
-        return inspect_dispatch[inspect_command]
-
-    if args.command == "profile":
-        profile_command = getattr(args, "profile_command", None)
-        if profile_command is None:
-            parser.parse_args([args.command, "-h"])
-            return None
-        profile_dispatch: dict[str, Callable[[argparse.Namespace], int]] = {
-            "path": cmd_profile_path,
-            "is-running": cmd_profile_is_running,
-        }
-        return profile_dispatch[profile_command]
-
-    return None
-
-
-_ARGPARSE_BUILD_PARSER: Final = build_parser
-_ARGPARSE_DISPATCH_NESTED_COMMAND: Final = _dispatch_nested_command
 
 
 _TYPER_CONTEXT_SETTINGS: Final = {"help_option_names": ["-h", "--help"]}
@@ -2982,9 +3659,9 @@ def _effective_profile(ctx: typer.Context, profile: str | None) -> str | None:
     return profile if profile is not None else _context_profile(ctx)
 
 
-def _run_handler(handler: Callable[[argparse.Namespace], int], **values: object) -> int:
-    """Call an existing argparse-shaped handler from the Typer command tree."""
-    return handler(argparse.Namespace(**values))
+def _run_handler(handler: Callable[[SimpleNamespace], int], **values: object) -> int:
+    """Call an existing namespace-shaped handler from the Typer command tree."""
+    return handler(SimpleNamespace(**values))
 
 
 def _scoped_values(
@@ -3222,57 +3899,24 @@ def _typer_profile_is_running(ctx: typer.Context) -> int:
     )
 
 
-def _legacy_argparse_main(argv: Sequence[str] | None = None) -> int:
-    """Run the legacy argparse dispatcher for parser-focused tests."""
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    if not args.command:
-        parser.print_help()
-        return 0
-
-    dispatch: dict[str, Callable[[argparse.Namespace], int]] = {
-        "apply": cmd_apply,
-        "check": cmd_check,
-        "diff": cmd_diff,
-        "dump": cmd_dump,
-        "validate": cmd_validate,
-    }
-
-    try:
-        handler = dispatch.get(args.command)
-        if handler is None:
-            handler = _dispatch_nested_command(parser, args)
-        if handler is not None:
-            return handler(args)
-    except ZentoolError as exc:
-        _stderr(f"Error: {exc}")
-        return 1
-    except KeyboardInterrupt:
-        _stderr("Interrupted.")
-        return 130
-
-    parser.print_help()
-    return 0
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI."""
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
-        build_parser().print_help()
-        return 0
-    if (
-        build_parser is not _ARGPARSE_BUILD_PARSER
-        or _dispatch_nested_command is not _ARGPARSE_DISPATCH_NESTED_COMMAND
-    ):
-        return _legacy_argparse_main(args)
+        args = ["--help"]
     try:
         result = get_command(TYPER_APP).main(
             args=args,
             prog_name="zentool",
             standalone_mode=False,
         )
+        if result == INTERRUPTED_EXIT_CODE:
+            _stderr("Interrupted.")
         return result if isinstance(result, int) else 0
+    except click.exceptions.Exit as exc:
+        if exc.exit_code == INTERRUPTED_EXIT_CODE:
+            _stderr("Interrupted.")
+        return exc.exit_code
     except ZentoolError as exc:
         _stderr(f"Error: {exc}")
         return 1
@@ -3305,7 +3949,6 @@ __all__ = [
     "active_url",
     "backup_session",
     "build_desired_state",
-    "build_parser",
     "diff_session",
     "display_name",
     "export_config",

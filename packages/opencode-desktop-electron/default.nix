@@ -243,8 +243,7 @@ stdenv.mkDerivation {
       --replace-fail '    OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",' '    OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "false",'
 
     # Keep the packaged Electron runtime identity aligned with the Nix-level
-    # overrides so the app bundle, userData path, deep-link scheme, and Tauri
-    # migration target all agree.
+    # overrides so the app bundle, userData path, and deep-link scheme agree.
     substituteInPlace packages/desktop-electron/src/main/index.ts \
       --replace-fail 'const appId = app.isPackaged ? APP_IDS[CHANNEL] : "ai.opencode.desktop.dev"' 'const appId = process.env.OPENCODE_APP_ID ?? (app.isPackaged ? APP_IDS[CHANNEL] : "ai.opencode.desktop.dev")' \
       --replace-fail 'app.setName(app.isPackaged ? APP_NAMES[CHANNEL] : "OpenCode Dev")' 'app.setName(process.env.OPENCODE_APP_NAME ?? (app.isPackaged ? APP_NAMES[CHANNEL] : "OpenCode Dev"))' \

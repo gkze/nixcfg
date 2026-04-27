@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -20,8 +20,8 @@ def zentool() -> ModuleType:
     return load_zen_script_module("zentool", "zentool_finishing")
 
 
-def make_args(**overrides: object) -> argparse.Namespace:
-    """Build a minimal argparse namespace for diff/apply helpers."""
+def make_args(**overrides: object) -> SimpleNamespace:
+    """Build a minimal namespace for diff/apply helpers."""
     values: dict[str, object] = {
         "profile": None,
         "config": "/tmp/folders.yaml",
@@ -33,7 +33,7 @@ def make_args(**overrides: object) -> argparse.Namespace:
         "yes": True,
     }
     values.update(overrides)
-    return argparse.Namespace(**values)
+    return SimpleNamespace(**values)
 
 
 class FakeDiff:
@@ -84,6 +84,19 @@ def test_serialization_helpers_cover_remaining_default_skips(
     theme = zentool.ThemeSpec.model_construct(type="image")
     empty_folder = zentool.FolderSpec(name="Collapsed")
     tab = zentool.TabSpec(name="Inbox", url="https://mail.example")
+    config = zentool.ZenConfig(
+        manage_containers=True,
+        containers=[
+            zentool.ContainerSpec(
+                key="Town",
+                icon="briefcase",
+                color="orange",
+                public=False,
+                accessKey="T",
+            )
+        ],
+        workspaces=[zentool.WorkspaceSpec(name="Work")],
+    )
 
     assert zentool._theme_to_dict(theme) == {"type": "image"}
     assert zentool._item_to_dict(empty_folder) == {
@@ -92,6 +105,24 @@ def test_serialization_helpers_cover_remaining_default_skips(
     }
     assert zentool._authored_leaf_to_dict(tab) == {"Inbox": "https://mail.example"}
     assert zentool._authored_folder_to_dict(empty_folder) == {"Collapsed": []}
+    assert zentool.config_to_dict(config) == {
+        "containers": {
+            "Town": {
+                "name": "Town",
+                "icon": "briefcase",
+                "color": "orange",
+                "public": False,
+                "accessKey": "T",
+            }
+        },
+        "workspaces": {"Work": []},
+    }
+    assert zentool.config_to_dict(
+        zentool.ZenConfig(
+            manage_containers=True,
+            workspaces=[zentool.WorkspaceSpec(name="Work")],
+        )
+    ) == {"workspaces": {"Work": []}}
 
 
 def test_cmd_tabs_omits_empty_sections_for_sparse_workspaces(
@@ -117,7 +148,7 @@ def test_cmd_tabs_omits_empty_sections_for_sparse_workspaces(
         zentool, "load_session", lambda _profile: (Path("session"), session)
     )
 
-    assert zentool.cmd_tabs(argparse.Namespace(profile="default")) == 0
+    assert zentool.cmd_tabs(SimpleNamespace(profile="default")) == 0
     assert lines == ["", "Workspace: Work", "", "Workspace: Play"]
 
 
@@ -172,8 +203,15 @@ def test_cmd_diff_reports_no_changes_for_state_only_scope(
     monkeypatch.setattr(
         zentool, "load_session", lambda _profile: (Path("session"), object())
     )
-    monkeypatch.setattr(zentool, "load_config", lambda _path: object())
-    monkeypatch.setattr(zentool, "diff_session", lambda _session, _config: None)
+    monkeypatch.setattr(
+        zentool,
+        "load_containers",
+        lambda _profile: (Path("containers.json"), zentool.ContainerState()),
+    )
+    monkeypatch.setattr(zentool, "load_config", lambda _path: zentool.ZenConfig())
+    monkeypatch.setattr(
+        zentool, "diff_session", lambda _session, _config, _containers: None
+    )
     monkeypatch.setattr(
         zentool,
         "_asset_diff_lines",
@@ -225,14 +263,23 @@ def test_cmd_apply_reports_no_changes_for_state_only_without_diff(
     monkeypatch.setattr(
         zentool, "load_session", lambda _profile: (Path("session"), session)
     )
-    monkeypatch.setattr(zentool, "load_config", lambda _path: object())
     monkeypatch.setattr(
-        zentool, "build_desired_state", lambda _session, _config: desired_state
+        zentool,
+        "load_containers",
+        lambda _profile: (Path("containers.json"), zentool.ContainerState()),
+    )
+    monkeypatch.setattr(zentool, "load_config", lambda _path: zentool.ZenConfig())
+    monkeypatch.setattr(
+        zentool,
+        "build_desired_state",
+        lambda _session, _config, _plan: desired_state,
     )
     monkeypatch.setattr(
         zentool,
         "snapshot",
-        lambda value: {"kind": "session" if value is session else "desired"},
+        lambda value, _containers=None: {
+            "kind": "session" if value is session else "desired"
+        },
     )
     monkeypatch.setattr(
         zentool, "DeepDiff", lambda *_args, **_kwargs: FakeDiff("", truthy=False)
@@ -263,14 +310,23 @@ def test_cmd_apply_aborts_on_state_only_prompt_interrupt(
     monkeypatch.setattr(
         zentool, "load_session", lambda _profile: (Path("session"), session)
     )
-    monkeypatch.setattr(zentool, "load_config", lambda _path: object())
     monkeypatch.setattr(
-        zentool, "build_desired_state", lambda _session, _config: desired_state
+        zentool,
+        "load_containers",
+        lambda _profile: (Path("containers.json"), zentool.ContainerState()),
+    )
+    monkeypatch.setattr(zentool, "load_config", lambda _path: zentool.ZenConfig())
+    monkeypatch.setattr(
+        zentool,
+        "build_desired_state",
+        lambda _session, _config, _plan: desired_state,
     )
     monkeypatch.setattr(
         zentool,
         "snapshot",
-        lambda value: {"kind": "session" if value is session else "desired"},
+        lambda value, _containers=None: {
+            "kind": "session" if value is session else "desired"
+        },
     )
     monkeypatch.setattr(
         zentool, "DeepDiff", lambda *_args, **_kwargs: FakeDiff("state diff")
@@ -302,14 +358,23 @@ def test_cmd_apply_aborts_on_state_only_prompt_rejection(
     monkeypatch.setattr(
         zentool, "load_session", lambda _profile: (Path("session"), session)
     )
-    monkeypatch.setattr(zentool, "load_config", lambda _path: object())
     monkeypatch.setattr(
-        zentool, "build_desired_state", lambda _session, _config: desired_state
+        zentool,
+        "load_containers",
+        lambda _profile: (Path("containers.json"), zentool.ContainerState()),
+    )
+    monkeypatch.setattr(zentool, "load_config", lambda _path: zentool.ZenConfig())
+    monkeypatch.setattr(
+        zentool,
+        "build_desired_state",
+        lambda _session, _config, _plan: desired_state,
     )
     monkeypatch.setattr(
         zentool,
         "snapshot",
-        lambda value: {"kind": "session" if value is session else "desired"},
+        lambda value, _containers=None: {
+            "kind": "session" if value is session else "desired"
+        },
     )
     monkeypatch.setattr(
         zentool, "DeepDiff", lambda *_args, **_kwargs: FakeDiff("state diff")
@@ -343,14 +408,23 @@ def test_cmd_apply_applies_state_only_without_running_asset_sync(
     monkeypatch.setattr(
         zentool, "load_session", lambda _profile: (session_path, session)
     )
-    monkeypatch.setattr(zentool, "load_config", lambda _path: object())
     monkeypatch.setattr(
-        zentool, "build_desired_state", lambda _session, _config: desired_state
+        zentool,
+        "load_containers",
+        lambda _profile: (Path("containers.json"), zentool.ContainerState()),
+    )
+    monkeypatch.setattr(zentool, "load_config", lambda _path: zentool.ZenConfig())
+    monkeypatch.setattr(
+        zentool,
+        "build_desired_state",
+        lambda _session, _config, _plan: desired_state,
     )
     monkeypatch.setattr(
         zentool,
         "snapshot",
-        lambda value: {"kind": "session" if value is session else "desired"},
+        lambda value, _containers=None: {
+            "kind": "session" if value is session else "desired"
+        },
     )
     monkeypatch.setattr(
         zentool, "DeepDiff", lambda *_args, **_kwargs: FakeDiff("state diff")

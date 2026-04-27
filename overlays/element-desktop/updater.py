@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 from lib.update.nix import (
     _build_fetch_from_github_call,
     _build_fetch_from_github_expr,
-    _build_fetch_yarn_deps_expr,
+    _build_fetch_pnpm_deps_expr,
 )
 from lib.update.updaters.base import (
     FixedOutputHashStep,
@@ -52,19 +52,24 @@ class ElementDesktopUpdater(HashEntryUpdater):
     def _src_expr(version: str) -> str:
         return _build_fetch_from_github_expr(
             "element-hq",
-            "element-desktop",
-            rev=f"v{version}",
+            "element-web",
+            tag=f"v{version}",
         )
 
     @staticmethod
     def _offline_expr(version: str, src_hash: str) -> str:
         src_expr = _build_fetch_from_github_call(
             "element-hq",
-            "element-desktop",
-            rev=f"v{version}",
+            "element-web",
+            tag=f"v{version}",
             hash_value=src_hash,
         )
-        return _build_fetch_yarn_deps_expr(src_expr)
+        return _build_fetch_pnpm_deps_expr(
+            src_expr,
+            pname="element",
+            version=version,
+            fetcher_version=3,
+        )
 
     async def fetch_hashes(
         self,
@@ -73,7 +78,7 @@ class ElementDesktopUpdater(HashEntryUpdater):
         *,
         context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
-        """Compute srcHash first, then sha256 for fetchYarnDeps offline cache."""
+        """Compute srcHash first, then sha256 for the pnpm dependency cache."""
         _ = (session, context)
 
         async for event in stream_fixed_output_hashes(

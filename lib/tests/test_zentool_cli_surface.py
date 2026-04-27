@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -124,7 +123,12 @@ def test_cmd_check_reports_success_and_failure(
         "load_session",
         lambda _profile: (Path("/tmp/session"), object()),
     )
-    monkeypatch.setattr(zentool, "session_check", lambda _session: [])
+    monkeypatch.setattr(
+        zentool,
+        "load_containers",
+        lambda _profile: (Path("/tmp/containers.json"), object()),
+    )
+    monkeypatch.setattr(zentool, "session_check", lambda _session, _containers: [])
 
     assert zentool.cmd_check(SimpleNamespace(profile="default")) == 0
     assert lines == ["Session check passed: no structural errors found."]
@@ -133,7 +137,7 @@ def test_cmd_check_reports_success_and_failure(
     monkeypatch.setattr(
         zentool,
         "session_check",
-        lambda _session: ["first issue", "second issue"],
+        lambda _session, _containers: ["first issue", "second issue"],
     )
 
     assert zentool.cmd_check(SimpleNamespace(profile="default")) == 1
@@ -187,101 +191,15 @@ def test_cmd_profile_path_prints_resolved_directory(
     assert lines == ["/tmp/profile"]
 
 
-def test_add_profile_argument_sets_expected_option_shape(zentool: ModuleType) -> None:
-    """The shared profile argument should keep its documented flag surface."""
-    parser = argparse.ArgumentParser()
-
-    zentool._add_profile_argument(parser)
-
-    assert parser.parse_args([]).profile is None
-    assert parser.parse_args(["--profile", "Work"]).profile == "Work"
-    action = next(action for action in parser._actions if action.dest == "profile")
-    assert "-p" in action.option_strings
-    assert "--profile" in action.option_strings
-    assert action.help == zentool.PROFILE_HELP
-
-
-def test_add_scoped_operation_arguments_sets_shared_defaults(
-    zentool: ModuleType,
-) -> None:
-    """Diff/apply parsers should share the expected profile/config/asset flags."""
-    parser = argparse.ArgumentParser()
-
-    zentool._add_scoped_operation_arguments(parser)
-
-    defaults = parser.parse_args([])
-    assert defaults.profile is None
-    assert defaults.config == str(zentool.DEFAULT_YAML)
-    assert defaults.asset_dir == str(zentool.DEFAULT_CONFIG_DIR)
-    assert defaults.chrome_source is None
-    assert defaults.user_js_source is None
-    assert defaults.state is False
-    assert defaults.assets is False
-
-    parsed = parser.parse_args([
-        "-p",
-        "Work",
-        "--state",
-        "--assets",
-        "--chrome-source",
-        "/tmp/chrome",
-        "--user-js-source",
-        "/tmp/user.js",
-    ])
-    assert parsed.profile == "Work"
-    assert parsed.state is True
-    assert parsed.assets is True
-    assert parsed.chrome_source == "/tmp/chrome"
-    assert parsed.user_js_source == "/tmp/user.js"
-
-
-def test_scoped_operation_arguments_reject_app_bundle_autoconfig_flags(
-    zentool: ModuleType,
-) -> None:
-    """Asset sync must not expose app-bundle mutation flags."""
-    parser = argparse.ArgumentParser()
-    zentool._add_scoped_operation_arguments(parser)
-
-    with pytest.raises(SystemExit):
-        parser.parse_args(["--app-bundle", "/Applications/Twilight.app"])
-
-
-def test_build_parser_parses_nested_cli_shapes(zentool: ModuleType) -> None:
-    """The public parser should expose the targeted inspect/profile/main flags."""
-    parser = zentool.build_parser()
-
-    inspect_raw = parser.parse_args([
-        "inspect",
-        "raw",
-        "--literal",
-        "--output",
-        "session.json",
-    ])
-    assert inspect_raw.command == "inspect"
-    assert inspect_raw.inspect_command == "raw"
-    assert inspect_raw.literal is True
-    assert inspect_raw.output == "session.json"
-    assert inspect_raw.profile is None
-
-    profile_running = parser.parse_args(["profile", "--profile", "Work", "is-running"])
-    assert profile_running.command == "profile"
-    assert profile_running.profile_command == "is-running"
-    assert profile_running.profile == "Work"
-
-    check_args = parser.parse_args(["check", "-p", "Default"])
-    assert check_args.command == "check"
-    assert check_args.profile == "Default"
-
-
-def test_typer_wrappers_forward_to_existing_argparse_handlers(
+def test_typer_wrappers_forward_to_existing_namespace_handlers(
     monkeypatch: pytest.MonkeyPatch,
     zentool: ModuleType,
 ) -> None:
-    """Typer command functions should preserve the legacy handler namespaces."""
-    calls: list[tuple[str, argparse.Namespace]] = []
+    """Typer command functions should preserve handler namespace payloads."""
+    calls: list[tuple[str, SimpleNamespace]] = []
 
     def _handler(name: str):
-        def _inner(args: argparse.Namespace) -> int:
+        def _inner(args: SimpleNamespace) -> int:
             calls.append((name, args))
             return len(calls)
 
@@ -358,124 +276,59 @@ def test_typer_wrappers_forward_to_existing_argparse_handlers(
     assert by_name["cmd_profile_path"].profile == "Profile"
 
 
-def test_dispatch_nested_command_routes_known_nested_commands(
+def test_main_routes_typer_commands(
     monkeypatch: pytest.MonkeyPatch,
     zentool: ModuleType,
 ) -> None:
-    """Nested dispatch should map inspect/profile verbs to handlers."""
-    parser = zentool.build_parser()
-    inspect_handler = object()
-    profile_handler = object()
-    monkeypatch.setattr(zentool, "cmd_inspect_raw", inspect_handler)
-    monkeypatch.setattr(zentool, "cmd_profile_is_running", profile_handler)
-
-    assert (
-        zentool._dispatch_nested_command(
-            parser,
-            SimpleNamespace(command="inspect", inspect_command="raw"),
-        )
-        is inspect_handler
-    )
-    assert (
-        zentool._dispatch_nested_command(
-            parser,
-            SimpleNamespace(command="profile", profile_command="is-running"),
-        )
-        is profile_handler
-    )
-    assert (
-        zentool._dispatch_nested_command(
-            parser,
-            SimpleNamespace(command="check"),
-        )
-        is None
-    )
-
-
-def test_dispatch_nested_command_requests_help_when_nested_command_is_missing(
-    monkeypatch: pytest.MonkeyPatch,
-    zentool: ModuleType,
-) -> None:
-    """Missing nested verbs should bounce back through parser help parsing."""
-    calls: list[list[str]] = []
-
-    class FakeParser:
-        def parse_args(self, argv: list[str]) -> None:
-            calls.append(argv)
-
-    parser = FakeParser()
-
-    assert (
-        zentool._dispatch_nested_command(
-            parser,
-            SimpleNamespace(command="inspect", inspect_command=None),
-        )
-        is None
-    )
-    assert (
-        zentool._dispatch_nested_command(
-            parser,
-            SimpleNamespace(command="profile", profile_command=None),
-        )
-        is None
-    )
-    assert calls == [["inspect", "-h"], ["profile", "-h"]]
-
-
-def test_main_routes_direct_and_nested_commands(
-    monkeypatch: pytest.MonkeyPatch,
-    zentool: ModuleType,
-) -> None:
-    """Main should invoke direct commands and nested fallback dispatch."""
-    parser = zentool.build_parser()
+    """Main should invoke direct, scoped, and nested Typer commands."""
     seen: list[tuple[str, object]] = []
 
-    def direct_handler(args: argparse.Namespace) -> int:
+    def check_handler(args: SimpleNamespace) -> int:
         seen.append(("check", args.command))
         return 11
 
-    def nested_handler(args: argparse.Namespace) -> int:
+    def apply_handler(args: SimpleNamespace) -> int:
+        seen.append(("apply", args.profile, args.state, args.yes))
+        return 17
+
+    def nested_handler(args: SimpleNamespace) -> int:
         seen.append(("nested", args.inspect_command))
         return 22
 
-    monkeypatch.setattr(zentool, "build_parser", lambda: parser)
-    monkeypatch.setattr(zentool, "cmd_check", direct_handler)
-    monkeypatch.setattr(
-        zentool,
-        "_dispatch_nested_command",
-        lambda _parser, args: nested_handler if args.command == "inspect" else None,
-    )
+    monkeypatch.setattr(zentool, "cmd_check", check_handler)
+    monkeypatch.setattr(zentool, "cmd_apply", apply_handler)
+    monkeypatch.setattr(zentool, "cmd_inspect_raw", nested_handler)
 
     assert zentool.main(["check"]) == 11
+    assert (
+        zentool.main([
+            "apply",
+            "--profile",
+            "Default (twilight)",
+            "--state",
+            "--yes",
+        ])
+        == 17
+    )
     assert zentool.main(["inspect", "raw"]) == 22
-    assert seen == [("check", "check"), ("nested", "raw")]
+    assert seen == [
+        ("check", "check"),
+        ("apply", "Default (twilight)", True, True),
+        ("nested", "raw"),
+    ]
 
 
-def test_main_handles_help_errors_interrupts_and_missing_nested_handler(
+def test_main_handles_help_errors_and_interrupts(
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     zentool: ModuleType,
 ) -> None:
-    """Main should cover no-command, handled errors, interrupts, and help fallback."""
+    """Main should cover Typer help, handled errors, and interrupts."""
     stderr_lines: list[str] = []
 
-    class FakeParser:
-        def __init__(self, args: argparse.Namespace) -> None:
-            self.args = args
-            self.help_calls = 0
-
-        def parse_args(self, _argv: object = None) -> argparse.Namespace:
-            return self.args
-
-        def print_help(self) -> None:
-            self.help_calls += 1
-
-    parser = FakeParser(argparse.Namespace(command=None))
-    monkeypatch.setattr(zentool, "build_parser", lambda: parser)
     assert zentool.main([]) == 0
-    assert parser.help_calls == 1
+    assert "usage: zentool" in capsys.readouterr().out.lower()
 
-    parser = FakeParser(argparse.Namespace(command="check"))
-    monkeypatch.setattr(zentool, "build_parser", lambda: parser)
     monkeypatch.setattr(
         zentool,
         "cmd_check",
@@ -485,8 +338,6 @@ def test_main_handles_help_errors_interrupts_and_missing_nested_handler(
     assert zentool.main(["check"]) == 1
     assert stderr_lines == ["Error: bad state"]
 
-    parser = FakeParser(argparse.Namespace(command="check"))
-    monkeypatch.setattr(zentool, "build_parser", lambda: parser)
     monkeypatch.setattr(
         zentool,
         "cmd_check",
@@ -494,34 +345,6 @@ def test_main_handles_help_errors_interrupts_and_missing_nested_handler(
     )
     assert zentool.main(["check"]) == 130
     assert stderr_lines[-1] == "Interrupted."
-
-    parser = FakeParser(argparse.Namespace(command="inspect", inspect_command="raw"))
-    monkeypatch.setattr(zentool, "build_parser", lambda: parser)
-    monkeypatch.setattr(zentool, "_dispatch_nested_command", lambda *_args: None)
-    assert zentool.main(["inspect", "raw"]) == 0
-    assert parser.help_calls == 1
-
-
-def test_legacy_argparse_main_prints_help_without_command(
-    monkeypatch: pytest.MonkeyPatch,
-    zentool: ModuleType,
-) -> None:
-    """Legacy argparse fallback should keep the no-command help behavior."""
-
-    class FakeParser:
-        help_calls = 0
-
-        def parse_args(self, _argv: object = None) -> argparse.Namespace:
-            return argparse.Namespace(command=None)
-
-        def print_help(self) -> None:
-            self.help_calls += 1
-
-    parser = FakeParser()
-    monkeypatch.setattr(zentool, "build_parser", lambda: parser)
-
-    assert zentool._legacy_argparse_main([]) == 0
-    assert parser.help_calls == 1
 
 
 def test_main_maps_typer_interrupt_and_click_exceptions(
@@ -563,6 +386,23 @@ def test_main_maps_typer_interrupt_and_click_exceptions(
     )
     assert zentool.main(["check"]) == 130
     assert stderr_lines[-1] == "Interrupted."
+
+    monkeypatch.setattr(
+        zentool,
+        "get_command",
+        lambda _app: _Command(
+            zentool.click.exceptions.Exit(zentool.INTERRUPTED_EXIT_CODE)
+        ),
+    )
+    assert zentool.main(["check"]) == 130
+    assert stderr_lines[-1] == "Interrupted."
+
+    monkeypatch.setattr(
+        zentool,
+        "get_command",
+        lambda _app: _Command(zentool.click.exceptions.Exit(7)),
+    )
+    assert zentool.main(["check"]) == 7
 
     monkeypatch.setattr(
         zentool,

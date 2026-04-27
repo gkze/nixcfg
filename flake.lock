@@ -1206,11 +1206,11 @@
     "homebrew-core": {
       "flake": false,
       "locked": {
-        "lastModified": 1777292486,
-        "narHash": "sha256-WpG/4aeZJCjt28B+itMBgLEeyC0cZbr2E1iN5UHdDA0=",
+        "lastModified": 1777311422,
+        "narHash": "sha256-zfYHcDdMnxRk5onbMSZLzfePJPpPnnMF39qP/8ctJBc=",
         "owner": "homebrew",
         "repo": "homebrew-core",
-        "rev": "71a947e04ec94614e85272bdd72c46cb3f1e462f",
+        "rev": "b9d6eb7b848c58bed92e517d59807fa3080f9943",
         "type": "github"
       },
       "original": {
@@ -1404,6 +1404,27 @@
       "original": {
         "owner": "neovim",
         "repo": "neovim",
+        "type": "github"
+      }
+    },
+    "nh": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1757353470,
+        "narHash": "sha256-6n5SVO8zsdVTD691lri7ZcO4zpqYFU8GIvjI6dbxkA8=",
+        "owner": "nix-community",
+        "repo": "nh",
+        "rev": "5e04bd5723bb547bd404752ed629c02b89f06645",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "ref": "v4.2.0",
+        "repo": "nh",
         "type": "github"
       }
     },
@@ -1923,6 +1944,7 @@
         "mountpoint-s3": "mountpoint-s3",
         "mux": "mux",
         "neovim-nightly-overlay": "neovim-nightly-overlay",
+        "nh": "nh",
         "nix-darwin": "nix-darwin",
         "nix-homebrew": "nix-homebrew",
         "nix-manipulator": "nix-manipulator",

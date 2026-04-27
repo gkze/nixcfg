@@ -26,9 +26,9 @@ let
 
   devIdentity = {
     opencodeChannel = "dev";
-    appName = "OpenCode Electron Dev";
-    appId = "ai.opencode.desktop.electron-dev";
-    appProtocolScheme = "opencode-electron-dev";
+    appName = "OpenCode Dev";
+    appId = "ai.opencode.desktop.dev";
+    appProtocolScheme = "opencode";
   };
 
   packageFor = system: name: builtins.getAttr name (builtins.getAttr system self.packages);

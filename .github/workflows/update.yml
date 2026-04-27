@@ -343,7 +343,6 @@ jobs:
         run: >-
           nix run .#nixcfg -- ci pipeline crate2nix --write
           --package zed-editor-nightly
-          --package opencode-desktop
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: crate2nix-darwin
@@ -351,8 +350,6 @@ jobs:
           path: |
             packages/zed-editor-nightly/Cargo.nix
             packages/zed-editor-nightly/crate-hashes.json
-            packages/opencode-desktop/Cargo.nix
-            packages/opencode-desktop/crate-hashes.json
 
   merge-generated:
     needs:
@@ -374,7 +371,7 @@ jobs:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: crate2nix-darwin
-          path: packages
+          path: packages/zed-editor-nightly
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: merged-generated
@@ -394,8 +391,6 @@ jobs:
             overlays/goose-cli/crate-hashes.json
             packages/zed-editor-nightly/Cargo.nix
             packages/zed-editor-nightly/crate-hashes.json
-            packages/opencode-desktop/Cargo.nix
-            packages/opencode-desktop/crate-hashes.json
 
   # Phase 7: Refresh sanity checks required before opening the PR
   refresh-sanity:
@@ -436,8 +431,6 @@ jobs:
             overlays/goose-cli/crate-hashes.json
             packages/zed-editor-nightly/Cargo.nix
             packages/zed-editor-nightly/crate-hashes.json
-            packages/opencode-desktop/Cargo.nix
-            packages/opencode-desktop/crate-hashes.json
 
   # Phase 8: Create PR with updates
   create-pr:

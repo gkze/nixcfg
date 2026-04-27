@@ -19,6 +19,7 @@ ZENTOOL_PATH = resolve_zen_script_path("zentool")
 _EXPECTED_MULTI_EXCEPT_HANDLERS = (
     (("OSError", "configparser.Error"), None),
     (("RuntimeError", "ValueError"), "exc"),
+    (("OSError", "ValueError"), "exc"),
     (("FileNotFoundError", "subprocess.SubprocessError", "OSError"), "exc"),
     (("EOFError", "KeyboardInterrupt"), None),
 )

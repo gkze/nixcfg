@@ -178,6 +178,16 @@ def test_load_yaml_rejects_duplicate_keys(tmp_path: Path, zentool: ModuleType) -
             "node names must be strings",
             id="non-string-name",
         ),
+        pytest.param(
+            {"Folder": {1: "https://example.com"}},
+            "node 'Folder' mapping keys must be strings",
+            id="non-string-node-field",
+        ),
+        pytest.param(
+            {"Folder": {"collapsed": "false", "children": []}},
+            "folder 'Folder' collapsed must be a boolean",
+            id="collapsed-not-bool",
+        ),
         pytest.param({"Broken": 3}, "unable to parse node 'Broken'", id="bad-scalar"),
     ],
 )
@@ -300,6 +310,41 @@ def test_normalize_authored_node_wraps_validation_failures(zentool: ModuleType) 
     """Pydantic validation failures should be wrapped in ``ZenFoldersError``."""
     with pytest.raises(zentool.ZenFoldersError, match="Invalid authored node"):
         zentool._normalize_authored_node({"Inbox": {"url": "   "}})
+
+    with pytest.raises(zentool.ZenFoldersError, match="Invalid authored node"):
+        zentool._normalize_authored_node({"Inbox": {"url": 123}})
+
+
+def test_container_and_workspace_models_reject_blank_container_fields(
+    zentool: ModuleType,
+) -> None:
+    """Container-aware config models should reject ambiguous blank fields."""
+    with pytest.raises(zentool.ValidationError, match="workspace containers"):
+        zentool.WorkspaceSpec(name="Work", container="   ")
+
+    with pytest.raises(zentool.ValidationError, match="container fields"):
+        zentool.ContainerSpec(key="   ", icon="fingerprint", color="blue")
+
+    assert zentool.ContainerSpec(key="Town", name=None).name == "Town"
+
+    with pytest.raises(zentool.ValidationError, match="container names"):
+        zentool.ContainerSpec(key="Town", name="   ")
+
+    with pytest.raises(zentool.ValidationError, match="duplicate container key"):
+        zentool.ZenConfig(
+            containers=[
+                zentool.ContainerSpec(key="Town"),
+                zentool.ContainerSpec(key="town"),
+            ]
+        )
+
+    with pytest.raises(zentool.ValidationError, match="duplicate container name"):
+        zentool.ZenConfig(
+            containers=[
+                zentool.ContainerSpec(key="Town", name="Shared"),
+                zentool.ContainerSpec(key="Personal", name="shared"),
+            ]
+        )
 
 
 def test_authored_folder_to_item_converts_nested_children(zentool: ModuleType) -> None:

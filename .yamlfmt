@@ -2,6 +2,7 @@
 ---
 line_ending: lf
 exclude:
+  - .claude/worktrees/**
   - .direnv/**
   - .ghawfr/**
   - .pre-commit-config.yaml

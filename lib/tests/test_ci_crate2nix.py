@@ -231,7 +231,7 @@ def test_resolve_targets_skips_unsupported_platforms(monkeypatch) -> None:
         "goose-cli",
         "zed-editor-nightly",
     ]
-    assert skipped == ["opencode-desktop"]
+    assert skipped == []
 
 
 def test_resolve_targets_skips_aarch64_linux_for_all_current_targets(
@@ -246,7 +246,6 @@ def test_resolve_targets_skips_aarch64_linux_for_all_current_targets(
     assert sorted(skipped) == [
         "codex",
         "goose-cli",
-        "opencode-desktop",
         "zed-editor-nightly",
     ]
 
@@ -385,7 +384,6 @@ def test_targets_use_dedicated_source_installables() -> None:
         "codex": "path:.#codex-crate2nix-src",
         "goose-cli": "path:.#goose-cli-crate2nix-src",
         "zed-editor-nightly": "path:.#zed-editor-nightly-crate2nix-src",
-        "opencode-desktop": "path:.#opencode-desktop-crate2nix-src",
     }
 
 
@@ -399,7 +397,6 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
     expected_companions = {
         "codex-crate2nix-src",
         "goose-cli-crate2nix-src",
-        "opencode-desktop-crate2nix-src",
         "zed-editor-nightly-crate2nix-src",
     }
 
@@ -449,7 +446,6 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
         "conductor",
         "granola",
         "netnewswire",
-        "opencode-desktop-crate2nix-src",
         "raycast",
         "wispr-flow",
         "zen-twilight",
@@ -463,7 +459,6 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
     selected_paths = {
         "codex": str(packages_root / "codex/crate2nix-src.nix"),
         "goose": str(packages_root / "goose-cli/crate2nix-src.nix"),
-        "opencode": str(packages_root / "opencode-desktop/crate2nix-src.nix"),
         "zed": str(packages_root / "zed-editor-nightly/crate2nix-src.nix"),
     }
     assert all(Path(path).is_file() for path in selected_paths.values())
@@ -479,11 +474,6 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
             "linux": True,
             "darwin": True,
             "linuxAarch64": True,
-        },
-        "opencodeDesktopCrate2nixSrc": {
-            "linux": False,
-            "darwin": True,
-            "linuxAarch64": False,
         },
         "zedEditorNightly": {
             "linux": True,
@@ -514,7 +504,6 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
             "goose-cli",
             "goose-cli-crate2nix-src",
             "codex-crate2nix-src",
-            "opencode-desktop-crate2nix-src",
             "zed-editor-nightly",
             "zed-editor-nightly-crate2nix-src",
             "sculptor",
@@ -530,7 +519,6 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
             "gooseCli": "goose-cli",
             "gooseCliCrate2nixSrc": "goose-cli-crate2nix-src",
             "codexCrate2nixSrc": "codex-crate2nix-src",
-            "opencodeDesktopCrate2nixSrc": "opencode-desktop-crate2nix-src",
             "zedEditorNightly": "zed-editor-nightly",
             "zedEditorNightlyCrate2nixSrc": "zed-editor-nightly-crate2nix-src",
             "sculptor": "sculptor",

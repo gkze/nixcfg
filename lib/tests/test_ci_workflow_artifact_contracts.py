@@ -333,8 +333,6 @@ def test_validate_workflow_artifact_contracts_detects_path_re_rooting(
     """Reject downloads that silently strip a shared parent directory."""
     _write_file(tmp_path / "packages/zed-editor-nightly/Cargo.nix")
     _write_file(tmp_path / "packages/zed-editor-nightly/crate-hashes.json")
-    _write_file(tmp_path / "packages/opencode-desktop/Cargo.nix")
-    _write_file(tmp_path / "packages/opencode-desktop/crate-hashes.json")
 
     workflow_path = tmp_path / "workflow.yml"
     workflow_path.write_text(
@@ -350,8 +348,6 @@ jobs:
           path: |
             packages/zed-editor-nightly/Cargo.nix
             packages/zed-editor-nightly/crate-hashes.json
-            packages/opencode-desktop/Cargo.nix
-            packages/opencode-desktop/crate-hashes.json
   merge-generated:
     needs: crate2nix-darwin
     runs-on: ubuntu-latest
@@ -366,8 +362,6 @@ jobs:
           path: |
             packages/zed-editor-nightly/Cargo.nix
             packages/zed-editor-nightly/crate-hashes.json
-            packages/opencode-desktop/Cargo.nix
-            packages/opencode-desktop/crate-hashes.json
 """.lstrip(),
         encoding="utf-8",
     )
@@ -390,8 +384,6 @@ def test_validate_workflow_artifact_contracts_accepts_explicit_re_rooting(
     """Allow consumers that download under the producer artifact root."""
     _write_file(tmp_path / "packages/zed-editor-nightly/Cargo.nix")
     _write_file(tmp_path / "packages/zed-editor-nightly/crate-hashes.json")
-    _write_file(tmp_path / "packages/opencode-desktop/Cargo.nix")
-    _write_file(tmp_path / "packages/opencode-desktop/crate-hashes.json")
 
     workflow_path = tmp_path / "workflow.yml"
     workflow_path.write_text(
@@ -407,8 +399,6 @@ jobs:
           path: |
             packages/zed-editor-nightly/Cargo.nix
             packages/zed-editor-nightly/crate-hashes.json
-            packages/opencode-desktop/Cargo.nix
-            packages/opencode-desktop/crate-hashes.json
   merge-generated:
     needs: crate2nix-darwin
     runs-on: ubuntu-latest
@@ -416,15 +406,13 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           name: crate2nix-darwin
-          path: packages
+          path: packages/zed-editor-nightly
       - uses: actions/upload-artifact@v6
         with:
           name: merged-generated
           path: |
             packages/zed-editor-nightly/Cargo.nix
             packages/zed-editor-nightly/crate-hashes.json
-            packages/opencode-desktop/Cargo.nix
-            packages/opencode-desktop/crate-hashes.json
 """.lstrip(),
         encoding="utf-8",
     )

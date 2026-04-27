@@ -8,6 +8,7 @@ from typing import Annotated
 
 import click
 import typer
+from githubkit.exception import RequestError as GitHubKitRequestError
 from rich.console import Console
 from rich.table import Table
 
@@ -49,7 +50,12 @@ def list_workflows(
     """Render all repository workflows with their latest known run state."""
     try:
         rows = _workflow_rows(repo=repo, server_url=server_url)
-    except (http_utils.RequestError, RuntimeError, ValueError) as exc:
+    except (
+        GitHubKitRequestError,
+        http_utils.RequestError,
+        RuntimeError,
+        ValueError,
+    ) as exc:
         raise click.ClickException(str(exc)) from None
 
     table = Table(title="GitHub Actions workflows")
@@ -74,7 +80,12 @@ def list_workflows(
 def tail_workflow(
     workflow_name: Annotated[
         str,
-        typer.Argument(help="Workflow name, as shown by `nixcfg actions workflows`."),
+        typer.Argument(
+            help=(
+                "Workflow name, path, or file basename as shown by "
+                "`nixcfg actions workflows`."
+            )
+        ),
     ],
     job_name: Annotated[
         str | None,
@@ -128,7 +139,12 @@ def tail_workflow(
                 allow_playwright_login=allow_playwright_login,
             )
         )
-    except (http_utils.RequestError, RuntimeError, ValueError) as exc:
+    except (
+        GitHubKitRequestError,
+        http_utils.RequestError,
+        RuntimeError,
+        ValueError,
+    ) as exc:
         raise click.ClickException(str(exc)) from None
 
 

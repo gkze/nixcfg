@@ -137,15 +137,6 @@ TARGETS = {
         normalizer_path=Path("packages/zed-editor-nightly/normalize_cargo_nix.py"),
         supported_platforms=("aarch64-darwin", "x86_64-linux"),
     ),
-    "opencode-desktop": Crate2NixTarget(
-        name="opencode-desktop",
-        patched_src_installable="path:.#opencode-desktop-crate2nix-src",
-        cargo_nix=Path("packages/opencode-desktop/Cargo.nix"),
-        crate_hashes=Path("packages/opencode-desktop/crate-hashes.json"),
-        normalizer_path=Path("packages/opencode-desktop/normalize_cargo_nix.py"),
-        supported_platforms=("aarch64-darwin", "x86_64-darwin"),
-        cargo_manifest_relpath=Path("packages/desktop/src-tauri/Cargo.toml"),
-    ),
 }
 
 

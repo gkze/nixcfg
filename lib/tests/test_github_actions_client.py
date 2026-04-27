@@ -363,18 +363,76 @@ def test_selection_and_live_helpers_cover_matching_modes() -> None:
     assert (
         gha_client.select_named_workflow((_workflow("Build"),), "build").name == "Build"
     )
+    update_workflow = _workflow("Periodic Flake Update").model_copy(
+        update={"path": ".github/workflows/update.yml"}
+    )
+    assert gha_client.select_named_workflow((update_workflow,), "update.yml").name == (
+        "Periodic Flake Update"
+    )
+    assert (
+        gha_client.select_named_workflow(
+            (update_workflow,), ".github/workflows/update.yml"
+        ).name
+        == "Periodic Flake Update"
+    )
     assert gha_client.select_named_job(jobs, "macos").id == 2
     assert gha_client.choose_live_run((_run(1, "completed"), _run(2, "queued"))).id == 2
     assert gha_client.choose_live_run((_run(1, "completed"),)) is None
     assert gha_client.choose_next_live_job(jobs).id == 3
     assert gha_client.choose_next_live_job((jobs[0], jobs[1])) is None
 
+    no_path_workflow = _workflow("No Path").model_copy(update={"path": None})
+    assert gha_client._workflow_aliases(no_path_workflow) == ("No Path",)
+    assert gha_client._workflow_display_name(no_path_workflow) == "No Path"
+    root_path_workflow = _workflow("Root Path").model_copy(update={"path": "root.yml"})
+    assert gha_client._workflow_aliases(root_path_workflow) == (
+        "Root Path",
+        "root.yml",
+    )
+    assert gha_client.select_named_job((jobs[0],), "LINT").id == 1
+    assert (
+        gha_client.select_named_workflow((update_workflow,), "flake").name
+        == "Periodic Flake Update"
+    )
+
     with pytest.raises(ValueError, match="Expected a non-empty workflow name"):
         gha_client.select_named_workflow((_workflow("Build"),), "   ")
+    with pytest.raises(ValueError, match="Expected a non-empty job name"):
+        gha_client.select_named_job(jobs, "   ")
     with pytest.raises(ValueError, match="Ambiguous workflow name"):
         gha_client.select_named_workflow(workflows, "BuIlD")
+    with pytest.raises(ValueError, match="Ambiguous workflow name"):
+        gha_client.select_named_workflow(
+            (
+                _workflow("Build"),
+                _workflow("Build", 2),
+            ),
+            "Build",
+        )
+    with pytest.raises(ValueError, match="Ambiguous workflow name"):
+        gha_client.select_named_workflow(
+            (
+                _workflow("lint-linux"),
+                _workflow("lint-macos", 2),
+            ),
+            "lint",
+        )
+    with pytest.raises(ValueError, match="Ambiguous job name"):
+        gha_client.select_named_job(
+            (
+                gha_client.JobSummary(
+                    1, "Build", "queued", None, "https://example/1", None, None
+                ),
+                gha_client.JobSummary(
+                    2, "BUILD", "queued", None, "https://example/2", None, None
+                ),
+            ),
+            "build",
+        )
     with pytest.raises(ValueError, match="Unknown workflow 'ship'"):
         gha_client.select_named_workflow((_workflow("Build"),), "ship")
+    with pytest.raises(ValueError, match="Unknown job 'ship'"):
+        gha_client.select_named_job(jobs, "ship")
 
 
 def test_collect_paginated_and_name_message_helpers() -> None:

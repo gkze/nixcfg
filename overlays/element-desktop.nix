@@ -9,12 +9,14 @@
     inherit (selfSource) version;
     src = prev.fetchFromGitHub {
       owner = "element-hq";
-      repo = "element-desktop";
-      rev = "v${version}";
+      repo = "element-web";
+      tag = "v${version}";
       hash = slib.sourceHash "element-desktop" "srcHash";
     };
-    offlineCache = prev.fetchYarnDeps {
-      yarnLock = src + "/yarn.lock";
+    pnpmDeps = prev.fetchPnpmDeps {
+      pname = "element";
+      inherit version src;
+      fetcherVersion = 3;
       hash = slib.sourceHash "element-desktop" "sha256";
     };
   });

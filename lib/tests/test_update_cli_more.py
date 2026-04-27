@@ -221,9 +221,6 @@ def test_resolved_targets_expand_flake_input_to_backing_sources(
     class _OpencodeUpdater(FlakeInputUpdater):
         pass
 
-    class _DesktopUpdater(FlakeInputUpdater):
-        input_name = "opencode"
-
     class _ElectronUpdater(FlakeInputUpdater):
         input_name = "opencode"
 
@@ -231,7 +228,6 @@ def test_resolved_targets_expand_flake_input_to_backing_sources(
         "lib.update.cli.UPDATERS",
         {
             "opencode": _OpencodeUpdater,
-            "opencode-desktop": _DesktopUpdater,
             "opencode-desktop-electron": _ElectronUpdater,
             "other": object,
         },
@@ -242,7 +238,6 @@ def test_resolved_targets_expand_flake_input_to_backing_sources(
     assert resolved.ref_inputs == []
     assert resolved.source_names == [
         "opencode",
-        "opencode-desktop",
         "opencode-desktop-electron",
     ]
 

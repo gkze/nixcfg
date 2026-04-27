@@ -83,8 +83,19 @@ in
       description = ''
         Declarative Zen session config published to ~/.config/zen/folders.yaml
         and applied with zentool when Zen is closed. The schema is
-        essentials/workspaces/items/tabs, with exact syncing against the
-        managed subset of zen-sessions.jsonlz4.
+        containers/workspaces/items/tabs, with exact syncing against the
+        managed subset of zen-sessions.jsonlz4 and the referenced contextual
+        identities in containers.json.
+      '';
+    };
+
+    quitDialogCssSource = mkOption {
+      type = types.nullOr types.path;
+      default = null;
+      example = ./quit-dialog-primary.css;
+      description = ''
+        CSS loaded by Twilight AutoConfig and injected into the quit dialog's
+        shadow root. Published to ~/.config/zen/quit-dialog-primary.css.
       '';
     };
 
@@ -140,6 +151,9 @@ in
       })
       (mkIf (cfg.foldersSource != null) {
         "zen/folders.yaml".source = cfg.foldersSource;
+      })
+      (mkIf (cfg.quitDialogCssSource != null) {
+        "zen/quit-dialog-primary.css".source = cfg.quitDialogCssSource;
       })
     ];
 

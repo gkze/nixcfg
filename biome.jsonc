@@ -17,6 +17,7 @@
       "!**/*pre-commit-config.json",
       "!schemas/codegen/testdata/lockfile-golden/expected.codegen.lock.json",
       "!**/.direnv",
+      "!**/.claude/worktrees",
       "!**/.ghawfr",
       "!**/.venv",
       "!**/node_modules",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -43,15 +44,16 @@ def test_apply_assets_uses_default_managed_files(
 
     monkeypatch.setattr(zentool, "zen_profile_dir", lambda _profile: profile_dir)
 
-    args = zentool.build_parser().parse_args([
-        "--profile",
-        "Default (twilight)",
-        "apply",
-        "--assets",
-        "--asset-dir",
-        str(asset_dir),
-        "--yes",
-    ])
+    args = SimpleNamespace(
+        profile="Default (twilight)",
+        config=str(zentool.DEFAULT_YAML),
+        asset_dir=str(asset_dir),
+        chrome_source=None,
+        user_js_source=None,
+        state=False,
+        assets=True,
+        yes=True,
+    )
     assert zentool.cmd_apply(args) == 0
 
     profile_chrome_file = profile_dir / "chrome" / "userChrome.css"
@@ -92,13 +94,16 @@ def test_apply_assets_preserves_unmanaged_user_js_and_cleans_stale_chrome_links(
 
     monkeypatch.setattr(zentool, "zen_profile_dir", lambda _profile: profile_dir)
 
-    args = zentool.build_parser().parse_args([
-        "apply",
-        "--assets",
-        "--asset-dir",
-        str(asset_dir),
-        "--yes",
-    ])
+    args = SimpleNamespace(
+        profile=None,
+        config=str(zentool.DEFAULT_YAML),
+        asset_dir=str(asset_dir),
+        chrome_source=None,
+        user_js_source=None,
+        state=False,
+        assets=True,
+        yes=True,
+    )
     assert zentool.cmd_apply(args) == 0
 
     assert not stale_link.exists()
@@ -129,13 +134,16 @@ def test_apply_assets_removes_previously_managed_explicit_user_js_when_omitted(
 
     monkeypatch.setattr(zentool, "zen_profile_dir", lambda _profile: profile_dir)
 
-    args = zentool.build_parser().parse_args([
-        "apply",
-        "--assets",
-        "--asset-dir",
-        str(asset_dir),
-        "--yes",
-    ])
+    args = SimpleNamespace(
+        profile=None,
+        config=str(zentool.DEFAULT_YAML),
+        asset_dir=str(asset_dir),
+        chrome_source=None,
+        user_js_source=None,
+        state=False,
+        assets=True,
+        yes=True,
+    )
     assert zentool.cmd_apply(args) == 0
 
     assert not managed_user_js.exists()

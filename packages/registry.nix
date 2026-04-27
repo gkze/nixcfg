@@ -93,9 +93,6 @@ let
         "x86_64-linux"
       ];
     };
-    "opencode-desktop-crate2nix-src" = {
-      constraint = "darwin";
-    };
     "opencode-desktop-electron" = {
       constraint = [
         "aarch64-darwin"
@@ -132,6 +129,9 @@ let
       constraint = [ "aarch64-darwin" ];
     };
     "t3code-desktop" = {
+      constraint = [ "aarch64-darwin" ];
+    };
+    "town-assistant-nightly" = {
       constraint = [ "aarch64-darwin" ];
     };
     "zed-editor-nightly" = {

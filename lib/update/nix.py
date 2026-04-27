@@ -18,6 +18,7 @@ from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.let import LetExpression
 from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
@@ -247,6 +248,39 @@ def _build_fetch_yarn_deps_expr(
     return compact_nix_expr(expression.rebuild())
 
 
+def _build_fetch_pnpm_deps_expr(
+    src_expr: NixExpression,
+    *,
+    pname: str,
+    version: str,
+    fetcher_version: int,
+    hash_value: str | NixExpression | None = None,
+) -> str:
+    expression = LetExpression(
+        local_variables=[Binding(name="src", value=src_expr)],
+        value=FunctionCall(
+            name=_select_attrs(Identifier(name="pkgs"), "fetchPnpmDeps"),
+            argument=AttributeSet(
+                values=[
+                    Binding(name="pname", value=pname),
+                    Binding(name="version", value=version),
+                    Inherit(names=[Identifier(name="src")]),
+                    Binding(
+                        name="fetcherVersion", value=Primitive(value=fetcher_version)
+                    ),
+                    Binding(
+                        name="hash",
+                        value=_fake_hash_expr()
+                        if hash_value is None
+                        else _nix_string_or_expr(hash_value),
+                    ),
+                ]
+            ),
+        ),
+    )
+    return compact_nix_expr(expression.rebuild())
+
+
 def _build_flake_attr_expr(
     flake_url: str,
     *attributes: str,
@@ -279,6 +313,77 @@ def _build_overlay_attr_expr(
         if not attribute:
             continue
         expression = Select(expression=expression, attribute=attribute)
+    return compact_nix_expr(expression.rebuild())
+
+
+def _build_package_path_attr_expr(
+    package: str,
+    attr_path: str,
+    *,
+    system: str | None = None,
+    repo_root: str | None = None,
+) -> str:
+    repo_path = get_repo_file(".") if repo_root is None else Path(repo_root).resolve()
+    flake_url = f"git+file://{repo_path}?dirty=1"
+    system_expr: NixExpression = (
+        _select_attrs(Identifier(name="builtins"), "currentSystem")
+        if system is None
+        else StringPrimitive(value=system)
+    )
+    import_nixpkgs = FunctionCall(
+        name=Identifier(name="import"),
+        argument=_select_attrs(Identifier(name="flake"), "inputs", "nixpkgs"),
+    )
+    config_expr = AttributeSet(
+        values=[
+            Binding(name="allowUnfree", value=Primitive(value=True)),
+            Binding(
+                name="allowInsecurePredicate",
+                value=FunctionDefinition(
+                    argument_set=Identifier(name="_"),
+                    output=Primitive(value=True),
+                ),
+            ),
+        ],
+    )
+    expression: NixExpression = FunctionCall(
+        name=FunctionCall(
+            name=_select_attrs(Identifier(name="pkgs"), "callPackage"),
+            argument=NixPath(path=f"./packages/{package}/default.nix"),
+        ),
+        argument=AttributeSet(
+            values=[
+                Binding(
+                    name="inputs",
+                    value=_select_attrs(Identifier(name="flake"), "inputs"),
+                ),
+                Binding(name="outputs", value=Identifier(name="flake")),
+            ]
+        ),
+    )
+    for attribute in attr_path.removeprefix(".").split("."):
+        if not attribute:
+            continue
+        expression = Select(expression=expression, attribute=attribute)
+    expression = LetExpression(
+        local_variables=[
+            Binding(name="flake", value=_build_get_flake_expr(flake_url)),
+            Binding(name="system", value=system_expr),
+            Binding(
+                name="pkgs",
+                value=FunctionCall(
+                    name=import_nixpkgs,
+                    argument=AttributeSet(
+                        values=[
+                            Inherit(names=[Identifier(name="system")]),
+                            Binding(name="config", value=config_expr),
+                        ],
+                    ),
+                ),
+            ),
+        ],
+        value=expression,
+    )
     return compact_nix_expr(expression.rebuild())
 
 
@@ -675,6 +780,7 @@ __all__ = [
     "_build_nix_expr",
     "_build_overlay_attr_expr",
     "_build_overlay_expr",
+    "_build_package_path_attr_expr",
     "_emit_sri_hash_from_build_result",
     "_run_fixed_output_build",
     "compute_drv_fingerprint",

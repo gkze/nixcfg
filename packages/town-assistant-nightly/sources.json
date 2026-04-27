@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-JW3SEAG0kwaFBkOHowprC7yG8J6spHBvgdrmF3LxNTc="
+  },
+  "urls": {
+    "aarch64-darwin": "https://town-macos-app.s3.us-east-1.amazonaws.com/desktop/nightly/releases/Town%20Assistant-1.8-32.dmg"
+  },
+  "version": "1.8-32"
+}

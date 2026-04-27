@@ -305,12 +305,13 @@ def select_named_workflow(
     workflows: tuple[Workflow, ...],
     requested_name: str,
 ) -> Workflow:
-    """Resolve one workflow by exact or unique fuzzy name match."""
-    return _select_named(
+    """Resolve one workflow by name, path, basename, or unique fuzzy match."""
+    return _select_by_aliases(
         workflows,
         requested_name=requested_name,
         label="workflow",
-        value_getter=lambda workflow: workflow.name,
+        aliases_getter=_workflow_aliases,
+        display_getter=_workflow_display_name,
     )
 
 
@@ -478,6 +479,99 @@ def _select_named[T](
     available = ", ".join(value_getter(item) for item in items) or "<none>"
     msg = f"Unknown {label} {requested_name!r}. Available {label}s: {available}"
     raise ValueError(msg)
+
+
+def _select_by_aliases[T](
+    items: tuple[T, ...],
+    *,
+    requested_name: str,
+    label: str,
+    aliases_getter: Callable[[T], tuple[str, ...]],
+    display_getter: Callable[[T], str],
+) -> T:
+    requested = requested_name.strip()
+    if not requested:
+        msg = f"Expected a non-empty {label} name"
+        raise ValueError(msg)
+
+    exact = _items_matching_alias(
+        items,
+        aliases_getter=aliases_getter,
+        predicate=lambda alias: alias == requested,
+    )
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        msg = _ambiguous_name_message(
+            exact,
+            label=label,
+            value_getter=display_getter,
+        )
+        raise ValueError(msg)
+
+    folded_requested = requested.casefold()
+    casefold_matches = _items_matching_alias(
+        items,
+        aliases_getter=aliases_getter,
+        predicate=lambda alias: alias.casefold() == folded_requested,
+    )
+    if len(casefold_matches) == 1:
+        return casefold_matches[0]
+    if len(casefold_matches) > 1:
+        msg = _ambiguous_name_message(
+            casefold_matches,
+            label=label,
+            value_getter=display_getter,
+        )
+        raise ValueError(msg)
+
+    fuzzy_matches = _items_matching_alias(
+        items,
+        aliases_getter=aliases_getter,
+        predicate=lambda alias: folded_requested in alias.casefold(),
+    )
+    if len(fuzzy_matches) == 1:
+        return fuzzy_matches[0]
+    if len(fuzzy_matches) > 1:
+        msg = _ambiguous_name_message(
+            fuzzy_matches,
+            label=label,
+            value_getter=display_getter,
+        )
+        raise ValueError(msg)
+
+    available = ", ".join(display_getter(item) for item in items) or "<none>"
+    msg = f"Unknown {label} {requested_name!r}. Available {label}s: {available}"
+    raise ValueError(msg)
+
+
+def _items_matching_alias[T](
+    items: tuple[T, ...],
+    *,
+    aliases_getter: Callable[[T], tuple[str, ...]],
+    predicate: Callable[[str], bool],
+) -> list[T]:
+    return [
+        item
+        for item in items
+        if any(predicate(alias) for alias in aliases_getter(item))
+    ]
+
+
+def _workflow_aliases(workflow: Workflow) -> tuple[str, ...]:
+    aliases = [workflow.name]
+    if workflow.path:
+        aliases.append(workflow.path)
+        basename = workflow.path.rsplit("/", maxsplit=1)[-1]
+        if basename != workflow.path:
+            aliases.append(basename)
+    return tuple(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def _workflow_display_name(workflow: Workflow) -> str:
+    if not workflow.path:
+        return workflow.name
+    return f"{workflow.name} ({workflow.path})"
 
 
 def _ambiguous_name_message[T](

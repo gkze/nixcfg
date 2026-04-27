@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -20,8 +20,8 @@ def zentool() -> ModuleType:
     return load_zen_script_module("zentool", "zentool_diff_apply")
 
 
-def make_args(**overrides: object) -> argparse.Namespace:
-    """Build a minimal argparse namespace for diff/apply entrypoints."""
+def make_args(**overrides: object) -> SimpleNamespace:
+    """Build a minimal namespace for diff/apply entrypoints."""
     values: dict[str, object] = {
         "profile": None,
         "config": "/tmp/folders.yaml",
@@ -33,7 +33,7 @@ def make_args(**overrides: object) -> argparse.Namespace:
         "yes": True,
     }
     values.update(overrides)
-    return argparse.Namespace(**values)
+    return SimpleNamespace(**values)
 
 
 class FakeDiff:
@@ -100,11 +100,51 @@ def test_asset_diff_lines_reports_create_update_remove_and_user_js_update(
     )
 
     assert zentool._asset_diff_lines(make_args()) == [
-        f"create asset chrome/create.css -> {create_source.resolve()}",
-        f"update asset chrome/nested/update.css -> {update_source.resolve()}",
+        f"create asset chrome/create.css -> {create_source}",
+        f"update asset chrome/nested/update.css -> {update_source}",
         "remove asset chrome/stale.css",
         f"update asset user.js -> {user_js_source}",
     ]
+
+
+def test_asset_diff_lines_keeps_symlinked_chrome_sources_stable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Chrome diffs should match the symlink target that apply writes."""
+    profile_dir = tmp_path / "profile"
+    profile_chrome_dir = profile_dir / "chrome"
+    profile_chrome_dir.mkdir(parents=True)
+
+    realized_theme = tmp_path / "theme-store" / "userChrome.css"
+    realized_theme.parent.mkdir()
+    realized_theme.write_text("theme\n", encoding="utf-8")
+
+    chrome_source = tmp_path / "assets" / "chrome"
+    chrome_source.mkdir(parents=True)
+    managed_source = chrome_source / "userChrome.css"
+    managed_source.symlink_to(realized_theme)
+    (profile_chrome_dir / "userChrome.css").symlink_to(managed_source)
+
+    manifest_path = profile_dir / zentool.MANAGED_CHROME_MANIFEST
+    manifest_path.write_text("userChrome.css\n", encoding="utf-8")
+    user_js_manifest_path = profile_dir / zentool.MANAGED_USER_JS_MANIFEST
+
+    monkeypatch.setattr(
+        zentool,
+        "_resolve_asset_targets",
+        lambda _args: (
+            profile_dir,
+            chrome_source,
+            None,
+            profile_chrome_dir,
+            manifest_path,
+            user_js_manifest_path,
+        ),
+    )
+
+    assert zentool._asset_diff_lines(make_args()) == []
 
 
 def test_asset_diff_lines_reports_managed_user_js_removal(
@@ -267,8 +307,17 @@ def test_cmd_diff_prints_no_changes_when_state_and_assets_match(
     monkeypatch.setattr(
         zentool, "load_session", lambda _profile: (Path("session"), object())
     )
+    monkeypatch.setattr(
+        zentool,
+        "load_containers",
+        lambda _profile: (Path("containers.json"), object()),
+    )
     monkeypatch.setattr(zentool, "load_config", lambda _path: object())
-    monkeypatch.setattr(zentool, "diff_session", lambda _session, _config: None)
+    monkeypatch.setattr(
+        zentool,
+        "diff_session",
+        lambda _session, _config, _containers: None,
+    )
     monkeypatch.setattr(zentool, "_asset_diff_lines", lambda _args: [])
     monkeypatch.setattr(zentool, "_stdout", lambda message="": stdout.append(message))
 
@@ -286,11 +335,16 @@ def test_cmd_diff_prints_state_and_asset_sections_together(
     monkeypatch.setattr(
         zentool, "load_session", lambda _profile: (Path("session"), object())
     )
+    monkeypatch.setattr(
+        zentool,
+        "load_containers",
+        lambda _profile: (Path("containers.json"), object()),
+    )
     monkeypatch.setattr(zentool, "load_config", lambda _path: object())
     monkeypatch.setattr(
         zentool,
         "diff_session",
-        lambda _session, _config: FakeDiff("state diff"),
+        lambda _session, _config, _containers: FakeDiff("state diff"),
     )
     monkeypatch.setattr(
         zentool,
@@ -350,7 +404,15 @@ def test_cmd_apply_applies_state_and_assets_after_showing_both_diffs(
     stdout: list[str] = []
     session = object()
     desired_state = object()
+    containers = object()
+    desired_containers = object()
+    config = SimpleNamespace(manage_containers=False)
+    container_plan = SimpleNamespace(
+        state=desired_containers,
+        removed_context_ids=set(),
+    )
     session_path = Path("/tmp/session.jsonlz4")
+    containers_path = Path("/tmp/containers.json")
     backup_path = Path("/tmp/session.jsonlz4.bak")
     runtime = object()
     diff = FakeDiff("state diff")
@@ -360,16 +422,28 @@ def test_cmd_apply_applies_state_and_assets_after_showing_both_diffs(
     monkeypatch.setattr(
         zentool, "load_session", lambda _profile: (session_path, session)
     )
-    monkeypatch.setattr(zentool, "load_config", lambda _path: object())
+    monkeypatch.setattr(
+        zentool,
+        "load_containers",
+        lambda _profile: (containers_path, containers),
+    )
+    monkeypatch.setattr(zentool, "load_config", lambda _path: config)
+    monkeypatch.setattr(
+        zentool,
+        "build_desired_containers",
+        lambda _containers, _config, _session: container_plan,
+    )
     monkeypatch.setattr(
         zentool,
         "build_desired_state",
-        lambda existing, _config: desired_state if existing is session else None,
+        lambda existing, _config, _plan: desired_state if existing is session else None,
     )
     monkeypatch.setattr(
         zentool,
         "snapshot",
-        lambda value: {"kind": "session" if value is session else "desired"},
+        lambda value, _containers=None: {
+            "kind": "session" if value is session else "desired"
+        },
     )
     monkeypatch.setattr(zentool, "DeepDiff", lambda old, new, **_kwargs: diff)
     monkeypatch.setattr(zentool, "_asset_diff_lines", lambda _args: ["asset change"])
@@ -380,7 +454,7 @@ def test_cmd_apply_applies_state_and_assets_after_showing_both_diffs(
         "write_session",
         lambda path, state: written.append((path, state)),
     )
-    applied_assets: list[argparse.Namespace] = []
+    applied_assets: list[SimpleNamespace] = []
     monkeypatch.setattr(
         zentool,
         "_apply_assets",
@@ -412,7 +486,15 @@ def test_cmd_apply_accepts_combined_prompt_before_applying_changes(
     prompts: list[str] = []
     session = object()
     desired_state = object()
+    containers = object()
+    desired_containers = object()
+    config = SimpleNamespace(manage_containers=False)
+    container_plan = SimpleNamespace(
+        state=desired_containers,
+        removed_context_ids=set(),
+    )
     session_path = Path("/tmp/session.jsonlz4")
+    containers_path = Path("/tmp/containers.json")
     backup_path = Path("/tmp/session.jsonlz4.bak")
 
     monkeypatch.setattr(zentool, "require_zen_closed", lambda _profile: object())
@@ -420,14 +502,28 @@ def test_cmd_apply_accepts_combined_prompt_before_applying_changes(
     monkeypatch.setattr(
         zentool, "load_session", lambda _profile: (session_path, session)
     )
-    monkeypatch.setattr(zentool, "load_config", lambda _path: object())
     monkeypatch.setattr(
-        zentool, "build_desired_state", lambda _session, _config: desired_state
+        zentool,
+        "load_containers",
+        lambda _profile: (containers_path, containers),
+    )
+    monkeypatch.setattr(zentool, "load_config", lambda _path: config)
+    monkeypatch.setattr(
+        zentool,
+        "build_desired_containers",
+        lambda _containers, _config, _session: container_plan,
+    )
+    monkeypatch.setattr(
+        zentool,
+        "build_desired_state",
+        lambda _session, _config, _plan: desired_state,
     )
     monkeypatch.setattr(
         zentool,
         "snapshot",
-        lambda value: {"kind": "session" if value is session else "desired"},
+        lambda value, _containers=None: {
+            "kind": "session" if value is session else "desired"
+        },
     )
     monkeypatch.setattr(
         zentool, "DeepDiff", lambda *_args, **_kwargs: FakeDiff("state diff")

@@ -139,7 +139,6 @@ let
         jetbrains.datagrip
         hoppscotch
         config.fonts.monospace.package
-        opencode-desktop
         postman
         red-reddit-cli
         slack

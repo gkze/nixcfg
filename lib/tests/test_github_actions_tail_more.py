@@ -420,6 +420,7 @@ def test_job_page_attempts_and_header_helpers() -> None:
             None,
         )
     ]
+    assert gha_tail._html_has_attr(object(), "data-url") is False
 
 
 async def _collect_attempts(
@@ -720,6 +721,56 @@ def test_tailer_waits_for_steps_then_completes(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(tailer, "_sleep", lambda: asyncio.sleep(0))
     asyncio.run(tailer._tail_one_job(run_id=9, job=_job(1, "build", "in_progress")))
     assert "job completed before live steps became available" in output.getvalue()
+
+
+def test_tailer_prefers_completed_job_over_static_page_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    jobs = iter([
+        (_job(1, "build", "completed", "success"),),
+    ])
+    output = io.StringIO()
+    tailer = gha_tail.GitHubActionsTailer(
+        api_client=SimpleNamespace(list_run_jobs=lambda _run_id: next(jobs)),
+        live_client=SimpleNamespace(
+            discover_job_page=lambda **_kwargs: asyncio.sleep(
+                0,
+                result=gha_tail.LiveJobPageInfo(
+                    check_steps_found=True,
+                    static_step_count=1,
+                ),
+            )
+        ),
+        output=output,
+        poll_interval=0.1,
+    )
+    monkeypatch.setattr(tailer, "_sleep", lambda: asyncio.sleep(0))
+
+    asyncio.run(tailer._tail_one_job(run_id=9, job=_job(1, "build", "in_progress")))
+
+    assert "job completed before live steps became available" in output.getvalue()
+
+
+def test_tailer_reports_static_job_page_without_live_metadata() -> None:
+    tailer = gha_tail.GitHubActionsTailer(
+        api_client=SimpleNamespace(
+            list_run_jobs=lambda _run_id: (_job(1, "build", "in_progress"),)
+        ),
+        live_client=SimpleNamespace(
+            discover_job_page=lambda **_kwargs: asyncio.sleep(
+                0,
+                result=gha_tail.LiveJobPageInfo(
+                    check_steps_found=True,
+                    static_step_count=1,
+                ),
+            )
+        ),
+        output=io.StringIO(),
+        poll_interval=0.1,
+    )
+
+    with pytest.raises(RuntimeError, match="no jobStepsUrl endpoint"):
+        asyncio.run(tailer._tail_one_job(run_id=9, job=_job(1, "build", "in_progress")))
 
 
 def test_tailer_sleep_delegates_to_asyncio(monkeypatch: pytest.MonkeyPatch) -> None:

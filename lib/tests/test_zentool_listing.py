@@ -112,12 +112,12 @@ def test_diff_session_uses_desired_state_snapshot(
     monkeypatch.setattr(
         zentool,
         "build_desired_state",
-        lambda session, built_config: (
+        lambda session, built_config, _plan=None: (
             desired if session is current and built_config is config else None
         ),
     )
 
-    def fake_snapshot(session: object) -> dict[str, int]:
+    def fake_snapshot(session: object, _containers: object = None) -> dict[str, int]:
         calls.append(session)
         return {"space_count": len(session.spaces)}
 

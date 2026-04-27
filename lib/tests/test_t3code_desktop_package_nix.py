@@ -124,10 +124,12 @@ def test_t3code_desktop_sources_track_the_supported_platform_matrix() -> None:
 
     assert payload["input"] == "t3code"
     assert isinstance(payload.get("version"), str)
-    assert payload["hashes"] == [
-        {
-            "hash": "sha256-o+LKHj/LJ5PwKxVHUUl/RR9CLLfmmtaelNN1JFGjs6w=",
-            "hashType": "nodeModulesHash",
-            "platform": "aarch64-darwin",
-        }
-    ]
+    hashes = payload["hashes"]
+    assert len(hashes) == 1
+    [hash_entry] = hashes
+    assert set(hash_entry) == {"hash", "hashType", "platform"}
+    assert hash_entry["hashType"] == "nodeModulesHash"
+    assert hash_entry["platform"] == "aarch64-darwin"
+    hash_value = hash_entry["hash"]
+    assert isinstance(hash_value, str)
+    assert hash_value.startswith("sha256-")

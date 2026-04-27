@@ -121,55 +121,6 @@
         run ln -s "$NIXCFG_DIR" "$HM_DIR"
       fi
     '';
-    activation.opencodeElectronStateLinks = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      OPENCODE_TAURI_STATE_DIR="${config.home.homeDirectory}/Library/Application Support/ai.opencode.desktop.dev"
-      OPENCODE_ELECTRON_STATE_DIR="${config.home.homeDirectory}/Library/Application Support/ai.opencode.desktop.electron-dev"
-      OPENCODE_ELECTRON_BACKUP_DIR="$OPENCODE_ELECTRON_STATE_DIR/backups/pre-symlink"
-
-      link_state_file() {
-        local source_path="$1"
-        local target_path="$2"
-
-        if [ ! -e "$source_path" ]; then
-          return
-        fi
-
-        if [ -L "$target_path" ]; then
-          local existing_target
-          existing_target="$(${lib.getExe' pkgs.coreutils "readlink"} "$target_path")"
-          if [ "$existing_target" = "$source_path" ]; then
-            return
-          fi
-          run rm -f "$target_path"
-        elif [ -e "$target_path" ]; then
-          local backup_dir
-          run mkdir -p "$OPENCODE_ELECTRON_BACKUP_DIR"
-          backup_dir="$(${lib.getExe' pkgs.coreutils "mktemp"} -d "$OPENCODE_ELECTRON_BACKUP_DIR/$(basename "$target_path").XXXXXX")"
-          echo "Backing up existing $target_path to $backup_dir" >&2
-          run mv "$target_path" "$backup_dir/$(basename "$target_path")"
-        fi
-
-        run ln -s "$source_path" "$target_path"
-      }
-
-      if [ -d "$OPENCODE_TAURI_STATE_DIR" ]; then
-        run mkdir -p "$OPENCODE_ELECTRON_STATE_DIR"
-
-        # Share the app-owned persisted stores between the Tauri and Electron
-        # dev shells, but keep browser/runtime files (cookies, caches, window
-        # state, Chromium local/session storage) separate.
-        link_state_file "$OPENCODE_TAURI_STATE_DIR/default.dat" "$OPENCODE_ELECTRON_STATE_DIR/default.dat"
-        link_state_file "$OPENCODE_TAURI_STATE_DIR/opencode.global.dat" "$OPENCODE_ELECTRON_STATE_DIR/opencode.global.dat"
-        link_state_file "$OPENCODE_TAURI_STATE_DIR/opencode.settings.dat" "$OPENCODE_ELECTRON_STATE_DIR/opencode.settings.dat"
-
-        for source_path in "$OPENCODE_TAURI_STATE_DIR"/opencode.workspace*.dat; do
-          if [ ! -e "$source_path" ]; then
-            continue
-          fi
-          link_state_file "$source_path" "$OPENCODE_ELECTRON_STATE_DIR/$(basename "$source_path")"
-        done
-      fi
-    '';
     file = {
       # Keep the Nix-generated VS Code settings content, but materialize it as a
       # normal file so the editor can mutate it between switches.
@@ -299,6 +250,7 @@
             '';
           userJsSource = ./zen/user.js;
           foldersSource = ./zen/folders.yaml;
+          quitDialogCssSource = ./zen/quit-dialog-primary.css;
         };
 
       languages = {

@@ -548,6 +548,11 @@ def test_cmd_dump_prints_or_writes_snapshot_yaml(
     monkeypatch.setattr(
         zentool, "load_session", lambda _profile: (Path("/tmp/session"), session)
     )
+    monkeypatch.setattr(
+        zentool,
+        "load_containers",
+        lambda _profile: (Path("/tmp/containers.json"), zentool.ContainerState()),
+    )
 
     stdout_chunks: list[str] = []
     stdout_lines: list[str] = []

@@ -41,8 +41,6 @@ _REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS = (
     "overlays/goose-cli/crate-hashes.json",
     "packages/zed-editor-nightly/Cargo.nix",
     "packages/zed-editor-nightly/crate-hashes.json",
-    "packages/opencode-desktop/Cargo.nix",
-    "packages/opencode-desktop/crate-hashes.json",
 )
 _REFRESH_FINAL_ARTIFACT_REQUIRED_SPECS = _REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS
 

@@ -7,10 +7,15 @@ from pathlib import Path
 import pytest
 
 from lib.nix.models.sources import HashEntry
+from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEventKind
+from lib.update.nix import (
+    _build_fetch_from_github_call,
+    _build_fetch_pnpm_deps_expr,
+)
 from lib.update.updaters import base as updater_base
 from lib.update.updaters.base import VersionInfo
 
@@ -71,22 +76,34 @@ def test_element_desktop_fetch_latest_rejects_missing_package_or_version(
 
 
 def test_element_desktop_expr_builders_include_expected_structure() -> None:
-    """Build GitHub source and fetchYarnDeps expressions for the pinned tag."""
+    """Build GitHub source and fetchPnpmDeps expressions for the pinned tag."""
     module = _load_module("element_desktop_updater_test_exprs")
 
     src_expr = module.ElementDesktopUpdater._src_expr("1.11.99")
     offline_expr = module.ElementDesktopUpdater._offline_expr("1.11.99", "sha256-src")
 
-    assert 'owner = "element-hq"' in src_expr
-    assert 'repo = "element-desktop"' in src_expr
-    assert 'rev = "v1.11.99"' in src_expr
-    assert "fetchFromGitHub" in src_expr
-
-    assert "fetchYarnDeps" in offline_expr
-    assert 'owner = "element-hq"' in offline_expr
-    assert 'repo = "element-desktop"' in offline_expr
-    assert 'rev = "v1.11.99"' in offline_expr
-    assert 'hash = "sha256-src"' in offline_expr
+    assert_nix_ast_equal(
+        src_expr,
+        _build_fetch_from_github_call(
+            "element-hq",
+            "element-web",
+            tag="v1.11.99",
+        ),
+    )
+    assert_nix_ast_equal(
+        offline_expr,
+        _build_fetch_pnpm_deps_expr(
+            _build_fetch_from_github_call(
+                "element-hq",
+                "element-web",
+                tag="v1.11.99",
+                hash_value="sha256-src",
+            ),
+            pname="element",
+            version="1.11.99",
+            fetcher_version=3,
+        ),
+    )
 
 
 def test_element_desktop_is_latest_always_recomputes_hashes() -> None:

@@ -38,7 +38,11 @@ from lib.nix.commands.build import nix_build
 from lib.update import sources as update_sources
 from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.ci._time import format_duration
-from lib.update.nix import _build_overlay_attr_expr, normalize_nix_platform
+from lib.update.nix import (
+    _build_overlay_attr_expr,
+    _build_package_path_attr_expr,
+    normalize_nix_platform,
+)
 from lib.update.paths import SOURCES_FILE_NAME, package_file_map
 
 if TYPE_CHECKING:
@@ -63,7 +67,9 @@ _HASH_TYPE_TO_FOD_ATTR: dict[str, str] = {
 # ``nodeModulesHash`` value but exposes it as ``.offlineCache``.
 _PACKAGE_HASH_TYPE_TO_FOD_ATTR: dict[tuple[str, str], str] = {
     ("mux", "nodeModulesHash"): ".offlineCache",
+    ("t3code-workspace", "nodeModulesHash"): "",
 }
+_PACKAGE_PATH_FOD_TARGETS: frozenset[str] = frozenset({"t3code-workspace"})
 
 _DENO_DEPS_MANIFEST_FILE_NAME = "deno-deps.json"
 _DENO_DEPS_ATTR = ".passthru.denoDeps"
@@ -209,6 +215,8 @@ def _find_fod_targets(system: str) -> list[FodTarget]:
 
 def _build_fod_expr(package: str, fod_attr: str, *, system: str | None = None) -> str:
     """Build a Nix expression that evaluates to a package's FOD sub-derivation."""
+    if package in _PACKAGE_PATH_FOD_TARGETS:
+        return _build_package_path_attr_expr(package, fod_attr, system=system)
     return _build_overlay_attr_expr(package, fod_attr, system=system)
 
 

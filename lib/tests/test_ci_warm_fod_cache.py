@@ -71,6 +71,18 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
     assert targets[0].package == "mux"
     assert targets[0].fod_attr == ".offlineCache"
 
+    monkeypatch.setattr(
+        wfc,
+        "package_file_map",
+        lambda name: (
+            {"t3code-workspace": Path("path")} if name == wfc.SOURCES_FILE_NAME else {}
+        ),
+    )
+    targets = object.__getattribute__(wfc, "_find_fod_targets")("x86_64-linux")
+    assert len(targets) == 1
+    assert targets[0].package == "t3code-workspace"
+    assert targets[0].fod_attr == ""
+
     deno_entry = SourceEntry(
         version="1",
         hashes=HashCollection(
@@ -281,6 +293,18 @@ def test_build_fod_expr(monkeypatch: pytest.MonkeyPatch) -> None:
         "demo", ".node_modules", system="x86_64-linux"
     )
     assert expr == "overlay-attr:demo:.node_modules:x86_64-linux"
+
+    monkeypatch.setattr(
+        wfc,
+        "_build_package_path_attr_expr",
+        lambda package, attr_path, *, system=None: (
+            f"package-path:{package}:{attr_path}:{system}"
+        ),
+    )
+    expr = object.__getattribute__(wfc, "_build_fod_expr")(
+        "t3code-workspace", "", system="aarch64-darwin"
+    )
+    assert expr == "package-path:t3code-workspace::aarch64-darwin"
 
 
 def test_resolve_output_paths(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -33,7 +33,7 @@
 </details>
 
 <details>
-<summary><a href="https://github.com/gkze/nixcfg/blob/update_flake_lock_action/packages/opencode-desktop/sources.json"><code>packages/opencode-desktop/sources.json</code></a></summary>
+<summary><a href="https://github.com/gkze/nixcfg/blob/update_flake_lock_action/packages/opencode-desktop-electron/sources.json"><code>packages/opencode-desktop-electron/sources.json</code></a></summary>
 
 ```diff
 @ ["commit"]
@@ -66,7 +66,7 @@ Closures pushed to Cachix (`gkze`):
 
 - `.#pkgs.aarch64-darwin.zed-editor-nightly`
 - `.#pkgs.aarch64-darwin.opencode`
-- `.#pkgs.aarch64-darwin.opencode-desktop`
+- `.#pkgs.aarch64-darwin.opencode-desktop-electron-dev`
 - `.#pkgs.aarch64-darwin.codex`
 - `.#pkgs.aarch64-darwin.gemini-cli`
 - `.#pkgs.aarch64-darwin.element-desktop`
