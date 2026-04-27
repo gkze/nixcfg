@@ -22182,6 +22182,10 @@ rec {
             packageId = "tree-sitter-c";
           }
           {
+            name = "tree-sitter-go";
+            packageId = "tree-sitter-go";
+          }
+          {
             name = "tree-sitter-html";
             packageId = "tree-sitter-html";
           }
@@ -39409,8 +39413,33 @@ rec {
         ];
         devDependencies = [
           {
+            name = "editor";
+            packageId = "editor";
+            features = [ "test-support" ];
+          }
+          {
+            name = "fs";
+            packageId = "fs";
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            features = [ "test-support" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+          {
             name = "tempfile";
             packageId = "tempfile";
+          }
+          {
+            name = "workspace";
+            packageId = "workspace";
+            features = [ "test-support" ];
           }
         ];
         features = {
