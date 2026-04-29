@@ -16,7 +16,6 @@
     "misc/zellij-plugin-wasm-ts/assembly/**",
     "**/.direnv",
     "**/.claude/worktrees",
-    "**/.ghawfr",
     "**/.venv",
     "**/node_modules",
     "**/result*"

@@ -16,29 +16,23 @@ Current intended workflow:
 1. materialize a lockfile that conforms to `codegen-lock.schema.json`
 1. generate language bindings for the schemas themselves
 
-Current lockfile CLIs:
+Current lockfile CLI:
 
 - Python reproducible default output:
   - `uv run python nixcfg.py schema lock path/to/codegen.yaml`
 - Python include informational timestamps / provenance metadata:
   - `uv run python nixcfg.py schema lock path/to/codegen.yaml --include-metadata`
-- Go reproducible default output, from the standalone `ghawfr` repository:
-  - `cd ~/Development/github.com/gkze/ghawfr && go run ./cmd/ghawfr-dev codegen lock path/to/codegen.yaml`
-- Go include informational timestamps / provenance metadata, from the standalone `ghawfr` repository:
-  - `cd ~/Development/github.com/gkze/ghawfr && go run ./cmd/ghawfr-dev codegen lock path/to/codegen.yaml --include-metadata`
 
 Current generated bindings in this repo:
 
 - Python: `lib/schema_codegen/models/_generated.py`
-- Go manifest: `devtools/codegenmanifest/types.gen.go` in the standalone `ghawfr` repository
-- Go lockfile: `devtools/codegenlock/types.gen.go` in the standalone `ghawfr` repository
 
-Shared cross-language golden fixtures live under:
+Golden fixtures live under:
 
 - `schemas/codegen/testdata/`
 
 The schema `$id` values currently use stable `urn:uuid:` identifiers rather than hosted URLs, so
 they do not imply a public domain or publication contract.
 
-The schemas are designed to stay language-neutral so the format can be reused by the standalone
-`ghawfr` repository.
+The schemas are designed to stay language-neutral so other implementations can materialize
+compatible lockfiles.

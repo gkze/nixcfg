@@ -4,7 +4,6 @@ extends: default
 ignore: |
   .claude/worktrees/**
   .direnv/**
-  .ghawfr/**
   .pre-commit-config.yaml
   .venv/**
   node_modules/**

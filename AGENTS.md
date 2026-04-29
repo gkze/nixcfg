@@ -525,7 +525,6 @@ working alone.
 - `~/.pi`
 - `~/.claude`
 - `~/.local/share/opencode`
-- `.ghawfr/` legacy workflow-runner runtime state
 
 Use local history for continuity, but do not surface credentials or paste sensitive local data back
 into the conversation.
@@ -556,4 +555,3 @@ These are commonly local state or generated artifacts, not source-of-truth code:
 - `.pytest_cache/`
 - `.ruff_cache/`
 - `.coverage*`
-- `.ghawfr/`
