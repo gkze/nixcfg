@@ -180,13 +180,13 @@ def test_asset_diff_lines_returns_empty_for_already_matching_assets(
     monkeypatch.setattr(
         zentool,
         "_resolve_asset_targets",
-        lambda _args: (
-            profile_dir,
-            chrome_source,
-            user_js_source,
-            profile_chrome_dir,
-            manifest_path,
-            user_js_manifest_path,
+        lambda _args: zentool.AssetTargets(
+            profile_dir=profile_dir,
+            chrome_source=chrome_source,
+            user_js_source=user_js_source,
+            profile_chrome_dir=profile_chrome_dir,
+            chrome_manifest_path=manifest_path,
+            user_js_manifest_path=user_js_manifest_path,
         ),
     )
 

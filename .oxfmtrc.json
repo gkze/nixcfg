@@ -1,0 +1,24 @@
+{
+  "useTabs": false,
+  "tabWidth": 2,
+  "printWidth": 100,
+  "singleQuote": false,
+  "jsxSingleQuote": false,
+  "quoteProps": "as-needed",
+  "trailingComma": "all",
+  "semi": true,
+  "arrowParens": "always",
+  "bracketSameLine": false,
+  "bracketSpacing": true,
+  "ignorePatterns": [
+    "**/*pre-commit-config.json",
+    "schemas/codegen/testdata/lockfile-golden/expected.codegen.lock.json",
+    "misc/zellij-plugin-wasm-ts/assembly/**",
+    "**/.direnv",
+    "**/.claude/worktrees",
+    "**/.ghawfr",
+    "**/.venv",
+    "**/node_modules",
+    "**/result*"
+  ]
+}

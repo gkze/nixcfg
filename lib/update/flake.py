@@ -9,12 +9,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from nix_manipulator.expressions.binary import BinaryExpression
+from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.path import NixPath
-from nix_manipulator.expressions.primitive import StringPrimitive
+from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.commands.flake import nix_flake_lock_update
@@ -30,6 +31,7 @@ from lib.update.paths import get_repo_root
 
 if TYPE_CHECKING:
     from nix_manipulator.expressions.expression import NixExpression
+    from nix_manipulator.expressions.inherit import Inherit
 
 
 @functools.cache
@@ -120,25 +122,43 @@ def flake_fetch_expression(node: FlakeLockNode) -> NixExpression:
     if locked is None:
         msg = "Node has no locked ref"
         raise ValueError(msg)
-    if locked.type not in {"github", "gitlab"}:
-        msg = f"Unsupported flake input type: {locked.type}"
-        raise ValueError(msg)
-    if not locked.owner or not locked.repo or not locked.rev:
-        msg = f"Incomplete locked ref for {locked.type}: missing owner/repo/rev"
-        raise ValueError(msg)
+    if locked.type == "git":
+        if not locked.url or not locked.rev:
+            msg = "Incomplete locked ref for git: missing url/rev"
+            raise ValueError(msg)
+        bindings: list[Binding | Inherit] = [
+            Binding(name="type", value="git"),
+            Binding(name="url", value=locked.url),
+            Binding(name="rev", value=locked.rev),
+            Binding(name="narHash", value=locked.nar_hash),
+        ]
+        if getattr(locked, "submodules", False):
+            bindings.append(Binding(name="submodules", value=Primitive(value=True)))
+        return FunctionCall(
+            name=identifier_attr_path("builtins", "fetchTree"),
+            argument=AttributeSet(values=bindings),
+        )
 
-    return FunctionCall(
-        name=identifier_attr_path("builtins", "fetchTree"),
-        argument=AttributeSet.from_dict(
-            {
-                "type": locked.type,
-                "owner": locked.owner,
-                "repo": locked.repo,
-                "rev": locked.rev,
-                "narHash": locked.nar_hash,
-            },
-        ),
-    )
+    if locked.type in {"github", "gitlab"}:
+        if not locked.owner or not locked.repo or not locked.rev:
+            msg = f"Incomplete locked ref for {locked.type}: missing owner/repo/rev"
+            raise ValueError(msg)
+
+        return FunctionCall(
+            name=identifier_attr_path("builtins", "fetchTree"),
+            argument=AttributeSet.from_dict(
+                {
+                    "type": locked.type,
+                    "owner": locked.owner,
+                    "repo": locked.repo,
+                    "rev": locked.rev,
+                    "narHash": locked.nar_hash,
+                },
+            ),
+        )
+
+    msg = f"Unsupported flake input type: {locked.type}"
+    raise ValueError(msg)
 
 
 def flake_fetch_expr(node: FlakeLockNode) -> str:

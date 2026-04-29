@@ -110,6 +110,58 @@ def test_nixcfg_update_parses_native_only(monkeypatch: _MonkeyPatchLike) -> None
     assert called["opts"].native_only is True
 
 
+def test_nixcfg_update_parses_multiple_targets(monkeypatch: _MonkeyPatchLike) -> None:
+    """Ensure `nixcfg update a b` maps to multiple update targets."""
+    called: dict[str, UpdateOptions] = {}
+
+    async def _fake_run_updates(opts: UpdateOptions) -> int:
+        called["opts"] = opts
+        return 0
+
+    monkeypatch.setattr("lib.update.cli.check_required_tools", lambda **_kw: [])
+    monkeypatch.setattr("lib.update.cli.run_updates", _fake_run_updates)
+
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["update", "--check", "emdash", "mux"])
+
+    assert result.exit_code == 0
+    assert called["opts"].target_names == ("emdash", "mux")
+    assert called["opts"].check is True
+
+
+def test_nixcfg_update_parses_options_after_target(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Ensure `nixcfg update target --check` keeps legacy option placement."""
+    called: dict[str, UpdateOptions] = {}
+
+    async def _fake_run_updates(opts: UpdateOptions) -> int:
+        called["opts"] = opts
+        return 0
+
+    monkeypatch.setattr("lib.update.cli.check_required_tools", lambda **_kw: [])
+    monkeypatch.setattr("lib.update.cli.run_updates", _fake_run_updates)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        nixcfg.app,
+        [
+            "update",
+            "github-desktop",
+            "--check",
+            "--json",
+            "--http-timeout",
+            "12",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert called["opts"].target_names == ("github-desktop",)
+    assert called["opts"].check is True
+    assert called["opts"].json is True
+    assert called["opts"].http_timeout == 12
+
+
 def test_nixcfg_recover_snapshot_parses_flags(monkeypatch: _MonkeyPatchLike) -> None:
     """Ensure recover snapshot forwards its argument and flags."""
     called: dict[str, object] = {}

@@ -39,8 +39,15 @@ from collections import defaultdict, deque
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, cast
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Final,
+    Literal,
+    NamedTuple,
+    cast,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -81,6 +88,7 @@ DEFAULT_CHROME_SOURCE_ENV: Final = "ZEN_CHROME_SOURCE"
 MANAGED_CHROME_MANIFEST: Final = ".zentool-managed-chrome"
 MANAGED_USER_JS_MANIFEST: Final = ".zentool-managed-user-js"
 INTERRUPTED_EXIT_CODE: Final = 130
+SESSION_SPLIT_VIEW_EXTRA: Final = "splitViewData"
 PROFILE_HELP: Final = (
     "Zen profile directory name, a direct path to a profile directory/session file, "
     "or a human profile name from profiles.ini. Default: auto-detect from profiles.ini"
@@ -706,6 +714,53 @@ class ZenRuntimeState(BaseModel):
     warnings: tuple[str, ...] = ()
 
 
+class ScopeSelection(NamedTuple):
+    """Resolved state/assets operation scope."""
+
+    state: bool
+    assets: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AssetTargets:
+    """Resolved managed asset sources and live profile destinations."""
+
+    profile_dir: Path
+    chrome_source: Path | None
+    user_js_source: Path | None
+    profile_chrome_dir: Path
+    chrome_manifest_path: Path
+    user_js_manifest_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class SessionIssue:
+    """Structured structural-check issue with stable display text."""
+
+    code: str
+    message: str
+    subject: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CommandArgs:
+    """Typed command payload shared by direct handlers and Typer adapters."""
+
+    command: str = ""
+    profile: str | None = None
+    config: str = str(DEFAULT_YAML)
+    output: str | None = None
+    asset_dir: str = str(DEFAULT_CONFIG_DIR)
+    chrome_source: str | None = None
+    user_js_source: str | None = None
+    state: bool = False
+    assets: bool = False
+    yes: bool = False
+    literal: bool = False
+    inspect_command: str | None = None
+    profile_command: str | None = None
+
+
 @dataclass(slots=True)
 class CompiledTab:
     """Internal compiled tab node with sync metadata."""
@@ -775,6 +830,15 @@ class TabPool:
         if not tabs:
             return None
         return tabs.popleft()
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceTabPools:
+    """Existing tab pools for one workspace partition."""
+
+    essentials: TabPool
+    pinned: TabPool
+    regular: TabPool
 
 
 def _stdout(message: str = "") -> None:
@@ -917,59 +981,63 @@ def _optional_bool_field(
     return value
 
 
-def _coerce_authored_node_input(raw: object) -> object:
-    """Convert one shorthand authored node into a model-friendly mapping."""
-    if not isinstance(raw, dict) or len(raw) != 1:
-        msg = "each workspace item must be a single-key mapping"
+def _coerce_authored_leaf_node(name: str, value: str) -> dict[str, object]:
+    """Convert a shorthand URL node into a model-friendly mapping."""
+    return {
+        "name": name,
+        "url": value,
+    }
+
+
+def _coerce_authored_list_folder(
+    name: str,
+    value: Sequence[object],
+) -> dict[str, object]:
+    """Convert a shorthand list folder into a model-friendly mapping."""
+    return {
+        "name": name,
+        "children": [_normalize_authored_node(item) for item in value],
+    }
+
+
+def _coerce_explicit_authored_leaf(
+    name: str,
+    value_map: dict[str, object],
+) -> dict[str, object]:
+    """Convert an explicit ``url`` node into a model-friendly mapping."""
+    return {
+        "name": name,
+        "url": value_map["url"],
+        "role": value_map.get("role"),
+    }
+
+
+def _coerce_explicit_authored_folder(
+    name: str,
+    value_map: dict[str, object],
+) -> dict[str, object]:
+    """Convert an explicit ``children`` folder into a model-friendly mapping."""
+    children_raw = value_map["children"]
+    if not isinstance(children_raw, list):
+        msg = f"folder {name!r} children must be a list"
         raise ZenFoldersError(msg)
+    return {
+        "name": name,
+        "collapsed": _optional_bool_field(
+            value_map,
+            "collapsed",
+            default=True,
+            label=f"folder {name!r}",
+        ),
+        "children": [_normalize_authored_node(item) for item in children_raw],
+    }
 
-    [(name, value)] = raw.items()
 
-    if not isinstance(name, str):
-        msg = "node names must be strings"
-        raise ZenFoldersError(msg)
-
-    if isinstance(value, str):
-        return {
-            "name": name,
-            "url": value,
-        }
-
-    if isinstance(value, list):
-        return {
-            "name": name,
-            "children": [_normalize_authored_node(item) for item in value],
-        }
-
-    if not isinstance(value, dict):
-        msg = f"unable to parse node {name!r}"
-        raise ZenFoldersError(msg)
-
-    value_map = _string_key_mapping(value, label=f"node {name!r} mapping")
-
-    if "url" in value_map:
-        return {
-            "name": name,
-            "url": value_map["url"],
-            "role": value_map.get("role"),
-        }
-
-    if "children" in value_map:
-        children_raw = value_map["children"]
-        if not isinstance(children_raw, list):
-            msg = f"folder {name!r} children must be a list"
-            raise ZenFoldersError(msg)
-        return {
-            "name": name,
-            "collapsed": _optional_bool_field(
-                value_map,
-                "collapsed",
-                default=True,
-                label=f"folder {name!r}",
-            ),
-            "children": [_normalize_authored_node(item) for item in children_raw],
-        }
-
+def _coerce_implicit_authored_folder(
+    name: str,
+    value_map: dict[str, object],
+) -> dict[str, object]:
+    """Convert a nested mapping folder into a model-friendly mapping."""
     child_entries = {
         key: child for key, child in value_map.items() if key != "collapsed"
     }
@@ -986,6 +1054,39 @@ def _coerce_authored_node_input(raw: object) -> object:
             for child_name, child_value in child_entries.items()
         ],
     }
+
+
+def _coerce_authored_node_input(raw: object) -> object:
+    """Convert one shorthand authored node into a model-friendly mapping."""
+    if not isinstance(raw, dict) or len(raw) != 1:
+        msg = "each workspace item must be a single-key mapping"
+        raise ZenFoldersError(msg)
+
+    [(name, value)] = raw.items()
+
+    if not isinstance(name, str):
+        msg = "node names must be strings"
+        raise ZenFoldersError(msg)
+
+    if isinstance(value, str):
+        return _coerce_authored_leaf_node(name, value)
+
+    if isinstance(value, list):
+        return _coerce_authored_list_folder(name, value)
+
+    if not isinstance(value, dict):
+        msg = f"unable to parse node {name!r}"
+        raise ZenFoldersError(msg)
+
+    value_map = _string_key_mapping(value, label=f"node {name!r} mapping")
+
+    if "url" in value_map:
+        return _coerce_explicit_authored_leaf(name, value_map)
+
+    if "children" in value_map:
+        return _coerce_explicit_authored_folder(name, value_map)
+
+    return _coerce_implicit_authored_folder(name, value_map)
 
 
 def _normalize_authored_node(raw: object) -> AuthoredNode:
@@ -1826,6 +1927,24 @@ class StateApplyPlan:
     removed_context_ids: set[int] = field(default_factory=set)
 
 
+@dataclass(slots=True)
+class ApplyPreview:
+    """Prepared state and asset changes for one apply command."""
+
+    state_plan: StateApplyPlan | None = None
+    asset_lines: list[str] = field(default_factory=list)
+
+    @property
+    def state_diff_text(self) -> str | None:
+        """Return pending state diff text, if any."""
+        return self.state_plan.diff_text if self.state_plan is not None else None
+
+    @property
+    def has_changes(self) -> bool:
+        """Return whether either selected apply scope has pending changes."""
+        return self.state_diff_text is not None or bool(self.asset_lines)
+
+
 def is_default_container_ref(value: str) -> bool:
     """Return whether an authored container ref means the default context."""
     return value.strip().casefold() in DEFAULT_CONTAINER_REFS
@@ -2346,6 +2465,61 @@ def gather_compiled_tabs(
     return tabs
 
 
+def _workspace_tab_pools(
+    session: SessionState,
+    workspace: WorkspaceCompilation,
+) -> WorkspaceTabPools:
+    """Return existing tab pools for one compiled workspace."""
+    uuid_value = workspace.space.uuid
+    return WorkspaceTabPools(
+        essentials=TabPool(
+            tab
+            for tab in session.tabs
+            if tab.zen_essential
+            and tab.zen_workspace == uuid_value
+            and not tab.zen_is_empty
+        ),
+        pinned=TabPool(
+            tab
+            for tab in session.tabs
+            if tab.pinned
+            and not tab.zen_essential
+            and tab.zen_workspace == uuid_value
+            and not tab.zen_is_empty
+        ),
+        regular=TabPool(
+            tab
+            for tab in session.tabs
+            if not tab.pinned and tab.zen_workspace == uuid_value and not tab.zen_is_empty
+        ),
+    )
+
+
+def _global_essential_tab_pool(session: SessionState) -> TabPool:
+    """Return existing global essential tabs that are not attached to a workspace."""
+    return TabPool(
+        tab
+        for tab in session.tabs
+        if tab.zen_essential and tab.zen_workspace is None and not tab.zen_is_empty
+    )
+
+
+def _claim_existing_tab(compiled: CompiledTab, pool: TabPool | None) -> None:
+    """Attach a compiled tab to an existing tab, or allocate its sync ID."""
+    if compiled.placeholder:
+        compiled.sync_id = compiled.spec.url or compiled.sync_id or new_item_id()
+        return
+
+    compiled.existing = pool.claim(compiled.spec.url) if pool is not None else None
+    compiled.sync_id = (
+        compiled.existing.zen_sync_id
+        if compiled.existing is not None
+        else new_item_id()
+    )
+    if compiled.existing is not None and compiled.preserve_existing_context:
+        compiled.user_context_id = compiled.existing.user_context_id
+
+
 def match_tabs_to_existing(
     *,
     session: SessionState,
@@ -2353,69 +2527,25 @@ def match_tabs_to_existing(
     workspaces: Sequence[WorkspaceCompilation],
 ) -> None:
     """Match compiled tabs to existing session tabs by exact URL."""
-    essential_pools: dict[str | None, TabPool] = {}
-    workspace_pools: dict[str, TabPool] = {}
-    workspace_tab_pools: dict[str, TabPool] = {}
-    for workspace in workspaces:
-        uuid_value = workspace.space.uuid
-        essential_pools[uuid_value] = TabPool(
-            tab
-            for tab in session.tabs
-            if tab.zen_essential
-            and tab.zen_workspace == uuid_value
-            and not tab.zen_is_empty
-        )
-        workspace_pools[workspace.key] = TabPool(
-            tab
-            for tab in session.tabs
-            if tab.pinned
-            and not tab.zen_essential
-            and tab.zen_workspace == uuid_value
-            and not tab.zen_is_empty
-        )
-        workspace_tab_pools[workspace.key] = TabPool(
-            tab
-            for tab in session.tabs
-            if not tab.pinned and tab.zen_workspace == uuid_value and not tab.zen_is_empty
-        )
-
-    essential_pools[None] = TabPool(
-        tab
-        for tab in session.tabs
-        if tab.zen_essential and tab.zen_workspace is None and not tab.zen_is_empty
-    )
+    pools_by_workspace = {
+        workspace.key: _workspace_tab_pools(session, workspace)
+        for workspace in workspaces
+    }
+    essential_pools: dict[str | None, TabPool] = {
+        workspace.space.uuid: pools_by_workspace[workspace.key].essentials
+        for workspace in workspaces
+    }
+    essential_pools[None] = _global_essential_tab_pool(session)
 
     for tab in essentials:
-        essential_pool = essential_pools.get(tab.workspace_uuid)
-        tab.existing = (
-            essential_pool.claim(tab.spec.url) if essential_pool is not None else None
-        )
-        tab.sync_id = (
-            tab.existing.zen_sync_id if tab.existing is not None else new_item_id()
-        )
-        if tab.existing is not None and tab.preserve_existing_context:
-            tab.user_context_id = tab.existing.user_context_id
+        _claim_existing_tab(tab, essential_pools.get(tab.workspace_uuid))
 
     for workspace in workspaces:
-        pinned_pool = workspace_pools[workspace.key]
+        pools = pools_by_workspace[workspace.key]
         for tab in gather_workspace_pinned_tabs(workspace.items):
-            if tab.placeholder:
-                tab.sync_id = tab.spec.url or tab.sync_id or new_item_id()
-                continue
-            tab.existing = pinned_pool.claim(tab.spec.url)
-            tab.sync_id = (
-                tab.existing.zen_sync_id if tab.existing is not None else new_item_id()
-            )
-            if tab.existing is not None and tab.preserve_existing_context:
-                tab.user_context_id = tab.existing.user_context_id
-        regular_pool = workspace_tab_pools[workspace.key]
+            _claim_existing_tab(tab, pools.pinned)
         for tab in workspace.tabs:
-            tab.existing = regular_pool.claim(tab.spec.url)
-            tab.sync_id = (
-                tab.existing.zen_sync_id if tab.existing is not None else new_item_id()
-            )
-            if tab.existing is not None and tab.preserve_existing_context:
-                tab.user_context_id = tab.existing.user_context_id
+            _claim_existing_tab(tab, pools.regular)
 
 
 def direct_tab_count(items: Sequence[CompiledItem]) -> int:
@@ -2468,10 +2598,7 @@ def assign_folder_links(
             if previous_type is None
             else PrevSiblingInfo(type=previous_type, id=previous_id)
         )
-        if item.existing is not None:
-            item.existing.parent_id = parent_id
-            item.existing.prev_sibling_info = info
-        else:
+        if item.existing is None:
             item.existing = SessionFolder(
                 id=item.id,
                 name=item.spec.name,
@@ -2559,6 +2686,19 @@ def build_desired_tabs(
     return tabs
 
 
+def reset_split_view_extra(state: SessionState) -> None:
+    """Clear unmanaged split-view state while preserving other top-level extras."""
+    extra = state.model_extra
+    if extra is None:
+        # Pydantic only exposes ``model_extra`` after an extra field exists.
+        state.__pydantic_extra__ = {}
+        extra = state.model_extra
+    if extra is None:
+        msg = "Unable to initialize session extra fields"
+        raise ZenFoldersError(msg)
+    extra[SESSION_SPLIT_VIEW_EXTRA] = []
+
+
 def build_desired_state(
     existing: SessionState,
     config: ZenConfig,
@@ -2622,10 +2762,7 @@ def build_desired_state(
         for folder in iter_compiled_folders(workspace.items)
     ]
     result.tabs = build_desired_tabs(compiled_essentials, compiled_workspaces)
-    if result.model_extra is None:
-        result.__pydantic_extra__ = {"splitViewData": []}
-    else:
-        result.model_extra["splitViewData"] = []
+    reset_split_view_extra(result)
     return result
 
 
@@ -3030,56 +3167,110 @@ def iter_folder_records(session: SessionState) -> Iterator[tuple[str, SessionFol
         yield (" / ".join((workspace_name, *record.path)), folder)
 
 
+def collect_session_issues(
+    session: SessionState,
+    containers: ContainerState | None = None,
+) -> list[SessionIssue]:
+    """Return structured structural issues in the managed subset."""
+    issues: list[SessionIssue] = []
+    group_ids = {group.id for group in session.groups}
+    folder_ids = {folder.id for folder in session.folders}
+    folder_names: set[tuple[str, str | None, str]] = set()
+
+    for folder in session.folders:
+        if folder.id not in group_ids:
+            issues.append(
+                SessionIssue(
+                    code="folder-missing-group",
+                    subject=folder.id,
+                    message=f"Folder {folder.name!r} has no matching group",
+                )
+            )
+        key = (folder.workspace_id, folder.parent_id, folder.name.casefold())
+        if key in folder_names:
+            issues.append(
+                SessionIssue(
+                    code="folder-duplicate-name",
+                    subject=folder.id,
+                    message=f"Duplicate folder name in one container: {folder.name!r}",
+                )
+            )
+        folder_names.add(key)
+        if folder.parent_id is not None and folder.parent_id not in folder_ids:
+            issues.append(
+                SessionIssue(
+                    code="folder-unknown-parent",
+                    subject=folder.id,
+                    message=(
+                        f"Folder {folder.name!r} has unknown parentId "
+                        f"{folder.parent_id!r}"
+                    ),
+                )
+            )
+
+    for tab in session.tabs:
+        if tab.zen_is_empty:
+            continue
+        if tab.group_id is not None and tab.group_id not in folder_ids:
+            issues.append(
+                SessionIssue(
+                    code="tab-unknown-folder",
+                    subject=tab.zen_sync_id,
+                    message=(
+                        f"Tab {active_url(tab)!r} references unknown folder "
+                        f"{tab.group_id!r}"
+                    ),
+                )
+            )
+        if tab.zen_essential and not tab.pinned:
+            issues.append(
+                SessionIssue(
+                    code="essential-tab-unpinned",
+                    subject=tab.zen_sync_id,
+                    message=f"Essential tab {active_url(tab)!r} is not pinned",
+                )
+            )
+
+    if containers is None:
+        return issues
+
+    known_context_ids = {identity.user_context_id for identity in containers.identities}
+    issues.extend(
+        SessionIssue(
+            code="workspace-unknown-container",
+            subject=space.uuid,
+            message=(
+                f"Workspace {space.name!r} references unknown container "
+                f"{space.container_tab_id}"
+            ),
+        )
+        for space in session.spaces
+        if space.container_tab_id > 0 and space.container_tab_id not in known_context_ids
+    )
+    issues.extend(
+        SessionIssue(
+            code="tab-unknown-container",
+            subject=tab.zen_sync_id,
+            message=(
+                f"Tab {active_url(tab)!r} references unknown container "
+                f"{tab.user_context_id}"
+            ),
+        )
+        for tab in session.tabs
+        if tab.user_context_id > 0 and tab.user_context_id not in known_context_ids
+    )
+    return issues
+
+
 def session_check(
     session: SessionState,
     containers: ContainerState | None = None,
 ) -> list[str]:
     """Return structural errors in the managed subset."""
-    errors: list[str] = []
-    group_ids = {group.id for group in session.groups}
-    folder_ids = {folder.id for folder in session.folders}
-    folder_names: set[tuple[str, str | None, str]] = set()
-    for folder in session.folders:
-        if folder.id not in group_ids:
-            errors.append(f"Folder {folder.name!r} has no matching group")
-        key = (folder.workspace_id, folder.parent_id, folder.name.casefold())
-        if key in folder_names:
-            errors.append(f"Duplicate folder name in one container: {folder.name!r}")
-        folder_names.add(key)
-        if folder.parent_id is not None and folder.parent_id not in folder_ids:
-            errors.append(
-                f"Folder {folder.name!r} has unknown parentId {folder.parent_id!r}"
-            )
-    for tab in session.tabs:
-        if tab.zen_is_empty:
-            continue
-        if tab.group_id is not None and tab.group_id not in folder_ids:
-            errors.append(
-                f"Tab {active_url(tab)!r} references unknown folder {tab.group_id!r}"
-            )
-        if tab.zen_essential and not tab.pinned:
-            errors.append(f"Essential tab {active_url(tab)!r} is not pinned")
-    if containers is not None:
-        known_context_ids = {
-            identity.user_context_id for identity in containers.identities
-        }
-        errors.extend(
-            f"Workspace {space.name!r} references unknown container "
-            f"{space.container_tab_id}"
-            for space in session.spaces
-            if space.container_tab_id > 0
-            and space.container_tab_id not in known_context_ids
-        )
-        errors.extend(
-            f"Tab {active_url(tab)!r} references unknown container "
-            f"{tab.user_context_id}"
-            for tab in session.tabs
-            if tab.user_context_id > 0 and tab.user_context_id not in known_context_ids
-        )
-    return errors
+    return [issue.message for issue in collect_session_issues(session, containers)]
 
 
-def cmd_list(args: SimpleNamespace) -> int:
+def cmd_list(args: CommandArgs) -> int:
     """List folders in path order."""
     _path, session = load_session(args.profile)
     folders = list(iter_folder_records(session))
@@ -3091,7 +3282,7 @@ def cmd_list(args: SimpleNamespace) -> int:
     return 0
 
 
-def cmd_tabs(args: SimpleNamespace) -> int:
+def cmd_tabs(args: CommandArgs) -> int:
     """List declarative tab locations from the current session."""
     _path, session = load_session(args.profile)
     essentials = top_level_essentials(session)
@@ -3125,7 +3316,7 @@ def cmd_tabs(args: SimpleNamespace) -> int:
     return 0
 
 
-def cmd_dump(args: SimpleNamespace) -> int:
+def cmd_dump(args: CommandArgs) -> int:
     """Dump the current session as declarative config YAML."""
     _path, session = load_session(args.profile)
     _containers_path, containers = load_containers(args.profile)
@@ -3139,13 +3330,11 @@ def cmd_dump(args: SimpleNamespace) -> int:
     return 0
 
 
-def _selected_scope(args: SimpleNamespace) -> tuple[bool, bool]:
+def _selected_scope(args: CommandArgs) -> ScopeSelection:
     """Resolve the requested diff/apply scope flags."""
-    selected_state = bool(getattr(args, "state", False))
-    selected_assets = bool(getattr(args, "assets", False))
-    if not selected_state and not selected_assets:
-        return True, True
-    return selected_state, selected_assets
+    if not args.state and not args.assets:
+        return ScopeSelection(state=True, assets=True)
+    return ScopeSelection(state=args.state, assets=args.assets)
 
 
 def _symlink_target_matches(destination: Path, expected_source: Path) -> bool:
@@ -3256,28 +3445,23 @@ def sync_chrome_tree(
     )
 
 
-def _load_asset_sources(
-    args: SimpleNamespace,
-) -> tuple[Path, Path | None, Path | None]:
+def _load_asset_sources(args: CommandArgs) -> tuple[Path, Path | None, Path | None]:
     """Resolve managed asset inputs from the configured asset directory."""
     config_dir = _expand_path(args.asset_dir)
     chrome_source = _resolve_optional_dir(
-        getattr(args, "chrome_source", None)
-        or os.environ.get(DEFAULT_CHROME_SOURCE_ENV),
+        args.chrome_source or os.environ.get(DEFAULT_CHROME_SOURCE_ENV),
         config_dir / "chrome",
         label="chrome source directory",
     )
     user_js_source = _resolve_optional_file(
-        getattr(args, "user_js_source", None),
+        args.user_js_source,
         config_dir / "user.js",
         label="user.js source file",
     )
     return config_dir, chrome_source, user_js_source
 
 
-def _resolve_asset_targets(
-    args: SimpleNamespace,
-) -> tuple[Path, Path | None, Path | None, Path, Path, Path]:
+def _resolve_asset_targets(args: CommandArgs) -> AssetTargets:
     """Resolve managed asset sources and live profile target paths."""
     _config_dir, chrome_source, user_js_source = _load_asset_sources(args)
     profile_dir = zen_profile_dir(args.profile)
@@ -3286,35 +3470,28 @@ def _resolve_asset_targets(
     manifest_path = profile_dir / MANAGED_CHROME_MANIFEST
     user_js_manifest_path = profile_dir / MANAGED_USER_JS_MANIFEST
 
-    return (
-        profile_dir,
-        chrome_source,
-        user_js_source,
-        profile_chrome_dir,
-        manifest_path,
-        user_js_manifest_path,
+    return AssetTargets(
+        profile_dir=profile_dir,
+        chrome_source=chrome_source,
+        user_js_source=user_js_source,
+        profile_chrome_dir=profile_chrome_dir,
+        chrome_manifest_path=manifest_path,
+        user_js_manifest_path=user_js_manifest_path,
     )
 
 
-def _asset_diff_lines(args: SimpleNamespace) -> list[str]:
-    """Return human-readable differences between managed assets and the live profile."""
-    (
-        profile_dir,
-        chrome_source,
-        user_js_source,
-        profile_chrome_dir,
-        manifest_path,
-        user_js_manifest_path,
-    ) = _resolve_asset_targets(args)
-
-    lines: list[str] = []
-
+def _managed_chrome_entries(chrome_source: Path | None) -> dict[str, Path]:
+    """Return desired managed chrome entries keyed by profile-relative path."""
     managed_entries: dict[str, Path] = {}
     if chrome_source is not None:
         for source in _iter_source_files(chrome_source):
             rel = source.relative_to(chrome_source).as_posix()
             managed_entries[rel] = source
+    return managed_entries
 
+
+def _previous_managed_chrome_entries(manifest_path: Path) -> set[str]:
+    """Return chrome paths previously managed by zentool."""
     previous_entries: set[str] = set()
     if manifest_path.is_file():
         previous_entries = {
@@ -3322,9 +3499,16 @@ def _asset_diff_lines(args: SimpleNamespace) -> list[str]:
             for entry in manifest_path.read_text(encoding="utf-8").splitlines()
             if entry.strip()
         }
+    return previous_entries
 
+
+def _chrome_asset_diff_lines(targets: AssetTargets) -> list[str]:
+    """Return chrome tree diff lines for resolved asset targets."""
+    lines: list[str] = []
+    managed_entries = _managed_chrome_entries(targets.chrome_source)
+    previous_entries = _previous_managed_chrome_entries(targets.chrome_manifest_path)
     for rel, source in managed_entries.items():
-        destination = profile_chrome_dir / rel
+        destination = targets.profile_chrome_dir / rel
         if not destination.exists() and not destination.is_symlink():
             lines.append(f"create asset chrome/{rel} -> {source}")
         elif not _symlink_target_matches(destination, source):
@@ -3334,66 +3518,80 @@ def _asset_diff_lines(args: SimpleNamespace) -> list[str]:
         f"remove asset chrome/{rel}"
         for rel in sorted(previous_entries - managed_entries.keys())
     )
-
-    user_js_destination = profile_dir / "user.js"
-    if user_js_source is None:
-        previous_user_js = _read_managed_source(user_js_manifest_path)
-        if previous_user_js is not None and _symlink_target_matches(
-            user_js_destination, previous_user_js
-        ):
-            lines.append("remove asset user.js")
-    elif not user_js_destination.exists() and not user_js_destination.is_symlink():
-        lines.append(f"create asset user.js -> {user_js_source}")
-    elif not _symlink_target_matches(user_js_destination, user_js_source):
-        lines.append(f"update asset user.js -> {user_js_source}")
-
     return lines
 
 
-def _apply_assets(args: SimpleNamespace) -> bool:
+def _user_js_asset_diff_lines(targets: AssetTargets) -> list[str]:
+    """Return user.js diff lines for resolved asset targets."""
+    user_js_destination = targets.profile_dir / "user.js"
+    if targets.user_js_source is None:
+        previous_user_js = _read_managed_source(targets.user_js_manifest_path)
+        if previous_user_js is not None and _symlink_target_matches(
+            user_js_destination, previous_user_js
+        ):
+            return ["remove asset user.js"]
+        return []
+    if not user_js_destination.exists() and not user_js_destination.is_symlink():
+        return [f"create asset user.js -> {targets.user_js_source}"]
+    if not _symlink_target_matches(user_js_destination, targets.user_js_source):
+        return [f"update asset user.js -> {targets.user_js_source}"]
+    return []
+
+
+def _asset_diff_lines_for_targets(targets: AssetTargets) -> list[str]:
+    """Return human-readable asset differences for resolved targets."""
+    return [*_chrome_asset_diff_lines(targets), *_user_js_asset_diff_lines(targets)]
+
+
+def _asset_diff_lines(args: CommandArgs) -> list[str]:
+    """Return human-readable differences between managed assets and the live profile."""
+    return _asset_diff_lines_for_targets(_resolve_asset_targets(args))
+
+
+def _apply_assets(args: CommandArgs) -> bool:
     """Synchronize managed assets into the live profile and return whether anything changed."""
-    (
-        profile_dir,
-        chrome_source,
-        user_js_source,
-        profile_chrome_dir,
-        manifest_path,
-        user_js_manifest_path,
-    ) = _resolve_asset_targets(args)
-    profile_chrome_dir.mkdir(parents=True, exist_ok=True)
+    targets = _resolve_asset_targets(args)
+    targets.profile_chrome_dir.mkdir(parents=True, exist_ok=True)
 
     changes = bool(_asset_diff_lines(args))
 
-    cleanup_managed_chrome_symlinks(profile_chrome_dir, manifest_path)
-    prune_empty_chrome_dirs(profile_chrome_dir)
+    cleanup_managed_chrome_symlinks(
+        targets.profile_chrome_dir,
+        targets.chrome_manifest_path,
+    )
+    prune_empty_chrome_dirs(targets.profile_chrome_dir)
 
-    if chrome_source is not None:
-        sync_chrome_tree(chrome_source, profile_chrome_dir, manifest_path)
-    elif manifest_path.exists():
-        manifest_path.unlink()
+    if targets.chrome_source is not None:
+        sync_chrome_tree(
+            targets.chrome_source,
+            targets.profile_chrome_dir,
+            targets.chrome_manifest_path,
+        )
+    elif targets.chrome_manifest_path.exists():
+        targets.chrome_manifest_path.unlink()
 
     link_managed_file(
-        user_js_source,
-        profile_dir / "user.js",
-        manifest_path=user_js_manifest_path,
+        targets.user_js_source,
+        targets.profile_dir / "user.js",
+        manifest_path=targets.user_js_manifest_path,
     )
 
     return changes
 
 
-def cmd_validate(args: SimpleNamespace) -> int:
+def cmd_validate(args: CommandArgs) -> int:
     """Validate the declarative config file."""
     load_config(Path(args.config))
     _stdout("Config is valid.")
     return 0
 
 
-def cmd_diff(args: SimpleNamespace) -> int:
+def cmd_diff(args: CommandArgs) -> int:
     """Show the structural diff between current and desired state."""
-    want_state, want_assets = _selected_scope(args)
+    scope = _selected_scope(args)
     sections: list[str] = []
 
-    if want_state:
+    if scope.state:
         _path, session = load_session(args.profile)
         _containers_path, containers = load_containers(args.profile)
         config = load_config(Path(args.config))
@@ -3401,7 +3599,7 @@ def cmd_diff(args: SimpleNamespace) -> int:
         if diff:
             sections.append(diff.pretty())
 
-    if want_assets:
+    if scope.assets:
         asset_lines = _asset_diff_lines(args)
         if asset_lines:
             sections.append("\n".join(asset_lines))
@@ -3414,7 +3612,7 @@ def cmd_diff(args: SimpleNamespace) -> int:
     return 0
 
 
-def build_state_apply_plan(args: SimpleNamespace) -> StateApplyPlan:
+def build_state_apply_plan(args: CommandArgs) -> StateApplyPlan:
     """Build the desired state mutation for ``apply --state``."""
     runtime = require_zen_closed(args.profile)
     _print_runtime_warnings(runtime)
@@ -3471,7 +3669,7 @@ def confirm_apply(
     return True
 
 
-def apply_state_plan(args: SimpleNamespace, plan: StateApplyPlan) -> None:
+def apply_state_plan(args: CommandArgs, plan: StateApplyPlan) -> None:
     """Write a prepared state mutation after confirmation."""
     backup = backup_session(plan.session_path)
     _stdout(f"Backup: {backup.name}")
@@ -3494,59 +3692,73 @@ def apply_state_plan(args: SimpleNamespace, plan: StateApplyPlan) -> None:
     _stdout("Applied state successfully.")
 
 
-def cmd_apply(args: SimpleNamespace) -> int:
-    """Apply the declarative config to the session file."""
-    want_state, want_assets = _selected_scope(args)
-
+def build_apply_preview(args: CommandArgs, scope: ScopeSelection) -> ApplyPreview:
+    """Return the pending apply changes for the selected scopes."""
     state_plan: StateApplyPlan | None = None
-    state_diff_text: str | None = None
     asset_lines: list[str] = []
 
-    if want_state:
+    if scope.state:
         state_plan = build_state_apply_plan(args)
-        state_diff_text = state_plan.diff_text
 
-    if want_assets:
+    if scope.assets:
         asset_lines = _asset_diff_lines(args)
 
-    if state_diff_text is None and not asset_lines:
+    return ApplyPreview(state_plan=state_plan, asset_lines=asset_lines)
+
+
+def print_apply_preview(preview: ApplyPreview) -> None:
+    """Print pending state and asset changes in CLI order."""
+    state_diff_text = preview.state_diff_text
+    if state_diff_text is not None:
+        _stdout(state_diff_text)
+    if preview.asset_lines:
+        if state_diff_text is not None:
+            _stdout()
+        _stdout("\n".join(preview.asset_lines))
+
+
+def cmd_apply(args: CommandArgs) -> int:
+    """Apply the declarative config to the session file."""
+    scope = _selected_scope(args)
+    preview = build_apply_preview(args, scope)
+
+    if not preview.has_changes:
         _stdout("No changes needed.")
         return 0
 
-    if state_diff_text is not None:
-        _stdout(state_diff_text)
-    if asset_lines:
-        if state_diff_text is not None:
-            _stdout()
-        _stdout("\n".join(asset_lines))
+    print_apply_preview(preview)
 
     if not args.yes and not confirm_apply(
-        want_state=want_state,
-        want_assets=want_assets,
+        want_state=scope.state,
+        want_assets=scope.assets,
     ):
         return 1
 
-    if want_state and state_plan is not None and state_plan.diff_text is not None:
-        apply_state_plan(args, state_plan)
+    if (
+        scope.state
+        and preview.state_plan is not None
+        and preview.state_plan.diff_text is not None
+    ):
+        apply_state_plan(args, preview.state_plan)
 
-    if want_assets and asset_lines:
+    if scope.assets and preview.asset_lines:
         _apply_assets(args)
         _stdout("Applied assets successfully.")
 
     return 0
 
 
-def cmd_inspect_folders(args: SimpleNamespace) -> int:
+def cmd_inspect_folders(args: CommandArgs) -> int:
     """List folders in path order."""
     return cmd_list(args)
 
 
-def cmd_inspect_tabs(args: SimpleNamespace) -> int:
+def cmd_inspect_tabs(args: CommandArgs) -> int:
     """List declarative tab locations from the current session."""
     return cmd_tabs(args)
 
 
-def cmd_inspect_workspaces(args: SimpleNamespace) -> int:
+def cmd_inspect_workspaces(args: CommandArgs) -> int:
     """List workspaces from the current session."""
     _path, session = load_session(args.profile)
     if not session.spaces:
@@ -3557,7 +3769,7 @@ def cmd_inspect_workspaces(args: SimpleNamespace) -> int:
     return 0
 
 
-def cmd_inspect_raw(args: SimpleNamespace) -> int:
+def cmd_inspect_raw(args: CommandArgs) -> int:
     """Print the decoded session payload."""
     path = session_file(args.profile)
     if args.literal:
@@ -3590,7 +3802,7 @@ def cmd_inspect_raw(args: SimpleNamespace) -> int:
     return 0
 
 
-def cmd_check(args: SimpleNamespace) -> int:
+def cmd_check(args: CommandArgs) -> int:
     """Validate structural invariants in the current session subset."""
     _path, session = load_session(args.profile)
     _containers_path, containers = load_containers(args.profile)
@@ -3604,7 +3816,7 @@ def cmd_check(args: SimpleNamespace) -> int:
     return 1
 
 
-def cmd_profile_is_running(args: SimpleNamespace) -> int:
+def cmd_profile_is_running(args: CommandArgs) -> int:
     """Return whether Zen appears to be actively using the target profile."""
     state = inspect_zen_runtime(args.profile)
     _print_runtime_warnings(state)
@@ -3615,7 +3827,7 @@ def cmd_profile_is_running(args: SimpleNamespace) -> int:
     return 1
 
 
-def cmd_profile_path(args: SimpleNamespace) -> int:
+def cmd_profile_path(args: CommandArgs) -> int:
     """Print the resolved profile directory path and exit."""
     _stdout(str(zen_profile_dir(args.profile)))
     return 0
@@ -3659,12 +3871,12 @@ def _effective_profile(ctx: typer.Context, profile: str | None) -> str | None:
     return profile if profile is not None else _context_profile(ctx)
 
 
-def _run_handler(handler: Callable[[SimpleNamespace], int], **values: object) -> int:
-    """Call an existing namespace-shaped handler from the Typer command tree."""
-    return handler(SimpleNamespace(**values))
+def _run_handler(handler: Callable[[CommandArgs], int], args: CommandArgs) -> int:
+    """Call a command handler with its typed argument payload."""
+    return handler(args)
 
 
-def _scoped_values(
+def _scoped_command(
     ctx: typer.Context,
     *,
     assets: bool,
@@ -3675,18 +3887,18 @@ def _scoped_values(
     profile: str | None,
     state: bool,
     user_js_source: str | None,
-) -> dict[str, object]:
-    """Build the shared diff/apply argument namespace payload."""
-    return {
-        "asset_dir": asset_dir,
-        "assets": assets,
-        "chrome_source": chrome_source,
-        "command": command,
-        "config": config,
-        "profile": _effective_profile(ctx, profile),
-        "state": state,
-        "user_js_source": user_js_source,
-    }
+) -> CommandArgs:
+    """Build the shared diff/apply command payload."""
+    return CommandArgs(
+        asset_dir=asset_dir,
+        assets=assets,
+        chrome_source=chrome_source,
+        command=command,
+        config=config,
+        profile=_effective_profile(ctx, profile),
+        state=state,
+        user_js_source=user_js_source,
+    )
 
 
 @TYPER_APP.callback()
@@ -3705,7 +3917,7 @@ def _typer_validate(
     config: ConfigOption = str(DEFAULT_YAML),
 ) -> int:
     """Validate the authored workspace-map config."""
-    return _run_handler(cmd_validate, command="validate", config=config)
+    return _run_handler(cmd_validate, CommandArgs(command="validate", config=config))
 
 
 @TYPER_APP.command(name="dump")
@@ -3718,9 +3930,11 @@ def _typer_dump(
     """Dump declarative YAML from the current session."""
     return _run_handler(
         cmd_dump,
-        command="dump",
-        output=output,
-        profile=_effective_profile(ctx, profile),
+        CommandArgs(
+            command="dump",
+            output=output,
+            profile=_effective_profile(ctx, profile),
+        ),
     )
 
 
@@ -3739,7 +3953,7 @@ def _typer_diff(
     """Show what changes would be made."""
     return _run_handler(
         cmd_diff,
-        **_scoped_values(
+        _scoped_command(
             ctx,
             assets=assets,
             asset_dir=asset_dir,
@@ -3770,19 +3984,20 @@ def _typer_apply(
     ] = False,
 ) -> int:
     """Apply changes to the Zen session file."""
-    values = _scoped_values(
-        ctx,
-        assets=assets,
-        asset_dir=asset_dir,
-        chrome_source=chrome_source,
-        command="apply",
-        config=config,
-        profile=profile,
-        state=state,
-        user_js_source=user_js_source,
+    return _run_handler(
+        cmd_apply,
+        CommandArgs(
+            command="apply",
+            profile=_effective_profile(ctx, profile),
+            config=config,
+            asset_dir=asset_dir,
+            chrome_source=chrome_source,
+            user_js_source=user_js_source,
+            state=state,
+            assets=assets,
+            yes=yes,
+        ),
     )
-    values["yes"] = yes
-    return _run_handler(cmd_apply, **values)
 
 
 @TYPER_APP.command(name="check")
@@ -3794,8 +4009,7 @@ def _typer_check(
     """Validate structural invariants in the current session."""
     return _run_handler(
         cmd_check,
-        command="check",
-        profile=_effective_profile(ctx, profile),
+        CommandArgs(command="check", profile=_effective_profile(ctx, profile)),
     )
 
 
@@ -3814,9 +4028,11 @@ def _typer_inspect_folders(ctx: typer.Context) -> int:
     """List folders."""
     return _run_handler(
         cmd_inspect_folders,
-        command="inspect",
-        inspect_command="folders",
-        profile=_effective_profile(ctx, None),
+        CommandArgs(
+            command="inspect",
+            inspect_command="folders",
+            profile=_effective_profile(ctx, None),
+        ),
     )
 
 
@@ -3825,9 +4041,11 @@ def _typer_inspect_tabs(ctx: typer.Context) -> int:
     """List managed tab locations."""
     return _run_handler(
         cmd_inspect_tabs,
-        command="inspect",
-        inspect_command="tabs",
-        profile=_effective_profile(ctx, None),
+        CommandArgs(
+            command="inspect",
+            inspect_command="tabs",
+            profile=_effective_profile(ctx, None),
+        ),
     )
 
 
@@ -3836,9 +4054,11 @@ def _typer_inspect_workspaces(ctx: typer.Context) -> int:
     """List workspaces."""
     return _run_handler(
         cmd_inspect_workspaces,
-        command="inspect",
-        inspect_command="workspaces",
-        profile=_effective_profile(ctx, None),
+        CommandArgs(
+            command="inspect",
+            inspect_command="workspaces",
+            profile=_effective_profile(ctx, None),
+        ),
     )
 
 
@@ -3859,11 +4079,13 @@ def _typer_inspect_raw(
     """Print decoded session JSON."""
     return _run_handler(
         cmd_inspect_raw,
-        command="inspect",
-        inspect_command="raw",
-        literal=literal,
-        output=output,
-        profile=_effective_profile(ctx, None),
+        CommandArgs(
+            command="inspect",
+            inspect_command="raw",
+            literal=literal,
+            output=output,
+            profile=_effective_profile(ctx, None),
+        ),
     )
 
 
@@ -3882,9 +4104,11 @@ def _typer_profile_path(ctx: typer.Context) -> int:
     """Print the resolved profile directory path."""
     return _run_handler(
         cmd_profile_path,
-        command="profile",
-        profile=_effective_profile(ctx, None),
-        profile_command="path",
+        CommandArgs(
+            command="profile",
+            profile=_effective_profile(ctx, None),
+            profile_command="path",
+        ),
     )
 
 
@@ -3893,9 +4117,11 @@ def _typer_profile_is_running(ctx: typer.Context) -> int:
     """Exit 0 if Zen appears to be using the target profile."""
     return _run_handler(
         cmd_profile_is_running,
-        command="profile",
-        profile=_effective_profile(ctx, None),
-        profile_command="is-running",
+        CommandArgs(
+            command="profile",
+            profile=_effective_profile(ctx, None),
+            profile_command="is-running",
+        ),
     )
 
 

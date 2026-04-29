@@ -26,7 +26,7 @@
       { app = "/System/Applications/Notes.app"; }
       { app = "/Applications/Figma.app"; }
       { app = "/Applications/Linear.app"; }
-      { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Spotify.app"; }
+      { app = "/Applications/Spotify.app"; }
       { app = "/System/Applications/System Settings.app"; }
     ];
     persistent-others = [

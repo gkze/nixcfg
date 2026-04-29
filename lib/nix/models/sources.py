@@ -51,6 +51,8 @@ HashType = Literal[
     "tauriSpectaOutputHash",  # For tauri-specta git dependency hash
     "uvLockHash",  # For uv.lock fixed-output derivation hash
     "vendorHash",
+    "yarnAppHash",  # For nested app/yarn.lock fetchYarnDeps caches
+    "yarnRootHash",  # For root yarn.lock fetchYarnDeps caches
 ]
 
 type JsonObject = dict[str, object]

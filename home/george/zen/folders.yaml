@@ -45,6 +45,7 @@ workspaces:
       - AI Tooling:
           - Browserbase: https://browserbase.com
           - E2B: https://e2b.dev
+          - Firetiger: https://ui.cloud.firetiger.com
       - Auth:
           - Clerk: https://dashboard.clerk.com
       - CRM & Marketing:

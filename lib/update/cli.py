@@ -9,7 +9,7 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Protocol, Unpack
+from typing import TYPE_CHECKING, Annotated, Protocol, Unpack, cast
 
 import aiohttp
 import typer
@@ -86,6 +86,137 @@ from lib.update.updaters.base import (
     _call_with_optional_context,
 )
 
+_TRAILING_TARGET_FLAG_OPTIONS: dict[str, tuple[str, bool]] = {
+    "--check": ("check", True),
+    "-c": ("check", True),
+    "--json": ("json_output", True),
+    "-j": ("json_output", True),
+    "--list": ("list_targets", True),
+    "-l": ("list_targets", True),
+    "--native-only": ("native_only", True),
+    "-n": ("native_only", True),
+    "--no-input": ("no_input", True),
+    "-I": ("no_input", True),
+    "--no-refs": ("no_refs", True),
+    "-R": ("no_refs", True),
+    "--no-sources": ("no_sources", True),
+    "-S": ("no_sources", True),
+    "--quiet": ("quiet", True),
+    "-q": ("quiet", True),
+    "--schema": ("schema", True),
+    "-s": ("schema", True),
+    "--validate": ("validate", True),
+    "-v": ("validate", True),
+    "--verbose": ("verbose", True),
+    "-V": ("verbose", True),
+    "--zellij-guard": ("zellij_guard", True),
+    "-z": ("zellij_guard", True),
+    "--no-zellij-guard": ("zellij_guard", False),
+    "-Z": ("zellij_guard", False),
+}
+_TRAILING_TARGET_VALUE_OPTIONS: dict[str, tuple[str, str]] = {
+    "--deno-platforms": ("deno_platforms", "str"),
+    "-d": ("deno_platforms", "str"),
+    "--fake-hash": ("fake_hash", "str"),
+    "-f": ("fake_hash", "str"),
+    "--http-timeout": ("http_timeout", "int"),
+    "-H": ("http_timeout", "int"),
+    "--log-tail-lines": ("log_tail_lines", "int"),
+    "-L": ("log_tail_lines", "int"),
+    "--max-nix-builds": ("max_nix_builds", "int"),
+    "-m": ("max_nix_builds", "int"),
+    "--pinned-versions": ("pinned_versions", "str"),
+    "-p": ("pinned_versions", "str"),
+    "--render-interval": ("render_interval", "float"),
+    "-r": ("render_interval", "float"),
+    "--retries": ("retries", "int"),
+    "-N": ("retries", "int"),
+    "--retry-backoff": ("retry_backoff", "float"),
+    "-b": ("retry_backoff", "float"),
+    "--sort": ("sort_by", "str"),
+    "-o": ("sort_by", "str"),
+    "--subprocess-timeout": ("subprocess_timeout", "int"),
+    "-T": ("subprocess_timeout", "int"),
+    "--tty": ("tty", "str"),
+    "-t": ("tty", "str"),
+    "--user-agent": ("user_agent", "str"),
+    "-u": ("user_agent", "str"),
+}
+
+
+def _coerce_trailing_target_option(
+    *,
+    option: str,
+    raw_value: str,
+    value_kind: str,
+) -> object:
+    if value_kind == "int":
+        try:
+            return int(raw_value)
+        except ValueError as exc:
+            msg = f"{option} expects an integer value"
+            raise typer.BadParameter(msg) from exc
+    if value_kind == "float":
+        try:
+            return float(raw_value)
+        except ValueError as exc:
+            msg = f"{option} expects a numeric value"
+            raise typer.BadParameter(msg) from exc
+    return raw_value
+
+
+def _split_trailing_target_options(
+    targets: list[str] | tuple[str, ...] | None,
+) -> tuple[tuple[str, ...], dict[str, object]]:
+    """Recover options that Click placed inside the variadic target argument."""
+    normalized_targets: list[str] = []
+    option_values: dict[str, object] = {}
+    tokens = list(targets or ())
+    index = 0
+    while index < len(tokens):
+        raw_arg = tokens[index]
+        if raw_arg == "--":
+            normalized_targets.extend(tokens[index + 1 :])
+            break
+
+        option = raw_arg
+        inline_value: str | None = None
+        if raw_arg.startswith("--") and "=" in raw_arg:
+            option, inline_value = raw_arg.split("=", 1)
+
+        flag_spec = _TRAILING_TARGET_FLAG_OPTIONS.get(option)
+        if flag_spec is not None:
+            if inline_value is not None:
+                msg = f"{option} does not take a value"
+                raise typer.BadParameter(msg)
+            destination, value = flag_spec
+            option_values[destination] = value
+            index += 1
+            continue
+
+        value_spec = _TRAILING_TARGET_VALUE_OPTIONS.get(option)
+        if value_spec is not None:
+            destination, value_kind = value_spec
+            if inline_value is None:
+                index += 1
+                if index >= len(tokens):
+                    msg = f"{option} requires a value"
+                    raise typer.BadParameter(msg)
+                inline_value = tokens[index]
+            option_values[destination] = _coerce_trailing_target_option(
+                option=option,
+                raw_value=inline_value,
+                value_kind=value_kind,
+            )
+            index += 1
+            continue
+
+        normalized_targets.append(raw_arg)
+        index += 1
+
+    return tuple(normalized_targets), option_values
+
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable
 
@@ -133,34 +264,43 @@ def _needs_flake_edit(opts: UpdateOptions) -> bool:
     """Return whether the current option set needs flake-edit installed."""
     if opts.no_refs or opts.native_only:
         return False
-    if not opts.source:
+    target_names = opts.target_names
+    if not target_names:
         return True
     ref_names = {i.name for i in get_flake_inputs_with_refs()}
-    return opts.source in ref_names
+    return any(target in ref_names for target in target_names)
 
 
 def check_required_tools(
     *,
     include_flake_edit: bool = False,
     source: str | None = None,
+    targets: tuple[str, ...] | list[str] | None = None,
     needs_sources: bool = True,
 ) -> list[str]:
     """Return names of required CLI tools that are missing from ``$PATH``."""
     updaters = _get_updaters()
+    target_names = tuple(targets) if targets is not None else ()
+    if not target_names and source:
+        target_names = (source,)
     tools: list[str]
     if not needs_sources:
         # refs-only (or explicit --no-sources) mode: don't require hash tooling.
         tools = [str(tool) for tool in REQUIRED_TOOLS]
-    elif source:
-        selected_sources = _select_source_names(source, updaters)
+    elif target_names:
+        selected_sources = _select_target_source_names(target_names, updaters)
         if selected_sources:
-            tools = sorted({
+            target_ref_names = {i.name for i in get_flake_inputs_with_refs()}
+            required_tools = {
                 str(tool)
                 for selected in selected_sources
                 for tool in getattr(updaters[selected], "required_tools", ALL_TOOLS)
-            })
+            }
+            if any(target in target_ref_names for target in target_names):
+                required_tools.update(str(tool) for tool in REQUIRED_TOOLS)
+            tools = sorted(required_tools)
         else:
-            # ref-only source - only needs nix (and possibly flake-edit)
+            # refs-only targets only need nix (and possibly flake-edit).
             tools = [str(tool) for tool in REQUIRED_TOOLS]
     else:
         tools = [str(tool) for tool in ALL_TOOLS]
@@ -176,7 +316,7 @@ def _handle_required_tool_check(opts: UpdateOptions) -> int | None:
 
     missing = check_required_tools(
         include_flake_edit=_needs_flake_edit(opts),
-        source=opts.source,
+        targets=opts.target_names,
         needs_sources=not opts.no_sources,
     )
     if not missing:
@@ -405,29 +545,50 @@ def _select_source_names(
     updaters: dict[str, UpdaterClass],
 ) -> list[str]:
     """Resolve source targets, expanding backing-input and companion sources."""
-    if source is None:
+    target_names = () if source is None else (source,)
+    return _select_target_source_names(target_names, updaters)
+
+
+def _select_target_source_names(
+    target_names: tuple[str, ...],
+    updaters: dict[str, UpdaterClass],
+) -> list[str]:
+    """Resolve source targets, expanding backing-input and companion sources."""
+    if not target_names:
         selected = set(updaters)
         roots = set(selected)
+        order = {name: index for index, name in enumerate(updaters)}
     else:
-        selected = {
-            name
-            for name, updater_cls in updaters.items()
-            if _source_backing_input_name(name, updater_cls, None) == source
-        }
-        if not selected and source in updaters:
-            selected = {source}
+        selected: set[str] = set()
+        roots: set[str] = set()
+        order: dict[str, int] = {}
+        for target in target_names:
+            target_sources = [
+                name
+                for name, updater_cls in updaters.items()
+                if _source_backing_input_name(name, updater_cls, None) == target
+            ]
+            if not target_sources and target in updaters:
+                target_sources = [target]
+            for name in target_sources:
+                selected.add(name)
+                roots.add(name)
+                order.setdefault(name, len(order))
         if not selected:
             return []
-        roots = set(selected)
 
     _add_companion_source_parents(selected, updaters)
     _add_companion_source_children(selected, roots=roots, updaters=updaters)
 
     depths = _companion_source_depths(selected, updaters)
-    if source is None:
-        source_order = {name: index for index, name in enumerate(updaters)}
-        return sorted(selected, key=lambda name: (depths[name], source_order[name]))
-    return sorted(selected, key=lambda name: (depths[name], name))
+    return sorted(
+        selected,
+        key=lambda name: (
+            depths[name],
+            order.get(name, len(order)),
+            name,
+        ),
+    )
 
 
 def _source_update_waves(
@@ -471,21 +632,22 @@ class ResolvedTargets:
         all_ref_names = {i.name for i in all_ref_inputs}
         all_known_names = all_source_names | all_ref_names
 
-        source_names = _select_source_names(opts.source, updaters)
+        target_names = opts.target_names
+        source_names = _select_target_source_names(target_names, updaters)
 
         # --native-only implies --no-refs: in CI, refs are managed by the
         # pipeline (nix flake update + create-pr).
         do_refs = not opts.no_refs and not opts.native_only
         do_sources = not opts.no_sources
-        if opts.source:
-            if opts.source not in all_ref_names:
+        if target_names:
+            if not any(target in all_ref_names for target in target_names):
                 do_refs = False
             if not source_names:
                 do_sources = False
 
         ref_inputs = (
-            [i for i in all_ref_inputs if i.name == opts.source]
-            if opts.source
+            [i for i in all_ref_inputs if i.name in set(target_names)]
+            if target_names
             else all_ref_inputs
         )
         if not do_refs:
@@ -1084,8 +1246,16 @@ def _build_run_plan(opts: UpdateOptions, out: OutputOptions) -> _RunPlan | int:
     resolved = ResolvedTargets.from_options(opts)
     tty_enabled, show_phase_headers = _resolve_tty_settings(opts, resolved)
 
-    if opts.source and opts.source not in resolved.all_known_names:
-        out.print_error(f"Error: Unknown source or input '{opts.source}'")
+    unknown_targets = [
+        target for target in opts.target_names if target not in resolved.all_known_names
+    ]
+    if unknown_targets:
+        if len(unknown_targets) == 1:
+            out.print_error(f"Error: Unknown source or input '{unknown_targets[0]}'")
+        else:
+            out.print_error(
+                "Error: Unknown sources or inputs: " + ", ".join(unknown_targets)
+            )
         out.print_error(f"Available: {', '.join(sorted(resolved.all_known_names))}")
         return 1
 
@@ -1247,9 +1417,9 @@ app = typer.Typer(
 
 @app.callback(invoke_without_command=True)
 def cli(  # noqa: PLR0913
-    source: Annotated[
-        str | None,
-        typer.Argument(help="Source or flake input to update (default: all)."),
+    targets: Annotated[
+        list[str] | None,
+        typer.Argument(help="Sources or flake inputs to update (default: all)."),
     ] = None,
     *,
     check: Annotated[
@@ -1389,4 +1559,8 @@ def cli(  # noqa: PLR0913
     ] = None,
 ) -> None:
     """Update source versions/hashes and flake input refs."""
-    raise typer.Exit(code=run_update_command(**locals()))
+    values = dict(locals())
+    normalized_targets, trailing_options = _split_trailing_target_options(targets)
+    values["targets"] = normalized_targets
+    values.update(trailing_options)
+    raise typer.Exit(code=run_update_command(**cast("UpdateOptionsKwargs", values)))

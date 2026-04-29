@@ -10,6 +10,7 @@ let
   pythonScriptFindPredicates = lib.concatMapStringsSep " " (
     path: "-o -path './${path}'"
   ) lintFiles.python.pythonScriptPaths;
+  oxfmtPatterns = lintFiles.oxfmt.globs ++ map (glob: "!${glob}") lintFiles.oxfmt.excludeGlobs;
 
   # pyupgrade currently tops out at --py314-plus, but these repo helpers still
   # need to parse under nixpkgs' generic python3 (3.13 today), so keep the
@@ -76,11 +77,21 @@ let
         priority = hookPriority;
       };
 
-      format-web-biome = {
+      format-web-oxfmt = {
         enable = true;
-        name = "format-web-biome";
-        package = pkgs.biome;
-        entry = "biome check --config-path biome.jsonc --diagnostic-level=error .";
+        name = "format-web-oxfmt";
+        package = pkgs.oxfmt;
+        entry = "oxfmt --check --config .oxfmtrc.json --no-error-on-unmatched-pattern ${lib.escapeShellArgs oxfmtPatterns}";
+        pass_filenames = false;
+        always_run = true;
+        priority = hookPriority;
+      };
+
+      lint-web-oxlint = {
+        enable = true;
+        name = "lint-web-oxlint";
+        package = pkgs.oxlint;
+        entry = "env OXLINT_TSGOLINT_PATH=${lib.getExe pkgs.oxlint-tsgolint} oxlint --config .oxlintrc.json --type-aware --quiet .";
         pass_filenames = false;
         always_run = true;
         priority = hookPriority;
@@ -200,13 +211,15 @@ pkgs.devshell.mkShell {
   packages =
     with pkgs;
     [
-      biome
       flake-edit
       go
       nh
       nil
       nix-init
       nixos-generators
+      oxfmt
+      oxlint
+      oxlint-tsgolint
       nurl
       pinact
       prek

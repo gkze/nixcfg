@@ -89,13 +89,13 @@ def test_asset_diff_lines_reports_create_update_remove_and_user_js_update(
     monkeypatch.setattr(
         zentool,
         "_resolve_asset_targets",
-        lambda _args: (
-            profile_dir,
-            chrome_source,
-            user_js_source,
-            profile_chrome_dir,
-            manifest_path,
-            user_js_manifest_path,
+        lambda _args: zentool.AssetTargets(
+            profile_dir=profile_dir,
+            chrome_source=chrome_source,
+            user_js_source=user_js_source,
+            profile_chrome_dir=profile_chrome_dir,
+            chrome_manifest_path=manifest_path,
+            user_js_manifest_path=user_js_manifest_path,
         ),
     )
 
@@ -134,13 +134,13 @@ def test_asset_diff_lines_keeps_symlinked_chrome_sources_stable(
     monkeypatch.setattr(
         zentool,
         "_resolve_asset_targets",
-        lambda _args: (
-            profile_dir,
-            chrome_source,
-            None,
-            profile_chrome_dir,
-            manifest_path,
-            user_js_manifest_path,
+        lambda _args: zentool.AssetTargets(
+            profile_dir=profile_dir,
+            chrome_source=chrome_source,
+            user_js_source=None,
+            profile_chrome_dir=profile_chrome_dir,
+            chrome_manifest_path=manifest_path,
+            user_js_manifest_path=user_js_manifest_path,
         ),
     )
 
@@ -167,13 +167,13 @@ def test_asset_diff_lines_reports_managed_user_js_removal(
     monkeypatch.setattr(
         zentool,
         "_resolve_asset_targets",
-        lambda _args: (
-            profile_dir,
-            None,
-            None,
-            profile_chrome_dir,
-            manifest_path,
-            user_js_manifest_path,
+        lambda _args: zentool.AssetTargets(
+            profile_dir=profile_dir,
+            chrome_source=None,
+            user_js_source=None,
+            profile_chrome_dir=profile_chrome_dir,
+            chrome_manifest_path=manifest_path,
+            user_js_manifest_path=user_js_manifest_path,
         ),
     )
 
@@ -197,13 +197,13 @@ def test_apply_assets_syncs_sources_and_reports_changes(
     monkeypatch.setattr(
         zentool,
         "_resolve_asset_targets",
-        lambda _args: (
-            profile_dir,
-            chrome_source,
-            user_js_source,
-            profile_chrome_dir,
-            manifest_path,
-            user_js_manifest_path,
+        lambda _args: zentool.AssetTargets(
+            profile_dir=profile_dir,
+            chrome_source=chrome_source,
+            user_js_source=user_js_source,
+            profile_chrome_dir=profile_chrome_dir,
+            chrome_manifest_path=manifest_path,
+            user_js_manifest_path=user_js_manifest_path,
         ),
     )
     monkeypatch.setattr(zentool, "_asset_diff_lines", lambda _args: ["changed"])
@@ -261,13 +261,13 @@ def test_apply_assets_removes_manifest_when_chrome_source_is_omitted(
     monkeypatch.setattr(
         zentool,
         "_resolve_asset_targets",
-        lambda _args: (
-            profile_dir,
-            None,
-            None,
-            profile_chrome_dir,
-            manifest_path,
-            user_js_manifest_path,
+        lambda _args: zentool.AssetTargets(
+            profile_dir=profile_dir,
+            chrome_source=None,
+            user_js_source=None,
+            profile_chrome_dir=profile_chrome_dir,
+            chrome_manifest_path=manifest_path,
+            user_js_manifest_path=user_js_manifest_path,
         ),
     )
     monkeypatch.setattr(zentool, "_asset_diff_lines", lambda _args: [])

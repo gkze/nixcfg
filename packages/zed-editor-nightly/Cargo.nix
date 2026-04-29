@@ -14756,7 +14756,6 @@ rec {
           {
             name = "futures";
             packageId = "futures";
-            optional = true;
           }
           {
             name = "itertools";
@@ -14812,7 +14811,7 @@ rec {
           }
         ];
         features = {
-          "octo-client" = [ "dep:octocrab" "dep:jsonwebtoken" "dep:futures" "dep:tokio" ];
+          "octo-client" = [ "dep:octocrab" "dep:jsonwebtoken" "dep:tokio" ];
         };
         resolvedDefaultFeatures = [ "octo-client" ];
       };
@@ -28050,137 +28049,6 @@ rec {
         };
         resolvedDefaultFeatures = [ "rand" "test-support" ];
       };
-      "git+https://github.com/zed-industries/wgpu.git?branch=v29#naga@29.0.0" = rec {
-        crateName = "naga";
-        version = "29.0.0";
-        edition = "2021";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/zed-industries/wgpu.git";
-          rev = "a466bc382ea747f8e1ac810efdb6dcd49a514575";
-          sha256 = "0ljbav9rln76s3y7k5lfihjfq1bghazjsf94d4d0k105r83yrlxh";
-        };
-        authors = [
-          "gfx-rs developers"
-        ];
-        dependencies = [
-          {
-            name = "arrayvec";
-            packageId = "arrayvec";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "bit-set";
-            packageId = "bit-set 0.9.1";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "bitflags";
-            packageId = "bitflags 2.10.0";
-          }
-          {
-            name = "cfg-if";
-            packageId = "cfg-if";
-          }
-          {
-            name = "codespan-reporting";
-            packageId = "codespan-reporting";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "half";
-            packageId = "half";
-            usesDefaultFeatures = false;
-            features = [ "num-traits" ];
-          }
-          {
-            name = "hashbrown";
-            packageId = "hashbrown 0.16.1";
-            usesDefaultFeatures = false;
-            features = [ "default-hasher" "inline-more" ];
-          }
-          {
-            name = "hexf-parse";
-            packageId = "hexf-parse";
-            optional = true;
-          }
-          {
-            name = "indexmap";
-            packageId = "indexmap 2.11.4";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "libm";
-            packageId = "libm";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "log";
-            packageId = "log";
-          }
-          {
-            name = "num-traits";
-            packageId = "num-traits";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "once_cell";
-            packageId = "once_cell";
-            usesDefaultFeatures = false;
-            features = [ "alloc" "race" ];
-          }
-          {
-            name = "rustc-hash";
-            packageId = "rustc-hash 1.1.0";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "spirv";
-            packageId = "spirv";
-            optional = true;
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 2.0.17";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "unicode-ident";
-            packageId = "unicode-ident";
-            optional = true;
-          }
-        ];
-        buildDependencies = [
-          {
-            name = "cfg_aliases";
-            packageId = "cfg_aliases 0.2.1";
-          }
-        ];
-        devDependencies = [
-          {
-            name = "hashbrown";
-            packageId = "hashbrown 0.16.1";
-            usesDefaultFeatures = false;
-            features = [ "default-hasher" "inline-more" "serde" ];
-          }
-          {
-            name = "spirv";
-            packageId = "spirv";
-          }
-        ];
-        features = {
-          "arbitrary" = [ "dep:arbitrary" "bitflags/arbitrary" "indexmap/arbitrary" "half/arbitrary" "half/std" ];
-          "deserialize" = [ "dep:serde" "bitflags/serde" "half/serde" "hashbrown/serde" "indexmap/serde" ];
-          "glsl-in" = [ "dep:pp-rs" ];
-          "serialize" = [ "dep:serde" "bitflags/serde" "half/serde" "hashbrown/serde" "indexmap/serde" ];
-          "spv-in" = [ "dep:petgraph" "petgraph/graphmap" "dep:spirv" ];
-          "spv-out" = [ "dep:spirv" ];
-          "stderr" = [ "codespan-reporting/std" ];
-          "termcolor" = [ "codespan-reporting/termcolor" ];
-          "wgsl-in" = [ "dep:hexf-parse" "dep:unicode-ident" ];
-        };
-        resolvedDefaultFeatures = [ "default" "glsl-out" "hlsl-out" "msl-out" "spv-out" "termcolor" "wgsl-in" "wgsl-out" ];
-      };
       "git2" = rec {
         crateName = "git2";
         version = "0.20.4";
@@ -29853,12 +29721,6 @@ rec {
             packageId = "embed-resource";
             optional = true;
           }
-          {
-            name = "naga";
-            packageId = "registry+https://github.com/rust-lang/crates.io-index#naga@29.0.0";
-            target = { target, features }: ("macos" == target."os" or null);
-            features = [ "wgsl-in" ];
-          }
         ];
         devDependencies = [
           {
@@ -30439,6 +30301,15 @@ rec {
             packageId = "gpui";
             usesDefaultFeatures = false;
             target = { target, features }: ("macos" == target."os" or null);
+          }
+        ];
+        devDependencies = [
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("macos" == target."os" or null);
+            features = [ "test-support" ];
           }
         ];
         features = {
@@ -41030,6 +40901,137 @@ rec {
           "serde_impl" = [ "serde" ];
         };
       };
+      "naga" = rec {
+        crateName = "naga";
+        version = "29.0.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/zed-industries/wgpu.git";
+          rev = "a466bc382ea747f8e1ac810efdb6dcd49a514575";
+          sha256 = "0ljbav9rln76s3y7k5lfihjfq1bghazjsf94d4d0k105r83yrlxh";
+        };
+        authors = [
+          "gfx-rs developers"
+        ];
+        dependencies = [
+          {
+            name = "arrayvec";
+            packageId = "arrayvec";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "bit-set";
+            packageId = "bit-set 0.9.1";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.10.0";
+          }
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "codespan-reporting";
+            packageId = "codespan-reporting";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "half";
+            packageId = "half";
+            usesDefaultFeatures = false;
+            features = [ "num-traits" ];
+          }
+          {
+            name = "hashbrown";
+            packageId = "hashbrown 0.16.1";
+            usesDefaultFeatures = false;
+            features = [ "default-hasher" "inline-more" ];
+          }
+          {
+            name = "hexf-parse";
+            packageId = "hexf-parse";
+            optional = true;
+          }
+          {
+            name = "indexmap";
+            packageId = "indexmap 2.11.4";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "libm";
+            packageId = "libm";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "num-traits";
+            packageId = "num-traits";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "once_cell";
+            packageId = "once_cell";
+            usesDefaultFeatures = false;
+            features = [ "alloc" "race" ];
+          }
+          {
+            name = "rustc-hash";
+            packageId = "rustc-hash 1.1.0";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "spirv";
+            packageId = "spirv";
+            optional = true;
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.17";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "unicode-ident";
+            packageId = "unicode-ident";
+            optional = true;
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "cfg_aliases";
+            packageId = "cfg_aliases 0.2.1";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "hashbrown";
+            packageId = "hashbrown 0.16.1";
+            usesDefaultFeatures = false;
+            features = [ "default-hasher" "inline-more" "serde" ];
+          }
+          {
+            name = "spirv";
+            packageId = "spirv";
+          }
+        ];
+        features = {
+          "arbitrary" = [ "dep:arbitrary" "bitflags/arbitrary" "indexmap/arbitrary" "half/arbitrary" "half/std" ];
+          "deserialize" = [ "dep:serde" "bitflags/serde" "half/serde" "hashbrown/serde" "indexmap/serde" ];
+          "glsl-in" = [ "dep:pp-rs" ];
+          "serialize" = [ "dep:serde" "bitflags/serde" "half/serde" "hashbrown/serde" "indexmap/serde" ];
+          "spv-in" = [ "dep:petgraph" "petgraph/graphmap" "dep:spirv" ];
+          "spv-out" = [ "dep:spirv" ];
+          "stderr" = [ "codespan-reporting/std" ];
+          "termcolor" = [ "codespan-reporting/termcolor" ];
+          "wgsl-in" = [ "dep:hexf-parse" "dep:unicode-ident" ];
+        };
+        resolvedDefaultFeatures = [ "default" "glsl-out" "hlsl-out" "msl-out" "spv-out" "termcolor" "wgsl-in" "wgsl-out" ];
+      };
       "nanoid" = rec {
         crateName = "nanoid";
         version = "0.4.0";
@@ -44688,6 +44690,10 @@ rec {
           {
             name = "http_client";
             packageId = "http_client";
+          }
+          {
+            name = "language_model_core";
+            packageId = "language_model_core";
           }
           {
             name = "schemars";
@@ -53233,123 +53239,6 @@ rec {
           "unicode" = [ "unicode-age" "unicode-bool" "unicode-case" "unicode-gencat" "unicode-perl" "unicode-script" "unicode-segment" ];
         };
         resolvedDefaultFeatures = [ "default" "std" "unicode" "unicode-age" "unicode-bool" "unicode-case" "unicode-gencat" "unicode-perl" "unicode-script" "unicode-segment" ];
-      };
-      "registry+https://github.com/rust-lang/crates.io-index#naga@29.0.0" = rec {
-        crateName = "naga";
-        version = "29.0.0";
-        edition = "2021";
-        sha256 = "1j191x3f15f343bzw8n5ricpi0qfvwk6j6yh8vb65lqbxlpkgd45";
-        authors = [
-          "gfx-rs developers"
-        ];
-        dependencies = [
-          {
-            name = "arrayvec";
-            packageId = "arrayvec";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "bit-set";
-            packageId = "bit-set 0.9.1";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "bitflags";
-            packageId = "bitflags 2.10.0";
-          }
-          {
-            name = "cfg-if";
-            packageId = "cfg-if";
-          }
-          {
-            name = "codespan-reporting";
-            packageId = "codespan-reporting";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "half";
-            packageId = "half";
-            usesDefaultFeatures = false;
-            features = [ "num-traits" ];
-          }
-          {
-            name = "hashbrown";
-            packageId = "hashbrown 0.16.1";
-            usesDefaultFeatures = false;
-            features = [ "default-hasher" "inline-more" ];
-          }
-          {
-            name = "hexf-parse";
-            packageId = "hexf-parse";
-            optional = true;
-          }
-          {
-            name = "indexmap";
-            packageId = "indexmap 2.11.4";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "libm";
-            packageId = "libm";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "log";
-            packageId = "log";
-          }
-          {
-            name = "num-traits";
-            packageId = "num-traits";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "once_cell";
-            packageId = "once_cell";
-            usesDefaultFeatures = false;
-            features = [ "alloc" "race" ];
-          }
-          {
-            name = "rustc-hash";
-            packageId = "rustc-hash 1.1.0";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 2.0.17";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "unicode-ident";
-            packageId = "unicode-ident";
-            optional = true;
-          }
-        ];
-        buildDependencies = [
-          {
-            name = "cfg_aliases";
-            packageId = "cfg_aliases 0.2.1";
-          }
-        ];
-        devDependencies = [
-          {
-            name = "hashbrown";
-            packageId = "hashbrown 0.16.1";
-            usesDefaultFeatures = false;
-            features = [ "default-hasher" "inline-more" "serde" ];
-          }
-        ];
-        features = {
-          "arbitrary" = [ "dep:arbitrary" "bitflags/arbitrary" "indexmap/arbitrary" "half/arbitrary" "half/std" ];
-          "deserialize" = [ "dep:serde" "bitflags/serde" "half/serde" "hashbrown/serde" "indexmap/serde" ];
-          "glsl-in" = [ "dep:pp-rs" ];
-          "serialize" = [ "dep:serde" "bitflags/serde" "half/serde" "hashbrown/serde" "indexmap/serde" ];
-          "spv-in" = [ "dep:petgraph" "petgraph/graphmap" "dep:spirv" ];
-          "spv-out" = [ "dep:spirv" ];
-          "stderr" = [ "codespan-reporting/std" ];
-          "termcolor" = [ "codespan-reporting/termcolor" ];
-          "wgsl-in" = [ "dep:hexf-parse" "dep:unicode-ident" ];
-        };
-        resolvedDefaultFeatures = [ "default" "wgsl-in" ];
       };
       "release_channel" = rec {
         crateName = "release_channel";
@@ -74886,12 +74775,6 @@ rec {
             packageId = "document-features";
           }
           {
-            name = "naga";
-            packageId = "git+https://github.com/zed-industries/wgpu.git?branch=v29#naga@29.0.0";
-            optional = true;
-            features = [ "termcolor" ];
-          }
-          {
             name = "hashbrown";
             packageId = "hashbrown 0.16.1";
             usesDefaultFeatures = false;
@@ -74907,6 +74790,12 @@ rec {
           {
             name = "log";
             packageId = "log";
+          }
+          {
+            name = "naga";
+            packageId = "naga";
+            optional = true;
+            features = [ "termcolor" ];
           }
           {
             name = "parking_lot";
@@ -75100,10 +74989,6 @@ rec {
             packageId = "document-features";
           }
           {
-            name = "naga";
-            packageId = "git+https://github.com/zed-industries/wgpu.git?branch=v29#naga@29.0.0";
-          }
-          {
             name = "hashbrown";
             packageId = "hashbrown 0.16.1";
             usesDefaultFeatures = false;
@@ -75117,6 +75002,10 @@ rec {
           {
             name = "log";
             packageId = "log";
+          }
+          {
+            name = "naga";
+            packageId = "naga";
           }
           {
             name = "once_cell";
@@ -75377,10 +75266,6 @@ rec {
             packageId = "cfg-if";
           }
           {
-            name = "naga";
-            packageId = "git+https://github.com/zed-industries/wgpu.git?branch=v29#naga@29.0.0";
-          }
-          {
             name = "glow";
             packageId = "glow";
             optional = true;
@@ -75454,6 +75339,10 @@ rec {
           {
             name = "log";
             packageId = "log";
+          }
+          {
+            name = "naga";
+            packageId = "naga";
           }
           {
             name = "ndk-sys";
@@ -75626,7 +75515,7 @@ rec {
         devDependencies = [
           {
             name = "naga";
-            packageId = "git+https://github.com/zed-industries/wgpu.git?branch=v29#naga@29.0.0";
+            packageId = "naga";
             features = [ "wgsl-in" "termcolor" ];
           }
         ];
@@ -75660,7 +75549,7 @@ rec {
         dependencies = [
           {
             name = "naga";
-            packageId = "git+https://github.com/zed-industries/wgpu.git?branch=v29#naga@29.0.0";
+            packageId = "naga";
           }
           {
             name = "wgpu-types";
@@ -85733,7 +85622,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "0.235.0";
+        version = "1.2.0";
         edition = "2024";
         crateBin = [
           {

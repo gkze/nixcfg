@@ -283,6 +283,7 @@ def test_flake_wrappers_require_json_object(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_hash_and_path_info_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
+    prefetch_args: list[list[str]] = []
 
     async def _run_nix(args: list[str], **_kwargs: object) -> CommandResult:
         if args[:3] == ["nix", "hash", "convert"]:
@@ -290,6 +291,7 @@ def test_hash_and_path_info_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
                 args=args, returncode=0, stdout="sha256-AAA=\n", stderr=""
             )
         if args[:1] == ["nix-prefetch-url"]:
+            prefetch_args.append(args)
             return CommandResult(
                 args=args, returncode=0, stdout="log\nabc\n", stderr=""
             )
@@ -306,6 +308,26 @@ def test_hash_and_path_info_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
         asyncio.run(hash_mod.nix_prefetch_url("https://example.com"))
         == "converted:sha256:abc"
     )
+    assert (
+        asyncio.run(
+            hash_mod.nix_prefetch_url(
+                "https://example.com",
+                name="safe-name.dmg",
+            )
+        )
+        == "converted:sha256:abc"
+    )
+    assert prefetch_args == [
+        ["nix-prefetch-url", "--type", "sha256", "https://example.com"],
+        [
+            "nix-prefetch-url",
+            "--type",
+            "sha256",
+            "--name",
+            "safe-name.dmg",
+            "https://example.com",
+        ],
+    ]
     seen_path_info_args: list[list[str]] = []
 
     async def _run_nix_json(args: list[str], **kwargs: object) -> object:

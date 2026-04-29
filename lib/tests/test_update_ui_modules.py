@@ -1169,10 +1169,48 @@ def test_event_consumer_command_start_line_and_end_paths(
     )
     assert hash_op.status == "error"
     assert hash_op.detail_lines == [
+        "Command failed (exit 1): nix build '.#demo'",
         "Output tail (last 2 lines):",
         "line-1",
         "line-2",
     ]
+
+
+def test_event_consumer_command_failure_includes_output_tails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run this test case."""
+    consumer, _queue = _consumer(monkeypatch, is_tty=False)
+    item = consumer.items["demo"]
+    hash_op = item.operations[OperationKind.COMPUTE_HASH]
+    hash_op.active_commands = 1
+    item.active_command_op = OperationKind.COMPUTE_HASH
+
+    object.__getattribute__(consumer, "_handle_command_end")(
+        UpdateEvent(
+            source="demo",
+            kind=UpdateEventKind.COMMAND_END,
+            payload=CommandResult(
+                args=["cmd", "--flag", "value"],
+                returncode=2,
+                stdout="\n".join(f"out-{index}" for index in range(12)),
+                stderr="\n".join(f"err-{index}" for index in range(11)),
+                tail_lines=("stream-tail",),
+            ),
+        ),
+        item,
+    )
+
+    expected_details = [
+        "Command failed (exit 2): cmd --flag value",
+        "stdout (last 10 lines):",
+        *(f"out-{index}" for index in range(2, 12)),
+        "stderr (last 10 lines):",
+        *(f"err-{index}" for index in range(1, 11)),
+    ]
+    assert hash_op.status == "error"
+    assert hash_op.detail_lines == expected_details
+    assert _renderer(consumer).errors == [("demo", "\n".join(expected_details))]
 
 
 def test_event_consumer_command_branches_and_source_result_dispatch(

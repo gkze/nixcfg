@@ -41,15 +41,14 @@ These are hard rules, not suggestions.
 
 ## What This Repository Actually Is
 
-This is not just a personal dotfiles repo. It is a mixed Nix + Python + Go codebase with several
-public and semi-public surfaces:
+This is not just a personal dotfiles repo. It is a mixed Nix + Python codebase with several public
+and semi-public surfaces:
 
 - a personal `nix-darwin` + Home Manager flake
 - reusable exported `darwin`, `home`, and `nixos` module sets
 - a Python `nixcfg` CLI in `nixcfg.py` with substantial logic under `lib/`
 - update/CI tooling under `lib/update/` and `lib/recover/`
 - a schema/codegen toolchain under `schema_codegen.yaml`, `schemas/`, and `lib/schema_codegen/`
-- an incubating Go workflow runner in `ghawfr/`
 - custom packages and overlays under `packages/` and `overlays/`
 
 Important entrypoints:
@@ -120,12 +119,6 @@ machine-specific.
 - `modules/home/zen.nix`
 - `home/george/bin/zentool`
 - `home/george/zen/`
-
-### `ghawfr` work
-
-- `ghawfr/`
-- `ghawfr/README.md`
-- `.ghawfr/` only when debugging runtime parity or local runner behavior
 
 ## Dominant Workstreams From Repo History
 
@@ -200,22 +193,13 @@ For macOS GUI apps, prefer the shared pattern built around:
 Do not add bespoke activation hacks for `/Applications` unless the shared pattern genuinely cannot
 express the need.
 
-### 6. `ghawfr/` source and `.ghawfr/` runtime state are different things
-
-- `ghawfr/` is source code and tests.
-- `.ghawfr/` is local runtime state, plans, artifacts, caches, worker state, and possibly sensitive
-  material.
-
-Do not mix them up in reviews or commits. If a `ghawfr` task leaves `.ghawfr/` debris around,
-separate source changes from runtime leftovers.
-
-### 7. `default.nix` / `lib.nix` / `lib/exports.nix` are API surfaces
+### 6. `default.nix` / `lib.nix` / `lib/exports.nix` are API surfaces
 
 The repo exports constructors and module sets for downstream use. If you touch these files, treat
 them as public API and validate accordingly. Preserve constructor names and module export intent
 unless the task explicitly changes API shape.
 
-### 8. Prefer AST-backed Nix generation from Python
+### 7. Prefer AST-backed Nix generation from Python
 
 When Python needs to construct or compose Nix code, prefer `nix-manipulator` AST builders over raw
 Nix string templates. For Nix-native behavioral checks, prefer dedicated `.nix` test files or
@@ -486,10 +470,6 @@ Only use this when the task truly requires an actual local apply:
 - relevant `nix run .#nixcfg -- ci ...` subcommands
 - relevant `nix run .#nixcfg -- update ...` commands
 
-### Go / `ghawfr`
-
-- `cd ghawfr && go test ./...`
-
 ### Workflow hygiene tools enforced in CI
 
 - `pinact run --check`
@@ -500,7 +480,8 @@ Only use this when the task truly requires an actual local apply:
 
 If the task touches CSS or related frontend-ish repo assets, validate that too:
 
-- `nix build .#checks.x86_64-linux.format-web-biome`
+- `nix build .#checks.x86_64-linux.format-web-oxfmt`
+- `nix build .#checks.x86_64-linux.lint-web-oxlint`
 
 ## Commit And Review Norms
 
@@ -544,7 +525,7 @@ working alone.
 - `~/.pi`
 - `~/.claude`
 - `~/.local/share/opencode`
-- `.ghawfr/` runtime state
+- `.ghawfr/` legacy workflow-runner runtime state
 
 Use local history for continuity, but do not surface credentials or paste sensitive local data back
 into the conversation.
@@ -560,7 +541,6 @@ If the user asks “where were we?”, “what is this worktree trying to do?”
 - inspect recent Claude sessions under the repo-specific directory in `~/.claude/projects/`
 - inspect recent OpenCode sessions in `~/.local/share/opencode/opencode.db` filtered to this worktree
 - inspect recent Codex sessions under `~/.codex/sessions/` that mention this worktree
-- for `ghawfr` work, inspect `.ghawfr/runs/` and related runtime artifacts
 
 The local histories are genuinely useful here; this repo has a lot of long-running, iterative
 debugging and architecture work.
@@ -576,7 +556,4 @@ These are commonly local state or generated artifacts, not source-of-truth code:
 - `.pytest_cache/`
 - `.ruff_cache/`
 - `.coverage*`
-- `.ghawfr/` for normal source changes
-
-Exception: inspect `.ghawfr/` when the task is specifically about local workflow-runner parity,
-cached run state, or generated runner artifacts.
+- `.ghawfr/`

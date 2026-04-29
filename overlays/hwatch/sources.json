@@ -1,0 +1,11 @@
+{
+  "drvHash": "zg2m8d0lvqx3i7svmbjsvmv2d3r4c204",
+  "hashes": [
+    {
+      "hash": "sha256-dyugbY7v1GX1IoErX3lOOKycRWDy+9kZxMLRZScz7TQ=",
+      "hashType": "cargoHash"
+    }
+  ],
+  "input": "hwatch",
+  "version": "0.4.1"
+}

@@ -27,6 +27,7 @@ async def nix_prefetch_url(
     url: str,
     *,
     hash_type: str = "sha256",
+    name: str | None = None,
     command_timeout: float = 1200.0,
     **kwargs: object,
 ) -> str:
@@ -35,8 +36,12 @@ async def nix_prefetch_url(
         command_timeout=command_timeout,
         kwargs=kwargs,
     )
+    args = ["nix-prefetch-url", "--type", hash_type]
+    if name is not None:
+        args.extend(["--name", name])
+    args.append(url)
     result = await run_nix(
-        ["nix-prefetch-url", "--type", hash_type, url],
+        args,
         timeout=timeout_seconds,
     )
     raw_hash = result.stdout.strip().split("\n")[-1]

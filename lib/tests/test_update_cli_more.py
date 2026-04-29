@@ -46,6 +46,7 @@ from lib.update.cli import (
     _resolve_full_output,
     _resolve_runtime_config,
     _resolve_tty_settings,
+    _split_trailing_target_options,
     check_required_tools,
     cli,
     run_update_command,
@@ -96,10 +97,20 @@ def test_build_update_options_and_required_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Map json_output alias and detect missing required tools."""
+    assert UpdateOptions().target_names == ()
+    assert UpdateOptions(targets=None).target_names == ()
+    assert UpdateOptions(targets="single").target_names == ("single",)
+    legacy_opts = UpdateOptions()
+    object.__setattr__(legacy_opts, "targets", "legacy")
+    assert legacy_opts.target_names == ("legacy",)
+
     opts = _build_update_options({"source": "demo", "json_output": True, "check": True})
     assert opts.source == "demo"
+    assert opts.target_names == ("demo",)
     assert opts.json is True
     assert opts.check is True
+    multi_opts = _build_update_options({"targets": ["one", "two"]})
+    assert multi_opts.target_names == ("one", "two")
 
     monkeypatch.setattr(
         "lib.update.cli.shutil.which",
@@ -107,16 +118,59 @@ def test_build_update_options_and_required_tools(
     )
     monkeypatch.setattr(
         "lib.update.cli.UPDATERS",
-        {"demo": type("_U", (), {"required_tools": ("nix",)})},
+        {
+            "demo": type("_U", (), {"required_tools": ("nix",)}),
+            "source-only": type("_V", (), {"required_tools": ("nix",)}),
+        },
+    )
+    monkeypatch.setattr(
+        "lib.update.cli.get_flake_inputs_with_refs",
+        lambda: [SimpleNamespace(name="demo")],
     )
 
     assert check_required_tools() == ["uv"]
     assert check_required_tools(needs_sources=False) == []
     assert check_required_tools(source="demo") == []
+    assert check_required_tools(targets=("demo",)) == []
+    assert check_required_tools(targets=("source-only",)) == []
     assert check_required_tools(source="demo", include_flake_edit=True) == [
         "flake-edit"
     ]
     assert check_required_tools(source="unknown", needs_sources=True) == []
+
+
+def test_split_trailing_target_options_handles_click_variants() -> None:
+    """Recover Typer options that Click leaves in the variadic target tuple."""
+    assert _split_trailing_target_options(["one", "--", "--check", "two"]) == (
+        ("one", "--check", "two"),
+        {},
+    )
+    assert _split_trailing_target_options([
+        "one",
+        "--check",
+        "--max-nix-builds",
+        "3",
+        "--render-interval=1.5",
+        "--user-agent",
+        "agent",
+    ]) == (
+        ("one",),
+        {
+            "check": True,
+            "max_nix_builds": 3,
+            "render_interval": 1.5,
+            "user_agent": "agent",
+        },
+    )
+
+    with pytest.raises(typer.BadParameter, match="does not take a value"):
+        _split_trailing_target_options(["--check=true"])
+    with pytest.raises(typer.BadParameter, match="expects an integer value"):
+        _split_trailing_target_options(["--max-nix-builds", "many"])
+    with pytest.raises(typer.BadParameter, match="expects a numeric value"):
+        _split_trailing_target_options(["--render-interval", "soon"])
+    with pytest.raises(typer.BadParameter, match="requires a value"):
+        _split_trailing_target_options(["--max-nix-builds"])
 
 
 def test_tty_resolution_and_output_options(
@@ -195,6 +249,10 @@ def test_resolved_targets_and_item_meta(monkeypatch: pytest.MonkeyPatch) -> None
     resolved = ResolvedTargets.from_options(UpdateOptions(source="src", no_refs=True))
     assert resolved.source_names == ["src"]
     assert resolved.ref_inputs == []
+
+    resolved_multi = ResolvedTargets.from_options(UpdateOptions(targets=("src", "inp")))
+    assert resolved_multi.source_names == ["src"]
+    assert [inp.name for inp in resolved_multi.ref_inputs] == ["inp"]
 
     sources = SourcesFile(entries={"src": SourceEntry(hashes={}, input="inp")})
     meta, order = _build_item_meta(resolved, sources)
@@ -1811,6 +1869,10 @@ def test_load_pinned_versions_and_run_plan_building(
 
     unknown = _build_run_plan(UpdateOptions(source="unknown"), OutputOptions())
     assert unknown == 1
+    plural_unknown = _build_run_plan(
+        UpdateOptions(targets=("missing-a", "missing-b")), OutputOptions()
+    )
+    assert plural_unknown == 1
 
     monkeypatch.setattr(
         "lib.update.cli._build_item_meta", lambda resolved, sources: ({}, [])

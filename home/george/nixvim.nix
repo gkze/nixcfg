@@ -463,7 +463,6 @@ in
                 oxlintCmd = lib.getExe pkgs.oxlint;
               in
               {
-                biome.command = lib.getExe pkgs.biome;
                 oxlint = {
                   command = oxlintCmd;
                   args = [
@@ -511,10 +510,18 @@ in
               };
             formatters_by_ft = {
               jsonnet = [ "jsonnetfmt" ];
-              html = [ "biome" ];
-              javascript = [ "biome" ];
-              javascriptreact = [ "biome" ];
-              json = [ "biome" ];
+              css = [ "oxfmt" ];
+              html = [ "oxfmt" ];
+              javascript = [
+                "oxlint"
+                "oxfmt"
+              ];
+              javascriptreact = [
+                "oxlint"
+                "oxfmt"
+              ];
+              json = [ "oxfmt" ];
+              jsonc = [ "oxfmt" ];
               lua = [ "stylua" ];
               python = [
                 "ruff_fix"
@@ -571,7 +578,6 @@ in
           };
           servers = {
             bashls.enable = true;
-            biome.enable = true;
             cssls.enable = true;
             dockerls.enable = true;
             # efm.enable = true;
@@ -584,7 +590,7 @@ in
             jsonnet_ls.enable = true;
             jsonls = {
               enable = true;
-              # Use Biome formatter instead to avoid LSP conflicts
+              # Use Oxfmt instead to avoid LSP formatting conflicts.
               extraOptions.settings.json = {
                 format.enable = false;
                 schemas.__raw = "require('schemastore').json.schemas()";

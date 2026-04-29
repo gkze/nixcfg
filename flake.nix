@@ -132,7 +132,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.44.0";
+      url = "github:max-sixty/worktrunk/v0.45.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -162,7 +162,14 @@
     };
     # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
     gogcli = {
-      url = "github:steipete/gogcli/v0.13.0";
+      url = "github:steipete/gogcli/v0.14.0";
+      flake = false;
+    };
+    github-desktop = {
+      type = "git";
+      url = "https://github.com/desktop/desktop.git";
+      ref = "refs/tags/release-3.5.9-beta2";
+      submodules = true;
       flake = false;
     };
     goose-v8 = {
@@ -191,6 +198,10 @@
       url = "github:homebrew/homebrew-core";
       flake = false;
     };
+    hwatch = {
+      url = "github:blacknon/hwatch/0.4.1";
+      flake = false;
+    };
     linear-cli = {
       url = "github:schpet/linear-cli/v2.0.0";
       flake = false;
@@ -204,7 +215,7 @@
       flake = false;
     };
     mux = {
-      url = "github:coder/mux/v0.23.1";
+      url = "github:coder/mux/v0.23.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mountpoint-s3 = {
@@ -311,6 +322,7 @@
           pythonScriptFindPredicates = lib.concatMapStringsSep " " (
             path: "-o -path './${path}'"
           ) pythonScriptPaths;
+          oxfmtPatterns = lintFiles.oxfmt.globs ++ map (glob: "!${glob}") lintFiles.oxfmt.excludeGlobs;
           mkDevShell = import ./lib/dev-shell.nix {
             src = ./.;
             gitHooks = git-hooks;
@@ -460,9 +472,9 @@
 
                 for file in "$@"; do
                   tmp="$(${lib.getExe' pkgs.coreutils "mktemp"} "''${TMPDIR:-/tmp}/twilight-autoconfig.XXXXXX")"
-                  ${lib.getExe pkgs.biome} format \
-                    --config-path biome.jsonc \
-                    --stdin-file-path twilight.js \
+                  ${lib.getExe pkgs.oxfmt} \
+                    --config .oxfmtrc.json \
+                    --stdin-filepath twilight.js \
                     < "$file" > "$tmp"
                   if ! ${lib.getExe' pkgs.diffutils "cmp"} -s "$tmp" "$file"; then
                     ${lib.getExe' pkgs.coreutils "cat"} "$tmp" > "$file"
@@ -477,10 +489,10 @@
                     nixfmt.enable = true;
                     deadnix.enable = true;
                     statix.enable = true;
-                    biome = {
+                    oxfmt = {
                       enable = true;
-                      includes = lintFiles.biome.globs;
-                      excludes = lintFiles.biome.excludeGlobs;
+                      includes = lintFiles.oxfmt.globs;
+                      excludes = lintFiles.oxfmt.excludeGlobs;
                     };
                     buf = {
                       enable = true;
@@ -568,11 +580,10 @@
                         "-conf"
                         ".yamlfmt"
                       ];
-                      biome.options = lib.mkForce [
-                        "format"
-                        "--config-path"
-                        "biome.jsonc"
-                        "--write"
+                      oxfmt.options = lib.mkForce [
+                        "--config"
+                        ".oxfmtrc.json"
+                        "--no-error-on-unmatched-pattern"
                       ];
                       go-mod-format = {
                         command = lib.getExe goModFormat;
@@ -674,8 +685,8 @@
               '';
           };
 
-          checks."format-web-biome" = mkRepoCheck {
-            name = "check-format-web-biome";
+          checks."format-web-oxfmt" = mkRepoCheck {
+            name = "check-format-web-oxfmt";
             command =
               {
                 lib,
@@ -683,7 +694,20 @@
                 ...
               }:
               ''
-                ${lib.getExe pkgs.biome} check --config-path biome.jsonc --diagnostic-level=error .
+                ${lib.getExe pkgs.oxfmt} --check --config .oxfmtrc.json --no-error-on-unmatched-pattern ${lib.escapeShellArgs oxfmtPatterns}
+              '';
+          };
+
+          checks."lint-web-oxlint" = mkRepoCheck {
+            name = "check-lint-web-oxlint";
+            command =
+              {
+                lib,
+                pkgs,
+                ...
+              }:
+              ''
+                OXLINT_TSGOLINT_PATH=${lib.getExe pkgs.oxlint-tsgolint} ${lib.getExe pkgs.oxlint} --config .oxlintrc.json --type-aware --quiet .
               '';
           };
 

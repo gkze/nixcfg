@@ -20,11 +20,13 @@ UpdateSortBy = Literal[
 ]
 
 UpdateTTYMode = Literal["auto", "force", "off", "full"]
-type UpdateOptionValue = str | int | float | bool | None
+type UpdateOptionValue = str | tuple[str, ...] | list[str] | int | float | bool | None
+type UpdateTargetsValue = str | tuple[str, ...] | list[str] | None
 
 
 class _UpdateOptionsInitKwargs(TypedDict, total=False):
     source: str | None
+    targets: UpdateTargetsValue
     list_targets: bool
     no_refs: bool
     no_sources: bool
@@ -63,6 +65,7 @@ class UpdateOptions:
     """Typed options for the update CLI."""
 
     source: str | None = None
+    targets: UpdateTargetsValue = ()
     list_targets: bool = False
     no_refs: bool = False
     no_sources: bool = False
@@ -88,6 +91,29 @@ class UpdateOptions:
     fake_hash: str | None = None
     deno_platforms: str | None = None
     pinned_versions: str | None = None
+
+    def __post_init__(self) -> None:
+        """Normalize target aliases while preserving the legacy ``source`` field."""
+        raw_targets = self.targets
+        if raw_targets is None:
+            normalized_targets: tuple[str, ...] = ()
+        elif isinstance(raw_targets, str):
+            normalized_targets = (raw_targets,)
+        else:
+            normalized_targets = tuple(target for target in raw_targets if target)
+        object.__setattr__(self, "targets", normalized_targets)
+
+    @property
+    def target_names(self) -> tuple[str, ...]:
+        """Return selected update targets, or an empty tuple for all targets."""
+        targets = self.targets
+        if isinstance(targets, str):
+            return (targets,)
+        if targets:
+            return tuple(targets)
+        if self.source is not None:
+            return (self.source,)
+        return ()
 
     @classmethod
     def from_mapping(cls, values: UpdateOptionsKwargs) -> UpdateOptions:

@@ -101,7 +101,8 @@ jobs:
           - lint-editorconfig
           - format-yaml-yamlfmt
           - lint-yaml-yamllint
-          - format-web-biome
+          - format-web-oxfmt
+          - lint-web-oxlint
           - format-python-pyupgrade
           - format-python-ruff
           - lint-python-compile
@@ -126,10 +127,6 @@ jobs:
       - *cache_nix
       - name: Run quality gate
         run: nix build .#checks.x86_64-linux.${{ matrix.check }}
-  # ghawfr coverage is intentionally omitted from GitHub Actions for now.
-  # The in-repo workflow runner still depends on host/runtime assumptions that
-  # are not stable in generic CI; keep local `go test ./...` coverage until a
-  # dedicated CI-parity job is ready.
   lint-pins-pinact:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from packaging.version import InvalidVersion, Version
@@ -24,6 +25,7 @@ from lib.update.events import (
 )
 from lib.update.flake import load_flake_lock
 from lib.update.net import fetch_github_api_paginated
+from lib.update.paths import get_repo_root
 from lib.update.process import StreamCommandOptions, run_queue_task, stream_command
 
 _BRANCH_REF_PATTERNS = {
@@ -35,6 +37,19 @@ _BRANCH_REF_PATTERNS = {
 }
 
 _MIN_COMMIT_HEX_LEN = 7
+_GIT_TAG_REF_PREFIX = "refs/tags/"
+_GITHUB_GIT_URL_RE = re.compile(
+    r"^(?:https://|ssh://git@)github\.com[:/](?P<owner>[^/]+)/"
+    r"(?P<repo>[^/]+?)(?:\.git)?/?$"
+)
+_GITHUB_GIT_SCP_URL_RE = re.compile(
+    r"^git@github\.com:(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$"
+)
+_INPUT_ATTRSET_START_RE_TEMPLATE = r"^(?P<indent>\s*){name}\s*=\s*\{{\s*$"
+_REF_BINDING_RE = re.compile(
+    r"^(?P<indent>\s*)ref\s*=\s*\"(?P<value>(?:\\.|[^\"])*)\"\s*;"
+    r"(?P<suffix>\s*(?:#.*)?)$"
+)
 
 
 def _is_version_ref(ref: str) -> bool:
@@ -55,7 +70,16 @@ class FlakeInputRef:
     owner: str
     repo: str
     ref: str
-    input_type: str  # "github", "gitlab"
+    input_type: str  # "github", "gitlab", "git"
+    submodules: bool = False
+
+
+def _parse_github_git_url(url: str) -> tuple[str, str] | None:
+    for pattern in (_GITHUB_GIT_URL_RE, _GITHUB_GIT_SCP_URL_RE):
+        match = pattern.match(url)
+        if match:
+            return match.group("owner"), match.group("repo")
+    return None
 
 
 def get_flake_inputs_with_refs() -> list[FlakeInputRef]:
@@ -78,6 +102,7 @@ def get_flake_inputs_with_refs() -> list[FlakeInputRef]:
         owner = node.original.owner
         repo = node.original.repo
         input_type = node.original.type or "github"
+        submodules = bool(getattr(node.original, "submodules", False))
         if owner and repo and input_type in ("github", "gitlab"):
             result.append(
                 FlakeInputRef(
@@ -86,8 +111,24 @@ def get_flake_inputs_with_refs() -> list[FlakeInputRef]:
                     repo=repo,
                     ref=ref,
                     input_type=input_type,
+                    submodules=submodules,
                 ),
             )
+            continue
+        if input_type == "git" and node.original.url:
+            parsed = _parse_github_git_url(node.original.url)
+            if parsed:
+                owner, repo = parsed
+                result.append(
+                    FlakeInputRef(
+                        name=input_name,
+                        owner=owner,
+                        repo=repo,
+                        ref=ref,
+                        input_type=input_type,
+                        submodules=submodules,
+                    ),
+                )
     return result
 
 
@@ -99,12 +140,23 @@ def _extract_version_prefix(ref: str) -> str:
 
 
 def _build_version_prefixes(prefix: str) -> list[str]:
-    prefixes = [prefix]
-    lowered = prefix.lower()
-    if lowered.endswith("v") and lowered != "v":
-        prefixes.append("v")
-    if lowered == "v":
-        prefixes.append("")
+    prefixes: list[str] = []
+
+    def add(candidate: str) -> None:
+        if candidate not in prefixes:
+            prefixes.append(candidate)
+
+    add(prefix)
+    if prefix.startswith(_GIT_TAG_REF_PREFIX):
+        add(prefix.removeprefix(_GIT_TAG_REF_PREFIX))
+
+    initial_prefixes = tuple(prefixes)
+    for candidate in initial_prefixes:
+        lowered = candidate.lower()
+        if lowered.endswith("v") and lowered != "v":
+            add("v")
+        if lowered == "v":
+            add("")
     return list(dict.fromkeys(prefixes))
 
 
@@ -114,7 +166,12 @@ def _tag_matches_prefix(tag: str, prefix: str) -> bool:
     return bool(re.match(r"\d", tag))
 
 
-def _parse_tag_version(tag: str, prefix: str) -> Version | None:
+def _parse_tag_version(
+    tag: str,
+    prefix: str,
+    *,
+    allow_prerelease: bool = False,
+) -> Version | None:
     if not _tag_matches_prefix(tag, prefix):
         return None
     suffix = tag[len(prefix) :] if prefix else tag
@@ -125,12 +182,17 @@ def _parse_tag_version(tag: str, prefix: str) -> Version | None:
         parsed = Version(suffix)
     except InvalidVersion:
         return None
-    if parsed.is_prerelease:
+    if parsed.is_prerelease and not allow_prerelease:
         return None
     return parsed
 
 
-def _select_tag(tags: Iterable[str], prefix: str) -> str | None:
+def _select_tag(
+    tags: Iterable[str],
+    prefix: str,
+    *,
+    allow_prerelease: bool = False,
+) -> str | None:
     matches = [tag for tag in tags if _tag_matches_prefix(tag, prefix)]
     if not matches:
         return None
@@ -138,7 +200,14 @@ def _select_tag(tags: Iterable[str], prefix: str) -> str | None:
     parsed_versions = [
         (tag, parsed)
         for tag in matches
-        if (parsed := _parse_tag_version(tag, prefix)) is not None
+        if (
+            parsed := _parse_tag_version(
+                tag,
+                prefix,
+                allow_prerelease=allow_prerelease,
+            )
+        )
+        is not None
     ]
     if parsed_versions:
         return max(parsed_versions, key=lambda item: item[1])[0]
@@ -149,25 +218,32 @@ def _select_tag(tags: Iterable[str], prefix: str) -> str | None:
 def _select_tag_from_releases(
     releases: Iterable[Mapping[str, object]],
     prefix: str,
+    *,
+    allow_prerelease: bool = False,
 ) -> str | None:
     return _select_tag(
         (
             tag_name
             for release in releases
             if isinstance(tag_name := release.get("tag_name"), str)
-            if not release.get("draft") and not release.get("prerelease")
+            if not release.get("draft")
+            if allow_prerelease or not release.get("prerelease")
         ),
         prefix,
+        allow_prerelease=allow_prerelease,
     )
 
 
 def _select_tag_from_tags(
     tags: Iterable[Mapping[str, object]],
     prefix: str,
+    *,
+    allow_prerelease: bool = False,
 ) -> str | None:
     return _select_tag(
         (name for tag in tags if isinstance(name := tag.get("name"), str)),
         prefix,
+        allow_prerelease=allow_prerelease,
     )
 
 
@@ -178,6 +254,7 @@ async def _fetch_first_matching_tag(
     prefix: str,
     *,
     config: UpdateConfig,
+    allow_prerelease: bool = False,
 ) -> str | None:
     max_pages = 5
     last_error: RuntimeError | None = None
@@ -210,7 +287,7 @@ async def _fetch_first_matching_tag(
         if path.endswith("/tags"):
             saw_tags_fetch = True
         payload = [item for item in payload_raw if isinstance(item, dict)]
-        tag = selector(payload, prefix)
+        tag = selector(payload, prefix, allow_prerelease=allow_prerelease)
         if tag:
             return tag
     if not saw_tags_fetch and last_error is not None:
@@ -226,6 +303,7 @@ async def fetch_github_latest_version_ref(
     prefix: str,
     *,
     config: UpdateConfig | None = None,
+    allow_prerelease: bool = False,
 ) -> str | None:
     config = resolve_active_config(config)
     for candidate_prefix in _build_version_prefixes(prefix):
@@ -235,6 +313,7 @@ async def fetch_github_latest_version_ref(
             repo,
             candidate_prefix,
             config=config,
+            allow_prerelease=allow_prerelease,
         )
         if tag:
             return tag
@@ -250,6 +329,66 @@ class RefUpdateResult:
     current_ref: str
     latest_ref: str | None
     error: str | None = None
+
+
+def _format_git_ref_update(current_ref: str, new_ref: str) -> str:
+    """Preserve explicit tag refs when updating generic git flake inputs."""
+    if current_ref.startswith(_GIT_TAG_REF_PREFIX) and not new_ref.startswith("refs/"):
+        return f"{_GIT_TAG_REF_PREFIX}{new_ref}"
+    return new_ref
+
+
+def _quote_nix_string_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _rewrite_git_input_ref(text: str, input_name: str, new_ref: str) -> str:
+    start_re = re.compile(
+        _INPUT_ATTRSET_START_RE_TEMPLATE.format(name=re.escape(input_name))
+    )
+    lines = text.splitlines()
+    keep_trailing_newline = text.endswith("\n")
+    escaped_ref = _quote_nix_string_value(new_ref)
+    inside = False
+    updated = False
+    input_indent = ""
+
+    for index, line in enumerate(lines):
+        if not inside:
+            match = start_re.match(line)
+            if match:
+                inside = True
+                input_indent = match.group("indent")
+            continue
+
+        ref_match = _REF_BINDING_RE.match(line)
+        if ref_match:
+            lines[index] = (
+                f'{ref_match.group("indent")}ref = "{escaped_ref}";'
+                f"{ref_match.group('suffix')}"
+            )
+            updated = True
+            break
+
+        if re.match(rf"^{re.escape(input_indent)}\}};\s*$", line):
+            lines.insert(index, f'{input_indent}  ref = "{escaped_ref}";')
+            updated = True
+            break
+
+    if not updated:
+        msg = f"Could not find git flake input attrset for {input_name!r}"
+        raise RuntimeError(msg)
+
+    rewritten = "\n".join(lines)
+    return f"{rewritten}\n" if keep_trailing_newline else rewritten
+
+
+def _update_git_input_ref_in_flake(input_name: str, new_ref: str) -> None:
+    flake_path = Path(get_repo_root()) / "flake.nix"
+    text = flake_path.read_text(encoding="utf-8")
+    rewritten = _rewrite_git_input_ref(text, input_name, new_ref)
+    if rewritten != text:
+        flake_path.write_text(rewritten, encoding="utf-8")
 
 
 @dataclass(frozen=True)
@@ -270,8 +409,14 @@ async def check_flake_ref_update(
     """Check a flake input ref against the latest matching upstream tag."""
     config = resolve_active_config(config)
     prefix = _extract_version_prefix(input_ref.ref)
+    current_version = _parse_tag_version(
+        input_ref.ref,
+        prefix,
+        allow_prerelease=True,
+    )
+    allow_prerelease = current_version is not None and current_version.is_prerelease
 
-    if input_ref.input_type == "github":
+    if input_ref.input_type in {"github", "git"}:
         try:
             latest = await fetch_github_latest_version_ref(
                 session,
@@ -279,6 +424,7 @@ async def check_flake_ref_update(
                 input_ref.repo,
                 prefix,
                 config=config,
+                allow_prerelease=allow_prerelease,
             )
         except RuntimeError as exc:
             return RefUpdateResult(
@@ -302,6 +448,8 @@ async def check_flake_ref_update(
             latest_ref=None,
             error="Could not determine latest version",
         )
+    if input_ref.input_type == "git":
+        latest = _format_git_ref_update(input_ref.ref, latest)
 
     return RefUpdateResult(
         name=input_ref.name,
@@ -328,15 +476,27 @@ async def update_flake_ref(
         new_url = f"github:{input_ref.owner}/{input_ref.repo}/{new_ref}"
     elif input_ref.input_type == "gitlab":
         new_url = f"gitlab:{input_ref.owner}/{input_ref.repo}/{new_ref}"
+    elif input_ref.input_type == "git":
+        ref = _format_git_ref_update(input_ref.ref, new_ref)
+        _update_git_input_ref_in_flake(input_ref.name, ref)
+        yield UpdateEvent.status(
+            source,
+            f"Updated flake.nix input ref: {input_ref.name} -> {ref}",
+            operation="update_ref",
+            status="updating_ref",
+            detail={"input": input_ref.name, "latest": ref},
+        )
+        new_url = None
     else:
         msg = f"Unsupported input type: {input_ref.input_type}"
         raise RuntimeError(msg)
-    async for event in _run_checked_command(
-        ["flake-edit", "change", input_ref.name, new_url],
-        source=source,
-        error_prefix="flake-edit change failed",
-    ):
-        yield event
+    if new_url is not None:
+        async for event in _run_checked_command(
+            ["flake-edit", "change", input_ref.name, new_url],
+            source=source,
+            error_prefix="flake-edit change failed",
+        ):
+            yield event
 
     async for event in _run_checked_command(
         ["nix", "flake", "lock", "--update-input", input_ref.name],

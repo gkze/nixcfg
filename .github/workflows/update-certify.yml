@@ -72,8 +72,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.select-ref.outputs.ref }}
-      - &setup_nix
-        # Determinate Nix v3.17.1
+      - &setup_nix # Determinate Nix v3.17.1
         uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919
         with:
           extra-conf: |
@@ -116,7 +115,8 @@ jobs:
           nix build .#checks.x86_64-linux.lint-editorconfig
           nix build .#checks.x86_64-linux.format-yaml-yamlfmt
           nix build .#checks.x86_64-linux.lint-yaml-yamllint
-          nix build .#checks.x86_64-linux.format-web-biome
+          nix build .#checks.x86_64-linux.format-web-oxfmt
+          nix build .#checks.x86_64-linux.lint-web-oxlint
           nix build .#checks.x86_64-linux.format-python-pyupgrade
           nix build .#checks.x86_64-linux.format-python-ruff
           nix build .#checks.x86_64-linux.lint-python-compile
@@ -127,10 +127,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: nix run --inputs-from . nixpkgs#pinact -- run --check
-      # ghawfr coverage is intentionally omitted from certification for now.
-      # The in-repo workflow runner still needs host/runtime assumptions that
-      # are not stable on generic CI runners; rely on local `go test ./...`
-      # until a dedicated CI-parity check is ready.
       - name: Run shared deep verification checks
         run: |
           nix build .#checks.x86_64-linux.test-nix-default-api

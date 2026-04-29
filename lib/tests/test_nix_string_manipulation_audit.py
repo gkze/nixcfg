@@ -3,12 +3,24 @@
 from __future__ import annotations
 
 import ast
+import os
 from pathlib import Path
 
 from lib.update.paths import REPO_ROOT
 
 _REPO_ROOT = Path(REPO_ROOT)
-_EXCLUDED_PARTS = {".claude", ".venv", "venv", "__pycache__", "mutants"}
+_EXCLUDED_DIR_NAMES = {
+    ".claude",
+    ".direnv",
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "mutants",
+    "node_modules",
+    "venv",
+}
 _SELF_PATH = Path(__file__).resolve()
 _FORBIDDEN_NIX_TEMPLATE_FRAGMENTS = (
     "fetchFromGitHub {",
@@ -23,6 +35,7 @@ _AST_SCAN_MARKERS = (
     "FunctionCall(",
     "nix_manipulator",
 )
+_AST_SCAN_MARKER_BYTES = tuple(marker.encode() for marker in _AST_SCAN_MARKERS)
 
 
 def _docstring_node_ids(tree: ast.AST) -> set[int]:
@@ -61,18 +74,37 @@ def _might_need_ast_scan(source: str) -> bool:
     return any(marker in source for marker in _AST_SCAN_MARKERS)
 
 
+def _might_need_ast_scan_bytes(source: bytes) -> bool:
+    return any(marker in source for marker in _AST_SCAN_MARKER_BYTES)
+
+
+def _iter_python_sources() -> list[Path]:
+    sources: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(_REPO_ROOT):
+        dirnames[:] = [
+            dirname
+            for dirname in dirnames
+            if dirname not in _EXCLUDED_DIR_NAMES and not dirname.startswith("result")
+        ]
+        sources.extend(
+            Path(dirpath) / filename
+            for filename in filenames
+            if filename.endswith(".py")
+        )
+    return sorted(sources)
+
+
 def test_python_sources_avoid_raw_nix_templates() -> None:
     """Python sources should build Nix syntax through nix-manipulator helpers."""
     violations: list[str] = []
 
-    for path in sorted(_REPO_ROOT.rglob("*.py")):
+    for path in _iter_python_sources():
         if path.resolve() == _SELF_PATH:
             continue
-        if any(part in _EXCLUDED_PARTS for part in path.parts):
+        raw_source = path.read_bytes()
+        if not _might_need_ast_scan_bytes(raw_source):
             continue
-        source = path.read_text(encoding="utf-8")
-        if not _might_need_ast_scan(source):
-            continue
+        source = raw_source.decode()
 
         tree = ast.parse(source)
         docstring_ids = _docstring_node_ids(tree)

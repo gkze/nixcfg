@@ -16,6 +16,7 @@ from lib.update.process import (
     RunCommandOptions,
     StreamCommandOptions,
     _emit_successful_command,
+    _nix_prefetch_name,
     _sanitize_log_line,
     _truncate_command,
     compute_sri_hash,
@@ -251,12 +252,33 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
     convert_events = _collect_stream(convert_nix_hash_to_sri("demo", "deadbeef"))
     assert convert_events[-1].payload == "sha256-AAA="
 
-    monkeypatch.setattr(
-        "lib.update.process.libnix_prefetch_url",
-        lambda _url: asyncio.sleep(0, result="sha256-BBB="),
+    prefetch_calls: list[tuple[str, str | None]] = []
+
+    async def _prefetch_url(url: str, *, name: str | None = None) -> str:
+        prefetch_calls.append((url, name))
+        return "sha256-BBB="
+
+    monkeypatch.setattr("lib.update.process.libnix_prefetch_url", _prefetch_url)
+    prefetch_events = _collect_stream(
+        compute_sri_hash(
+            "demo",
+            "https://example.com/releases/Town%20Assistant-1.8-33.dmg",
+        )
     )
-    prefetch_events = _collect_stream(compute_sri_hash("demo", "https://example.com"))
+    start_message = prefetch_events[0].message
+    assert start_message is not None
+    assert "--name Town-Assistant-1.8-33.dmg" in start_message
     assert prefetch_events[-1].payload == "sha256-BBB="
+
+    _collect_stream(compute_sri_hash("demo", "https://example.com/app.dmg"))
+    assert _nix_prefetch_name("https://example.com/releases/") is None
+    assert prefetch_calls == [
+        (
+            "https://example.com/releases/Town%20Assistant-1.8-33.dmg",
+            "Town-Assistant-1.8-33.dmg",
+        ),
+        ("https://example.com/app.dmg", None),
+    ]
 
 
 def test_compute_url_hashes_gather_and_type_errors(

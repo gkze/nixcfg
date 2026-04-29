@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import posixpath
+import re
 import shlex
 from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from urllib.parse import unquote, urlparse
 
 from rich.text import Text
 
@@ -47,6 +50,7 @@ _TASK_ERROR_TYPES: tuple[type[Exception], ...] = (
     NixCommandError,
 )
 _LOG = logging.getLogger(__name__)
+_NIX_STORE_NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9+._?=-]+")
 
 
 @dataclass(frozen=True)
@@ -307,14 +311,30 @@ async def convert_nix_hash_to_sri(source: str, hash_value: str) -> EventStream:
         yield event
 
 
+def _nix_prefetch_name(url: str) -> str | None:
+    """Return a safe override name when ``nix-prefetch-url`` would infer a bad one."""
+    basename = posixpath.basename(urlparse(url).path)
+    if not basename:
+        return None
+    decoded = unquote(basename)
+    safe_name = _NIX_STORE_NAME_UNSAFE_RE.sub("-", decoded).strip("-")
+    if not safe_name or safe_name == decoded:
+        return None
+    return safe_name
+
+
 async def compute_sri_hash(source: str, url: str) -> EventStream:
     """Prefetch a URL and return its SRI hash via :func:`lib.nix.commands.hash.nix_prefetch_url`."""
-    args = ["nix-prefetch-url", "--type", "sha256", url]
+    args = ["nix-prefetch-url", "--type", "sha256"]
+    prefetch_name = _nix_prefetch_name(url)
+    if prefetch_name is not None:
+        args.extend(["--name", prefetch_name])
+    args.append(url)
     async for event in _emit_successful_command(
         source=source,
         args=args,
-        message=f"nix-prefetch-url --type sha256 {url}",
-        runner=lambda: libnix_prefetch_url(url),
+        message=shlex.join(args),
+        runner=lambda: libnix_prefetch_url(url, name=prefetch_name),
     ):
         yield event
 

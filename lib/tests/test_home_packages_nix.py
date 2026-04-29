@@ -71,3 +71,49 @@ def test_heavy_optional_goose_cli_is_guarded_to_aarch64_darwin() -> None:
         ]
         """,
     )
+
+
+def test_github_desktop_is_in_shared_gui_package_set() -> None:
+    """GitHub Desktop should stay in the cross-platform GUI app set."""
+    assert_nix_ast_equal(
+        expect_binding(_package_set_entry("guiApps").values, "packages").value,
+        """
+        [
+          code-cursor
+          dbeaver-bin
+          emdash
+          github-desktop
+          jetbrains.datagrip
+          hoppscotch
+          config.fonts.monospace.package
+          postman
+          red-reddit-cli
+          slack
+          spacedrive
+        ]
+        ++ lib.optionals stdenv.isLinux [
+          spotify
+          wl-clipboard
+        ]
+        ++ lib.optionals stdenv.isDarwin [
+          appcleaner
+          chatgpt
+          commander
+          codex-desktop
+          conductor
+          opencode-desktop-electron-dev
+          container
+          cyberduck
+          google-chrome
+          granola
+          iina
+          mas
+          notion-app
+          raycast
+          rapidapi
+          sloth-app
+          t3code-desktop
+          wispr-flow
+        ]
+        """,
+    )

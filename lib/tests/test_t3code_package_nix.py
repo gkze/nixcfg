@@ -70,7 +70,7 @@ def test_t3code_package_wraps_the_bun_runtime_entrypoint() -> None:
 
 
 def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
-    """The shared helper should keep versioning and hashing sourced from one workspace."""
+    """The shared helper should keep runtime versioning separate from dependency FODs."""
     assert_nix_ast_equal(
         expect_scope_binding(_shared_output(), "serverPackageJson").value,
         'builtins.fromJSON (builtins.readFile "${src}/apps/server/package.json")',
@@ -82,6 +82,20 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
     assert_nix_ast_equal(
         expect_scope_binding(_shared_output(), "version").value,
         '"${baseVersion}-main-${revSuffix}"',
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_shared_output(), "nodeModulesVersion").value,
+        '"deps"',
+    )
+    dependency_source = expect_instance(
+        expect_scope_binding(_shared_output(), "dependencySource").value,
+        FunctionCall,
+    )
+    dependency_source_args = expect_instance(dependency_source.argument, AttributeSet)
+    assert_nix_ast_equal(dependency_source.name, "builtins.path")
+    assert_nix_ast_equal(
+        expect_binding(dependency_source_args.values, "name").value,
+        '"${pname}-dependency-source"',
     )
     assert_nix_ast_equal(
         expect_scope_binding(_shared_output(), "bunTarget").value,
@@ -101,6 +115,14 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
         FunctionCall,
     )
     node_modules_args = expect_instance(node_modules.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(node_modules_args.values, "version").value,
+        "nodeModulesVersion",
+    )
+    assert_nix_ast_equal(
+        expect_binding(node_modules_args.values, "src").value,
+        "dependencySource",
+    )
     assert_nix_ast_equal(
         expect_binding(node_modules_args.values, "outputHash").value,
         'outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system',

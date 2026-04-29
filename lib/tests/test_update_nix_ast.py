@@ -61,6 +61,82 @@ def test_flake_fetch_expr_builds_parseable_fetch_tree() -> None:
     assert_nix_ast_equal(expr, flake_fetch_expression(node))
 
 
+def test_flake_fetch_expr_builds_git_fetch_tree_with_submodules() -> None:
+    """Generic git flake inputs should retain submodule fetch metadata."""
+    node = FlakeLockNode(
+        locked=LockedRef.model_validate({
+            "type": "git",
+            "url": "https://github.com/desktop/desktop.git",
+            "rev": "abc123",
+            "narHash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "submodules": True,
+        }),
+    )
+
+    assert_nix_ast_equal(
+        flake_fetch_expr(node),
+        FunctionCall(
+            name=identifier_attr_path("builtins", "fetchTree"),
+            argument=AttributeSet(
+                values=[
+                    Binding(name="type", value="git"),
+                    Binding(name="url", value="https://github.com/desktop/desktop.git"),
+                    Binding(name="rev", value="abc123"),
+                    Binding(
+                        name="narHash",
+                        value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    ),
+                    Binding(name="submodules", value=Primitive(value=True)),
+                ]
+            ),
+        ),
+    )
+
+
+def test_flake_fetch_expr_builds_git_fetch_tree_without_submodules() -> None:
+    """Generic git flake inputs should not invent submodule metadata."""
+    node = FlakeLockNode(
+        locked=LockedRef.model_validate({
+            "type": "git",
+            "url": "https://github.com/desktop/desktop.git",
+            "rev": "abc123",
+            "narHash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        }),
+    )
+
+    assert_nix_ast_equal(
+        flake_fetch_expr(node),
+        FunctionCall(
+            name=identifier_attr_path("builtins", "fetchTree"),
+            argument=AttributeSet(
+                values=[
+                    Binding(name="type", value="git"),
+                    Binding(name="url", value="https://github.com/desktop/desktop.git"),
+                    Binding(name="rev", value="abc123"),
+                    Binding(
+                        name="narHash",
+                        value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    ),
+                ]
+            ),
+        ),
+    )
+
+
+def test_flake_fetch_expr_rejects_incomplete_git_locked_ref() -> None:
+    """Generic git fetchTree expressions need both a repository URL and revision."""
+    with pytest.raises(ValueError, match="missing url/rev"):
+        flake_fetch_expr(
+            FlakeLockNode(
+                locked=LockedRef.model_validate({
+                    "type": "git",
+                    "url": "https://github.com/desktop/desktop.git",
+                    "narHash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                })
+            )
+        )
+
+
 def test_nixpkgs_expression_uses_pinned_flake_input_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

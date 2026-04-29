@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import aiohttp
 import pytest
+from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode, LockedRef, OriginalRef
+from lib.tests._assertions import expect_instance
+from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.update.config import resolve_config
 from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
 from lib.update.flake import (
@@ -30,13 +34,17 @@ from lib.update.refs import (
     _build_version_prefixes,
     _extract_version_prefix,
     _fetch_first_matching_tag,
+    _format_git_ref_update,
     _is_version_ref,
+    _parse_github_git_url,
     _parse_tag_version,
+    _rewrite_git_input_ref,
     _run_checked_command,
     _select_tag,
     _select_tag_from_releases,
     _select_tag_from_tags,
     _tag_matches_prefix,
+    _update_git_input_ref_in_flake,
     check_flake_ref_update,
     fetch_github_latest_version_ref,
     get_flake_inputs_with_refs,
@@ -251,7 +259,22 @@ def test_refs_version_parsing_and_selection_helpers() -> None:
     assert _extract_version_prefix("stable") == ""
     assert _build_version_prefixes("release-v") == ["release-v", "v"]
     assert _build_version_prefixes("v") == ["v", ""]
+    assert _build_version_prefixes("refs/tags/v") == ["refs/tags/v", "v", ""]
     assert _build_version_prefixes("rel-") == ["rel-"]
+    assert _build_version_prefixes("refs/tags/release-") == [
+        "refs/tags/release-",
+        "release-",
+    ]
+    assert _parse_github_git_url("https://github.com/desktop/desktop.git") == (
+        "desktop",
+        "desktop",
+    )
+    assert _parse_github_git_url("git@github.com:desktop/desktop.git") == (
+        "desktop",
+        "desktop",
+    )
+    assert _parse_github_git_url("https://gitlab.com/desktop/desktop.git") is None
+    assert _format_git_ref_update("release-1", "release-2") == "release-2"
 
     assert _tag_matches_prefix("release-v1.2.3", "release-v") is True
     assert _tag_matches_prefix("1.2.3", "") is True
@@ -260,11 +283,29 @@ def test_refs_version_parsing_and_selection_helpers() -> None:
     assert str(_parse_tag_version("release-v1.2.3", "release-v")) == "1.2.3"
     assert str(_parse_tag_version("release-v1.2.3", "release-")) == "1.2.3"
     assert _parse_tag_version("release-v1.2.3-rc1", "release-v") is None
+    assert (
+        str(
+            _parse_tag_version(
+                "release-v1.2.3-rc1",
+                "release-v",
+                allow_prerelease=True,
+            )
+        )
+        == "1.2.3rc1"
+    )
     assert _parse_tag_version("bad-tag", "release-v") is None
 
     assert (
         _select_tag(["release-v1.2.0", "release-v1.10.0"], "release-v")
         == "release-v1.10.0"
+    )
+    assert (
+        _select_tag(
+            ["release-v1.2.0", "release-v1.11.0-beta1"],
+            "release-v",
+            allow_prerelease=True,
+        )
+        == "release-v1.11.0-beta1"
     )
     assert _select_tag(["release-vnext"], "release-v") == "release-vnext"
     assert _select_tag(["x"], "release-v") is None
@@ -275,20 +316,46 @@ def test_refs_version_parsing_and_selection_helpers() -> None:
         {"tag_name": "v3.0.0", "draft": True, "prerelease": False},
     ]
     assert _select_tag_from_releases(releases, "v") == "v1.2.3"
+    assert (
+        _select_tag_from_releases(releases, "v", allow_prerelease=True) == "v9.9.9-rc1"
+    )
 
     tags = [{"name": "v1.0.0"}, {"name": "v9.9.9"}, {"name": 1}]
     assert _select_tag_from_tags(tags, "v") == "v9.9.9"
+    assert (
+        _select_tag_from_tags(
+            [{"name": "v1.0.0"}, {"name": "v2.0.0-beta1"}],
+            "v",
+            allow_prerelease=True,
+        )
+        == "v2.0.0-beta1"
+    )
 
 
 def test_get_flake_inputs_with_refs_filters_expected_items(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Collect only version-like github/gitlab root inputs."""
+    """Collect only version-like GitHub/GitLab/Git root inputs."""
     valid_node = FlakeLockNode(
         original=OriginalRef(type="github", owner="o", repo="r", ref="v1.0.0")
     )
     gitlab_node = FlakeLockNode(
         original=OriginalRef(type="gitlab", owner="o2", repo="r2", ref="1.2.3")
+    )
+    git_node = FlakeLockNode(
+        original=OriginalRef.model_validate({
+            "type": "git",
+            "url": "https://github.com/desktop/desktop.git",
+            "ref": "refs/tags/release-3.5.9-beta2",
+            "submodules": True,
+        })
+    )
+    git_unparsed_node = FlakeLockNode(
+        original=OriginalRef.model_validate({
+            "type": "git",
+            "url": "https://example.com/desktop/desktop.git",
+            "ref": "refs/tags/release-3.5.9-beta2",
+        })
     )
     branch_node = FlakeLockNode(
         original=OriginalRef(type="github", owner="o", repo="r", ref="main")
@@ -305,6 +372,8 @@ def test_get_flake_inputs_with_refs_filters_expected_items(
             inputs={
                 "valid": "valid-node",
                 "gitlab": "gitlab-node",
+                "git": "git-node",
+                "git-unparsed": "git-unparsed-node",
                 "branch": "branch-node",
                 "unsupported": "unsupported-node",
                 "missing-owner": "missing-owner",
@@ -315,6 +384,8 @@ def test_get_flake_inputs_with_refs_filters_expected_items(
         nodes={
             "valid-node": valid_node,
             "gitlab-node": gitlab_node,
+            "git-node": git_node,
+            "git-unparsed-node": git_unparsed_node,
             "branch-node": branch_node,
             "unsupported-node": unsupported_node,
             "missing-owner": missing_owner,
@@ -323,8 +394,12 @@ def test_get_flake_inputs_with_refs_filters_expected_items(
     monkeypatch.setattr("lib.update.refs.load_flake_lock", lambda: model)
 
     items = get_flake_inputs_with_refs()
-    assert [item.name for item in items] == ["gitlab", "valid"]
-    assert items[0].input_type == "gitlab"
+    assert [item.name for item in items] == ["git", "gitlab", "valid"]
+    assert items[0].input_type == "git"
+    assert items[0].owner == "desktop"
+    assert items[0].repo == "desktop"
+    assert items[0].submodules is True
+    assert items[1].input_type == "gitlab"
 
 
 def test_get_flake_inputs_with_refs_empty_root_inputs(
@@ -334,6 +409,115 @@ def test_get_flake_inputs_with_refs_empty_root_inputs(
     model = SimpleNamespace(root_node=SimpleNamespace(inputs=None), nodes={})
     monkeypatch.setattr("lib.update.refs.load_flake_lock", lambda: model)
     assert get_flake_inputs_with_refs() == []
+
+
+def test_rewrite_git_input_ref_preserves_submodule_attrset() -> None:
+    """Update only the generic git input ref while preserving input metadata."""
+    source = """{
+  inputs = {
+    github-desktop = {
+      type = "git";
+      url = "https://github.com/desktop/desktop.git";
+      ref = "refs/tags/release-3.5.9-beta1";
+      submodules = true;
+      flake = false;
+    };
+  };
+  outputs = { self, ... }: {};
+}
+"""
+
+    rewritten = _rewrite_git_input_ref(
+        source,
+        "github-desktop",
+        "refs/tags/release-3.5.9-beta2",
+    )
+
+    root = expect_instance(parse_nix_expr(rewritten), AttributeSet)
+    inputs = expect_instance(expect_binding(root.values, "inputs").value, AttributeSet)
+    github_desktop = expect_instance(
+        expect_binding(inputs.values, "github-desktop").value,
+        AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(github_desktop.values, "ref").value,
+        '"refs/tags/release-3.5.9-beta2"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(github_desktop.values, "submodules").value, "true"
+    )
+    assert_nix_ast_equal(expect_binding(github_desktop.values, "flake").value, "false")
+
+
+def test_rewrite_git_input_ref_inserts_missing_ref_and_reports_absent_input() -> None:
+    """Insert refs into generic git inputs that only declare a URL."""
+    source = """{
+  inputs = {
+    github-desktop = {
+      type = "git";
+      url = "https://github.com/desktop/desktop.git";
+      submodules = true;
+    };
+  };
+  outputs = { self, ... }: {};
+}"""
+
+    rewritten = _rewrite_git_input_ref(
+        source,
+        "github-desktop",
+        "refs/tags/release-3.5.9-beta2",
+    )
+
+    root = expect_instance(parse_nix_expr(rewritten), AttributeSet)
+    inputs = expect_instance(expect_binding(root.values, "inputs").value, AttributeSet)
+    github_desktop = expect_instance(
+        expect_binding(inputs.values, "github-desktop").value,
+        AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(github_desktop.values, "ref").value,
+        '"refs/tags/release-3.5.9-beta2"',
+    )
+
+    with pytest.raises(RuntimeError, match="Could not find git flake input attrset"):
+        _rewrite_git_input_ref(source, "missing", "v2")
+
+
+def test_update_git_input_ref_in_flake_writes_changed_ref(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Update the repository flake file only when the rendered text changes."""
+    flake_path = tmp_path / "flake.nix"
+    flake_path.write_text(
+        """{
+  inputs = {
+    github-desktop = {
+      type = "git";
+      url = "https://github.com/desktop/desktop.git";
+    };
+  };
+}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("lib.update.refs.get_repo_root", lambda: tmp_path)
+
+    _update_git_input_ref_in_flake("github-desktop", "refs/tags/release-3.5.9-beta2")
+
+    root = expect_instance(parse_nix_expr(flake_path.read_text()), AttributeSet)
+    inputs = expect_instance(expect_binding(root.values, "inputs").value, AttributeSet)
+    github_desktop = expect_instance(
+        expect_binding(inputs.values, "github-desktop").value,
+        AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(github_desktop.values, "ref").value,
+        '"refs/tags/release-3.5.9-beta2"',
+    )
+
+    updated_text = flake_path.read_text(encoding="utf-8")
+    _update_git_input_ref_in_flake("github-desktop", "refs/tags/release-3.5.9-beta2")
+    assert flake_path.read_text(encoding="utf-8") == updated_text
 
 
 def test_get_root_input_name_without_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -438,8 +622,9 @@ def test_fetch_github_latest_version_ref_tries_prefix_fallbacks(
         prefix: str,
         *,
         config: object,
+        allow_prerelease: bool = False,
     ) -> str | None:
-        _ = config
+        _ = (config, allow_prerelease)
         calls.append(prefix)
         return "v1.2.3" if prefix == "v" else None
 
@@ -457,6 +642,39 @@ def test_fetch_github_latest_version_ref_tries_prefix_fallbacks(
     result = _run_async(_run())
     assert result == "v1.2.3"
     assert calls == ["release-v", "v"]
+
+
+def test_check_flake_ref_update_follows_prerelease_when_current_ref_is_prerelease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prerelease-pinned inputs should keep following prerelease tags."""
+    calls: list[bool] = []
+
+    async def _latest(
+        *_args: object,
+        allow_prerelease: bool = False,
+        **_kwargs: object,
+    ) -> str | None:
+        calls.append(allow_prerelease)
+        return "release-3.5.9-beta2"
+
+    monkeypatch.setattr("lib.update.refs.fetch_github_latest_version_ref", _latest)
+
+    async def _run(ref: str, input_type: str = "github") -> RefUpdateResult:
+        async with aiohttp.ClientSession() as session:
+            return await check_flake_ref_update(
+                FlakeInputRef("demo", "desktop", "desktop", ref, input_type),
+                session,
+            )
+
+    beta = _run_async(_run("release-3.5.9-beta1"))
+    stable = _run_async(_run("release-3.5.8"))
+    git_beta = _run_async(_run("refs/tags/release-3.5.9-beta1", "git"))
+
+    assert beta.latest_ref == "release-3.5.9-beta2"
+    assert stable.latest_ref == "release-3.5.9-beta2"
+    assert git_beta.latest_ref == "refs/tags/release-3.5.9-beta2"
+    assert calls == [True, False, True]
 
 
 def test_fetch_github_latest_version_ref_returns_none_when_unmatched(
@@ -592,7 +810,7 @@ def test_check_flake_ref_update_supported_and_error_paths(
     assert latest.latest_ref == "v2"
     unsupported = _run_async(
         check_flake_ref_update(
-            FlakeInputRef("demo", "o", "r", "v1", "git"),
+            FlakeInputRef("demo", "o", "r", "v1", "gitlab"),
             SimpleNamespace(),
         )
     )
@@ -703,6 +921,11 @@ def test_run_checked_command_and_update_flake_ref_paths(
         yield UpdateEvent.status("demo", "ok")
 
     monkeypatch.setattr("lib.update.refs._run_checked_command", _record_run_checked)
+    rewritten_refs: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "lib.update.refs._update_git_input_ref_in_flake",
+        lambda input_name, new_ref: rewritten_refs.append((input_name, new_ref)),
+    )
     github_ref = FlakeInputRef("demo", "owner", "repo", "v1", "github")
     _run_async(update_flake_ref(github_ref, "v2", source="demo"))
     assert called_args[0][:3] == ["flake-edit", "change", "demo"]
@@ -713,10 +936,23 @@ def test_run_checked_command_and_update_flake_ref_paths(
     _run_async(update_flake_ref(gitlab_ref, "v2", source="demo"))
     assert "gitlab:owner/repo/v2" in " ".join(called_args[0])
 
+    called_args.clear()
+    git_ref = FlakeInputRef(
+        "demo",
+        "desktop",
+        "desktop",
+        "refs/tags/release-3.5.9-beta1",
+        "git",
+        submodules=True,
+    )
+    _run_async(update_flake_ref(git_ref, "release-3.5.9-beta2", source="demo"))
+    assert rewritten_refs == [("demo", "refs/tags/release-3.5.9-beta2")]
+    assert called_args[0][:4] == ["nix", "flake", "lock", "--update-input"]
+
     with pytest.raises(RuntimeError, match="Unsupported input type"):
         _run_async(
             update_flake_ref(
-                FlakeInputRef("demo", "o", "r", "v1", "git"), "v2", source="demo"
+                FlakeInputRef("demo", "o", "r", "v1", "path"), "v2", source="demo"
             )
         )
 

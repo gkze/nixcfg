@@ -748,6 +748,14 @@ def test_updater_supported_platforms_allows_native_platform(
         lambda: "aarch64-darwin",
     )
 
+    async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
+        return "drv-fingerprint"
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_drv_fingerprint",
+        _compute_drv_fingerprint,
+    )
+
     async def _fetch_latest(_self: object, _session: object) -> VersionInfo:
         return VersionInfo(version="1.0.0", metadata={})
 

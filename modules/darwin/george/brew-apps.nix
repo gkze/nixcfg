@@ -25,6 +25,7 @@
       "nordvpn"
       "rio"
       "signal@beta"
+      "spotify"
       "wave"
       "yaak@beta"
     ];

@@ -46,11 +46,8 @@ mutants/
 # Per-package update lock artifacts
 **/sources.json.lock
 
-# ghawfr runtime state
+# Legacy ghawfr runtime state
 /.ghawfr/
-
-# ghawfr schema audit cache
-/ghawfr/workflow/schema/.cache/
 
 # Commander app local state
 /.commander/

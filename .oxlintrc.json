@@ -1,0 +1,19 @@
+{
+  "ignorePatterns": [
+    "misc/zellij-plugin-wasm-ts/assembly/**",
+    ".direnv/**",
+    ".claude/worktrees/**",
+    ".ghawfr/**",
+    ".venv/**",
+    "node_modules/**",
+    "result/**",
+    "result-*"
+  ],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "typescript/no-redundant-type-constituents": "warn",
+    "unicorn/no-useless-fallback-in-spread": "warn"
+  }
+}

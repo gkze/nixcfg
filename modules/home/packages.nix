@@ -92,11 +92,11 @@ let
         duf
         dust
         gping
+        hwatch
         killport
         ookla-speedtest
         procs
         tokei
-        viddy
       ];
     }
     {
@@ -106,7 +106,7 @@ let
         amp-cli
         ast-grep
         axiom-cli
-        biome
+        oxfmt
         oxlint
         oxlint-tsgolint
         curator
@@ -131,11 +131,12 @@ let
     }
     {
       name = "guiApps";
-      description = "GUI applications (code-cursor, slack, spotify, etc.)";
+      description = "GUI applications (code-cursor, slack, etc.)";
       packages = [
         code-cursor
         dbeaver-bin
         emdash
+        github-desktop
         jetbrains.datagrip
         hoppscotch
         config.fonts.monospace.package
@@ -143,9 +144,11 @@ let
         red-reddit-cli
         slack
         spacedrive
-        spotify
       ]
-      ++ lib.optionals stdenv.isLinux [ wl-clipboard ]
+      ++ lib.optionals stdenv.isLinux [
+        spotify
+        wl-clipboard
+      ]
       ++ lib.optionals stdenv.isDarwin [
         appcleaner
         chatgpt

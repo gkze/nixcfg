@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import shlex
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
@@ -14,7 +15,6 @@ from lib.update.events import (
     UpdateEvent,
     UpdateEventKind,
     expect_artifact_updates,
-    is_nix_build_command,
 )
 from lib.update.ui_render import Renderer
 from lib.update.ui_state import (
@@ -65,6 +65,7 @@ class EventConsumer:
     """Process queued update events and collect summarized results."""
 
     _ARTIFACT_LOG_PREVIEW_LIMIT: ClassVar[int] = 3
+    _COMMAND_FAILURE_TAIL_LINES: ClassVar[int] = 10
     _DETAIL_PRIORITY: ClassVar[dict[SummaryStatus, int]] = {
         "no_change": 0,
         "updated": 1,
@@ -173,6 +174,55 @@ class EventConsumer:
             operation.tail.append(line_text)
         self.renderer.log_line(event.source, message)
 
+    @staticmethod
+    def _output_tail_lines(output: str, *, max_lines: int) -> list[str]:
+        lines = output.strip().splitlines()
+        if not lines:
+            return []
+        return lines[-max_lines:]
+
+    @classmethod
+    def _append_output_tail(
+        cls,
+        details: list[str],
+        *,
+        label: str,
+        output: str,
+    ) -> None:
+        lines = cls._output_tail_lines(
+            output,
+            max_lines=cls._COMMAND_FAILURE_TAIL_LINES,
+        )
+        if not lines:
+            return
+        details.append(
+            f"{label} (last {min(len(lines), cls._COMMAND_FAILURE_TAIL_LINES)} lines):"
+        )
+        details.extend(lines)
+
+    @classmethod
+    def _command_failure_detail_lines(
+        cls,
+        result: CommandResult,
+        *,
+        build_failure_tail_lines: int,
+    ) -> list[str]:
+        details = [
+            f"Command failed (exit {result.returncode}): {shlex.join(result.args)}"
+        ]
+        cls._append_output_tail(details, label="stdout", output=result.stdout)
+        cls._append_output_tail(details, label="stderr", output=result.stderr)
+        if (
+            not result.stdout.strip()
+            and not result.stderr.strip()
+            and result.tail_lines
+        ):
+            details.extend([
+                f"Output tail (last {build_failure_tail_lines} lines):",
+                *result.tail_lines,
+            ])
+        return details
+
     def _handle_command_end(self, event: UpdateEvent, item: ItemState) -> None:
         result = event.payload
         if not isinstance(result, CommandResult):
@@ -188,11 +238,13 @@ class EventConsumer:
                 item.active_command_op = None
         if result.returncode != 0 and not result.allow_failure:
             operation.status = "error"
-            if is_nix_build_command(result.args) and result.tail_lines:
-                operation.detail_lines = [
-                    f"Output tail (last {self.build_failure_tail_lines} lines):",
-                    *result.tail_lines,
-                ]
+            details = self._command_failure_detail_lines(
+                result,
+                build_failure_tail_lines=self.build_failure_tail_lines,
+            )
+            operation.detail_lines = details
+            if not self.renderer.is_tty:
+                self.renderer.log_error(event.source, "\n".join(details))
         elif (
             op_kind in (OperationKind.UPDATE_REF, OperationKind.REFRESH_LOCK)
             and operation.status != "error"

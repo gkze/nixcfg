@@ -1,0 +1,15 @@
+{
+  "drvHash": "1hlnkqgzxgplfknqhhyvaa2mqr4cny5y",
+  "hashes": [
+    {
+      "hash": "sha256-Yhmo0Ptl4VYBkg/uSkPwYrzObndH04SjzVV4IZduzws=",
+      "hashType": "yarnAppHash"
+    },
+    {
+      "hash": "sha256-rFnOc1QtnRBeEfv/moud3FTirqiPWCu0NEXJ6PQ+c14=",
+      "hashType": "yarnRootHash"
+    }
+  ],
+  "input": "github-desktop",
+  "version": "3.5.9-beta2"
+}

@@ -10,7 +10,12 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
-from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
+from lib.tests._nix_ast import (
+    assert_nix_ast_equal,
+    binding_map,
+    expect_binding,
+    parse_nix_expr,
+)
 from lib.update.paths import REPO_ROOT
 
 
@@ -44,8 +49,8 @@ def _conform_settings() -> AttributeSet:
     )
 
 
-def test_typescript_formatters_use_oxc_tooling_with_tsgolint_backend() -> None:
-    """TypeScript buffers should use Oxlint/Oxfmt plus the tsgolint bridge."""
+def test_web_formatters_use_oxc_tooling_with_tsgolint_backend() -> None:
+    """Web buffers should use Oxfmt/Oxlint plus the tsgolint bridge."""
     formatters_by_ft = expect_instance(
         expect_binding(_conform_settings().values, "formatters_by_ft").value,
         AttributeSet,
@@ -59,6 +64,24 @@ def test_typescript_formatters_use_oxc_tooling_with_tsgolint_backend() -> None:
     )
     oxlint_env = expect_instance(
         expect_binding(oxlint.values, "env").value, AttributeSet
+    )
+    formatter_bindings = binding_map(formatters.values)
+
+    assert "biome" not in formatter_bindings
+
+    for filetype in ("css", "html", "json", "jsonc"):
+        assert_nix_ast_equal(
+            expect_binding(formatters_by_ft.values, filetype).value,
+            '[ "oxfmt" ]',
+        )
+
+    assert_nix_ast_equal(
+        expect_binding(formatters_by_ft.values, "javascript").value,
+        '[ "oxlint" "oxfmt" ]',
+    )
+    assert_nix_ast_equal(
+        expect_binding(formatters_by_ft.values, "javascriptreact").value,
+        '[ "oxlint" "oxfmt" ]',
     )
 
     assert_nix_ast_equal(

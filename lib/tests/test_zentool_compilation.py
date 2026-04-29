@@ -826,3 +826,20 @@ def test_build_desired_state_overwrites_split_view_data_and_preserves_other_extr
         "keep": {"marker": True},
         "splitViewData": [],
     }
+
+
+def test_reset_split_view_extra_reports_uninitializable_extra_storage(
+    zentool: ModuleType,
+) -> None:
+    """A defensive Pydantic-extra failure should surface as a zentool error."""
+
+    class BrokenExtraState:
+        @property
+        def model_extra(self) -> None:
+            return None
+
+    with pytest.raises(
+        zentool.ZenFoldersError,
+        match="Unable to initialize session extra fields",
+    ):
+        zentool.reset_split_view_extra(BrokenExtraState())

@@ -5,7 +5,7 @@
 ### Updated flake inputs
 
 | Input | Source | From | To | Diff |
-| --- | --- | --- | --- | --- |
+| ---------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | catppuccin | [catppuccin/nix](https://github.com/catppuccin/nix) | [ba73719](https://github.com/catppuccin/nix/commit/ba73719e673e7c2d89ac2f8df0bc0d48983e4907) | [f41cc1c](https://github.com/catppuccin/nix/commit/f41cc1cf13647e482b7317396f749840ef715e16) | [Diff](https://github.com/catppuccin/nix/compare/ba73719e673e7c2d89ac2f8df0bc0d48983e4907...f41cc1cf13647e482b7317396f749840ef715e16) |
 | nixpkgs | [NixOS/nixpkgs](https://github.com/NixOS/nixpkgs) | [6201e20](https://github.com/NixOS/nixpkgs/commit/6201e203d09599479a3b3450ed24fa81537ebc4e) | [b12141e](https://github.com/NixOS/nixpkgs/commit/b12141ef619e0a9c1c84dc8c684040326f27cdcc) | [Diff](https://github.com/NixOS/nixpkgs/compare/6201e203d09599479a3b3450ed24fa81537ebc4e...b12141ef619e0a9c1c84dc8c684040326f27cdcc) |
 | opencode | [gkze/opencode](https://github.com/gkze/opencode) | [2a857eb](https://github.com/gkze/opencode/commit/2a857eb14050436f9020d6f9b5b60320a4e0cd70) | [6742eef](https://github.com/gkze/opencode/commit/6742eefe43e7d90e8a8d6d4403d61c71ef971c8c) | [Diff](https://github.com/gkze/opencode/compare/2a857eb14050436f9020d6f9b5b60320a4e0cd70...6742eefe43e7d90e8a8d6d4403d61c71ef971c8c) |

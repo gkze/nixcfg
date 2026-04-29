@@ -1246,14 +1246,20 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
             "/Users/${primaryUser}/Applications/Home Manager Apps/DataGrip.app"
             not in apps
         )
+        assert (
+            "/Users/${primaryUser}/Applications/Home Manager Apps/Spotify.app"
+            not in apps
+        )
 
     assert "/Applications/ChatGPT.app" in george_dock
     assert "/Applications/DataGrip.app" in george_dock
+    assert "/Applications/Spotify.app" in george_dock
 
     assert "/Applications/ChatGPT.app" in town_dock
     assert "/Applications/Cursor.app" in town_dock
     assert "/Applications/Visual Studio Code - Insiders.app" in town_dock
     assert "/Applications/DataGrip.app" in town_dock
+    assert "/Applications/Spotify.app" in town_dock
     assert (
         "/Users/${primaryUser}/Applications/Home Manager Apps/OpenCode Dev.app"
         in town_dock

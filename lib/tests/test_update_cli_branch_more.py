@@ -62,7 +62,12 @@ def test_build_options_and_is_tty_env_defaults(monkeypatch: pytest.MonkeyPatch) 
     """Cover json alias absence and env-driven tty default resolution."""
     opts = _build_update_options({"source": "demo", "check": True})
     assert opts.source == "demo"
+    assert opts.target_names == ("demo",)
     assert opts.json is False
+
+    multi_opts = _build_update_options({"targets": ("demo", "other")})
+    assert multi_opts.source is None
+    assert multi_opts.target_names == ("demo", "other")
 
     monkeypatch.setenv("UPDATE_FORCE_TTY", "0")
     monkeypatch.setenv("UPDATE_NO_TTY", "0")

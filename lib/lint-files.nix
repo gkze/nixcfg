@@ -75,7 +75,7 @@ in
     ];
   };
 
-  biome = {
+  oxfmt = {
     regex = "(\\.(cjs|css|js|json|jsonc|ts)$|(^|.*/)flake\\.lock$)";
     globs = [
       "*.css"
@@ -89,10 +89,34 @@ in
       "flake.lock"
     ];
     excludeGlobs = [
+      "schemas/codegen/testdata/lockfile-golden/expected.codegen.lock.json"
+      "misc/zellij-plugin-wasm-ts/assembly/**"
       ".direnv/**"
+      ".claude/worktrees/**"
+      ".ghawfr/**"
       ".venv/**"
       "node_modules/**"
       "result/**"
+      "result-*"
+    ];
+  };
+
+  oxlint = {
+    regex = "\\.(cjs|js|ts)$";
+    globs = [
+      "*.js"
+      "*.cjs"
+      "*.ts"
+    ];
+    excludeGlobs = [
+      "misc/zellij-plugin-wasm-ts/assembly/**"
+      ".direnv/**"
+      ".claude/worktrees/**"
+      ".ghawfr/**"
+      ".venv/**"
+      "node_modules/**"
+      "result/**"
+      "result-*"
     ];
   };
 

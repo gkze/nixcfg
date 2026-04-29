@@ -2,6 +2,7 @@
   bun,
   cacert,
   inputs,
+  lib,
   nodejs,
   outputs,
   stdenv,
@@ -16,6 +17,48 @@ let
   baseVersion = serverPackageJson.version;
   revSuffix = builtins.substring 0 7 (outputs.lib.flakeLock.t3code.locked.rev or "unknown");
   version = "${baseVersion}-main-${revSuffix}";
+  nodeModulesVersion = "deps";
+  childDirectoryNames =
+    path: builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir path));
+  workspaceDirs =
+    lib.concatMap
+      (
+        parent:
+        lib.optionals (builtins.pathExists (src + "/${parent}")) (
+          map (name: "${parent}/${name}") (childDirectoryNames (src + "/${parent}"))
+        )
+      )
+      [
+        "apps"
+        "packages"
+      ]
+    ++ lib.optional (builtins.pathExists (src + "/scripts/package.json")) "scripts";
+  dependencySourceDirectories = [
+    ""
+  ]
+  ++ lib.optionals (builtins.pathExists (src + "/apps")) [ "apps" ]
+  ++ lib.optionals (builtins.pathExists (src + "/packages")) [ "packages" ]
+  ++ workspaceDirs;
+  dependencySource = builtins.path {
+    name = "${pname}-dependency-source";
+    path = src;
+    filter =
+      path: type:
+      let
+        pathString = toString path;
+        srcString = toString src;
+        relativePath = if pathString == srcString then "" else lib.removePrefix "${srcString}/" pathString;
+      in
+      (type == "directory" && builtins.elem relativePath dependencySourceDirectories)
+      || builtins.elem relativePath (
+        [
+          "bun.lock"
+          "bunfig.toml"
+          "package.json"
+        ]
+        ++ map (dir: "${dir}/package.json") workspaceDirs
+      );
+  };
 
   bunTarget =
     {
@@ -28,7 +71,8 @@ let
 
   node_modules = stdenv.mkDerivation {
     pname = "${sourceHashPackageName}-node_modules";
-    inherit version src;
+    version = nodeModulesVersion;
+    src = dependencySource;
 
     nativeBuildInputs = [
       bun
@@ -61,7 +105,7 @@ let
       runHook preInstall
 
       mkdir -p "$out"
-      find . -type d -name node_modules -exec cp -R --parents {} "$out" \;
+      find . -type d -name node_modules -prune -exec cp -R --parents {} "$out" \;
 
       runHook postInstall
     '';
