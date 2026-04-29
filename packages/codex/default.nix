@@ -55,15 +55,9 @@ let
     # Darwin weak symbols in force-loaded static archives are not resolved
     # properly. Remove weak linkage so the symbols are strong externals.
     extraPatchCommands = ''
-      ${pkgs.python3}/bin/python3 - "$out" <<'PYEOF'
-      import sys
-      from pathlib import Path
-      out = sys.argv[1]
-      p = Path(out) / "build/rust/allocator/lib.rs"
-      t = p.read_text()
-      t = t.replace('#[linkage = "weak"]\n', "")
-      p.write_text(t)
-      PYEOF
+      ${pkgs.python3}/bin/python3 \
+        ${./patch_allocator_weak_linkage.py} \
+        "$out/build/rust/allocator/lib.rs"
     '';
     prebuiltArtifacts = prebuiltV8;
   };

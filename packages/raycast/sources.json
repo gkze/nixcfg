@@ -1,12 +1,12 @@
 {
-  "commit": "06e21c4a4258b728bf713b68e4935e52ddbc3ed5",
+  "commit": "ad1b02ef49a8d87b875f5f7a2bc5a1cceda3df74",
   "hashes": {
-    "aarch64-darwin": "sha256-+ECHNNC2SIqpldkGrqrAPbnnBCBhZerWy5CTcvrNiyw=",
-    "x86_64-darwin": "sha256-5hWXi8/jx9oJYWwn48sPnagnF18z4RFp9LpcvIKiSmY="
+    "aarch64-darwin": "sha256-3Syx0gIoaI5TiKoADVlEKhaGpysCYw2/8P+P/ScGIzs=",
+    "x86_64-darwin": "sha256-YD0ZvEC2VuDCj1bPONaUUMiHacQRHwvl74f28ankno4="
   },
   "urls": {
-    "aarch64-darwin": "https://releases.raycast.com/releases/1.104.13/download?build=arm",
-    "x86_64-darwin": "https://releases.raycast.com/releases/1.104.13/download?build=x86_64"
+    "aarch64-darwin": "https://releases.raycast.com/releases/1.104.15/download?build=arm",
+    "x86_64-darwin": "https://releases.raycast.com/releases/1.104.15/download?build=x86_64"
   },
-  "version": "1.104.13"
+  "version": "1.104.15"
 }

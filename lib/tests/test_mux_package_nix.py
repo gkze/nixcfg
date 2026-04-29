@@ -141,6 +141,29 @@ else
     )
 
 
+def test_mux_linux_desktop_item_is_structured() -> None:
+    """Linux desktop metadata should use makeDesktopItem instead of a heredoc."""
+    desktop_item = expect_instance(
+        expect_scope_binding(_mux_derivation(), "linuxDesktopItem").value,
+        FunctionCall,
+    )
+    desktop_item_args = expect_instance(desktop_item.argument, AttributeSet)
+
+    assert_nix_ast_equal(desktop_item.name, "makeDesktopItem")
+    assert_nix_ast_equal(
+        expect_binding(desktop_item_args.values, "desktopName").value,
+        '"Mux"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(desktop_item_args.values, "genericName").value,
+        '"Agent Multiplexer"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(desktop_item_args.values, "exec").value,
+        '"${pname} %U"',
+    )
+
+
 def test_mux_derivation_encodes_the_hermetic_darwin_packaging_contract() -> None:
     """Mux should keep the Darwin hermeticity fixes wired into the derivation."""
     derivation_args = expect_instance(_mux_derivation().argument, AttributeSet)

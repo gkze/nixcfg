@@ -58,6 +58,13 @@ def _replace_strings_parts(
         expect_binding(_override_attrs().values, attr_name).value,
         FunctionCall,
     )
+    return _replace_strings_call_parts(expression)
+
+
+def _replace_strings_call_parts(
+    expression: FunctionCall,
+) -> tuple[NixList, NixList, object]:
+    """Return search list, replacement list, and final argument."""
     replacement_call = expect_instance(expression.name, FunctionCall)
     search_call = expect_instance(replacement_call.name, FunctionCall)
 
@@ -140,23 +147,60 @@ def test_post_configure_patches_bundled_node_addon_api_before_native_rebuilds() 
     ]
 
 
-def test_install_phase_handles_darwin_packaged_resources_and_real_icon() -> None:
-    """Darwin packaging should not leave desktopToDarwinBundle a broken icon."""
-    searches, replacements, final_argument = _replace_strings_parts("installPhase")
+def test_native_build_inputs_removes_desktop_to_darwin_bundle_on_darwin() -> None:
+    """The real packaged app should own the Darwin bundle metadata."""
+    native_build_inputs = expect_instance(
+        expect_binding(_override_attrs().values, "nativeBuildInputs").value,
+        IfExpression,
+    )
+    assert_nix_ast_equal(
+        native_build_inputs.condition,
+        "prev.stdenv.hostPlatform.isDarwin",
+    )
+    assert_nix_ast_equal(
+        native_build_inputs.consequence,
+        "prev.lib.remove prev.desktopToDarwinBundle oldAttrs.nativeBuildInputs",
+    )
+    assert_nix_ast_equal(native_build_inputs.alternative, "oldAttrs.nativeBuildInputs")
+
+
+def test_install_phase_installs_real_darwin_app_bundle_with_protocol_guard() -> None:
+    """Darwin should install GitHub Desktop's real bundle and validate schemes."""
+    install_phase = expect_instance(
+        expect_binding(_override_attrs().values, "installPhase").value,
+        IfExpression,
+    )
+    assert_nix_ast_equal(
+        install_phase.condition,
+        "prev.stdenv.hostPlatform.isDarwin",
+    )
+
+    darwin_body = expect_instance(install_phase.consequence, IndentedString).value
+    commands = command_texts(parse_shell(darwin_body))
+
+    assert "shopt -s nullglob" in commands
+    assert '[ "__NIX_INTERP__" -ne 1 ]' in commands
+    assert 'cp -R "__NIX_INTERP__" "$out/Applications/GitHub Desktop.app"' in commands
+    assert '__NIX_INTERP__ __NIX_INTERP__ "$info_plist"' in commands
+    assert (
+        'ln -s "$out/Applications/GitHub Desktop.app/Contents/MacOS/GitHub Desktop" "$out/bin/github-desktop"'
+        in commands
+    )
+    assert (
+        'install -Dm444 app/static/linux/icon-logo.png "$out/share/icons/hicolor/512x512/apps/github-desktop.png"'
+        in commands
+    )
+
+    searches, replacements, final_argument = _replace_strings_call_parts(
+        expect_instance(install_phase.alternative, FunctionCall)
+    )
 
     assert _string_items(searches) == [
-        "cp -r dist/*/resources $out/share/github-desktop",
         "ln -s $out/share/github-desktop/resources/app/static/icon-logo.png $out/share/icons/hicolor/512x512/apps/github-desktop.png",
     ]
     assert_nix_ast_equal(final_argument, "oldAttrs.installPhase")
 
-    commands = command_texts(
-        parse_shell(expect_instance(replacements.value[0], IndentedString).value)
-    )
-    assert 'cp -r "__NIX_INTERP__" "$out/share/github-desktop/resources"' in commands
-    assert 'cp -r dist/*/resources "$out/share/github-desktop"' in commands
-
-    assert expect_instance(replacements.value[1], StringPrimitive).value == (
+    assert expect_instance(replacements.value[0], StringPrimitive).value == (
         "install -Dm444 app/static/linux/icon-logo.png "
         "$out/share/icons/hicolor/512x512/apps/github-desktop.png"
     )

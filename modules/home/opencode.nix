@@ -1,4 +1,9 @@
-{ config, lib, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   inherit (lib)
     concatLists
@@ -13,6 +18,12 @@ let
 
   cfg = config.nixcfg.opencode;
   opencodeMcpLib = import ../../lib/opencode-mcp.nix { inherit lib; };
+  mcpRemote = import ../../lib/mcp-remote-wrapper.nix { inherit lib pkgs; };
+  phoneMcpWrapper = mcpRemote.mkMcpRemoteWrapper {
+    name = "phone-mcp";
+    tokenEnv = "PHONE_AGENT_API_KEY";
+    url = "https://phone.kote.fyi/mcp";
+  };
 
   mcpServerType = types.submodule {
     freeformType = types.attrsOf types.anything;
@@ -192,6 +203,20 @@ in
     mcpServers = mkOption {
       type = types.attrsOf mcpServerType;
       default = {
+        aws-knowledge = {
+          type = "remote";
+          url = "https://knowledge-mcp.global.api.aws";
+        };
+
+        aws-mcp = {
+          type = "local";
+          command = [
+            "uvx"
+            "mcp-proxy-for-aws@latest"
+            "https://aws-mcp.us-east-1.api.aws/mcp"
+          ];
+        };
+
         chrome-devtools = {
           enable = false;
           type = "local";
@@ -213,12 +238,35 @@ in
           ];
         };
 
+        firefox-devtools = {
+          type = "local";
+          command = [
+            "npx"
+            "-y"
+            "@padenot/firefox-devtools-mcp@latest"
+            "--firefoxPath=/Applications/Twilight.app/Contents/MacOS/zen"
+          ];
+        };
+
+        figma = {
+          type = "remote";
+          url = "https://mcp.figma.com/mcp";
+        };
+
         macos-automator = {
           type = "local";
           command = [
             "bunx"
             "--bun"
             "@steipete/macos-automator-mcp@latest"
+          ];
+        };
+
+        markitdown = {
+          type = "local";
+          command = [
+            "uvx"
+            "markitdown-mcp@0.0.1a4"
           ];
         };
 
@@ -229,6 +277,11 @@ in
             "--bun"
             "next-devtools-mcp@latest"
           ];
+        };
+
+        phone = {
+          type = "local";
+          command = [ "${phoneMcpWrapper}" ];
         };
       };
       description = "Base MCP server definitions written to the global OpenCode config; servers default to disabled and can be enabled on demand.";

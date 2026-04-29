@@ -199,7 +199,7 @@
       flake = false;
     };
     hwatch = {
-      url = "github:blacknon/hwatch/0.4.1";
+      url = "github:blacknon/hwatch/0.4.2";
       flake = false;
     };
     linear-cli = {
@@ -407,38 +407,7 @@
             pkgs:
             with treefmt-nix.lib;
             let
-              textHygieneScript = pkgs.writeText "format-text.py" ''
-                import sys
-                from pathlib import Path
-
-
-                def normalize_text(text: str, *, trim_trailing_whitespace: bool) -> str:
-                    normalized_lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-                    if trim_trailing_whitespace:
-                        normalized_lines = [line.rstrip(" \t") for line in normalized_lines]
-                    while normalized_lines and normalized_lines[-1] == "":
-                        normalized_lines.pop()
-                    if not normalized_lines:
-                        return ""
-                    return "\n".join(normalized_lines) + "\n"
-
-
-                def format_path(path: Path) -> None:
-                    with path.open(encoding="utf-8", newline=None) as file:
-                        original = file.read()
-                    normalized = normalize_text(
-                        original,
-                        trim_trailing_whitespace=path.suffix != ".patch",
-                    )
-                    if normalized == original:
-                        return
-                    with path.open("w", encoding="utf-8", newline="") as file:
-                        file.write(normalized)
-
-
-                for raw_path in sys.argv[1:]:
-                    format_path(Path(raw_path))
-              '';
+              textHygieneScript = ./lib/format_text.py;
               jsonlFormat = pkgs.writeShellScriptBin "format-jsonl" ''
                 set -euo pipefail
 

@@ -226,23 +226,10 @@ stdenv.mkDerivation {
         cp -R "$appDir" "$out/Applications/"
 
         install -d "$out/bin"
-        cat <<'EOF' > "$out/bin/emdash"
-        #!${stdenv.shell}
-        set -euo pipefail
-
-        app_root="@out@/Applications/Emdash.app/Contents/MacOS"
-
-        if [ -z "''${SSH_AUTH_SOCK:-}" ]; then
-          ssh_auth_sock="$(launchctl getenv SSH_AUTH_SOCK 2>/dev/null || true)"
-          if [ -n "$ssh_auth_sock" ]; then
-            export SSH_AUTH_SOCK="$ssh_auth_sock"
-          fi
-        fi
-
-        exec "$app_root/Emdash" "$@"
-        EOF
-        substituteInPlace "$out/bin/emdash" --replace-fail "@out@" "$out"
-        chmod +x "$out/bin/emdash"
+        install -m755 ${./launcher-darwin.sh} "$out/bin/emdash"
+        substituteInPlace "$out/bin/emdash" \
+          --replace-fail "#!/usr/bin/env bash" "#!${stdenv.shell}" \
+          --replace-fail "@out@" "$out"
 
         runHook postInstall
       ''
@@ -264,15 +251,10 @@ stdenv.mkDerivation {
         cp -R "$unpackedDir" "$out/share/emdash/"
 
         install -d "$out/bin"
-        cat <<'EOF' > "$out/bin/emdash"
-        #!${stdenv.shell}
-        set -euo pipefail
-
-        app_root="@out@/share/emdash/linux-unpacked"
-        exec "$app_root/emdash" "$@"
-        EOF
-        substituteInPlace "$out/bin/emdash" --replace-fail "@out@" "$out"
-        chmod +x "$out/bin/emdash"
+        install -m755 ${./launcher-linux.sh} "$out/bin/emdash"
+        substituteInPlace "$out/bin/emdash" \
+          --replace-fail "#!/usr/bin/env bash" "#!${stdenv.shell}" \
+          --replace-fail "@out@" "$out"
 
         runHook postInstall
       '';

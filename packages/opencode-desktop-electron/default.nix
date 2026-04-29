@@ -4,6 +4,7 @@
   electron_41,
   inputs,
   lib,
+  makeDesktopItem,
   models-dev,
   nodejs,
   opencode,
@@ -168,6 +169,16 @@ let
   ghosttyWebPin = opencodeOverlayDir + "/pin_ghostty_web_ref.py";
   hoistedOpentuiLinker = opencodeOverlayDir + "/link-hoisted-opentui-packages.sh";
   linuxAppDirName = "${pname}";
+  linuxDesktopItem = makeDesktopItem {
+    name = pname;
+    desktopName = appName;
+    comment = packageDescription;
+    exec = "${pname} %U";
+    icon = pname;
+    categories = [ "Development" ];
+    startupWMClass = appName;
+    mimeTypes = [ "x-scheme-handler/${appProtocolScheme}" ];
+  };
 in
 assert desktopPackageVersionCheck;
 assert electronRuntimeMajorCheck;
@@ -418,18 +429,9 @@ stdenv.mkDerivation {
             "$out/share/icons/hicolor/512x512/apps/${pname}.png"
         fi
 
-        cat > "$out/share/applications/${pname}.desktop" <<EOF
-        [Desktop Entry]
-        Name=${appName}
-        Comment=${packageDescription}
-        Exec=$out/bin/${pname} %U
-        Icon=${pname}
-        Terminal=false
-        Type=Application
-        Categories=Development;
-        StartupWMClass=${appName}
-        MimeType=x-scheme-handler/${appProtocolScheme};
-        EOF
+        install -Dm644 \
+          ${linuxDesktopItem}/share/applications/${pname}.desktop \
+          "$out/share/applications/${pname}.desktop"
 
         runHook postInstall
       '';

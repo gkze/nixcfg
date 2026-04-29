@@ -172,6 +172,39 @@ def test_shared_zed_module_keeps_nightly_package_wiring() -> None:
     )
 
 
+def test_shared_zed_module_uses_wrappers_for_shell_backed_mcp_servers() -> None:
+    """Do not embed bash command strings directly in Zed MCP server config."""
+    programs = expect_instance(
+        expect_binding(_zed_module_output().values, "programs").value,
+        AttributeSet,
+    )
+    zed_editor = expect_instance(
+        expect_binding(programs.values, "zed-editor").value,
+        AttributeSet,
+    )
+    user_settings = expect_instance(
+        expect_binding(zed_editor.values, "userSettings").value,
+        AttributeSet,
+    )
+    context_servers = expect_instance(
+        expect_binding(user_settings.values, "context_servers").value,
+        AttributeSet,
+    )
+
+    assert_nix_ast_equal(
+        expect_binding(context_servers.values, "github").value,
+        'disabledLocalMcp "${githubMcpWrapper}" [ ]',
+    )
+    assert_nix_ast_equal(
+        expect_binding(context_servers.values, "phone").value,
+        'disabledLocalMcp "${phoneMcpWrapper}" [ ]',
+    )
+    assert_nix_ast_equal(
+        expect_binding(context_servers.values, "render").value,
+        'disabledLocalMcp "${renderMcpWrapper}" [ ]',
+    )
+
+
 def test_registry_limits_zed_to_validated_primary_surfaces() -> None:
     """Keep Zed exports constrained to the currently validated Darwin/Linux outputs."""
     overrides = expect_instance(

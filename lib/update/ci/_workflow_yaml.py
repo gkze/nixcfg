@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -24,16 +24,16 @@ _YAML_1_2_BOOL_RE = re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$")
 class GitHubActionsYamlLoader(yaml.SafeLoader):
     """PyYAML loader adjusted to match GitHub Actions' YAML 1.2 booleans."""
 
-    yaml_implicit_resolvers: ClassVar[dict[object, list[tuple[object, object]]]] = {
-        key: list(value)
-        for key, value in yaml.SafeLoader.yaml_implicit_resolvers.items()
-    }
+
+cast("Any", GitHubActionsYamlLoader).yaml_implicit_resolvers = {
+    key: list(value) for key, value in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
 
 
 for first_char, resolvers in tuple(
-    GitHubActionsYamlLoader.yaml_implicit_resolvers.items()
+    cast("Any", GitHubActionsYamlLoader).yaml_implicit_resolvers.items()
 ):
-    GitHubActionsYamlLoader.yaml_implicit_resolvers[first_char] = [
+    cast("Any", GitHubActionsYamlLoader).yaml_implicit_resolvers[first_char] = [
         (tag, pattern) for tag, pattern in resolvers if tag != _YAML_BOOL_TAG
     ]
 GitHubActionsYamlLoader.add_implicit_resolver(

@@ -18,6 +18,7 @@ from lib.tests._nix_ast import (
     expect_scope_binding,
     parse_nix_expr,
 )
+from lib.tests._shell_ast import command_texts, parse_shell
 from lib.update.paths import REPO_ROOT
 
 
@@ -100,9 +101,14 @@ def test_t3code_desktop_package_keeps_staged_runtime_and_darwin_electron_zip() -
         "--app-name ${lib.escapeShellArg appName}",
         "--bundle-id ${lib.escapeShellArg appId}",
         "--url-scheme ${lib.escapeShellArg appProtocolScheme}",
-        'exec "$out/Applications/${appBundleName}/Contents/MacOS/${appName}" "$@"',
     ):
         assert snippet in install_phase.value
+    install_shell = parse_shell(install_phase.value)
+    assert command_texts(install_shell, "makeWrapper") == [
+        "makeWrapper \\\n"
+        '      "$out/Applications/__NIX_INTERP__/Contents/MacOS/__NIX_INTERP__" \\\n'
+        '      "$out/bin/__NIX_INTERP__"'
+    ]
     passthru = expect_instance(
         expect_binding(_desktop_derivation_args().values, "passthru").value,
         AttributeSet,

@@ -79,6 +79,7 @@ let
     if match != null then builtins.elemAt match 0 else null;
   bunWithFakeNode = stdenvNoCC.mkDerivation {
     name = "bun-with-fake-node";
+    nativeBuildInputs = [ makeWrapper ];
     dontUnpack = true;
     dontBuild = true;
 
@@ -93,11 +94,7 @@ let
         ln -s "$out/bin/bun" "$out/bin/$node_binary"
       done
 
-      cat > "$out/bin/npx" <<EOF
-      #!${stdenv.shell}
-      exec "$out/bin/bunx" "\$@"
-      EOF
-      chmod +x "$out/bin/npx"
+      makeWrapper "$out/bin/bunx" "$out/bin/npx"
     '';
   };
   bunCacheEntryCreator = stdenvNoCC.mkDerivation {

@@ -6,6 +6,7 @@
   bun,
   nodejs,
   makeWrapper,
+  makeDesktopItem,
   gnumake,
   git,
   python3,
@@ -81,6 +82,16 @@ let
       mkdir -p "$out"
       ln -s ${electronZip} "$out/electron-v${electronVersion}-${electronZipPlatform}.zip"
     '';
+  };
+  linuxDesktopItem = makeDesktopItem {
+    name = pname;
+    desktopName = "Mux";
+    genericName = "Agent Multiplexer";
+    comment = "Agent Multiplexer";
+    exec = "${pname} %U";
+    icon = pname;
+    categories = [ "Development" ];
+    startupWMClass = pname;
   };
   offlineCache = stdenvNoCC.mkDerivation {
     name = "${pname}-deps-${version}";
@@ -251,19 +262,9 @@ stdenv.mkDerivation {
           }"
 
         install -Dm644 public/icon.png "$out/share/icons/hicolor/512x512/apps/mux.png"
-        mkdir -p "$out/share/applications"
-        cat > "$out/share/applications/mux.desktop" <<'EOF'
-        [Desktop Entry]
-        Name=Mux
-        GenericName=Agent Multiplexer
-        Comment=Agent Multiplexer
-        Exec=$out/bin/mux %U
-        Icon=mux
-        Terminal=false
-        Type=Application
-        Categories=Development;
-        StartupWMClass=mux
-        EOF
+        install -Dm644 \
+          ${linuxDesktopItem}/share/applications/${pname}.desktop \
+          "$out/share/applications/${pname}.desktop"
 
         runHook postInstall
       '';

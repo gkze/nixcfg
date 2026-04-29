@@ -40,36 +40,6 @@
   };
 
   home = {
-    activation.injectZedGithubToken = lib.hm.dag.entryAfter [ "zedSettingsActivation" "sops-nix" ] ''
-      settings_path="${config.xdg.configHome}/zed/settings.json"
-      token_path="${config.sops.secrets.github_pat.path}"
-
-      # Inject the sops-managed GitHub token into Zed settings while avoiding
-      # partial writes when jq or the filesystem fails mid-update.
-      if [ ! -f "$settings_path" ]; then
-        echo "warning: skipping Zed GitHub token injection because $settings_path is missing" >&2
-      else
-        if [ ! -s "$token_path" ]; then
-          echo "missing GitHub token for Zed injection: $token_path" >&2
-          exit 1
-        fi
-
-        token="$(cat "$token_path")"
-        tmp_settings="$(mktemp "$settings_path.tmp.XXXXXX")"
-        chmod 600 "$tmp_settings"
-
-        if ! ${lib.getExe pkgs.jq} \
-          --arg token "$token" \
-          '.context_servers."mcp-server-github".settings.github_personal_access_token = $token' \
-          "$settings_path" > "$tmp_settings"
-        then
-          rm -f "$tmp_settings"
-          exit 1
-        fi
-
-        run mv "$tmp_settings" "$settings_path"
-      fi
-    '';
     activation.materializeVscodeSettings =
       let
         vscodeSettingsHomeFileKey = "${config.home.homeDirectory}/Library/Application Support/${config.programs.vscode.nameShort}/User/settings.json";

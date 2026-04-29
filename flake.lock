@@ -1241,16 +1241,16 @@
     "hwatch": {
       "flake": false,
       "locked": {
-        "lastModified": 1777092854,
-        "narHash": "sha256-kltt7+C1vebYGE7bebg7Pd0fuVITgnGkTWpmIpeHWXE=",
+        "lastModified": 1777450773,
+        "narHash": "sha256-PVPkvBoFPFCM6sYDT73NpeWM/Dxd9v6i6zkNtweo2RA=",
         "owner": "blacknon",
         "repo": "hwatch",
-        "rev": "0af1224a494c4fa3416d0ed26cebe4b5e5a4093d",
+        "rev": "635ca0611e6987d55febfb33e3cb9273cf5cd55e",
         "type": "github"
       },
       "original": {
         "owner": "blacknon",
-        "ref": "0.4.1",
+        "ref": "0.4.2",
         "repo": "hwatch",
         "type": "github"
       }
@@ -2374,11 +2374,11 @@
     "t3code": {
       "flake": false,
       "locked": {
-        "lastModified": 1777308619,
-        "narHash": "sha256-UR7HsnJq1RSiTMCi7LqVDQbx4IxmIC8aK67tqbqsv98=",
+        "lastModified": 1777485736,
+        "narHash": "sha256-u5QTAmNG9Wv+Z/rxgDDqSDt1MI3TQYfkQZq2DWFWGzU=",
         "owner": "pingdotgg",
         "repo": "t3code",
-        "rev": "dbebc387dd458dd7062380ccb862a5cdac7aba66",
+        "rev": "35822884d19ba64c6529d7736fb0182b361f3e4c",
         "type": "github"
       },
       "original": {

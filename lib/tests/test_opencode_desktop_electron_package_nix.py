@@ -167,6 +167,32 @@ def test_opencode_desktop_electron_node_modules_derivation_tracks_platform_hashe
     assert "find . -type d -name node_modules" not in install_phase.value
 
 
+def test_opencode_desktop_electron_linux_desktop_item_is_structured() -> None:
+    """Linux desktop metadata should be declared as data, not heredoc text."""
+    desktop_item = expect_instance(
+        expect_scope_binding(_package_assertion(), "linuxDesktopItem").value,
+        FunctionCall,
+    )
+    desktop_item_args = expect_instance(desktop_item.argument, AttributeSet)
+
+    assert_nix_ast_equal(desktop_item.name, "makeDesktopItem")
+    assert_nix_ast_equal(
+        expect_binding(desktop_item_args.values, "name").value, "pname"
+    )
+    assert_nix_ast_equal(
+        expect_binding(desktop_item_args.values, "desktopName").value,
+        "appName",
+    )
+    assert_nix_ast_equal(
+        expect_binding(desktop_item_args.values, "exec").value,
+        '"${pname} %U"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(desktop_item_args.values, "mimeTypes").value,
+        '[ "x-scheme-handler/${appProtocolScheme}" ]',
+    )
+
+
 def test_opencode_desktop_electron_derivation_keeps_platform_branches() -> None:
     """Build, install, and install-check phases should stay platform-conditional."""
     derivation_args = _derivation_args()

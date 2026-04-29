@@ -125,6 +125,57 @@ def test_patch_apple_toolchain_main_guard_runs(
     assert exc.value.code == 0
 
 
+def test_patch_build_rs_prebuilt_script_success_and_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Patch build.rs prebuilt handling and reject invalid inputs."""
+    namespace = _load_script("patch_build_rs_prebuilt.py")
+    target = tmp_path / "build.rs"
+    target.write_text(
+        f"prefix\n{namespace['_ENV_NEEDLE']}\n{namespace['_PREBUILT_NEEDLE']}suffix\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(sys, "argv", ["patch_build_rs_prebuilt.py", str(target)])
+    assert _main(namespace)() == 0
+    patched = target.read_text(encoding="utf-8")
+    assert "RUSTY_V8_PREBUILT_GN_OUT" in patched
+    assert "build_binding();" in patched
+
+    monkeypatch.setattr(sys, "argv", ["patch_build_rs_prebuilt.py"])
+    with pytest.raises(SystemExit, match="usage: patch_build_rs_prebuilt.py"):
+        _main(namespace)()
+
+    target.write_text("no env anchor\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["patch_build_rs_prebuilt.py", str(target)])
+    with pytest.raises(SystemExit, match="RUSTY_V8_SRC_BINDING_PATH"):
+        _main(namespace)()
+
+    target.write_text(str(namespace["_ENV_NEEDLE"]), encoding="utf-8")
+    with pytest.raises(SystemExit, match="prebuilt V8 branch"):
+        _main(namespace)()
+
+
+def test_patch_build_rs_prebuilt_main_guard_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Execute the build.rs prebuilt patch helper through its CLI entrypoint."""
+    script_path = _scripts_dir() / "patch_build_rs_prebuilt.py"
+    namespace = _load_script(script_path.name)
+    target = tmp_path / "build.rs"
+    target.write_text(
+        f"{namespace['_ENV_NEEDLE']}{namespace['_PREBUILT_NEEDLE']}",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(sys, "argv", [str(script_path), str(target)])
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(str(script_path), run_name="__main__")
+    assert exc.value.code == 0
+
+
 def test_patch_whole_archive_script_success_and_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

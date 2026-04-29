@@ -54,14 +54,10 @@ symlinkJoin {
       mkCompletionScript =
         shell:
         runCommand "nixcfg-completion-${shell}" { } ''
-          ${venv}/bin/python -c "
-          from typer._completion_shared import get_completion_script
-          print(get_completion_script(
-              prog_name='nixcfg',
-              complete_var='_NIXCFG_COMPLETE',
-              shell='${shell}',
-          ))
-          " > $out
+          ${venv}/bin/python \
+            ${./nixcfg/render_completion.py} \
+            ${lib.escapeShellArg shell} \
+            > $out
         '';
     in
     ''

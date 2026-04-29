@@ -170,7 +170,8 @@ def resolve_config(**overrides: Unpack[_ResolveConfigOverrides]) -> UpdateConfig
     """Build an UpdateConfig by merging explicit overrides onto env defaults."""
     settings_data = default_settings().model_dump()
 
-    normalized_overrides = _normalize_platform_override_names(dict(overrides))
+    override_values = dict(overrides.items())
+    normalized_overrides = _normalize_platform_override_names(override_values)
 
     for setting_name, value in normalized_overrides.items():
         if value is not None:

@@ -24,6 +24,12 @@ in
             prev.curl
           ];
 
+      nativeBuildInputs =
+        if prev.stdenv.hostPlatform.isDarwin then
+          prev.lib.remove prev.desktopToDarwinBundle oldAttrs.nativeBuildInputs
+        else
+          oldAttrs.nativeBuildInputs;
+
       cacheRoot = prev.fetchYarnDeps {
         name = "${finalAttrs.pname}-cache-root";
         yarnLock = finalAttrs.src + "/yarn.lock";
@@ -74,22 +80,37 @@ in
           oldAttrs.postConfigure;
 
       installPhase =
-        prev.lib.replaceStrings
-          [
-            "cp -r dist/*/resources $out/share/github-desktop"
-            "ln -s $out/share/github-desktop/resources/app/static/icon-logo.png $out/share/icons/hicolor/512x512/apps/github-desktop.png"
-          ]
-          [
-            ''
-              packaged_resources=(dist/*/*.app/Contents/Resources)
-              if [ -d "''${packaged_resources[0]}" ]; then
-                cp -r "''${packaged_resources[0]}" "$out/share/github-desktop/resources"
-              else
-                cp -r dist/*/resources "$out/share/github-desktop"
-              fi''
-            "install -Dm444 app/static/linux/icon-logo.png $out/share/icons/hicolor/512x512/apps/github-desktop.png"
-          ]
-          oldAttrs.installPhase;
+        if prev.stdenv.hostPlatform.isDarwin then
+          ''
+            runHook preInstall
+
+            shopt -s nullglob
+            packaged_apps=(dist/*/*.app)
+            if [ "''${#packaged_apps[@]}" -ne 1 ]; then
+              printf 'expected exactly one packaged GitHub Desktop app, found %s\n' "''${#packaged_apps[@]}" >&2
+              exit 1
+            fi
+
+            mkdir -p "$out/Applications" "$out/bin"
+            cp -R "''${packaged_apps[0]}" "$out/Applications/GitHub Desktop.app"
+
+            info_plist="$out/Applications/GitHub Desktop.app/Contents/Info.plist"
+            ${prev.lib.getExe prev.python3} ${./validate_info_plist.py} "$info_plist"
+
+            ln -s "$out/Applications/GitHub Desktop.app/Contents/MacOS/GitHub Desktop" "$out/bin/github-desktop"
+            install -Dm444 app/static/linux/icon-logo.png "$out/share/icons/hicolor/512x512/apps/github-desktop.png"
+
+            runHook postInstall
+          ''
+        else
+          prev.lib.replaceStrings
+            [
+              "ln -s $out/share/github-desktop/resources/app/static/icon-logo.png $out/share/icons/hicolor/512x512/apps/github-desktop.png"
+            ]
+            [
+              "install -Dm444 app/static/linux/icon-logo.png $out/share/icons/hicolor/512x512/apps/github-desktop.png"
+            ]
+            oldAttrs.installPhase;
 
       preBuild = ''
         export CIRCLE_SHA1="${srcRev}"

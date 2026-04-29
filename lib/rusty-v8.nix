@@ -124,26 +124,8 @@
             python ${patchScriptsDir}/patch_apple_toolchain_host_build_tools.py \
               $out/build/toolchain/apple/toolchain.gni
 
-            python - <<PY
-            from pathlib import Path
-
-            path = Path("$out/build.rs")
-            text = path.read_text()
-
-            old_envs = '    "RUSTY_V8_SRC_BINDING_PATH",\n'
-            new_envs = '    "RUSTY_V8_SRC_BINDING_PATH",\n    "RUSTY_V8_PREBUILT_GN_OUT",\n'
-            if old_envs not in text:
-                raise SystemExit("expected RUSTY_V8_SRC_BINDING_PATH env list entry not found")
-            text = text.replace(old_envs, new_envs, 1)
-
-            old_prebuilt = '  print_prebuilt_src_binding_path();\n\n  download_static_lib_binaries();\n'
-            new_prebuilt = """  if let Ok(prebuilt_gn_out) = env::var(\"RUSTY_V8_PREBUILT_GN_OUT\") {\n    let prebuilt_gn_out = PathBuf::from(prebuilt_gn_out);\n    let local_gn_out = build_dir().join(\"gn_out\");\n    fs::create_dir_all(&local_gn_out).unwrap();\n    fs::copy(prebuilt_gn_out.join(\"project.json\"), local_gn_out.join(\"project.json\")).unwrap();\n    if let Ok(args_gn) = fs::read(prebuilt_gn_out.join(\"args.gn\")) {\n      fs::write(local_gn_out.join(\"args.gn\"), args_gn).unwrap();\n    }\n    build_binding();\n  } else {\n    print_prebuilt_src_binding_path();\n  }\n\n  download_static_lib_binaries();\n"""
-            if old_prebuilt not in text:
-                raise SystemExit("expected prebuilt V8 branch not found")
-            text = text.replace(old_prebuilt, new_prebuilt, 1)
-
-            path.write_text(text)
-            PY
+            python ${patchScriptsDir}/patch_build_rs_prebuilt.py \
+              $out/build.rs
 
             ${extraPatchCommands}
 

@@ -13,37 +13,12 @@ let
 
   cfg = config.profiles.work;
   opencodeMcpLib = import ../../lib/opencode-mcp.nix { inherit lib; };
+  mcpRemote = import ../../lib/mcp-remote-wrapper.nix { inherit lib pkgs; };
   workProfileSkeleton = import ../_profiles-work-skeleton.nix {
     enableDescription = "work profile — adds work packages, MCP servers, and shell integrations";
   };
 
-  bunxExe = pkgs.lib.getExe' pkgs.bun "bunx";
-
-  mkMcpRemoteWrapper =
-    {
-      name,
-      tokenCommand,
-      url,
-      extraHeaders ? [ ],
-    }:
-    pkgs.writeShellScript name ''
-      set -euo pipefail
-
-      token="$(${tokenCommand})"
-      if [ -z "$token" ]; then
-        echo ${lib.escapeShellArg "${name}: token lookup returned empty output"} >&2
-        exit 1
-      fi
-
-      args=(
-        "${url}"
-        --header "Authorization: Bearer $token"
-      )
-      ${lib.concatMapStringsSep "\n      " (
-        header: "args+=(--header ${lib.escapeShellArg header})"
-      ) extraHeaders}
-      exec ${bunxExe} --bun mcp-remote@latest "''${args[@]}"
-    '';
+  inherit (mcpRemote) bunxExe mkMcpRemoteWrapper;
 
   # GitHub MCP wrapper that reads PAT from sops secret and calls remote server.
   # This stays in the shared home module because it only depends on repo-managed
@@ -104,6 +79,10 @@ let
     clerk = {
       type = "remote";
       url = "https://mcp.clerk.com/mcp";
+    };
+    supabase = {
+      type = "remote";
+      url = "https://mcp.supabase.com/mcp?project_ref=xfgralojsgvvibogtjxo";
     };
     # GitHub MCP (remote via mcp-remote proxy) - uses PAT from sops secret
     # Toolsets: repos, pull_requests, actions

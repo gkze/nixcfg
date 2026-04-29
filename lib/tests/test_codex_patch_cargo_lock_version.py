@@ -20,6 +20,13 @@ def _load_helper() -> ModuleType:
     )
 
 
+def _load_allocator_helper() -> ModuleType:
+    return load_module_from_path(
+        REPO_ROOT / "packages/codex/patch_allocator_weak_linkage.py",
+        "_codex_patch_allocator_weak_linkage",
+    )
+
+
 def test_patch_lockfile_updates_only_local_placeholder_versions(tmp_path: Path) -> None:
     """Only source-less 0.0.0 packages should be rewritten."""
     helper = _load_helper()
@@ -106,3 +113,48 @@ def test_main_guard_exits_with_main_result(
 
     assert excinfo.value.code == 0
     assert 'version = "3.4.5"' in lock_file.read_text(encoding="utf-8")
+
+
+def test_patch_allocator_removes_weak_linkage_attrs(tmp_path: Path) -> None:
+    """The allocator helper should remove weak linkage attributes in place."""
+    helper = _load_allocator_helper()
+    allocator = tmp_path / "lib.rs"
+    allocator.write_text(
+        '#[linkage = "weak"]\n'
+        'pub extern "C" fn __rust_alloc() {}\n'
+        '#[linkage = "weak"]\n'
+        'pub extern "C" fn __rust_dealloc() {}\n',
+        encoding="utf-8",
+    )
+
+    helper.patch_allocator(allocator)
+
+    patched = allocator.read_text(encoding="utf-8")
+    assert '#[linkage = "weak"]' not in patched
+    assert "__rust_alloc" in patched
+    assert "__rust_dealloc" in patched
+
+
+def test_patch_allocator_main_rejects_invalid_argument_count() -> None:
+    """The allocator CLI should require exactly one path argument."""
+    helper = _load_allocator_helper()
+
+    with pytest.raises(SystemExit, match="usage: patch_allocator_weak_linkage.py"):
+        helper.main([])
+
+
+def test_patch_allocator_main_guard_exits_with_main_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Executing the allocator helper as __main__ should raise SystemExit(main())."""
+    allocator = tmp_path / "lib.rs"
+    allocator.write_text('#[linkage = "weak"]\nfn shim() {}\n', encoding="utf-8")
+    script_path = REPO_ROOT / "packages/codex/patch_allocator_weak_linkage.py"
+    monkeypatch.setattr("sys.argv", [str(script_path), str(allocator)])
+
+    with pytest.raises(SystemExit) as excinfo:
+        runpy.run_path(str(script_path), run_name="__main__")
+
+    assert excinfo.value.code == 0
+    assert '#[linkage = "weak"]' not in allocator.read_text(encoding="utf-8")

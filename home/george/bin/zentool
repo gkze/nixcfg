@@ -1213,18 +1213,20 @@ def _coerce_authored_workspace(name: str, value: object) -> AuthoredWorkspace:
         msg = f"workspace {name!r} theme must be a mapping"
         raise ZenFoldersError(msg)
 
-    return AuthoredWorkspace(
-        name=name,
-        icon=cast("str | None", value_map.get("icon")),
-        container=cast("str | None", value_map.get("container")),
-        has_collapsed_pinned_tabs=_optional_bool_field(
-            value_map,
-            "hasCollapsedPinnedTabs",
-            default=False,
-            label=f"workspace {name!r}",
-        ),
-        theme=ThemeSpec.model_validate(theme_raw),
-        tree=tree,
+    return AuthoredWorkspace.model_validate(
+        {
+            "name": name,
+            "icon": cast("str | None", value_map.get("icon")),
+            "container": cast("str | None", value_map.get("container")),
+            "has_collapsed_pinned_tabs": _optional_bool_field(
+                value_map,
+                "hasCollapsedPinnedTabs",
+                default=False,
+                label=f"workspace {name!r}",
+            ),
+            "theme": ThemeSpec.model_validate(theme_raw),
+            "tree": tree,
+        },
     )
 
 
@@ -1249,15 +1251,17 @@ def _authored_workspace_to_spec(name: str, value: object) -> WorkspaceSpec:
         else:
             items.append(ItemTabSpec(name=node.name, url=node.url))
 
-    return WorkspaceSpec(
-        name=workspace.name,
-        icon=workspace.icon,
-        container=workspace.container,
-        has_collapsed_pinned_tabs=workspace.has_collapsed_pinned_tabs,
-        theme=workspace.theme,
-        essentials=essentials,
-        items=items,
-        tabs=tabs,
+    return WorkspaceSpec.model_validate(
+        {
+            "name": workspace.name,
+            "icon": workspace.icon,
+            "container": workspace.container,
+            "has_collapsed_pinned_tabs": workspace.has_collapsed_pinned_tabs,
+            "theme": workspace.theme,
+            "essentials": essentials,
+            "items": items,
+            "tabs": tabs,
+        },
     )
 
 
@@ -1871,27 +1875,29 @@ def build_placeholder_tab(
     user_context_id: int,
 ) -> SessionTab:
     """Build the hidden empty tab Zen uses for empty folders."""
-    return SessionTab(
-        entries=[],
-        index=1,
-        last_accessed=0,
-        hidden=False,
-        pinned=True,
-        zen_workspace=workspace_uuid,
-        zenSyncId=sync_id,
-        zen_essential=False,
-        zen_default_user_context_id="true" if user_context_id else None,
-        zen_pinned_icon=None,
-        zen_is_empty=True,
-        zen_static_label=None,
-        zen_has_static_icon=False,
-        zen_glance_id=None,
-        zen_is_glance=False,
-        zen_live_folder_item_id=None,
-        search_mode=None,
-        user_context_id=user_context_id,
-        group_id=folder_id,
-        attributes={},
+    return SessionTab.model_validate(
+        {
+            "entries": [],
+            "index": 1,
+            "last_accessed": 0,
+            "hidden": False,
+            "pinned": True,
+            "zen_workspace": workspace_uuid,
+            "zen_sync_id": sync_id,
+            "zen_essential": False,
+            "zen_default_user_context_id": "true" if user_context_id else None,
+            "zen_pinned_icon": None,
+            "zen_is_empty": True,
+            "zen_static_label": None,
+            "zen_has_static_icon": False,
+            "zen_glance_id": None,
+            "zen_is_glance": False,
+            "zen_live_folder_item_id": None,
+            "search_mode": None,
+            "user_context_id": user_context_id,
+            "group_id": folder_id,
+            "attributes": {},
+        },
     )
 
 
@@ -2148,13 +2154,15 @@ def build_desired_containers(
         )
 
         desired_identities.append(
-            ContainerIdentity(
-                userContextId=context_id,
-                public=spec.public,
-                icon=spec.icon,
-                color=spec.color,
-                name=spec.name or spec.key,
-                access_key=spec.access_key,
+            ContainerIdentity.model_validate(
+                {
+                    "user_context_id": context_id,
+                    "public": spec.public,
+                    "icon": spec.icon,
+                    "color": spec.color,
+                    "name": spec.name or spec.key,
+                    "access_key": spec.access_key,
+                },
             )
         )
         context_ids_by_key[_container_key(spec.key)] = context_id
@@ -2893,13 +2901,15 @@ def _container_specs_from_state(
             continue
         key = identity_display_name(identity)
         specs.append(
-            ContainerSpec(
-                key=key,
-                name=key,
-                icon=identity.icon or "fingerprint",
-                color=identity.color or "blue",
-                public=identity.public,
-                access_key=identity.access_key,
+            ContainerSpec.model_validate(
+                {
+                    "key": key,
+                    "name": key,
+                    "icon": identity.icon or "fingerprint",
+                    "color": identity.color or "blue",
+                    "public": identity.public,
+                    "access_key": identity.access_key,
+                },
             )
         )
         keys_by_id[context_id] = key
@@ -2943,15 +2953,17 @@ def export_config(
         ]
 
         workspaces.append(
-            WorkspaceSpec(
-                name=space.name,
-                icon=space.icon,
-                container=container_keys_by_id.get(space.container_tab_id),
-                has_collapsed_pinned_tabs=space.has_collapsed_pinned_tabs,
-                theme=ThemeSpec.model_validate(space.theme.model_dump()),
-                essentials=workspace_essentials,
-                items=workspace_items,
-                tabs=workspace_tabs,
+            WorkspaceSpec.model_validate(
+                {
+                    "name": space.name,
+                    "icon": space.icon,
+                    "container": container_keys_by_id.get(space.container_tab_id),
+                    "has_collapsed_pinned_tabs": space.has_collapsed_pinned_tabs,
+                    "theme": ThemeSpec.model_validate(space.theme.model_dump()),
+                    "essentials": workspace_essentials,
+                    "items": workspace_items,
+                    "tabs": workspace_tabs,
+                },
             )
         )
     return ZenConfig(

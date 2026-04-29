@@ -4,6 +4,7 @@
   fetchurl,
   inputs,
   lib,
+  makeWrapper,
   nodejs,
   outputs,
   python3,
@@ -143,6 +144,7 @@ stdenv.mkDerivation {
 
   nativeBuildInputs = [
     bun
+    makeWrapper
     nodejs
     python3
   ];
@@ -213,11 +215,9 @@ stdenv.mkDerivation {
       --icon-file icon.icns \
       --url-scheme ${lib.escapeShellArg appProtocolScheme}
 
-    cat > "$out/bin/${pname}" <<EOF
-    #!${stdenv.shell}
-    exec "$out/Applications/${appBundleName}/Contents/MacOS/${appName}" "$@"
-    EOF
-    chmod +x "$out/bin/${pname}"
+    makeWrapper \
+      "$out/Applications/${appBundleName}/Contents/MacOS/${appName}" \
+      "$out/bin/${pname}"
 
     runHook postInstall
   '';

@@ -108,12 +108,22 @@ def _profiles_fragment_expr(start_marker: str, end_marker: str):
 
 
 @cache
+def _mcp_remote_wrapper_module() -> FunctionDefinition:
+    """Return the shared MCP remote-wrapper helper function."""
+    return expect_instance(
+        parse_nix_expr(
+            Path(REPO_ROOT / "lib/mcp-remote-wrapper.nix").read_text(encoding="utf-8")
+        ),
+        FunctionDefinition,
+    )
+
+
+@cache
 def _mk_mcp_remote_wrapper_expr() -> FunctionDefinition:
     return expect_instance(
-        _profiles_fragment_expr(
-            "  mkMcpRemoteWrapper =\n",
-            "\n\n  # GitHub MCP wrapper",
-        ),
+        expect_scope_binding(
+            _mcp_remote_wrapper_module().output, "mkMcpRemoteWrapper"
+        ).value,
         FunctionDefinition,
     )
 
@@ -331,8 +341,11 @@ def _eval_opencode_value(
             }),
         ])
     }
-    if special_args is not None:
-        module_args["specialArgs"] = special_args
+    module_args["specialArgs"] = (
+        special_args
+        if special_args is not None
+        else nix_attrset({"pkgs": Identifier(name="pkgs")})
+    )
 
     bindings: dict[str, object] = {
         "lib": nixpkgs_lib_expression(),
@@ -341,8 +354,7 @@ def _eval_opencode_value(
             argument=nix_attrset(module_args),
         ),
     }
-    if pkgs_expr is not None:
-        bindings["pkgs"] = pkgs_expr
+    bindings["pkgs"] = pkgs_expr if pkgs_expr is not None else _stub_work_profile_pkgs()
 
     return nix_eval_json(nix_let(bindings, value))
 

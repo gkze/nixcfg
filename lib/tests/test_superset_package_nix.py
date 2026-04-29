@@ -18,6 +18,7 @@ from lib.tests._nix_ast import (
     expect_scope_binding,
     parse_nix_expr,
 )
+from lib.tests._shell_ast import command_texts, parse_shell
 from lib.update.paths import REPO_ROOT
 
 
@@ -53,14 +54,23 @@ def test_superset_fake_node_shim_routes_npx_through_bunx() -> None:
     bun_with_fake_node_args = expect_instance(bun_with_fake_node.argument, AttributeSet)
 
     assert_nix_ast_equal(bun_with_fake_node.name, "stdenvNoCC.mkDerivation")
+    assert_nix_ast_equal(
+        expect_binding(bun_with_fake_node_args.values, "nativeBuildInputs").value,
+        "[ makeWrapper ]",
+    )
     install_phase = expect_instance(
         expect_binding(bun_with_fake_node_args.values, "installPhase").value,
         IndentedString,
     )
 
-    assert "for node_binary in node npm bunx; do" in install_phase.value
-    assert 'cat > "$out/bin/npx" <<EOF' in install_phase.value
-    assert 'exec "$out/bin/bunx" "\\$@"' in install_phase.value
+    install_shell = parse_shell(install_phase.value)
+    assert any(
+        text == 'ln -s "$out/bin/bun" "$out/bin/$node_binary"'
+        for text in command_texts(install_shell, "ln")
+    )
+    assert command_texts(install_shell, "makeWrapper") == [
+        'makeWrapper "$out/bin/bunx" "$out/bin/npx"'
+    ]
 
 
 def test_superset_darwin_build_phase_uses_explicit_unsigned_packaging_flags() -> None:
