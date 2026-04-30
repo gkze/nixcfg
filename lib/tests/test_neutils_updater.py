@@ -252,6 +252,68 @@ def test_render_build_zig_zon_nix_surfaces_zon2nix_failure(
         )
 
 
+def test_render_build_zig_zon_nix_retries_transient_zon2nix_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry transient Zig package fetch failures before surfacing the artifact."""
+    module = _load_module("neutils_updater_test_render_retry")
+    updater = module.NeutilsUpdater()
+    command_calls: list[list[str]] = []
+    sleep_delays: list[float] = []
+
+    async def _fetch_url(*_args, **_kwargs):
+        return _build_archive()
+
+    async def _resolve(_installable: str):
+        yield UpdateEvent.value(updater.name, "/nix/store/tool")
+
+    async def _run_command(args: list[str], *, options):
+        _ = options
+        command_calls.append(args)
+        if len(command_calls) == 1:
+            yield UpdateEvent.value(
+                updater.name,
+                CommandResult(
+                    args=args,
+                    returncode=1,
+                    stdout="",
+                    stderr="err(default): NameServerFailure",
+                ),
+            )
+            return
+        output_arg = next(arg for arg in args if arg.startswith("--nix="))
+        Path(output_arg.removeprefix("--nix=")).write_text(
+            "# rendered after retry\n", encoding="utf-8"
+        )
+        yield UpdateEvent.value(
+            updater.name,
+            CommandResult(args=args, returncode=0, stdout="ok", stderr=""),
+        )
+
+    async def _sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(module, "get_current_nix_platform", lambda: "aarch64-darwin")
+    monkeypatch.setattr(module, "get_repo_file", lambda _path: Path("/repo/root"))
+    monkeypatch.setattr(updater, "_resolve_installable_path", _resolve)
+    monkeypatch.setattr(module, "run_command", _run_command)
+    monkeypatch.setattr(module.asyncio, "sleep", _sleep)
+
+    events = _run(
+        _collect_events(
+            updater._render_build_zig_zon_nix(VersionInfo(version="0.7.2"), object())
+        )
+    )
+
+    assert len(command_calls) == 2
+    assert sleep_delays == [updater.config.default_retry_backoff]
+    assert [
+        event.message for event in events if event.kind is UpdateEventKind.STATUS
+    ] == ["zon2nix hit a transient fetch failure; retrying..."]
+    assert events[-1].payload == "# rendered after retry\n"
+
+
 def test_render_build_zig_zon_nix_yields_tool_resolution_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

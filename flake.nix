@@ -408,6 +408,9 @@
             with treefmt-nix.lib;
             let
               textHygieneScript = ./lib/format_text.py;
+              textHygieneFormat = pkgs.writeShellScriptBin "format-text-hygiene" ''
+                exec ${lib.getExe pkgs.python3} ${textHygieneScript} "$@"
+              '';
               jsonlFormat = pkgs.writeShellScriptBin "format-jsonl" ''
                 set -euo pipefail
 
@@ -576,8 +579,7 @@
                         includes = lintFiles.twilightAutoconfig.globs;
                       };
                       "text-hygiene" = {
-                        command = lib.getExe pkgs.python3;
-                        options = [ (toString textHygieneScript) ];
+                        command = lib.getExe textHygieneFormat;
                         includes = lintFiles.text.globs;
                       };
                     };

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from lib.nix.models.sources import HashEntry, SourceHashes
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
+    CommandResult,
     EventStream,
     UpdateEvent,
     ValueDrain,
@@ -55,6 +56,15 @@ class NeutilsUpdater(GitHubReleaseUpdater):
 
     _ZON2NIX_COMMIT = "0ece5ed15107ecafbb121ad46aa85413dd40ff03"
     _ZON2NIX_FLAKE = f"github:jcollie/zon2nix/{_ZON2NIX_COMMIT}#zon2nix"
+    _ZON2NIX_MAX_ATTEMPTS = 3
+    _ZON2NIX_TRANSIENT_MARKERS: ClassVar[tuple[str, ...]] = (
+        "502 Bad Gateway",
+        "Could not resolve host",
+        "NameServerFailure",
+        "Temporary failure in name resolution",
+        "connection reset",
+        "timed out",
+    )
 
     @staticmethod
     def _src_expr(version: str) -> str:
@@ -115,6 +125,69 @@ class NeutilsUpdater(GitHubReleaseUpdater):
             raise RuntimeError(msg)
         yield UpdateEvent.value(self.name, out_paths[-1])
 
+    @classmethod
+    def _is_transient_zon2nix_failure(cls, result: CommandResult) -> bool:
+        output = f"{result.stderr}\n{result.stdout}".casefold()
+        return any(
+            marker.casefold() in output for marker in cls._ZON2NIX_TRANSIENT_MARKERS
+        )
+
+    async def _run_zon2nix(
+        self,
+        *,
+        zon2nix_path: str,
+        build_zig_zon: Path,
+        output_path: Path,
+        env: dict[str, str],
+    ) -> EventStream:
+        command = [
+            str(Path(zon2nix_path) / "bin" / "zon2nix"),
+            f"--nix={output_path}",
+            str(build_zig_zon),
+        ]
+        for attempt in range(1, self._ZON2NIX_MAX_ATTEMPTS + 1):
+            await asyncio.to_thread(output_path.unlink, missing_ok=True)
+            zon2nix_result_drain = ValueDrain()
+            async for event in drain_value_events(
+                run_command(
+                    command,
+                    options=RunCommandOptions(
+                        source=self.name,
+                        error="zon2nix did not return output",
+                        env=env,
+                        config=self.config,
+                    ),
+                ),
+                zon2nix_result_drain,
+                parse=expect_command_result,
+            ):
+                yield event
+            zon2nix_result = require_value(
+                zon2nix_result_drain,
+                "Missing zon2nix command result",
+            )
+            if zon2nix_result.returncode == 0:
+                return
+
+            message = (
+                zon2nix_result.stderr.strip()
+                or zon2nix_result.stdout.strip()
+                or "zon2nix failed"
+            )
+            if (
+                attempt < self._ZON2NIX_MAX_ATTEMPTS
+                and self._is_transient_zon2nix_failure(zon2nix_result)
+            ):
+                yield UpdateEvent.status(
+                    self.name,
+                    "zon2nix hit a transient fetch failure; retrying...",
+                    operation="compute_hash",
+                    detail=f"attempt {attempt + 1}/{self._ZON2NIX_MAX_ATTEMPTS}",
+                )
+                await asyncio.sleep(max(0.0, self.config.default_retry_backoff))
+                continue
+            raise RuntimeError(message)
+
     async def _render_build_zig_zon_nix(
         self,
         info: VersionInfo,
@@ -171,36 +244,13 @@ class NeutilsUpdater(GitHubReleaseUpdater):
             await asyncio.to_thread(home_dir.mkdir, parents=True, exist_ok=True)
             await asyncio.to_thread(cache_dir.mkdir, parents=True, exist_ok=True)
 
-            zon2nix_result_drain = ValueDrain()
-            async for event in drain_value_events(
-                run_command(
-                    [
-                        str(Path(zon2nix_path) / "bin" / "zon2nix"),
-                        f"--nix={output_path}",
-                        str(build_zig_zon),
-                    ],
-                    options=RunCommandOptions(
-                        source=self.name,
-                        error="zon2nix did not return output",
-                        env=env,
-                        config=self.config,
-                    ),
-                ),
-                zon2nix_result_drain,
-                parse=expect_command_result,
+            async for event in self._run_zon2nix(
+                zon2nix_path=zon2nix_path,
+                build_zig_zon=build_zig_zon,
+                output_path=output_path,
+                env=env,
             ):
                 yield event
-            zon2nix_result = require_value(
-                zon2nix_result_drain,
-                "Missing zon2nix command result",
-            )
-            if zon2nix_result.returncode != 0:
-                msg = (
-                    zon2nix_result.stderr.strip()
-                    or zon2nix_result.stdout.strip()
-                    or "zon2nix failed"
-                )
-                raise RuntimeError(msg)
 
             rendered = await asyncio.to_thread(output_path.read_text, encoding="utf-8")
         yield UpdateEvent.value(self.name, rendered)
