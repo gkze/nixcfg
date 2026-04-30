@@ -2184,16 +2184,6 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "vercel" = rec {
-      packageId = "vercel";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "vercel";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
     "vim" = rec {
       packageId = "vim";
       build = internal.buildRustCrateWithFeatures {
@@ -36626,11 +36616,6 @@ rec {
             packageId = "util";
           }
           {
-            name = "vercel";
-            packageId = "vercel";
-            features = [ "schemars" ];
-          }
-          {
             name = "x_ai";
             packageId = "x_ai";
             features = [ "schemars" ];
@@ -70828,39 +70813,6 @@ rec {
           "Jim McGrath <jimmc2@gmail.com>"
         ];
 
-      };
-      "vercel" = rec {
-        crateName = "vercel";
-        version = "0.1.0";
-        edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/vercel"; };
-        libPath = "src/vercel.rs";
-        dependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-          }
-          {
-            name = "schemars";
-            packageId = "schemars 1.0.4";
-            optional = true;
-            features = [ "indexmap2" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "strum";
-            packageId = "strum 0.27.2";
-            features = [ "derive" ];
-          }
-        ];
-        features = {
-          "schemars" = [ "dep:schemars" ];
-        };
-        resolvedDefaultFeatures = [ "default" "schemars" ];
       };
       "version-compare" = rec {
         crateName = "version-compare";

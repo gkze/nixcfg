@@ -3874,6 +3874,10 @@
     url = "https://registry.npmjs.org/@tanstack/db-ivm/-/db-ivm-0.1.18.tgz";
     hash = "sha512-+pZJiRKdoKRM5Epq9T7otD9ZJl82pRFauo7LKuJGrarjVKQ7r+QQlPe3kGdN9LEKSnuNGIWjX9OOY4M8kH4eLw==";
   };
+  "@tanstack/db-sqlite-persistence-core@0.1.9" = fetchurl {
+    url = "https://registry.npmjs.org/@tanstack/db-sqlite-persistence-core/-/db-sqlite-persistence-core-0.1.9.tgz";
+    hash = "sha512-Ju4HcBzaSXTaPJFMRWNjiyXRfCmom0AXBr/22sqLoQWY1TjFM/UTbSSTQgsrExkNuFDVFiV8EDpCt8WUBFiKcQ==";
+  };
   "@tanstack/db@0.6.5" = fetchurl {
     url = "https://registry.npmjs.org/@tanstack/db/-/db-0.6.5.tgz";
     hash = "sha512-gtCuAo4UtC9SR/kTMu5fVEff6qZ2R1FZi9X7MybtHKA6wve7RePifGG6qBI4OmMB+7juT5/+glNbnqZOrG0/pg==";
@@ -3882,9 +3886,17 @@
     url = "https://registry.npmjs.org/@tanstack/electric-db-collection/-/electric-db-collection-0.3.3.tgz";
     hash = "sha512-ywx5s6kv/ZNDszl2GwnlvZPlimEBAUREo9cEN9oCN7SyO36/5andaAKgjWQYXiXDc6FamjQfE6N6WuUFb0Zg0Q==";
   };
+  "@tanstack/electron-db-sqlite-persistence@0.1.9" = fetchurl {
+    url = "https://registry.npmjs.org/@tanstack/electron-db-sqlite-persistence/-/electron-db-sqlite-persistence-0.1.9.tgz";
+    hash = "sha512-QlH4pt0vhw9BZIdf6iyIioFoUy58vJoe5gXNIpXFEXY1uP4awKpTJ7ZrVTlBPPpaYvbcJxMxqjusoFCRVA5XQg==";
+  };
   "@tanstack/history@1.161.6" = fetchurl {
     url = "https://registry.npmjs.org/@tanstack/history/-/history-1.161.6.tgz";
     hash = "sha512-NaOGLRrddszbQj9upGat6HG/4TKvXLvu+osAIgfxPYA+eIvYKv8GKDJOrY2D3/U9MRnKfMWD7bU4jeD4xmqyIg==";
+  };
+  "@tanstack/node-db-sqlite-persistence@0.1.9" = fetchurl {
+    url = "https://registry.npmjs.org/@tanstack/node-db-sqlite-persistence/-/node-db-sqlite-persistence-0.1.9.tgz";
+    hash = "sha512-irgaRzZ6eMV4Ky7fIoiy823vPfGllnsJPI0oqdjWS4kD09juktR8JfS0Gqg9ONBbwLB2kLBrC3ei72Dzz92RKg==";
   };
   "@tanstack/pacer-lite@0.2.1" = fetchurl {
     url = "https://registry.npmjs.org/@tanstack/pacer-lite/-/pacer-lite-0.2.1.tgz";
@@ -9150,6 +9162,10 @@
   "napi-build-utils@2.0.0" = fetchurl {
     url = "https://registry.npmjs.org/napi-build-utils/-/napi-build-utils-2.0.0.tgz";
     hash = "sha512-GEbrYkbfF7MoNaoh2iGG84Mnf/WZfB0GdGEsM8wz7Expx/LlWf5U8t9nvJKXSp3qr5IsEbK04cBGhol/KwOsWA==";
+  };
+  "native-keymap@3.3.9" = fetchurl {
+    url = "https://registry.npmjs.org/native-keymap/-/native-keymap-3.3.9.tgz";
+    hash = "sha512-d/ydQ5x+GM5W0dyAjFPwexhtc9CDH1g/xWZESS5CXk16ThyFzSBLvlBJq1+FyzUIFf/F2g1MaHdOpa6G9150YQ==";
   };
   "needle@2.9.1" = fetchurl {
     url = "https://registry.npmjs.org/needle/-/needle-2.9.1.tgz";
