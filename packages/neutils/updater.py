@@ -145,7 +145,8 @@ class NeutilsUpdater(GitHubReleaseUpdater):
             f"--nix={output_path}",
             str(build_zig_zon),
         ]
-        for attempt in range(1, self._ZON2NIX_MAX_ATTEMPTS + 1):
+        attempt = 1
+        while True:
             await asyncio.to_thread(output_path.unlink, missing_ok=True)
             zon2nix_result_drain = ValueDrain()
             async for event in drain_value_events(
@@ -178,11 +179,12 @@ class NeutilsUpdater(GitHubReleaseUpdater):
                 attempt < self._ZON2NIX_MAX_ATTEMPTS
                 and self._is_transient_zon2nix_failure(zon2nix_result)
             ):
+                attempt += 1
                 yield UpdateEvent.status(
                     self.name,
                     "zon2nix hit a transient fetch failure; retrying...",
                     operation="compute_hash",
-                    detail=f"attempt {attempt + 1}/{self._ZON2NIX_MAX_ATTEMPTS}",
+                    detail=f"attempt {attempt}/{self._ZON2NIX_MAX_ATTEMPTS}",
                 )
                 await asyncio.sleep(max(0.0, self.config.default_retry_backoff))
                 continue
