@@ -35,7 +35,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v0.4.50";
+      url = "github:generalaction/emdash/v1.1.5";
       flake = false;
     };
     flake-edit = {
@@ -78,7 +78,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.4.23";
+      url = "github:NousResearch/hermes-agent/v2026.4.30";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -132,7 +132,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.45.2";
+      url = "github:max-sixty/worktrunk/v0.46.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -153,7 +153,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.125.0";
+      url = "github:openai/codex/rust-v0.128.0";
       flake = false;
     };
     curator = {
@@ -279,12 +279,17 @@
 
       nixpkgsConfig = {
         allowUnfree = true;
-        # Allow Google Chrome regardless of insecure status - we pin the
-        # version ourselves via overlays/google-chrome/sources.json and the
-        # update pipeline, so nixpkgs marking a release as insecure should
-        # not block builds. Using a pname predicate avoids the brittle
-        # version-string coupling that permittedInsecurePackages requires.
-        allowInsecurePredicate = pkg: (pkg.pname or "") == "google-chrome";
+        # Allow selected pinned binary runtimes regardless of insecure status.
+        # We pin and cache them ourselves, so nixpkgs marking a release as
+        # insecure should not block builds. Use pname/version predicates to
+        # avoid broad allowlists while keeping package-specific pins explicit.
+        allowInsecurePredicate =
+          pkg:
+          let
+            pname = pkg.pname or "";
+            version = pkg.version or "";
+          in
+          pname == "google-chrome" || (pname == "electron" && builtins.elem version [ "38.7.2" ]);
       };
 
       overlayList = [
@@ -789,6 +794,8 @@
             pkgs.runCommand "check-test-nix-opencode-desktop-electron" { } ''
               touch $out
             '';
+
+          checks."cache-electron-runtimes" = { pkgs, ... }: pkgs.electron-runtimes;
 
           checks."test-python-pytest" = mkRepoCheck {
             name = "check-test-python-pytest";

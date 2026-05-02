@@ -1,11 +1,10 @@
 {
   bun,
-  electron_40,
-  electron_41,
   inputs,
   lib,
   makeDesktopItem,
   models-dev,
+  nixcfgElectron,
   nodejs,
   opencode,
   outputs,
@@ -23,7 +22,6 @@
 }:
 let
   inherit (builtins)
-    head
     fromJSON
     readFile
     ;
@@ -41,14 +39,7 @@ let
   desktopPackageJson = fromJSON (readFile "${src}/packages/desktop-electron/package.json");
   desktopPackageVersion = desktopPackageJson.version;
   electronVersion = lib.removePrefix "^" desktopPackageJson.devDependencies.electron;
-  electronMajor = head (lib.splitVersion electronVersion);
-  electronRuntime =
-    {
-      "40" = electron_40;
-      "41" = electron_41;
-    }
-    .${electronMajor}
-      or (throw "packages/opencode-desktop-electron/default.nix has no nixpkgs Electron runtime for major ${electronMajor} (needed for ${electronVersion})");
+  electronRuntime = nixcfgElectron.runtimeFor electronVersion;
   electronRuntimeVersion = electronRuntime.version;
 
   desktopPackageVersionCheck =
@@ -64,13 +55,13 @@ let
         expected ${desktopPackageVersion}, ${desktopPackageVersion}-<suffix>, or ${desktopPackageVersion}+<build-metadata>
       '';
 
-  electronRuntimeMajorCheck =
-    if head (lib.splitVersion electronRuntimeVersion) == head (lib.splitVersion electronVersion) then
+  electronRuntimeVersionCheck =
+    if electronRuntimeVersion == electronVersion then
       true
     else
       throw ''
         packages/opencode-desktop-electron/default.nix needs Electron ${electronVersion},
-        but the selected runtime is ${electronRuntimeVersion}; pick a matching nixpkgs Electron major line
+        but the selected runtime is ${electronRuntimeVersion}; add the exact runtime to nixcfgElectron
       '';
 
   bunTarget =
@@ -181,7 +172,7 @@ let
   };
 in
 assert desktopPackageVersionCheck;
-assert electronRuntimeMajorCheck;
+assert electronRuntimeVersionCheck;
 stdenv.mkDerivation {
   inherit
     pname
@@ -480,6 +471,7 @@ stdenv.mkDerivation {
       appProtocolName
       appProtocolScheme
       electronDist
+      electronRuntime
       electronRuntimeVersion
       electronVersion
       node_modules

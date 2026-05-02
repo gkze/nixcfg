@@ -613,7 +613,10 @@ def test_build_package_path_attr_expr_calls_package_with_flake_context() -> None
         LetExpression(
             local_variables=expected.local_variables,
             value=Select(
-                expression=Select(expression=package_expr, attribute="passthru"),
+                expression=Select(
+                    expression=Parenthesis(value=package_expr),
+                    attribute="passthru",
+                ),
                 attribute="node_modules",
             ),
         ),

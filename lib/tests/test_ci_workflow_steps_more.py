@@ -350,8 +350,24 @@ def test_cmd_list_update_targets_imports_update_cli(
 
 def test_direct_command_helpers_call_expected_subprocesses(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Run direct helper commands that just dispatch subprocess calls."""
+    (tmp_path / "flake.lock").write_text(
+        json.dumps({
+            "nodes": {
+                "root": {
+                    "inputs": {
+                        "alpha": "alpha-node",
+                        "nh": "nh-node",
+                        "nested-follow": ["alpha", "nixpkgs"],
+                    }
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
     commands: list[list[str]] = []
 
     def _fake_run(
@@ -370,7 +386,9 @@ def test_direct_command_helpers_call_expected_subprocesses(
     assert ws._cmd_eval_darwin_full_smoke() == 0
     assert ws._cmd_smoke_check_update_app() == 0
 
-    assert ["nix", "flake", "update"] in commands
+    assert ["nix", "flake", "lock", "--update-input", "alpha"] in commands
+    assert ["nix", "flake", "lock", "--update-input", "nh"] not in commands
+    assert ["nix", "flake", "lock", "--update-input", "nested-follow"] not in commands
     assert ["brew", "install", "--cask", "macfuse"] in commands
     assert ["brew", "install", "1password-cli"] in commands
     assert [
@@ -913,7 +931,7 @@ def test_registered_command_metadata_preserves_cli_surface() -> None:
         ("free-disk-space", "Legacy alias for CI runner disk cleanup."),
         ("install-darwin-tools", "Alias for `darwin install`."),
         ("prefetch-flake-inputs", "Alias for `flake prefetch`."),
-        ("nix-flake-update", "Alias for `flake update`."),
+        ("nix-flake-update", "Alias for pinned-aware flake input updates."),
         ("generate-pr-body", "Alias for `pr-body`."),
         (
             "render-certification-pr-body",

@@ -86,11 +86,24 @@ def _stabilize_generated_root_src_paths(
     generated_cargo: Path,
 ) -> str:
     """Rewrite generated store-path source roots back to ``${rootSrc}`` references."""
-    relative_root_src = os.path.relpath(patched_src, generated_cargo.parent).replace(
-        os.sep,
-        "/",
+    patched_src_candidates = (patched_src, patched_src.resolve())
+    generated_parent_candidates = (
+        generated_cargo.parent,
+        generated_cargo.parent.resolve(),
     )
-    prefixes = tuple(dict.fromkeys((patched_src.as_posix(), relative_root_src)))
+    prefixes = tuple(
+        dict.fromkeys(
+            candidate
+            for source in patched_src_candidates
+            for candidate in (
+                source.as_posix(),
+                *(
+                    os.path.relpath(source, parent).replace(os.sep, "/")
+                    for parent in generated_parent_candidates
+                ),
+            )
+        )
+    )
 
     def _rewrite(match: re.Match[str]) -> str:
         raw_src = match.group("src").strip()

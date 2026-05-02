@@ -1,14 +1,44 @@
-"""Updater for T3 Code's platform-specific Bun workspace cache."""
+"""Updater for T3 Code's staged runtime Bun cache."""
 
-from lib.update.updaters.base import bun_node_modules_updater
+from __future__ import annotations
 
-# T3 Code's _shared.nix bunTarget map only covers aarch64-darwin; keep the
-# updater's platform set in sync with packages/registry.nix so the
-# compute-hashes Linux runners skip rather than try to build the missing
-# flake attribute.
-T3CodeUpdater = bun_node_modules_updater(
-    "t3code",
-    input_name="t3code",
-    module=__name__,
-    supported_platforms=("aarch64-darwin",),
-)
+from typing import TYPE_CHECKING, Literal
+
+from lib.update.nix import _build_overlay_attr_expr
+from lib.update.updaters._base_proxy import base_module as _base_module
+from lib.update.updaters.base import VersionInfo, register_updater
+from lib.update.updaters.flake_backed import FlakeInputHashUpdater
+
+if TYPE_CHECKING:
+    from lib.update.events import EventStream
+
+
+@register_updater
+class T3CodeUpdater(FlakeInputHashUpdater):
+    """Compute only the standalone T3 Code runtime ``node_modules`` hash."""
+
+    name = "t3code"
+    input_name = "t3code"
+    hash_type: Literal["nodeModulesHash"] = "nodeModulesHash"
+    platform_specific = True
+    supported_platforms = ("aarch64-darwin",)
+
+    @classmethod
+    def _node_modules_expr(cls, *, system: str | None = None) -> str:
+        """Return the package-path expression for this package's FOD."""
+        return _build_overlay_attr_expr(cls.name, ".node_modules", system=system)
+
+    def _compute_hash_for_system(
+        self,
+        info: VersionInfo,
+        *,
+        system: str | None,
+    ) -> EventStream:
+        """Hash the runtime cache directly so workspace FODs cannot pollute it."""
+        _ = info
+        return _base_module().compute_fixed_output_hash(
+            self.name,
+            self._node_modules_expr(system=system),
+            env={"FAKE_HASHES": "1"},
+            config=self.config,
+        )

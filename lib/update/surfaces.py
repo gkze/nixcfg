@@ -14,7 +14,10 @@ UPDATE_SURFACE_ALIASES: dict[str, str] = {
     "opencode-desktop-electron-dev": "opencode-desktop-electron",
 }
 
-UPDATE_SURFACE_EXEMPTIONS = frozenset({"nix"})
+UPDATE_SURFACE_EXEMPTIONS = frozenset({
+    "electron-runtimes",  # aggregate/cache package, not an external update target
+    "nix",
+})
 
 _SURFACE_FILES = ("default.nix", "sources.json", "updater.py")
 _SURFACE_ROOTS = ("packages", "overlays")

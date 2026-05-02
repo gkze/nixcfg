@@ -15,8 +15,6 @@ let
     "x86_64-linux"
   ];
 
-  majorOf = version: builtins.head (builtins.splitVersion version);
-
   prodIdentity = {
     opencodeChannel = "prod";
     appName = "OpenCode";
@@ -61,9 +59,9 @@ let
         (assertEq "prod protocol scheme (${system})" prodIdentity.appProtocolScheme
           prod.passthru.appProtocolScheme
         )
-        (assertEq "prod runtime major (${system})" (majorOf prod.passthru.electronVersion) (
-          majorOf prod.passthru.electronRuntimeVersion
-        ))
+        (assertEq "prod runtime version (${system})" prod.passthru.electronVersion
+          prod.passthru.electronRuntimeVersion
+        )
         (assertStorePath "prod electronDist (${system})" prod.passthru.electronDist)
         (assertStorePath "prod drvPath (${system})" prod.drvPath)
 
@@ -73,9 +71,9 @@ let
         (assertEq "dev protocol scheme (${system})" devIdentity.appProtocolScheme
           dev.passthru.appProtocolScheme
         )
-        (assertEq "dev runtime major (${system})" (majorOf dev.passthru.electronVersion) (
-          majorOf dev.passthru.electronRuntimeVersion
-        ))
+        (assertEq "dev runtime version (${system})" dev.passthru.electronVersion
+          dev.passthru.electronRuntimeVersion
+        )
         (assertEq "dev runtime version matches prod (${system})" prod.passthru.electronRuntimeVersion
           dev.passthru.electronRuntimeVersion
         )

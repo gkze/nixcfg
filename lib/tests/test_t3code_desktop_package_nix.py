@@ -43,31 +43,28 @@ def _desktop_derivation_args() -> AttributeSet:
     return expect_instance(body.argument, AttributeSet)
 
 
-def test_t3code_desktop_package_keeps_staged_runtime_and_darwin_electron_zip() -> None:
-    """Desktop packaging should keep staged runtime metadata and a local Electron dist."""
+def test_t3code_desktop_package_keeps_staged_runtime_and_electron_dist() -> None:
+    """Desktop packaging should use the centrally packaged Electron runtime."""
     assert_nix_ast_equal(_desktop_assertion().expression, "versionSyncCheck")
     assert_nix_ast_equal(
         expect_scope_binding(_desktop_assertion(), "appName").value,
         '"T3 Code (Alpha)"',
     )
     assert_nix_ast_equal(
-        expect_scope_binding(_desktop_assertion(), "electronTarget").value,
-        """
-        {
-          aarch64-darwin = "darwin-arm64";
-        }
-        .${system}
-          or (throw "packages/t3code-desktop/default.nix unsupported Darwin platform ${system}")
-        """,
+        expect_scope_binding(_desktop_assertion(), "electronRuntime").value,
+        "nixcfgElectron.runtimeFor electronVersion",
     )
     assert_nix_ast_equal(
-        expect_scope_binding(_desktop_assertion(), "electronZip").value,
-        """
-        fetchurl {
-          url = "https://github.com/electron/electron/releases/download/v${electronVersion}/electron-v${electronVersion}-${electronTarget}.zip";
-          hash = darwinElectronZipHash;
-        }
-        """,
+        expect_scope_binding(_desktop_assertion(), "electronRuntimeVersion").value,
+        "electronRuntime.version",
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_desktop_assertion(), "electronHeaders").value,
+        "electronRuntime.passthru.headers",
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_desktop_assertion(), "electronDist").value,
+        "electronRuntime.passthru.dist",
     )
 
     node_modules = expect_instance(

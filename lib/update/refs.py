@@ -36,6 +36,12 @@ _BRANCH_REF_PATTERNS = {
     "nixpkgs-unstable",
 }
 
+# These version-like refs are intentionally operational pins, not update targets.
+# In particular, nh >=4.3 currently drops Darwin activation logs even with
+# --show-activation-logs, so keep the flake input pinned until that is resolved
+# upstream.
+PINNED_REF_INPUTS = frozenset({"nh"})
+
 _MIN_COMMIT_HEX_LEN = 7
 _GIT_TAG_REF_PREFIX = "refs/tags/"
 _GITHUB_GIT_URL_RE = re.compile(
@@ -91,6 +97,8 @@ def get_flake_inputs_with_refs() -> list[FlakeInputRef]:
 
     result = []
     for input_name, node_name in sorted(root.inputs.items()):
+        if input_name in PINNED_REF_INPUTS:
+            continue
         if isinstance(node_name, list):
             continue
         node = model.nodes.get(node_name or input_name)
@@ -618,6 +626,7 @@ async def update_refs_task(
 
 
 __all__ = [
+    "PINNED_REF_INPUTS",
     "FlakeInputRef",
     "RefTaskOptions",
     "RefUpdateResult",

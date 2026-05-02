@@ -190,6 +190,9 @@
         }
         { package = pkgs.zoom-us; }
         { package = pkgs.zen-twilight; }
+      ]
+      ++ lib.optionals config.profiles.work.enable [
+        { package = pkgs.town-assistant-nightly; }
       ];
       managedMacAppProjection = macAppHelpers.managedMacAppRoutingProjection managedMacAppRouting;
     in
@@ -438,12 +441,14 @@
       enable = true;
       # Disabled: auto-attach behavior is disruptive; prefer manual invocation
       enableZshIntegration = false;
+      # Stylix PR #2257 changed inactive Zellij ribbons to base05 text on
+      # base02, but left emphasis_1 as base05. Zellij uses emphasis_1 as
+      # the alternating inactive-tab background, which makes alternate tabs
+      # render base05 text on base05 background. Keep alternating inactive
+      # tabs visually disabled until Stylix adjusts it upstream.
+      themes.stylix.themes.default.ribbon_unselected.emphasis_1 =
+        lib.mkForce config.lib.stylix.colors.withHashtag.base02;
       settings = {
-        # TODO: remove after a Zellij release includes
-        # https://github.com/zellij-org/zellij/pull/4892.
-        # Work around the 0.44.0 regression where themes under
-        # ~/.config/zellij/themes are not loaded on session start.
-        theme_dir = "${config.xdg.configHome}/zellij/themes";
         keybinds = {
           normal = {
             "bind \"Alt b\"".TogglePaneFrames = { };

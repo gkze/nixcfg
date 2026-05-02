@@ -1,71 +1,173 @@
-"""Updater for Codex desktop DMG releases."""
+"""Updater for Codex desktop Sparkle releases."""
 
 from __future__ import annotations
 
-import base64
-import binascii
-from datetime import UTC
-from email.utils import parsedate_to_datetime
-from typing import TYPE_CHECKING, ClassVar
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, ClassVar, cast
+
+from defusedxml import ElementTree
+
+from lib.update.net import fetch_url
+from lib.update.updaters.base import (
+    DownloadHashUpdater,
+    VersionInfo,
+    _verify_platform_versions,
+    register_updater,
+)
+from lib.update.updaters.metadata import AssetURLsMetadata, metadata_get
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from xml.etree.ElementTree import Element
 
     import aiohttp
 
-from lib.update.net import fetch_headers
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
-from lib.update.updaters.metadata import NO_METADATA
+_SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
+_SPARKLE_SHORT_VERSION = f"{{{_SPARKLE_NS}}}shortVersionString"
+_SPARKLE_BUILD_VERSION = f"{{{_SPARKLE_NS}}}version"
+
+
+@dataclass(frozen=True, slots=True)
+class _CodexAppcastItem:
+    short_version: str
+    build_version: str
+    url: str
 
 
 @register_updater
 class CodexDesktopUpdater(DownloadHashUpdater):
-    """Track the Codex DMG and derive a stable artifact revision."""
+    """Track immutable Codex desktop archives from the Sparkle appcasts."""
 
     name = "codex-desktop"
+    ARCHIVE_BASE_URL = "https://persistent.oaistatic.com/codex-app-prod"
+    APPCASTS: ClassVar[dict[str, str]] = {
+        "aarch64-darwin": "https://persistent.oaistatic.com/codex-app-prod/appcast.xml",
+        "x86_64-darwin": "https://persistent.oaistatic.com/codex-app-prod/appcast-x64.xml",
+    }
     PLATFORMS: ClassVar[dict[str, str]] = {
-        "aarch64-darwin": "https://persistent.oaistatic.com/codex-app-prod/Codex.dmg",
-        "x86_64-darwin": "https://persistent.oaistatic.com/codex-app-prod/Codex.dmg",
+        "aarch64-darwin": "arm64",
+        "x86_64-darwin": "x64",
     }
 
+    def _parse_appcast(self, xml_data: str, *, appcast_url: str) -> Element:
+        try:
+            return ElementTree.fromstring(xml_data)
+        except ElementTree.ParseError as exc:
+            snippet = xml_data[:200].replace("\n", " ").strip()
+            msg = f"Invalid Codex appcast XML from {appcast_url}; snippet: {snippet}"
+            raise RuntimeError(msg) from exc
+
     @staticmethod
-    def _version_from_headers(headers: Mapping[str, str]) -> str:
-        """Derive a stable artifact revision from HTTP metadata."""
-        content_md5 = headers.get("Content-MD5", "").strip()
-        if content_md5:
-            try:
-                md5_hex = base64.b64decode(content_md5, validate=True).hex()
-            except (ValueError, binascii.Error) as exc:
-                msg = f"Invalid Content-MD5 header: {content_md5!r}"
-                raise RuntimeError(msg) from exc
-            return f"md5.{md5_hex}"
+    def _extract_item(root: Element, *, appcast_url: str) -> Element:
+        item = root.find("./channel/item")
+        if item is None:
+            msg = f"No items found in Codex appcast {appcast_url}"
+            raise RuntimeError(msg)
+        return item
 
-        etag = headers.get("ETag", "").strip().strip('"').lower()
-        if etag:
-            normalized = etag.removeprefix("0x")
-            return f"etag.{normalized}"
+    @staticmethod
+    def _required_text(item: Element, tag: str, label: str) -> str:
+        node = item.find(tag)
+        if node is None:
+            msg = f"No {label} found in Codex appcast"
+            raise RuntimeError(msg)
+        value = (node.text or "").strip()
+        if not value:
+            msg = f"Blank {label} found in Codex appcast"
+            raise RuntimeError(msg)
+        return value
 
-        last_modified = headers.get("Last-Modified", "").strip()
-        if last_modified:
-            try:
-                dt = parsedate_to_datetime(last_modified).astimezone(UTC)
-            except (TypeError, ValueError) as exc:
-                msg = f"Could not parse Last-Modified header: {last_modified!r}"
-                raise RuntimeError(msg) from exc
-            return f"modified.{dt.strftime('%Y%m%d%H%M%S')}"
+    @staticmethod
+    def _extract_enclosure(item: Element) -> Element:
+        enclosure = item.find("enclosure")
+        if enclosure is None:
+            msg = "No enclosure found in Codex appcast"
+            raise RuntimeError(msg)
+        return enclosure
 
-        msg = "Missing Content-MD5/ETag/Last-Modified headers for Codex artifact"
-        raise RuntimeError(msg)
+    @staticmethod
+    def _extract_download_url(enclosure: Element) -> str:
+        value = (enclosure.get("url") or "").strip()
+        if not value:
+            msg = "No URL found in Codex appcast enclosure"
+            raise RuntimeError(msg)
+        return value
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Use artifact metadata headers to produce a stable artifact revision."""
-        probe_url = self.PLATFORMS["aarch64-darwin"]
-        headers = await fetch_headers(
+    def _extract_appcast_item(
+        self,
+        root: Element,
+        *,
+        appcast_url: str,
+    ) -> _CodexAppcastItem:
+        item = self._extract_item(root, appcast_url=appcast_url)
+        enclosure = self._extract_enclosure(item)
+        return _CodexAppcastItem(
+            short_version=self._required_text(
+                item,
+                _SPARKLE_SHORT_VERSION,
+                "short version",
+            ),
+            build_version=self._required_text(
+                item,
+                _SPARKLE_BUILD_VERSION,
+                "build version",
+            ),
+            url=self._extract_download_url(enclosure),
+        )
+
+    async def _fetch_appcast_item(
+        self,
+        session: aiohttp.ClientSession,
+        platform: str,
+    ) -> _CodexAppcastItem:
+        appcast_url = self.APPCASTS[platform]
+        xml_payload = await fetch_url(
             session,
-            probe_url,
+            appcast_url,
+            user_agent="Sparkle/2.0",
             request_timeout=self.config.default_timeout,
             config=self.config,
         )
+        root = self._parse_appcast(xml_payload.decode(), appcast_url=appcast_url)
+        return self._extract_appcast_item(root, appcast_url=appcast_url)
 
-        version = self._version_from_headers(headers)
-        return VersionInfo(version=version, metadata=NO_METADATA)
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        """Fetch both appcasts and return a release plus per-platform archive URLs."""
+        items = {
+            platform: await self._fetch_appcast_item(session, platform)
+            for platform in self.PLATFORMS
+        }
+        short_version = _verify_platform_versions(
+            {platform: item.short_version for platform, item in items.items()},
+            self.name,
+        )
+        build_version = _verify_platform_versions(
+            {platform: item.build_version for platform, item in items.items()},
+            f"{self.name} build",
+        )
+        return VersionInfo(
+            version=f"{short_version}-{build_version}",
+            metadata=AssetURLsMetadata(
+                asset_urls={platform: item.url for platform, item in items.items()},
+            ),
+        )
+
+    def get_download_url(self, platform: str, info: VersionInfo) -> str:
+        """Return the appcast-provided versioned ZIP URL for ``platform``."""
+        asset_urls = metadata_get(
+            info.metadata,
+            "asset_urls",
+            context="Codex desktop metadata",
+        )
+        if asset_urls is None:
+            short_version = info.version.rsplit("-", maxsplit=1)[0]
+            arch = self.PLATFORMS[platform]
+            return f"{self.ARCHIVE_BASE_URL}/Codex-darwin-{arch}-{short_version}.zip"
+        if not isinstance(asset_urls, dict):
+            msg = f"Invalid Codex desktop asset URLs in metadata: {info.metadata!r}"
+            raise TypeError(msg)
+        asset_urls_map = cast("dict[str, object]", asset_urls)
+        url = asset_urls_map.get(platform)
+        if not isinstance(url, str) or not url.strip():
+            msg = f"Missing Codex desktop URL for platform {platform!r}"
+            raise RuntimeError(msg)
+        return url

@@ -70,6 +70,35 @@ def test_sources_json_urls_cover_each_updater_platform(
     assert sorted(urls) == sorted(updater_cls.PLATFORMS)
 
 
+def test_source_commit_metadata_matches_locked_flake_inputs() -> None:
+    """Flake-backed source commit metadata should mirror the active lockfile."""
+    lock_payload = json.loads((REPO_ROOT / "flake.lock").read_text(encoding="utf-8"))
+    nodes = lock_payload["nodes"]
+    source_paths = sorted([
+        *REPO_ROOT.glob("packages/*/sources.json"),
+        *REPO_ROOT.glob("overlays/*/sources.json"),
+    ])
+
+    mismatches: dict[str, dict[str, str | None]] = {}
+    for source_path in source_paths:
+        payload = json.loads(source_path.read_text(encoding="utf-8"))
+        input_name = payload.get("input")
+        commit = payload.get("commit")
+        if not isinstance(input_name, str) or not isinstance(commit, str):
+            continue
+        node = nodes.get(input_name, {})
+        locked = node.get("locked", {}) if isinstance(node, dict) else {}
+        rev = locked.get("rev") if isinstance(locked, dict) else None
+        if commit != rev:
+            mismatches[str(source_path.relative_to(REPO_ROOT))] = {
+                "input": input_name,
+                "sourcesCommit": commit,
+                "flakeLockRev": rev if isinstance(rev, str) else None,
+            }
+
+    assert mismatches == {}
+
+
 @cache
 def _sculptor_platform_switch() -> IfExpression:
     """Return the top-level platform switch for the Sculptor package."""
@@ -108,26 +137,23 @@ def test_sculptor_package_meta_platforms_match_its_source_matrix() -> None:
     )
 
 
-def test_emdash_electron_platform_maps_cover_intel_mac() -> None:
-    """Emdash should keep its Electron target/hash maps in sync for Intel macOS."""
-    expected = {
-        "aarch64-darwin",
-        "x86_64-darwin",
-        "aarch64-linux",
-        "x86_64-linux",
-    }
-    electron_targets = expect_instance(
-        expect_scope_binding(_emdash_derivation(), "electronTargets").value,
-        AttributeSet,
-    )
-    electron_hashes = expect_instance(
-        expect_scope_binding(_emdash_derivation(), "electronZipHashes").value,
-        AttributeSet,
-    )
+def test_emdash_uses_central_electron_runtime_and_keeps_platform_surface() -> None:
+    """Emdash should get Electron artifacts from nixcfgElectron on exported platforms."""
+    derivation = _emdash_derivation()
 
-    assert {
-        binding.name for binding in electron_targets.values if hasattr(binding, "name")
-    } == expected
-    assert {
-        binding.name for binding in electron_hashes.values if hasattr(binding, "name")
-    } == expected
+    assert_nix_ast_equal(
+        expect_scope_binding(derivation, "electronRuntime").value,
+        "nixcfgElectron.runtimeFor electronVersion",
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(derivation, "electronHeaders").value,
+        "electronRuntime.passthru.headers",
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(derivation, "electronDist").value,
+        "electronRuntime.passthru.dist",
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(derivation, "supportedSystems").value,
+        '[ "aarch64-darwin" "aarch64-linux" "x86_64-linux" ]',
+    )

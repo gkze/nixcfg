@@ -10,10 +10,9 @@
   gnumake,
   git,
   python3,
-  electron,
   cacert,
-  fetchurl,
   lib,
+  nixcfgElectron,
   ...
 }:
 let
@@ -24,65 +23,10 @@ let
   # We validate it against node_modules/electron/package.json during configurePhase
   # so lockfile bumps fail loudly until the matching headers hash is updated.
   electronVersion = "38.7.2";
-  hashToNix32 =
-    hash:
-    builtins.convertHash {
-      inherit hash;
-      hashAlgo = "sha256";
-      toHashFormat = "nix32";
-    };
-  electronHeadersChecksum =
-    {
-      # From node-v38.7.2-headers.tar.gz
-      "38.7.2" = "9c571a305727c9d8188971c36df3f953268e1b9f4135d322fe75609ad3ca5318";
-    }
-    .${electronVersion}
-      or (throw "packages/mux/default.nix missing Electron headers hash for ${electronVersion}");
-  electronHeaders = stdenvNoCC.mkDerivation {
-    name = "electron-headers-${electronVersion}";
-    src = fetchurl {
-      url = "https://www.electronjs.org/headers/v${electronVersion}/node-v${electronVersion}-headers.tar.gz";
-      sha256 = hashToNix32 electronHeadersChecksum;
-    };
-    dontUnpack = true;
-    dontBuild = true;
-    dontFixup = true;
-    installPhase = ''
-      mkdir -p "$out"
-      tar -xzf "$src" --strip-components=1 -C "$out"
-    '';
-  };
-  electronZipPlatform =
-    if stdenv.hostPlatform.system == "aarch64-darwin" then
-      "darwin-arm64"
-    else if stdenv.hostPlatform.system == "x86_64-darwin" then
-      "darwin-x64"
-    else
-      throw "packages/mux/default.nix unsupported Darwin platform ${stdenv.hostPlatform.system}";
-  electronZipChecksum =
-    {
-      "38.7.2" = {
-        # From node_modules/electron/checksums.json
-        "darwin-arm64" = "b91e12ec6695f969ccf792d95dc7ea5da35f399cec2bed4d7b25d8a1f545b5de";
-        "darwin-x64" = "459dd05f00c29d435112596f87bc5bd0aeb16796dff0744e5421086417877d24";
-      };
-    }
-    .${electronVersion}.${electronZipPlatform}
-      or (throw "packages/mux/default.nix missing Electron zip hash for ${electronVersion}/${electronZipPlatform}");
-  electronZip = fetchurl {
-    url = "https://github.com/electron/electron/releases/download/v${electronVersion}/electron-v${electronVersion}-${electronZipPlatform}.zip";
-    sha256 = hashToNix32 electronZipChecksum;
-  };
-  electronDist = stdenvNoCC.mkDerivation {
-    name = "electron-dist-${electronVersion}-${electronZipPlatform}";
-    dontUnpack = true;
-    dontBuild = true;
-    dontFixup = true;
-    installPhase = ''
-      mkdir -p "$out"
-      ln -s ${electronZip} "$out/electron-v${electronVersion}-${electronZipPlatform}.zip"
-    '';
-  };
+  electronRuntime = nixcfgElectron.runtimeFor electronVersion;
+  electronRuntimeVersion = electronRuntime.version;
+  electronHeaders = electronRuntime.passthru.headers;
+  electronDist = electronRuntime.passthru.dist;
   linuxDesktopItem = makeDesktopItem {
     name = pname;
     desktopName = "Mux";
@@ -147,7 +91,7 @@ stdenv.mkDerivation {
     ${lib.getExe python3} \
       ${./patch_package_json.py} \
       package.json \
-      ${lib.escapeShellArg (toString electronDist)}
+      electron-dist
   '';
 
   nativeBuildInputs = [
@@ -160,7 +104,7 @@ stdenv.mkDerivation {
   ];
 
   buildInputs = [
-    electron
+    electronRuntime
     stdenv.cc.cc.lib
   ];
 
@@ -199,12 +143,23 @@ stdenv.mkDerivation {
         export CSC_IDENTITY_AUTO_DISCOVERY=false
         export NODE_OPTIONS="--max-old-space-size=6144''${NODE_OPTIONS:+ $NODE_OPTIONS}"
 
+        electronDistDir="$PWD/electron-dist"
+        mkdir -p "$electronDistDir"
+        cp -R ${electronDist}/. "$electronDistDir"/
+        chmod -R u+w "$electronDistDir"
+
         # Generate app icons once up front to avoid parallel make races inside
         # scripts/generate-icons.ts writing build/icon.iconset.
         bun scripts/generate-icons.ts png icns linux-icons
 
         make SHELL=${stdenv.shell} build-main build-preload build-renderer build-static
-        bun x electron-builder --mac --dir --publish never -c.mac.identity=null
+        bun x electron-builder \
+          --mac \
+          --dir \
+          --publish never \
+          -c.electronDist="$electronDistDir" \
+          -c.electronVersion=${lib.escapeShellArg electronRuntimeVersion} \
+          -c.mac.identity=null
 
         runHook postBuild
       ''
@@ -250,7 +205,7 @@ stdenv.mkDerivation {
         cp -r node_modules "$out/lib/mux/"
         cp package.json "$out/lib/mux/"
 
-        makeWrapper ${electron}/bin/electron "$out/bin/mux" \
+        makeWrapper ${electronRuntime}/bin/electron "$out/bin/mux" \
           --add-flags "$out/lib/mux/dist/cli/index.js" \
           --set MUX_E2E_LOAD_DIST "1" \
           --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath [ stdenv.cc.cc.lib ]}" \
@@ -268,6 +223,16 @@ stdenv.mkDerivation {
 
         runHook postInstall
       '';
+
+  passthru = {
+    inherit
+      electronDist
+      electronHeaders
+      electronRuntime
+      electronRuntimeVersion
+      electronVersion
+      ;
+  };
 
   doInstallCheck = stdenv.hostPlatform.isDarwin;
   installCheckPhase = lib.optionalString stdenv.hostPlatform.isDarwin ''

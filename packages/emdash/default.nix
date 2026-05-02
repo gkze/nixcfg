@@ -5,23 +5,22 @@
   coreutils,
   dpkg,
   fetchPnpmDeps ? null,
-  fetchurl,
   git,
   inputs,
   lib,
   libiconv,
   libsecret,
   libutempter,
-  nodejs_22,
+  nodejs_24,
   openssl,
   outputs,
   patchelf,
   pkg-config,
   pnpmConfigHook,
   pnpm_10,
+  nixcfgElectron,
   python3,
   rpm,
-  runCommand,
   sqlite,
   stdenv,
   zlib,
@@ -32,7 +31,7 @@ let
   slib = outputs.lib;
   version = slib.getFlakeVersion pname;
   src = inputs.emdash;
-  nodejs = nodejs_22;
+  nodejs = nodejs_24;
   pnpm = pnpm_10.override { inherit nodejs; };
   inherit (stdenv.hostPlatform) system;
   npmDepsHash =
@@ -41,43 +40,19 @@ let
     in
     if perPlatformHash.success then perPlatformHash.value else slib.sourceHash pname "npmDepsHash";
 
-  electronVersion = "30.5.1";
-  electronTargets = {
-    aarch64-darwin = "darwin-arm64";
-    x86_64-darwin = "darwin-x64";
-    aarch64-linux = "linux-arm64";
-    x86_64-linux = "linux-x64";
-  };
-  electronZipHashes = {
-    aarch64-darwin = "sha256-0xJUTqKYRM8yi0S5294S9P3O2Qy0Qt/KbfNsCY27bno=";
-    x86_64-darwin = "sha256-+vncwg1SVgfqIF8vah3+MnD2JoqkObsLpWRsfk+72EI=";
-    aarch64-linux = "sha256-6zFHDA181uI+fODYnMk6I1bJ2si8yZfjNTU7iqmVr6A=";
-    x86_64-linux = "sha256-7EcHeD056GAF9CiZ4wrlnlDdXZx/KFMe1JTrQ/I2FAM=";
-  };
-  supportedSystems = builtins.attrNames electronTargets;
-  electronTarget = electronTargets.${system} or (throw "Unsupported system ${system} for ${pname}");
+  electronVersion = "40.7.0";
+  electronRuntime = nixcfgElectron.runtimeFor electronVersion;
+  electronRuntimeVersion = electronRuntime.version;
+  electronHeaders = electronRuntime.passthru.headers;
+  electronDist = electronRuntime.passthru.dist;
+  supportedSystems = [
+    "aarch64-darwin"
+    "aarch64-linux"
+    "x86_64-linux"
+  ];
   electronBuilderTarget = if stdenv.hostPlatform.isDarwin then "mac" else "linux";
   patchNodeAddonApi = ./patch_node_addon_api.py;
   msShim = ./ms-shim.cjs;
-
-  electronZip = fetchurl {
-    url =
-      "https://github.com/electron/electron/releases/download/"
-      + "v${electronVersion}/electron-v${electronVersion}-${electronTarget}.zip";
-    hash = electronZipHashes.${system};
-  };
-
-  electronHeadersTarball = fetchurl {
-    url =
-      "https://www.electronjs.org/headers/"
-      + "v${electronVersion}/node-v${electronVersion}-headers.tar.gz";
-    hash = "sha256-Q+c8G4nIRoJL/0uAYVYY2hrnFgvmkKB6RC3nxJtFYzU=";
-  };
-
-  electronDistDir = runCommand "${pname}-electron-dist-${electronTarget}" { } ''
-    mkdir -p "$out"
-    cp ${electronZip} "$out/electron-v${electronVersion}-${electronTarget}.zip"
-  '';
 
   pnpmDeps =
     if fetchPnpmDeps != null then
@@ -88,7 +63,7 @@ let
           src
           pnpm
           ;
-        fetcherVersion = 1;
+        fetcherVersion = 3;
         hash = npmDepsHash;
       }
     else
@@ -98,7 +73,7 @@ let
           version
           src
           ;
-        fetcherVersion = 1;
+        fetcherVersion = 3;
         hash = npmDepsHash;
       };
 in
@@ -153,11 +128,8 @@ stdenv.mkDerivation {
   };
 
   postPatch = ''
-    substituteInPlace src/main/main.ts \
-      --replace-fail " -ilc " " -lc "
-
-    substituteInPlace src/main/utils/shellEnv.ts \
-      --replace-fail " -ilc " " -lc "
+    substituteInPlace src/main/utils/userEnv.ts \
+      --replace-fail " -ilc 'env'" " -lc 'env'"
   '';
 
   buildPhase = ''
@@ -167,14 +139,9 @@ stdenv.mkDerivation {
     mkdir -p "$HOME"
     pnpm config set manage-package-manager-versions false
 
-    # Pre-seed Electron headers to keep native rebuilds offline/reproducible.
-    electron_gyp_dir="$HOME/.electron-gyp/${electronVersion}"
-    mkdir -p "$electron_gyp_dir"
-    tar -xzf ${electronHeadersTarball} --strip-components=1 -C "$electron_gyp_dir"
-
     export npm_config_runtime=electron
     export npm_config_target=${electronVersion}
-    export npm_config_nodedir="$electron_gyp_dir"
+    export npm_config_nodedir=${lib.escapeShellArg (toString electronHeaders)}
 
     # Work around keytar's bundled node-addon-api constant-expression issue
     # with the Apple toolchain in this build environment.
@@ -182,15 +149,20 @@ stdenv.mkDerivation {
 
     # pnpmConfigHook installs dependencies without relying on upstream
     # postinstall scripts, so rebuild native Electron modules explicitly.
-    pnpm exec electron-rebuild -f -v ${electronVersion} --only=sqlite3,keytar
+    pnpm exec electron-rebuild -f -v ${electronVersion} --only=better-sqlite3,node-pty
 
     pnpm run build
 
-    install -Dm644 ${msShim} dist/main/main/ms-shim.cjs
+    install -Dm644 ${msShim} out/main/ms-shim.cjs
 
     substituteInPlace node_modules/debug/src/common.js \
       --replace-fail "require('ms')" \
-        "require('../../../dist/main/main/ms-shim.cjs')"
+        "require('../../../out/main/ms-shim.cjs')"
+
+    electronDistDir="$PWD/electron-dist"
+    mkdir -p "$electronDistDir"
+    cp -R ${electronDist}/. "$electronDistDir"/
+    chmod -R u+w "$electronDistDir"
 
     extra_electron_builder_flags=()
     ${lib.optionalString stdenv.hostPlatform.isDarwin ''
@@ -200,8 +172,10 @@ stdenv.mkDerivation {
     pnpm exec electron-builder \
       --${electronBuilderTarget} \
       --dir \
-      -c.electronDist=${electronDistDir} \
-      -c.electronVersion=${electronVersion} \
+      --publish never \
+      -c.electronDist="$electronDistDir" \
+      -c.electronVersion=${lib.escapeShellArg electronRuntimeVersion} \
+      -c.npmRebuild=false \
       "''${extra_electron_builder_flags[@]}"
 
     runHook postBuild
@@ -212,7 +186,7 @@ stdenv.mkDerivation {
       ''
         runHook preInstall
 
-        distDir="$PWD/release"
+        distDir="$PWD/dist"
         appDir="$distDir/mac-arm64/Emdash.app"
 
         if [ ! -d "$appDir" ]; then
@@ -237,18 +211,20 @@ stdenv.mkDerivation {
       ''
         runHook preInstall
 
-        distDir="$PWD/release"
-        unpackedDir="$distDir/linux-unpacked"
-
-        if [ ! -d "$unpackedDir" ]; then
-          echo \
-            "Expected linux-unpacked output from electron-builder, got nothing at $unpackedDir" \
+        distDir="$PWD/dist"
+        shopt -s nullglob
+        unpackedDirs=("$distDir"/linux*-unpacked)
+        if [ "''${#unpackedDirs[@]}" -ne 1 ]; then
+          printf \
+            'Expected exactly one linux*-unpacked output from electron-builder, found %s\n' \
+            "''${#unpackedDirs[@]}" \
             >&2
           exit 1
         fi
+        unpackedDir="''${unpackedDirs[0]}"
 
         install -d "$out/share/emdash"
-        cp -R "$unpackedDir" "$out/share/emdash/"
+        cp -R "$unpackedDir" "$out/share/emdash/linux-unpacked"
 
         install -d "$out/bin"
         install -m755 ${./launcher-linux.sh} "$out/bin/emdash"
@@ -258,6 +234,16 @@ stdenv.mkDerivation {
 
         runHook postInstall
       '';
+
+  passthru = {
+    inherit
+      electronDist
+      electronHeaders
+      electronRuntime
+      electronRuntimeVersion
+      electronVersion
+      ;
+  };
 
   meta = with lib; {
     description = "Agentic development environment for parallel coding agents";

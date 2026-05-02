@@ -248,11 +248,6 @@ in
           ];
         };
 
-        figma = {
-          type = "remote";
-          url = "https://mcp.figma.com/mcp";
-        };
-
         macos-automator = {
           type = "local";
           command = [

@@ -131,6 +131,7 @@ jobs:
         run: |
           nix build .#checks.x86_64-linux.test-nix-default-api
           nix build .#checks.x86_64-linux.test-nix-opencode-desktop-electron
+          nix build .#checks.x86_64-linux.cache-electron-runtimes
           nix build .#checks.x86_64-linux.test-python-pytest
           nix build .#checks.x86_64-linux.verify-workflow-artifacts-refresh
           nix build .#checks.x86_64-linux.verify-workflow-artifacts-certify

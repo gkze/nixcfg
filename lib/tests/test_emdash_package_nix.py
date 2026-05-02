@@ -60,6 +60,8 @@ def test_emdash_launchers_are_installed_from_repo_scripts() -> None:
         'install -d "$out/bin"',
         'install -m755 __NIX_INTERP__ "$out/bin/emdash"',
     ]
+    assert "linux*-unpacked" in linux_install.value
+    assert '"$out/share/emdash/linux-unpacked"' in linux_install.value
     expected_substitute = (
         'substituteInPlace "$out/bin/emdash" \\ '
         '--replace-fail "#!/usr/bin/env bash" "#!__NIX_INTERP__" \\ '

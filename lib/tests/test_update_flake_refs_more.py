@@ -357,6 +357,11 @@ def test_get_flake_inputs_with_refs_filters_expected_items(
             "ref": "refs/tags/release-3.5.9-beta2",
         })
     )
+    pinned_node = FlakeLockNode(
+        original=OriginalRef(
+            type="github", owner="nix-community", repo="nh", ref="v4.2.0"
+        )
+    )
     branch_node = FlakeLockNode(
         original=OriginalRef(type="github", owner="o", repo="r", ref="main")
     )
@@ -374,6 +379,7 @@ def test_get_flake_inputs_with_refs_filters_expected_items(
                 "gitlab": "gitlab-node",
                 "git": "git-node",
                 "git-unparsed": "git-unparsed-node",
+                "nh": "pinned-node",
                 "branch": "branch-node",
                 "unsupported": "unsupported-node",
                 "missing-owner": "missing-owner",
@@ -386,6 +392,7 @@ def test_get_flake_inputs_with_refs_filters_expected_items(
             "gitlab-node": gitlab_node,
             "git-node": git_node,
             "git-unparsed-node": git_unparsed_node,
+            "pinned-node": pinned_node,
             "branch-node": branch_node,
             "unsupported-node": unsupported_node,
             "missing-owner": missing_owner,

@@ -77,7 +77,11 @@ let
       name = "security";
       description = "PGP and security tools (sequoia suite)";
       packages = [
-        sequoia-chameleon-gnupg
+        # This package intentionally exposes GnuPG-compatible names (gpg,
+        # gpgv, gpgconf) while programs.gpg also installs pkgs.gnupg. Keep
+        # GnuPG as the default provider for those names and still expose the
+        # Sequoia-specific gpg-sq/gpgv-sq tools.
+        (lib.lowPrio sequoia-chameleon-gnupg)
         sequoia-sq
         sequoia-sqop
         sequoia-sqv

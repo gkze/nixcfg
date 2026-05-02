@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import cache
 from pathlib import Path
 
+from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.if_expression import IfExpression
@@ -12,6 +13,7 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.primitive import StringPrimitive
+from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
@@ -35,16 +37,30 @@ def _overlay_output() -> AttributeSet:
 
 
 @cache
-def _override_attrs() -> AttributeSet:
-    """Return the attrset passed to ``prev.github-desktop.overrideAttrs``."""
-    override = expect_instance(
+def _override_call() -> FunctionCall:
+    """Return the call that defines ``github-desktop``."""
+    return expect_instance(
         expect_binding(_overlay_output().values, "github-desktop").value,
         FunctionCall,
     )
-    assert_nix_ast_equal(override.name, "prev.github-desktop.overrideAttrs")
 
+
+def _base_package_override() -> FunctionCall:
+    """Return the ``prev.github-desktop.override`` call before ``overrideAttrs``."""
+    override_attrs_select = expect_instance(_override_call().name, Select)
+    assert override_attrs_select.attribute == "overrideAttrs"
+    return expect_instance(
+        expect_instance(override_attrs_select.expression, Parenthesis).value,
+        FunctionCall,
+    )
+
+
+@cache
+def _override_attrs() -> AttributeSet:
+    """Return the attrset passed to ``overrideAttrs``."""
     outer = expect_instance(
-        expect_instance(override.argument, Parenthesis).value, FunctionDefinition
+        expect_instance(_override_call().argument, Parenthesis).value,
+        FunctionDefinition,
     )
     inner = expect_instance(outer.output, FunctionDefinition)
     return expect_instance(inner.output, AttributeSet)
@@ -89,6 +105,18 @@ def _string_items(items: NixList) -> list[str]:
     return values
 
 
+def test_github_desktop_overrides_base_electron_dependency() -> None:
+    """The base derivation should evaluate against the exact shared runtime."""
+    base_override = _base_package_override()
+    assert_nix_ast_equal(base_override.name, "prev.github-desktop.override")
+
+    override_args = expect_instance(base_override.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(override_args.values, "electron").value,
+        "electronRuntime",
+    )
+
+
 def test_post_configure_patches_bundled_node_addon_api_before_native_rebuilds() -> None:
     """Native modules should compile with the current Darwin toolchain."""
     searches, replacements, final_argument = _replace_strings_parts("postConfigure")
@@ -131,7 +159,7 @@ def test_post_configure_patches_bundled_node_addon_api_before_native_rebuilds() 
             expect_instance(electron_zip_branch.consequence, IndentedString).value
         )
     ) == [
-        "cp -R __NIX_INTERP__/Applications/Electron.app Electron.app",
+        "cp -R __NIX_INTERP__/Electron.app Electron.app",
         "chmod -R u+w Electron.app",
         "zip -0Xqr __NIX_INTERP__ Electron.app",
         "rm -rf Electron.app",
@@ -145,6 +173,33 @@ def test_post_configure_patches_bundled_node_addon_api_before_native_rebuilds() 
         "zip -0Xqr __NIX_INTERP__ electron",
         "rm electron",
     ]
+
+
+def test_github_desktop_passthru_exposes_shared_electron_runtime() -> None:
+    """Downstream checks should be able to see the shared Electron runtime."""
+    passthru = expect_instance(
+        expect_binding(_override_attrs().values, "passthru").value,
+        BinaryExpression,
+    )
+    assert_nix_ast_equal(passthru.left, "(oldAttrs.passthru or { })")
+    merged_attrs = expect_instance(passthru.right, AttributeSet)
+
+    assert_nix_ast_equal(
+        expect_binding(merged_attrs.values, "electronDist").value,
+        "electronRuntime.passthru.dist",
+    )
+    assert_nix_ast_equal(
+        expect_binding(merged_attrs.values, "electronHeaders").value,
+        "electronRuntime.passthru.headers",
+    )
+    assert_nix_ast_equal(
+        expect_binding(merged_attrs.values, "electronRuntimeVersion").value,
+        "electronRuntime.version",
+    )
+    assert_nix_ast_equal(
+        expect_binding(merged_attrs.values, "electronVersion").value,
+        "electronRuntime.version",
+    )
 
 
 def test_native_build_inputs_removes_desktop_to_darwin_bundle_on_darwin() -> None:

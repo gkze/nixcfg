@@ -346,7 +346,7 @@ def _build_package_path_attr_expr(
             ),
         ],
     )
-    expression: NixExpression = FunctionCall(
+    package_expr: NixExpression = FunctionCall(
         name=FunctionCall(
             name=_select_attrs(Identifier(name="pkgs"), "callPackage"),
             argument=NixPath(path=f"./packages/{package}/default.nix"),
@@ -361,9 +361,12 @@ def _build_package_path_attr_expr(
             ]
         ),
     )
+    expression = package_expr
     for attribute in attr_path.removeprefix(".").split("."):
         if not attribute:
             continue
+        if expression is package_expr:
+            expression = Parenthesis(value=expression)
         expression = Select(expression=expression, attribute=attribute)
     expression = LetExpression(
         local_variables=[

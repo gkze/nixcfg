@@ -10,7 +10,6 @@
   openssh,
   python312,
   ripgrep,
-  runCommand,
   stdenv,
   tirith,
   ...
@@ -49,36 +48,7 @@ else
       "web"
     ];
     darwinExtrasSpec = lib.concatStringsSep "," darwinExtras;
-    darwinExtrasNix = ''
-      defaultExtras =
-        if stdenv.hostPlatform.isDarwin then [
-      ${lib.concatMapStringsSep "\n" (extra: "    \"${extra}\"") darwinExtras}
-        ]
-        else [
-          "all"
-        ];
-    '';
-
-    hermesSource = runCommand "hermes-agent-darwin-source" { } ''
-      cp -R ${inputs.hermes-agent}/. "$out"
-      chmod -R u+w "$out"
-
-      printf '%s' ${lib.escapeShellArg darwinExtrasNix} > "$TMPDIR/darwin-extras.nix"
-      grep -q '^in$' "$out/nix/python.nix"
-      awk -v extrasFile="$TMPDIR/darwin-extras.nix" '
-        /^in$/ {
-          while ((getline line < extrasFile) > 0) {
-            print line
-          }
-        }
-        { print }
-      ' "$out/nix/python.nix" > "$out/nix/python.nix.tmp"
-      mv "$out/nix/python.nix.tmp" "$out/nix/python.nix"
-      substituteInPlace "$out/nix/python.nix" \
-        --replace-fail '  hermes-agent = [ "all" ];' '  hermes-agent = defaultExtras;'
-      grep -q '^defaultExtras =' "$out/nix/python.nix"
-      grep -q 'hermes-agent = defaultExtras;' "$out/nix/python.nix"
-    '';
+    hermesSource = inputs.hermes-agent;
 
     python312ForHermes = python312.override {
       packageOverrides = _pyFinal: pyPrev: {
@@ -99,6 +69,7 @@ else
         uv2nix
         ;
       python312 = python312ForHermes;
+      dependency-groups = darwinExtras;
     };
 
     npm-lockfile-fix = inputs.hermes-agent.inputs.npm-lockfile-fix.packages.${system}.default;

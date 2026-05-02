@@ -13,6 +13,7 @@
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Slack.app"; }
       { app = "/Applications/Twilight.app"; }
       { app = "/Applications/Google Chrome.app"; }
+      { app = "/Applications/Town Assistant.app"; }
       { app = "/Applications/ChatGPT.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Codex.app"; }
       { app = "/Applications/Claude.app"; }

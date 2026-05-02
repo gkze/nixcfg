@@ -9,13 +9,11 @@ from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.indented_string import IndentedString
-from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
-    binding_map,
     expect_binding,
     expect_scope_binding,
     parse_nix_expr,
@@ -40,104 +38,25 @@ def test_mux_top_level_derivation_uses_stdenv_mk_derivation() -> None:
     assert_nix_ast_equal(_mux_derivation().name, "stdenv.mkDerivation")
 
 
-def test_mux_declares_local_darwin_electron_artifacts() -> None:
-    """Mux should declare local Electron headers, zip, and dist derivations."""
+def test_mux_uses_central_electron_runtime_artifacts() -> None:
+    """Mux should source Electron runtime, headers, and dist from nixcfgElectron."""
     derivation = _mux_derivation()
 
     assert_nix_ast_equal(
         expect_scope_binding(derivation, "electronVersion").value,
         '"38.7.2"',
     )
-
-    electron_headers = expect_instance(
+    assert_nix_ast_equal(
+        expect_scope_binding(derivation, "electronRuntime").value,
+        "nixcfgElectron.runtimeFor electronVersion",
+    )
+    assert_nix_ast_equal(
         expect_scope_binding(derivation, "electronHeaders").value,
-        FunctionCall,
-    )
-    assert_nix_ast_equal(electron_headers.name, "stdenvNoCC.mkDerivation")
-    headers_args = expect_instance(electron_headers.argument, AttributeSet)
-    headers_src = expect_instance(
-        expect_binding(headers_args.values, "src").value, FunctionCall
-    )
-    assert_nix_ast_equal(headers_src.name, "fetchurl")
-    headers_src_args = expect_instance(headers_src.argument, AttributeSet)
-    assert_nix_ast_equal(
-        expect_binding(headers_src_args.values, "url").value,
-        '"https://www.electronjs.org/headers/v${electronVersion}/node-v${electronVersion}-headers.tar.gz"',
+        "electronRuntime.passthru.headers",
     )
     assert_nix_ast_equal(
-        expect_binding(headers_src_args.values, "sha256").value,
-        "hashToNix32 electronHeadersChecksum",
-    )
-
-    electron_zip = expect_instance(
-        expect_scope_binding(derivation, "electronZip").value,
-        FunctionCall,
-    )
-    assert_nix_ast_equal(electron_zip.name, "fetchurl")
-    electron_zip_args = expect_instance(electron_zip.argument, AttributeSet)
-    assert_nix_ast_equal(
-        expect_binding(electron_zip_args.values, "url").value,
-        '"https://github.com/electron/electron/releases/download/v${electronVersion}/electron-v${electronVersion}-${electronZipPlatform}.zip"',
-    )
-    assert_nix_ast_equal(
-        expect_binding(electron_zip_args.values, "sha256").value,
-        "hashToNix32 electronZipChecksum",
-    )
-
-    electron_dist = expect_instance(
         expect_scope_binding(derivation, "electronDist").value,
-        FunctionCall,
-    )
-    assert_nix_ast_equal(electron_dist.name, "stdenvNoCC.mkDerivation")
-    electron_dist_args = expect_instance(electron_dist.argument, AttributeSet)
-    install_phase = expect_instance(
-        expect_binding(electron_dist_args.values, "installPhase").value,
-        IndentedString,
-    )
-    assert (
-        'ln -s ${electronZip} "$out/electron-v${electronVersion}-${electronZipPlatform}.zip"'
-        in install_phase.value
-    )
-
-
-def test_mux_keeps_darwin_platform_mapping_and_checksum_table() -> None:
-    """Mux should keep both Darwin Electron zip mappings in the package AST."""
-    derivation = _mux_derivation()
-
-    assert_nix_ast_equal(
-        expect_scope_binding(derivation, "electronZipPlatform").value,
-        """if stdenv.hostPlatform.system == "aarch64-darwin" then
-  "darwin-arm64"
-else if stdenv.hostPlatform.system == "x86_64-darwin" then
-  "darwin-x64"
-else
-  throw "packages/mux/default.nix unsupported Darwin platform ${stdenv.hostPlatform.system}"
-""",
-    )
-
-    electron_zip_checksum = expect_instance(
-        expect_scope_binding(derivation, "electronZipChecksum").value,
-        Select,
-    )
-    assert (
-        electron_zip_checksum.attribute == "${electronVersion}.${electronZipPlatform}"
-    )
-
-    checksum_bindings = binding_map(
-        expect_instance(electron_zip_checksum.expression, AttributeSet).values,
-    )
-    version_hashes = expect_instance(
-        next(iter(checksum_bindings.values())).value, AttributeSet
-    )
-    platform_hashes = binding_map(version_hashes.values)
-    assert set(platform_hashes) == {'"darwin-arm64"', '"darwin-x64"'}
-
-    assert_nix_ast_equal(
-        electron_zip_checksum.default,
-        (
-            'throw "packages/mux/default.nix missing Electron zip hash '
-            'for ${electronVersion}/${electronZipPlatform}"'
-        ),
+        "electronRuntime.passthru.dist",
     )
 
 
@@ -189,7 +108,7 @@ def test_mux_derivation_encodes_the_hermetic_darwin_packaging_contract() -> None
     post_patch_script = expect_instance(post_patch.argument, IndentedString)
     assert "patch_package_json.py" in post_patch_script.value
     assert "package.json" in post_patch_script.value
-    assert "lib.escapeShellArg (toString electronDist)" in post_patch_script.value
+    assert "electron-dist" in post_patch_script.value
 
     build_phase = expect_instance(
         expect_binding(derivation_args.values, "buildPhase").value,
@@ -198,7 +117,11 @@ def test_mux_derivation_encodes_the_hermetic_darwin_packaging_contract() -> None
     assert_nix_ast_equal(build_phase.condition, "stdenv.hostPlatform.isDarwin")
     darwin_build = expect_instance(build_phase.consequence, IndentedString)
     assert "bun scripts/generate-icons.ts png icns linux-icons" in darwin_build.value
+    assert "bun x electron-builder" in darwin_build.value
+    assert 'cp -R ${electronDist}/. "$electronDistDir"/' in darwin_build.value
+    assert '-c.electronDist="$electronDistDir"' in darwin_build.value
     assert (
-        "bun x electron-builder --mac --dir --publish never -c.mac.identity=null"
+        "-c.electronVersion=${lib.escapeShellArg electronRuntimeVersion}"
         in darwin_build.value
     )
+    assert "-c.mac.identity=null" in darwin_build.value

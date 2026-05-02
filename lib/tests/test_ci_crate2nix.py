@@ -195,6 +195,37 @@ def test_stabilize_generated_root_src_paths_rewrites_relative_store_paths() -> N
     )
 
 
+def test_stabilize_generated_root_src_paths_handles_canonicalized_temp_paths(
+    tmp_path: Path,
+) -> None:
+    """crate2nix may emit paths relative to a canonicalized temp directory."""
+    patched_src = Path("/nix/store/demo-src")
+    real_parent = tmp_path / "real" / "build"
+    symlink_parent = tmp_path / "link" / "build"
+    real_parent.mkdir(parents=True)
+    symlink_parent.parent.symlink_to(real_parent.parent, target_is_directory=True)
+    generated_cargo = symlink_parent / "Cargo.nix"
+    relative_src = os.path.relpath(
+        patched_src / "crates/demo",
+        real_parent,
+    ).replace(os.sep, "/")
+    refreshed = (
+        "        src = lib.cleanSourceWith { filter = sourceFilter;  "
+        f"src = {relative_src}; }};\n"
+    )
+
+    stabilized = crate2nix._stabilize_generated_root_src_paths(
+        refreshed,
+        patched_src=patched_src,
+        generated_cargo=generated_cargo,
+    )
+
+    assert (
+        "src = lib.cleanSourceWith { filter = sourceFilter;  "
+        'src = "${rootSrc}/crates/demo"; };\n' in stabilized
+    )
+
+
 def test_stabilize_generated_root_src_paths_handles_root_and_unrelated_paths() -> None:
     """Exact root paths normalize, while unrelated paths are left alone."""
     patched_src = Path("/nix/store/demo-src")

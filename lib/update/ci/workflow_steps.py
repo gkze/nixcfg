@@ -416,7 +416,7 @@ def command_prefetch_flake_inputs() -> None:
 
 
 def command_nix_flake_update() -> None:
-    """Run `nix flake update`."""
+    """Update flake inputs except operational pins."""
     _exit_with_code(_cmd_nix_flake_update())
 
 
@@ -720,7 +720,11 @@ for _name, _command, _help in (
         command_prefetch_flake_inputs,
         "Alias for `flake prefetch`.",
     ),
-    ("nix-flake-update", command_nix_flake_update, "Alias for `flake update`."),
+    (
+        "nix-flake-update",
+        command_nix_flake_update,
+        "Alias for pinned-aware flake input updates.",
+    ),
     ("generate-pr-body", command_generate_pr_body, "Alias for `pr-body`."),
     (
         "render-certification-pr-body",

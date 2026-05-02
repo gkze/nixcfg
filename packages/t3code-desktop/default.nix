@@ -1,10 +1,10 @@
 {
   bun,
   cacert,
-  fetchurl,
   inputs,
   lib,
   makeWrapper,
+  nixcfgElectron,
   nodejs,
   outputs,
   python3,
@@ -42,6 +42,10 @@ let
   desktopPackageJson = builtins.fromJSON (builtins.readFile "${src}/apps/desktop/package.json");
   appVersion = serverPackageJson.version;
   electronVersion = desktopPackageJson.dependencies.electron;
+  electronRuntime = nixcfgElectron.runtimeFor electronVersion;
+  electronRuntimeVersion = electronRuntime.version;
+  electronHeaders = electronRuntime.passthru.headers;
+  electronDist = electronRuntime.passthru.dist;
   versionSyncCheck =
     if serverPackageJson.version == desktopPackageJson.version then
       true
@@ -51,34 +55,6 @@ let
         got server ${serverPackageJson.version} and desktop ${desktopPackageJson.version}
       '';
   t3codeCommitHash = outputs.lib.flakeLock.t3code.locked.rev or "";
-
-  electronTarget =
-    {
-      aarch64-darwin = "darwin-arm64";
-    }
-    .${system} or (throw "packages/t3code-desktop/default.nix unsupported Darwin platform ${system}");
-
-  darwinElectronZipHash =
-    {
-      aarch64-darwin = "sha256-UOuR8ezVETuLJIPwARb1xKCkc/RoT6w32kKTq8177vM=";
-    }
-    .${system};
-
-  electronZip = fetchurl {
-    url = "https://github.com/electron/electron/releases/download/v${electronVersion}/electron-v${electronVersion}-${electronTarget}.zip";
-    hash = darwinElectronZipHash;
-  };
-
-  electronDist = stdenv.mkDerivation {
-    name = "${pname}-electron-dist-${electronTarget}";
-    dontUnpack = true;
-    dontBuild = true;
-    dontFixup = true;
-    installPhase = ''
-      mkdir -p "$out"
-      ln -s ${electronZip} "$out/electron-v${electronVersion}-${electronTarget}.zip"
-    '';
-  };
 
   node_modules = stdenv.mkDerivation {
     pname = "${pname}-node_modules";
@@ -178,6 +154,11 @@ stdenv.mkDerivation {
 
     patchShebangs node_modules
 
+    electronDistDir="$PWD/electron-dist"
+    mkdir -p "$electronDistDir"
+    cp -R ${electronDist}/. "$electronDistDir"/
+    chmod -R u+w "$electronDistDir"
+
     ./node_modules/.bin/electron-builder \
       --mac dir \
       --publish never \
@@ -189,8 +170,8 @@ stdenv.mkDerivation {
       -c.mac.identity=null \
       -c.mac.hardenedRuntime=false \
       -c.mac.notarize=false \
-      -c.electronVersion=${lib.escapeShellArg electronVersion} \
-      -c.electronDist=${lib.escapeShellArg (toString electronDist)}
+      -c.electronVersion=${lib.escapeShellArg electronRuntimeVersion} \
+      -c.electronDist="$electronDistDir"
 
     runHook postBuild
   '';
@@ -246,6 +227,14 @@ stdenv.mkDerivation {
   '';
 
   passthru = {
+    inherit
+      electronDist
+      electronHeaders
+      electronRuntime
+      electronRuntimeVersion
+      electronVersion
+      ;
+
     macApp = {
       bundleName = appBundleName;
       bundleRelPath = "Applications/${appBundleName}";

@@ -1,4 +1,5 @@
 {
+  final,
   inputs,
   prev,
   selfSource,
@@ -7,12 +8,13 @@
 }:
 let
   inherit (selfSource) version;
-  electronZipName = "electron-v${prev.electron.version}-${prev.stdenv.hostPlatform.node.platform}-${prev.stdenv.hostPlatform.node.arch}.zip";
+  electronRuntime = final.nixcfgElectron.runtimeFor "40.1.0";
+  electronZipName = "electron-v${electronRuntime.version}-${prev.stdenv.hostPlatform.node.platform}-${prev.stdenv.hostPlatform.node.arch}.zip";
   src = inputs.github-desktop;
   srcRev = inputs.github-desktop.rev;
 in
 {
-  github-desktop = prev.github-desktop.overrideAttrs (
+  github-desktop = (prev.github-desktop.override { electron = electronRuntime; }).overrideAttrs (
     finalAttrs: oldAttrs: {
       inherit src version;
 
@@ -66,7 +68,7 @@ in
             (
               if prev.stdenv.hostPlatform.isDarwin then
                 ''
-                  cp -R ${prev.electron}/Applications/Electron.app Electron.app
+                  cp -R ${electronRuntime.passthru.dist}/Electron.app Electron.app
                   chmod -R u+w Electron.app
                   zip -0Xqr ${electronZipName} Electron.app
                   rm -rf Electron.app''
@@ -117,6 +119,11 @@ in
       '';
 
       passthru = (oldAttrs.passthru or { }) // {
+        inherit electronRuntime;
+        electronDist = electronRuntime.passthru.dist;
+        electronHeaders = electronRuntime.passthru.headers;
+        electronRuntimeVersion = electronRuntime.version;
+        electronVersion = electronRuntime.version;
         upstreamChannel = "beta";
       };
     }

@@ -6,6 +6,7 @@
   stdenv,
   stdenvNoCC,
   lib,
+  nixcfgElectron,
   bun,
   bun2nix,
   appimageTools,
@@ -54,14 +55,14 @@ let
           ]
           (builtins.readFile updateBunLockTemplate);
   };
-  # Keep this in sync with apps/desktop/package.json and bun.lock. We pre-seed
-  # these headers so `electron-builder install-app-deps` stays offline and
-  # reproducible under Nix instead of hitting electronjs.org at build time.
+  # Keep this in sync with apps/desktop/package.json and bun.lock. Reuse the
+  # centrally-packaged runtime and headers so Electron builder/rebuild stays
+  # offline and shares cache entries with other Electron apps.
   electronVersion = "40.8.5";
-  electronHeadersTarball = fetchurl {
-    url = "https://www.electronjs.org/headers/v${electronVersion}/node-v${electronVersion}-headers.tar.gz";
-    hash = "sha256-kyeCgCvn9qIneittSPHA/Dsgocva33Z64RB2NGPNP5o=";
-  };
+  electronRuntime = nixcfgElectron.runtimeFor electronVersion;
+  electronRuntimeVersion = electronRuntime.version;
+  electronHeaders = electronRuntime.passthru.headers;
+  electronDist = electronRuntime.passthru.dist;
   invalidBunNixErr = ''
     packages/superset/bun.nix failed to evaluate.
 
@@ -286,10 +287,7 @@ else
       export npm_config_runtime=electron
       export npm_config_target=${electronVersion}
 
-      electron_gyp_dir="$HOME/.electron-gyp/${electronVersion}"
-      mkdir -p "$electron_gyp_dir"
-      tar -xzf ${electronHeadersTarball} --strip-components=1 -C "$electron_gyp_dir"
-      export npm_config_nodedir="$electron_gyp_dir"
+      export npm_config_nodedir=${lib.escapeShellArg (toString electronHeaders)}
 
       bun run --cwd apps/desktop copy:native-modules
 
@@ -301,6 +299,11 @@ else
       bun run --cwd apps/desktop validate:native-runtime
       bun run --cwd apps/desktop install:deps
 
+      electronDistDir="$PWD/electron-dist"
+      mkdir -p "$electronDistDir"
+      cp -R ${electronDist}/. "$electronDistDir"/
+      chmod -R u+w "$electronDistDir"
+
       (
         cd apps/desktop
         bun x electron-builder \
@@ -308,6 +311,8 @@ else
           --mac \
           --dir \
           --publish never \
+          -c.electronDist="$electronDistDir" \
+          -c.electronVersion=${lib.escapeShellArg electronRuntimeVersion} \
           -c.mac.identity=null \
           -c.mac.hardenedRuntime=false \
           -c.mac.notarize=false
@@ -355,7 +360,16 @@ else
       runHook postInstallCheck
     '';
 
-    passthru.updateScript = updateScript;
+    passthru = {
+      inherit
+        electronDist
+        electronHeaders
+        electronRuntime
+        electronRuntimeVersion
+        electronVersion
+        updateScript
+        ;
+    };
 
     meta = with lib; {
       description = "Desktop client for the Superset agent platform";

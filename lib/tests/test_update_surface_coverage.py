@@ -22,7 +22,7 @@ def test_surface_alias_and_exemption_contracts() -> None:
     assert UPDATE_SURFACE_ALIASES == {
         "opencode-desktop-electron-dev": "opencode-desktop-electron",
     }
-    assert {"nix"} == UPDATE_SURFACE_EXEMPTIONS
+    assert {"electron-runtimes", "nix"} == UPDATE_SURFACE_EXEMPTIONS
     assert canonical_update_surface_name("opencode-desktop-electron-dev") == (
         "opencode-desktop-electron"
     )

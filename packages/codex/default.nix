@@ -70,10 +70,17 @@ let
       ''
         cp -r ${src} "$out"
         chmod -R u+w "$out"
-        cp ${src}/node-version.txt "$out/node-version.txt"
-        cp ${src}/node-version.txt "$out/core/node-version.txt"
-        substituteInPlace "$out/core/src/tools/js_repl/mod.rs" \
-          --replace-fail '../../../../node-version.txt' '../../../node-version.txt'
+        if [ -f "${src}/node-version.txt" ]; then
+          cp "${src}/node-version.txt" "$out/node-version.txt"
+          cp "${src}/node-version.txt" "$out/core/node-version.txt"
+          if [ -f "$out/core/src/tools/js_repl/mod.rs" ]; then
+            substituteInPlace "$out/core/src/tools/js_repl/mod.rs" \
+              --replace-fail '../../../../node-version.txt' '../../../node-version.txt'
+          fi
+        elif [ -f "$out/core/src/tools/js_repl/mod.rs" ]; then
+          echo "codex js_repl source still exists, but ${src}/node-version.txt is missing" >&2
+          exit 1
+        fi
 
         ${pythonForSourcePrep}/bin/python3 \
           ${./patch_cargo_lock_version.py} \

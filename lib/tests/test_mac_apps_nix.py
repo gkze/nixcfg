@@ -205,95 +205,117 @@ def _mac_app_metadata_attrset(
     })
 
 
-def _managed_mac_app_routing_table() -> NixList:
-    """Build George's canonical managed macOS app routing table."""
-    return NixList(
-        value=[
-            AttributeSet(
-                values=[
-                    Binding(
-                        name="excludePackageName",
-                        value=StringPrimitive(value="chatgpt"),
-                    ),
-                    Binding(
-                        name="package",
-                        value=identifier_attr_path("pkgs", "chatgpt"),
-                    ),
-                    Binding(name="mode", value=StringPrimitive(value="copy")),
-                ]
+def _managed_mac_app_routing_table() -> NixExpression:
+    """Build George's canonical managed macOS app routing expression."""
+    base_entries = [
+        AttributeSet(
+            values=[
+                Binding(
+                    name="excludePackageName",
+                    value=StringPrimitive(value="chatgpt"),
+                ),
+                Binding(
+                    name="package",
+                    value=identifier_attr_path("pkgs", "chatgpt"),
+                ),
+                Binding(name="mode", value=StringPrimitive(value="copy")),
+            ]
+        ),
+        AttributeSet(
+            values=[
+                Binding(
+                    name="excludePackageName",
+                    value=StringPrimitive(value="cursor"),
+                ),
+                Binding(
+                    name="package",
+                    value=identifier_attr_path("pkgs", "code-cursor"),
+                ),
+                Binding(name="mode", value=StringPrimitive(value="copy")),
+            ]
+        ),
+        AttributeSet(
+            values=[
+                Binding(
+                    name="excludePackageName",
+                    value=StringPrimitive(value="datagrip"),
+                ),
+                Binding(
+                    name="package",
+                    value=identifier_attr_path("pkgs", "jetbrains", "datagrip"),
+                ),
+                Binding(name="mode", value=StringPrimitive(value="copy")),
+            ]
+        ),
+        AttributeSet(
+            values=[
+                Binding(
+                    name="package",
+                    value=identifier_attr_path("pkgs", "vscode-insiders"),
+                ),
+                Binding(name="mode", value=StringPrimitive(value="copy")),
+            ]
+        ),
+        AttributeSet(
+            values=[
+                Binding(
+                    name="package",
+                    value=identifier_attr_path("pkgs", "netnewswire"),
+                )
+            ]
+        ),
+        AttributeSet(
+            values=[
+                Binding(
+                    name="excludePackageName",
+                    value=StringPrimitive(value="wispr-flow"),
+                ),
+                Binding(
+                    name="package",
+                    value=identifier_attr_path("pkgs", "wispr-flow"),
+                ),
+            ]
+        ),
+        AttributeSet(
+            values=[
+                Binding(
+                    name="package",
+                    value=identifier_attr_path("pkgs", "zoom-us"),
+                )
+            ]
+        ),
+        AttributeSet(
+            values=[
+                Binding(
+                    name="package",
+                    value=identifier_attr_path("pkgs", "zen-twilight"),
+                )
+            ]
+        ),
+    ]
+    return BinaryExpression(
+        left=NixList(value=base_entries),
+        operator=Operator(name="++"),
+        right=FunctionCall(
+            name=FunctionCall(
+                name=identifier_attr_path("lib", "optionals"),
+                argument=identifier_attr_path("config", "profiles", "work", "enable"),
             ),
-            AttributeSet(
-                values=[
-                    Binding(
-                        name="excludePackageName",
-                        value=StringPrimitive(value="cursor"),
-                    ),
-                    Binding(
-                        name="package",
-                        value=identifier_attr_path("pkgs", "code-cursor"),
-                    ),
-                    Binding(name="mode", value=StringPrimitive(value="copy")),
-                ]
-            ),
-            AttributeSet(
-                values=[
-                    Binding(
-                        name="excludePackageName",
-                        value=StringPrimitive(value="datagrip"),
-                    ),
-                    Binding(
-                        name="package",
-                        value=identifier_attr_path("pkgs", "jetbrains", "datagrip"),
-                    ),
-                    Binding(name="mode", value=StringPrimitive(value="copy")),
-                ]
-            ),
-            AttributeSet(
-                values=[
-                    Binding(
-                        name="package",
-                        value=identifier_attr_path("pkgs", "vscode-insiders"),
-                    ),
-                    Binding(name="mode", value=StringPrimitive(value="copy")),
-                ]
-            ),
-            AttributeSet(
-                values=[
-                    Binding(
-                        name="package",
-                        value=identifier_attr_path("pkgs", "netnewswire"),
+            argument=NixList(
+                value=[
+                    AttributeSet(
+                        values=[
+                            Binding(
+                                name="package",
+                                value=identifier_attr_path(
+                                    "pkgs", "town-assistant-nightly"
+                                ),
+                            )
+                        ]
                     )
                 ]
             ),
-            AttributeSet(
-                values=[
-                    Binding(
-                        name="excludePackageName",
-                        value=StringPrimitive(value="wispr-flow"),
-                    ),
-                    Binding(
-                        name="package",
-                        value=identifier_attr_path("pkgs", "wispr-flow"),
-                    ),
-                ]
-            ),
-            AttributeSet(
-                values=[
-                    Binding(
-                        name="package",
-                        value=identifier_attr_path("pkgs", "zoom-us"),
-                    )
-                ]
-            ),
-            AttributeSet(
-                values=[
-                    Binding(
-                        name="package",
-                        value=identifier_attr_path("pkgs", "zen-twilight"),
-                    )
-                ]
-            ),
-        ]
+        ),
     )
 
 

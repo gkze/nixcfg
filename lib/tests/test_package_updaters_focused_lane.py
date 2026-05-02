@@ -122,67 +122,87 @@ def test_wispr_flow_platform_urls_and_required_tools(
     )
 
 
-def test_codex_desktop_version_derivation_paths(
+def test_codex_desktop_fetch_latest_and_download_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Prefer Content-MD5, then ETag, then Last-Modified."""
+    """Parse both Codex Sparkle appcasts and preserve per-arch ZIP URLs."""
     module = _load_updater(
         "packages/codex-desktop/updater.py", "codex_desktop_updater_test"
     )
     updater = module.CodexDesktopUpdater()
+    urls = {
+        "aarch64-darwin": "https://example.invalid/Codex-darwin-arm64-26.429.20946.zip",
+        "x86_64-darwin": "https://example.invalid/Codex-darwin-x64-26.429.20946.zip",
+    }
 
-    monkeypatch.setattr(
-        module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(
-            0,
-            result={"Content-MD5": "dSDx9z9xMK/8IITfW12Edg=="},
-        ),
-    )
-    assert _run(updater.fetch_latest(object())).version == (
-        "md5.7520f1f73f7130affc2084df5b5d8476"
-    )
+    def _appcast(platform: str) -> bytes:
+        return f"""
+            <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+              <channel><item>
+                <sparkle:version>2312</sparkle:version>
+                <sparkle:shortVersionString>26.429.20946</sparkle:shortVersionString>
+                <enclosure url="{urls[platform]}" />
+              </item></channel>
+            </rss>
+        """.encode()
 
-    monkeypatch.setattr(
-        module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(0, result={"ETag": '"0xABCDEF"'}),
-    )
-    assert _run(updater.fetch_latest(object())).version == "etag.abcdef"
+    async def _fetch_url(_session: object, url: str, **kwargs: object) -> bytes:
+        assert kwargs["user_agent"] == "Sparkle/2.0"
+        assert kwargs["request_timeout"] == updater.config.default_timeout
+        assert kwargs["config"] == updater.config
+        for platform, appcast_url in updater.APPCASTS.items():
+            if url == appcast_url:
+                return _appcast(platform)
+        raise AssertionError(url)
 
-    monkeypatch.setattr(
-        module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(
-            0,
-            result={"Last-Modified": "Wed, 04 Mar 2026 00:25:01 GMT"},
-        ),
+    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+
+    latest = _run(updater.fetch_latest(object()))
+
+    assert latest.version == "26.429.20946-2312"
+    assert {
+        platform: updater.get_download_url(platform, latest)
+        for platform in updater.PLATFORMS
+    } == urls
+    assert updater.get_download_url(
+        "aarch64-darwin",
+        VersionInfo(version="26.429.20946-2312"),
+    ) == (
+        "https://persistent.oaistatic.com/codex-app-prod/"
+        "Codex-darwin-arm64-26.429.20946.zip"
     )
-    assert _run(updater.fetch_latest(object())).version == "modified.20260304002501"
 
 
 @pytest.mark.parametrize(
-    ("headers", "match"),
+    ("xml", "match"),
     [
-        ({"Content-MD5": "not-base64"}, "Invalid Content-MD5"),
-        ({"Last-Modified": "not-a-date"}, "Could not parse Last-Modified"),
-        ({}, "Missing Content-MD5/ETag/Last-Modified headers"),
+        ("<", "Invalid Codex appcast XML"),
+        ("<rss><channel /></rss>", "No items found in Codex appcast"),
+        (
+            "<rss><channel><item /></channel></rss>",
+            "No enclosure found in Codex appcast",
+        ),
+        (
+            '<rss><channel><item><enclosure url="https://example.invalid" />'
+            "</item></channel></rss>",
+            "No short version found in Codex appcast",
+        ),
     ],
 )
-def test_codex_desktop_rejects_invalid_header_inputs(
+def test_codex_desktop_rejects_invalid_appcast_shapes(
     monkeypatch: pytest.MonkeyPatch,
-    headers: dict[str, str],
+    xml: str,
     match: str,
 ) -> None:
-    """Raise clear errors for malformed or missing artifact metadata."""
+    """Raise clear errors for malformed Codex appcast payloads."""
     module = _load_updater(
         "packages/codex-desktop/updater.py", "codex_desktop_updater_test_errors"
     )
     updater = module.CodexDesktopUpdater()
     monkeypatch.setattr(
         module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(0, result=headers),
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=xml.encode()),
     )
 
     with pytest.raises(RuntimeError, match=match):

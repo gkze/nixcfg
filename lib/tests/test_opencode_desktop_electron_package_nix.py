@@ -74,27 +74,18 @@ def test_opencode_desktop_electron_top_level_derivation_keeps_both_guards() -> N
     inner_assertion = expect_instance(outer_assertion.body, Assertion)
 
     assert_nix_ast_equal(outer_assertion.expression, "desktopPackageVersionCheck")
-    assert_nix_ast_equal(inner_assertion.expression, "electronRuntimeMajorCheck")
+    assert_nix_ast_equal(inner_assertion.expression, "electronRuntimeVersionCheck")
     assert_nix_ast_equal(_derivation().name, "stdenv.mkDerivation")
 
 
-def test_opencode_desktop_electron_uses_nixpkgs_electron_runtime_on_all_platforms() -> (
-    None
-):
-    """All supported platforms should source Electron from the matching nixpkgs major line."""
+def test_opencode_desktop_electron_uses_exact_nixcfg_electron_runtime() -> None:
+    """All supported platforms should source Electron from the exact shared runtime."""
     package = _package_assertion()
 
     assert_nix_ast_equal(
-        expect_scope_binding(package, "electronMajor").value,
-        "head (lib.splitVersion electronVersion)",
+        expect_scope_binding(package, "electronRuntime").value,
+        "nixcfgElectron.runtimeFor electronVersion",
     )
-    electron_runtime = expect_scope_binding(package, "electronRuntime").value
-    electron_runtime_text = electron_runtime.rebuild()
-
-    assert '"40" = electron_40;' in electron_runtime_text
-    assert '"41" = electron_41;' in electron_runtime_text
-    assert ".${electronMajor}" in electron_runtime_text
-    assert "needed for ${electronVersion}" in electron_runtime_text
     assert_nix_ast_equal(
         expect_scope_binding(package, "electronRuntimeVersion").value,
         "electronRuntime.version",

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from lib import json_utils
+from lib.update.refs import PINNED_REF_INPUTS
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -210,9 +211,33 @@ def cmd_prefetch_flake_inputs(
     return 0
 
 
+def _flake_update_input_names(
+    *,
+    lock_file: Path = Path("flake.lock"),
+    pinned_inputs: frozenset[str] = PINNED_REF_INPUTS,
+) -> list[str]:
+    """Return root flake input names that should be lock-refreshed."""
+    lock = json_utils.as_object_dict(
+        json.loads(lock_file.read_text(encoding="utf-8")),
+        context=str(lock_file),
+    )
+    nodes = json_utils.as_object_dict(lock.get("nodes"), context="flake.lock.nodes")
+    root = json_utils.as_object_dict(nodes.get("root"), context="flake.lock.nodes.root")
+    root_inputs = json_utils.as_object_dict(
+        root.get("inputs", {}),
+        context="flake.lock.nodes.root.inputs",
+    )
+    return [
+        name
+        for name, target in sorted(root_inputs.items())
+        if name not in pinned_inputs and not isinstance(target, list)
+    ]
+
+
 def cmd_nix_flake_update(*, run: Callable[..., object]) -> int:
-    """Run `nix flake update`."""
-    run(["nix", "flake", "update"])
+    """Update root flake inputs while preserving operational pins."""
+    for input_name in _flake_update_input_names():
+        run(["nix", "flake", "lock", "--update-input", input_name])
     return 0
 
 

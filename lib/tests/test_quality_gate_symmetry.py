@@ -60,6 +60,7 @@ _SHARED_FLAKE_CHECKS = (
     "lint-workflows-actionlint",
     "test-nix-default-api",
     "test-nix-opencode-desktop-electron",
+    "cache-electron-runtimes",
     "test-python-pytest",
     "verify-workflow-artifacts-refresh",
     "verify-workflow-artifacts-certify",

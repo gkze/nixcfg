@@ -45,6 +45,10 @@ let
         "start"
       ];
     };
+    figma = {
+      type = "remote";
+      url = "https://mcp.figma.com/mcp";
+    };
     linear = {
       type = "remote";
       url = "https://mcp.linear.app/mcp";
@@ -139,6 +143,7 @@ in
         google-cloud-sdk
         linear-cli
         linearis
+        pscale
       ];
       description = "Packages installed when the work profile is enabled.";
     };
