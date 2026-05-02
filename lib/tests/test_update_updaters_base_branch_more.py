@@ -25,6 +25,7 @@ from lib.update.updaters.base import (
     _ensure_str_mapping,
     _updater_sourcefile,
 )
+from lib.update.updaters.dependencies import updater_dependencies
 from lib.update.updaters.metadata import FlakeInputMetadata
 
 if TYPE_CHECKING:
@@ -126,6 +127,21 @@ def test_helper_aliases_and_type_guard_errors(monkeypatch: pytest.MonkeyPatch) -
         _ = _ensure_str_mapping("bad")
     with pytest.raises(TypeError, match="Expected platform/hash string mapping"):
         _ = _ensure_str_mapping({"ok": 1})
+
+
+def test_dependency_adapter_uses_public_base_facade(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep adapter calls compatible with monkeypatches on the base facade."""
+
+    async def _url_hashes(source_name: str, urls: object) -> AsyncIterator[UpdateEvent]:
+        _ = urls
+        yield UpdateEvent.status(source_name, "adapter-url-hashes")
+
+    monkeypatch.setattr("lib.update.updaters.base.compute_url_hashes", _url_hashes)
+
+    events = _run(_collect(updater_dependencies().compute_url_hashes("demo", [])))
+    assert events[0].message == "adapter-url-hashes"
 
 
 def test_updater_sourcefile_falls_back_to_module_file(

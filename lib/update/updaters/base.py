@@ -57,6 +57,10 @@ from lib.update.updaters.materialization import (
 )
 from lib.update.updaters.metadata import VersionInfo
 from lib.update.updaters.registry import UPDATERS, register_updater
+from lib.update.updaters.single_url import (
+    SingleURLHashEntryUpdater,
+    stream_single_url_hash_entry,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -128,6 +132,7 @@ __all__ = [
     "FlakeInputUpdater",
     "HashEntryUpdater",
     "MaterializesArtifactsMixin",
+    "SingleURLHashEntryUpdater",
     "UpdateConfig",
     "UpdateContext",
     "Updater",
@@ -163,6 +168,7 @@ __all__ = [
     "register_updater",
     "source_override_env",
     "stream_fixed_output_hashes",
+    "stream_single_url_hash_entry",
     "stream_source_then_overlay_hashes",
     "stream_url_hash_mapping",
     "uv_lock_hash_updater",

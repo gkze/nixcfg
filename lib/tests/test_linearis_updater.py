@@ -103,7 +103,9 @@ def test_linearis_fetch_hashes_emits_single_tarball_hash(
         yield UpdateEvent.status(name, "hashing tarball")
         yield UpdateEvent.value(name, {tarball: hash_value})
 
-    monkeypatch.setattr(module, "compute_url_hashes", _compute_url_hashes)
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_url_hashes", _compute_url_hashes
+    )
 
     events = _run(
         _collect_events(

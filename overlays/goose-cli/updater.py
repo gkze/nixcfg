@@ -15,6 +15,7 @@ from lib.update.events import (
 )
 from lib.update.nix import _build_fetch_from_github_expr, compute_fixed_output_hash
 from lib.update.updaters.base import (
+    Crate2NixArtifactsMixin,
     UpdateContext,
     VersionInfo,
     register_updater,
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 
 
 @register_updater
-class GooseCliUpdater(GitHubReleaseUpdater):
+class GooseCliUpdater(Crate2NixArtifactsMixin, GitHubReleaseUpdater):
     """Resolve the latest Goose release and compute its source hash."""
 
     name = "goose-cli"
@@ -52,6 +53,9 @@ class GooseCliUpdater(GitHubReleaseUpdater):
     ) -> EventStream:
         """Compute the fixed-output source hash for Goose."""
         _ = (session, context)
+
+        async for event in self.stream_materialized_artifacts():
+            yield event
 
         src_hash_drain = ValueDrain[str]()
         async for event in drain_value_events(

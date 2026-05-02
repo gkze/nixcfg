@@ -14,6 +14,7 @@ import lib.update.updaters.base as _updaters_base
 import lib.update.updaters.github_raw_file as _github_raw_file_module
 import lib.update.updaters.github_release as _github_release_module
 import lib.update.updaters.platform_api as _platform_api_module
+import lib.update.updaters.single_url as _single_url_module
 from lib.update.paths import REPO_ROOT, package_file_map
 from lib.update.updaters.registry import UPDATERS, UpdaterClass, register_updater
 
@@ -33,6 +34,7 @@ UpdateContext = _updaters_base.UpdateContext
 Updater = _updaters_base.Updater
 UvLockUpdater = _updaters_base.UvLockUpdater
 VersionInfo = _updaters_base.VersionInfo
+SingleURLHashEntryUpdater = _single_url_module.SingleURLHashEntryUpdater
 bun_node_modules_updater = _updaters_base.bun_node_modules_updater
 cargo_vendor_updater = _updaters_base.cargo_vendor_updater
 deno_deps_updater = _updaters_base.deno_deps_updater
@@ -46,6 +48,7 @@ stream_url_hash_mapping = _updaters_base.stream_url_hash_mapping
 GitHubRawFileUpdater = _github_raw_file_module.GitHubRawFileUpdater
 github_raw_file_updater = _github_raw_file_module.github_raw_file_updater
 GitHubReleaseUpdater = _github_release_module.GitHubReleaseUpdater
+GitHubReleaseAssetURLsUpdater = _github_release_module.GitHubReleaseAssetURLsUpdater
 DownloadingPlatformAPIUpdater = _platform_api_module.DownloadingPlatformAPIUpdater
 PlatformAPIUpdater = _platform_api_module.PlatformAPIUpdater
 
@@ -117,10 +120,12 @@ __all__ = [
     "FlakeInputMetadataUpdater",
     "FlakeInputUpdater",
     "GitHubRawFileUpdater",
+    "GitHubReleaseAssetURLsUpdater",
     "GitHubReleaseUpdater",
     "HashEntryUpdater",
     "MaterializesArtifactsMixin",
     "PlatformAPIUpdater",
+    "SingleURLHashEntryUpdater",
     "UpdateContext",
     "Updater",
     "UpdaterClass",

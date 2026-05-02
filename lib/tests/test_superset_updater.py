@@ -47,8 +47,7 @@ def test_fetch_latest_rejects_invalid_payload_shapes(
     module = _load_module()
     updater = module.SupersetUpdater()
     monkeypatch.setattr(
-        module,
-        "fetch_github_api",
+        "lib.update.updaters.github_release.fetch_github_api",
         lambda *_a, **_k: asyncio.sleep(0, result=payload),
     )
 
@@ -63,8 +62,7 @@ def test_fetch_latest_ignores_non_dict_and_empty_asset_urls(
     module = _load_module()
     updater = module.SupersetUpdater()
     monkeypatch.setattr(
-        module,
-        "fetch_github_api",
+        "lib.update.updaters.github_release.fetch_github_api",
         lambda *_a, **_k: asyncio.sleep(
             0,
             result={
@@ -91,8 +89,7 @@ def test_fetch_latest_rejects_non_desktop_tag(monkeypatch: pytest.MonkeyPatch) -
     module = _load_module()
     updater = module.SupersetUpdater()
     monkeypatch.setattr(
-        module,
-        "fetch_github_api",
+        "lib.update.updaters.github_release.fetch_github_api",
         lambda *_a, **_k: asyncio.sleep(
             0,
             result={
@@ -113,8 +110,7 @@ def test_fetch_latest_returns_version_info_with_asset_metadata(
     module = _load_module()
     updater = module.SupersetUpdater()
     monkeypatch.setattr(
-        module,
-        "fetch_github_api",
+        "lib.update.updaters.github_release.fetch_github_api",
         lambda *_a, **_k: asyncio.sleep(
             0,
             result={
@@ -144,11 +140,10 @@ def test_fetch_latest_returns_version_info_with_asset_metadata(
 def test_asset_name_and_fallback_url_match_release_convention() -> None:
     """Build asset names and fallback URLs from the desktop tag convention."""
     module = _load_module()
+    updater = module.SupersetUpdater()
 
-    assert module.SupersetUpdater._asset_name("1.2.3", "x86_64") == (
-        "superset-1.2.3-x86_64.AppImage"
-    )
-    assert module.SupersetUpdater._fallback_url("1.2.3", "x86_64") == (
+    assert updater._asset_name("1.2.3", "x86_64") == ("superset-1.2.3-x86_64.AppImage")
+    assert updater._fallback_url("1.2.3", "x86_64") == (
         "https://github.com/superset-sh/superset/releases/download/"
         "desktop-v1.2.3/superset-1.2.3-x86_64.AppImage"
     )

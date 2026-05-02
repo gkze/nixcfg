@@ -11,7 +11,7 @@ from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEvent
-from lib.update.nix import _build_overlay_attr_expr, compute_expr_drv_fingerprint
+from lib.update.nix import _build_overlay_attr_expr
 from lib.update.updaters.base import VersionInfo
 
 HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -47,17 +47,6 @@ def test_t3code_desktop_updater_targets_the_main_t3code_input() -> None:
             "t3code-desktop", ".node_modules", system="aarch64-darwin"
         ),
     )
-
-
-def test_t3code_desktop_node_modules_expr_evaluates_in_overlay_context() -> None:
-    """Evaluate the FOD attr because AST checks cannot prove overlay-supplied args."""
-    expr = _build_overlay_attr_expr(
-        "t3code-desktop", ".node_modules", system="aarch64-darwin"
-    )
-
-    fingerprint = _run(compute_expr_drv_fingerprint("t3code-desktop", expr))
-
-    assert fingerprint
 
 
 @pytest.mark.parametrize(

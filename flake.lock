@@ -2374,11 +2374,11 @@
     "t3code": {
       "flake": false,
       "locked": {
-        "lastModified": 1777607627,
-        "narHash": "sha256-IWIVfBzyLPn3GK8gEfeFiw7VslbvGMJ2lWiwa1DBG5w=",
+        "lastModified": 1777660781,
+        "narHash": "sha256-/spXjix9ibVNAse6xEKYtv+9pWSDrGNSm6PC/Lozd3A=",
         "owner": "pingdotgg",
         "repo": "t3code",
-        "rev": "17b43960e86335534c63fb2b93ea68300b3bcc62",
+        "rev": "7a3f21e7ca4f63c353284542d2dfbb568a3c803e",
         "type": "github"
       },
       "original": {
@@ -2723,11 +2723,11 @@
         "rust-overlay": "rust-overlay_5"
       },
       "locked": {
-        "lastModified": 1777565466,
-        "narHash": "sha256-txi7gAcYGUmIzeCETPFDv+fPKJwVH7Byfi2nYPrbsCk=",
+        "lastModified": 1777674834,
+        "narHash": "sha256-AqWJIzu/LltmbVYTBbYl41XveSBZuR+geuUxtSMpb1U=",
         "owner": "zed-industries",
         "repo": "zed",
-        "rev": "950161ff0ff34d313c795eef6c28b958cb487039",
+        "rev": "9155bf4e1795131339ccf9e5e8e491d35ab9cfdd",
         "type": "github"
       },
       "original": {

@@ -29,8 +29,10 @@ from lib.update.cli import (
     _build_run_plan,
     _build_update_inventory,
     _build_update_options,
+    _companion_source_name,
     _emit_summary,
     _execute_run_plan,
+    _flatten_artifact_updates,
     _get_updaters,
     _handle_list_targets_request,
     _handle_preflight_requests,
@@ -329,6 +331,9 @@ def test_resolved_targets_expand_primary_source_to_companion_sources(
         },
     )
     monkeypatch.setattr("lib.update.cli.get_flake_inputs_with_refs", list)
+
+    assert _companion_source_name(_CodexV8Updater) == "codex"
+    assert _companion_source_name(None) is None
 
     resolved = ResolvedTargets.from_options(UpdateOptions(source="codex", no_refs=True))
 
@@ -1753,6 +1758,10 @@ def test_persist_generated_artifacts_and_materialized_updates(
         source_names=["demo"],
     )
     artifact = GeneratedArtifact.text("artifacts/demo.txt", "hello\n")
+    other_artifact = GeneratedArtifact.text("artifacts/other.txt", "other\n")
+    assert _flatten_artifact_updates(
+        {"other": (other_artifact,), "demo": (artifact,)},
+    ) == [artifact, other_artifact]
 
     saved_artifacts: list[list[GeneratedArtifact]] = []
     saved_sources: list[SourcesFile] = []

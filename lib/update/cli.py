@@ -9,14 +9,15 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Protocol, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, Unpack, cast
 
-import aiohttp
 import typer
 from rich.console import Console
 
 from lib.cli import HELP_CONTEXT_SETTINGS
 from lib.nix.models.sources import SourceEntry, SourcesFile
+from lib.update import planner as update_planner
+from lib.update import source_runner as update_source_runner
 from lib.update import updaters as updater_module
 from lib.update.artifacts import GeneratedArtifact, save_generated_artifacts
 from lib.update.ci.resolve_versions import load_pinned_versions
@@ -47,11 +48,9 @@ from lib.update.cli_validation import (
 from lib.update.config import (
     UpdateConfig,
     env_bool,
-    resolve_active_config,
     resolve_config,
 )
 from lib.update.constants import ALL_TOOLS, NIX_BUILD_FAILURE_TAIL_LINES, REQUIRED_TOOLS
-from lib.update.events import UpdateEvent, UpdateEventKind, expect_artifact_updates
 from lib.update.flake import (
     load_flake_lock,
     resolve_root_input_node,
@@ -63,10 +62,16 @@ from lib.update.paths import (
     package_file_map,
     sources_file_for,
 )
+from lib.update.persistence import (
+    flatten_artifact_updates,
+    merge_source_updates,
+    persist_generated_artifacts,
+    persist_materialized_updates,
+    persist_source_updates,
+)
 from lib.update.process import run_queue_task
 from lib.update.refs import (
     FlakeInputRef,
-    RefTaskOptions,
     get_flake_inputs_with_refs,
     update_refs_task,
 )
@@ -78,13 +83,10 @@ from lib.update.sources import (
 from lib.update.ui_consumer import ConsumeEventsOptions, consume_events
 from lib.update.ui_state import ItemMeta, OperationKind, SummaryStatus
 from lib.update.updaters import UPDATERS, UpdaterClass, ensure_updaters_loaded
-from lib.update.updaters.base import (
-    FlakeInputHashUpdater,
-    UpdateContext,
-    Updater,
-    VersionInfo,
-    _call_with_optional_context,
-)
+
+if TYPE_CHECKING:
+    from lib.update.events import UpdateEvent
+    from lib.update.updaters.base import Updater, VersionInfo
 
 _TRAILING_TARGET_FLAG_OPTIONS: dict[str, tuple[str, bool]] = {
     "--check": ("check", True),
@@ -217,14 +219,6 @@ def _split_trailing_target_options(
     return tuple(normalized_targets), option_values
 
 
-if TYPE_CHECKING:
-    from collections.abc import Awaitable
-
-
-class _EventPut(Protocol):
-    def __call__(self, event: UpdateEvent | None, /) -> Awaitable[None]: ...
-
-
 __all__ = (
     "OutputOptions",
     "ResolvedTargets",
@@ -236,6 +230,10 @@ __all__ = (
     "run_update_command",
     "run_updates",
 )
+
+_SourceTaskContext = update_source_runner.SourceTaskContext
+_SourcesPhaseContext = update_source_runner.SourcesPhaseContext
+_SourceTaskResult = update_source_runner.SourceTaskResult
 
 
 def _get_updaters() -> dict[str, UpdaterClass]:
@@ -249,10 +247,7 @@ def _shows_materialize_artifacts_phase(updater_cls: type[Updater] | None) -> boo
 
 
 def _companion_source_name(updater_cls: type[Updater] | None) -> str | None:
-    if updater_cls is None:
-        return None
-    companion_of = getattr(updater_cls, "companion_of", None)
-    return companion_of if isinstance(companion_of, str) and companion_of else None
+    return update_planner.companion_source_name(updater_cls)
 
 
 def _build_update_options(values: UpdateOptionsKwargs) -> UpdateOptions:
@@ -459,65 +454,18 @@ class UpdateSummary:
 _SUMMARY_STATUS_PRIORITY = {"no_change": 0, "updated": 1, "error": 2}
 
 
-def _companion_source_parent(
-    updaters: dict[str, UpdaterClass],
-    name: str,
-) -> str | None:
-    return _companion_source_name(updaters.get(name))
-
-
 def _companion_source_depths(
     names: set[str],
     updaters: dict[str, UpdaterClass],
 ) -> dict[str, int]:
-    memo: dict[str, int] = {}
-    visiting: list[str] = []
-
-    def _depth(name: str) -> int:
-        if name in memo:
-            return memo[name]
-        if name in visiting:
-            cycle = " -> ".join((*visiting, name))
-            msg = f"Companion source cycle detected: {cycle}"
-            raise RuntimeError(msg)
-
-        visiting.append(name)
-        parent = _companion_source_parent(updaters, name)
-        value = 0 if parent is None or parent not in names else _depth(parent) + 1
-        visiting.pop()
-        memo[name] = value
-        return value
-
-    for name in sorted(names):
-        _depth(name)
-    return memo
+    return update_planner.companion_source_depths(names, updaters)
 
 
 def _add_companion_source_parents(
     names: set[str],
     updaters: dict[str, UpdaterClass],
 ) -> None:
-    visited: set[str] = set()
-    visiting: list[str] = []
-
-    def _visit(name: str) -> None:
-        if name in visited:
-            return
-        if name in visiting:
-            cycle = " -> ".join((*visiting, name))
-            msg = f"Companion source cycle detected: {cycle}"
-            raise RuntimeError(msg)
-
-        visiting.append(name)
-        parent = _companion_source_parent(updaters, name)
-        if parent is not None and parent in updaters:
-            names.add(parent)
-            _visit(parent)
-        visiting.pop()
-        visited.add(name)
-
-    for name in sorted(names):
-        _visit(name)
+    update_planner.add_companion_source_parents(names, updaters)
 
 
 def _add_companion_source_children(
@@ -526,18 +474,11 @@ def _add_companion_source_children(
     roots: set[str],
     updaters: dict[str, UpdaterClass],
 ) -> None:
-    frontier = sorted(roots)
-    visited: set[str] = set()
-    while frontier:
-        parent = frontier.pop(0)
-        if parent in visited:
-            continue
-        visited.add(parent)
-        for name, updater_cls in updaters.items():
-            companion_of = _companion_source_name(updater_cls)
-            if companion_of == parent and name not in names:
-                names.add(name)
-                frontier.append(name)
+    update_planner.add_companion_source_children(
+        names,
+        roots=roots,
+        updaters=updaters,
+    )
 
 
 def _select_source_names(
@@ -545,8 +486,11 @@ def _select_source_names(
     updaters: dict[str, UpdaterClass],
 ) -> list[str]:
     """Resolve source targets, expanding backing-input and companion sources."""
-    target_names = () if source is None else (source,)
-    return _select_target_source_names(target_names, updaters)
+    return update_planner.select_source_names(
+        source,
+        updaters,
+        source_backing_input_name=_source_backing_input_name,
+    )
 
 
 def _select_target_source_names(
@@ -554,40 +498,10 @@ def _select_target_source_names(
     updaters: dict[str, UpdaterClass],
 ) -> list[str]:
     """Resolve source targets, expanding backing-input and companion sources."""
-    if not target_names:
-        selected = set(updaters)
-        roots = set(selected)
-        order = {name: index for index, name in enumerate(updaters)}
-    else:
-        selected: set[str] = set()
-        roots: set[str] = set()
-        order: dict[str, int] = {}
-        for target in target_names:
-            target_sources = [
-                name
-                for name, updater_cls in updaters.items()
-                if _source_backing_input_name(name, updater_cls, None) == target
-            ]
-            if not target_sources and target in updaters:
-                target_sources = [target]
-            for name in target_sources:
-                selected.add(name)
-                roots.add(name)
-                order.setdefault(name, len(order))
-        if not selected:
-            return []
-
-    _add_companion_source_parents(selected, updaters)
-    _add_companion_source_children(selected, roots=roots, updaters=updaters)
-
-    depths = _companion_source_depths(selected, updaters)
-    return sorted(
-        selected,
-        key=lambda name: (
-            depths[name],
-            order.get(name, len(order)),
-            name,
-        ),
+    return update_planner.select_target_source_names(
+        target_names,
+        updaters,
+        source_backing_input_name=_source_backing_input_name,
     )
 
 
@@ -596,15 +510,7 @@ def _source_update_waves(
     updaters: dict[str, UpdaterClass],
 ) -> list[list[str]]:
     """Group source updates into dependency-respecting execution waves."""
-    if not source_names:
-        return []
-
-    depths = _companion_source_depths(set(source_names), updaters)
-    max_depth = max(depths.values(), default=0)
-    return [
-        [name for name in source_names if depths[name] == depth]
-        for depth in range(max_depth + 1)
-    ]
+    return update_planner.source_update_waves(source_names, updaters)
 
 
 @dataclass(frozen=True)
@@ -626,47 +532,12 @@ class ResolvedTargets:
     @classmethod
     def from_options(cls, opts: UpdateOptions) -> ResolvedTargets:
         """Resolve target sets and operational flags from update options."""
-        updaters = _get_updaters()
-        all_source_names = set(updaters.keys())
-        all_ref_inputs = get_flake_inputs_with_refs()
-        all_ref_names = {i.name for i in all_ref_inputs}
-        all_known_names = all_source_names | all_ref_names
-
-        target_names = opts.target_names
-        source_names = _select_target_source_names(target_names, updaters)
-
-        # --native-only implies --no-refs: in CI, refs are managed by the
-        # pipeline (nix flake update + create-pr).
-        do_refs = not opts.no_refs and not opts.native_only
-        do_sources = not opts.no_sources
-        if target_names:
-            if not any(target in all_ref_names for target in target_names):
-                do_refs = False
-            if not source_names:
-                do_sources = False
-
-        ref_inputs = (
-            [i for i in all_ref_inputs if i.name in set(target_names)]
-            if target_names
-            else all_ref_inputs
-        )
-        if not do_refs:
-            ref_inputs = []
-        if not do_sources:
-            source_names = []
-
-        return cls(
-            all_source_names=all_source_names,
-            all_ref_inputs=all_ref_inputs,
-            all_ref_names=all_ref_names,
-            all_known_names=all_known_names,
-            do_refs=do_refs,
-            do_sources=do_sources,
-            do_input_refresh=not opts.no_input,
-            dry_run=opts.check,
-            native_only=opts.native_only,
-            ref_inputs=ref_inputs,
-            source_names=source_names,
+        return update_planner.resolve_update_targets(
+            opts,
+            updaters=_get_updaters(),
+            ref_inputs=get_flake_inputs_with_refs(),
+            source_backing_input_name=_source_backing_input_name,
+            result_type=cls,
         )
 
 
@@ -773,93 +644,11 @@ def _merge_source_updates(
     *,
     native_only: bool,
 ) -> dict[str, SourceEntry]:
-    if not native_only:
-        return source_updates
-    return {
-        name: existing_entries[name].merge(entry) if name in existing_entries else entry
-        for name, entry in source_updates.items()
-    }
-
-
-@dataclass(frozen=True)
-class _SourceTaskContext:
-    sources: SourcesFile
-    update_input: bool
-    native_only: bool
-    session: aiohttp.ClientSession
-    update_input_lock: asyncio.Lock
-    update_input_tasks: dict[str, asyncio.Task[None]]
-    queue: asyncio.Queue[UpdateEvent | None]
-    generated_artifacts: dict[Path, str]
-    config: UpdateConfig | None = None
-    pinned_version: VersionInfo | None = None
-
-
-@dataclass(frozen=True)
-class _SourcesPhaseContext:
-    source_names: list[str]
-    sources: SourcesFile
-    queue: asyncio.Queue[UpdateEvent | None]
-    update_input: bool
-    native_only: bool
-    config: UpdateConfig
-    pinned: dict[str, VersionInfo]
-
-
-@dataclass(frozen=True)
-class _SourceTaskResult:
-    completed: bool
-    artifacts: tuple[GeneratedArtifact, ...] = ()
-
-
-async def _refresh_input_task(
-    *,
-    input_name: str,
-    source: str,
-    put: _EventPut,
-) -> None:
-    await put(
-        UpdateEvent.status(
-            source,
-            f"Updating flake input '{input_name}'...",
-            operation="refresh_lock",
-            status="refresh_lock",
-            detail=input_name,
-        )
+    return merge_source_updates(
+        existing_entries,
+        source_updates,
+        native_only=native_only,
     )
-    async for event in update_flake_input(input_name, source=source):
-        await put(event)
-
-
-async def _ensure_input_refreshed(
-    name: str,
-    input_name: str,
-    *,
-    context: _SourceTaskContext,
-) -> None:
-    put = context.queue.put
-    async with context.update_input_lock:
-        task = context.update_input_tasks.get(input_name)
-        if task is None:
-            task = asyncio.create_task(
-                _refresh_input_task(input_name=input_name, source=name, put=put)
-            )
-            context.update_input_tasks[input_name] = task
-            reuse_existing = False
-        else:
-            reuse_existing = True
-
-    if reuse_existing:
-        await put(
-            UpdateEvent.status(
-                name,
-                f"Reusing flake input '{input_name}' refresh...",
-                operation="refresh_lock",
-                status="refresh_lock",
-                detail=input_name,
-            )
-        )
-    await task
 
 
 async def _update_source_task(
@@ -867,51 +656,12 @@ async def _update_source_task(
     *,
     context: _SourceTaskContext,
 ) -> _SourceTaskResult:
-    artifacts_by_path: dict[Path, GeneratedArtifact] = {}
-    completed = False
-
-    async def _run() -> None:
-        nonlocal completed
-        resolved_config = resolve_active_config(context.config)
-        current = context.sources.entries.get(name)
-        updater = _get_updaters()[name](config=resolved_config)
-        if isinstance(updater, FlakeInputHashUpdater):
-            updater.native_only = context.native_only
-        input_name = getattr(updater, "input_name", None)
-        put = context.queue.put
-        update_context = UpdateContext(
-            current=current,
-            generated_artifacts=context.generated_artifacts,
-        )
-
-        await put(UpdateEvent.status(name, "Starting update"))
-        if context.update_input and input_name:
-            await _ensure_input_refreshed(name, input_name, context=context)
-
-        async for event in _call_with_optional_context(
-            updater.update_stream,
-            current,
-            context.session,
-            pinned_version=context.pinned_version,
-            context=update_context,
-        ):
-            if event.kind is UpdateEventKind.ARTIFACT and event.payload is not None:
-                for artifact in expect_artifact_updates(event.payload):
-                    artifacts_by_path[artifact.path] = artifact
-            await put(event)
-
-        completed = True
-
-    await run_queue_task(source=name, queue=context.queue, task=_run)
-    return _SourceTaskResult(
-        completed=completed,
-        artifacts=tuple(
-            artifact
-            for _, artifact in sorted(
-                artifacts_by_path.items(),
-                key=lambda item: item[0],
-            )
-        ),
+    return await update_source_runner.update_source_task(
+        name,
+        context=context,
+        get_updaters=_get_updaters,
+        run_queue_task=run_queue_task,
+        update_flake_input=update_flake_input,
     )
 
 
@@ -1045,106 +795,31 @@ async def _run_ref_phase(
     dry_run: bool,
     config: UpdateConfig,
 ) -> None:
-    async with aiohttp.ClientSession() as session:
-        flake_edit_lock = asyncio.Lock()
-        async with asyncio.TaskGroup() as group:
-            for inp in ref_inputs:
-                group.create_task(
-                    update_refs_task(
-                        inp,
-                        session,
-                        queue,
-                        options=RefTaskOptions(
-                            dry_run=dry_run,
-                            flake_edit_lock=flake_edit_lock,
-                            config=config,
-                        ),
-                    ),
-                )
+    await update_source_runner.run_ref_phase(
+        ref_inputs=ref_inputs,
+        queue=queue,
+        dry_run=dry_run,
+        config=config,
+        update_refs_task=update_refs_task,
+    )
 
 
 async def _run_sources_phase(
     context: _SourcesPhaseContext,
 ) -> None:
-    async with aiohttp.ClientSession() as session:
-        update_input_lock = asyncio.Lock()
-        update_input_tasks: dict[str, asyncio.Task[None]] = {}
-        generated_artifacts: dict[Path, str] = {}
-        updaters = _get_updaters()
-        source_waves = _source_update_waves(context.source_names, updaters)
-
-        def _source_task_context(name: str) -> _SourceTaskContext:
-            return _SourceTaskContext(
-                sources=context.sources,
-                update_input=context.update_input,
-                native_only=context.native_only,
-                session=session,
-                update_input_lock=update_input_lock,
-                update_input_tasks=update_input_tasks,
-                queue=context.queue,
-                generated_artifacts=generated_artifacts,
-                config=context.config,
-                pinned_version=context.pinned.get(name),
-            )
-
-        completed_sources: dict[str, bool] = {}
-        for wave in source_waves:
-            runnable: list[str] = []
-            for name in wave:
-                parent = _companion_source_name(updaters.get(name))
-                if (
-                    parent is not None
-                    and parent in completed_sources
-                    and not completed_sources[parent]
-                ):
-                    await context.queue.put(
-                        UpdateEvent.error(name, f"Prerequisite update failed: {parent}")
-                    )
-                    completed_sources[name] = False
-                    continue
-                runnable.append(name)
-
-            if not runnable:
-                continue
-
-            wave_results: dict[str, _SourceTaskResult] = {}
-            if context.config.max_nix_builds == 1 or len(runnable) == 1:
-                for name in runnable:
-                    result = await _update_source_task(
-                        name,
-                        context=_source_task_context(name),
-                    )
-                    wave_results[name] = result
-            else:
-                async with asyncio.TaskGroup() as group:
-                    tasks = {
-                        name: group.create_task(
-                            _update_source_task(
-                                name, context=_source_task_context(name)
-                            )
-                        )
-                        for name in runnable
-                    }
-                wave_results = {name: task.result() for name, task in tasks.items()}
-
-            for name in runnable:
-                result = wave_results[name]
-                completed_sources[name] = result.completed
-                if not result.completed:
-                    continue
-                for artifact in result.artifacts:
-                    generated_artifacts[artifact.path] = artifact.content
+    await update_source_runner.run_sources_phase(
+        context,
+        get_updaters=_get_updaters,
+        source_update_waves=_source_update_waves,
+        update_source_task=_update_source_task,
+    )
 
 
 def _flatten_artifact_updates(
     artifact_updates: dict[str, tuple[GeneratedArtifact, ...]],
 ) -> list[GeneratedArtifact]:
     """Flatten per-source generated artifact updates into one list."""
-    return [
-        artifact
-        for source in sorted(artifact_updates)
-        for artifact in artifact_updates[source]
-    ]
+    return flatten_artifact_updates(artifact_updates)
 
 
 def _persist_generated_artifacts(
@@ -1154,18 +829,14 @@ def _persist_generated_artifacts(
     details: dict[str, SummaryStatus],
 ) -> None:
     """Persist generated artifacts emitted by source updaters."""
-    if not (resolved.do_sources and resolved.source_names):
-        return
-    if resolved.dry_run or not artifact_updates:
-        return
-    successful_updates = {
-        source: artifacts
-        for source, artifacts in artifact_updates.items()
-        if details.get(source) == "updated"
-    }
-    if not successful_updates:
-        return
-    save_generated_artifacts(_flatten_artifact_updates(successful_updates))
+    persist_generated_artifacts(
+        do_sources=resolved.do_sources,
+        source_names=resolved.source_names,
+        dry_run=resolved.dry_run,
+        artifact_updates=artifact_updates,
+        details=details,
+        save_artifacts=save_generated_artifacts,
+    )
 
 
 def _persist_source_updates(
@@ -1175,23 +846,16 @@ def _persist_source_updates(
     source_updates: dict[str, SourceEntry],
     details: dict[str, SummaryStatus],
 ) -> None:
-    if not (resolved.do_sources and resolved.source_names):
-        return
-
-    if source_updates:
-        merged_updates = _merge_source_updates(
-            sources.entries,
-            source_updates,
-            native_only=resolved.native_only,
-        )
-        sources.entries.update(merged_updates)
-
-    if (
-        not resolved.dry_run
-        and source_updates
-        and any(details.get(name) == "updated" for name in resolved.source_names)
-    ):
-        save_sources(sources)
+    persist_source_updates(
+        do_sources=resolved.do_sources,
+        source_names=resolved.source_names,
+        dry_run=resolved.dry_run,
+        native_only=resolved.native_only,
+        sources=sources,
+        source_updates=source_updates,
+        details=details,
+        save_source_file=save_sources,
+    )
 
 
 def _persist_materialized_updates(
@@ -1203,16 +867,17 @@ def _persist_materialized_updates(
     details: dict[str, SummaryStatus],
 ) -> None:
     """Persist generated artifacts first, then update per-package sources."""
-    _persist_generated_artifacts(
-        resolved=resolved,
-        artifact_updates=artifact_updates,
-        details=details,
-    )
-    _persist_source_updates(
-        resolved=resolved,
+    persist_materialized_updates(
+        do_sources=resolved.do_sources,
+        source_names=resolved.source_names,
+        dry_run=resolved.dry_run,
+        native_only=resolved.native_only,
         sources=sources,
         source_updates=source_updates,
+        artifact_updates=artifact_updates,
         details=details,
+        save_artifacts=save_generated_artifacts,
+        save_source_file=save_sources,
     )
 
 

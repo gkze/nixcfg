@@ -2244,6 +2244,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "windows_resources" = rec {
+      packageId = "windows_resources";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "windows_resources";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "workspace" = rec {
       packageId = "workspace";
       build = internal.buildRustCrateWithFeatures {
@@ -7066,9 +7076,8 @@ rec {
         ];
         buildDependencies = [
           {
-            name = "winresource";
-            packageId = "winresource";
-            target = { target, features }: ("windows" == target."os" or null);
+            name = "windows_resources";
+            packageId = "windows_resources";
           }
         ];
         devDependencies = [
@@ -12950,6 +12959,12 @@ rec {
             features = [ "Foundation_Numerics" "Globalization_DateTimeFormatting" "Storage_Search" "Storage_Streams" "System_Threading" "UI_ViewManagement" "Wdk_System_SystemServices" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics_Direct3D" "Win32_Graphics_Direct3D11" "Win32_Graphics_Direct3D_Fxc" "Win32_Graphics_DirectComposition" "Win32_Graphics_DirectWrite" "Win32_Graphics_DirectManipulation" "Win32_Graphics_Dwm" "Win32_Graphics_Dxgi" "Win32_Graphics_Dxgi_Common" "Win32_Graphics_Gdi" "Win32_Graphics_Imaging" "Win32_Graphics_Hlsl" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage_FileSystem" "Win32_System_Com" "Win32_System_Com_StructuredStorage" "Win32_System_Console" "Win32_System_Diagnostics_Debug" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Performance" "Win32_System_Pipes" "Win32_System_RestartManager" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Variant" "Win32_System_WinRT" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input_Ime" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Input_Pointer" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_Shell_PropertiesSystem" "Win32_UI_WindowsAndMessaging" "Win32_Media" ];
           }
         ];
+        buildDependencies = [
+          {
+            name = "windows_resources";
+            packageId = "windows_resources";
+          }
+        ];
         devDependencies = [
           {
             name = "serde_json";
@@ -14281,6 +14296,10 @@ rec {
           {
             name = "editor";
             packageId = "editor";
+          }
+          {
+            name = "feature_flags";
+            packageId = "feature_flags";
           }
           {
             name = "futures";
@@ -82478,6 +82497,21 @@ rec {
         sha256 = "1hi6scw3mn2pbdl30ji5i4y8vvspb9b66l98kkz350pig58wfyhy";
 
       };
+      "windows_resources" = rec {
+        crateName = "windows_resources";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/windows_resources"; };
+        libPath = "src/windows_resources.rs";
+        dependencies = [
+          {
+            name = "embed-resource";
+            packageId = "embed-resource";
+            target = { target, features }: ("windows" == target."os" or null);
+          }
+        ];
+
+      };
       "windows_x86_64_gnu 0.42.2" = rec {
         crateName = "windows_x86_64_gnu";
         version = "0.42.2";
@@ -86282,9 +86316,8 @@ rec {
             target = { target, features }: ("linux" == target."os" or null);
           }
           {
-            name = "winresource";
-            packageId = "winresource";
-            target = { target, features }: ("windows" == target."os" or null);
+            name = "windows_resources";
+            packageId = "windows_resources";
           }
         ];
         devDependencies = [

@@ -15,6 +15,7 @@ from lib.tests._updater_helpers import load_repo_module as _load_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
+from lib.update.updaters import github_release as github_release_module
 from lib.update.updaters import materialization as materialization_mod
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
@@ -571,7 +572,7 @@ def test_superset_fetches_desktop_release_assets(
     """Resolve desktop version and release asset URL from GitHub releases."""
     updater = superset_module.SupersetUpdater()
     monkeypatch.setattr(
-        superset_module,
+        github_release_module,
         "fetch_github_api",
         lambda *_a, **_k: asyncio.sleep(
             0,
@@ -602,7 +603,7 @@ def test_superset_rejects_release_without_expected_asset(
     """Fail when latest desktop release misses the expected Linux AppImage."""
     updater = superset_module.SupersetUpdater()
     monkeypatch.setattr(
-        superset_module,
+        github_release_module,
         "fetch_github_api",
         lambda *_a, **_k: asyncio.sleep(
             0,
@@ -631,7 +632,7 @@ def test_superset_rejects_unexpected_release_tag(
     """Reject release payloads that are not desktop-tagged."""
     updater = superset_module.SupersetUpdater()
     monkeypatch.setattr(
-        superset_module,
+        github_release_module,
         "fetch_github_api",
         lambda *_a, **_k: asyncio.sleep(
             0,

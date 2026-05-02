@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from lib.update.net import fetch_url
 from lib.update.updaters.base import (
-    FlakeInputMetadataUpdater,
+    Crate2NixMetadataUpdater,
     VersionInfo,
     register_updater,
 )
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 @register_updater
-class ZedEditorNightlyUpdater(FlakeInputMetadataUpdater):
+class ZedEditorNightlyUpdater(Crate2NixMetadataUpdater):
     """Track the current Zed nightly app version and locked commit."""
 
     name = "zed-editor-nightly"

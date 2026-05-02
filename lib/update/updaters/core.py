@@ -41,7 +41,9 @@ if TYPE_CHECKING:
     from lib.update.events import EventStream
     from lib.update.updaters.metadata import VersionInfo
 
-from lib.update.updaters._base_proxy import base_module as _base_module
+from lib.update.updaters.dependencies import updater_dependencies
+
+_dependencies = updater_dependencies()
 
 
 @dataclass(frozen=True)
@@ -144,7 +146,7 @@ async def stream_url_hash_mapping(
     """Hash a keyed URL mapping while forwarding progress events."""
     hash_drain = ValueDrain[HashMapping]()
     async for event in drain_value_events(
-        _base_module().compute_url_hashes(source_name, urls_by_key.values()),
+        _dependencies.compute_url_hashes(source_name, urls_by_key.values()),
         hash_drain,
         parse=expect_hash_mapping,
     ):
@@ -171,7 +173,7 @@ async def stream_fixed_output_hashes(
         hash_drain = ValueDrain[str]()
         env = step.env(resolved_hashes, config) if step.env is not None else None
         async for event in drain_value_events(
-            _base_module().compute_fixed_output_hash(
+            _dependencies.compute_fixed_output_hash(
                 source_name,
                 step.expr(resolved_hashes),
                 env=env,
@@ -370,7 +372,7 @@ class Updater(ABC):
     ) -> EventStream:
         """Run fetch/check/hash/update flow and emit update events."""
         if self.supported_platforms is not None:
-            current_platform = _base_module().get_current_nix_platform()
+            current_platform = _dependencies.get_current_nix_platform()
             if current_platform not in self.supported_platforms:
                 yield UpdateEvent.status(
                     self.name,
@@ -529,7 +531,7 @@ class ChecksumProvidedUpdater(Updater):
             yield event
         checksums = require_value(checksums_drain, "Missing checksum output")
         streams = {
-            platform: _base_module().convert_nix_hash_to_sri(self.name, hex_hash)
+            platform: _dependencies.convert_nix_hash_to_sri(self.name, hex_hash)
             for platform, hex_hash in checksums.items()
         }
         async for item in gather_event_streams(streams):
@@ -548,7 +550,7 @@ class ChecksumProvidedUpdater(Updater):
         """Fetch per-platform checksums from sidecar URLs."""
 
         async def _fetch_one(platform: str, checksum_url: str) -> tuple[str, str]:
-            payload = await _base_module().fetch_url(
+            payload = await _dependencies.fetch_url(
                 session,
                 checksum_url,
                 request_timeout=self.config.default_timeout,

@@ -304,31 +304,23 @@ def test_updater_registration_rejects_duplicate_names_from_different_files(
     UPDATERS.pop(duplicate_name, None)
 
 
-def test_register_updater_auto_wraps_crate2nix_targets(
+def test_register_updater_does_not_auto_wrap_crate2nix_targets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Crate2nix-backed updaters should gain artifact materialization automatically."""
-    updater_name = "auto-crate2nix-demo"
+    """Crate2nix materialization should be explicit on updater classes."""
+    updater_name = "explicit-crate2nix-demo"
     UPDATERS.pop(updater_name, None)
-
-    async def _stream(name: str, *, operation: str = "materialize_artifacts"):
-        yield UpdateEvent.status(name, "refreshing", operation=operation)
-        yield UpdateEvent.artifact(
-            name,
-            GeneratedArtifact.text("packages/demo/Cargo.nix", "{ demo = true; }\n"),
-        )
 
     monkeypatch.setitem(
         sys.modules,
         "lib.update.crate2nix",
         SimpleNamespace(
             TARGETS={updater_name: object()},
-            stream_crate2nix_artifact_updates=_stream,
         ),
     )
 
     @register_updater
-    class _AutoCrate2NixUpdater(FlakeInputMetadataUpdater):
+    class _ImplicitCrate2NixUpdater(FlakeInputMetadataUpdater):
         name = updater_name
         input_name = "demo-input"
 
@@ -337,9 +329,10 @@ def test_register_updater_auto_wraps_crate2nix_targets(
             return VersionInfo(version="1.0.0", metadata={})
 
     try:
-        updater = _AutoCrate2NixUpdater()
-        assert updater.materialize_when_current is True
-        assert updater.shows_materialize_artifacts_phase is True
+        updater = _ImplicitCrate2NixUpdater()
+        assert updater.materialize_when_current is False
+        assert updater.shows_materialize_artifacts_phase is False
+        assert not hasattr(updater, "stream_materialized_artifacts")
 
         events = asyncio.run(
             _collect_events(
@@ -350,14 +343,9 @@ def test_register_updater_auto_wraps_crate2nix_targets(
         )
 
         assert [event.kind for event in events] == [
-            UpdateEventKind.STATUS,
-            UpdateEventKind.ARTIFACT,
             UpdateEventKind.VALUE,
         ]
-        artifact_payload = expect_instance(events[1].payload, list)
-        artifact = expect_instance(artifact_payload[0], GeneratedArtifact)
-        assert artifact.path == Path("packages/demo/Cargo.nix")
-        assert events[2].payload == []
+        assert events[0].payload == []
     finally:
         UPDATERS.pop(updater_name, None)
 

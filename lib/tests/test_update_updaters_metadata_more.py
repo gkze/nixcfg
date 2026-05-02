@@ -2,20 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 from abc import ABC, abstractmethod
-from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel
 
 from lib.nix.models.flake_lock import FlakeLockNode
-from lib.update.events import UpdateEvent
-from lib.update.updaters import materialization as materialization_module
 from lib.update.updaters import metadata as metadata_module
 from lib.update.updaters import registry as registry_module
 from lib.update.updaters.base import FlakeInputMetadataUpdater
-from lib.update.updaters.materialization import MaterializesArtifactsMixin
 from lib.update.updaters.metadata import (
     NO_METADATA,
     DownloadUrlMetadata,
@@ -299,96 +294,22 @@ def test_register_updater_allows_test_duplicates_and_detects_test_classes() -> N
     UPDATERS.pop("test-only-updater", None)
 
 
-def test_registry_crate2nix_helper_edge_paths(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Cover optional crate2nix import and auto-materialization guard branches."""
-    original_import_module = registry_module.importlib.import_module
+def test_registry_does_not_implicitly_materialize_crate2nix_targets() -> None:
+    """Crate2nix materialization must be declared on the updater class."""
+    original = registry_module.UPDATERS.get("codex")
 
-    def _raise_import_error(_name: str) -> object:
-        msg = "missing optional module"
-        raise ImportError(msg)
+    try:
 
-    monkeypatch.setattr(
-        registry_module.importlib,
-        "import_module",
-        _raise_import_error,
-    )
-    assert registry_module._crate2nix_module() is None
-    assert registry_module._has_crate2nix_target(None) is False
-    assert registry_module._has_crate2nix_target("") is False
-    assert registry_module._has_crate2nix_target("demo") is False
+        @registry_module.register_updater
+        class _PlainCodexUpdater(FlakeInputMetadataUpdater):
+            name = "codex"
+            input_name = "codex"
 
-    monkeypatch.setattr(
-        registry_module.importlib,
-        "import_module",
-        lambda _name: SimpleNamespace(MaterializesArtifactsMixin=object()),
-    )
-    with pytest.raises(TypeError, match="Could not resolve MaterializesArtifactsMixin"):
-        registry_module._materialization_mixin_class()
-
-    async def _stream(name: str) -> object:
-        yield UpdateEvent.status(name, "materialized")
-
-    fake_crate2nix = SimpleNamespace(
-        TARGETS={
-            "already-wrapped-test": object(),
-            "mixin-wrapped-test": object(),
-            "stream-none-test": object(),
-        },
-        stream_crate2nix_artifact_updates=_stream,
-    )
-
-    def _import_for_wrap(name: str) -> object:
-        if name == "lib.update.crate2nix":
-            return fake_crate2nix
-        if name == "lib.update.updaters.materialization":
-            return materialization_module
-        return original_import_module(name)
-
-    monkeypatch.setattr(
-        registry_module.importlib,
-        "import_module",
-        _import_for_wrap,
-    )
-
-    class _AlreadyWrapped(FlakeInputMetadataUpdater):
-        name = "already-wrapped-test"
-        input_name = "already-input"
-
-    setattr(_AlreadyWrapped, registry_module._AUTO_CRATE2NIX_WRAPPED_ATTR, True)
-    assert registry_module._auto_enable_crate2nix_materialization(_AlreadyWrapped) is (
-        _AlreadyWrapped
-    )
-
-    class _MixinWrapped(MaterializesArtifactsMixin, FlakeInputMetadataUpdater):
-        name = "mixin-wrapped-test"
-        input_name = "mixin-input"
-
-    assert registry_module._auto_enable_crate2nix_materialization(_MixinWrapped) is (
-        _MixinWrapped
-    )
-    assert getattr(_MixinWrapped, registry_module._AUTO_CRATE2NIX_WRAPPED_ATTR) is True
-
-    class _StreamNone(FlakeInputMetadataUpdater):
-        name = "stream-none-test"
-        input_name = "stream-input"
-
-    registry_module._auto_enable_crate2nix_materialization(_StreamNone)
-
-    def _import_missing_crate2nix(name: str) -> object:
-        if name == "lib.update.crate2nix":
-            msg = "crate2nix unavailable"
-            raise ImportError(msg)
-        return original_import_module(name)
-
-    monkeypatch.setattr(
-        registry_module.importlib,
-        "import_module",
-        _import_missing_crate2nix,
-    )
-
-    async def _events() -> list[UpdateEvent]:
-        return [event async for event in _StreamNone().stream_materialized_artifacts()]
-
-    assert asyncio.run(_events()) == []
+        assert _PlainCodexUpdater.materialize_when_current is False
+        assert _PlainCodexUpdater.shows_materialize_artifacts_phase is False
+        assert not hasattr(_PlainCodexUpdater, "stream_materialized_artifacts")
+    finally:
+        if original is None:
+            registry_module.UPDATERS.pop("codex", None)
+        else:
+            registry_module.UPDATERS["codex"] = original

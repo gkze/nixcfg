@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from lib.update.events import EventStream, UpdateEvent
-from lib.update.updaters.github_release import GitHubReleaseUpdater
+from lib.update.updaters.github_release import (
+    GitHubReleaseAssetURLsUpdater,
+    GitHubReleaseUpdater,
+)
 
 if TYPE_CHECKING:
     import aiohttp
@@ -31,6 +34,16 @@ class _DemoReleaseUpdater(GitHubReleaseUpdater):
         _ = (info, session, context)
         if False:
             yield UpdateEvent.status(self.name, "never")
+
+
+class _DemoAssetReleaseUpdater(GitHubReleaseAssetURLsUpdater):
+    name = "demo-asset-release"
+    GITHUB_OWNER = "owner"
+    GITHUB_REPO = "repo"
+    PLATFORMS: ClassVar[dict[str, str]] = {"x86_64-linux": "linux-x64"}
+
+    def _asset_name(self, version: str, platform_value: str) -> str:
+        return f"demo-{version}-{platform_value}.tar.gz"
 
 
 def test_normalize_release_version_paths() -> None:
@@ -75,3 +88,19 @@ def test_fetch_latest_success_and_error_paths(monkeypatch: pytest.MonkeyPatch) -
     )
     with pytest.raises(RuntimeError, match="Missing tag_name"):
         asyncio.run(updater.fetch_latest(object()))
+
+
+def test_github_release_asset_defaults() -> None:
+    """Cover default release asset helper behavior."""
+    updater = _DemoAssetReleaseUpdater()
+
+    with pytest.raises(NotImplementedError):
+        GitHubReleaseAssetURLsUpdater()._asset_name("1.2.3", "linux-x64")
+
+    assert updater._fallback_url("1.2.3", "linux-x64") == (
+        "https://github.com/owner/repo/releases/download/"
+        "v1.2.3/demo-1.2.3-linux-x64.tar.gz"
+    )
+    assert updater._missing_asset_message("demo.tar.gz", "v1.2.3") == (
+        "Could not find demo-asset-release release asset 'demo.tar.gz' in tag v1.2.3"
+    )

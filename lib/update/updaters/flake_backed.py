@@ -48,7 +48,9 @@ if TYPE_CHECKING:
     from lib.nix.models.flake_lock import FlakeLockNode
     from lib.update.config import UpdateConfig
 
-from lib.update.updaters._base_proxy import base_module as _base_module
+from lib.update.updaters.dependencies import updater_dependencies
+
+_dependencies = updater_dependencies()
 
 
 def _ensure_user_writable_tree(root: Path) -> None:
@@ -87,7 +89,7 @@ class FlakeInputUpdater(Updater):
         )
         if metadata is not None:
             return metadata.node
-        return _base_module().get_flake_input_node(self._input)
+        return _dependencies.get_flake_input_node(self._input)
 
     async def fetch_latest(
         self,
@@ -95,8 +97,8 @@ class FlakeInputUpdater(Updater):
     ) -> VersionInfo:
         """Resolve the latest version from the flake lock node."""
         _ = session
-        node = _base_module().get_flake_input_node(self._input)
-        version = _base_module().get_flake_input_version(node)
+        node = _dependencies.get_flake_input_node(self._input)
+        version = _dependencies.get_flake_input_version(node)
         commit = node.locked.rev if node.locked is not None else None
         return VersionInfo(
             version=version,
@@ -182,7 +184,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         ):
             return False
         try:
-            new_fingerprint = await _base_module().compute_drv_fingerprint(
+            new_fingerprint = await _dependencies.compute_drv_fingerprint(
                 self.name,
                 config=self.config,
             )
@@ -210,7 +212,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         try:
             drv_hash = context.drv_fingerprint
             if drv_hash is None:
-                drv_hash = await _base_module().compute_drv_fingerprint(
+                drv_hash = await _dependencies.compute_drv_fingerprint(
                     self.name,
                     config=self.config,
                 )
@@ -265,15 +267,13 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         system: str | None,
     ) -> EventStream:
         _ = info
-        return _base_module().compute_overlay_hash(
+        return _dependencies.compute_overlay_hash(
             self.name, system=system, config=self.config
         )
 
     def _compute_hash(self, info: VersionInfo) -> EventStream:
         system = (
-            _base_module().get_current_nix_platform()
-            if self.platform_specific
-            else None
+            _dependencies.get_current_nix_platform() if self.platform_specific else None
         )
         return self._compute_hash_for_system(info, system=system)
 
@@ -287,7 +287,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         """Compute flake-backed hashes for one or more target platforms."""
         context = _coerce_context(context)
         _ = session
-        current_platform = _base_module().get_current_nix_platform()
+        current_platform = _dependencies.get_current_nix_platform()
         if (
             self.supported_platforms is not None
             and current_platform not in self.supported_platforms
@@ -318,7 +318,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
                     async for event in drain_value_events(
                         self._compute_hash_for_system(info, system=platform),
                         hash_drain,
-                        parse=_base_module().expect_str,
+                        parse=_dependencies.expect_str,
                     ):
                         yield event
                 except RuntimeError:
@@ -375,7 +375,7 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
 
     def _compute_hash(self, info: VersionInfo) -> EventStream:
         _ = info
-        return _base_module().compute_deno_deps_hash(
+        return _dependencies.compute_deno_deps_hash(
             self.name,
             self._input,
             native_only=self.native_only,
@@ -394,7 +394,7 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
 
         def _expect_platform_hashes(payload: object) -> HashMapping:
             if isinstance(payload, dict):
-                return _base_module().expect_hash_mapping(payload)
+                return _dependencies.expect_hash_mapping(payload)
             msg = f"Expected dict of platform hashes, got {type(payload)}"
             raise TypeError(msg)
 
@@ -461,7 +461,7 @@ class DenoManifestUpdater(FlakeInputUpdater):
             status="computing_hash",
             detail=self.lock_file,
         )
-        lock_bytes = await _base_module().fetch_url(
+        lock_bytes = await _dependencies.fetch_url(
             session,
             lock_url,
             request_timeout=self.config.default_timeout,
@@ -483,7 +483,7 @@ class DenoManifestUpdater(FlakeInputUpdater):
             with suppress(OSError):
                 await asyncio.to_thread(Path(tmp_name).unlink, missing_ok=True)
 
-        pkg_dir = _base_module().package_dir_for(self.name)
+        pkg_dir = _dependencies.package_dir_for(self.name)
         if pkg_dir is None:
             msg = f"Package directory not found for {self.name}"
             raise RuntimeError(msg)
@@ -536,9 +536,9 @@ class UvLockUpdater(FlakeInputUpdater):
         )
         source_path_drain = ValueDrain[CommandResult]()
         async for event in drain_value_events(
-            _base_module().update_process.run_command(
+            _dependencies.update_process.run_command(
                 ["nix", "eval", "--impure", "--raw", "--expr", source_path_expr],
-                options=_base_module().update_process.RunCommandOptions(
+                options=_dependencies.update_process.RunCommandOptions(
                     source=self.name,
                     error="nix eval did not return output",
                     config=self.config,
@@ -582,9 +582,9 @@ class UvLockUpdater(FlakeInputUpdater):
     ) -> EventStream:
         uv_result_drain = ValueDrain[CommandResult]()
         async for event in drain_value_events(
-            _base_module().update_process.run_command(
+            _dependencies.update_process.run_command(
                 ["uv", "-q", "lock", "--directory", str(workspace_dir)],
-                options=_base_module().update_process.RunCommandOptions(
+                options=_dependencies.update_process.RunCommandOptions(
                     source=self.name,
                     error="uv lock did not return output",
                     env={
@@ -637,7 +637,7 @@ class UvLockUpdater(FlakeInputUpdater):
             yield event
         source_path = require_value(source_path_drain, "Missing resolved source path")
 
-        pkg_dir = _base_module().package_dir_for(self.name)
+        pkg_dir = _dependencies.package_dir_for(self.name)
         if pkg_dir is None:
             msg = f"Package directory not found for {self.name}"
             raise RuntimeError(msg)
