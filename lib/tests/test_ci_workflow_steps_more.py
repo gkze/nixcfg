@@ -392,12 +392,16 @@ def test_direct_command_helpers_call_expected_subprocesses(
     assert ["brew", "install", "--cask", "macfuse"] in commands
     assert ["brew", "install", "1password-cli"] in commands
     assert [
+        "env",
+        "NIXPKGS_ALLOW_UNFREE=1",
         "nix",
         "build",
         "--impure",
         ".#darwinConfigurations.argus.system",
     ] in commands
     assert [
+        "env",
+        "NIXPKGS_ALLOW_UNFREE=1",
         "nix",
         "eval",
         "--json",
@@ -405,6 +409,8 @@ def test_direct_command_helpers_call_expected_subprocesses(
         ".#darwinConfigurations.argus.config.home-manager.users.george.programs.nixvim.content",
     ] in commands
     assert [
+        "env",
+        "NIXPKGS_ALLOW_UNFREE=1",
         "nix",
         "eval",
         "--json",
@@ -412,6 +418,8 @@ def test_direct_command_helpers_call_expected_subprocesses(
         ".#darwinConfigurations.rocinante.config.home-manager.users.george.programs.nixvim.content",
     ] in commands
     assert [
+        "env",
+        "NIXPKGS_ALLOW_UNFREE=1",
         "nix",
         "build",
         "--dry-run",
@@ -419,6 +427,8 @@ def test_direct_command_helpers_call_expected_subprocesses(
         ".#darwinConfigurations.argus.system",
     ] in commands
     assert [
+        "env",
+        "NIXPKGS_ALLOW_UNFREE=1",
         "nix",
         "build",
         "--dry-run",
@@ -426,6 +436,8 @@ def test_direct_command_helpers_call_expected_subprocesses(
         ".#darwinConfigurations.rocinante.system",
     ] in commands
     assert [
+        "env",
+        "NIXPKGS_ALLOW_UNFREE=1",
         "nix",
         "build",
         "--dry-run",

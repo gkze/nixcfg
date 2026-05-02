@@ -62,6 +62,10 @@ DARWIN_FULL_SMOKE_REFS = (
 )
 
 
+def _darwin_nix_args(*args: str) -> list[str]:
+    return ["env", "NIXPKGS_ALLOW_UNFREE=1", "nix", *args]
+
+
 def xcode_version_key(app_path: Path) -> tuple[int, ...]:
     """Return sortable numeric components from an Xcode app path."""
     stem = app_path.stem.removeprefix("Xcode")
@@ -243,7 +247,7 @@ def cmd_nix_flake_update(*, run: Callable[..., object]) -> int:
 
 def cmd_build_darwin_config(*, run: Callable[..., object], host: str) -> int:
     """Build one Darwin configuration by host name."""
-    run(["nix", "build", "--impure", f".#darwinConfigurations.{host}.system"])
+    run(_darwin_nix_args("build", "--impure", f".#darwinConfigurations.{host}.system"))
     return 0
 
 
@@ -254,7 +258,10 @@ def cmd_eval_darwin_lock_smoke(
 ) -> int:
     """Evaluate lock-only-safe Darwin expressions."""
     for expr in exprs:
-        run(["nix", "eval", "--json", "--impure", expr], stdout=subprocess.DEVNULL)
+        run(
+            _darwin_nix_args("eval", "--json", "--impure", expr),
+            stdout=subprocess.DEVNULL,
+        )
     return 0
 
 
@@ -265,7 +272,7 @@ def cmd_eval_darwin_full_smoke(
 ) -> int:
     """Dry-run full Darwin outputs once generated artifacts are available."""
     for ref in refs:
-        run(["nix", "build", "--dry-run", "--impure", ref])
+        run(_darwin_nix_args("build", "--dry-run", "--impure", ref))
     return 0
 
 
