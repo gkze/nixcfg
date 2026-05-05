@@ -569,14 +569,11 @@ def test_scratch_updater_paths(
 
     npm_expr = object.__getattribute__(updater, "_expr_for_npm_deps")()
     cargo_expr = object.__getattribute__(updater, "_expr_for_cargo_vendor")()
-    assert "fetchNpmDeps" in npm_expr
-    assert "fetchCargoVendor" in cargo_expr
+    seen_exprs: list[str] = []
 
     async def _fixed_hash(_name: str, expr: str, **_kwargs: object) -> EventStream:
-        if "fetchNpmDeps" in expr:
-            yield UpdateEvent.value("scratch", HASH_A)
-        else:
-            yield UpdateEvent.value("scratch", HASH_B)
+        seen_exprs.append(expr)
+        yield UpdateEvent.value("scratch", HASH_A if len(seen_exprs) == 1 else HASH_B)
 
     monkeypatch.setattr(
         "lib.update.updaters.base.compute_fixed_output_hash", _fixed_hash
@@ -585,6 +582,8 @@ def test_scratch_updater_paths(
     payload = _require_hash_entries(
         [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload
     )
+    assert_nix_ast_equal(seen_exprs[0], npm_expr)
+    assert_nix_ast_equal(seen_exprs[1], cargo_expr)
     assert [entry.hash_type for entry in payload] == ["npmDepsHash", "cargoHash"]
 
     async def _no_hash(_name: str, _expr: str, **_kwargs: object) -> EventStream:

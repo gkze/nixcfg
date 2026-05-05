@@ -88,17 +88,17 @@
     "brew-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1761551821,
-        "narHash": "sha256-N3Zj73TAxclhLGgADbPVwcVrhYIBKUgAxjfQuOXre6s=",
+        "lastModified": 1777713173,
+        "narHash": "sha256-OWP/gY6TrdZx5lj/FwVUJcQg61z+w0FCrFy0Fli1L+0=",
         "owner": "Homebrew",
         "repo": "brew",
-        "rev": "8f6719274133c5bcc24c058c5a6bcbb3b0cd48b3",
+        "rev": "4a95077682ae5f342cf60ff181ebbcfb03d49117",
         "type": "github"
       },
       "original": {
         "owner": "Homebrew",
-        "ref": "4.6.19",
         "repo": "brew",
+        "rev": "4a95077682ae5f342cf60ff181ebbcfb03d49117",
         "type": "github"
       }
     },
@@ -968,6 +968,23 @@
         "type": "github"
       }
     },
+    "gitbutler": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776766036,
+        "narHash": "sha256-hUxtvCxLB++33gKc+UNOAns3UFozWTETYJvEr+HcOgU=",
+        "owner": "gitbutlerapp",
+        "repo": "gitbutler",
+        "rev": "69e085a82a56fc475250fb8ff0f9738b3a4d2f53",
+        "type": "github"
+      },
+      "original": {
+        "owner": "gitbutlerapp",
+        "ref": "release/0.19.9",
+        "repo": "gitbutler",
+        "type": "github"
+      }
+    },
     "github-desktop": {
       "flake": false,
       "locked": {
@@ -1101,16 +1118,16 @@
     "gogcli": {
       "flake": false,
       "locked": {
-        "lastModified": 1777369084,
-        "narHash": "sha256-aau1w6b4nBdTMUTeX0LwV+8YPP5YeghE0iWSaHQXBFQ=",
+        "lastModified": 1777960177,
+        "narHash": "sha256-8ffexCQWQXaaEyiWIKxg8M2VdgLDMqTiadCu/8v3DE0=",
         "owner": "steipete",
         "repo": "gogcli",
-        "rev": "469f4b4382f7938d061ff0d1dd075aa9ad4aa10b",
+        "rev": "e0338d59548e9ac1f5ae5aa304b03f077720446c",
         "type": "github"
       },
       "original": {
         "owner": "steipete",
-        "ref": "v0.14.0",
+        "ref": "v0.15.0",
         "repo": "gogcli",
         "type": "github"
       }
@@ -1208,33 +1225,34 @@
     "homebrew-cask": {
       "flake": false,
       "locked": {
-        "lastModified": 1776996732,
-        "narHash": "sha256-/5Hs/WIP4vXFfgkD/QTVjoc5+zmkk80AlbTDO2T4umI=",
+        "lastModified": 1777741099,
+        "narHash": "sha256-jhg1b+Nidpc4VYk8Pyh/10hmCZsyYspiGtsLuCzN9O4=",
         "owner": "homebrew",
         "repo": "homebrew-cask",
-        "rev": "2a7a61418c95a7192253bc463dfb03f2719fb12d",
+        "rev": "d680f10a0c8ce5142a9765536129a9d57e3f4b9c",
         "type": "github"
       },
       "original": {
         "owner": "homebrew",
         "repo": "homebrew-cask",
-        "rev": "2a7a61418c95a7192253bc463dfb03f2719fb12d",
+        "rev": "d680f10a0c8ce5142a9765536129a9d57e3f4b9c",
         "type": "github"
       }
     },
     "homebrew-core": {
       "flake": false,
       "locked": {
-        "lastModified": 1777551343,
-        "narHash": "sha256-5ryrv0rZDJWie6PrRmuGoPj9QCXrlpPGYB6omwCy0BU=",
+        "lastModified": 1777736898,
+        "narHash": "sha256-J0H8JHYMbD/23gbQlUmzCJ24p1DFbk7S8iFvyGwwPvw=",
         "owner": "homebrew",
         "repo": "homebrew-core",
-        "rev": "c9496e3a4330de092938f905c4e2860bb9752dba",
+        "rev": "60fd33c8b6bcb76248cb4e8f3cdde93d6ba8ce75",
         "type": "github"
       },
       "original": {
         "owner": "homebrew",
         "repo": "homebrew-core",
+        "rev": "60fd33c8b6bcb76248cb4e8f3cdde93d6ba8ce75",
         "type": "github"
       }
     },
@@ -1964,6 +1982,7 @@
         "flakelight": "flakelight_2",
         "flakelight-darwin": "flakelight-darwin",
         "git-hooks": "git-hooks_2",
+        "gitbutler": "gitbutler",
         "github-desktop": "github-desktop",
         "gitui-key-config": "gitui-key-config",
         "gogcli": "gogcli",
@@ -2374,11 +2393,11 @@
     "t3code": {
       "flake": false,
       "locked": {
-        "lastModified": 1777660781,
-        "narHash": "sha256-/spXjix9ibVNAse6xEKYtv+9pWSDrGNSm6PC/Lozd3A=",
+        "lastModified": 1777943389,
+        "narHash": "sha256-di77QvM2WIDuVU/FtGdHXnoPrVR+um1Wz19ADcPj59U=",
         "owner": "pingdotgg",
         "repo": "t3code",
-        "rev": "7a3f21e7ca4f63c353284542d2dfbb568a3c803e",
+        "rev": "35721d9a08b225c4a3752f322ae4daccbeaa564e",
         "type": "github"
       },
       "original": {
@@ -2699,16 +2718,16 @@
         "rust-overlay": "rust-overlay_4"
       },
       "locked": {
-        "lastModified": 1777569688,
-        "narHash": "sha256-G8nRU6DtvGEBBn106OZsmxOVaJpFiVAv/h1AMJzqfnA=",
+        "lastModified": 1777962776,
+        "narHash": "sha256-iNviDjcYfBooXKGCXfW8feEDOHTIV/DYRHpAWSDU2xY=",
         "owner": "max-sixty",
         "repo": "worktrunk",
-        "rev": "093f6b3fcf9912ff3c6b716e27440d169b86091d",
+        "rev": "f897aa7a9c8edb28974e4d3846a0392c925930ed",
         "type": "github"
       },
       "original": {
         "owner": "max-sixty",
-        "ref": "v0.46.1",
+        "ref": "v0.48.0",
         "repo": "worktrunk",
         "type": "github"
       }
@@ -2723,11 +2742,11 @@
         "rust-overlay": "rust-overlay_5"
       },
       "locked": {
-        "lastModified": 1777674834,
-        "narHash": "sha256-AqWJIzu/LltmbVYTBbYl41XveSBZuR+geuUxtSMpb1U=",
+        "lastModified": 1778001479,
+        "narHash": "sha256-E+wCNBjvnzgRVMxheVvFECMD4b8w+1mvcxEG0ZZUEeI=",
         "owner": "zed-industries",
         "repo": "zed",
-        "rev": "9155bf4e1795131339ccf9e5e8e491d35ab9cfdd",
+        "rev": "e1f79382b08dfedfc3a875191a0288c1df02bc74",
         "type": "github"
       },
       "original": {

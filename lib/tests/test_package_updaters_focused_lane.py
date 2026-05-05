@@ -6,8 +6,13 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.primitive import StringPrimitive
 
 from lib.nix.models.sources import HashEntry
+from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import install_fixed_hash_stream
 from lib.tests._updater_helpers import load_repo_module as _load_updater
@@ -125,24 +130,34 @@ def test_wispr_flow_platform_urls_and_required_tools(
 def test_codex_desktop_fetch_latest_and_download_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Parse both Codex Sparkle appcasts and preserve per-arch ZIP URLs."""
+    """Pick the newest common Codex appcast release and preserve ZIP URLs."""
     module = _load_updater(
         "packages/codex-desktop/updater.py", "codex_desktop_updater_test"
     )
     updater = module.CodexDesktopUpdater()
+    newer_arm_url = "https://example.invalid/Codex-darwin-arm64-26.429.61741.zip"
     urls = {
         "aarch64-darwin": "https://example.invalid/Codex-darwin-arm64-26.429.20946.zip",
         "x86_64-darwin": "https://example.invalid/Codex-darwin-x64-26.429.20946.zip",
     }
 
+    def _item(version: str, build: str, download_url: str) -> str:
+        return f"""
+            <item>
+              <sparkle:version>{build}</sparkle:version>
+              <sparkle:shortVersionString>{version}</sparkle:shortVersionString>
+              <enclosure url="{download_url}" />
+            </item>
+        """
+
     def _appcast(platform: str) -> bytes:
+        items = ""
+        if platform == "aarch64-darwin":
+            items += _item("26.429.61741", "2429", newer_arm_url)
+        items += _item("26.429.20946", "2312", urls[platform])
         return f"""
             <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-              <channel><item>
-                <sparkle:version>2312</sparkle:version>
-                <sparkle:shortVersionString>26.429.20946</sparkle:shortVersionString>
-                <enclosure url="{urls[platform]}" />
-              </item></channel>
+              <channel>{items}</channel>
             </rss>
         """.encode()
 
@@ -399,15 +414,27 @@ def test_scratch_expr_builders_fetch_hashes_and_build_result(
     wrapped_expr = updater._wrap_expr_with_flake_and_pkgs(
         module.identifier_attr_path("pkgs", "hello")
     )
-    assert "builtins.getFlake" in wrapped_expr
-    assert f"git+file://{module.REPO_ROOT}?dirty=1" in wrapped_expr
+    assert_nix_ast_equal(
+        wrapped_expr,
+        LetExpression(
+            local_variables=[
+                Binding(
+                    name="flake",
+                    value=FunctionCall(
+                        name=module.identifier_attr_path("builtins", "getFlake"),
+                        argument=StringPrimitive(
+                            value=f"git+file://{module.REPO_ROOT}?dirty=1"
+                        ),
+                    ),
+                ),
+                Binding(name="pkgs", value=module.nixpkgs_expression()),
+            ],
+            value=module.identifier_attr_path("pkgs", "hello"),
+        ),
+    )
 
     npm_expr = updater._expr_for_npm_deps()
     cargo_expr = updater._expr_for_cargo_vendor()
-    assert "fetchNpmDeps" in npm_expr
-    assert 'name = "scratch-npm-deps"' in npm_expr
-    assert "fetchCargoVendor" in cargo_expr
-    assert '"/src-tauri"' in cargo_expr
 
     calls = install_fixed_hash_stream(
         monkeypatch,

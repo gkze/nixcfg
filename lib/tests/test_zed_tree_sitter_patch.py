@@ -28,10 +28,7 @@ def test_patch_file_expands_tree_sitter_include_iteration(tmp_path: Path) -> Non
     helper.patch_file(build_rs)
     patched = build_rs.read_text(encoding="utf-8")
 
-    assert '.define("static_assert(...)", "");' in patched
-    assert 'if let Ok(include) = env::var("DEP_WASMTIME_C_API_INCLUDE")' in patched
-    assert "for include in include.split_whitespace()" in patched
-    assert "config.include(include);" in patched
+    assert patched == helper._NEW
 
 
 def test_patch_file_errors_when_expected_snippet_is_missing(tmp_path: Path) -> None:
@@ -51,7 +48,7 @@ def test_main_patches_requested_file(tmp_path: Path) -> None:
     build_rs.write_text(helper._OLD, encoding="utf-8")
 
     assert helper.main([str(build_rs)]) == 0
-    assert helper._NEW in build_rs.read_text(encoding="utf-8")
+    assert build_rs.read_text(encoding="utf-8") == helper._NEW
 
 
 def test_main_rejects_invalid_argument_count() -> None:
@@ -78,4 +75,4 @@ def test_main_guard_exits_with_main_result(
         runpy.run_path(str(script_path), run_name="__main__")
 
     assert excinfo.value.code == 0
-    assert _load_helper()._NEW in build_rs.read_text(encoding="utf-8")
+    assert build_rs.read_text(encoding="utf-8") == _load_helper()._NEW

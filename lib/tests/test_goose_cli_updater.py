@@ -5,9 +5,11 @@ from __future__ import annotations
 import pytest
 
 from lib.nix.models.sources import HashEntry
+from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
+from lib.update.nix import _build_fetch_from_github_call
 from lib.update.updaters.base import VersionInfo
 
 
@@ -39,8 +41,10 @@ def test_goose_cli_updater_builds_github_tagged_src_expr(
 
     events = _run(_collect(updater.fetch_hashes(VersionInfo("1.2.3", {}), object())))
 
-    assert "fetchFromGitHub" in calls[0]
-    assert 'tag = "v1.2.3"' in calls[0]
+    assert_nix_ast_equal(
+        calls[0],
+        _build_fetch_from_github_call("block", "goose", tag="v1.2.3"),
+    )
     assert events[-1].payload == [
         HashEntry.create(
             "srcHash",

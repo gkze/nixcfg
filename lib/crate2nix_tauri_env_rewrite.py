@@ -10,6 +10,7 @@ from pathlib import Path
 
 _EXPORT_RE = re.compile(r"^(export\s+)([^=]+)(=.*)$")
 _TEMP_SOURCE_PREFIXES = (
+    Path("/build").as_posix() + "/",
     "/nix/var/nix/builds/",
     Path("/private").joinpath("tmp").as_posix() + "/",
     Path("/").joinpath("tmp").as_posix() + "/",

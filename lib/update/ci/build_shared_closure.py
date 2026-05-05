@@ -15,7 +15,10 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 import typer
 
@@ -99,6 +102,17 @@ def _nix_verbosity_from_cli(verbosity: int) -> int:
     return max(0, verbosity - 1)
 
 
+def _dry_run_env_for_ref(ref: str) -> Mapping[str, str] | None:
+    """Return extra env needed to dry-run evaluate selected flake refs."""
+    if (
+        "darwinConfigurations." in ref
+        or "aarch64-darwin" in ref
+        or "x86_64-darwin" in ref
+    ):
+        return {"NIXPKGS_ALLOW_UNFREE": "1"}
+    return None
+
+
 def _parse_dry_run_derivations(combined_output: str) -> set[str]:
     """Extract derivation paths from ``nix build --dry-run`` output."""
     drvs: set[str] = set()
@@ -122,6 +136,7 @@ async def _stream_nix_build_dry_run(
     installable: str,
     *,
     nix_verbosity: int,
+    env: Mapping[str, str] | None = None,
 ) -> set[str]:
     """Run ``nix build --dry-run`` while streaming output to the terminal."""
     args = [
@@ -135,7 +150,11 @@ async def _stream_nix_build_dry_run(
     result: CommandResult | None = None
 
     try:
-        async for event in stream_process(args, command_timeout=EVAL_TIMEOUT):
+        async for event in stream_process(
+            args,
+            command_timeout=EVAL_TIMEOUT,
+            env=env,
+        ):
             if isinstance(event, ProcessDone):
                 result = event.result
                 continue
@@ -190,10 +209,15 @@ async def _eval_one(ref: str, *, nix_verbosity: int = 0) -> set[str]:
     """Evaluate a single flake ref and return its derivations."""
     log.info("Evaluating %s ...", ref)
     start = time.monotonic()
+    env = _dry_run_env_for_ref(ref)
     if nix_verbosity > 0:
-        drvs = await _stream_nix_build_dry_run(ref, nix_verbosity=nix_verbosity)
+        drvs = await _stream_nix_build_dry_run(
+            ref,
+            nix_verbosity=nix_verbosity,
+            env=env,
+        )
     else:
-        drvs = await nix_build_dry_run(ref, timeout=EVAL_TIMEOUT)
+        drvs = await nix_build_dry_run(ref, timeout=EVAL_TIMEOUT, env=env)
     elapsed = time.monotonic() - start
     log.info("  %s: %d derivation(s) in %s", ref, len(drvs), _format_duration(elapsed))
     return drvs

@@ -6,7 +6,12 @@
     # Pinned nixpkgs with working Swift build (before clang-21.1.8 broke it)
     # Tracking: https://github.com/NixOS/nixpkgs/issues/483584
     nixpkgs-swift.url = "github:NixOS/nixpkgs/70801e06d9730c4f1704fbd3bbf5b8e11c03a2a7";
-    nix-homebrew.url = "github:Yeradon/nix-homebrew";
+    nix-homebrew = {
+      url = "github:Yeradon/nix-homebrew";
+      # Keep brew-src, homebrew-cask, and homebrew-core pinned as one tested
+      # tuple; current tap syntax can require matching Homebrew/Ruby support.
+      inputs.brew-src.url = "github:Homebrew/brew/4a95077682ae5f342cf60ff181ebbcfb03d49117";
+    };
     neovim-nightly-overlay = {
       url = "github:nix-community/neovim-nightly-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -45,6 +50,10 @@
     git-hooks = {
       url = "github:cachix/git-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
+    };
+    gitbutler = {
+      url = "github:gitbutlerapp/gitbutler/release/0.19.9";
+      flake = false;
     };
     home-manager = {
       url = "github:nix-community/home-manager";
@@ -132,7 +141,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.46.1";
+      url = "github:max-sixty/worktrunk/v0.48.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -160,9 +169,8 @@
       url = "github:gkze/curator/v0.7.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # gitbutler removed - using Homebrew cask (Nix build blocked by git dep issues)
     gogcli = {
-      url = "github:steipete/gogcli/v0.14.0";
+      url = "github:steipete/gogcli/v0.15.0";
       flake = false;
     };
     github-desktop = {
@@ -189,13 +197,13 @@
       flake = false;
     };
     homebrew-cask = {
-      # Newer cask revisions use bare `depends_on :macos`, which requires
-      # unreleased Homebrew code that currently requires Ruby 4.0.
-      url = "github:homebrew/homebrew-cask/2a7a61418c95a7192253bc463dfb03f2719fb12d";
+      # Update with nix-homebrew.inputs.brew-src and homebrew-core.
+      url = "github:homebrew/homebrew-cask/d680f10a0c8ce5142a9765536129a9d57e3f4b9c";
       flake = false;
     };
     homebrew-core = {
-      url = "github:homebrew/homebrew-core";
+      # Update with nix-homebrew.inputs.brew-src and homebrew-cask.
+      url = "github:homebrew/homebrew-core/60fd33c8b6bcb76248cb4e8f3cdde93d6ba8ce75";
       flake = false;
     };
     hwatch = {

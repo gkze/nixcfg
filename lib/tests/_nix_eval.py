@@ -18,6 +18,10 @@ from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.update.paths import REPO_ROOT
+
+_NIX_EVAL_TIMEOUT_SECONDS = 30
+
 
 def nix_value(value: object) -> NixExpression:
     """Convert a Python value into a nix-manipulator expression."""
@@ -77,7 +81,9 @@ def _run_nix_eval(expression: NixExpression, *, raw: bool) -> str:
         command,
         check=True,
         capture_output=True,
+        cwd=REPO_ROOT,
         text=True,
+        timeout=_NIX_EVAL_TIMEOUT_SECONDS,
     )
     return result.stdout
 

@@ -32,6 +32,12 @@ from lib.update.nix import (
     get_current_nix_platform,
 )
 from lib.update.paths import sources_file_for
+from lib.update.platform_hashes import (
+    PreservedPlatformHash,
+    preserve_existing_platform_hash,
+    preserved_platform_hash_status,
+    preserved_platform_hash_warning,
+)
 from lib.update.sources import load_source_entry
 
 if TYPE_CHECKING:
@@ -163,7 +169,7 @@ class _PlatformHashContext:
     original_entry: SourceEntry
     existing_hashes: dict[str, str]
     platform_hashes: dict[str, str]
-    failed_platforms: list[str]
+    failed_platforms: list[PreservedPlatformHash]
     config: UpdateConfig
 
 
@@ -207,25 +213,17 @@ async def _process_platform_hash(
                 continue
             plat, hash_val = payload
             context.platform_hashes[plat] = hash_val
-    except RuntimeError:
+    except RuntimeError as exc:
         if platform_name == context.current_platform:
             raise
-        context.failed_platforms.append(platform_name)
-        if platform_name in context.existing_hashes:
-            context.platform_hashes[platform_name] = context.existing_hashes[
-                platform_name
-            ]
-            yield UpdateEvent.status(
-                context.source,
-                f"Build failed for {platform_name}, preserving existing hash",
-                operation="compute_hash",
-            )
-            return
-        yield UpdateEvent.status(
-            context.source,
-            f"Build failed for {platform_name}, no existing hash to preserve",
-            operation="compute_hash",
+        preserved = preserve_existing_platform_hash(
+            platform_name,
+            context.existing_hashes,
+            exc,
         )
+        context.failed_platforms.append(preserved)
+        context.platform_hashes[platform_name] = preserved.hash
+        yield preserved_platform_hash_status(context.source, preserved)
 
 
 async def compute_deno_deps_hash(
@@ -260,7 +258,7 @@ async def compute_deno_deps_hash(
     platforms_to_compute = (current_platform,) if native_only else platforms
 
     platform_hashes: dict[str, str] = {}
-    failed_platforms: list[str] = []
+    failed_platforms: list[PreservedPlatformHash] = []
     context = _PlatformHashContext(
         source=source,
         input_name=input_name,
@@ -281,12 +279,7 @@ async def compute_deno_deps_hash(
             yield event
 
     if failed_platforms:
-        yield UpdateEvent.status(
-            source,
-            f"Warning: {len(failed_platforms)} platform(s) failed, "
-            f"preserved existing hashes: {', '.join(failed_platforms)}",
-            operation="compute_hash",
-        )
+        yield preserved_platform_hash_warning(source, failed_platforms)
 
     final_hashes = {**existing_hashes, **platform_hashes}
     yield UpdateEvent.value(source, final_hashes)

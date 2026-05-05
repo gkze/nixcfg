@@ -7,6 +7,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from lib.nix.models.sources import SourceEntry
+from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
@@ -67,8 +68,9 @@ def test_t3code_workspace_fetch_hashes_uses_direct_helper_expr(
 
     events = _run(_collect(updater.fetch_hashes(VersionInfo(version="main"), object())))
 
-    assert "./packages/t3code-workspace/default.nix" in captured["expr"]
-    assert "git+file://" in captured["expr"]
+    expr = captured["expr"]
+    assert isinstance(expr, str)
+    assert_nix_ast_equal(expr, module.T3CodeWorkspaceUpdater._workspace_expression())
     assert events[-1].kind is UpdateEventKind.VALUE
     payload = events[-1].payload
     assert isinstance(payload, list)
@@ -85,8 +87,7 @@ def test_t3code_workspace_build_args_wrap_expr_for_nix_build() -> None:
     args = module._workspace_build_args("pkgs.hello")
 
     assert args[:6] == ["nix", "build", "-L", "--no-link", "--impure", "--expr"]
-    assert "let pkgs =" in args[-1]
-    assert "pkgs.hello" in args[-1]
+    assert_nix_ast_equal(args[-1], module._build_nix_expr("pkgs.hello"))
 
 
 def test_t3code_workspace_compute_hash_rejects_successful_build(

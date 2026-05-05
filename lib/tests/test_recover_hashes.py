@@ -164,7 +164,12 @@ def test_apply_hash_recovery_writes_deletes_and_stages(
         "packages/demo/sources.json",
         "overlays/extra/sources.json",
     )
-    assert '"new": true' in (repo_root / "flake.lock").read_text(encoding="utf-8")
+    assert (
+        json.loads((repo_root / "flake.lock").read_text(encoding="utf-8"))["nodes"][
+            "new"
+        ]
+        is True
+    )
     assert (repo_root / "packages/demo/sources.json").exists()
     assert not (repo_root / "overlays/extra/sources.json").exists()
     args = seen["args"]
@@ -247,7 +252,12 @@ def test_apply_hash_recovery_skips_missing_removals_without_staging(
     )
 
     assert rh.apply_hash_recovery(plan) == ("flake.lock",)
-    assert '"new": true' in (repo_root / "flake.lock").read_text(encoding="utf-8")
+    assert (
+        json.loads((repo_root / "flake.lock").read_text(encoding="utf-8"))["nodes"][
+            "new"
+        ]
+        is True
+    )
 
 
 def test_render_plain_covers_empty_restore_and_apply_remove_branches() -> None:

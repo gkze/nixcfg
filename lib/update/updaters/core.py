@@ -97,6 +97,7 @@ class UpdateContext:
     current: SourceEntry | None
     drv_fingerprint: str | None = None
     generated_artifacts: dict[Path, str] = field(default_factory=dict)
+    hashes_fully_computed: bool = True
 
 
 def _coerce_context(context: UpdateContext | SourceEntry | None) -> UpdateContext:

@@ -174,6 +174,7 @@ def test_nix_build_dry_run_respects_section_boundaries(
 ) -> None:
     """Run this test case."""
     seen_args: list[str] = []
+    seen_kwargs: dict[str, object] = {}
     combined = (
         "these derivations will be built:\n"
         "  note: this line is not a derivation\n"
@@ -182,14 +183,17 @@ def test_nix_build_dry_run_respects_section_boundaries(
         "  /nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar.drv\n"
     )
 
-    async def _run_nix(args: list[str], **_kwargs: object) -> CommandResult:
+    async def _run_nix(args: list[str], **kwargs: object) -> CommandResult:
         seen_args.extend(args)
+        seen_kwargs.update(kwargs)
         return CommandResult(args=args, returncode=0, stdout=combined, stderr="")
 
     monkeypatch.setattr(build_mod, "run_nix", _run_nix)
 
-    drvs = asyncio.run(build_mod.nix_build_dry_run(".#pkg", impure=False))
+    env = {"NIXPKGS_ALLOW_UNFREE": "1"}
+    drvs = asyncio.run(build_mod.nix_build_dry_run(".#pkg", impure=False, env=env))
     assert "--impure" not in seen_args
+    assert seen_kwargs["env"] == env
     assert drvs == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo.drv"}
 
 

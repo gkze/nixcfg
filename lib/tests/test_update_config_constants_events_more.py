@@ -71,8 +71,8 @@ def test_env_bool_truthy_falsy_and_default(monkeypatch: pytest.MonkeyPatch) -> N
     assert env_bool("UPDATE_BOOL_TEST", default=False) is False
 
 
-def test_resolve_config_normalizes_aliases_and_bounds() -> None:
-    """Normalize deno platform aliases and bounded numeric fields."""
+def test_resolve_config_normalizes_legacy_platform_aliases_and_bounds() -> None:
+    """Normalize legacy platform aliases and bounded numeric fields."""
     cfg = resolve_config(
         deno_platforms="x86_64-linux, aarch64-darwin",
         retries=-5,
@@ -82,6 +82,7 @@ def test_resolve_config_normalizes_aliases_and_bounds() -> None:
     assert cfg.default_retries == 0
     assert cfg.default_log_tail_lines == 1
     assert cfg.max_nix_builds == 1
+    assert cfg.hash_build_platforms == ("x86_64-linux", "aarch64-darwin")
     assert cfg.deno_deps_platforms == ("x86_64-linux", "aarch64-darwin")
 
 
@@ -89,6 +90,26 @@ def test_resolve_config_accepts_hash_build_platform_alias() -> None:
     """Allow the generalized hash platform alias to override Deno targets."""
     cfg = resolve_config(hash_build_platforms=("aarch64-linux",))
     assert cfg.deno_deps_platforms == ("aarch64-linux",)
+    assert cfg.hash_build_platforms == ("aarch64-linux",)
+
+
+def test_resolve_config_canonical_platforms_win_over_legacy_aliases() -> None:
+    """Prefer canonical platform overrides over legacy aliases."""
+    cfg = resolve_config(
+        hash_build_platforms=("aarch64-linux",),
+        deno_deps_platforms=("x86_64-linux",),
+    )
+    assert cfg.hash_build_platforms == ("aarch64-linux",)
+
+
+def test_resolve_config_canonical_platforms_win_over_legacy_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit canonical overrides should not inherit legacy env values."""
+    monkeypatch.setenv("UPDATE_DENO_DEPS_PLATFORMS", "x86_64-linux")
+
+    cfg = resolve_config(hash_build_platforms=("aarch64-linux",))
+
     assert cfg.hash_build_platforms == ("aarch64-linux",)
 
 
@@ -126,7 +147,7 @@ def test_resolve_active_config_and_default_config_reference() -> None:
         default_retry_backoff=0.5,
         fake_hash="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         max_nix_builds=2,
-        deno_deps_platforms=("x86_64-linux",),
+        hash_build_platforms=("x86_64-linux",),
     )
     assert resolve_active_config(custom) is custom
     assert resolve_active_config(None) is DEFAULT_CONFIG

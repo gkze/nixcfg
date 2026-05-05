@@ -7,6 +7,7 @@ from functools import cache
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.if_expression import IfExpression
+from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
@@ -57,13 +58,21 @@ def test_codex_checks_v8_cargo_nix_version_against_the_pinned_source() -> None:
         expect_scope_binding(_codex_platform_switch(), "cargoNixV8Version").value,
         "cargoNix.internal.crates.v8.version",
     )
-    check_expr = expect_scope_binding(
-        _codex_platform_switch(), "cargoNixV8VersionCheck"
-    ).value.rebuild()
+    check_expr = expect_instance(
+        expect_scope_binding(_codex_platform_switch(), "cargoNixV8VersionCheck").value,
+        IfExpression,
+    )
 
-    assert "cargoNixV8Version == v8ManifestVersion" in check_expr
-    assert "packages/codex/Cargo.nix has v8 version ${cargoNixV8Version}," in check_expr
-    assert "expected ${v8ManifestVersion}; regenerate Cargo.nix" in check_expr
+    assert_nix_ast_equal(check_expr.condition, "cargoNixV8Version == v8ManifestVersion")
+    assert_nix_ast_equal(check_expr.consequence, "true")
+    throw_call = expect_instance(check_expr.alternative, FunctionCall)
+    assert_nix_ast_equal(throw_call.name, "throw")
+    assert expect_instance(throw_call.argument, IndentedString).value == (
+        "\n"
+        "        packages/codex/Cargo.nix has v8 version ${cargoNixV8Version},\n"
+        "        expected ${v8ManifestVersion}; regenerate Cargo.nix\n"
+        "      "
+    )
     assert_nix_ast_equal(
         expect_scope_binding(_codex_platform_switch(), "guardedCodexDrv").value,
         """

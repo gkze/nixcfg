@@ -10,6 +10,8 @@ import pytest
 
 from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import SourceEntry
+from lib.tests._updater_helpers import empty_event_stream
+from lib.update.config import resolve_config
 from lib.update.events import UpdateEvent
 from lib.update.updaters.base import (
     ChecksumProvidedUpdater,
@@ -160,8 +162,8 @@ def test_updater_sourcefile_falls_back_to_module_file(
             self, info: VersionInfo, session: object
         ) -> AsyncIterator[UpdateEvent]:
             _ = (info, session)
-            if False:
-                yield UpdateEvent.status(self.name, "never")
+            async for event in empty_event_stream():
+                yield event
 
     monkeypatch.setattr(
         "lib.update.updaters.base.inspect.getsourcefile",
@@ -188,8 +190,8 @@ def test_unbound_abstract_methods_raise() -> None:
             self, info: VersionInfo, session: object
         ) -> AsyncIterator[UpdateEvent]:
             _ = (info, session)
-            if False:
-                yield UpdateEvent.status(self.name, "never")
+            async for event in empty_event_stream():
+                yield event
 
     updater = _Concrete()
 
@@ -377,6 +379,53 @@ def test_deno_deps_default_compute_and_type_enforcement(
     )
     with pytest.raises(TypeError, match="Expected dict of platform hashes"):
         _run(_run_hashes())
+
+
+def test_deno_native_only_single_platform_status_keeps_full_hash_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A native-only run for exactly one platform should remain fully certified."""
+
+    async def _compute_deno(
+        source_name: str,
+        input_name: str,
+        *,
+        native_only: bool,
+        config: object,
+    ) -> AsyncIterator[UpdateEvent]:
+        _ = (input_name, config)
+        assert native_only is True
+        yield UpdateEvent.status(source_name, "hashing", operation="compute_hash")
+        yield UpdateEvent.value(source_name, {"aarch64-darwin": HASH_A})
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_deno_deps_hash", _compute_deno
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    updater = _DefaultDeno(
+        config=resolve_config(hash_build_platforms=("aarch64-darwin",))
+    )
+    updater.native_only = True
+    context = UpdateContext(current=None)
+
+    async def _run_hashes() -> list[UpdateEvent]:
+        async with aiohttp.ClientSession() as session:
+            return [
+                event
+                async for event in updater.fetch_hashes(
+                    VersionInfo(version="1", metadata={}),
+                    session,
+                    context=context,
+                )
+            ]
+
+    events = _run(_run_hashes())
+    assert any(event.message == "hashing" for event in events)
+    assert context.hashes_fully_computed is True
 
 
 def test_manifest_updater_rejects_non_flake_node_metadata() -> None:

@@ -9,7 +9,7 @@ import sys
 import tempfile
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from lib.nix.models.sources import (
     HashCollection,
@@ -25,12 +25,19 @@ from lib.update.events import (
     CommandResult,
     EventStream,
     UpdateEvent,
+    UpdateEventKind,
     ValueDrain,
     drain_value_events,
     expect_command_result,
     require_value,
 )
 from lib.update.flake import flake_fetch_expr
+from lib.update.platform_hashes import (
+    PreservedPlatformHash,
+    preserve_existing_platform_hash,
+    preserved_platform_hash_status,
+    preserved_platform_hash_warning,
+)
 from lib.update.updaters.core import (
     UpdateContext,
     Updater,
@@ -202,6 +209,26 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
     ) -> EventStream:
         _ = info
         context = _coerce_context(context)
+        if not context.hashes_fully_computed:
+            current_drv_hash = context.current.drv_hash if context.current else None
+            if current_drv_hash is None:
+                msg = (
+                    f"Cannot preserve derivation fingerprint for {self.name}: "
+                    "this run cannot certify all fingerprint inputs and the current "
+                    "source entry has no drvHash"
+                )
+                raise RuntimeError(msg)
+            result = result.model_copy(update={"drv_hash": current_drv_hash})
+            yield UpdateEvent.status(
+                self.name,
+                "Preserving previous derivation fingerprint because this run cannot "
+                "certify all fingerprint inputs",
+                operation="compute_hash",
+                status="preserved_drv_hash",
+                detail=current_drv_hash,
+            )
+            yield UpdateEvent.value(self.name, result)
+            return
         yield UpdateEvent.status(
             self.name,
             "Computing derivation fingerprint...",
@@ -233,6 +260,11 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         for platform in self.config.hash_build_platforms:
             if platform not in targets:
                 targets.append(platform)
+
+        if self.supported_platforms is not None:
+            supported = set(self.supported_platforms)
+            targets = [platform for platform in targets if platform in supported]
+
         return tuple(targets)
 
     def _existing_platform_hashes(
@@ -292,6 +324,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             self.supported_platforms is not None
             and current_platform not in self.supported_platforms
         ):
+            context.hashes_fully_computed = False
             existing_hashes = self._existing_platform_hashes(context)
             entries = [
                 HashEntry.create(self.hash_type, hash_val, platform=platform)
@@ -307,10 +340,15 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             yield UpdateEvent.value(self.name, entries)
             return
         if self.platform_specific:
+            if self.native_only and (
+                self.supported_platforms is None
+                or set(self.supported_platforms) != {current_platform}
+            ):
+                context.hashes_fully_computed = False
             error = f"Missing {self.hash_type} output"
             platform_hashes: dict[str, str] = {}
             existing_hashes = self._existing_platform_hashes(context)
-            failed_platforms: list[str] = []
+            failed_platforms: list[PreservedPlatformHash] = []
 
             for platform in self._platform_targets(current_platform):
                 hash_drain = ValueDrain[str]()
@@ -321,36 +359,25 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
                         parse=_dependencies.expect_str,
                     ):
                         yield event
-                except RuntimeError:
+                except RuntimeError as exc:
                     if platform == current_platform:
                         raise
-                    failed_platforms.append(platform)
-                    existing = existing_hashes.get(platform)
-                    if existing is None:
-                        yield UpdateEvent.status(
-                            self.name,
-                            f"Build failed for {platform}, no existing hash to preserve",
-                            operation="compute_hash",
-                        )
-                        continue
-                    platform_hashes[platform] = existing
-                    yield UpdateEvent.status(
-                        self.name,
-                        f"Build failed for {platform}, preserving existing hash",
-                        operation="compute_hash",
+                    context.hashes_fully_computed = False
+                    preserved = preserve_existing_platform_hash(
+                        platform,
+                        existing_hashes,
+                        exc,
                     )
+                    failed_platforms.append(preserved)
+                    platform_hashes[platform] = preserved.hash
+                    yield preserved_platform_hash_status(self.name, preserved)
                     continue
 
                 hash_value = require_value(hash_drain, error)
                 platform_hashes[platform] = hash_value
 
             if failed_platforms:
-                yield UpdateEvent.status(
-                    self.name,
-                    f"Warning: {len(failed_platforms)} platform(s) failed, "
-                    f"preserved existing hashes: {', '.join(failed_platforms)}",
-                    operation="compute_hash",
-                )
+                yield preserved_platform_hash_warning(self.name, failed_platforms)
 
             entries = [
                 HashEntry.create(self.hash_type, hash_val, platform=platform)
@@ -390,7 +417,12 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
         context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Compute structured Deno dependency hashes for all target platforms."""
-        _ = (session, _coerce_context(context))
+        _ = session
+        context = _coerce_context(context)
+        if self.native_only:
+            current_platform = _dependencies.get_current_nix_platform()
+            if set(self.config.hash_build_platforms) != {current_platform}:
+                context.hashes_fully_computed = False
 
         def _expect_platform_hashes(payload: object) -> HashMapping:
             if isinstance(payload, dict):
@@ -405,6 +437,11 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
             hash_drain,
             parse=_expect_platform_hashes,
         ):
+            payload = event.payload
+            if event.kind is UpdateEventKind.STATUS and isinstance(payload, dict):
+                payload_dict = cast("dict[str, object]", payload)
+                if payload_dict.get("status") == "partial_hashes":
+                    context.hashes_fully_computed = False
             yield event
         platform_hashes = require_value(hash_drain, error)
         if not isinstance(platform_hashes, dict):

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import runpy
+import tomllib
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
-import tomlkit
 
 from lib.import_utils import load_module_from_path
 from lib.update.paths import REPO_ROOT
@@ -25,6 +26,22 @@ def _load_allocator_helper() -> ModuleType:
         REPO_ROOT / "packages/codex/patch_allocator_weak_linkage.py",
         "_codex_patch_allocator_weak_linkage",
     )
+
+
+def _cargo_lock_payload(path: Path) -> dict[str, Any]:
+    return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+def _cargo_packages_by_name(path: Path) -> dict[str, dict[str, Any]]:
+    packages = _cargo_lock_payload(path).get("package", [])
+    assert isinstance(packages, list)
+    by_name: dict[str, dict[str, Any]] = {}
+    for package in packages:
+        assert isinstance(package, dict)
+        name = package.get("name")
+        assert isinstance(name, str)
+        by_name[name] = package
+    return by_name
 
 
 def test_patch_lockfile_updates_only_local_placeholder_versions(tmp_path: Path) -> None:
@@ -51,14 +68,13 @@ version = "1.2.3"
     )
 
     helper.patch_lockfile(lock_file, "9.9.9")
-    patched = lock_file.read_text(encoding="utf-8")
+    packages = _cargo_packages_by_name(lock_file)
 
-    assert 'name = "codex-cli"' in patched
-    assert 'version = "9.9.9"' in patched
-    assert 'name = "remote"' in patched
-    assert 'source = "registry+https://example.invalid"' in patched
-    assert patched.count('version = "9.9.9"') == 1
-    assert 'version = "1.2.3"' in patched
+    assert packages["codex-cli"]["version"] == "9.9.9"
+    assert packages["remote"]["version"] == "0.0.0"
+    assert packages["remote"]["source"] == "registry+https://example.invalid"
+    assert packages["stable"]["version"] == "1.2.3"
+    assert sum(package["version"] == "9.9.9" for package in packages.values()) == 1
 
 
 def test_patch_lockfile_preserves_packages_without_package_table(
@@ -71,7 +87,7 @@ def test_patch_lockfile_preserves_packages_without_package_table(
 
     helper.patch_lockfile(lock_file, "1.2.3")
 
-    assert tomlkit.parse(lock_file.read_text(encoding="utf-8"))["version"] == 3
+    assert _cargo_lock_payload(lock_file)["version"] == 3
 
 
 def test_main_patches_requested_lockfile(tmp_path: Path) -> None:
@@ -84,7 +100,7 @@ def test_main_patches_requested_lockfile(tmp_path: Path) -> None:
     )
 
     assert helper.main([str(lock_file), "2.3.4"]) == 0
-    assert 'version = "2.3.4"' in lock_file.read_text(encoding="utf-8")
+    assert _cargo_packages_by_name(lock_file)["codex-cli"]["version"] == "2.3.4"
 
 
 def test_main_rejects_invalid_argument_count() -> None:
@@ -112,7 +128,7 @@ def test_main_guard_exits_with_main_result(
         runpy.run_path(str(script_path), run_name="__main__")
 
     assert excinfo.value.code == 0
-    assert 'version = "3.4.5"' in lock_file.read_text(encoding="utf-8")
+    assert _cargo_packages_by_name(lock_file)["codex-cli"]["version"] == "3.4.5"
 
 
 def test_patch_allocator_removes_weak_linkage_attrs(tmp_path: Path) -> None:
@@ -129,10 +145,9 @@ def test_patch_allocator_removes_weak_linkage_attrs(tmp_path: Path) -> None:
 
     helper.patch_allocator(allocator)
 
-    patched = allocator.read_text(encoding="utf-8")
-    assert '#[linkage = "weak"]' not in patched
-    assert "__rust_alloc" in patched
-    assert "__rust_dealloc" in patched
+    assert allocator.read_text(encoding="utf-8") == (
+        'pub extern "C" fn __rust_alloc() {}\npub extern "C" fn __rust_dealloc() {}\n'
+    )
 
 
 def test_patch_allocator_main_rejects_invalid_argument_count() -> None:
@@ -157,4 +172,4 @@ def test_patch_allocator_main_guard_exits_with_main_result(
         runpy.run_path(str(script_path), run_name="__main__")
 
     assert excinfo.value.code == 0
-    assert '#[linkage = "weak"]' not in allocator.read_text(encoding="utf-8")
+    assert allocator.read_text(encoding="utf-8") == "fn shim() {}\n"

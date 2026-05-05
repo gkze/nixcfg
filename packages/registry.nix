@@ -62,6 +62,12 @@ let
         "x86_64-linux"
       ];
     };
+    "codex-crate2nix-src" = {
+      constraint = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
+    };
     "codex-desktop" = {
       constraint = "darwin";
     };
@@ -88,6 +94,24 @@ let
       ];
     };
     "goose-cli" = {
+      constraint = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
+    };
+    "goose-cli-crate2nix-src" = {
+      constraint = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
+    };
+    gitbutler = {
+      constraint = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
+    };
+    "gitbutler-crate2nix-src" = {
       constraint = [
         "aarch64-darwin"
         "x86_64-linux"

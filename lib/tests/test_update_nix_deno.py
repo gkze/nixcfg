@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.tests._updater_helpers import empty_event_stream
+from lib.update.config import resolve_config
 from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
 from lib.update.nix_deno import (
     _build_deno_deps_expr,
@@ -17,10 +19,12 @@ from lib.update.nix_deno import (
     _build_source_override_env,
     _compute_deno_deps_hash_for_platform,
     _existing_platform_hashes,
+    _PlatformHashContext,
     _process_platform_hash,
     _try_platform_hash_event,
     compute_deno_deps_hash,
 )
+from lib.update.platform_hashes import PreservedPlatformHash
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -140,15 +144,9 @@ def test_compute_deno_deps_hash_for_platform_emits_value_and_errors(
         "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     )
 
-    async def _emit_none(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
-        if False:
-            yield UpdateEvent.status("demo", "never")
-        return
-
     monkeypatch.setattr(
-        "lib.update.nix_deno._emit_sri_hash_from_build_result", _emit_none
+        "lib.update.nix_deno._emit_sri_hash_from_build_result",
+        lambda *_args, **_kwargs: empty_event_stream(),
     )
     with pytest.raises(RuntimeError, match="Hash conversion failed"):
         _collect(
@@ -200,16 +198,17 @@ def test_process_platform_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         "lib.update.nix_deno._compute_deno_deps_hash_for_platform", _compute_ok
     )
 
-    context = type("_Context", (), {})()
-    context.source = "demo"
-    context.input_name = "input"
-    context.platforms = ("x86_64-linux", "aarch64-darwin")
-    context.current_platform = "x86_64-linux"
-    context.original_entry = SourceEntry(hashes={})
-    context.existing_hashes = {"aarch64-darwin": "sha256-existing"}
-    context.platform_hashes = {}
-    context.failed_platforms = []
-    context.config = type("_Cfg", (), {"fake_hash": "sha256-fake"})()
+    context = _PlatformHashContext(
+        source="demo",
+        input_name="input",
+        platforms=("x86_64-linux", "aarch64-darwin"),
+        current_platform="x86_64-linux",
+        original_entry=SourceEntry(hashes={}),
+        existing_hashes={"aarch64-darwin": "sha256-existing"},
+        platform_hashes={},
+        failed_platforms=[],
+        config=resolve_config(fake_hash="sha256-fake"),
+    )
 
     success_events = _collect(_process_platform_hash("x86_64-linux", context=context))
     assert any(
@@ -237,7 +236,9 @@ def test_process_platform_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     recovered_events = _collect(
         _process_platform_hash("aarch64-darwin", context=context)
     )
-    assert "aarch64-darwin" in context.failed_platforms
+    assert [failure.platform for failure in context.failed_platforms] == [
+        "aarch64-darwin"
+    ]
     assert context.platform_hashes["aarch64-darwin"] == "sha256-existing"
     assert any(
         "preserving existing hash" in (event.message or "")
@@ -245,12 +246,8 @@ def test_process_platform_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     context.existing_hashes = {}
     context.failed_platforms = []
-    no_existing_events = _collect(
-        _process_platform_hash("aarch64-darwin", context=context)
-    )
-    assert any(
-        "no existing hash" in (event.message or "") for event in no_existing_events
-    )
+    with pytest.raises(RuntimeError, match="no existing hash is available"):
+        _collect(_process_platform_hash("aarch64-darwin", context=context))
 
 
 def test_compute_deno_deps_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -266,7 +263,7 @@ def test_compute_deno_deps_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
                 "_Cfg",
                 (),
                 {
-                    "deno_deps_platforms": ("x86_64-linux", "aarch64-darwin"),
+                    "hash_build_platforms": ("x86_64-linux", "aarch64-darwin"),
                     "fake_hash": "sha256-fake",
                 },
             )()
@@ -296,17 +293,32 @@ def test_compute_deno_deps_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     async def _process(
-        platform_name: str, *, context: object
+        platform_name: str, *, context: _PlatformHashContext
     ) -> AsyncIterator[UpdateEvent]:
         context.platform_hashes[platform_name] = f"sha256-{platform_name}"
         if platform_name == "aarch64-darwin":
-            context.failed_platforms.append(platform_name)
+            context.failed_platforms.append(
+                PreservedPlatformHash(
+                    platform=platform_name,
+                    hash="sha256-existing",
+                    error="boom",
+                )
+            )
         yield UpdateEvent.status("demo", f"processed {platform_name}")
 
     monkeypatch.setattr("lib.update.nix_deno._process_platform_hash", _process)
 
     events = _collect(compute_deno_deps_hash("demo", "input", native_only=False))
-    assert any("Warning:" in (event.message or "") for event in events)
+    warning_events = [event for event in events if "Warning:" in (event.message or "")]
+    assert len(warning_events) == 1
+    assert warning_events[0].message == (
+        "Warning: 1 platform(s) failed, preserved existing hashes for: aarch64-darwin"
+    )
+    assert warning_events[0].payload == {
+        "operation": "compute_hash",
+        "status": "partial_hashes",
+        "detail": ("aarch64-darwin",),
+    }
     final = events[-1]
     assert final.kind == UpdateEventKind.VALUE
     payload = final.payload

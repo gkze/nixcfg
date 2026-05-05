@@ -11,7 +11,6 @@ from lib.update.net import fetch_url
 from lib.update.updaters.base import (
     DownloadHashUpdater,
     VersionInfo,
-    _verify_platform_versions,
     register_updater,
 )
 from lib.update.updaters.metadata import AssetURLsMetadata, metadata_get
@@ -57,12 +56,12 @@ class CodexDesktopUpdater(DownloadHashUpdater):
             raise RuntimeError(msg) from exc
 
     @staticmethod
-    def _extract_item(root: Element, *, appcast_url: str) -> Element:
-        item = root.find("./channel/item")
-        if item is None:
+    def _extract_items(root: Element, *, appcast_url: str) -> tuple[Element, ...]:
+        items = tuple(root.findall("./channel/item"))
+        if not items:
             msg = f"No items found in Codex appcast {appcast_url}"
             raise RuntimeError(msg)
-        return item
+        return items
 
     @staticmethod
     def _required_text(item: Element, tag: str, label: str) -> str:
@@ -92,13 +91,7 @@ class CodexDesktopUpdater(DownloadHashUpdater):
             raise RuntimeError(msg)
         return value
 
-    def _extract_appcast_item(
-        self,
-        root: Element,
-        *,
-        appcast_url: str,
-    ) -> _CodexAppcastItem:
-        item = self._extract_item(root, appcast_url=appcast_url)
+    def _extract_appcast_item(self, item: Element) -> _CodexAppcastItem:
         enclosure = self._extract_enclosure(item)
         return _CodexAppcastItem(
             short_version=self._required_text(
@@ -114,11 +107,58 @@ class CodexDesktopUpdater(DownloadHashUpdater):
             url=self._extract_download_url(enclosure),
         )
 
-    async def _fetch_appcast_item(
+    def _extract_appcast_items(
+        self,
+        root: Element,
+        *,
+        appcast_url: str,
+    ) -> tuple[_CodexAppcastItem, ...]:
+        return tuple(
+            self._extract_appcast_item(item)
+            for item in self._extract_items(root, appcast_url=appcast_url)
+        )
+
+    @staticmethod
+    def _release_key(item: _CodexAppcastItem) -> tuple[str, str]:
+        return item.short_version, item.build_version
+
+    @classmethod
+    def _format_version(cls, item: _CodexAppcastItem) -> str:
+        short_version, build_version = cls._release_key(item)
+        return f"{short_version}-{build_version}"
+
+    def _select_common_items(
+        self,
+        items_by_platform: dict[str, tuple[_CodexAppcastItem, ...]],
+    ) -> dict[str, _CodexAppcastItem]:
+        keyed_items: dict[str, dict[tuple[str, str], _CodexAppcastItem]] = {}
+        for platform, items in items_by_platform.items():
+            platform_items: dict[tuple[str, str], _CodexAppcastItem] = {}
+            for item in items:
+                platform_items.setdefault(self._release_key(item), item)
+            keyed_items[platform] = platform_items
+
+        primary_platform = next(iter(items_by_platform))
+        for item in items_by_platform[primary_platform]:
+            release_key = self._release_key(item)
+            if all(release_key in items for items in keyed_items.values()):
+                return {
+                    platform: items[release_key]
+                    for platform, items in keyed_items.items()
+                }
+
+        versions = {
+            platform: [self._format_version(item) for item in items]
+            for platform, items in items_by_platform.items()
+        }
+        msg = f"No common Codex desktop release across platform appcasts: {versions}"
+        raise RuntimeError(msg)
+
+    async def _fetch_appcast_items(
         self,
         session: aiohttp.ClientSession,
         platform: str,
-    ) -> _CodexAppcastItem:
+    ) -> tuple[_CodexAppcastItem, ...]:
         appcast_url = self.APPCASTS[platform]
         xml_payload = await fetch_url(
             session,
@@ -128,24 +168,18 @@ class CodexDesktopUpdater(DownloadHashUpdater):
             config=self.config,
         )
         root = self._parse_appcast(xml_payload.decode(), appcast_url=appcast_url)
-        return self._extract_appcast_item(root, appcast_url=appcast_url)
+        return self._extract_appcast_items(root, appcast_url=appcast_url)
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch both appcasts and return a release plus per-platform archive URLs."""
-        items = {
-            platform: await self._fetch_appcast_item(session, platform)
+        items_by_platform = {
+            platform: await self._fetch_appcast_items(session, platform)
             for platform in self.PLATFORMS
         }
-        short_version = _verify_platform_versions(
-            {platform: item.short_version for platform, item in items.items()},
-            self.name,
-        )
-        build_version = _verify_platform_versions(
-            {platform: item.build_version for platform, item in items.items()},
-            f"{self.name} build",
-        )
+        items = self._select_common_items(items_by_platform)
+        selected_item = next(iter(items.values()))
         return VersionInfo(
-            version=f"{short_version}-{build_version}",
+            version=self._format_version(selected_item),
             metadata=AssetURLsMetadata(
                 asset_urls={platform: item.url for platform, item in items.items()},
             ),

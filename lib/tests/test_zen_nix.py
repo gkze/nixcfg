@@ -126,8 +126,8 @@ with ps; [
     )
 
 
-def test_george_local_bin_exports_only_git_ignore() -> None:
-    """George's local bin exports should only keep the remaining repo-managed helper."""
+def test_george_local_bin_exports_expected_helpers() -> None:
+    """George's local bin exports should stay limited to explicit helper links."""
     root = _module_output("home/george/configuration.nix")
     home = expect_instance(expect_binding(root.values, "home").value, AttributeSet)
     file_attrset = expect_instance(
@@ -141,6 +141,7 @@ def test_george_local_bin_exports_only_git_ignore() -> None:
     }
 
     assert local_bin_entries == {
+        '".local/bin/but"',
         '".local/bin/git-ignore"',
     }
 

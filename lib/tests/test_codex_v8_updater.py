@@ -8,9 +8,11 @@ from types import SimpleNamespace
 import pytest
 
 from lib.nix.models.sources import HashEntry
+from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
+from lib.update.nix import _build_fetchgit_call
 from lib.update.updaters.base import VersionInfo
 
 
@@ -60,8 +62,14 @@ def test_codex_v8_updater_computes_recursive_src_hash(monkeypatch) -> None:
         )
     )
 
-    assert "fetchgit" in calls[0]
-    assert "fetchSubmodules" in calls[0]
+    assert_nix_ast_equal(
+        calls[0],
+        _build_fetchgit_call(
+            "https://github.com/denoland/rusty_v8.git",
+            "v999.0.0",
+            fetch_submodules=True,
+        ),
+    )
     assert events[-1].payload == [
         HashEntry.create(
             "srcHash",

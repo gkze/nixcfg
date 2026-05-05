@@ -376,19 +376,29 @@ def test_codex_desktop_reads_platform_appcasts(
     codex_desktop_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Resolve Codex desktop version and immutable ZIP URLs from appcasts."""
+    """Resolve the newest common Codex release and immutable ZIP URLs."""
     updater = codex_desktop_module.CodexDesktopUpdater()
+    newer_arm_url = "https://example.invalid/Codex-darwin-arm64-26.429.61741.zip"
     arm_url = "https://example.invalid/Codex-darwin-arm64-26.429.20946.zip"
     x64_url = "https://example.invalid/Codex-darwin-x64-26.429.20946.zip"
 
-    def _appcast(download_url: str) -> bytes:
+    def _item(version: str, build: str, download_url: str) -> str:
+        return f"""
+            <item>
+              <sparkle:version>{build}</sparkle:version>
+              <sparkle:shortVersionString>{version}</sparkle:shortVersionString>
+              <enclosure url="{download_url}" />
+            </item>
+        """
+
+    def _appcast(download_url: str, *, include_newer_arm: bool = False) -> bytes:
+        items = ""
+        if include_newer_arm:
+            items += _item("26.429.61741", "2429", newer_arm_url)
+        items += _item("26.429.20946", "2312", download_url)
         return f"""
             <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-              <channel><item>
-                <sparkle:version>2312</sparkle:version>
-                <sparkle:shortVersionString>26.429.20946</sparkle:shortVersionString>
-                <enclosure url="{download_url}" />
-              </item></channel>
+              <channel>{items}</channel>
             </rss>
         """.encode()
 
@@ -397,7 +407,7 @@ def test_codex_desktop_reads_platform_appcasts(
         assert kwargs["request_timeout"] == updater.config.default_timeout
         assert kwargs["config"] == updater.config
         if url == updater.APPCASTS["aarch64-darwin"]:
-            return _appcast(arm_url)
+            return _appcast(arm_url, include_newer_arm=True)
         if url == updater.APPCASTS["x86_64-darwin"]:
             return _appcast(x64_url)
         raise AssertionError(url)
@@ -411,11 +421,11 @@ def test_codex_desktop_reads_platform_appcasts(
     assert updater.get_download_url("x86_64-darwin", latest) == x64_url
 
 
-def test_codex_desktop_rejects_mismatched_appcast_versions(
+def test_codex_desktop_rejects_appcasts_without_common_release(
     codex_desktop_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fail if the architecture appcasts do not agree on one release."""
+    """Fail if the architecture appcasts have no release in common."""
     updater = codex_desktop_module.CodexDesktopUpdater()
 
     async def _fetch_url(_session: object, url: str, **_kwargs: object) -> bytes:
@@ -432,7 +442,7 @@ def test_codex_desktop_rejects_mismatched_appcast_versions(
 
     monkeypatch.setattr(codex_desktop_module, "fetch_url", _fetch_url)
 
-    with pytest.raises(RuntimeError, match="codex-desktop version mismatch"):
+    with pytest.raises(RuntimeError, match="No common Codex desktop release"):
         _run(updater.fetch_latest(object()))
 
 

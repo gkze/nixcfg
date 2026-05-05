@@ -14,7 +14,7 @@ import pytest
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance, expect_not_none
 from lib.tests._updater_helpers import collect_events as _collect_events
-from lib.tests._updater_helpers import install_fixed_hash_stream
+from lib.tests._updater_helpers import empty_event_stream, install_fixed_hash_stream
 from lib.update import updaters as updater_module
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import resolve_config
@@ -65,7 +65,7 @@ class _DummyUpdater(Updater):
         self.latest = latest
 
     async def fetch_latest(self, session: object) -> VersionInfo:
-        """Run this test case."""
+        """Return the configured dummy latest version."""
         _ = session
         return VersionInfo(version=self.latest, metadata={})
 
@@ -76,7 +76,7 @@ class _DummyUpdater(Updater):
         *,
         context: object | None = None,
     ) -> EventStream:
-        """Run this test case."""
+        """Emit a simple platform hash mapping."""
         _ = (info, session, context)
         payload: dict[str, str] = {"x86_64-linux": HASH_A}
         yield UpdateEvent.value(self.name, payload)
@@ -107,14 +107,14 @@ class _DummyChecksum(ChecksumProvidedUpdater):
     PLATFORMS: ClassVar[dict[str, str]] = {"x86_64-linux": "linux"}
 
     async def fetch_latest(self, session: object) -> VersionInfo:
-        """Run this test case."""
+        """Return a fixed checksum-backed version."""
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
     async def fetch_checksums(
         self, info: VersionInfo, session: object
     ) -> dict[str, str]:
-        """Run this test case."""
+        """Return one checksum for checksum conversion tests."""
         _ = (info, session)
         return {"x86_64-linux": "deadbeef"}
 
@@ -128,7 +128,7 @@ class _DummyDownload(DownloadHashUpdater):
     }
 
     async def fetch_latest(self, session: object) -> VersionInfo:
-        """Run this test case."""
+        """Return a fixed download-backed version."""
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
@@ -138,7 +138,7 @@ class _DummyHashEntry(HashEntryUpdater):
     input_name = "input"
 
     async def fetch_latest(self, session: object) -> VersionInfo:
-        """Run this test case."""
+        """Return a fixed hash-entry version."""
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
@@ -149,7 +149,7 @@ class _DummyHashEntry(HashEntryUpdater):
         *,
         context: object | None = None,
     ) -> EventStream:
-        """Run this test case."""
+        """Emit one structured hash entry."""
         _ = (info, session, context)
         entry = HashEntry.create("sha256", HASH_A)
         payload: list[HashEntry] = [entry]
@@ -162,7 +162,7 @@ class _DummyFlakeInput(FlakeInputHashUpdater):
     hash_type = "sha256"
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Run this test case."""
+        """Delegate to the flake-input implementation."""
         return await super().fetch_latest(session)
 
     def _compute_hash(self, info: VersionInfo) -> EventStream:
@@ -179,7 +179,7 @@ class _DummyDenoDeps(DenoDepsHashUpdater):
     input_name = "deno-input"
 
     async def fetch_latest(self, session: object) -> VersionInfo:
-        """Run this test case."""
+        """Return a fixed Deno dependency version."""
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
@@ -229,6 +229,25 @@ def _entry(version: str = "1.0.0", *, drv_hash: str | None = None) -> SourceEntr
         "hashes": HashCollection(entries=[HashEntry.create("sha256", HASH_A)]),
         "drvHash": drv_hash,
     })
+
+
+def _platform_entry(
+    *,
+    drv_hash: str | None = "old-drv",
+    hash_type: str = "sha256",
+    hash_value: str = "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
+    platforms: tuple[str, ...] = ("x86_64-linux", "aarch64-darwin"),
+) -> SourceEntry:
+    payload: dict[str, object] = {
+        "version": "1.0.0",
+        "hashes": [
+            {"hashType": hash_type, "hash": hash_value, "platform": platform}
+            for platform in platforms
+        ],
+    }
+    if drv_hash is not None:
+        payload["drvHash"] = drv_hash
+    return SourceEntry.model_validate(payload)
 
 
 def _require_hash_mapping(payload: object) -> dict[str, str]:
@@ -406,14 +425,14 @@ async def _with_session[T](
 
 
 def test_verify_platform_versions() -> None:
-    """Run this test case."""
+    """Accept matching platform versions and reject mismatches."""
     assert _verify_platform_versions({"a": "1", "b": "1"}, "x") == "1"
     with pytest.raises(RuntimeError, match="version mismatch"):
         _verify_platform_versions({"a": "1", "b": "2"}, "x")
 
 
 def test_updater_is_latest_and_update_stream_paths() -> None:
-    """Run this test case."""
+    """Exercise generic updater latest and update-stream branches."""
     updater = _DummyUpdater(latest="1.0.0")
     assert (
         asyncio.run(
@@ -794,7 +813,7 @@ def test_updater_materializes_artifacts_when_current() -> None:
 
 
 def test_checksum_provided_fetch_hashes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run this test case."""
+    """Convert fetched checksums into SRI hash mappings."""
     updater = _DummyChecksum()
 
     async def _convert(name: str, hex_hash: str) -> EventStream:
@@ -815,7 +834,7 @@ def test_checksum_provided_fetch_hashes(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_fetch_checksums_from_urls(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run this test case."""
+    """Fetch sidecar checksum URLs and reject empty parsed payloads."""
     updater = _DummyChecksum()
 
     async def _fetch_url(_session: object, url: str, **_kwargs: object) -> bytes:
@@ -850,7 +869,7 @@ def test_fetch_checksums_from_urls(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_download_hash_updater(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run this test case."""
+    """Build download URLs and stream their computed hashes."""
     updater = _DummyDownload(config=resolve_config())
     info = VersionInfo(version="1.0.0", metadata={})
 
@@ -879,7 +898,7 @@ def test_download_hash_updater(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_hash_entry_updater_emit_and_build_result() -> None:
-    """Run this test case."""
+    """Build and emit structured hash-entry updater results."""
     updater = _DummyHashEntry()
     info = VersionInfo(version="1.0.0", metadata={})
     built = updater.build_result(info, [HashEntry.create("sha256", HASH_A)])
@@ -901,15 +920,11 @@ def test_hash_entry_updater_emit_and_build_result() -> None:
     payload = _require_hash_entries(final.payload)
     assert payload[0].hash_type == "sha256"
 
-    async def _no_value() -> EventStream:
-        if False:
-            yield UpdateEvent.status("x", "noop")
-
     with pytest.raises(RuntimeError, match="missing"):
         asyncio.run(
             _collect_events(
                 object.__getattribute__(updater, "_emit_single_hash_entry")(
-                    _no_value(),
+                    empty_event_stream(),
                     error="missing",
                     hash_type="sha256",
                 )
@@ -917,11 +932,8 @@ def test_hash_entry_updater_emit_and_build_result() -> None:
         )
 
 
-def test_flake_input_helpers_and_hash_updater_paths(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Run this test case."""
-    updater = _DummyFlakeInput()
+def test_flake_input_missing_input_raises() -> None:
+    """Flake input updaters require a resolved input name."""
 
     class _NoInput(_DummyFlakeInput):
         input_name = None
@@ -930,6 +942,13 @@ def test_flake_input_helpers_and_hash_updater_paths(
     no_input.input_name = None
     with pytest.raises(RuntimeError, match="Missing input name"):
         _ = object.__getattribute__(no_input, "_input")
+
+
+def test_flake_input_fetch_latest_reads_lock_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """fetch_latest should read version and commit data from the flake node."""
+    updater = _DummyFlakeInput()
 
     monkeypatch.setattr(
         "lib.update.updaters.base.get_flake_input_node",
@@ -940,6 +959,13 @@ def test_flake_input_helpers_and_hash_updater_paths(
     )
     latest = asyncio.run(_with_session(updater.fetch_latest))
     assert latest.version == "2.0.0"
+
+
+def test_flake_hash_is_latest_uses_derivation_fingerprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Existing drvHash values should prove latest status when fingerprints match."""
+    updater = _DummyFlakeInput()
 
     current = _entry(version="1.0.0", drv_hash="drv")
     info = VersionInfo(version="1.0.0", metadata={})
@@ -969,6 +995,20 @@ def test_flake_input_helpers_and_hash_updater_paths(
         asyncio.run(object.__getattribute__(updater, "_is_latest")(current, info))
         is True
     )
+
+
+def test_flake_hash_finalize_reports_fingerprint_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finalization should emit values and warn when fingerprints are unavailable."""
+    updater = _DummyFlakeInput()
+    current = _entry(version="1.0.0", drv_hash="drv")
+    info = VersionInfo(version="1.0.0", metadata={})
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_drv_fingerprint",
+        lambda *_a, **_k: asyncio.sleep(0, result="drv"),
+    )
     events = asyncio.run(
         _collect_events(object.__getattribute__(updater, "_finalize_result")(_entry()))
     )
@@ -991,6 +1031,12 @@ def test_flake_input_helpers_and_hash_updater_paths(
         e.message and "Warning: derivation fingerprint unavailable" in e.message
         for e in warn_events
     )
+
+
+def test_platform_specific_fetch_hashes_computes_configured_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Platform-specific updaters should hash the current plus configured targets."""
 
     class _PlatformFlake(_DummyFlakeInput):
         platform_specific = True
@@ -1015,11 +1061,12 @@ def test_flake_input_helpers_and_hash_updater_paths(
     )
 
     plat = _PlatformFlake(
-        config=resolve_config(deno_deps_platforms=("x86_64-linux", "aarch64-linux"))
+        config=resolve_config(hash_build_platforms=("x86_64-linux", "aarch64-linux"))
     )
     monkeypatch.setattr(
         "lib.update.updaters.base.get_current_nix_platform", lambda: "x86_64-linux"
     )
+    info = VersionInfo(version="1.0.0", metadata={})
     plat_events = asyncio.run(
         _with_session(lambda session: _collect_events(plat.fetch_hashes(info, session)))
     )
@@ -1063,23 +1110,13 @@ def test_platform_specific_fetch_hashes_preserves_existing_on_non_native_failure
 
     updater = _PlatformFlake(
         config=resolve_config(
-            deno_deps_platforms=("aarch64-darwin", "x86_64-linux"),
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
         )
     )
     object.__setattr__(
         updater,
         "_current_entry",
-        SourceEntry(
-            hashes=HashCollection(
-                entries=[
-                    HashEntry.create(
-                        "sha256",
-                        "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
-                        platform="x86_64-linux",
-                    ),
-                ]
-            ),
-        ),
+        _platform_entry(drv_hash=None, platforms=("x86_64-linux",)),
     )
 
     info = VersionInfo(version="1.0.0", metadata={})
@@ -1098,6 +1135,297 @@ def test_platform_specific_fetch_hashes_preserves_existing_on_non_native_failure
     }
 
 
+def test_platform_specific_update_keeps_drv_hash_when_hashes_are_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not pair a new derivation fingerprint with preserved stale hashes."""
+
+    class _PlatformFlake(_DummyFlakeInput):
+        platform_specific = True
+
+        async def fetch_latest(self, session: object) -> VersionInfo:
+            _ = session
+            return VersionInfo(version="1.0.0", metadata={})
+
+    preserved_hash = "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M="
+    current = _platform_entry(drv_hash="old-drv", hash_value=preserved_hash)
+
+    async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
+        return "new-drv"
+
+    async def _compute_overlay_hash(
+        source_name: str,
+        *,
+        system: str | None,
+        config: object,
+    ) -> EventStream:
+        _ = config
+        if system == "x86_64-linux":
+            raise RuntimeError("no builder")
+        yield UpdateEvent.value(source_name, HASH_A)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_drv_fingerprint",
+        _compute_drv_fingerprint,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_overlay_hash",
+        _compute_overlay_hash,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    updater = _PlatformFlake(
+        config=resolve_config(
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
+        )
+    )
+    events = asyncio.run(
+        _with_session(
+            lambda session: _collect_events(updater.update_stream(current, session))
+        )
+    )
+
+    result_events = [event for event in events if event.kind == UpdateEventKind.RESULT]
+    assert len(result_events) == 1
+    result = expect_instance(result_events[0].payload, SourceEntry)
+    assert result.drv_hash == "old-drv"
+    payload = _require_hash_entries(result.hashes.entries)
+    assert {(entry.platform, entry.hash) for entry in payload} == {
+        ("aarch64-darwin", HASH_A),
+        ("x86_64-linux", preserved_hash),
+    }
+
+
+def test_platform_specific_update_rejects_partial_hashes_without_drv_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Partial hash updates require a previous drvHash to preserve."""
+
+    class _PlatformFlake(_DummyFlakeInput):
+        platform_specific = True
+
+        async def fetch_latest(self, session: object) -> VersionInfo:
+            _ = session
+            return VersionInfo(version="1.0.0", metadata={})
+
+    current = _platform_entry(drv_hash=None)
+
+    async def _compute_overlay_hash(
+        source_name: str,
+        *,
+        system: str | None,
+        config: object,
+    ) -> EventStream:
+        _ = config
+        if system == "x86_64-linux":
+            raise RuntimeError("no builder")
+        yield UpdateEvent.value(source_name, HASH_A)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_overlay_hash",
+        _compute_overlay_hash,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    updater = _PlatformFlake(
+        config=resolve_config(
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
+        )
+    )
+    with pytest.raises(RuntimeError, match="has no drvHash"):
+        asyncio.run(
+            _with_session(
+                lambda session: _collect_events(updater.update_stream(current, session))
+            )
+        )
+
+
+def test_platform_specific_native_only_update_keeps_drv_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native-only updates must not certify old foreign hashes with a new drvHash."""
+
+    class _PlatformFlake(_DummyFlakeInput):
+        platform_specific = True
+
+        async def fetch_latest(self, session: object) -> VersionInfo:
+            _ = session
+            return VersionInfo(version="1.0.0", metadata={})
+
+    current = _platform_entry(drv_hash="old-drv")
+
+    async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
+        return "new-drv"
+
+    async def _compute_overlay_hash(
+        source_name: str,
+        *,
+        system: str | None,
+        config: object,
+    ) -> EventStream:
+        _ = config
+        assert system == "aarch64-darwin"
+        yield UpdateEvent.value(source_name, HASH_A)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_drv_fingerprint",
+        _compute_drv_fingerprint,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_overlay_hash",
+        _compute_overlay_hash,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    updater = _PlatformFlake(
+        config=resolve_config(
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
+        )
+    )
+    updater.native_only = True
+    events = asyncio.run(
+        _with_session(
+            lambda session: _collect_events(updater.update_stream(current, session))
+        )
+    )
+
+    result_events = [event for event in events if event.kind == UpdateEventKind.RESULT]
+    assert len(result_events) == 1
+    result = expect_instance(result_events[0].payload, SourceEntry)
+    assert result.drv_hash == "old-drv"
+
+
+def test_platform_specific_native_only_single_platform_updates_drv_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A native-only run may certify hashes for a single-platform source."""
+
+    class _DarwinOnlyFlake(_DummyFlakeInput):
+        platform_specific = True
+        supported_platforms = ("aarch64-darwin",)
+
+        async def fetch_latest(self, session: object) -> VersionInfo:
+            _ = session
+            return VersionInfo(version="1.0.0", metadata={})
+
+    current = _platform_entry(drv_hash="old-drv", platforms=("aarch64-darwin",))
+
+    async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
+        return "new-drv"
+
+    async def _compute_overlay_hash(
+        source_name: str,
+        *,
+        system: str | None,
+        config: object,
+    ) -> EventStream:
+        _ = config
+        assert system == "aarch64-darwin"
+        yield UpdateEvent.value(source_name, HASH_A)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_drv_fingerprint",
+        _compute_drv_fingerprint,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_overlay_hash",
+        _compute_overlay_hash,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    updater = _DarwinOnlyFlake(
+        config=resolve_config(
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
+        )
+    )
+    updater.native_only = True
+    events = asyncio.run(
+        _with_session(
+            lambda session: _collect_events(updater.update_stream(current, session))
+        )
+    )
+
+    result_events = [event for event in events if event.kind == UpdateEventKind.RESULT]
+    assert len(result_events) == 1
+    result = expect_instance(result_events[0].payload, SourceEntry)
+    assert result.drv_hash == "new-drv"
+
+
+def test_platform_specific_single_supported_platform_updates_drv_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A single-platform source should not probe unsupported hash targets."""
+
+    class _DarwinOnlyFlake(_DummyFlakeInput):
+        platform_specific = True
+        supported_platforms = ("aarch64-darwin",)
+
+        async def fetch_latest(self, session: object) -> VersionInfo:
+            _ = session
+            return VersionInfo(version="1.0.0", metadata={})
+
+    current = _platform_entry(drv_hash="old-drv", platforms=("aarch64-darwin",))
+    seen_platforms: list[str | None] = []
+
+    async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
+        return "new-drv"
+
+    async def _compute_overlay_hash(
+        source_name: str,
+        *,
+        system: str | None,
+        config: object,
+    ) -> EventStream:
+        _ = config
+        seen_platforms.append(system)
+        if system != "aarch64-darwin":
+            msg = f"unexpected platform target: {system}"
+            raise AssertionError(msg)
+        yield UpdateEvent.value(source_name, HASH_A)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_drv_fingerprint",
+        _compute_drv_fingerprint,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_overlay_hash",
+        _compute_overlay_hash,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    updater = _DarwinOnlyFlake(
+        config=resolve_config(
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
+        )
+    )
+    events = asyncio.run(
+        _with_session(
+            lambda session: _collect_events(updater.update_stream(current, session))
+        )
+    )
+
+    result_events = [event for event in events if event.kind == UpdateEventKind.RESULT]
+    assert len(result_events) == 1
+    result = expect_instance(result_events[0].payload, SourceEntry)
+    assert result.drv_hash == "new-drv"
+    assert seen_platforms == ["aarch64-darwin"]
+
+
 def test_platform_specific_fetch_hashes_handles_native_only_and_mapping_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1108,7 +1436,7 @@ def test_platform_specific_fetch_hashes_handles_native_only_and_mapping_fallback
 
     updater = _PlatformFlake(
         config=resolve_config(
-            deno_deps_platforms=("aarch64-darwin", "x86_64-linux"),
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
         )
     )
     updater.native_only = True
@@ -1161,7 +1489,7 @@ def test_platform_specific_fetch_hashes_raises_on_native_failure(
 
     updater = _PlatformFlake(
         config=resolve_config(
-            deno_deps_platforms=("aarch64-darwin", "x86_64-linux"),
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
         )
     )
     info = VersionInfo(version="1.0.0", metadata={})
@@ -1174,10 +1502,10 @@ def test_platform_specific_fetch_hashes_raises_on_native_failure(
         )
 
 
-def test_platform_specific_fetch_hashes_reports_missing_non_native_preserve(
+def test_platform_specific_fetch_hashes_rejects_missing_non_native_preserve(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Non-native failures without existing hashes should emit a status warning."""
+    """Non-native failures without existing hashes should not emit partial results."""
 
     class _PlatformFlake(_DummyFlakeInput):
         platform_specific = True
@@ -1204,21 +1532,16 @@ def test_platform_specific_fetch_hashes_reports_missing_non_native_preserve(
 
     updater = _PlatformFlake(
         config=resolve_config(
-            deno_deps_platforms=("aarch64-darwin", "x86_64-linux"),
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
         )
     )
     info = VersionInfo(version="1.0.0", metadata={})
-    events = asyncio.run(
-        _with_session(
-            lambda session: _collect_events(updater.fetch_hashes(info, session)),
+    with pytest.raises(RuntimeError, match="no existing hash is available"):
+        asyncio.run(
+            _with_session(
+                lambda session: _collect_events(updater.fetch_hashes(info, session)),
+            )
         )
-    )
-
-    assert any(
-        event.message == "Build failed for x86_64-linux, no existing hash to preserve"
-        for event in events
-        if event.kind == UpdateEventKind.STATUS
-    )
 
 
 def test_supported_platforms_skips_on_unsupported_current_platform(
@@ -1253,7 +1576,7 @@ def test_supported_platforms_skips_on_unsupported_current_platform(
 
     existing_hash = "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M="
     updater = _DarwinOnlyFlake(
-        config=resolve_config(deno_deps_platforms=("aarch64-darwin", "x86_64-linux"))
+        config=resolve_config(hash_build_platforms=("aarch64-darwin", "x86_64-linux"))
     )
     object.__setattr__(
         updater,
@@ -1294,7 +1617,7 @@ def test_supported_platforms_skips_on_unsupported_current_platform(
 
 
 def test_deno_deps_hash_updater_paths() -> None:
-    """Run this test case."""
+    """Convert Deno platform hash mappings into structured entries."""
     updater = _DummyDenoDeps()
     info = VersionInfo(version="1.0.0", metadata={})
 
@@ -1325,15 +1648,171 @@ def test_deno_deps_hash_updater_paths() -> None:
         )
 
 
-def test_deno_manifest_updater_paths(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_deno_native_only_update_keeps_drv_hash_when_hashes_are_preserved(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Run this test case."""
-    updater = _DummyDenoManifest(config=resolve_config())
-    manifest = _DummyManifest()
-    node = SimpleNamespace(
+    """Deno native-only updates must not certify preserved foreign hashes."""
+
+    class _Deno(DenoDepsHashUpdater):
+        name = "deno-hash"
+        input_name = "deno-input"
+
+        async def fetch_latest(self, session: object) -> VersionInfo:
+            _ = session
+            return VersionInfo(version="1.0.0", metadata={})
+
+    foreign_hash = "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M="
+    current = _platform_entry(
+        drv_hash="old-drv",
+        hash_type="denoDepsHash",
+        hash_value=foreign_hash,
+    )
+
+    async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
+        return "new-drv"
+
+    async def _compute_deno_deps_hash(
+        source: str,
+        input_name: str,
+        *,
+        native_only: bool = False,
+        config: object | None = None,
+    ) -> EventStream:
+        _ = config
+        assert source == "deno-hash"
+        assert input_name == "deno-input"
+        assert native_only is True
+        yield UpdateEvent.value(
+            "deno-hash",
+            {
+                "aarch64-darwin": HASH_A,
+                "x86_64-linux": foreign_hash,
+            },
+        )
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_drv_fingerprint",
+        _compute_drv_fingerprint,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_deno_deps_hash",
+        _compute_deno_deps_hash,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    updater = _Deno(
+        config=resolve_config(
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
+        )
+    )
+    updater.native_only = True
+    events = asyncio.run(
+        _with_session(
+            lambda session: _collect_events(updater.update_stream(current, session))
+        )
+    )
+
+    result_events = [event for event in events if event.kind == UpdateEventKind.RESULT]
+    assert len(result_events) == 1
+    result = expect_instance(result_events[0].payload, SourceEntry)
+    assert result.drv_hash == "old-drv"
+
+
+def test_deno_multi_platform_update_keeps_drv_hash_when_hashes_are_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deno multi-platform failures must not certify preserved foreign hashes."""
+
+    class _Deno(DenoDepsHashUpdater):
+        name = "deno-hash"
+        input_name = "deno-input"
+
+        async def fetch_latest(self, session: object) -> VersionInfo:
+            _ = session
+            return VersionInfo(version="1.0.0", metadata={})
+
+    foreign_hash = "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M="
+    current = _platform_entry(
+        drv_hash="old-drv",
+        hash_type="denoDepsHash",
+        hash_value=foreign_hash,
+    )
+    fingerprint_calls = 0
+
+    async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
+        nonlocal fingerprint_calls
+        fingerprint_calls += 1
+        return "new-drv"
+
+    async def _compute_deno_deps_hash(
+        source: str,
+        input_name: str,
+        *,
+        native_only: bool = False,
+        config: object | None = None,
+    ) -> EventStream:
+        _ = config
+        assert source == "deno-hash"
+        assert input_name == "deno-input"
+        assert native_only is False
+        yield UpdateEvent.status(
+            "deno-hash",
+            "Warning: 1 platform(s) failed, preserved existing hashes for: x86_64-linux",
+            operation="compute_hash",
+            status="partial_hashes",
+            detail=("x86_64-linux",),
+        )
+        yield UpdateEvent.value(
+            "deno-hash",
+            {
+                "aarch64-darwin": HASH_B,
+                "x86_64-linux": foreign_hash,
+            },
+        )
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_drv_fingerprint",
+        _compute_drv_fingerprint,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.compute_deno_deps_hash",
+        _compute_deno_deps_hash,
+    )
+
+    updater = _Deno(
+        config=resolve_config(
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
+        )
+    )
+    events = asyncio.run(
+        _with_session(
+            lambda session: _collect_events(updater.update_stream(current, session))
+        )
+    )
+
+    result_events = [event for event in events if event.kind == UpdateEventKind.RESULT]
+    assert len(result_events) == 1
+    result = expect_instance(result_events[0].payload, SourceEntry)
+    assert result.drv_hash == "old-drv"
+    assert fingerprint_calls == 1
+
+
+def _deno_manifest_node() -> SimpleNamespace:
+    return SimpleNamespace(
         locked=SimpleNamespace(owner="o", repo="r", rev="a" * 40),
     )
+
+
+def _install_deno_manifest_success(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> _DummyDenoManifest:
+    updater = _DummyDenoManifest(config=resolve_config())
+    manifest = _DummyManifest()
+    node = _deno_manifest_node()
 
     monkeypatch.setattr(
         "lib.update.updaters.base.get_flake_input_node", lambda _name: node
@@ -1347,6 +1826,14 @@ def test_deno_manifest_updater_paths(
         "lib.update.updaters.base.fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=b"{}"),
     )
+    return updater
+
+
+def test_deno_manifest_updater_emits_manifest_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Resolve deno.lock and emit the generated dependency manifest."""
+    updater = _install_deno_manifest_success(monkeypatch, tmp_path)
 
     info = VersionInfo(version="1.0.0", metadata={})
     events = asyncio.run(
@@ -1364,36 +1851,56 @@ def test_deno_manifest_updater_paths(
     assert any(e.message and "Prepared deno-deps.json" in e.message for e in events)
     assert [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload == []
 
+
+def test_deno_manifest_updater_rejects_incomplete_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deno manifest updater should fail before IO on incomplete locks."""
+    updater = _DummyDenoManifest(config=resolve_config())
     monkeypatch.setattr(
         "lib.update.updaters.base.get_flake_input_node",
         lambda _name: SimpleNamespace(locked=None),
     )
-    bad_info = VersionInfo(version="1.0.0", metadata={})
     with pytest.raises(RuntimeError, match="incomplete lock"):
         asyncio.run(
             _with_session(
-                lambda session: _collect_events(updater.fetch_hashes(bad_info, session))
+                lambda session: _collect_events(
+                    updater.fetch_hashes(VersionInfo(version="1.0.0"), session)
+                )
             )
         )
 
+
+def test_deno_manifest_updater_requires_package_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deno manifest artifacts need a checked-in package directory."""
+    updater = _DummyDenoManifest(config=resolve_config())
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node", lambda _name: node
+        "lib.update.updaters.base.get_flake_input_node",
+        lambda _name: _deno_manifest_node(),
     )
     monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: None)
+    monkeypatch.setattr(
+        "lib.update.updaters.base.fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=b"{}"),
+    )
+    monkeypatch.setattr(
+        "lib.update.deno_lock.resolve_deno_deps",
+        lambda _path: asyncio.sleep(0, result=_DummyManifest()),
+    )
     with pytest.raises(RuntimeError, match="Package directory not found"):
         asyncio.run(
             _with_session(
-                lambda session: _collect_events(updater.fetch_hashes(info, session))
+                lambda session: _collect_events(
+                    updater.fetch_hashes(VersionInfo(version="1.0.0"), session)
+                )
             )
         )
 
 
-def test_uv_lock_updater_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Resolve and emit checked-in uv.lock artifacts."""
-    from pathlib import Path as PathLib
-
-    updater = _DummyUvLockUpdater(config=resolve_config())
-    node = SimpleNamespace(
+def _uv_lock_node() -> SimpleNamespace:
+    return SimpleNamespace(
         locked=SimpleNamespace(
             owner="o",
             repo="r",
@@ -1402,6 +1909,13 @@ def test_uv_lock_updater_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
             nar_hash="sha256-demo",
         ),
     )
+
+
+def _install_uv_lock_success(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> _DummyUvLockUpdater:
+    updater = _DummyUvLockUpdater(config=resolve_config())
     source_dir = tmp_path / "source"
     source_dir.mkdir()
     (source_dir / "pyproject.toml").write_text(
@@ -1410,7 +1924,7 @@ def test_uv_lock_updater_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     )
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node", lambda _name: node
+        "lib.update.updaters.base.get_flake_input_node", lambda _name: _uv_lock_node()
     )
     monkeypatch.setattr(
         "lib.update.updaters.base.package_dir_for", lambda _name: tmp_path
@@ -1428,7 +1942,7 @@ def test_uv_lock_updater_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
             )
             return
         if args[:3] == ["uv", "-q", "lock"]:
-            workspace_dir = PathLib(args[-1])
+            workspace_dir = Path(args[-1])
             (workspace_dir / "uv.lock").write_text("version = 1\n", encoding="utf-8")
             yield UpdateEvent.status(updater.name, "locking")
             yield UpdateEvent.value(
@@ -1442,6 +1956,14 @@ def test_uv_lock_updater_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     monkeypatch.setattr(
         "lib.update.updaters.base.update_process.run_command", _fake_run_command
     )
+    return updater
+
+
+def test_uv_lock_updater_emits_lock_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Resolve and emit checked-in uv.lock artifacts."""
+    updater = _install_uv_lock_success(monkeypatch, tmp_path)
 
     info = VersionInfo(version="1.0.0", metadata={})
     events = asyncio.run(
@@ -1460,6 +1982,13 @@ def test_uv_lock_updater_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     assert any(e.message and "Prepared uv.lock" in e.message for e in events)
     assert [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload == []
 
+
+def test_uv_lock_updater_rejects_incomplete_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """uv.lock updater should fail before workspace setup on incomplete locks."""
+    updater = _DummyUvLockUpdater(config=resolve_config())
+    info = VersionInfo(version="1.0.0", metadata={})
     monkeypatch.setattr(
         "lib.update.updaters.base.get_flake_input_node",
         lambda _name: SimpleNamespace(locked=None),
@@ -1471,10 +2000,28 @@ def test_uv_lock_updater_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
             )
         )
 
+
+def test_uv_lock_updater_requires_package_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """uv.lock artifacts need a checked-in package directory."""
+    updater = _DummyUvLockUpdater(config=resolve_config())
+    info = VersionInfo(version="1.0.0", metadata={})
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node", lambda _name: node
+        "lib.update.updaters.base.get_flake_input_node", lambda _name: _uv_lock_node()
     )
     monkeypatch.setattr("lib.update.updaters.base.package_dir_for", lambda _name: None)
+
+    async def _resolve_only(args: list[str], *, options: object) -> EventStream:
+        _ = options
+        yield UpdateEvent.value(
+            updater.name,
+            CommandResult(args=args, returncode=0, stdout="/tmp/source\n", stderr=""),
+        )
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.update_process.run_command", _resolve_only
+    )
     with pytest.raises(RuntimeError, match="Package directory not found"):
         asyncio.run(
             _with_session(
@@ -1595,7 +2142,7 @@ def test_uv_lock_updater_expect_path_payload_validates_string_inputs() -> None:
 
 
 def test_factory_helpers_return_expected_subclasses() -> None:
-    """Run this test case."""
+    """Factory helpers should create the expected updater subclasses."""
     assert flake_input_hash_updater("x", "vendorHash").hash_type == "vendorHash"
     assert go_vendor_updater("x").hash_type == "vendorHash"
     assert cargo_vendor_updater("x").hash_type == "cargoHash"

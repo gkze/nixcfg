@@ -29,6 +29,13 @@ async def collect_events[T](stream: AsyncIterable[T]) -> list[T]:
     return [event async for event in stream]
 
 
+async def empty_event_stream() -> AsyncIterator[UpdateEvent]:
+    """Return an empty async event stream for tests."""
+    events: tuple[UpdateEvent, ...] = ()
+    for event in events:
+        yield event
+
+
 def load_repo_module(path: str | Path, module_name: str) -> ModuleType:
     """Load a test module from a repository-relative path."""
     module_path = Path(path)

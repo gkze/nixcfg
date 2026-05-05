@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 
 from lib.nix.models.sources import HashEntry
+from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEventKind
+from lib.update.nix import _build_fetch_from_github_call
 from lib.update.updaters.base import VersionInfo, source_override_env
 
 
@@ -40,7 +42,10 @@ def test_gemini_cli_updater_fetch_latest_and_override_payload(monkeypatch) -> No
         "path": "repos/google-gemini/gemini-cli/releases/latest",
         "config": updater.config,
     }
-    assert 'tag = "v1.2.3"' in updater._src_expr(latest.version)
+    assert_nix_ast_equal(
+        updater._src_expr(latest.version),
+        _build_fetch_from_github_call("google-gemini", "gemini-cli", tag="v1.2.3"),
+    )
 
     env = source_override_env(
         "gemini-cli",

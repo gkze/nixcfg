@@ -42,7 +42,9 @@
   home = {
     activation.materializeVscodeSettings =
       let
-        vscodeSettingsHomeFileKey = "${config.home.homeDirectory}/Library/Application Support/${config.programs.vscode.nameShort}/User/settings.json";
+        vscodeSettingsHomeFileKey = "${config.home.homeDirectory}/Library/Application Support/${
+          config.programs.vscode.nameShort or "Code - Insiders"
+        }/User/settings.json";
         vscodeSettingsRelativePath = lib.removePrefix "${config.home.homeDirectory}/" vscodeSettingsHomeFileKey;
         vscodeSettingsSource = lib.attrByPath [
           "home"
@@ -94,7 +96,9 @@
     file = {
       # Keep the Nix-generated VS Code settings content, but materialize it as a
       # normal file so the editor can mutate it between switches.
-      "${config.home.homeDirectory}/Library/Application Support/${config.programs.vscode.nameShort}/User/settings.json".enable =
+      "${config.home.homeDirectory}/Library/Application Support/${
+        config.programs.vscode.nameShort or "Code - Insiders"
+      }/User/settings.json".enable =
         false;
 
       "${config.programs.gpg.homedir}/gpg-agent.conf" =
@@ -118,6 +122,11 @@
 
       ".local/bin/git-ignore" = {
         source = ./bin/git-ignore;
+        executable = true;
+      };
+
+      ".local/bin/but" = {
+        source = "${pkgs.gitbutler}/bin/but";
         executable = true;
       };
     };
@@ -184,6 +193,7 @@
           mode = "copy";
         }
         { package = pkgs.netnewswire; }
+        { package = pkgs.gitbutler; }
         {
           excludePackageName = "wispr-flow";
           package = pkgs.wispr-flow;

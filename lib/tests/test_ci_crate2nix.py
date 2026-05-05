@@ -251,6 +251,27 @@ def test_stabilize_generated_root_src_paths_handles_root_and_unrelated_paths() -
     assert "src = ../vendor/demo; };" in stabilized
 
 
+def test_stabilize_generated_root_src_paths_tolerates_spacing_drift() -> None:
+    """Root source rewriting should not depend on one exact crate2nix layout."""
+    patched_src = Path("/nix/store/demo-src")
+    generated_cargo = Path("/tmp/build/Cargo.nix")
+    relative_src = os.path.relpath(
+        patched_src / "crates/demo",
+        generated_cargo.parent,
+    ).replace(os.sep, "/")
+    refreshed = (
+        f"src=lib.cleanSourceWith {{ filter = sourceFilter; src={relative_src}; }};\n"
+    )
+
+    stabilized = crate2nix._stabilize_generated_root_src_paths(
+        refreshed,
+        patched_src=patched_src,
+        generated_cargo=generated_cargo,
+    )
+
+    assert 'src="${rootSrc}/crates/demo"; };' in stabilized
+
+
 def test_resolve_targets_skips_unsupported_platforms(monkeypatch) -> None:
     """Default target selection should skip platform-specific packages."""
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "x86_64-linux")
@@ -260,6 +281,7 @@ def test_resolve_targets_skips_unsupported_platforms(monkeypatch) -> None:
     assert [target.name for target in runnable] == [
         "codex",
         "goose-cli",
+        "gitbutler",
         "zed-editor-nightly",
     ]
     assert skipped == []
@@ -276,6 +298,7 @@ def test_resolve_targets_skips_aarch64_linux_for_all_current_targets(
     assert runnable == []
     assert sorted(skipped) == [
         "codex",
+        "gitbutler",
         "goose-cli",
         "zed-editor-nightly",
     ]
@@ -354,7 +377,7 @@ def test_crate2nix_artifact_updates_skip_unknown_or_unsupported_targets(
 def test_stream_crate2nix_artifact_updates_skips_unknown_or_unsupported_targets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Do not emit events when the target is missing or unsupported here."""
+    """Emit explicit skip statuses when refresh cannot run here."""
     target = crate2nix.Crate2NixTarget(
         name="demo-stream-skip",
         patched_src_installable="path:.#demo-stream-skip-crate2nix-src",
@@ -371,8 +394,21 @@ def test_stream_crate2nix_artifact_updates_skips_unknown_or_unsupported_targets(
             event async for event in crate2nix.stream_crate2nix_artifact_updates(name)
         ]
 
-    assert asyncio.run(_collect("missing-target")) == []
-    assert asyncio.run(_collect("demo-stream-skip")) == []
+    missing_events = asyncio.run(_collect("missing-target"))
+    assert len(missing_events) == 1
+    assert missing_events[0].payload == {
+        "operation": "materialize_artifacts",
+        "status": "skipped",
+        "detail": "unknown_target",
+    }
+
+    skipped_events = asyncio.run(_collect("demo-stream-skip"))
+    assert len(skipped_events) == 1
+    assert skipped_events[0].payload == {
+        "operation": "materialize_artifacts",
+        "status": "unsupported_platform",
+        "detail": "darwin",
+    }
 
 
 def test_stream_crate2nix_artifact_updates_reports_up_to_date(
@@ -414,12 +450,13 @@ def test_targets_use_dedicated_source_installables() -> None:
     } == {
         "codex": "path:.#codex-crate2nix-src",
         "goose-cli": "path:.#goose-cli-crate2nix-src",
+        "gitbutler": "path:.#gitbutler-crate2nix-src",
         "zed-editor-nightly": "path:.#zed-editor-nightly-crate2nix-src",
     }
 
 
-def test_crate2nix_source_installables_are_wired_through_package_registry() -> None:
-    """Package registry contracts should expose crate2nix companions structurally."""
+def test_crate2nix_companion_discovery_uses_package_registry() -> None:
+    """Package registry contracts should discover crate2nix companions."""
     packages_root = (crate2nix.REPO_ROOT / "packages").resolve()
     companion_entries = {
         f"{path.parent.name}-crate2nix-src"
@@ -427,6 +464,7 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
     }
     expected_companions = {
         "codex-crate2nix-src",
+        "gitbutler-crate2nix-src",
         "goose-cli-crate2nix-src",
         "zed-editor-nightly-crate2nix-src",
     }
@@ -443,6 +481,10 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
         }
         """,
     )
+
+
+def test_package_registry_system_constraint_contract_is_structural() -> None:
+    """System constraint helper shape should remain explicit in the registry."""
     assert_nix_ast_equal(
         expect_scope_binding(_registry_expr(), "supportsSystem").value,
         """
@@ -462,6 +504,9 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
         "system: packagePathsMatching (meta: supportsSystem meta.constraint system)",
     )
 
+
+def test_package_registry_metadata_overrides_are_intentional() -> None:
+    """Important package helper and platform overrides should stay visible."""
     overrides = _registry_overrides()
     assert {name for name, meta in overrides.items() if meta.get("helper") is True} == {
         "go-cli-wrapper",
@@ -487,24 +532,44 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
         "x86_64-linux",
     ]
 
+
+def test_crate2nix_source_files_exist_for_registered_targets() -> None:
+    """Registered source installables should have checked-in companion files."""
+    packages_root = (crate2nix.REPO_ROOT / "packages").resolve()
     selected_paths = {
         "codex": str(packages_root / "codex/crate2nix-src.nix"),
+        "gitbutler": str(packages_root / "gitbutler/crate2nix-src.nix"),
         "goose": str(packages_root / "goose-cli/crate2nix-src.nix"),
         "zed": str(packages_root / "zed-editor-nightly/crate2nix-src.nix"),
     }
     assert all(Path(path).is_file() for path in selected_paths.values())
+
+
+def test_crate2nix_target_platforms_match_registry_constraints() -> None:
+    """crate2nix runner platform gates should mirror registry constraints."""
+    overrides = _registry_overrides()
 
     presence = {
         "gooseCli": {"linux": True, "darwin": True, "linuxAarch64": False},
         "gooseCliCrate2nixSrc": {
             "linux": True,
             "darwin": True,
-            "linuxAarch64": True,
+            "linuxAarch64": False,
+        },
+        "gitbutler": {
+            "linux": True,
+            "darwin": True,
+            "linuxAarch64": False,
+        },
+        "gitbutlerCrate2nixSrc": {
+            "linux": True,
+            "darwin": True,
+            "linuxAarch64": False,
         },
         "codexCrate2nixSrc": {
             "linux": True,
             "darwin": True,
-            "linuxAarch64": True,
+            "linuxAarch64": False,
         },
         "zedEditorNightly": {
             "linux": True,
@@ -534,6 +599,8 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
         for name in (
             "goose-cli",
             "goose-cli-crate2nix-src",
+            "gitbutler",
+            "gitbutler-crate2nix-src",
             "codex-crate2nix-src",
             "zed-editor-nightly",
             "zed-editor-nightly-crate2nix-src",
@@ -549,12 +616,33 @@ def test_crate2nix_source_installables_are_wired_through_package_registry() -> N
         for key, name in {
             "gooseCli": "goose-cli",
             "gooseCliCrate2nixSrc": "goose-cli-crate2nix-src",
+            "gitbutler": "gitbutler",
+            "gitbutlerCrate2nixSrc": "gitbutler-crate2nix-src",
             "codexCrate2nixSrc": "codex-crate2nix-src",
             "zedEditorNightly": "zed-editor-nightly",
             "zedEditorNightlyCrate2nixSrc": "zed-editor-nightly-crate2nix-src",
             "sculptor": "sculptor",
         }.items()
     } == presence
+
+    systems_by_name = {
+        "aarch64-darwin": "aarch64-darwin",
+        "x86_64-linux": "x86_64-linux",
+        "aarch64-linux": "aarch64-linux",
+    }
+    assert {
+        name: tuple(
+            system
+            for system in systems_by_name
+            if _supports_system(
+                overrides.get(f"{name}-crate2nix-src", {}).get("constraint"),
+                system,
+            )
+        )
+        for name in crate2nix.TARGETS
+    } == {
+        name: target.supported_platforms for name, target in crate2nix.TARGETS.items()
+    }
 
 
 def test_run_writes_refreshed_files(monkeypatch, tmp_path: Path) -> None:
@@ -661,6 +749,22 @@ def test_load_normalizer_handles_success_and_type_errors(tmp_path: Path) -> None
     with pytest.raises(TypeError, match="returned an invalid result"):
         crate2nix._load_normalizer(invalid)("demo")
 
+    invalid_types = tmp_path / "invalid_types.py"
+    invalid_types.write_text(
+        "def normalize(text):\n    return text, '1', False\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(TypeError, match="returned an invalid result"):
+        crate2nix._load_normalizer(invalid_types)("demo")
+
+    invalid_bool_count = tmp_path / "invalid_bool_count.py"
+    invalid_bool_count.write_text(
+        "def normalize(text):\n    return text, True, False\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(TypeError, match="returned an invalid result"):
+        crate2nix._load_normalizer(invalid_bool_count)("demo")
+
 
 def test_load_normalizer_rejects_missing_spec(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail clearly when the normalizer helper module cannot be loaded."""
@@ -687,8 +791,9 @@ def test_run_helper_and_build_patched_src_error_paths(
         text: bool,
         capture_output: bool,
         check: bool,
+        timeout: float,
     ) -> subprocess.CompletedProcess[str]:
-        del cwd, text, capture_output, check
+        del cwd, text, capture_output, check, timeout
         if env is not None:
             seen_env["FLAG"] = env["FLAG"]
         return subprocess.CompletedProcess(["cmd"], 0, stdout="ok\n", stderr="")
@@ -705,12 +810,30 @@ def test_run_helper_and_build_patched_src_error_paths(
         text: bool,
         capture_output: bool,
         check: bool,
+        timeout: float,
     ) -> subprocess.CompletedProcess[str]:
-        del cwd, env, text, capture_output, check
+        del cwd, env, text, capture_output, check, timeout
         return subprocess.CompletedProcess(["cmd"], 1, stdout="", stderr="boom")
 
     monkeypatch.setattr(crate2nix.subprocess, "run", _failure)
     with pytest.raises(RuntimeError, match="boom"):
+        crate2nix._run(["cmd"])
+
+    def _timeout(
+        args: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str] | None,
+        text: bool,
+        capture_output: bool,
+        check: bool,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, text, capture_output, check
+        raise subprocess.TimeoutExpired(args, timeout)
+
+    monkeypatch.setattr(crate2nix.subprocess, "run", _timeout)
+    with pytest.raises(RuntimeError, match="timed out"):
         crate2nix._run(["cmd"])
 
     monkeypatch.setattr(
@@ -737,7 +860,25 @@ def test_run_helper_and_build_patched_src_error_paths(
             ["nix"], 0, stdout="\n", stderr=""
         ),
     )
-    with pytest.raises(RuntimeError, match="No patchedSrc output path returned"):
+    with pytest.raises(RuntimeError, match="Expected one patchedSrc output path"):
+        crate2nix._build_patched_src(
+            crate2nix.Crate2NixTarget(
+                name="demo",
+                patched_src_installable="path:.#demo",
+                cargo_nix=Path("Cargo.nix"),
+                crate_hashes=Path("crate-hashes.json"),
+                normalizer_path=Path("normalize.py"),
+                supported_platforms=("linux",),
+            )
+        )
+    monkeypatch.setattr(
+        crate2nix,
+        "_run",
+        lambda _args, cwd=crate2nix.REPO_ROOT: subprocess.CompletedProcess(
+            ["nix"], 0, stdout="/tmp/one\n/tmp/two\n", stderr=""
+        ),
+    )
+    with pytest.raises(RuntimeError, match="Expected one patchedSrc output path"):
         crate2nix._build_patched_src(
             crate2nix.Crate2NixTarget(
                 name="demo",

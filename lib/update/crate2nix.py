@@ -20,6 +20,7 @@ from lib.update.nix import get_current_nix_platform
 from lib.update.paths import REPO_ROOT
 
 _NORMALIZER_RESULT_SIZE = 3
+_CRATE2NIX_COMMAND_TIMEOUT_SECONDS = 2400
 
 
 class _Normalizer(Protocol):
@@ -48,7 +49,8 @@ class RefreshResult:
 
 
 _CLEAN_SOURCE_WITH_SRC_RE = re.compile(
-    r"src = lib\.cleanSourceWith \{ filter = sourceFilter;  src = (?P<src>[^;]+); \};"
+    r"src\s*=\s*lib\.cleanSourceWith\s*\{\s*filter\s*=\s*sourceFilter;"
+    r"\s*src\s*=\s*(?P<src>[^;]+);\s*\};"
 )
 
 
@@ -142,6 +144,14 @@ TARGETS = {
         normalizer_path=Path("overlays/goose-cli/normalize_cargo_nix.py"),
         supported_platforms=("aarch64-darwin", "x86_64-linux"),
     ),
+    "gitbutler": Crate2NixTarget(
+        name="gitbutler",
+        patched_src_installable="path:.#gitbutler-crate2nix-src",
+        cargo_nix=Path("packages/gitbutler/Cargo.nix"),
+        crate_hashes=Path("packages/gitbutler/crate-hashes.json"),
+        normalizer_path=Path("packages/gitbutler/normalize_cargo_nix.py"),
+        supported_platforms=("aarch64-darwin", "x86_64-linux"),
+    ),
     "zed-editor-nightly": Crate2NixTarget(
         name="zed-editor-nightly",
         patched_src_installable="path:.#zed-editor-nightly-crate2nix-src",
@@ -186,6 +196,14 @@ def _load_normalizer(path: Path) -> _Normalizer:
         if not isinstance(result, tuple) or len(result) != _NORMALIZER_RESULT_SIZE:
             msg = f"Normalizer module {module_path} returned an invalid result"
             raise TypeError(msg)
+        cargo_text, rewrites, added_root_src = result
+        if (
+            not isinstance(cargo_text, str)
+            or type(rewrites) is not int
+            or type(added_root_src) is not bool
+        ):
+            msg = f"Normalizer module {module_path} returned an invalid result"
+            raise TypeError(msg)
         return cast("tuple[str, int, bool]", result)
 
     return _normalize
@@ -196,15 +214,21 @@ def _run(
     *,
     cwd: Path = REPO_ROOT,
     env: dict[str, str] | None = None,
+    timeout: float = _CRATE2NIX_COMMAND_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(  # noqa: S603
-        args,
-        cwd=cwd,
-        env=(os.environ | env) if env is not None else None,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(  # noqa: S603
+            args,
+            cwd=cwd,
+            env=(os.environ | env) if env is not None else None,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        msg = f"{' '.join(args)}\ncommand timed out after {timeout}s"
+        raise RuntimeError(msg) from exc
     if completed.returncode != 0:
         details = (
             completed.stderr.strip() or completed.stdout.strip() or "command failed"
@@ -224,10 +248,10 @@ def _build_patched_src(target: Crate2NixTarget) -> Path:
         target.patched_src_installable,
     ])
     out_paths = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
-    if not out_paths:
-        msg = f"No patchedSrc output path returned for {target.name}"
+    if len(out_paths) != 1:
+        msg = f"Expected one patchedSrc output path for {target.name}, got {len(out_paths)}"
         raise RuntimeError(msg)
-    return Path(out_paths[-1])
+    return Path(out_paths[0])
 
 
 def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
@@ -301,8 +325,23 @@ async def stream_crate2nix_artifact_updates(
     """Emit normal updater events for checked-in crate2nix artifacts."""
     target = TARGETS.get(name)
     if target is None:
+        yield UpdateEvent.status(
+            name,
+            "No crate2nix target registered; skipping artifact refresh",
+            operation=operation,
+            status="skipped",
+            detail="unknown_target",
+        )
         return
-    if _current_platform() not in target.supported_platforms:
+    current_platform = _current_platform()
+    if current_platform not in target.supported_platforms:
+        yield UpdateEvent.status(
+            name,
+            "crate2nix target is unsupported on this platform; skipping artifact refresh",
+            operation=operation,
+            status="unsupported_platform",
+            detail=current_platform,
+        )
         return
 
     yield UpdateEvent.status(

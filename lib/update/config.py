@@ -33,12 +33,12 @@ class UpdateConfig:
     default_retry_backoff: float
     fake_hash: str
     max_nix_builds: int  # concurrent nix build processes
-    deno_deps_platforms: tuple[str, ...]
+    hash_build_platforms: tuple[str, ...]
 
     @property
-    def hash_build_platforms(self) -> tuple[str, ...]:
-        """Generalized alias for per-platform hash build targets."""
-        return self.deno_deps_platforms
+    def deno_deps_platforms(self) -> tuple[str, ...]:
+        """Legacy alias for per-platform dependency hash build targets."""
+        return self.hash_build_platforms
 
 
 class UpdateSettings(BaseSettings):
@@ -53,26 +53,33 @@ class UpdateSettings(BaseSettings):
     retry_backoff: float = 1.0
     fake_hash: str = FAKE_HASH
     max_nix_builds: int = default_max_nix_builds()
-    deno_deps_platforms: tuple[str, ...] = (
+    hash_build_platforms: tuple[str, ...] = (
         "aarch64-darwin",
         "aarch64-linux",
         "x86_64-linux",
     )
+    deno_deps_platforms: tuple[str, ...] | None = None
 
-    @field_validator("deno_deps_platforms", mode="before")
+    @field_validator("hash_build_platforms", "deno_deps_platforms", mode="before")
     @classmethod
-    def _parse_deno_deps_platforms(cls, value: object) -> object:
+    def _parse_hash_build_platforms(cls, value: object) -> object:
         if isinstance(value, str):
             parts = [part.strip() for part in value.split(",") if part.strip()]
             return (
                 tuple(parts)
                 if parts
-                else cls.model_fields["deno_deps_platforms"].default
+                else cls.model_fields["hash_build_platforms"].default
             )
         return value
 
 
 def _settings_to_config(settings: UpdateSettings) -> UpdateConfig:
+    platforms = settings.hash_build_platforms
+    if (
+        "UPDATE_HASH_BUILD_PLATFORMS" not in os.environ
+        and settings.deno_deps_platforms is not None
+    ):
+        platforms = settings.deno_deps_platforms
     return UpdateConfig(
         default_timeout=settings.http_timeout,
         default_subprocess_timeout=settings.subprocess_timeout,
@@ -83,7 +90,7 @@ def _settings_to_config(settings: UpdateSettings) -> UpdateConfig:
         default_retry_backoff=settings.retry_backoff,
         fake_hash=settings.fake_hash,
         max_nix_builds=max(1, settings.max_nix_builds),
-        deno_deps_platforms=settings.deno_deps_platforms,
+        hash_build_platforms=platforms,
     )
 
 
@@ -159,10 +166,14 @@ def _normalize_platform_override_names(
 ) -> dict[str, object]:
     """Collapse old platform override names onto the canonical settings field."""
     normalized = dict(overrides)
-    for alias in ("hash_build_platforms", "deno_platforms"):
+    canonical = normalized.get("hash_build_platforms")
+    legacy: object | None = None
+    for alias in ("deno_deps_platforms", "deno_platforms"):
         value = normalized.pop(alias, None)
-        if value is not None:
-            normalized["deno_deps_platforms"] = value
+        if legacy is None and value is not None:
+            legacy = value
+    if canonical is None and legacy is not None:
+        normalized["hash_build_platforms"] = legacy
     return normalized
 
 
@@ -172,6 +183,9 @@ def resolve_config(**overrides: Unpack[_ResolveConfigOverrides]) -> UpdateConfig
 
     override_values = dict(overrides.items())
     normalized_overrides = _normalize_platform_override_names(override_values)
+
+    if normalized_overrides.get("hash_build_platforms") is not None:
+        settings_data["deno_deps_platforms"] = None
 
     for setting_name, value in normalized_overrides.items():
         if value is not None:

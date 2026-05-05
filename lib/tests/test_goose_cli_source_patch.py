@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -14,6 +16,22 @@ def _load_module() -> ModuleType:
     return load_repo_module(
         "overlays/goose-cli/patch_source.py", "goose_cli_patch_source_test"
     )
+
+
+def _toml_payload(path: Path) -> dict[str, Any]:
+    return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+def _cargo_lock_packages(path: Path) -> dict[str, dict[str, Any]]:
+    packages = _toml_payload(path).get("package", [])
+    assert isinstance(packages, list)
+    by_name: dict[str, dict[str, Any]] = {}
+    for package in packages:
+        assert isinstance(package, dict)
+        name = package.get("name")
+        assert isinstance(name, str)
+        by_name[name] = package
+    return by_name
 
 
 def _write_minimal_goose_tree(root: Path) -> None:
@@ -98,8 +116,9 @@ def test_patch_source_rewrites_goose_workspace(tmp_path: Path) -> None:
     module.patch_source(tmp_path)
 
     main_rs = (tmp_path / "crates/goose-cli/src/main.rs").read_text(encoding="utf-8")
-    assert "../../static/img/logo_dark.png" in main_rs
-    assert "../../static/img/logo_light.png" in main_rs
+    assert main_rs == (
+        '"../../static/img/logo_dark.png"\n"../../static/img/logo_light.png"\n'
+    )
     assert (
         tmp_path / "crates/goose-cli/static/img/logo_dark.png"
     ).read_text() == "dark"
@@ -107,20 +126,17 @@ def test_patch_source_rewrites_goose_workspace(tmp_path: Path) -> None:
         tmp_path / "crates/goose-cli/static/img/logo_light.png"
     ).read_text() == "light"
 
-    v8_cargo = (tmp_path / "vendor/v8/Cargo.toml").read_text(encoding="utf-8")
-    assert 'v8-goose = { path = "../v8-goose-src" }' in v8_cargo
+    v8_cargo = _toml_payload(tmp_path / "vendor/v8/Cargo.toml")
+    assert v8_cargo["dependencies"]["v8-goose"] == {"path": "../v8-goose-src"}
 
-    v8_goose_cargo = (tmp_path / "vendor/v8-goose-src/Cargo.toml").read_text(
-        encoding="utf-8"
-    )
-    assert "[workspace]" not in v8_goose_cargo
-    assert "[workspace.dependencies]" not in v8_goose_cargo
-    assert "[dependencies]" in v8_goose_cargo
+    v8_goose_cargo = _toml_payload(tmp_path / "vendor/v8-goose-src/Cargo.toml")
+    assert "workspace" not in v8_goose_cargo
+    assert "dependencies" in v8_goose_cargo
 
-    cargo_lock = (tmp_path / "Cargo.lock").read_text(encoding="utf-8")
-    assert 'version = "1.2.3"' in cargo_lock
-    assert "source = " not in cargo_lock
-    assert "checksum = " not in cargo_lock
+    cargo_lock_packages = _cargo_lock_packages(tmp_path / "Cargo.lock")
+    assert cargo_lock_packages["v8-goose"]["version"] == "1.2.3"
+    assert "source" not in cargo_lock_packages["v8-goose"]
+    assert "checksum" not in cargo_lock_packages["v8-goose"]
 
 
 def test_patch_source_allows_no_goose_logo_rewrites(tmp_path: Path) -> None:
@@ -134,9 +150,9 @@ def test_patch_source_allows_no_goose_logo_rewrites(tmp_path: Path) -> None:
     module.main([str(tmp_path)])
 
     assert not (tmp_path / "crates/goose-cli/static").exists()
-    assert 'v8-goose = { path = "../v8-goose-src" }' in (
-        tmp_path / "vendor/v8/Cargo.toml"
-    ).read_text(encoding="utf-8")
+    assert _toml_payload(tmp_path / "vendor/v8/Cargo.toml")["dependencies"][
+        "v8-goose"
+    ] == {"path": "../v8-goose-src"}
 
 
 def test_rewrite_goose_logo_paths_returns_false_without_source_dir(

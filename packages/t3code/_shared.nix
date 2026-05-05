@@ -38,7 +38,8 @@ let
   ]
   ++ lib.optionals (builtins.pathExists (src + "/apps")) [ "apps" ]
   ++ lib.optionals (builtins.pathExists (src + "/packages")) [ "packages" ]
-  ++ workspaceDirs;
+  ++ workspaceDirs
+  ++ lib.optional (builtins.pathExists (src + "/patches")) "patches";
   dependencySource = builtins.path {
     name = "${pname}-dependency-source";
     path = src;
@@ -50,6 +51,7 @@ let
         relativePath = if pathString == srcString then "" else lib.removePrefix "${srcString}/" pathString;
       in
       (type == "directory" && builtins.elem relativePath dependencySourceDirectories)
+      || lib.hasPrefix "patches/" relativePath
       || builtins.elem relativePath (
         [
           "bun.lock"

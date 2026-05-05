@@ -64,11 +64,23 @@ def test_env_rewrite_helper_materializes_temp_paths_and_normalizes_exports(
 
     nested_payload = Path(json_value)
     assert nested_payload.exists()
-    assert nested_payload.read_text(encoding="utf-8") != payload_file.read_text(
-        encoding="utf-8"
+    rewritten_payload = json.loads(nested_payload.read_text(encoding="utf-8"))
+    original_payload = json.loads(payload_file.read_text(encoding="utf-8"))
+    assert isinstance(rewritten_payload, list)
+    assert isinstance(rewritten_payload[0], str)
+    assert rewritten_payload != original_payload
+    assert rewritten_payload[1] == "relative-entry"
+    assert Path(rewritten_payload[0]).parent.name == "tauri_json-files"
+
+
+def test_env_rewrite_helper_treats_linux_build_dir_as_ephemeral() -> None:
+    """Linux remote builders expose crate build outputs under /build."""
+    helper = _load_module(
+        "lib/crate2nix_tauri_env_rewrite.py",
+        "_crate2nix_tauri_env_rewrite_linux_build_dir",
     )
-    assert "relative-entry" in nested_payload.read_text(encoding="utf-8")
-    assert "tauri_json-files" in nested_payload.read_text(encoding="utf-8")
+
+    assert "/build/" in helper._TEMP_SOURCE_PREFIXES
 
 
 def test_acl_build_patch_helper_rewrites_tauri_env_key_round_trip() -> None:
@@ -292,7 +304,7 @@ def test_acl_build_patch_helper_resolve_and_main(tmp_path: Path, monkeypatch) ->
         "      path.display()\n"
         "    );\n"
     )
-    build_rs.write_text(
+    original = (
         'const CORE_PLUGIN_PERMISSIONS_TOKEN: &str = "__CORE_PLUGIN__";\n'
         + permission_lines
         + schema_lines
@@ -300,7 +312,10 @@ def test_acl_build_patch_helper_resolve_and_main(tmp_path: Path, monkeypatch) ->
         + "        v.strip_suffix(CORE_PLUGIN_PERMISSIONS_TOKEN)\n"
         + '          .and_then(|v| v.strip_prefix("TAURI_"))\n'
         + "          .unwrap_or(v)\n"
-        + "      })\n",
+        + "      })\n"
+    )
+    build_rs.write_text(
+        original,
         encoding="utf-8",
     )
 
@@ -308,7 +323,10 @@ def test_acl_build_patch_helper_resolve_and_main(tmp_path: Path, monkeypatch) ->
 
     assert helper.resolve_path() == Path("src/acl/build.rs")
     assert helper.main() == 0
-    assert "ENV_KEY_COLON_TOKEN" in build_rs.read_text(encoding="utf-8")
+    assert build_rs.read_text(encoding="utf-8") == helper.patch_text(
+        original,
+        path=Path("src/acl/build.rs"),
+    )
 
 
 def test_acl_build_patch_helper_errors_are_explicit(

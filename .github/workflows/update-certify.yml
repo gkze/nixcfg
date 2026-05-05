@@ -256,6 +256,8 @@ jobs:
         include:
           - package: goose-cli
             target: .#pkgs.aarch64-darwin.goose-cli
+          - package: gitbutler
+            target: .#pkgs.aarch64-darwin.gitbutler
           - package: superset
             target: .#pkgs.aarch64-darwin.superset
           - package: scratch
@@ -312,6 +314,7 @@ jobs:
             --exclude-ref .#pkgs.aarch64-darwin.linear-cli \
             --exclude-ref .#pkgs.aarch64-darwin.neovide \
             --exclude-ref .#pkgs.aarch64-darwin.goose-cli \
+            --exclude-ref .#pkgs.aarch64-darwin.gitbutler \
             --exclude-ref .#pkgs.aarch64-darwin.superset \
             --exclude-ref .#pkgs.aarch64-darwin.scratch \
             --exclude-ref .#pkgs.aarch64-darwin.czkawka \

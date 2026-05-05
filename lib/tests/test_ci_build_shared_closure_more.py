@@ -16,6 +16,19 @@ from lib.nix.commands.base import (
 )
 from lib.update.ci import build_shared_closure as bsc
 
+_aggregate_profile_events = bsc._aggregate_profile_events
+_async_main = bsc._async_main
+_build_derivations = bsc._build_derivations
+_combine_derivation_sets = bsc._combine_derivation_sets
+_emit_stream_line = bsc._emit_stream_line
+_eval_one = bsc._eval_one
+_log_profile_summary = bsc._log_profile_summary
+_parse_dry_run_derivations = bsc._parse_dry_run_derivations
+_parse_internal_json_line = bsc._parse_internal_json_line
+_realise_batch_with_profiling = bsc._realise_batch_with_profiling
+_stream_nix_build_dry_run = bsc._stream_nix_build_dry_run
+_write_profile_report = bsc._write_profile_report
+
 
 def test_parse_dry_run_derivations_covers_section_termination() -> None:
     """Extract only derivations from the 'will be built' section."""
@@ -28,7 +41,7 @@ def test_parse_dry_run_derivations_covers_section_termination() -> None:
         "these 1 paths will be fetched",
         "  /nix/store/cccccccccccccccccccccccccccccccc-c.drv",
     ])
-    drvs = object.__getattribute__(bsc, "_parse_dry_run_derivations")(output)
+    drvs = _parse_dry_run_derivations(output)
     assert drvs == {
         "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv",
         "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv",
@@ -43,23 +56,20 @@ def test_parse_dry_run_derivations_ends_on_non_indented_line() -> None:
         "summary:",
         "  /nix/store/ignored.drv",
     ])
-    drvs = object.__getattribute__(bsc, "_parse_dry_run_derivations")(output)
+    drvs = _parse_dry_run_derivations(output)
     assert drvs == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"}
 
     stop_immediately = "\n".join([
         "these 1 derivations will be built:",
         "summary line",
     ])
-    assert (
-        object.__getattribute__(bsc, "_parse_dry_run_derivations")(stop_immediately)
-        == set()
-    )
+    assert _parse_dry_run_derivations(stop_immediately) == set()
     keep_section = "\n".join([
         "these 1 derivations will be built:",
         "  just-a-log-line",
         "  /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv",
     ])
-    drvs2 = object.__getattribute__(bsc, "_parse_dry_run_derivations")(keep_section)
+    drvs2 = _parse_dry_run_derivations(keep_section)
     assert drvs2 == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"}
 
 
@@ -67,15 +77,13 @@ def test_parse_internal_json_line_and_emit_stream_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Handle valid/invalid internal-json lines and output forwarding."""
-    parse = object.__getattribute__(bsc, "_parse_internal_json_line")
-    assert parse("plain log") is None
-    assert parse("@nix [1,2,3]") is None
-    assert parse("@nix {not-json}") is None
-    assert parse('@nix {"action":"start"}') == {"action": "start"}
+    assert _parse_internal_json_line("plain log") is None
+    assert _parse_internal_json_line("@nix [1,2,3]") is None
+    assert _parse_internal_json_line("@nix {not-json}") is None
+    assert _parse_internal_json_line('@nix {"action":"start"}') == {"action": "start"}
 
-    emit = object.__getattribute__(bsc, "_emit_stream_line")
-    emit(ProcessLine(stream="stdout", text="out\n"))
-    emit(ProcessLine(stream="stderr", text="err\n"))
+    _emit_stream_line(ProcessLine(stream="stdout", text="out\n"))
+    _emit_stream_line(ProcessLine(stream="stderr", text="err\n"))
     captured = capsys.readouterr()
     assert captured.out == "out\n"
     assert captured.err == "err\n"
@@ -111,7 +119,7 @@ def test_realise_batch_with_profiling_missing_terminal_result(
 
     with pytest.raises(RuntimeError, match="without a terminal result"):
         asyncio.run(
-            object.__getattribute__(bsc, "_realise_batch_with_profiling")(
+            _realise_batch_with_profiling(
                 ["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"],
                 profiler=bsc.BuildProfiler(),
             )
@@ -120,16 +128,15 @@ def test_realise_batch_with_profiling_missing_terminal_result(
 
 def test_combine_derivation_sets_union_intersection_and_empty() -> None:
     """Combine derivation sets according to selected mode."""
-    combine = object.__getattribute__(bsc, "_combine_derivation_sets")
-    assert combine([], mode="union") == set()
-    assert combine(
+    assert _combine_derivation_sets([], mode="union") == set()
+    assert _combine_derivation_sets(
         [
             {"a", "b"},
             {"b", "c"},
         ],
         mode="union",
     ) == {"a", "b", "c"}
-    assert combine(
+    assert _combine_derivation_sets(
         [
             {"a", "b"},
             {"b", "c"},
@@ -150,7 +157,7 @@ def test_stream_nix_build_dry_run_timeout_and_nonzero(
     monkeypatch.setattr(bsc, "stream_process", _timeout)
     with pytest.raises(NixCommandError, match="timed out"):
         asyncio.run(
-            object.__getattribute__(bsc, "_stream_nix_build_dry_run")(
+            _stream_nix_build_dry_run(
                 ".#demo",
                 nix_verbosity=0,
             )
@@ -182,7 +189,7 @@ def test_stream_nix_build_dry_run_success_and_missing_result(
 
     monkeypatch.setattr(bsc, "stream_process", _ok_stream)
     drvs = asyncio.run(
-        object.__getattribute__(bsc, "_stream_nix_build_dry_run")(
+        _stream_nix_build_dry_run(
             ".#demo",
             nix_verbosity=0,
         )
@@ -195,7 +202,7 @@ def test_stream_nix_build_dry_run_success_and_missing_result(
     monkeypatch.setattr(bsc, "stream_process", _missing_done)
     with pytest.raises(RuntimeError, match="without a terminal result"):
         asyncio.run(
-            object.__getattribute__(bsc, "_stream_nix_build_dry_run")(
+            _stream_nix_build_dry_run(
                 ".#demo",
                 nix_verbosity=0,
             )
@@ -209,7 +216,7 @@ def test_stream_nix_build_dry_run_success_and_missing_result(
     monkeypatch.setattr(bsc, "stream_process", _nonzero)
     try:
         asyncio.run(
-            object.__getattribute__(bsc, "_stream_nix_build_dry_run")(
+            _stream_nix_build_dry_run(
                 ".#demo",
                 nix_verbosity=0,
             )
@@ -240,7 +247,7 @@ def test_write_profile_report_and_summary_logging(
     ])
 
     out = tmp_path / "report.json"
-    object.__getattribute__(bsc, "_write_profile_report")(
+    _write_profile_report(
         output_path=out,
         flake_refs=[".#a"],
         derivation_count=2,
@@ -254,7 +261,7 @@ def test_write_profile_report_and_summary_logging(
 
     messages: list[str] = []
     monkeypatch.setattr(bsc.log, "info", lambda msg, *args: messages.append(msg % args))
-    object.__getattribute__(bsc, "_log_profile_summary")([])
+    _log_profile_summary([])
     assert any("No derivation build events" in msg for msg in messages)
 
 
@@ -278,7 +285,7 @@ def test_log_profile_summary_nonempty_rows(monkeypatch: pytest.MonkeyPatch) -> N
     ]
     seen: list[str] = []
     monkeypatch.setattr(bsc.log, "info", lambda msg, *args: seen.append(msg % args))
-    object.__getattribute__(bsc, "_log_profile_summary")(rows)
+    _log_profile_summary(rows)
     assert any("Profiled 2 derivation(s)" in msg for msg in seen)
     assert any("interrupted" in msg for msg in seen)
 
@@ -302,7 +309,7 @@ def test_realise_batch_with_profiling_success(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(bsc, "stream_process", _stream)
     result = asyncio.run(
-        object.__getattribute__(bsc, "_realise_batch_with_profiling")(
+        _realise_batch_with_profiling(
             ["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"],
             profiler=profiler,
         )
@@ -325,7 +332,7 @@ def test_realise_batch_with_profiling_stdout_branch(
 
     monkeypatch.setattr(bsc, "stream_process", _stream)
     result = asyncio.run(
-        object.__getattribute__(bsc, "_realise_batch_with_profiling")(
+        _realise_batch_with_profiling(
             ["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"],
             profiler=profiler,
         )
@@ -348,7 +355,7 @@ def test_build_derivations_uses_run_nix_when_verbose(
     monkeypatch.setattr(bsc, "run_nix", _run_nix)
 
     ok = asyncio.run(
-        object.__getattribute__(bsc, "_build_derivations")(
+        _build_derivations(
             {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"},
             nix_verbosity=1,
         )
@@ -386,7 +393,7 @@ def test_build_derivations_uses_profiler_and_async_main_profile_block(
     )
 
     rc = asyncio.run(
-        object.__getattribute__(bsc, "_async_main")(
+        _async_main(
             flake_refs=[".#a"],
             dry_run=False,
             profile_output=Path("/tmp/profile.json"),
@@ -426,7 +433,7 @@ def test_async_main_excludes_derivations_from_exclude_refs(
     monkeypatch.setattr(bsc, "_build_derivations", _build)
 
     rc = asyncio.run(
-        object.__getattribute__(bsc, "_async_main")(
+        _async_main(
             flake_refs=[".#base"],
             exclude_refs=[".#heavy-a", ".#heavy-b"],
         )
@@ -449,7 +456,7 @@ def test_build_derivations_profiler_path_invokes_realise_batch(
 
     monkeypatch.setattr(bsc, "_realise_batch_with_profiling", _realise)
     ok = asyncio.run(
-        object.__getattribute__(bsc, "_build_derivations")(
+        _build_derivations(
             {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"},
             profiler=bsc.BuildProfiler(),
         )
@@ -464,22 +471,52 @@ def test_eval_one_uses_stream_mode_when_verbose(
     """Route _eval_one through streamed dry-run path with nix verbosity."""
     seen: dict[str, object] = {}
 
-    async def _stream(ref: str, *, nix_verbosity: int) -> set[str]:
+    async def _stream(
+        ref: str,
+        *,
+        nix_verbosity: int,
+        env: object | None = None,
+    ) -> set[str]:
         seen["ref"] = ref
         seen["nix_verbosity"] = nix_verbosity
+        seen["env"] = env
         return {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"}
 
     monkeypatch.setattr(bsc, "_stream_nix_build_dry_run", _stream)
-    drvs = asyncio.run(
-        object.__getattribute__(bsc, "_eval_one")(".#x", nix_verbosity=1)
-    )
-    assert seen == {"ref": ".#x", "nix_verbosity": 1}
+    drvs = asyncio.run(_eval_one(".#x", nix_verbosity=1))
+    assert seen == {"ref": ".#x", "nix_verbosity": 1, "env": None}
     assert drvs == {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"}
+
+
+def test_eval_one_allows_unfree_for_darwin_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Darwin closure evals need unfree packages such as scope.nvim."""
+    seen: list[tuple[str, object]] = []
+
+    async def _dry_run(ref: str, **kwargs: object) -> set[str]:
+        seen.append((ref, kwargs.get("env")))
+        return {"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv"}
+
+    monkeypatch.setattr(bsc, "nix_build_dry_run", _dry_run)
+
+    asyncio.run(_eval_one(".#darwinConfigurations.rocinante.system"))
+    asyncio.run(_eval_one(".#pkgs.aarch64-darwin.mux"))
+    asyncio.run(_eval_one(".#pkgs.x86_64-linux.mux"))
+
+    assert seen == [
+        (
+            ".#darwinConfigurations.rocinante.system",
+            {"NIXPKGS_ALLOW_UNFREE": "1"},
+        ),
+        (".#pkgs.aarch64-darwin.mux", {"NIXPKGS_ALLOW_UNFREE": "1"}),
+        (".#pkgs.x86_64-linux.mux", None),
+    ]
 
 
 def test_aggregate_profile_events_accumulates_same_derivation() -> None:
     """Aggregate multiple events for the same derivation key."""
-    rows = object.__getattribute__(bsc, "_aggregate_profile_events")([
+    rows = _aggregate_profile_events([
         bsc.BuildProfileEvent(
             derivation="/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv",
             duration_seconds=1.2,

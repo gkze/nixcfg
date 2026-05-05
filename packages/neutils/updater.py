@@ -60,6 +60,7 @@ class NeutilsUpdater(GitHubReleaseUpdater):
     _ZON2NIX_TRANSIENT_MARKERS: ClassVar[tuple[str, ...]] = (
         "502 Bad Gateway",
         "Could not resolve host",
+        "HttpConnectionClosing",
         "NameServerFailure",
         "Temporary failure in name resolution",
         "connection reset",

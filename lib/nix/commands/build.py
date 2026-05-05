@@ -7,7 +7,10 @@ Provides :func:`nix_build` for full builds with JSON result parsing and
 import json
 import re
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 from pydantic import TypeAdapter
 
@@ -168,6 +171,7 @@ async def nix_build_dry_run(
     *,
     impure: bool = True,
     command_timeout: float = 300.0,
+    env: Mapping[str, str] | None = None,
     **kwargs: object,
 ) -> set[str]:
     """Run ``nix build --dry-run`` and return derivations that would be built.
@@ -181,6 +185,8 @@ async def nix_build_dry_run(
         paths. Defaults to ``True`` since CI detection relies on ``getEnv``.
     command_timeout:
         Maximum wall-clock seconds before the process is killed.
+    env:
+        Extra environment variables passed to the Nix process.
     **kwargs:
         Supports legacy ``timeout=...`` alias.
 
@@ -202,7 +208,7 @@ async def nix_build_dry_run(
         command_timeout=command_timeout,
         kwargs=kwargs,
     )
-    result = await run_nix(args, check=True, timeout=timeout_seconds)
+    result = await run_nix(args, check=True, timeout=timeout_seconds, env=env)
 
     combined = result.stdout + result.stderr
     drvs: set[str] = set()

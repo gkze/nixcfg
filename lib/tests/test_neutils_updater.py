@@ -10,6 +10,7 @@ from types import ModuleType
 import pytest
 
 from lib.nix.models.sources import HashEntry
+from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
@@ -252,8 +253,16 @@ def test_render_build_zig_zon_nix_surfaces_zon2nix_failure(
         )
 
 
+@pytest.mark.parametrize(
+    "transient_stderr",
+    [
+        "err(default): NameServerFailure",
+        "err(default): HttpConnectionClosing",
+    ],
+)
 def test_render_build_zig_zon_nix_retries_transient_zon2nix_failure(
     monkeypatch: pytest.MonkeyPatch,
+    transient_stderr: str,
 ) -> None:
     """Retry transient Zig package fetch failures before surfacing the artifact."""
     module = _load_module("neutils_updater_test_render_retry")
@@ -277,7 +286,7 @@ def test_render_build_zig_zon_nix_retries_transient_zon2nix_failure(
                     args=args,
                     returncode=1,
                     stdout="",
-                    stderr="err(default): NameServerFailure",
+                    stderr=transient_stderr,
                 ),
             )
             return
@@ -393,7 +402,7 @@ def test_fetch_hashes_emits_generated_artifact_and_src_hash(
 
     async def _fixed_hash(name: str, expr: str, *, config=None):
         assert name == updater.name
-        assert expr == updater._src_expr("0.7.2")
+        assert_nix_ast_equal(expr, updater._src_expr("0.7.2"))
         assert config == updater.config
         yield UpdateEvent.status(name, "hashing src")
         yield UpdateEvent.value(name, "sha256-src")

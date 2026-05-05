@@ -7,10 +7,12 @@ import tomllib
 import pytest
 
 from lib.nix.models.sources import HashEntry
+from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEventKind
+from lib.update.nix import _build_fetchgit_call
 from lib.update.updaters.base import VersionInfo
 
 
@@ -26,10 +28,14 @@ def test_goose_v8_helper_urls_and_src_expr_shape() -> None:
     archive_url = module.GooseV8Updater._archive_url("v999.0.0", "x86_64-linux")
     binding_url = module.GooseV8Updater._binding_url("999.0.0", "x86_64-linux")
 
-    assert "fetchgit" in src_expr
-    assert 'url = "https://github.com/jh-block/rusty_v8.git"' in src_expr
-    assert 'rev = "abcdef123456"' in src_expr
-    assert "fetchSubmodules = true" in src_expr
+    assert_nix_ast_equal(
+        src_expr,
+        _build_fetchgit_call(
+            "https://github.com/jh-block/rusty_v8.git",
+            "abcdef123456",
+            fetch_submodules=True,
+        ),
+    )
     assert archive_url == (
         "https://github.com/denoland/rusty_v8/releases/download/"
         "v999.0.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz"

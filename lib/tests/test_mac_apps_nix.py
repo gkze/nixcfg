@@ -267,6 +267,14 @@ def _managed_mac_app_routing_table() -> NixExpression:
         AttributeSet(
             values=[
                 Binding(
+                    name="package",
+                    value=identifier_attr_path("pkgs", "gitbutler"),
+                )
+            ]
+        ),
+        AttributeSet(
+            values=[
+                Binding(
                     name="excludePackageName",
                     value=StringPrimitive(value="wispr-flow"),
                 ),

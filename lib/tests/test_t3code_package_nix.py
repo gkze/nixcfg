@@ -98,6 +98,39 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
         '"${pname}-dependency-source"',
     )
     assert_nix_ast_equal(
+        expect_scope_binding(_shared_output(), "dependencySourceDirectories").value,
+        """
+        [
+          ""
+        ]
+        ++ lib.optionals (builtins.pathExists (src + "/apps")) [ "apps" ]
+        ++ lib.optionals (builtins.pathExists (src + "/packages")) [ "packages" ]
+        ++ workspaceDirs
+        ++ lib.optional (builtins.pathExists (src + "/patches")) "patches"
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_binding(dependency_source_args.values, "filter").value,
+        """
+        path: type:
+        let
+          pathString = toString path;
+          srcString = toString src;
+          relativePath = if pathString == srcString then "" else lib.removePrefix "${srcString}/" pathString;
+        in
+        (type == "directory" && builtins.elem relativePath dependencySourceDirectories)
+        || lib.hasPrefix "patches/" relativePath
+        || builtins.elem relativePath (
+          [
+            "bun.lock"
+            "bunfig.toml"
+            "package.json"
+          ]
+          ++ map (dir: "${dir}/package.json") workspaceDirs
+        )
+        """,
+    )
+    assert_nix_ast_equal(
         expect_scope_binding(_shared_output(), "bunTarget").value,
         """
         {
