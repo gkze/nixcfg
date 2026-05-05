@@ -2,15 +2,46 @@
 
 from __future__ import annotations
 
+import re
 from functools import cache
 from pathlib import Path
 
+from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
-from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
+from lib.tests._nix_ast import (
+    assert_nix_ast_equal,
+    expect_binding,
+    expect_scope_binding,
+    parse_nix_expr,
+)
 from lib.update.paths import REPO_ROOT
+
+_NIX_ANTIQUOTATION = re.compile(r"\$\{\s*(.*?)\s*\}", re.DOTALL)
+_VSCODE_SETTINGS_HOME_FILE_KEY = (
+    '"${config.home.homeDirectory}/Library/Application Support/'
+    '${config.programs.vscode.nameShort or "Code - Insiders"}/User/settings.json"'
+)
+
+
+def _normalize_nix_antiquotation_whitespace(value: object) -> str:
+    return _NIX_ANTIQUOTATION.sub(
+        lambda match: "${" + " ".join(match.group(1).split()) + "}",
+        str(value),
+    )
+
+
+def _expect_binding_by_normalized_name(bindings, name: str) -> Binding:
+    expected_name = _normalize_nix_antiquotation_whitespace(name)
+    for binding in bindings:
+        if not isinstance(binding, Binding):
+            continue
+        if _normalize_nix_antiquotation_whitespace(binding.name) == expected_name:
+            return binding
+    message = f"missing binding {name}"
+    raise AssertionError(message)
 
 
 @cache
@@ -88,12 +119,12 @@ def test_george_home_configuration_materializes_vscode_settings_after_link_gener
     )
     materialize = expect_binding(activation.values, "materializeVscodeSettings").value
     materialize_text = str(materialize)
+    settings_key = expect_scope_binding(materialize, "vscodeSettingsHomeFileKey").value
 
     assert 'lib.hm.dag.entryAfter [ "linkGeneration" ]' in materialize_text
-    assert (
-        '"${config.home.homeDirectory}/Library/Application Support/'
-        '${config.programs.vscode.nameShort}/User/settings.json"' in materialize_text
-    )
+    assert _normalize_nix_antiquotation_whitespace(
+        settings_key
+    ) == _normalize_nix_antiquotation_whitespace(_VSCODE_SETTINGS_HOME_FILE_KEY)
     assert 'run cp "${vscodeSettingsSource}" "$tmp_settings"' in materialize_text
     assert 'run mv "$tmp_settings" "$settings_path"' in materialize_text
 
@@ -105,12 +136,11 @@ def test_george_home_configuration_disables_direct_vscode_settings_symlink() -> 
         AttributeSet,
     )
     files = expect_instance(expect_binding(home.values, "file").value, AttributeSet)
-    settings_key = (
-        '"${config.home.homeDirectory}/Library/Application Support/'
-        '${config.programs.vscode.nameShort}/User/settings.json"'
-    )
     settings_entry = expect_instance(
-        expect_binding(files.values, settings_key).value,
+        _expect_binding_by_normalized_name(
+            files.values,
+            _VSCODE_SETTINGS_HOME_FILE_KEY,
+        ).value,
         AttributeSet,
     )
     assert_nix_ast_equal(expect_binding(settings_entry.values, "enable").value, "false")

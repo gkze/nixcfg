@@ -113,6 +113,18 @@ def test_resolve_config_canonical_platforms_win_over_legacy_env(
     assert cfg.hash_build_platforms == ("aarch64-linux",)
 
 
+def test_resolve_config_accepts_legacy_platform_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use legacy Deno platform env when the canonical env is absent."""
+    monkeypatch.setenv("UPDATE_DENO_DEPS_PLATFORMS", "x86_64-linux")
+    monkeypatch.delenv("UPDATE_HASH_BUILD_PLATFORMS", raising=False)
+
+    cfg = resolve_config()
+
+    assert cfg.hash_build_platforms == ("x86_64-linux",)
+
+
 def test_hash_build_platforms_for_accepts_real_and_legacy_configs() -> None:
     """Read canonical platforms from UpdateConfig and legacy config doubles."""
     cfg = resolve_config(hash_build_platforms=("aarch64-linux",))
