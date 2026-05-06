@@ -3,6 +3,7 @@
   inputs,
   outputs,
   lib,
+  options,
   pkgs,
   slib,
   system,
@@ -42,16 +43,17 @@
   home = {
     activation.materializeVscodeSettings =
       let
-        vscodeSettingsHomeFileKey = "${config.home.homeDirectory}/Library/Application Support/${
-          config.programs.vscode.nameShort or "Code - Insiders"
+        vscodeSettingsSourceHomeFileKey = "${config.home.homeDirectory}/Library/Application Support/${
+          config.programs.vscode.nameShort or "Code"
         }/User/settings.json";
-        vscodeSettingsRelativePath = lib.removePrefix "${config.home.homeDirectory}/" vscodeSettingsHomeFileKey;
+        vscodeSettingsTargetHomeFileKey = "${config.home.homeDirectory}/Library/Application Support/Code - Insiders/User/settings.json";
+        vscodeSettingsRelativePath = lib.removePrefix "${config.home.homeDirectory}/" vscodeSettingsTargetHomeFileKey;
         vscodeSettingsSource = lib.attrByPath [
           "home"
           "file"
-          vscodeSettingsHomeFileKey
+          vscodeSettingsSourceHomeFileKey
           "source"
-        ] (throw "missing generated VS Code settings source for ${vscodeSettingsHomeFileKey}") config;
+        ] (throw "missing generated VS Code settings source for ${vscodeSettingsSourceHomeFileKey}") config;
       in
       lib.hm.dag.entryAfter [ "linkGeneration" ] ''
         settings_path="$HOME/${vscodeSettingsRelativePath}"
@@ -97,7 +99,7 @@
       # Keep the Nix-generated VS Code settings content, but materialize it as a
       # normal file so the editor can mutate it between switches.
       "${config.home.homeDirectory}/Library/Application Support/${
-        config.programs.vscode.nameShort or "Code - Insiders"
+        config.programs.vscode.nameShort or "Code"
       }/User/settings.json".enable =
         false;
 
@@ -439,6 +441,8 @@
     vscode = {
       enable = true;
       package = null;
+    }
+    // lib.optionalAttrs (options.programs.vscode ? nameShort) {
       pname = "vscode-insiders";
     };
     yazi = {

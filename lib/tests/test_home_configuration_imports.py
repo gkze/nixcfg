@@ -20,9 +20,13 @@ from lib.tests._nix_ast import (
 from lib.update.paths import REPO_ROOT
 
 _NIX_ANTIQUOTATION = re.compile(r"\$\{\s*(.*?)\s*\}", re.DOTALL)
-_VSCODE_SETTINGS_HOME_FILE_KEY = (
+_VSCODE_SETTINGS_SOURCE_HOME_FILE_KEY = (
     '"${config.home.homeDirectory}/Library/Application Support/'
-    '${config.programs.vscode.nameShort or "Code - Insiders"}/User/settings.json"'
+    '${config.programs.vscode.nameShort or "Code"}/User/settings.json"'
+)
+_VSCODE_SETTINGS_TARGET_HOME_FILE_KEY = (
+    '"${config.home.homeDirectory}/Library/Application Support/'
+    'Code - Insiders/User/settings.json"'
 )
 
 
@@ -119,12 +123,22 @@ def test_george_home_configuration_materializes_vscode_settings_after_link_gener
     )
     materialize = expect_binding(activation.values, "materializeVscodeSettings").value
     materialize_text = str(materialize)
-    settings_key = expect_scope_binding(materialize, "vscodeSettingsHomeFileKey").value
+    source_key = expect_scope_binding(
+        materialize,
+        "vscodeSettingsSourceHomeFileKey",
+    ).value
+    target_key = expect_scope_binding(
+        materialize,
+        "vscodeSettingsTargetHomeFileKey",
+    ).value
 
     assert 'lib.hm.dag.entryAfter [ "linkGeneration" ]' in materialize_text
     assert _normalize_nix_antiquotation_whitespace(
-        settings_key
-    ) == _normalize_nix_antiquotation_whitespace(_VSCODE_SETTINGS_HOME_FILE_KEY)
+        source_key
+    ) == _normalize_nix_antiquotation_whitespace(_VSCODE_SETTINGS_SOURCE_HOME_FILE_KEY)
+    assert _normalize_nix_antiquotation_whitespace(
+        target_key
+    ) == _normalize_nix_antiquotation_whitespace(_VSCODE_SETTINGS_TARGET_HOME_FILE_KEY)
     assert 'run cp "${vscodeSettingsSource}" "$tmp_settings"' in materialize_text
     assert 'run mv "$tmp_settings" "$settings_path"' in materialize_text
 
@@ -139,8 +153,32 @@ def test_george_home_configuration_disables_direct_vscode_settings_symlink() -> 
     settings_entry = expect_instance(
         _expect_binding_by_normalized_name(
             files.values,
-            _VSCODE_SETTINGS_HOME_FILE_KEY,
+            _VSCODE_SETTINGS_SOURCE_HOME_FILE_KEY,
         ).value,
         AttributeSet,
     )
     assert_nix_ast_equal(expect_binding(settings_entry.values, "enable").value, "false")
+
+
+def test_george_home_configuration_defines_vscode_pname_only_for_legacy_module() -> (
+    None
+):
+    """VS Code Insiders should not define removed Home Manager options."""
+    programs = expect_instance(
+        expect_binding(_configuration_output().values, "programs").value,
+        AttributeSet,
+    )
+    vscode = expect_binding(programs.values, "vscode").value
+
+    assert_nix_ast_equal(
+        vscode,
+        """
+{
+  enable = true;
+  package = null;
+}
+// lib.optionalAttrs (options.programs.vscode ? nameShort) {
+  pname = "vscode-insiders";
+}
+""",
+    )

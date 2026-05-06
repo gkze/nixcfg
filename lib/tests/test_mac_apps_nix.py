@@ -1037,16 +1037,17 @@ def test_george_config_manages_mutable_gui_apps_via_system_applications() -> Non
     programs = expect_instance(
         expect_binding(root.values, "programs").value, AttributeSet
     )
-    vscode = expect_instance(
-        expect_binding(programs.values, "vscode").value, AttributeSet
-    )
     assert_nix_ast_equal(
-        expect_binding(vscode.values, "package").value,
-        Primitive(value=None),
-    )
-    assert_nix_ast_equal(
-        expect_binding(vscode.values, "pname").value,
-        StringPrimitive(value="vscode-insiders"),
+        expect_binding(programs.values, "vscode").value,
+        """
+{
+  enable = true;
+  package = null;
+}
+// lib.optionalAttrs (options.programs.vscode ? nameShort) {
+  pname = "vscode-insiders";
+}
+""",
     )
 
 
