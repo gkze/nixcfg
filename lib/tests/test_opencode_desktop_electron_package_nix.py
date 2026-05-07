@@ -96,6 +96,25 @@ def test_opencode_desktop_electron_uses_exact_nixcfg_electron_runtime() -> None:
     )
 
 
+def test_opencode_desktop_electron_accepts_renamed_desktop_workspace() -> None:
+    """The package should tolerate upstream's desktop workspace rename."""
+    package = _package_assertion()
+
+    assert_nix_ast_equal(
+        expect_scope_binding(package, "desktopWorkspace").value,
+        """
+        if builtins.pathExists (src + "/packages/desktop-electron/package.json") then
+          "packages/desktop-electron"
+        else
+          "packages/desktop"
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(package, "desktopPackageJson").value,
+        'fromJSON (readFile (src + "/${desktopWorkspace}/package.json"))',
+    )
+
+
 def test_opencode_desktop_electron_node_modules_derivation_tracks_platform_hashes() -> (
     None
 ):
@@ -149,8 +168,10 @@ def test_opencode_desktop_electron_node_modules_derivation_tracks_platform_hashe
         expect_binding(override_args.values, "installPhase").value,
         IndentedString,
     )
+    assert "--filter './${desktopWorkspace}'" in build_phase.value
     assert "--filter './packages/core'" in build_phase.value
     assert 'cp -R node_modules "$out/node_modules"' in install_phase.value
+    assert "${desktopWorkspace}" in install_phase.value
     assert "packages/core" in install_phase.value
     assert "packages/sdk/js" in install_phase.value
     assert "packages/script" in install_phase.value
