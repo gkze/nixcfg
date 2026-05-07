@@ -89,7 +89,7 @@
         {
           "cache_path": "remote/https/jsr.io/502e3d0e346d8a1569ec409a538421e100345ab115c3b586fdf19450b228398a",
           "media_type": "application/json",
-          "sha256": "5d7355389e6c2dbeb7f79b24cca9b0e7aa9df4bec85e9d30c299b16a325a745d",
+          "sha256": "b1c6e7a08582830b51a83d983bccb2da395caacf547a7715ee602fe35699a436",
           "url": "https://jsr.io/@cliffy/ansi/meta.json"
         }
       ],
@@ -798,7 +798,7 @@
         {
           "cache_path": "remote/https/jsr.io/76055caef4d73e00446344c8eba62a5d746e78df8b213125fac306ee41bc7a18",
           "media_type": "application/json",
-          "sha256": "9487abe7e5b4c74d6d8622a6109f6940033caf19caa2d4b1662ae568490f9fa2",
+          "sha256": "734ca6d905a775db5301aa66e72b47caaf9cdcd2db95732e518907360c06f5c3",
           "url": "https://jsr.io/@cliffy/command/meta.json"
         }
       ],
@@ -1027,7 +1027,7 @@
         {
           "cache_path": "remote/https/jsr.io/3ee67aa3d3ff1e3e918ff8d524932dae5a627709193cdc9412165c0dad77d18c",
           "media_type": "application/json",
-          "sha256": "04f993c1671e47d929fd5bcfdb7b1db4b52b30491468b57e58a3d3d4db68dbb8",
+          "sha256": "b20eb0db798579b0eb3ab9fa02c60c0633d61cbc4d5873ee4a51c90602923908",
           "url": "https://jsr.io/@cliffy/flags/meta.json"
         }
       ],
@@ -1214,7 +1214,7 @@
         {
           "cache_path": "remote/https/jsr.io/49bb6ebdefba11fe8da394f8bd0b839e44483d5b18cc1d626e13793a4172c991",
           "media_type": "application/json",
-          "sha256": "5f0e1adc99de72292bdf9108f9ebd7106566992067456270ed2658d310945f33",
+          "sha256": "43372a427088ac9e7d11e566d504138d6cfba1268f3009e500b1dd598a6d139c",
           "url": "https://jsr.io/@cliffy/internal/meta.json"
         }
       ],
@@ -1269,7 +1269,7 @@
         {
           "cache_path": "remote/https/jsr.io/d3a636815e39ef3e1c51ef602e65da67a2cfc6679fe72f4d45031d0c8192ce94",
           "media_type": "application/json",
-          "sha256": "dd7127ae783602bd467e8676b2334b7e275afa415089c8a729afb80f37abeb1c",
+          "sha256": "49a62276652045e35c0d084206854f52f98f374f127d4a0f929c0bf31ec36355",
           "url": "https://jsr.io/@cliffy/keycode/meta.json"
         }
       ],
@@ -1774,7 +1774,7 @@
         {
           "cache_path": "remote/https/jsr.io/6252adec009cf0382daba96ee2c12d496756b09331adae811cb284827ad8e5bd",
           "media_type": "application/json",
-          "sha256": "7ec90bfbb7cab18bbe7f6fa17c237b34efcefd9f327ff5cb1652a81c3c2a35fc",
+          "sha256": "6ec7d7f6e84d2da7bf9fe5869e14a1b182e05d97c7d556ff6f4ae3e3a57f4f71",
           "url": "https://jsr.io/@cliffy/prompt/meta.json"
         }
       ],
@@ -1967,7 +1967,7 @@
         {
           "cache_path": "remote/https/jsr.io/806c85189b3496972be03a5ed8c64095dff3b2387e4ab0bfb632aeea2269e64b",
           "media_type": "application/json",
-          "sha256": "a9dfa63aded1b139c8fc9566d40834e8e84bf47e9d23f7da76197376bb46e371",
+          "sha256": "6576c31991455bd58932c796d0fcd30560a961a689f78d95c5f38d5b8336ef00",
           "url": "https://jsr.io/@cliffy/table/meta.json"
         }
       ],
@@ -2034,7 +2034,7 @@
         {
           "cache_path": "remote/https/jsr.io/837fa55beeaf75c6eb3d944591d8e4d8a364dd9d2af4b03183ff15aa6cdf1d06",
           "media_type": "application/json",
-          "sha256": "ebb08ef3bea4dd96f1069aaf703b1071bc06d7a36b5de09b0ff20c62652ec7b7",
+          "sha256": "a3e141d1b820f43f7e8816d4ef2887c5206f34f5f877eabcf6aae53405a02af7",
           "url": "https://jsr.io/@cliffy/testing/meta.json"
         }
       ],

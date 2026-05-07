@@ -674,6 +674,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "editor_benchmarks" = rec {
+      packageId = "editor_benchmarks";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "editor_benchmarks";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "encoding_selector" = rec {
       packageId = "encoding_selector";
       build = internal.buildRustCrateWithFeatures {
@@ -15366,10 +15376,6 @@ rec {
             packageId = "async-channel 2.5.0";
           }
           {
-            name = "async-process";
-            packageId = "async-process";
-          }
-          {
             name = "async-trait";
             packageId = "async-trait";
           }
@@ -16765,10 +16771,10 @@ rec {
       };
       "cranelift-assembler-x64" = rec {
         crateName = "cranelift-assembler-x64";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
         crateBin = [];
-        sha256 = "05ws3ff74v04khn9rwkii2md6g61czgpw0ykni2ncz8rkwrzw7yb";
+        sha256 = "1yllnj604awai64z65h3vqk4jilznn8rns3v0l31fcarwgniry24";
         libName = "cranelift_assembler_x64";
         buildDependencies = [
           {
@@ -16782,10 +16788,10 @@ rec {
       };
       "cranelift-assembler-x64-meta" = rec {
         crateName = "cranelift-assembler-x64-meta";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
         crateBin = [];
-        sha256 = "1x88c5sgg5z3sqlfsw0qkqbix2g8ip08397b37ni46rxywfs508y";
+        sha256 = "1p5z4vi131727h3c1cskaa3q66my7s8pn2c4i2h5whny0l9s2v7s";
         libName = "cranelift_assembler_x64_meta";
         dependencies = [
           {
@@ -16797,9 +16803,9 @@ rec {
       };
       "cranelift-bforest" = rec {
         crateName = "cranelift-bforest";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
-        sha256 = "03gqm22isc98yxc93chkjmv1b81jbmhxx39wq52wj58c3381gy9w";
+        sha256 = "09wzc28av75gczarfrdbi8qz4jr5wwryfywj84hq3aabk8d38dvm";
         libName = "cranelift_bforest";
         authors = [
           "The Cranelift Project Developers"
@@ -16814,9 +16820,9 @@ rec {
       };
       "cranelift-bitset" = rec {
         crateName = "cranelift-bitset";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
-        sha256 = "0b74zwq3idghjr855s5cmh4smib57nsqn8jxi719h1zh5npy3x56";
+        sha256 = "11jhlqgr8bc613k0dfvikxg51vzzd1pg4s67zhhzhpzjzajlr2nj";
         libName = "cranelift_bitset";
         authors = [
           "The Cranelift Project Developers"
@@ -16843,9 +16849,9 @@ rec {
       };
       "cranelift-codegen" = rec {
         crateName = "cranelift-codegen";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
-        sha256 = "19hmxviljafpd94rny1cz4q3zgjsjjcp757jvhrlkd7401rmsfjf";
+        sha256 = "12kz93ascapplrgjp535rqphjm44z9q2mcvk3v210fdpw5zhb4fq";
         libName = "cranelift_codegen";
         authors = [
           "The Cranelift Project Developers"
@@ -16985,9 +16991,9 @@ rec {
       };
       "cranelift-codegen-meta" = rec {
         crateName = "cranelift-codegen-meta";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
-        sha256 = "1f9g91yayp4137mcmgq18kg7gz1vd4smzzk6wvwdf00q271vbkdy";
+        sha256 = "0jxa9xhzsjmj3gjayf4hn3vf3d5fzgmyb51s9d9xrvkqi816d6n2";
         libName = "cranelift_codegen_meta";
         authors = [
           "The Cranelift Project Developers"
@@ -17022,9 +17028,9 @@ rec {
       };
       "cranelift-codegen-shared" = rec {
         crateName = "cranelift-codegen-shared";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
-        sha256 = "07as9kyssjppvwx0z2iqgyd3cpnx2r5iazkm3ybk8ad1zzppgynq";
+        sha256 = "1b69xl5ymyiwz4si7vjdykpvcsjdb0gdcwjagc42557ya799m04m";
         libName = "cranelift_codegen_shared";
         authors = [
           "The Cranelift Project Developers"
@@ -17033,9 +17039,9 @@ rec {
       };
       "cranelift-control" = rec {
         crateName = "cranelift-control";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
-        sha256 = "1r3gac3yw8n1gih5camwlc6fk30mh828h8d10cg3hwikmqx1si32";
+        sha256 = "1hkk6svsgrw4nb8m5qj8sbv8f6xlanrkrdymx3jrghk3y2n0r7gp";
         libName = "cranelift_control";
         authors = [
           "The Cranelift Project Developers"
@@ -17056,9 +17062,9 @@ rec {
       };
       "cranelift-entity" = rec {
         crateName = "cranelift-entity";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
-        sha256 = "0bc2fr5ssd7yj1mz4fwmr2jkrljdcvhid84s8c8x9q0hl0r9ip3v";
+        sha256 = "0aii9q14950pl3m8rwf2s26ybcf489qk1ilpb7jkpklml6bk5mxj";
         libName = "cranelift_entity";
         authors = [
           "The Cranelift Project Developers"
@@ -17090,9 +17096,9 @@ rec {
       };
       "cranelift-frontend" = rec {
         crateName = "cranelift-frontend";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
-        sha256 = "0nsn9jdwjdv58p4618fk2vvbrcwsw4ca6g166axwvb63ny4vcc4m";
+        sha256 = "0n28sgagizn05q8smp2j86j4rp4qysabcv7w27bcbxwyw8d8vqrv";
         libName = "cranelift_frontend";
         authors = [
           "The Cranelift Project Developers"
@@ -17137,9 +17143,9 @@ rec {
       };
       "cranelift-isle" = rec {
         crateName = "cranelift-isle";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
-        sha256 = "0xyl19sv79ab0bs2lyvhsfiqd4h08ad2cwhwd3r7cwyqlic35k9z";
+        sha256 = "0yk3w6kyg8g04abmndv12wcg5438425y52snmkkrs81ncrpr4qb7";
         libName = "cranelift_isle";
         authors = [
           "The Cranelift Project Developers"
@@ -17154,9 +17160,9 @@ rec {
       };
       "cranelift-native" = rec {
         crateName = "cranelift-native";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
-        sha256 = "0d0xpk5zz8970p3ywnvjprdm7w35mq6nrx26pz6ann1bl81mfb34";
+        sha256 = "0c0qpmkwj6h62zz4swxnkdjvk4qzdpd3lmwsisi31mghfcplg4q8";
         libName = "cranelift_native";
         authors = [
           "The Cranelift Project Developers"
@@ -17187,9 +17193,9 @@ rec {
       };
       "cranelift-srcgen" = rec {
         crateName = "cranelift-srcgen";
-        version = "0.123.8";
+        version = "0.123.9";
         edition = "2024";
-        sha256 = "1qjlwjd1ad8164wc6hr3xz0d5b9b9s9bmq192gn0iqbxlgaxq06j";
+        sha256 = "0h1fasrnqm534zm9v4n7rhy7vwiafb0aq3mbvcsd1k5imgmwrnn1";
         libName = "cranelift_srcgen";
         authors = [
           "The Wasmtime Project Developers"
@@ -20294,7 +20300,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_UI_Shell" "Win32_Foundation" "Win32_Globalization" "Win32_System_Com" ];
           }
@@ -21633,8 +21639,8 @@ rec {
         libPath = "src/edit_prediction_metrics.rs";
         dependencies = [
           {
-            name = "language";
-            packageId = "language";
+            name = "imara-diff";
+            packageId = "imara-diff";
           }
           {
             name = "serde";
@@ -22353,6 +22359,73 @@ rec {
           "unindent" = [ "dep:unindent" ];
         };
         resolvedDefaultFeatures = [ "proptest" "test-support" "tree-sitter-c" "tree-sitter-html" "tree-sitter-rust" "tree-sitter-typescript" "unindent" ];
+      };
+      "editor_benchmarks" = rec {
+        crateName = "editor_benchmarks";
+        version = "0.1.0";
+        edition = "2024";
+        crateBin = [
+          {
+            name = "editor_benchmarks";
+            path = "src/main.rs";
+            requiredFeatures = [ ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/editor_benchmarks"; };
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "editor";
+            packageId = "editor";
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "gpui_platform";
+            packageId = "gpui_platform";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "language";
+            packageId = "language";
+          }
+          {
+            name = "multi_buffer";
+            packageId = "multi_buffer";
+          }
+          {
+            name = "project";
+            packageId = "project";
+          }
+          {
+            name = "release_channel";
+            packageId = "release_channel";
+          }
+          {
+            name = "semver";
+            packageId = "semver";
+            features = [ "serde" ];
+          }
+          {
+            name = "settings";
+            packageId = "settings";
+          }
+          {
+            name = "theme";
+            packageId = "theme";
+          }
+          {
+            name = "workspace";
+            packageId = "workspace";
+          }
+        ];
+
       };
       "either" = rec {
         crateName = "either";
@@ -23170,7 +23243,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" ];
           }
@@ -27967,7 +28040,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Networking_WinSock" ];
           }
@@ -33124,7 +33197,7 @@ rec {
           }
           {
             name = "socket2";
-            packageId = "socket2 0.6.3";
+            packageId = "socket2 0.5.10";
             optional = true;
             features = [ "all" ];
           }
@@ -33230,7 +33303,7 @@ rec {
           }
           {
             name = "windows-core";
-            packageId = "windows-core 0.56.0";
+            packageId = "windows-core 0.57.0";
             target = { target, features }: ("windows" == target."os" or null);
           }
         ];
@@ -42170,7 +42243,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             rename = "windows";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_Security" ];
@@ -51250,9 +51323,9 @@ rec {
       };
       "pulley-interpreter" = rec {
         crateName = "pulley-interpreter";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "1phhfnwdsjpsy7daqrn748vfgnxzf1rllw7h0zbz3ymrccqvmsim";
+        sha256 = "10z6izz0x316mb12la8y1hyal63xvdvzxz5d3f99nqrbjvngsy4b";
         libName = "pulley_interpreter";
         authors = [
           "The Pulley Project Developers"
@@ -51289,9 +51362,9 @@ rec {
       };
       "pulley-macros" = rec {
         crateName = "pulley-macros";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "03bnlnjzwpw4fcr9zss7kmspb7c13b0jb7sgf4cpkq4wlablhadc";
+        sha256 = "0hixgf9kmfd9y02l6m1hwcdhal4353z2ab8x7f5s1pszrplg867p";
         procMacro = true;
         libName = "pulley_macros";
         dependencies = [
@@ -51570,7 +51643,7 @@ rec {
           }
           {
             name = "socket2";
-            packageId = "socket2 0.6.3";
+            packageId = "socket2 0.5.10";
             target = { target, features }: (!((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)));
           }
           {
@@ -51746,7 +51819,7 @@ rec {
           }
           {
             name = "socket2";
-            packageId = "socket2 0.6.3";
+            packageId = "socket2 0.5.10";
             target = { target, features }: (!((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)));
           }
           {
@@ -51758,7 +51831,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_IO" "Win32_Networking_WinSock" ];
           }
@@ -52946,6 +53019,11 @@ rec {
           {
             name = "language";
             packageId = "language";
+            features = [ "test-support" ];
+          }
+          {
+            name = "picker";
+            packageId = "picker";
             features = [ "test-support" ];
           }
           {
@@ -56516,7 +56594,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" ];
           }
@@ -65020,7 +65098,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Storage_FileSystem" "Win32_Foundation" ];
           }
@@ -72432,9 +72510,9 @@ rec {
       };
       "wasmtime" = rec {
         crateName = "wasmtime";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "1v0vdpn6zj3wy3jl6pdcb1vw08kfj55lcdxm99v0v140x0xxjq10";
+        sha256 = "14lln3rydxa72m3nv0fqmwc5xdirfmxqd6gz8m32rnr1v7m0c0xi";
         authors = [
           "The Wasmtime Project Developers"
         ];
@@ -72769,9 +72847,9 @@ rec {
       };
       "wasmtime-environ" = rec {
         crateName = "wasmtime-environ";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "07ki6y3ii75l2j1dpb9345y1pnjpgxzmvsqr670aprf2m0f9jbwh";
+        sha256 = "0prpff6dbdkdvxjq3f1b5dxp1q3x3qig06w76d7l8g96r8vjryz7";
         libName = "wasmtime_environ";
         authors = [
           "The Wasmtime Project Developers"
@@ -72902,9 +72980,9 @@ rec {
       };
       "wasmtime-internal-asm-macros" = rec {
         crateName = "wasmtime-internal-asm-macros";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "0ylhjfy0ghz3sryc48zvn8b5zkrclhc6fryps597dkjlkdhyqb5h";
+        sha256 = "14wg8dbs5apxxh41i4g0php3c598zw9x9s7q7955bnyjr39w1ihr";
         libName = "wasmtime_internal_asm_macros";
         authors = [
           "The Wasmtime Project Developers"
@@ -72941,9 +73019,9 @@ rec {
       };
       "wasmtime-internal-component-macro" = rec {
         crateName = "wasmtime-internal-component-macro";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "1gpkcahr8cv9nd1z35h8r3f2kl3g8s75bqbia9603di4pj3jmn7s";
+        sha256 = "1w66w5nhws71pss9h2pw43sqzqf02nzm77hljwghxsv64isz7qy3";
         procMacro = true;
         libName = "wasmtime_internal_component_macro";
         authors = [
@@ -72999,9 +73077,9 @@ rec {
       };
       "wasmtime-internal-component-util" = rec {
         crateName = "wasmtime-internal-component-util";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "1ch6nf5yn68k30cybdah2ddwgvylqidq64h0izx3jggx1fx4mhkb";
+        sha256 = "17hn1cbff6i97vahlf8sd7zh5hphvkm2l7y32v3fkx32my5h2m3z";
         libName = "wasmtime_internal_component_util";
         authors = [
           "The Wasmtime Project Developers"
@@ -73010,9 +73088,9 @@ rec {
       };
       "wasmtime-internal-cranelift" = rec {
         crateName = "wasmtime-internal-cranelift";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "06kjwi33l1zcz2ypag4323lgwy8v1ahdfrc32jbdr4l61k17zssl";
+        sha256 = "1jjflav88l0amnbi9x0bm7m0l93y4irzzky198mdp9dhmzr1492s";
         libName = "wasmtime_internal_cranelift";
         authors = [
           "The Wasmtime Project Developers"
@@ -73127,9 +73205,9 @@ rec {
       };
       "wasmtime-internal-fiber" = rec {
         crateName = "wasmtime-internal-fiber";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "1glx5qs6hsgmnqhif0n9436s0b3m06f20p1lcrf1f7nc5l98ww1h";
+        sha256 = "07svs9l10cr8kprx7kyx4ihypzhrw1dgdyhzzy43sd2xvmhc9zgc";
         libName = "wasmtime_internal_fiber";
         authors = [
           "The Wasmtime Project Developers"
@@ -73189,9 +73267,9 @@ rec {
       };
       "wasmtime-internal-jit-debug" = rec {
         crateName = "wasmtime-internal-jit-debug";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "159i3lr3sv6x50vb7c1ngl3nvyk3dhcdysi60pi9lvb4383spshy";
+        sha256 = "01qp0516kq6mfilx7xnxibjwdk43k1s0ci661zwvf9qqlwlb9axm";
         libName = "wasmtime_internal_jit_debug";
         authors = [
           "The Wasmtime Project Developers"
@@ -73223,9 +73301,9 @@ rec {
       };
       "wasmtime-internal-jit-icache-coherence" = rec {
         crateName = "wasmtime-internal-jit-icache-coherence";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "17mivgnikzsdgrj5vv66180qz5nbdh33nii2azspp8g4wrhrb5q9";
+        sha256 = "0a50ihprs831nglabhbzpz0pwgz90p3dbcbwhzxq7yy32hzw2v5s";
         libName = "wasmtime_internal_jit_icache_coherence";
         authors = [
           "The Wasmtime Project Developers"
@@ -73257,9 +73335,9 @@ rec {
       };
       "wasmtime-internal-math" = rec {
         crateName = "wasmtime-internal-math";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "1229sbgg3d14091j82ws2qik0l7c5f6579sybawsws2w5s2yp4wi";
+        sha256 = "100lni9ilyngxbin18hj1nirs36bin5z3fbvr3cxpx09793hkchw";
         libName = "wasmtime_internal_math";
         authors = [
           "The Wasmtime Project Developers"
@@ -73276,9 +73354,9 @@ rec {
       };
       "wasmtime-internal-slab" = rec {
         crateName = "wasmtime-internal-slab";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "1ld3j1snm6h84f2gj4ggy9g22b2j4lgpywv6c7rhdx23pd7zm6r8";
+        sha256 = "10r1a8nqn84vkj1krpfmn0rs13zjbqa417ggxkhhc8bm0iddzd5a";
         libName = "wasmtime_internal_slab";
         authors = [
           "The Wasmtime Project Developers"
@@ -73287,9 +73365,9 @@ rec {
       };
       "wasmtime-internal-unwinder" = rec {
         crateName = "wasmtime-internal-unwinder";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "1ii9mks7j5q31gnggj1b8wf58vpr20zmqiklyjdmv1lk16bqqx2f";
+        sha256 = "0fdn8whhcssxs29jiad2isymxlyq2ivib676cmz6znxx55fqfnak";
         libName = "wasmtime_internal_unwinder";
         authors = [
           "The Wasmtime Project Developers"
@@ -73330,9 +73408,9 @@ rec {
       };
       "wasmtime-internal-versioned-export-macros" = rec {
         crateName = "wasmtime-internal-versioned-export-macros";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "117dsi7m51j1snxqs9llbhiia2l3axkwancnpkrhvddqii1hfzp9";
+        sha256 = "0jm0kg9jknqznysnijzr5y8wxlmsdsr37jc6lcxp80cpsv6pn91f";
         procMacro = true;
         libName = "wasmtime_internal_versioned_export_macros";
         authors = [
@@ -73357,9 +73435,9 @@ rec {
       };
       "wasmtime-internal-winch" = rec {
         crateName = "wasmtime-internal-winch";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "0i02kn97incz9a37n43q9lzki2smjfcf1mnnhv3r1i8wyz1s0yhh";
+        sha256 = "0m2x23yzrrxxfvqm162i9sniwkw9fpzcybd9nli84n2pkzyqsafh";
         libName = "wasmtime_internal_winch";
         authors = [
           "The Wasmtime Project Developers"
@@ -73426,9 +73504,9 @@ rec {
       };
       "wasmtime-internal-wit-bindgen" = rec {
         crateName = "wasmtime-internal-wit-bindgen";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "1h5354rf3dc4hnmd0p8j0wvya1x5pd39jki606m11bnsxzjdiczf";
+        sha256 = "0f83zhfyjy09qx0cjs6sy8f459vqpwdpqppml0kfgfmrhcz801hp";
         libName = "wasmtime_internal_wit_bindgen";
         authors = [
           "The Wasmtime Project Developers"
@@ -73463,9 +73541,9 @@ rec {
       };
       "wasmtime-wasi" = rec {
         crateName = "wasmtime-wasi";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "03pv7d0vk2svd1v6h9avxdqqfgaiyv6r8qs5l877blh4ad2zrzw6";
+        sha256 = "180hk11xymzvaznvcr0npjfslpl8wp3xilk1pcpy7l2lxh10chqs";
         libName = "wasmtime_wasi";
         authors = [
           "The Wasmtime Project Developers"
@@ -73610,9 +73688,9 @@ rec {
       };
       "wasmtime-wasi-io" = rec {
         crateName = "wasmtime-wasi-io";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "1wqdz8d49043d7shpqfcmn2n6l0v1qkmp9albci0k0rix0ha4rjn";
+        sha256 = "0a8h0wzdwmp0v1z1lqzdbildv30kbwcgpiqmryaf6bcnd3fsaawb";
         libName = "wasmtime_wasi_io";
         authors = [
           "The Wasmtime Project Developers"
@@ -75865,9 +75943,9 @@ rec {
       };
       "wiggle" = rec {
         crateName = "wiggle";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "0z06msxx9i0j1rr9ps0np7kvia9y3m8whxl2c33i24vxjd36a5sf";
+        sha256 = "14mpdnw8rwh4232iz64jjhigjadicsm6znhqwlw7a0gw7znx6y8r";
         authors = [
           "Pat Hickey <phickey@fastly.com>"
           "Jakub Konka <kubkonk@jakubkonka.com>"
@@ -75925,9 +76003,9 @@ rec {
       };
       "wiggle-generate" = rec {
         crateName = "wiggle-generate";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "0hxn99k7di63zqjg6nb0k0hlryw9w9agkirk0v3rlg8kfsni5w73";
+        sha256 = "17z2nzbrpy7azpvk61cd4ykq2r68aan0zvyclwx59n44l3kjmn95";
         libName = "wiggle_generate";
         authors = [
           "Pat Hickey <phickey@fastly.com>"
@@ -75966,9 +76044,9 @@ rec {
       };
       "wiggle-macro" = rec {
         crateName = "wiggle-macro";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "1lmk23jbq41cbfbcldknbx56n5g90igwlfps77qyw4rx7lhfc0a3";
+        sha256 = "0d87zx64cx0ypk44b9abq2zwwcv5qpsss7hcnjdmdknr7ywv389n";
         procMacro = true;
         libName = "wiggle_macro";
         authors = [
@@ -76046,7 +76124,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.48.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" "Win32_System_SystemInformation" ];
           }
@@ -76066,9 +76144,9 @@ rec {
       };
       "winch-codegen" = rec {
         crateName = "winch-codegen";
-        version = "36.0.8";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "0y8z58jibzby09z1j0pzjs393mb3zfmn41rp9bi0cw4xyl0jsvk4";
+        sha256 = "17nk6pzav50r9infdc9dxp10gflvi6jaab64v522drbv2fi7wb9f";
         libName = "winch_codegen";
         authors = [
           "The Winch Project Developers"
@@ -81170,7 +81248,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_Time" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_Threading" "Win32_System_Time" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.52.0" = rec {
         crateName = "windows-sys";
@@ -81418,7 +81496,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_IO" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
       };
       "windows-sys 0.59.0" = rec {
         crateName = "windows-sys";
@@ -81677,7 +81755,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Ioctl" "Win32_System_Kernel" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Performance" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Time" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Ioctl" "Win32_System_Kernel" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Performance" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Time" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-sys 0.60.2" = rec {
         crateName = "windows-sys";
@@ -81942,7 +82020,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Kernel" "Win32_System_Memory" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Kernel" "Win32_System_Memory" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
       };
       "windows-sys 0.61.2" = rec {
         crateName = "windows-sys";
@@ -82204,7 +82282,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "default" ];
       };
       "windows-targets 0.42.2" = rec {
         crateName = "windows-targets";
@@ -85745,7 +85823,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "1.2.0";
+        version = "1.3.0";
         edition = "2024";
         crateBin = [
           {
