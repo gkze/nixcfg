@@ -8,10 +8,22 @@
       "url": "https://dl.deno.land/release/v2.7.13/denort-aarch64-apple-darwin.zip"
     },
     {
+      "hash": "sha256-FlUqVdyvmhMEEAOS1dVlW2EicXWa3DgZP/vt7FHoLSE=",
+      "hashType": "sha256",
+      "platform": "aarch64-darwin",
+      "url": "https://dl.deno.land/release/v2.7.14/denort-aarch64-apple-darwin.zip"
+    },
+    {
       "hash": "sha256-dsiWymV6hgHkcYcFR1tBlPJPcYxn7ZcxMmy+Hv+lt2w=",
       "hashType": "sha256",
       "platform": "aarch64-linux",
       "url": "https://dl.deno.land/release/v2.7.13/denort-aarch64-unknown-linux-gnu.zip"
+    },
+    {
+      "hash": "sha256-1q+Crl6soMSzvPpx+hXyvVKdlDj+A47+Q4jTPru6J1U=",
+      "hashType": "sha256",
+      "platform": "aarch64-linux",
+      "url": "https://dl.deno.land/release/v2.7.14/denort-aarch64-unknown-linux-gnu.zip"
     },
     {
       "hash": "sha256-3HkRG/eFfPU/K4SADGmi/AW30mmsLbb2xDnttAoCCwc=",
@@ -24,6 +36,12 @@
       "hashType": "sha256",
       "platform": "x86_64-linux",
       "url": "https://dl.deno.land/release/v2.7.13/denort-x86_64-unknown-linux-gnu.zip"
+    },
+    {
+      "hash": "sha256-8LiIxreFsrv3aC4Kqb4swifekCMKID2zwRT28uQcoOw=",
+      "hashType": "sha256",
+      "platform": "x86_64-linux",
+      "url": "https://dl.deno.land/release/v2.7.14/denort-x86_64-unknown-linux-gnu.zip"
     }
   ],
   "input": "linear-cli",

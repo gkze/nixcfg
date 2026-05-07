@@ -1,10 +1,10 @@
 {
-  "commit": "0aed0a9b6adcf8898b54afc1b9c28e3ac4e9c2d3",
+  "commit": "20544b72e9c754dbd1429db2d4c457de6dc1efe2",
   "hashes": {
-    "aarch64-darwin": "sha256-fAVlejYfxhGRJAXgQW3SKGUBJtHqhG8f4fLBSTcEIGo=",
-    "aarch64-linux": "sha256-/6mN4gt7oJFnwNQooiuaRbTS3tYMB6g5Lfn3mNQovGo=",
+    "aarch64-darwin": "sha256-W1taTEH1jrYRF/jZCIG2+YH4jNms9Zs09BKkMjo73Xs=",
+    "aarch64-linux": "sha256-al+7woKL78XYkzwTx4AzX6sbXt+HMVUfLDXY+uHPJLA=",
     "x86_64-darwin": "sha256-+ba85Jkga4jCjJimoy6wG/hJawhbhf7Tlq+o9M9HawE=",
-    "x86_64-linux": "sha256-yTQtTjO2e29KBwxsocjPK6d6Dyl4SlcnyZkUKdFZlUU="
+    "x86_64-linux": "sha256-C+qDYrDeDw+BZSG9KuH0636IosuFGtJStLv/3aHD6to="
   },
   "urls": {
     "aarch64-darwin": "https://update.code.visualstudio.com/1.120.0-insider/darwin-arm64/insider",

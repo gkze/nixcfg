@@ -1,8 +1,8 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-JFUEpi+FhpijdgNzqjqBy/x2J8xreQjAH5BTOw2737E=",
+    "aarch64-darwin": "sha256-Yej/s4wipwQd/Vp5b+sSpwXNEXTZ07hAcqfV6e1cIis=",
     "x86_64-darwin": "sha256-JFUEpi+FhpijdgNzqjqBy/x2J8xreQjAH5BTOw2737E=",
-    "x86_64-linux": "sha256-2QKA8nk+O10cGr0gGOMSlLkxpO+WHFG1yul9a3VGq64="
+    "x86_64-linux": "sha256-Rmowgy0t/GJkiu28ZkXdzi5dzFxpFpzhcbZgsdFKl0c="
   },
   "urls": {
     "aarch64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
