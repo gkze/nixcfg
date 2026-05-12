@@ -363,17 +363,17 @@ def test_selection_and_live_helpers_cover_matching_modes() -> None:
     assert (
         gha_client.select_named_workflow((_workflow("Build"),), "build").name == "Build"
     )
-    update_workflow = _workflow("Periodic Flake Update").model_copy(
+    update_workflow = _workflow("Update").model_copy(
         update={"path": ".github/workflows/update.yml"}
     )
     assert gha_client.select_named_workflow((update_workflow,), "update.yml").name == (
-        "Periodic Flake Update"
+        "Update"
     )
     assert (
         gha_client.select_named_workflow(
             (update_workflow,), ".github/workflows/update.yml"
         ).name
-        == "Periodic Flake Update"
+        == "Update"
     )
     assert gha_client.select_named_job(jobs, "macos").id == 2
     assert gha_client.choose_live_run((_run(1, "completed"), _run(2, "queued"))).id == 2
@@ -390,10 +390,7 @@ def test_selection_and_live_helpers_cover_matching_modes() -> None:
         "root.yml",
     )
     assert gha_client.select_named_job((jobs[0],), "LINT").id == 1
-    assert (
-        gha_client.select_named_workflow((update_workflow,), "flake").name
-        == "Periodic Flake Update"
-    )
+    assert gha_client.select_named_workflow((update_workflow,), "upd").name == "Update"
 
     with pytest.raises(ValueError, match="Expected a non-empty workflow name"):
         gha_client.select_named_workflow((_workflow("Build"),), "   ")

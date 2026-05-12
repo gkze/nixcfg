@@ -4,7 +4,7 @@ name: Agentic Update Self-Heal
 on:
   workflow_run:
     workflows:
-      - Periodic Flake Update
+      - Update
       - Periodic Flake Update Certification
       - CI
     types:
@@ -28,7 +28,7 @@ if: >-
   (
     github.event.workflow_run.conclusion == 'failure' &&
     (
-      github.event.workflow_run.name == 'Periodic Flake Update' ||
+      github.event.workflow_run.name == 'Update' ||
       github.event.workflow_run.name == 'Periodic Flake Update Certification' ||
       (
         github.event.workflow_run.name == 'CI' &&
@@ -296,7 +296,7 @@ safe-outputs:
 
 # Agentic Update Self-Heal
 
-You are the unattended repair agent for the `Periodic Flake Update` and
+You are the unattended repair agent for the `Update` and
 `Periodic Flake Update Certification` workflows.
 
 ## Invariants

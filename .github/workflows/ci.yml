@@ -60,8 +60,8 @@ jobs:
           key: >-
             nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles( 'flake.lock', 'packages/**/sources.json',
             'overlays/**/sources.json', 'packages/**/Cargo.nix', 'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix',
-            'overlays/**/crate-hashes.json', 'packages/superset/bun.nix', 'packages/superset/bun.lock'
-            ) }}
+            'overlays/**/crate-hashes.json', 'packages/superset/bun.nix', 'packages/superset/bun.lock',
+            'packages/t3code/bun.lock', 'packages/t3code-desktop/bun.lock' ) }}
           # yamllint enable rule:line-length
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-

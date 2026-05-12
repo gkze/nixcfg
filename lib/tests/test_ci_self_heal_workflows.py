@@ -118,7 +118,7 @@ def test_agentic_source_pins_copilot_gpt55_and_safe_outputs() -> None:
         "record-stop",
     }
     assert workflow["on"]["workflow_run"]["workflows"] == [
-        "Periodic Flake Update",
+        "Update",
         "Periodic Flake Update Certification",
         "CI",
     ]
@@ -166,7 +166,7 @@ def test_compiled_agentic_lock_tracks_source_and_gpt55() -> None:
     assert metadata["agent_model"] == "gpt-5.5"
     assert metadata["strict"] is True
     assert workflow["on"]["workflow_run"]["workflows"] == [
-        "Periodic Flake Update",
+        "Update",
         "Periodic Flake Update Certification",
         "CI",
     ]

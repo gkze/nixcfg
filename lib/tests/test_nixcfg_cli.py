@@ -36,7 +36,7 @@ def _workflow_record() -> Workflow:
     return Workflow.model_construct(
         id=1,
         node_id="WF_1",
-        name="Periodic Flake Update",
+        name="Update",
         path=".github/workflows/update.yml",
         state="active",
         created_at=timestamp,
@@ -88,7 +88,7 @@ def _workflow_run_record(status: str) -> WorkflowRun:
         repository={},
         head_repository={},
         head_repository_id=1,
-        display_title="Periodic Flake Update",
+        display_title="Update",
     )
 
 
@@ -550,7 +550,7 @@ def test_nixcfg_actions_workflows_renders_rows(
     result = runner.invoke(nixcfg.app, ["actions", "workflows"])
 
     assert result.exit_code == 0
-    assert "Periodic Flake Update" in result.output
+    assert "Update" in result.output
     assert ".github/workflows/update.yml" in result.output
     assert "#683 success" in result.output
 
@@ -655,7 +655,7 @@ def test_nixcfg_actions_tail_forwards_workflow_and_optional_job(
         [
             "actions",
             "tail",
-            "Periodic Flake Update",
+            "Update",
             "darwin-lock-smoke",
             "-i",
             "2.5",
@@ -750,7 +750,7 @@ def test_nixcfg_actions_tail_surfaces_request_errors_cleanly(
     )
 
     runner = CliRunner()
-    result = runner.invoke(nixcfg.app, ["actions", "tail", "Periodic Flake Update"])
+    result = runner.invoke(nixcfg.app, ["actions", "tail", "Update"])
 
     assert result.exit_code != 0
     assert "HTTP 404 Not Found" in result.output

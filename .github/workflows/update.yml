@@ -1,5 +1,5 @@
 --- # !yamlfmt!:ignore
-name: Periodic Flake Update
+name: Update
 
 env:
   CACHIX_NAME: gkze
@@ -64,7 +64,9 @@ jobs:
             'overlays/**/Cargo.nix',
             'overlays/**/crate-hashes.json',
             'packages/superset/bun.nix',
-            'packages/superset/bun.lock'
+            'packages/superset/bun.lock',
+            'packages/t3code/bun.lock',
+            'packages/t3code-desktop/bun.lock'
             ) }}
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
@@ -134,7 +136,9 @@ jobs:
             'overlays/**/Cargo.nix',
             'overlays/**/crate-hashes.json',
             'packages/superset/bun.nix',
-            'packages/superset/bun.lock'
+            'packages/superset/bun.lock',
+            'packages/t3code/bun.lock',
+            'packages/t3code-desktop/bun.lock'
             ) }}
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
@@ -214,6 +218,9 @@ jobs:
         with:
           enable-cache: true
           ignore-nothing-to-cache: true
+      - name: Regenerate T3 Code runtime Bun locks
+        if: matrix.platform == 'aarch64-darwin'
+        run: nix run .#t3code-desktop.passthru.updateRuntimeLocks
       - name: Compute hashes for ${{ matrix.platform }}
         # Run update with pinned versions to ensure all platforms use the
         # same upstream version (resolved in the resolve-versions job).
@@ -243,6 +250,14 @@ jobs:
             packages/**/uv.lock
             packages/**/deno-deps.json
             packages/**/build.zig.zon.nix
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: matrix.platform == 'aarch64-darwin'
+        with:
+          name: generated-artifacts-${{ matrix.platform }}-runtime-locks
+          if-no-files-found: error
+          path: |
+            packages/t3code/bun.lock
+            packages/t3code-desktop/bun.lock
 
   # Phase 5: Merge platform-specific hashes
   merge-hashes:
@@ -274,6 +289,11 @@ jobs:
         with:
           name: generated-artifacts-x86_64-linux
           path: packages
+      - name: Materialize checked-in Darwin updater artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: generated-artifacts-aarch64-darwin-runtime-locks
+          path: packages
       - *cache_nix
       - name: Merge per-package sources files
         run: |
@@ -289,6 +309,8 @@ jobs:
             flake.lock
             packages/superset/bun.nix
             packages/superset/bun.lock
+            packages/t3code/bun.lock
+            packages/t3code-desktop/bun.lock
             packages/**/sources.json
             packages/**/uv.lock
             packages/**/deno-deps.json
@@ -379,6 +401,8 @@ jobs:
             flake.lock
             packages/superset/bun.nix
             packages/superset/bun.lock
+            packages/t3code/bun.lock
+            packages/t3code-desktop/bun.lock
             packages/**/sources.json
             packages/**/uv.lock
             packages/**/deno-deps.json
@@ -419,6 +443,8 @@ jobs:
             flake.lock
             packages/superset/bun.nix
             packages/superset/bun.lock
+            packages/t3code/bun.lock
+            packages/t3code-desktop/bun.lock
             packages/**/sources.json
             packages/**/uv.lock
             packages/**/deno-deps.json

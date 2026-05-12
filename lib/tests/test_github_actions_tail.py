@@ -120,7 +120,7 @@ def _workflow() -> gha_client.Workflow:
     return gha_client.Workflow.model_construct(
         id=1,
         node_id="WF_1",
-        name="Periodic Flake Update",
+        name="Update",
         path=".github/workflows/update.yml",
         state="active",
         created_at=timestamp,
@@ -171,7 +171,7 @@ def _run(status: str, conclusion: str | None = None) -> gha_client.WorkflowRun:
         repository={},
         head_repository={},
         head_repository_id=1,
-        display_title="Periodic Flake Update",
+        display_title="Update",
     )
 
 
@@ -839,7 +839,7 @@ def test_tailer_tails_named_job_and_dedupes_lines(
     )
 
     rendered = output.getvalue()
-    assert "== workflow 'Periodic Flake Update' run #683 [in_progress] ==" in rendered
+    assert "== workflow 'Update' run #683 [in_progress] ==" in rendered
     assert "== job 'darwin-lock-smoke' [in_progress] ==" in rendered
     assert "-- step 7: Pre-fetch flake inputs --" in rendered
     assert rendered.count("first line") == 1

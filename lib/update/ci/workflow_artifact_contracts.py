@@ -30,6 +30,8 @@ _REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS = (
     "flake.lock",
     "packages/superset/bun.nix",
     "packages/superset/bun.lock",
+    "packages/t3code/bun.lock",
+    "packages/t3code-desktop/bun.lock",
     "packages/**/sources.json",
     "packages/**/uv.lock",
     "packages/**/deno-deps.json",

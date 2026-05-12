@@ -7,6 +7,7 @@
   nixcfgElectron,
   nodejs,
   outputs,
+  pkgs,
   python3,
   stdenv,
   ...
@@ -18,6 +19,7 @@ let
   appId = "com.t3tools.t3code";
   appProtocolScheme = "t3";
   electronBuilderVersion = "26.8.1";
+  updateRuntimeLocksTemplate = ./update_runtime_locks.py;
 
   shared = import ../t3code/_shared.nix {
     inherit
@@ -55,6 +57,28 @@ let
         got server ${serverPackageJson.version} and desktop ${desktopPackageJson.version}
       '';
   t3codeCommitHash = outputs.lib.flakeLock.t3code.locked.rev or "";
+  updateRuntimeLocks = pkgs.writeTextFile {
+    name = "update-t3code-runtime-locks";
+    destination = "/bin/update-t3code-runtime-locks";
+    executable = true;
+    text =
+      "#!${lib.getExe python3}\n"
+      +
+        builtins.replaceStrings
+          [
+            "@UPSTREAM_SRC@"
+            "@BUN@"
+            "@ELECTRON_BUILDER_VERSION@"
+            "@T3CODE_COMMIT_HASH@"
+          ]
+          [
+            (toString src)
+            (lib.getExe bun)
+            electronBuilderVersion
+            t3codeCommitHash
+          ]
+          (builtins.readFile updateRuntimeLocksTemplate);
+  };
 
   node_modules = stdenv.mkDerivation {
     pname = "${pname}-node_modules";
@@ -233,6 +257,7 @@ stdenv.mkDerivation {
       electronRuntime
       electronRuntimeVersion
       electronVersion
+      updateRuntimeLocks
       ;
 
     macApp = {

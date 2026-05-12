@@ -13,7 +13,7 @@ from lib.github_actions import cli as gha_cli
 from lib.github_actions import client as gha_client
 
 
-def _workflow(name: str = "Periodic Flake Update") -> gha_client.Workflow:
+def _workflow(name: str = "Update") -> gha_client.Workflow:
     timestamp = datetime(2026, 4, 2, 16, 0, tzinfo=UTC)
     return gha_client.Workflow.model_construct(
         id=1,
@@ -70,7 +70,7 @@ def _run(
         repository={},
         head_repository={},
         head_repository_id=1,
-        display_title="Periodic Flake Update",
+        display_title="Update",
     )
 
 

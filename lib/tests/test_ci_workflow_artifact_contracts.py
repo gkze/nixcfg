@@ -592,6 +592,8 @@ def test_refresh_final_artifact_scope_requires_generated_update_paths(
     _write_file(tmp_path / "packages/demo/sources.json")
     _write_file(tmp_path / "packages/linear-cli/deno-deps.json")
     _write_file(tmp_path / "packages/neutils/build.zig.zon.nix")
+    _write_file(tmp_path / "packages/t3code/bun.lock")
+    _write_file(tmp_path / "packages/t3code-desktop/bun.lock")
 
     errors = contracts._validate_refresh_final_artifact_scope(
         {
@@ -611,7 +613,9 @@ def test_refresh_final_artifact_scope_requires_generated_update_paths(
     assert errors == [
         "Artifact `merged-generated-formatted` is missing update path(s): "
         "`packages/linear-cli/deno-deps.json`, "
-        "`packages/neutils/build.zig.zon.nix`"
+        "`packages/neutils/build.zig.zon.nix`, "
+        "`packages/t3code-desktop/bun.lock`, "
+        "`packages/t3code/bun.lock`"
     ]
 
 

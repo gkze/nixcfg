@@ -172,7 +172,7 @@ def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -
         _DISPATCH_CERTIFY_MARKER,
         forbidden_run_message=(
             "create-pr must not dispatch the certification workflow because "
-            "update-certify.yml already follows Periodic Flake Update via workflow_run"
+            "update-certify.yml already follows Update via workflow_run"
         ),
     )
 
