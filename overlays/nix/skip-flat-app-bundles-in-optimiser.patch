@@ -1,0 +1,6 @@
+diff --git a/src/libstore/optimise-store.cc b/src/libstore/optimise-store.cc
+--- a/src/libstore/optimise-store.cc
++++ b/src/libstore/optimise-store.cc
+@@ -113,1 +113,1 @@
+-    if (std::regex_search(path.string(), std::regex("\\.app/Contents/.+$"))) {
++    if (std::regex_search(path.string(), std::regex("\\.app/.+$"))) {

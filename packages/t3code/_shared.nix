@@ -13,6 +13,7 @@ let
   pname = "t3code";
   src = inputs.t3code;
   inherit (stdenv.hostPlatform) system;
+  rootPackageJson = builtins.fromJSON (builtins.readFile "${src}/package.json");
   serverPackageJson = builtins.fromJSON (builtins.readFile "${src}/apps/server/package.json");
   baseVersion = serverPackageJson.version;
   revSuffix = builtins.substring 0 7 (outputs.lib.flakeLock.t3code.locked.rev or "unknown");
@@ -20,7 +21,7 @@ let
   nodeModulesVersion = "deps";
   childDirectoryNames =
     path: builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir path));
-  workspaceDirs =
+  nestedWorkspaceDirs =
     lib.concatMap
       (
         parent:
@@ -31,8 +32,23 @@ let
       [
         "apps"
         "packages"
-      ]
-    ++ lib.optional (builtins.pathExists (src + "/scripts/package.json")) "scripts";
+      ];
+  rootWorkspacePackagePatterns = rootPackageJson.workspaces.packages or [ ];
+  explicitRootWorkspaceDirs = builtins.filter (
+    dir: !lib.hasInfix "*" dir && builtins.pathExists (src + "/${dir}/package.json")
+  ) rootWorkspacePackagePatterns;
+  workspaceDirs = lib.unique (
+    nestedWorkspaceDirs
+    ++ explicitRootWorkspaceDirs
+    ++ lib.optional (builtins.pathExists (src + "/scripts/package.json")) "scripts"
+  );
+  workspaceBuildDirectories = lib.unique (
+    lib.optionals (builtins.pathExists (src + "/apps")) [ "apps" ]
+    ++ lib.optionals (builtins.pathExists (src + "/packages")) [ "packages" ]
+    ++ explicitRootWorkspaceDirs
+    ++ lib.optional (builtins.pathExists (src + "/scripts")) "scripts"
+  );
+  workspaceBuildShellDirs = lib.escapeShellArgs workspaceBuildDirectories;
   dependencySourceDirectories = [
     ""
   ]
@@ -149,10 +165,10 @@ let
       export TURBO_TELEMETRY_DISABLED=1
 
       cp -a ${node_modules}/. .
-      chmod -R u+w node_modules apps packages scripts
+      chmod -R u+w node_modules ${workspaceBuildShellDirs}
 
       patchShebangs node_modules
-      find apps packages -type d -name node_modules -print | while IFS= read -r nested_node_modules; do
+      find ${workspaceBuildShellDirs} -type d -name node_modules -print | while IFS= read -r nested_node_modules; do
         patchShebangs "$nested_node_modules"
       done
 

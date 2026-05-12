@@ -262,51 +262,9 @@ let
       app="$out/Applications/${appBundleName}"
       mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$out/bin"
 
-      cat >"$app/Contents/Info.plist" <<EOF
-      <?xml version="1.0" encoding="UTF-8"?>
-      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
-      <plist version="1.0">
-      <dict>
-        <key>CFBundleDevelopmentRegion</key>
-        <string>English</string>
-        <key>CFBundleDisplayName</key>
-        <string>${appName}</string>
-        <key>CFBundleExecutable</key>
-        <string>${appName}</string>
-        <key>CFBundleIconFile</key>
-        <string>${appName}</string>
-        <key>CFBundleIdentifier</key>
-        <string>com.gitbutler.app</string>
-        <key>CFBundleInfoDictionaryVersion</key>
-        <string>6.0</string>
-        <key>CFBundleName</key>
-        <string>${appName}</string>
-        <key>CFBundlePackageType</key>
-        <string>APPL</string>
-        <key>CFBundleShortVersionString</key>
-        <string>${version}</string>
-        <key>CFBundleVersion</key>
-        <string>${version}</string>
-        <key>CFBundleURLTypes</key>
-        <array>
-          <dict>
-            <key>CFBundleTypeRole</key>
-            <string>Editor</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-              <string>but</string>
-            </array>
-          </dict>
-        </array>
-        <key>LSApplicationCategoryType</key>
-        <string>public.app-category.developer-tools</string>
-        <key>LSMinimumSystemVersion</key>
-        <string>12.0</string>
-        <key>NSHighResolutionCapable</key>
-        <true/>
-      </dict>
-      </plist>
-      EOF
+      substitute ${./Info.plist.in} "$app/Contents/Info.plist" \
+        --replace-fail '@appName@' ${lib.escapeShellArg appName} \
+        --replace-fail '@version@' ${lib.escapeShellArg version}
 
       cp "$PWD/target/bin/gitbutler-tauri" "$app/Contents/MacOS/${appName}"
       cp "${butDrv}/bin/but" "$out/bin/but"

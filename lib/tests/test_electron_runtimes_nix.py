@@ -20,6 +20,7 @@ _EXPECTED_ELECTRON_VERSIONS = [
     "40.8.5",
     "40.9.3",
     "41.2.1",
+    "41.5.0",
 ]
 _EXPECTED_HASH_KEYS = {
     "headers",

@@ -159,7 +159,7 @@ let
         commander
         codex-desktop
         conductor
-        opencode-desktop-electron-dev
+        opencode-desktop-dev
         container
         cyberduck
         google-chrome

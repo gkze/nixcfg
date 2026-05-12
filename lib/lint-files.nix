@@ -139,6 +139,7 @@ in
   markdown = {
     regex = "\\.md$";
     globs = [ "*.md" ];
+    excludeGlobs = [ ".github/workflows/update-self-heal.md" ];
   };
 
   protobuf = {

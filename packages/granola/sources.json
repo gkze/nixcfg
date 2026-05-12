@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-hZ/LYf8VkILDWri4o1mYyKdGaGJf98+msQdGRGfkYFo=",
-    "x86_64-darwin": "sha256-hZ/LYf8VkILDWri4o1mYyKdGaGJf98+msQdGRGfkYFo="
+    "aarch64-darwin": "sha256-arjCxEfullSimD7BroqLtMaN3M5cFelPtVz5C9wfOtc=",
+    "x86_64-darwin": "sha256-arjCxEfullSimD7BroqLtMaN3M5cFelPtVz5C9wfOtc="
   },
   "urls": {
-    "aarch64-darwin": "https://dr2v7l5emb758.cloudfront.net/7.162.5/Granola-7.162.5-mac-universal.zip",
-    "x86_64-darwin": "https://dr2v7l5emb758.cloudfront.net/7.162.5/Granola-7.162.5-mac-universal.zip"
+    "aarch64-darwin": "https://dr2v7l5emb758.cloudfront.net/7.162.6/Granola-7.162.6-mac-universal.zip",
+    "x86_64-darwin": "https://dr2v7l5emb758.cloudfront.net/7.162.6/Granola-7.162.6-mac-universal.zip"
   },
-  "version": "7.162.5"
+  "version": "7.162.6"
 }

@@ -491,6 +491,7 @@ def test_conductor_updater_paths(
     )
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == "1.2.3"
+    assert _run(updater._is_latest(None, latest)) is False
 
     monkeypatch.setattr(
         conductor_module,

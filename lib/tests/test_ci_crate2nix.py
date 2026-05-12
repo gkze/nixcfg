@@ -510,7 +510,6 @@ def test_package_registry_metadata_overrides_are_intentional() -> None:
     overrides = _registry_overrides()
     assert {name for name, meta in overrides.items() if meta.get("helper") is True} == {
         "go-cli-wrapper",
-        "openchamber-bun",
         "registry",
         "t3code-workspace",
     }

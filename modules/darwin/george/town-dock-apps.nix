@@ -17,7 +17,7 @@
       { app = "/Applications/ChatGPT.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Codex.app"; }
       { app = "/Applications/Claude.app"; }
-      { app = "/Users/${primaryUser}/Applications/Home Manager Apps/OpenCode Dev.app"; }
+      { app = "/Users/${primaryUser}/Applications/Home Manager Apps/OpenCode Desktop Dev.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Zed Nightly.app"; }
       { app = "/Applications/Cursor.app"; }
       { app = "/Applications/Visual Studio Code - Insiders.app"; }

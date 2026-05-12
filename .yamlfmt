@@ -4,6 +4,7 @@ line_ending: lf
 exclude:
   - .claude/worktrees/**
   - .direnv/**
+  - .github/workflows/update-self-heal.lock.yml
   - .pre-commit-config.yaml
   - .venv/**
   - node_modules/**

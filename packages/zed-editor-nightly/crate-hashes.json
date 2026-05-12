@@ -50,7 +50,7 @@
   "git+https://github.com/zed-industries/livekit-rust-sdks?rev=147fbca3d4b592d96d33f5e6a84b59fc0b5d9bf1#webrtc-sys-build@0.3.13": "09q4cs44icvplr8iwpsnfmjqkmk8qpn1mpbgqi8z90kf00m6i756",
   "git+https://github.com/zed-industries/livekit-rust-sdks?rev=147fbca3d4b592d96d33f5e6a84b59fc0b5d9bf1#webrtc-sys@0.3.23": "09q4cs44icvplr8iwpsnfmjqkmk8qpn1mpbgqi8z90kf00m6i756",
   "git+https://github.com/zed-industries/lsp-types?rev=f4dfa89a21ca35cd929b70354b1583fabae325f8#0.95.1": "0sm888285ij6lg5xs0chkyd6acbhyy6p4jmf1snfsy9ja47b8vq2",
-  "git+https://github.com/zed-industries/mermaid-rs-renderer?rev=374db9ead5426697c6c2111151d9f246899bc638#0.2.0": "1c0mywx39w0dnc2p7zaqxh08snwhsp1hbc1zch0crbcp5nidw3rc",
+  "git+https://github.com/zed-industries/mermaid-rs-renderer?rev=782b89a7da3f0e91e51f98d00a93acba679be6fb#0.2.2": "1i5pzpm79zk5z5k8izp8gpcgb30y1790bf3bxi12qwsdr3cmzkyi",
   "git+https://github.com/zed-industries/notify.git?rev=ce58c24cad542c28e04ced02e20325a4ec28a31d#notify-types@2.0.0": "09zn3ll1vlsblgrdacyw3zx58xzdxlab8ba7h22bbb57n76dmkl0",
   "git+https://github.com/zed-industries/notify.git?rev=ce58c24cad542c28e04ced02e20325a4ec28a31d#notify@8.2.0": "09zn3ll1vlsblgrdacyw3zx58xzdxlab8ba7h22bbb57n76dmkl0",
   "git+https://github.com/zed-industries/reqwest.git?rev=c15662463bda39148ba154100dd44d3fba5873a4#zed-reqwest@0.12.15-zed": "0pzqj87fna3vw8nnmjxka7xyvbwsgwrszhbnzxj3jvdbnd9a5157",

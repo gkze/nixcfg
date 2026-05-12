@@ -288,7 +288,7 @@ def test_resolved_targets_expand_flake_input_to_backing_sources(
         "lib.update.cli.UPDATERS",
         {
             "opencode": _OpencodeUpdater,
-            "opencode-desktop-electron": _ElectronUpdater,
+            "opencode-desktop": _ElectronUpdater,
             "other": object,
         },
     )
@@ -298,7 +298,7 @@ def test_resolved_targets_expand_flake_input_to_backing_sources(
     assert resolved.ref_inputs == []
     assert resolved.source_names == [
         "opencode",
-        "opencode-desktop-electron",
+        "opencode-desktop",
     ]
 
     resolved_no_refs = ResolvedTargets.from_options(

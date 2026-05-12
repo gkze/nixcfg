@@ -77,6 +77,16 @@ let
         priority = hookPriority;
       };
 
+      lint-agentic-workflows-gh-aw = {
+        enable = true;
+        name = "lint-agentic-workflows-gh-aw";
+        package = pkgs.gh;
+        entry = "gh aw compile update-self-heal --no-check-update --no-emit --approve";
+        pass_filenames = false;
+        always_run = true;
+        priority = hookPriority;
+      };
+
       format-web-oxfmt = {
         enable = true;
         name = "format-web-oxfmt";

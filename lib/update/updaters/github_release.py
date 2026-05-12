@@ -35,7 +35,7 @@ class GitHubReleaseUpdater(Updater):
         if not isinstance(payload, dict):
             msg = f"Unexpected release payload type: {type(payload).__name__}"
             raise TypeError(msg)
-        return payload
+        return cast("dict[str, object]", payload)
 
     def _release_tag_from_payload(self, payload: dict[str, object]) -> str:
         tag_name = payload.get("tag_name")

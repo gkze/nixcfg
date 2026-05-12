@@ -439,6 +439,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     steps:
@@ -471,3 +472,11 @@ jobs:
           title: ${{ env.UPDATE_COMMIT_MESSAGE }}
           commit-message: ${{ env.UPDATE_COMMIT_MESSAGE }}
           body-path: /tmp/pr-body.md
+      - name: Dispatch PR-head CI workflow
+        if: >-
+          steps.cpr.outputs.pull-request-number != '' &&
+          steps.cpr.outputs.pull-request-operation != 'closed'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_BRANCH: ${{ steps.cpr.outputs.pull-request-branch }}
+        run: gh workflow run ci.yml --ref "${UPDATE_BRANCH}"

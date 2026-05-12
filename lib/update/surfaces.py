@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 UPDATE_SURFACE_ALIASES: dict[str, str] = {
-    "opencode-desktop-electron-dev": "opencode-desktop-electron",
+    "opencode-desktop-dev": "opencode-desktop",
 }
 
 UPDATE_SURFACE_EXEMPTIONS = frozenset({

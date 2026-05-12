@@ -1,0 +1,183 @@
+--- # !yamlfmt!:ignore
+name: Agentic Update Repair PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - closed
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+jobs:
+  classify-pr:
+    runs-on: ubuntu-24.04
+    outputs:
+      base-ref: ${{ steps.event.outputs.base_ref }}
+      head-ref: ${{ steps.event.outputs.head_ref }}
+      is-repair-pr: ${{ steps.event.outputs.is_repair_pr }}
+      should-dispatch-update: ${{ steps.event.outputs.should_dispatch_update }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Classify pull request event
+        id: event
+        run: >-
+          python3 -m lib.update.ci.self_heal pr-event-outputs --event-path
+          "$GITHUB_EVENT_PATH" --github-output "$GITHUB_OUTPUT"
+
+  enable-auto-merge:
+    needs: classify-pr
+    if: >-
+      needs.classify-pr.outputs.is-repair-pr == 'true' &&
+      github.event.action != 'closed'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Fail closed unless repair classifier is auto-fix
+        run: |
+          set -euo pipefail
+          body_path="${RUNNER_TEMP}/repair-pr-body.md"
+          python3 - <<'PY' >"${body_path}"
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+          body = payload["pull_request"].get("body") or ""
+          print(body)
+          PY
+          python3 -m lib.update.ci.self_heal verify-auto-fix-classifier \
+            --body-path "${body_path}"
+      - name: Record repair cycle
+        env:
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          HEAD_REF: ${{ needs.classify-pr.outputs.head-ref }}
+          LEDGER_TITLE: Agentic update self-healing ledger
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN}" || {
+            echo "UPDATE_SELF_HEAL_GITHUB_TOKEN is required." >&2
+            exit 1
+          }
+          campaign_key="${HEAD_REF#agentic/update-self-heal/}"
+          run_id="${campaign_key##*-}"
+
+          issue_json="$(
+            gh issue list --state all --limit 100 --json number,title,state \
+              --jq ".[] | select(.title == env.LEDGER_TITLE) | @json" | head -n 1
+          )"
+          if [ -z "${issue_json}" ]; then
+            issue_url="$(
+              gh issue create \
+                --title "${LEDGER_TITLE}" \
+                --body "Evergreen ledger for unattended update self-healing campaigns."
+            )"
+            issue_number="${issue_url##*/}"
+          else
+            issue_number="$(jq -r '.number' <<<"${issue_json}")"
+            issue_state="$(jq -r '.state' <<<"${issue_json}")"
+            if [ "${issue_state}" = "CLOSED" ]; then
+              gh issue reopen "${issue_number}"
+            fi
+          fi
+
+          comments_json="$(mktemp)"
+          gh issue view "${issue_number}" --json comments >"${comments_json}"
+          set +e
+          remaining="$(
+            python3 -m lib.update.ci.self_heal remaining-cycles \
+              --comments-json "${comments_json}" \
+              --campaign-key "${campaign_key}"
+          )"
+          remaining_status="$?"
+          set -e
+          if [ "${remaining_status}" -ne 0 ]; then
+            comment_body="$(mktemp)"
+            python3 -m lib.update.ci.self_heal render-ledger-comment \
+              --campaign-key "${campaign_key}" \
+              --attempt-kind stop \
+              --run-id "${run_id}" \
+              --status exhausted \
+              --reason "campaign exhausted automatic repair cycles" \
+              --evidence "PR #${PR_NUMBER} at ${PR_SHA}" >"${comment_body}"
+            gh issue comment "${issue_number}" --body-file "${comment_body}"
+            echo "Campaign ${campaign_key} has no remaining cycles." >&2
+            exit 1
+          fi
+
+          comment_body="$(mktemp)"
+          python3 -m lib.update.ci.self_heal render-ledger-comment \
+            --campaign-key "${campaign_key}" \
+            --attempt-kind repair \
+            --run-id "${run_id}" \
+            --status "pr-${GITHUB_EVENT_NAME}-${{ github.event.action }}" \
+            --reason "repair PR submitted for auto-merge" \
+            --evidence "remaining cycles before this attempt: ${remaining}" \
+            --evidence "PR #${PR_NUMBER} at ${PR_SHA}" >"${comment_body}"
+          gh issue comment "${issue_number}" --body-file "${comment_body}"
+      - name: Fail closed unless required checks are configured
+        env:
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          TARGET_BRANCH: ${{ needs.classify-pr.outputs.base-ref }}
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN}" || {
+            echo "UPDATE_SELF_HEAL_GITHUB_TOKEN is required." >&2
+            exit 1
+          }
+          protection_json="$(mktemp)"
+          protection_path="branches/${TARGET_BRANCH}/protection/required_status_checks"
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/${protection_path}" \
+            >"${protection_json}"
+          python3 -m lib.update.ci.self_heal required-checks-present \
+            --protection-json "${protection_json}"
+      - name: Enable signed squash auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          gh pr merge "${PR_NUMBER}" \
+            --auto \
+            --squash \
+            --delete-branch \
+            --subject "${PR_TITLE}"
+
+  dispatch-update-after-merge:
+    needs: classify-pr
+    if: needs.classify-pr.outputs.should-dispatch-update == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch update workflow from repaired main
+        env:
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN}" || {
+            echo "UPDATE_SELF_HEAL_GITHUB_TOKEN is required." >&2
+            exit 1
+          }
+          gh workflow run update.yml --ref main

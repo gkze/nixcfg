@@ -22,6 +22,7 @@ class T3CodeDesktopUpdater(FlakeInputHashUpdater):
     name = "t3code-desktop"
     input_name = "t3code"
     hash_type: Literal["nodeModulesHash"] = "nodeModulesHash"
+    materialize_when_current = True
     platform_specific = True
     supported_platforms = ("aarch64-darwin",)
 

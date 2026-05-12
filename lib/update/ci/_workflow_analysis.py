@@ -13,7 +13,7 @@ from graphlib import CycleError, TopologicalSorter
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
     from pathlib import Path
 
 from lib.update.ci._workflow_yaml import (
@@ -175,7 +175,7 @@ class WorkflowJobAnalysis:
 
     def _normalize_matrix_include(
         self,
-        include: list[object],
+        include: Sequence[object],
         *,
         invalid_entry_message: str,
     ) -> tuple[WorkflowObject, ...]:

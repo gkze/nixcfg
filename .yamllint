@@ -4,6 +4,7 @@ extends: default
 ignore: |
   .claude/worktrees/**
   .direnv/**
+  .github/workflows/*.lock.yml
   .pre-commit-config.yaml
   .venv/**
   node_modules/**

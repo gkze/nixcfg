@@ -26,7 +26,7 @@ def _darwin_module_output() -> AttributeSet:
     return expect_instance(expr.output, AttributeSet)
 
 
-def test_darwin_home_activation_repairs_opencode_dev_dock_after_install_packages() -> (
+def test_darwin_home_activation_repairs_opencode_desktop_dev_dock_after_install_packages() -> (
     None
 ):
     """The Dock repair must run after Home Manager materializes app bundles."""
@@ -37,7 +37,7 @@ def test_darwin_home_activation_repairs_opencode_dev_dock_after_install_packages
         expect_binding(home.values, "activation").value, AttributeSet
     )
     repair = expect_instance(
-        expect_binding(activation.values, "repairTownDockOpenCodeDev").value,
+        expect_binding(activation.values, "repairTownDockOpenCodeDesktopDev").value,
         FunctionCall,
     )
     entry_after = expect_instance(repair.name, FunctionCall)
@@ -59,6 +59,10 @@ def test_darwin_home_activation_repairs_opencode_dev_dock_after_install_packages
     )
     assert any(
         '--remove "OpenCode Dev" --no-restart' in text for text in dockutil_commands
+    )
+    assert any(
+        '--remove "OpenCode Desktop Dev" --no-restart' in text
+        for text in dockutil_commands
     )
     assert any(
         '--add __NIX_INTERP__ --after "Claude"' in text for text in dockutil_commands

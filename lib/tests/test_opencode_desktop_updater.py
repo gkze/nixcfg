@@ -1,4 +1,4 @@
-"""Tests for the OpenCode Desktop Electron updater module."""
+"""Tests for the OpenCode Desktop updater module."""
 
 from __future__ import annotations
 
@@ -17,18 +17,16 @@ from lib.update.updaters.base import VersionInfo
 def _load_updater_module() -> ModuleType:
     """Load the updater module under test."""
     return load_repo_module(
-        "packages/opencode-desktop-electron/updater.py",
-        "opencode_desktop_electron_updater_test",
+        "packages/opencode-desktop/updater.py",
+        "opencode_desktop_updater_test",
     )
 
 
-def test_opencode_desktop_electron_updater_tracks_all_supported_platform_hashes() -> (
-    None
-):
+def test_opencode_desktop_updater_tracks_all_supported_platform_hashes() -> None:
     """The updater should preserve the full persisted platform hash matrix."""
-    updater_cls = _load_updater_module().OpencodeDesktopElectronUpdater
+    updater_cls = _load_updater_module().OpencodeDesktopUpdater
     payload = json.loads(
-        (REPO_ROOT / "packages/opencode-desktop-electron/sources.json").read_text(
+        (REPO_ROOT / "packages/opencode-desktop/sources.json").read_text(
             encoding="utf-8"
         )
     )
@@ -42,9 +40,9 @@ def test_opencode_desktop_electron_updater_tracks_all_supported_platform_hashes(
     assert len(hashes) == 4
 
 
-def test_opencode_desktop_electron_platform_targets_dedupes_current_platform() -> None:
+def test_opencode_desktop_platform_targets_dedupes_current_platform() -> None:
     """The current platform should not be duplicated when already supported."""
-    updater = _load_updater_module().OpencodeDesktopElectronUpdater()
+    updater = _load_updater_module().OpencodeDesktopUpdater()
 
     assert updater._platform_targets("x86_64-linux") == (
         "x86_64-linux",
@@ -139,7 +137,7 @@ def test_opencode_desktop_electron_platform_targets_dedupes_current_platform() -
         ),
     ],
 )
-def test_opencode_desktop_electron_is_latest_validates_platform_hash_coverage(
+def test_opencode_desktop_is_latest_validates_platform_hash_coverage(
     monkeypatch: pytest.MonkeyPatch,
     base_latest: bool,
     current: SourceEntry | None,
@@ -147,7 +145,7 @@ def test_opencode_desktop_electron_is_latest_validates_platform_hash_coverage(
 ) -> None:
     """Latest checks require a base match and a complete supported-platform set."""
     module = _load_updater_module()
-    updater = module.OpencodeDesktopElectronUpdater()
+    updater = module.OpencodeDesktopUpdater()
 
     async def _base_is_latest(self, context, info):
         _ = (self, context, info)

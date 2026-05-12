@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.1.5";
+      url = "github:generalaction/emdash/v1.1.10";
       flake = false;
     };
     flake-edit = {
@@ -52,7 +52,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gitbutler = {
-      url = "github:gitbutlerapp/gitbutler/release/0.19.9";
+      url = "github:gitbutlerapp/gitbutler/release/0.19.10";
       flake = false;
     };
     home-manager = {
@@ -87,7 +87,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.4.30";
+      url = "github:NousResearch/hermes-agent/v2026.5.7";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -141,7 +141,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.48.0";
+      url = "github:max-sixty/worktrunk/v0.49.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -162,7 +162,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.128.0";
+      url = "github:openai/codex/rust-v0.130.0";
       flake = false;
     };
     curator = {
@@ -170,13 +170,13 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.15.0";
+      url = "github:steipete/gogcli/v0.16.0";
       flake = false;
     };
     github-desktop = {
       type = "git";
       url = "https://github.com/desktop/desktop.git";
-      ref = "refs/tags/release-3.5.9-beta2";
+      ref = "refs/tags/release-3.5.9-beta3";
       submodules = true;
       flake = false;
     };
@@ -223,7 +223,7 @@
       flake = false;
     };
     mux = {
-      url = "github:coder/mux/v0.23.2";
+      url = "github:coder/mux/v0.24.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mountpoint-s3 = {
@@ -251,7 +251,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad/v0.6.14";
+      url = "github:batrachianai/toad/v0.6.16";
       flake = false;
     };
     treewalker-nvim = {
@@ -586,6 +586,7 @@
                           ]
                         )) "mdformat";
                         includes = lintFiles.markdown.globs;
+                        excludes = lintFiles.markdown.excludeGlobs;
                       };
                       twilight-autoconfig-format = {
                         command = lib.getExe twilightAutoconfigFormat;
@@ -796,10 +797,10 @@
               touch $out
             '';
 
-          checks."test-nix-opencode-desktop-electron" =
+          checks."test-nix-opencode-desktop" =
             { pkgs, ... }:
-            assert import ./packages/opencode-desktop-electron/tests.nix { inherit self; };
-            pkgs.runCommand "check-test-nix-opencode-desktop-electron" { } ''
+            assert import ./packages/opencode-desktop/tests.nix { inherit self; };
+            pkgs.runCommand "check-test-nix-opencode-desktop" { } ''
               touch $out
             '';
 

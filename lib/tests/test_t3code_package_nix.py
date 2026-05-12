@@ -72,6 +72,10 @@ def test_t3code_package_wraps_the_bun_runtime_entrypoint() -> None:
 def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
     """The shared helper should keep runtime versioning separate from dependency FODs."""
     assert_nix_ast_equal(
+        expect_scope_binding(_shared_output(), "rootPackageJson").value,
+        'builtins.fromJSON (builtins.readFile "${src}/package.json")',
+    )
+    assert_nix_ast_equal(
         expect_scope_binding(_shared_output(), "serverPackageJson").value,
         'builtins.fromJSON (builtins.readFile "${src}/apps/server/package.json")',
     )
@@ -86,6 +90,32 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
     assert_nix_ast_equal(
         expect_scope_binding(_shared_output(), "nodeModulesVersion").value,
         '"deps"',
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_shared_output(), "rootWorkspacePackagePatterns").value,
+        "rootPackageJson.workspaces.packages or [ ]",
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_shared_output(), "explicitRootWorkspaceDirs").value,
+        """
+        builtins.filter (
+          dir: !lib.hasInfix "*" dir && builtins.pathExists (src + "/${dir}/package.json")
+        ) rootWorkspacePackagePatterns
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_shared_output(), "workspaceDirs").value,
+        """
+        lib.unique (
+          nestedWorkspaceDirs
+          ++ explicitRootWorkspaceDirs
+          ++ lib.optional (builtins.pathExists (src + "/scripts/package.json")) "scripts"
+        )
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_shared_output(), "workspaceBuildShellDirs").value,
+        "lib.escapeShellArgs workspaceBuildDirectories",
     )
     dependency_source = expect_instance(
         expect_scope_binding(_shared_output(), "dependencySource").value,
@@ -166,6 +196,16 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
         FunctionCall,
     )
     workspace_build_args = expect_instance(workspace_build.argument, AttributeSet)
+    workspace_build_phase = expect_instance(
+        expect_binding(workspace_build_args.values, "buildPhase").value,
+        IndentedString,
+    )
+    assert "chmod -R u+w node_modules ${workspaceBuildShellDirs}" in (
+        workspace_build_phase.value
+    )
+    assert "find ${workspaceBuildShellDirs} -type d -name node_modules -print" in (
+        workspace_build_phase.value
+    )
     workspace_install = expect_instance(
         expect_binding(workspace_build_args.values, "installPhase").value,
         IndentedString,

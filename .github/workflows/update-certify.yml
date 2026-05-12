@@ -130,7 +130,7 @@ jobs:
       - name: Run shared deep verification checks
         run: |
           nix build .#checks.x86_64-linux.test-nix-default-api
-          nix build .#checks.x86_64-linux.test-nix-opencode-desktop-electron
+          nix build .#checks.x86_64-linux.test-nix-opencode-desktop
           nix build .#checks.x86_64-linux.cache-electron-runtimes
           nix build .#checks.x86_64-linux.test-python-pytest
           nix build .#checks.x86_64-linux.verify-workflow-artifacts-refresh
@@ -216,8 +216,8 @@ jobs:
             target: .#pkgs.aarch64-darwin.zed-editor-nightly
           - package: opencode
             target: .#pkgs.aarch64-darwin.opencode
-          - package: opencode-desktop-electron-dev
-            target: .#pkgs.aarch64-darwin.opencode-desktop-electron-dev
+          - package: opencode-desktop-dev
+            target: .#pkgs.aarch64-darwin.opencode-desktop-dev
           - package: codex
             target: .#pkgs.aarch64-darwin.codex
           - package: gemini-cli
@@ -307,7 +307,7 @@ jobs:
             --mode intersection \
             --exclude-ref .#pkgs.aarch64-darwin.zed-editor-nightly \
             --exclude-ref .#pkgs.aarch64-darwin.opencode \
-            --exclude-ref .#pkgs.aarch64-darwin.opencode-desktop-electron-dev \
+            --exclude-ref .#pkgs.aarch64-darwin.opencode-desktop-dev \
             --exclude-ref .#pkgs.aarch64-darwin.codex \
             --exclude-ref .#pkgs.aarch64-darwin.gemini-cli \
             --exclude-ref .#pkgs.aarch64-darwin.element-desktop \

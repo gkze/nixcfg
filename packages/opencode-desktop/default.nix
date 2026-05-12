@@ -10,19 +10,20 @@
   outputs,
   python3,
   stdenv,
-  pname ? "opencode-desktop-electron",
-  sourceHashPackageName ? "opencode-desktop-electron",
+  pname ? "opencode-desktop",
+  sourceHashPackageName ? "opencode-desktop",
   opencodeChannel ? "prod",
-  appName ? if opencodeChannel == "prod" then "OpenCode" else "OpenCode Dev",
+  appName ? if opencodeChannel == "prod" then "OpenCode" else "OpenCode Desktop Dev",
   appId ? if opencodeChannel == "prod" then "ai.opencode.desktop" else "ai.opencode.desktop.dev",
   appProtocolName ? appName,
   appProtocolScheme ? "opencode",
-  packageDescription ? "OpenCode Desktop Electron app",
+  packageDescription ? "OpenCode Desktop app",
   ...
 }:
 let
   inherit (builtins)
     fromJSON
+    pathExists
     readFile
     ;
 
@@ -35,13 +36,13 @@ let
   opencodeOverlayDir = repoRoot + "/overlays/opencode";
   appBundleName = "${appName}.app";
   appExecutableName = appName;
-  desktopWorkspace =
-    if builtins.pathExists (src + "/packages/desktop-electron/package.json") then
-      "packages/desktop-electron"
-    else
-      "packages/desktop";
 
-  desktopPackageJson = fromJSON (readFile (src + "/${desktopWorkspace}/package.json"));
+  desktopPackagePath =
+    if pathExists (src + "/packages/desktop/package.json") then
+      "packages/desktop"
+    else
+      "packages/desktop-electron";
+  desktopPackageJson = fromJSON (readFile (src + "/${desktopPackagePath}/package.json"));
   desktopPackageVersion = desktopPackageJson.version;
   electronVersion = lib.removePrefix "^" desktopPackageJson.devDependencies.electron;
   electronRuntime = nixcfgElectron.runtimeFor electronVersion;
@@ -56,7 +57,7 @@ let
       true
     else
       throw ''
-        packages/opencode-desktop-electron/default.nix has desktop version ${version},
+        packages/opencode-desktop/default.nix has desktop version ${version},
         expected ${desktopPackageVersion}, ${desktopPackageVersion}-<suffix>, or ${desktopPackageVersion}+<build-metadata>
       '';
 
@@ -65,7 +66,7 @@ let
       true
     else
       throw ''
-        packages/opencode-desktop-electron/default.nix needs Electron ${electronVersion},
+        packages/opencode-desktop/default.nix needs Electron ${electronVersion},
         but the selected runtime is ${electronRuntimeVersion}; add the exact runtime to nixcfgElectron
       '';
 
@@ -106,15 +107,15 @@ let
       runHook preBuild
 
       export BUN_INSTALL_CACHE_DIR="$(mktemp -d)"
-      # The desktop workspace shells into packages/opencode during prepare/build and
-      # pulls renderer code from app/ui/core, SDK helpers from packages/sdk/js,
-      # and version metadata helpers from packages/script.
+      # The desktop package shells into packages/opencode during prepare/build
+      # and pulls renderer code from app/ui/core, SDK helpers from
+      # packages/sdk/js, and version metadata helpers from packages/script.
       bun install \
         --cpu="${bunTarget.cpu}" \
         --os="${bunTarget.os}" \
         --filter '!./' \
         --filter './packages/opencode' \
-        --filter './${desktopWorkspace}' \
+        --filter './${desktopPackagePath}' \
         --filter './packages/app' \
         --filter './packages/core' \
         --filter './packages/shared' \
@@ -144,7 +145,7 @@ let
       # on Darwin during fixed-output hash computation.
       for workspace in \
         packages/opencode \
-        ${desktopWorkspace} \
+        ${desktopPackagePath} \
         packages/app \
         packages/core \
         packages/shared \
@@ -164,6 +165,7 @@ let
   packageManagerSync = opencodeOverlayDir + "/sync_package_manager_bun_version.py";
   ghosttyWebPin = opencodeOverlayDir + "/pin_ghostty_web_ref.py";
   hoistedOpentuiLinker = opencodeOverlayDir + "/link-hoisted-opentui-packages.sh";
+  patchDesktopSource = ./patch_desktop_source.sh;
   linuxAppDirName = "${pname}";
   linuxDesktopItem = makeDesktopItem {
     name = pname;
@@ -226,42 +228,7 @@ stdenv.mkDerivation {
       fi
     fi
 
-    # @opencode-ai/script does a semver-based Bun version check at import
-    # time, which requires the semver npm package. The filtered bun install
-    # with --filter '!./' does not hoist semver@7 into node_modules, so any
-    # transitive import of @opencode-ai/script fails at build time.
-    #
-    # Patch every build-time script that imports @opencode-ai/script to read
-    # the derivation-provided env vars directly instead.
-    substituteInPlace ${desktopWorkspace}/scripts/prepare.ts \
-      --replace-fail 'import { Script } from "@opencode-ai/script"' 'const Script = { version: process.env.OPENCODE_VERSION ?? "0.0.0" }'
-
-    # build-node.ts is invoked via prebuild.ts (cd ../opencode && bun
-    # script/build-node.ts) and uses Script.channel to define
-    # OPENCODE_CHANNEL in the bundled output.
-    substituteInPlace packages/opencode/script/build-node.ts \
-      --replace-fail 'import { Script } from "@opencode-ai/script"' 'const Script = { channel: process.env.OPENCODE_CHANNEL ?? "dev" }'
-
-    # Keep desktop project icons stable unless the user explicitly sets one.
-    # Upstream currently forces favicon auto-discovery on in the Electron shell,
-    # which can replace the normal initial/color avatar with arbitrary repo
-    # favicons on each launch.
-    substituteInPlace ${desktopWorkspace}/src/main/server.ts \
-      --replace-fail '    OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",' '    OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "false",'
-
-    # Keep the packaged Electron runtime identity aligned with the Nix-level
-    # overrides so the app bundle, userData path, and deep-link scheme agree.
-    substituteInPlace ${desktopWorkspace}/src/main/index.ts \
-      --replace-fail 'const appId = app.isPackaged ? APP_IDS[CHANNEL] : "ai.opencode.desktop.dev"' 'const appId = process.env.OPENCODE_APP_ID ?? (app.isPackaged ? APP_IDS[CHANNEL] : "ai.opencode.desktop.dev")' \
-      --replace-fail 'app.setName(app.isPackaged ? APP_NAMES[CHANNEL] : "OpenCode Dev")' 'app.setName(process.env.OPENCODE_APP_NAME ?? (app.isPackaged ? APP_NAMES[CHANNEL] : "OpenCode Dev"))' \
-      --replace-fail 'const urls = argv.filter((arg: string) => arg.startsWith("opencode://"))' 'const urls = argv.filter((arg: string) => arg.startsWith((process.env.OPENCODE_PROTOCOL_SCHEME ?? "opencode") + "://"))' \
-      --replace-fail '    app.setAsDefaultProtocolClient("opencode")' '    app.setAsDefaultProtocolClient(process.env.OPENCODE_PROTOCOL_SCHEME ?? "opencode")'
-
-    substituteInPlace ${desktopWorkspace}/electron-builder.config.ts \
-      --replace-fail '    name: "OpenCode",' '    name: process.env.OPENCODE_PROTOCOL_NAME ?? "OpenCode",' \
-      --replace-fail '    schemes: ["opencode"],' '    schemes: [process.env.OPENCODE_PROTOCOL_SCHEME ?? "opencode"],'
-
-    mkdir -p ${desktopWorkspace}/native
+    . ${patchDesktopSource} . ${desktopPackagePath}
   '';
 
   buildPhase =
@@ -291,7 +258,7 @@ stdenv.mkDerivation {
         fi
 
         (
-          cd ${desktopWorkspace}
+          cd ${desktopPackagePath}
           bun ./scripts/prepare.ts
           bun run build
           bun x electron-builder \
@@ -332,7 +299,7 @@ stdenv.mkDerivation {
         fi
 
         (
-          cd ${desktopWorkspace}
+          cd ${desktopPackagePath}
           bun ./scripts/prepare.ts
           bun run build
           bun x electron-builder \
@@ -356,7 +323,7 @@ stdenv.mkDerivation {
         runHook preInstall
 
         appBundle=""
-        for appDir in ${desktopWorkspace}/dist/mac*; do
+        for appDir in ${desktopPackagePath}/dist/mac*; do
           candidate="$appDir/${appBundleName}"
           if [ -d "$candidate" ]; then
             appBundle="$candidate"
@@ -365,7 +332,7 @@ stdenv.mkDerivation {
         done
 
         if [ -z "$appBundle" ]; then
-          echo "failed to locate packaged ${appBundleName} in ${desktopWorkspace}/dist" >&2
+          echo "failed to locate packaged ${appBundleName} in ${desktopPackagePath}/dist" >&2
           exit 1
         fi
 
@@ -380,7 +347,7 @@ stdenv.mkDerivation {
         runHook preInstall
 
         appDir=""
-        for candidate in ${desktopWorkspace}/dist/linux*-unpacked; do
+        for candidate in ${desktopPackagePath}/dist/linux*-unpacked; do
           if [ -d "$candidate" ]; then
             appDir="$candidate"
             break
@@ -388,7 +355,7 @@ stdenv.mkDerivation {
         done
 
         if [ -z "$appDir" ]; then
-          echo "failed to locate packaged Linux app in ${desktopWorkspace}/dist" >&2
+          echo "failed to locate packaged Linux app in ${desktopPackagePath}/dist" >&2
           exit 1
         fi
 

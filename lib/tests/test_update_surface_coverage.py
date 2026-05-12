@@ -20,12 +20,10 @@ from lib.update.updaters import ensure_updaters_loaded
 def test_surface_alias_and_exemption_contracts() -> None:
     """Keep explicit coverage exceptions small and intentional."""
     assert UPDATE_SURFACE_ALIASES == {
-        "opencode-desktop-electron-dev": "opencode-desktop-electron",
+        "opencode-desktop-dev": "opencode-desktop",
     }
     assert {"electron-runtimes", "nix"} == UPDATE_SURFACE_EXEMPTIONS
-    assert canonical_update_surface_name("opencode-desktop-electron-dev") == (
-        "opencode-desktop-electron"
-    )
+    assert canonical_update_surface_name("opencode-desktop-dev") == ("opencode-desktop")
 
 
 def test_discover_update_surface_names_finds_repo_surfaces() -> None:
@@ -33,7 +31,7 @@ def test_discover_update_surface_names_finds_repo_surfaces() -> None:
     surfaces = discover_update_surface_names()
     assert "zed-editor-nightly" in surfaces
     assert "codex-v8" in surfaces
-    assert "opencode-desktop-electron-dev" in surfaces
+    assert "opencode-desktop-dev" in surfaces
     assert "nix" in surfaces
     assert "zoom-us" in surfaces
 
@@ -74,13 +72,13 @@ def test_validate_update_surface_coverage_reports_missing_alias_target(
     tmp_path: Path,
 ) -> None:
     """Report unresolved canonical targets with the alias mapping included."""
-    package_dir = tmp_path / "packages" / "opencode-desktop-electron-dev"
+    package_dir = tmp_path / "packages" / "opencode-desktop-dev"
     package_dir.mkdir(parents=True)
     (package_dir / "default.nix").write_text("{}\n", encoding="utf-8")
 
     with pytest.raises(
         RuntimeError,
-        match="opencode-desktop-electron-dev -> opencode-desktop-electron",
+        match="opencode-desktop-dev -> opencode-desktop",
     ):
         validate_update_surface_coverage(
             updater_names=set(),

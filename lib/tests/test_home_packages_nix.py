@@ -101,7 +101,7 @@ def test_github_desktop_is_in_shared_gui_package_set() -> None:
           commander
           codex-desktop
           conductor
-          opencode-desktop-electron-dev
+          opencode-desktop-dev
           container
           cyberduck
           google-chrome

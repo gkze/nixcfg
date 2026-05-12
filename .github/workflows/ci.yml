@@ -1,6 +1,7 @@
 ---
 name: CI
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -110,7 +111,7 @@ jobs:
           - lint-python-ty
           - lint-workflows-actionlint
           - test-nix-default-api
-          - test-nix-opencode-desktop-electron
+          - test-nix-opencode-desktop
           - cache-electron-runtimes
           - test-python-pytest
           - verify-workflow-artifacts-refresh

@@ -1,11 +1,11 @@
 args:
-import ../opencode-desktop-electron/default.nix (
+import ../opencode-desktop/default.nix (
   args
   // {
-    pname = "opencode-desktop-electron-dev";
-    sourceHashPackageName = "opencode-desktop-electron";
+    pname = "opencode-desktop-dev";
+    sourceHashPackageName = "opencode-desktop";
     opencodeChannel = "dev";
-    appName = "OpenCode Dev";
+    appName = "OpenCode Desktop Dev";
     appId = "ai.opencode.desktop.dev";
     appProtocolScheme = "opencode";
     packageDescription = "OpenCode Desktop local dev app";

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from lib.update.ci import workflow_structure_contracts as contracts
+from lib.update.ci._workflow_yaml import load_workflow_yaml
 from lib.update.ci.workflow_structure_contracts import (
     validate_workflow_structure_contracts,
 )
@@ -34,6 +35,15 @@ def _valid_refresh_workflow_text() -> str:
               - darwin-lock-smoke
               - resolve-versions
             runs-on: ubuntu-latest
+          create-pr:
+            runs-on: ubuntu-latest
+            permissions:
+              actions: write
+              contents: write
+              pull-requests: write
+            steps:
+              - run: |
+                  gh workflow run ci.yml --ref "${UPDATE_BRANCH}"
     """
 
 
@@ -383,6 +393,50 @@ def test_validate_workflow_structure_contracts_requires_compute_hashes_lock_smok
         validate_workflow_structure_contracts(workflow_path=workflow)
 
 
+def test_validate_workflow_structure_contracts_requires_pr_dispatch_permission(
+    tmp_path: Path,
+) -> None:
+    """The PR job must be allowed to start branch-bound validation workflows."""
+    workflow = _write_workflow(
+        tmp_path / "workflow.yml",
+        _valid_refresh_workflow_text().replace("              actions: write\n", "", 1),
+    )
+    with pytest.raises(RuntimeError, match="must grant actions: write"):
+        validate_workflow_structure_contracts(workflow_path=workflow)
+
+
+def test_validate_workflow_structure_contracts_requires_ci_dispatch(
+    tmp_path: Path,
+) -> None:
+    """The update PR should kick off CI on the generated branch."""
+    workflow = _write_workflow(
+        tmp_path / "workflow.yml",
+        _valid_refresh_workflow_text().replace("gh workflow run ci.yml", "echo", 1),
+    )
+    with pytest.raises(RuntimeError, match="must dispatch the CI workflow"):
+        validate_workflow_structure_contracts(workflow_path=workflow)
+
+
+def test_validate_workflow_structure_contracts_forbids_duplicate_certification_dispatch(
+    tmp_path: Path,
+) -> None:
+    """Certification already follows the update workflow through workflow_run."""
+    workflow = _write_workflow(
+        tmp_path / "workflow.yml",
+        _valid_refresh_workflow_text().replace(
+            'gh workflow run ci.yml --ref "${UPDATE_BRANCH}"',
+            'gh workflow run ci.yml --ref "${UPDATE_BRANCH}"\n'
+            '                  gh workflow run update-certify.yml --ref "${UPDATE_BRANCH}" '
+            '-f ref="${UPDATE_BRANCH}"',
+            1,
+        ),
+    )
+    with pytest.raises(
+        RuntimeError, match="must not dispatch the certification workflow"
+    ):
+        validate_workflow_structure_contracts(workflow_path=workflow)
+
+
 def test_validate_workflow_structure_contracts_requires_full_smoke_marker(
     tmp_path: Path,
 ) -> None:
@@ -587,6 +641,14 @@ def test_update_refresh_workflow_structure_contracts_hold() -> None:
     validate_workflow_structure_contracts(
         workflow_path=REPO_ROOT / ".github/workflows/update.yml"
     )
+
+
+def test_ci_workflow_can_be_dispatched_for_update_pr_heads() -> None:
+    """The update workflow dispatches CI explicitly after bot-created PR updates."""
+    payload = load_workflow_yaml(REPO_ROOT / ".github/workflows/ci.yml")
+    triggers = payload["on"]
+    assert isinstance(triggers, dict)
+    assert "workflow_dispatch" in triggers
 
 
 def test_update_certify_workflow_structure_contracts_hold() -> None:

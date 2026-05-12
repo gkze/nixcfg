@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, ClassVar
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.nix.models.sources import SourceEntry
+    from lib.update.updaters.base import UpdateContext
+
 from lib.update.net import fetch_headers
 from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
 from lib.update.updaters.metadata import NO_METADATA
@@ -43,3 +46,12 @@ class ConductorUpdater(DownloadHashUpdater):
             err = "Could not parse version from Content-Disposition filename"
             raise RuntimeError(err)
         return VersionInfo(version=match.group(1), metadata=NO_METADATA)
+
+    async def _is_latest(
+        self,
+        context: UpdateContext | SourceEntry | None,
+        info: VersionInfo,
+    ) -> bool:
+        """Recompute hashes for mutable latest-channel artifacts before comparing."""
+        _ = (context, info)
+        return False

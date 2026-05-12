@@ -1,11 +1,11 @@
 {
-  "drvHash": "dqmng8iaa9x58w7651xn33dic5wsyfrz",
+  "drvHash": "2bq0ib529g0inl1q3qvrd4hab0q2zk4g",
   "hashes": [
     {
-      "hash": "sha256-hC4e0xgbGrOpO2pQGPIULlNyP/Kh5+A8+61taxM2DQ0=",
+      "hash": "sha256-WDgBa/3J2Vfx6UlTxAEJ96Opk+bbYx0UhQxSG+4SanA=",
       "hashType": "npmDepsHash"
     }
   ],
   "input": "gitbutler",
-  "version": "0.19.9"
+  "version": "0.19.10"
 }

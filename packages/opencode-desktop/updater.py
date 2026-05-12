@@ -1,4 +1,4 @@
-"""Updater for opencode-desktop-electron's Bun node_modules hash."""
+"""Updater for opencode-desktop's Bun node_modules hash."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 @register_updater
-class OpencodeDesktopElectronUpdater(FlakeInputHashUpdater):
+class OpencodeDesktopUpdater(FlakeInputHashUpdater):
     """Track platform-specific node_modules hashes for every supported runtime."""
 
     SUPPORTED_PLATFORMS = (
@@ -26,7 +26,7 @@ class OpencodeDesktopElectronUpdater(FlakeInputHashUpdater):
         "x86_64-linux",
     )
 
-    name = "opencode-desktop-electron"
+    name = "opencode-desktop"
     input_name = "opencode"
     hash_type = "nodeModulesHash"
     platform_specific = True

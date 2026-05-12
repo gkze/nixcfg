@@ -44,9 +44,6 @@ let
     "go-cli-wrapper" = {
       helper = true;
     };
-    "openchamber-bun" = {
-      helper = true;
-    };
     registry = {
       helper = true;
     };
@@ -117,7 +114,7 @@ let
         "x86_64-linux"
       ];
     };
-    "opencode-desktop-electron" = {
+    "opencode-desktop" = {
       constraint = [
         "aarch64-darwin"
         "x86_64-darwin"
@@ -125,7 +122,7 @@ let
         "x86_64-linux"
       ];
     };
-    "opencode-desktop-electron-dev" = {
+    "opencode-desktop-dev" = {
       constraint = [
         "aarch64-darwin"
         "x86_64-darwin"

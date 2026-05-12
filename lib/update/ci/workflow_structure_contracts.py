@@ -20,6 +20,8 @@ from lib.update.ci._workflow_analysis import (
 _DARWIN_FULL_SMOKE_MARKER = "nix run .#nixcfg -- ci workflow darwin eval-full-smoke"
 _DARWIN_LOCK_SMOKE_MARKER = "nix run .#nixcfg -- ci workflow darwin eval-lock-smoke"
 _SHARED_CLOSURE_MARKER = "nix run .#nixcfg -- ci cache closure"
+_DISPATCH_CI_MARKER = "gh workflow run ci.yml"
+_DISPATCH_CERTIFY_MARKER = "gh workflow run update-certify.yml"
 _EXCLUDE_REF_RE = re.compile(r"--exclude-ref\s+([^\s\\]+)")
 _STRUCTURE_INVALID_NEEDS_VALUE_MESSAGE = (
     "Job {job_id} defines unsupported needs {raw_needs!r}"
@@ -139,8 +141,9 @@ def _darwin_shared_exclude_refs(
 
 
 def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -> None:
-    darwin_lock_smoke, compute_hashes = workflow.require_jobs(
-        *_REFRESH_WORKFLOW_JOB_IDS
+    darwin_lock_smoke, compute_hashes, create_pr = workflow.require_jobs(
+        *_REFRESH_WORKFLOW_JOB_IDS,
+        "create-pr",
     )
 
     darwin_lock_smoke.require_run_marker(_DARWIN_LOCK_SMOKE_MARKER)
@@ -156,6 +159,21 @@ def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -
     compute_hashes.require_need(
         "darwin-lock-smoke",
         missing_need_message="compute-hashes must depend on darwin-lock-smoke",
+    )
+    permissions = create_pr.data.get("permissions")
+    if not isinstance(permissions, dict) or permissions.get("actions") != "write":
+        msg = "create-pr must grant actions: write to dispatch PR-head validation"
+        raise RuntimeError(msg)
+    create_pr.require_run_marker(
+        _DISPATCH_CI_MARKER,
+        missing_run_message="create-pr must dispatch the CI workflow on the update branch",
+    )
+    create_pr.forbid_run_marker(
+        _DISPATCH_CERTIFY_MARKER,
+        forbidden_run_message=(
+            "create-pr must not dispatch the certification workflow because "
+            "update-certify.yml already follows Periodic Flake Update via workflow_run"
+        ),
     )
 
 

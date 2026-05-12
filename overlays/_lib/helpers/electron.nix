@@ -11,6 +11,7 @@ let
     "40.8.5"
     "40.9.3"
     "41.2.1"
+    "41.5.0"
   ];
 
   hashes = {
@@ -55,6 +56,13 @@ let
       aarch64-linux = "sha256-wu7fL/Cf1P7fzk8kThYEI1/GMH3Z//6u1L52o+Dc5vM=";
       x86_64-darwin = "sha256-/u/QIDn21AvMfb1vSy2ybj/JXO/6KltMJRLPYa1lNUk=";
       x86_64-linux = "sha256-BMx/1UAMCM2Y4sxcXl9gzrtLcvplAgqK4qiNj0gyhxA=";
+    };
+    "41.5.0" = {
+      headers = "sha256-9sMU6WAr+N3BHRoLb5JUSeTeGzawCziGlLvhhKXcL0k=";
+      aarch64-darwin = "sha256-CRpYQQo1O39/xYmMy2zDHG5ep6zYyu30SIM3E1Y++uI=";
+      aarch64-linux = "sha256-HQyJaYvMMCnQwZeiFWecFMZatnCGxFKdXqkCgPPVvMI=";
+      x86_64-darwin = "sha256-MIW1L8kOgcDD7X9Zt1n3ELF2xaiYnO1kpRYY6P0+ii4=";
+      x86_64-linux = "sha256-HVNkeU3/4kk9dKl1XUm6N+zf09Gajio4NJzZN0rbGdQ=";
     };
   };
 

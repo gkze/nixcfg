@@ -24,7 +24,7 @@ let
 
   devIdentity = {
     opencodeChannel = "dev";
-    appName = "OpenCode Dev";
+    appName = "OpenCode Desktop Dev";
     appId = "ai.opencode.desktop.dev";
     appProtocolScheme = "opencode";
   };
@@ -49,8 +49,8 @@ let
     builtins.map (
       system:
       let
-        prod = packageFor system "opencode-desktop-electron";
-        dev = packageFor system "opencode-desktop-electron-dev";
+        prod = packageFor system "opencode-desktop";
+        dev = packageFor system "opencode-desktop-dev";
       in
       [
         (assertEq "prod channel (${system})" prodIdentity.opencodeChannel prod.passthru.opencodeChannel)
@@ -85,10 +85,10 @@ let
 
   checks = [
     (assertEq "prod meta.platforms" supportedPlatforms
-      (packageFor "aarch64-darwin" "opencode-desktop-electron").meta.platforms
+      (packageFor "aarch64-darwin" "opencode-desktop").meta.platforms
     )
     (assertEq "dev meta.platforms" supportedPlatforms
-      (packageFor "aarch64-darwin" "opencode-desktop-electron-dev").meta.platforms
+      (packageFor "aarch64-darwin" "opencode-desktop-dev").meta.platforms
     )
   ]
   ++ perSystemChecks;
