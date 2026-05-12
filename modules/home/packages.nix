@@ -149,6 +149,9 @@ let
         slack
         spacedrive
       ]
+      ++ lib.optionals (stdenv.isDarwin || stdenv.hostPlatform.system == "x86_64-linux") [
+        superset
+      ]
       ++ lib.optionals stdenv.isLinux [
         spotify
         wl-clipboard
@@ -195,7 +198,6 @@ let
           czkawka
           mux
           scratch
-          superset
         ];
     }
   ];

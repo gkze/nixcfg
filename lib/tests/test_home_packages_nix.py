@@ -67,7 +67,6 @@ def test_heavy_optional_goose_cli_is_guarded_to_aarch64_darwin() -> None:
           czkawka
           mux
           scratch
-          superset
         ]
         """,
     )
@@ -90,6 +89,9 @@ def test_github_desktop_is_in_shared_gui_package_set() -> None:
           red-reddit-cli
           slack
           spacedrive
+        ]
+        ++ lib.optionals (stdenv.isDarwin || stdenv.hostPlatform.system == "x86_64-linux") [
+          superset
         ]
         ++ lib.optionals stdenv.isLinux [
           spotify
