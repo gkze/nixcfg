@@ -304,6 +304,8 @@ def test_required_checks_present_is_fail_closed() -> None:
             2,
         ],
     }) == frozenset({"ci", "quality", "lint"})
+    checks_only = {"checks": ["quality"]}
+    assert self_heal.required_check_contexts(checks_only) == frozenset({"quality"})
     assert self_heal.required_checks_present(protection)
     assert self_heal.missing_required_checks({"contexts": ["commitlint"]}) == tuple(
         all_checks[1:]
