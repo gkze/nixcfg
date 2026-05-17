@@ -49,6 +49,84 @@ def _string_map(parent: JsonObject, key: str, *, context: str) -> JsonStringMap:
     return rendered
 
 
+def _string_list(parent: JsonObject, key: str, *, context: str) -> list[str]:
+    value = parent.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        msg = f"Expected '{key}' to be a string list in {context}"
+        raise TypeError(msg)
+    return cast("list[str]", value)
+
+
+def _workspace_package_dirs(source_root: Path, patterns: list[str]) -> list[str]:
+    dirs: list[str] = []
+    for pattern in patterns:
+        matches = (
+            sorted(source_root.glob(pattern))
+            if "*" in pattern
+            else [source_root / pattern]
+        )
+        dirs.extend(
+            path.relative_to(source_root).as_posix()
+            for path in matches
+            if (path / "package.json").is_file()
+        )
+    return dirs
+
+
+def _workspace_package_map(source_root: Path, workspaces: JsonObject) -> dict[str, str]:
+    patterns = _string_list(
+        workspaces,
+        "packages",
+        context="root package.json workspaces",
+    )
+    packages: dict[str, str] = {}
+    for rel_dir in _workspace_package_dirs(source_root, patterns):
+        package_json = _load_json(source_root / rel_dir / "package.json")
+        package_name = _require_string(
+            package_json,
+            "name",
+            context=f"{rel_dir}/package.json",
+        )
+        packages[package_name] = rel_dir
+    return packages
+
+
+def _workspace_dependency_names(dependencies: JsonStringMap) -> set[str]:
+    return {
+        name for name, spec in dependencies.items() if spec.startswith("workspace:")
+    }
+
+
+def _runtime_workspace_dirs(
+    source_root: Path,
+    workspace_packages: dict[str, str],
+    dependencies: JsonStringMap,
+) -> list[str]:
+    selected: set[str] = set()
+    pending = list(_workspace_dependency_names(dependencies))
+    while pending:
+        package_name = pending.pop()
+        if package_name in selected:
+            continue
+        try:
+            rel_dir = workspace_packages[package_name]
+        except KeyError as exc:
+            msg = f"Unable to resolve workspace dependency {package_name!r}"
+            raise RuntimeError(msg) from exc
+        selected.add(package_name)
+        package_json = _load_json(source_root / rel_dir / "package.json")
+        for section in ("dependencies", "optionalDependencies"):
+            pending.extend(
+                _workspace_dependency_names(
+                    _string_map(
+                        package_json, section, context=f"{rel_dir}/package.json"
+                    )
+                )
+                - selected
+            )
+    return sorted(workspace_packages[name] for name in selected)
+
+
 def resolve_catalog_dependencies(
     dependencies: JsonStringMap,
     catalog: JsonStringMap,
@@ -79,8 +157,9 @@ def build_runtime_manifest(
     *,
     electron_builder_version: str | None = None,
     commit_hash: str | None = None,
+    include_desktop_runtime: bool = True,
 ) -> JsonObject:
-    """Build the packaged desktop runtime manifest from the upstream workspace."""
+    """Build the packaged runtime manifest from the upstream workspace."""
     root_package = _load_json(source_root / "package.json")
     server_package = _load_json(source_root / "apps/server/package.json")
     desktop_package = _load_json(source_root / "apps/desktop/package.json")
@@ -89,24 +168,35 @@ def build_runtime_manifest(
         root_package, "workspaces", context="root package.json"
     )
     catalog = _string_map(workspaces, "catalog", context="root package.json workspaces")
+    workspace_packages = _workspace_package_map(source_root, workspaces)
 
     server_dependencies = resolve_catalog_dependencies(
         _string_map(server_package, "dependencies", context="apps/server/package.json"),
         catalog,
         label="apps/server",
     )
-    desktop_runtime_dependencies = resolve_catalog_dependencies(
-        {
-            name: spec
-            for name, spec in _string_map(
-                desktop_package,
-                "dependencies",
-                context="apps/desktop/package.json",
-            ).items()
-            if name != "electron"
-        },
-        catalog,
-        label="apps/desktop",
+    desktop_runtime_dependencies = (
+        resolve_catalog_dependencies(
+            {
+                name: spec
+                for name, spec in _string_map(
+                    desktop_package,
+                    "dependencies",
+                    context="apps/desktop/package.json",
+                ).items()
+                if name != "electron"
+            },
+            catalog,
+            label="apps/desktop",
+        )
+        if include_desktop_runtime
+        else {}
+    )
+    runtime_dependencies = server_dependencies | desktop_runtime_dependencies
+    runtime_workspace_dirs = _runtime_workspace_dirs(
+        source_root,
+        workspace_packages,
+        runtime_dependencies,
     )
     overrides = resolve_catalog_dependencies(
         _string_map(root_package, "overrides", context="root package.json"),
@@ -126,9 +216,14 @@ def build_runtime_manifest(
         "description": "T3 Code desktop runtime",
         "author": "T3 Tools",
         "main": "apps/desktop/dist-electron/main.cjs",
-        "dependencies": server_dependencies | desktop_runtime_dependencies,
+        "dependencies": runtime_dependencies,
         "overrides": overrides,
     }
+    if runtime_workspace_dirs:
+        payload["workspaces"] = {
+            "packages": runtime_workspace_dirs,
+            "catalog": catalog,
+        }
     if electron_builder_version:
         payload["devDependencies"] = {"electron-builder": electron_builder_version}
     if commit_hash:
@@ -157,6 +252,11 @@ def _parse_args() -> argparse.Namespace:
         "--commit-hash",
         help="Optional git revision metadata to bake into the runtime manifest.",
     )
+    parser.add_argument(
+        "--server-only",
+        action="store_true",
+        help="Omit desktop runtime dependencies for the standalone server CLI.",
+    )
     return parser.parse_args()
 
 
@@ -167,6 +267,7 @@ def main() -> None:
         args.source_root.resolve(),
         electron_builder_version=args.electron_builder_version,
         commit_hash=args.commit_hash,
+        include_desktop_runtime=not args.server_only,
     )
     args.output.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
 

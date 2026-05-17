@@ -202,6 +202,20 @@ def test_github_desktop_passthru_exposes_shared_electron_runtime() -> None:
     )
 
 
+def test_github_desktop_final_metadata_keeps_darwin_platforms() -> None:
+    """The overlay should keep Darwin available even if nixpkgs marks it Linux-only."""
+    meta = expect_instance(
+        expect_binding(_override_attrs().values, "meta").value,
+        BinaryExpression,
+    )
+    assert_nix_ast_equal(meta.left, "(oldAttrs.meta or { })")
+    merged_attrs = expect_instance(meta.right, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(merged_attrs.values, "platforms").value,
+        "prev.lib.unique ((oldAttrs.meta.platforms or [ ]) ++ prev.lib.platforms.darwin)",
+    )
+
+
 def test_native_build_inputs_removes_desktop_to_darwin_bundle_on_darwin() -> None:
     """The real packaged app should own the Darwin bundle metadata."""
     native_build_inputs = expect_instance(

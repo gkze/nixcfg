@@ -122,6 +122,9 @@ def test_refresh_lock_renders_manifest_and_runs_bun(
         env: dict[str, str] | None = None,
     ) -> None:
         calls.append((command, cwd, env))
+        if "--output" in command:
+            output = Path(command[command.index("--output") + 1])
+            output.write_text('{"name":"t3code"}\n', encoding="utf-8")
 
     monkeypatch.setattr(module, "_run", _run)
 
@@ -166,11 +169,82 @@ def test_refresh_lock_renders_manifest_and_runs_bun(
     assert lock_file.read_text(encoding="utf-8") == "original lock\n"
 
 
+def test_stage_runtime_workspace_dirs_copies_declared_packages(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Lock refreshes need local workspace packages for workspace:* dependencies."""
+    module = _load_module()
+    upstream = tmp_path / "upstream"
+    workspace = tmp_path / "workspace"
+    upstream_package = upstream / "packages" / "shared"
+    upstream_package.mkdir(parents=True)
+    (upstream_package / "package.json").write_text(
+        '{"name":"@t3tools/shared"}\n',
+        encoding="utf-8",
+    )
+    (upstream_package / "index.ts").write_text("export {};\n", encoding="utf-8")
+    (upstream_package / "node_modules").mkdir()
+    (upstream_package / "node_modules" / "ignored").write_text("x", encoding="utf-8")
+    workspace.mkdir()
+    (workspace / "package.json").write_text(
+        '{"workspaces":{"packages":["packages/shared"]}}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "UPSTREAM_SRC", upstream)
+
+    module._stage_runtime_workspace_dirs(workspace)
+
+    assert (workspace / "packages" / "shared" / "package.json").is_file()
+    assert (workspace / "packages" / "shared" / "index.ts").is_file()
+    assert not (workspace / "packages" / "shared" / "node_modules").exists()
+
+
+def test_stage_runtime_workspace_dirs_rejects_missing_package(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Surface stale workspace package paths before invoking Bun."""
+    module = _load_module()
+    upstream = tmp_path / "upstream"
+    workspace = tmp_path / "workspace"
+    upstream.mkdir()
+    workspace.mkdir()
+    (workspace / "package.json").write_text(
+        '{"workspaces":{"packages":["packages/missing"]}}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "UPSTREAM_SRC", upstream)
+
+    with pytest.raises(
+        module.UpdateRuntimeLocksError,
+        match="references missing workspace packages/missing",
+    ):
+        module._stage_runtime_workspace_dirs(workspace)
+
+
+def test_runtime_workspace_dirs_rejects_non_string_packages(tmp_path: Path) -> None:
+    """Reject malformed rendered workspace package lists before staging files."""
+    module = _load_module()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "package.json").write_text(
+        '{"workspaces":{"packages":["packages/shared",1]}}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        module.UpdateRuntimeLocksError,
+        match=r"workspaces\.packages must be a string list",
+    ):
+        module._runtime_workspace_dirs(workspace)
+
+
 def test_render_runtime_manifest_keeps_optional_flags_optional(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Do not pass desktop-only manifest flags for the standalone package."""
+    """Do not pass desktop-only manifest flags unless requested."""
     module = _load_module()
     repo_root = tmp_path / "repo"
     workspace = tmp_path / "workspace"
@@ -201,6 +275,28 @@ def test_render_runtime_manifest_keeps_optional_flags_optional(
     ]
 
 
+def test_render_runtime_manifest_passes_server_only_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The standalone CLI lock refresh should request server-only manifests."""
+    module = _load_module()
+    repo_root = tmp_path / "repo"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda command: calls.append(command),
+    )
+
+    module._render_runtime_manifest(repo_root, workspace, server_only=True)
+
+    assert calls[0][-1] == "--server-only"
+
+
 def test_main_happy_path_refreshes_both_lockfiles(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -209,7 +305,7 @@ def test_main_happy_path_refreshes_both_lockfiles(
     module = _load_module()
     repo_root = tmp_path / "repo"
     _write_repo_layout(repo_root)
-    refreshed: list[tuple[Path, str | None, str | None]] = []
+    refreshed: list[tuple[Path, str | None, str | None, bool]] = []
 
     monkeypatch.setattr(module.Path, "cwd", classmethod(lambda cls: repo_root))
     monkeypatch.setattr(
@@ -219,16 +315,18 @@ def test_main_happy_path_refreshes_both_lockfiles(
             lock_file,
             kwargs.get("electron_builder_version"),
             kwargs.get("commit_hash"),
+            kwargs.get("server_only", False),
         )),
     )
 
     assert module.main() == 0
     assert refreshed == [
-        (repo_root / "packages" / "t3code" / "bun.lock", None, None),
+        (repo_root / "packages" / "t3code" / "bun.lock", None, None, True),
         (
             repo_root / "packages" / "t3code-desktop" / "bun.lock",
             module.ELECTRON_BUILDER_VERSION,
             module.T3CODE_COMMIT_HASH,
+            False,
         ),
     ]
 
@@ -269,8 +367,13 @@ def test_script_main_guard_exits_with_main_status(
     t3_lock.write_text("t3 lock\n", encoding="utf-8")
     desktop_lock.write_text("desktop lock\n", encoding="utf-8")
 
+    def _fake_run(command: list[str], *_args: object, **_kwargs: object) -> None:
+        if "--output" in command:
+            output = Path(command[command.index("--output") + 1])
+            output.write_text('{"name":"t3code"}\n', encoding="utf-8")
+
     monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: repo_root))
-    monkeypatch.setattr("subprocess.run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("subprocess.run", _fake_run)
 
     with pytest.raises(SystemExit, match="0") as excinfo:
         runpy.run_path(str(script_path), run_name="__main__")

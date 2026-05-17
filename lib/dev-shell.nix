@@ -3,10 +3,13 @@
   lib,
   gitHooks,
   lintFiles,
+  mkNixcfgPackage ? null,
 }:
 pkgs:
 let
   hookPriority = 10;
+  nixcfgPkg = if mkNixcfgPackage == null then null else mkNixcfgPackage pkgs;
+  tyPythonFlag = lib.optionalString (nixcfgPkg != null) " --python ${nixcfgPkg}/bin/python";
   pythonScriptFindPredicates = lib.concatMapStringsSep " " (
     path: "-o -path './${path}'"
   ) lintFiles.python.pythonScriptPaths;
@@ -151,7 +154,7 @@ let
         enable = true;
         name = "lint-python-ty";
         package = pkgs.ty;
-        entry = "ty check .";
+        entry = "ty check${tyPythonFlag} .";
         pass_filenames = false;
         always_run = true;
         priority = hookPriority;

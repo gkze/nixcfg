@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from lib.nix.commands.base import CommandResult, HashMismatchError
 from lib.tests._assertions import expect_not_none
 
@@ -59,33 +61,60 @@ class TestHashMismatchError:
         assert err.specified == "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         assert err.drv_path == "/nix/store/g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-source.drv"
 
-    def test_fod_sha512_sri(self) -> None:
-        """Run this test case."""
-        stderr = (
-            "hash mismatch in fixed-output derivation '/nix/store/abc-foo.drv':\n"
-            "  specified: sha512-AAAA=\n"
-            "     got:    sha512-BBBB=\n"
-        )
+    @pytest.mark.parametrize(
+        ("stderr", "expected_hash", "expected_specified"),
+        [
+            pytest.param(
+                "hash mismatch in fixed-output derivation '/nix/store/abc-foo.drv':\n"
+                "  specified: sha512-AAAA=\n"
+                "     got:    sha512-BBBB=\n",
+                "sha512-BBBB=",
+                "sha512-AAAA=",
+                id="fod-sha512-sri",
+            ),
+            pytest.param(
+                "hash mismatch in fixed-output derivation '/nix/store/abc-bar.drv':\n"
+                "  specified: sha1-AAAA=\n"
+                "     got:    sha1-BBBB=\n",
+                "sha1-BBBB=",
+                "sha1-AAAA=",
+                id="fod-sha1-sri",
+            ),
+            pytest.param(
+                "hash mismatch in fixed-output derivation '/nix/store/aaa-outer.drv':\n"
+                "  specified: sha256-OUTERspecOUTERspecOUTERspecOUTERspecOUTERspe0=\n"
+                "     got:    sha256-OUTERgotxOUTERgotxOUTERgotxOUTERgotxOUTERgo0=\n"
+                "\n"
+                "hash mismatch in fixed-output derivation '/nix/store/bbb-inner.drv':\n"
+                "  specified: sha256-INNERspecINNERspecINNERspecINNERspecINNERspe0=\n"
+                "     got:    sha256-INNERgotxINNERgotxINNERgotxINNERgotxINNERgo0=\n",
+                "sha256-INNERgotxINNERgotxINNERgotxINNERgotxINNERgo0=",
+                "sha256-INNERspecINNERspecINNERspecINNERspecINNERspe0=",
+                id="nested-derivation-takes-last-match",
+            ),
+            pytest.param(
+                "hash mismatch in fixed-output derivation '/nix/store/x-y.drv':\n"
+                "  specified: sha256-AAAA=\n"
+                "     got:    sha256-BBBB=\n",
+                "sha256-BBBB=",
+                "sha256-AAAA=",
+                id="whitespace-variations",
+            ),
+        ],
+    )
+    def test_fixed_output_hash_mismatch_variants(
+        self,
+        stderr: str,
+        expected_hash: str,
+        expected_specified: str,
+    ) -> None:
+        """Fixed-output mismatch parsing should handle each known variant."""
         err = HashMismatchError.from_output(
             stderr, object.__getattribute__(self, "_make_result")(stderr)
         )
         err = expect_not_none(err)
-        assert err.hash == "sha512-BBBB="
-        assert err.specified == "sha512-AAAA="
-
-    def test_fod_sha1_sri(self) -> None:
-        """Run this test case."""
-        stderr = (
-            "hash mismatch in fixed-output derivation '/nix/store/abc-bar.drv':\n"
-            "  specified: sha1-AAAA=\n"
-            "     got:    sha1-BBBB=\n"
-        )
-        err = HashMismatchError.from_output(
-            stderr, object.__getattribute__(self, "_make_result")(stderr)
-        )
-        err = expect_not_none(err)
-        assert err.hash == "sha1-BBBB="
-        assert err.specified == "sha1-AAAA="
+        assert err.hash == expected_hash
+        assert err.specified == expected_specified
 
     def test_nar_import_nix32(self) -> None:
         """Run this test case."""
@@ -124,24 +153,6 @@ class TestHashMismatchError:
             == "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         )
 
-    def test_nested_derivation_takes_last_match(self) -> None:
-        """Run this test case."""
-        stderr = (
-            "hash mismatch in fixed-output derivation '/nix/store/aaa-outer.drv':\n"
-            "  specified: sha256-OUTERspecOUTERspecOUTERspecOUTERspecOUTERspe0=\n"
-            "     got:    sha256-OUTERgotxOUTERgotxOUTERgotxOUTERgotxOUTERgo0=\n"
-            "\n"
-            "hash mismatch in fixed-output derivation '/nix/store/bbb-inner.drv':\n"
-            "  specified: sha256-INNERspecINNERspecINNERspecINNERspecINNERspe0=\n"
-            "     got:    sha256-INNERgotxINNERgotxINNERgotxINNERgotxINNERgo0=\n"
-        )
-        err = HashMismatchError.from_output(
-            stderr, object.__getattribute__(self, "_make_result")(stderr)
-        )
-        err = expect_not_none(err)
-        assert err.hash == "sha256-INNERgotxINNERgotxINNERgotxINNERgotxINNERgo0="
-        assert err.specified == "sha256-INNERspecINNERspecINNERspecINNERspecINNERspe0="
-
     def test_hash_in_stdout_not_stderr(self) -> None:
         """Run this test case."""
         stdout = (
@@ -155,20 +166,6 @@ class TestHashMismatchError:
         )
         err = expect_not_none(err)
         assert err.hash == "sha256-BBB="
-
-    def test_whitespace_variations(self) -> None:
-        """Run this test case."""
-        stderr = (
-            "hash mismatch in fixed-output derivation '/nix/store/x-y.drv':\n"
-            "  specified: sha256-AAAA=\n"
-            "     got:    sha256-BBBB=\n"
-        )
-        err = HashMismatchError.from_output(
-            stderr, object.__getattribute__(self, "_make_result")(stderr)
-        )
-        err = expect_not_none(err)
-        assert err.hash == "sha256-BBBB="
-        assert err.specified == "sha256-AAAA="
 
     def test_no_match_returns_none(self) -> None:
         """Run this test case."""

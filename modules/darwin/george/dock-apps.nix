@@ -10,7 +10,6 @@
       { app = "/System/Applications/Calendar.app"; }
       { app = "/System/Applications/Messages.app"; }
       { app = "/Users/${primaryUser}/Applications/Home Manager Apps/Slack.app"; }
-      { app = "/Applications/ChatGPT.app"; }
       { app = "/Applications/Claude.app"; }
       { app = "/Applications/Twilight.app"; }
       { app = "/Applications/Ghostty.app"; }

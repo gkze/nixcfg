@@ -124,6 +124,22 @@ let
       cp package.json "$out/package.json"
       cp bun.lock "$out/bun.lock"
       cp -R node_modules "$out/node_modules"
+      ${lib.getExe python3} - <<'PY'
+      import json
+      import os
+      import pathlib
+      import shutil
+
+      root = pathlib.Path(".")
+      out = pathlib.Path(os.environ["out"])
+      workspaces = json.loads((root / "package.json").read_text(encoding="utf-8")).get("workspaces", {})
+      for rel_dir in workspaces.get("packages", []):
+          src = root / rel_dir
+          if src.is_dir():
+              dst = out / rel_dir
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copytree(src, dst, ignore=shutil.ignore_patterns("node_modules", ".turbo"))
+      PY
 
       runHook postInstall
     '';
@@ -165,16 +181,29 @@ stdenv.mkDerivation {
 
     export HOME="$TMPDIR/home"
     mkdir -p "$HOME"
+    export BUN_INSTALL_CACHE_DIR="$TMPDIR/.bun-cache"
+    export NODE_COMPILE_CACHE="$TMPDIR/node-compile-cache"
+    export NODE_DISABLE_COMPILE_CACHE=1
     export SSL_CERT_FILE="${cacert}/etc/ssl/certs/ca-bundle.crt"
     export NODE_EXTRA_CA_CERTS="$SSL_CERT_FILE"
+
+    appBuildRoot="$PWD/app-build-root"
+    mkdir -p "$appBuildRoot"
+    cd "$appBuildRoot"
 
     mkdir -p apps/desktop apps/server
     cp -R ${workspaceBuild}/apps/desktop/dist-electron apps/desktop/dist-electron
     cp -R ${workspaceBuild}/apps/desktop/resources apps/desktop/resources
     cp -R ${workspaceBuild}/apps/server/dist apps/server/dist
     cp -R ${node_modules}/node_modules ./node_modules
+    if [ -d ${node_modules}/packages ]; then
+      cp -R ${node_modules}/packages ./packages
+    fi
     cp ${node_modules}/package.json ./package.json
     chmod -R u+w apps node_modules package.json
+    if [ -d packages ]; then
+      chmod -R u+w packages
+    fi
 
     patchShebangs node_modules
 
@@ -195,7 +224,89 @@ stdenv.mkDerivation {
       -c.mac.hardenedRuntime=false \
       -c.mac.notarize=false \
       -c.electronVersion=${lib.escapeShellArg electronRuntimeVersion} \
-      -c.electronDist="$electronDistDir"
+      -c.electronDist="$electronDistDir" \
+      -c.npmRebuild=false
+
+    appResources="dist/mac-arm64/${appBundleName}/Contents/Resources"
+    appAsar="$appResources/app.asar"
+    appInfoPlist="dist/mac-arm64/${appBundleName}/Contents/Info.plist"
+    asarScratch="$TMPDIR/t3code-app-asar"
+    rm -rf "$asarScratch"
+    mkdir -p "$asarScratch"
+
+    T3CODE_APP_ASAR="$appAsar" \
+    T3CODE_ASAR_SCRATCH="$asarScratch" \
+      ${lib.getExe nodejs} <<'NODE'
+    const fs = require("fs");
+    const path = require("path");
+
+    const asarRoots = fs
+      .readdirSync("node_modules/.bun")
+      .filter((entry) => entry.startsWith("@electron+asar@"))
+      .sort();
+    if (asarRoots.length !== 1) {
+      throw new Error("expected exactly one @electron/asar package, got " + asarRoots.length);
+    }
+
+    const asar = require(path.join(
+      process.cwd(),
+      "node_modules/.bun",
+      asarRoots[0],
+      "node_modules/@electron/asar",
+    ));
+    const appAsar = process.env.T3CODE_APP_ASAR;
+    const scratch = process.env.T3CODE_ASAR_SCRATCH;
+    const extractDir = path.join(scratch, "extract");
+    const nextAsar = path.join(scratch, "app.asar");
+    const nextUnpacked = nextAsar + ".unpacked";
+    const appUnpacked = appAsar + ".unpacked";
+    const filenames = [];
+
+    function compareNames(left, right) {
+      if (left.name < right.name) return -1;
+      if (left.name > right.name) return 1;
+      return 0;
+    }
+
+    function collectFiles(relativeDirectory) {
+      const absoluteDirectory = path.join(extractDir, relativeDirectory);
+      for (const entry of fs.readdirSync(absoluteDirectory, { withFileTypes: true }).sort(compareNames)) {
+        const relativePath = path.join(relativeDirectory, entry.name);
+        const absolutePath = path.join(extractDir, relativePath);
+        const stat = fs.lstatSync(absolutePath);
+        if (stat.isDirectory()) {
+          collectFiles(relativePath);
+        } else if (stat.isFile() || stat.isSymbolicLink()) {
+          filenames.push(absolutePath);
+        }
+      }
+    }
+
+    (async () => {
+      fs.rmSync(extractDir, { recursive: true, force: true });
+      fs.mkdirSync(extractDir, { recursive: true });
+      asar.extractAll(appAsar, extractDir);
+      collectFiles("");
+      await asar.createPackageFromFiles(
+        extractDir,
+        nextAsar,
+        filenames,
+        {},
+        { unpack: "*.node" },
+      );
+      fs.rmSync(appUnpacked, { recursive: true, force: true });
+      if (fs.existsSync(nextUnpacked)) {
+        fs.renameSync(nextUnpacked, appUnpacked);
+      }
+      fs.renameSync(nextAsar, appAsar);
+    })().catch((error) => {
+      console.error(error);
+      process.exit(1);
+    });
+    NODE
+
+    ${lib.getExe python3} ${../../lib/asar_integrity.py} \
+      set-info-plist-hash "$appInfoPlist" "$appAsar"
 
     runHook postBuild
   '';
@@ -246,6 +357,24 @@ stdenv.mkDerivation {
       echo "expected $out/bin/${pname} to be a launcher script, not a symlink" >&2
       exit 1
     fi
+
+    ${lib.getExe python3} ${../../lib/asar_integrity.py} \
+      check-info-plist-hash \
+      "$out/Applications/${appBundleName}/Contents/Info.plist" \
+      "$out/Applications/${appBundleName}/Contents/Resources/app.asar"
+
+    if [ ! -d "$out/Applications/${appBundleName}/Contents/Resources/app.asar.unpacked" ]; then
+      echo "missing native module unpack directory for ${appBundleName} app.asar" >&2
+      exit 1
+    fi
+
+    ELECTRON_RUN_AS_NODE=1 "$out/Applications/${appBundleName}/Contents/MacOS/${appName}" <<'NODE'
+    require(
+      process.env.out
+        + "/Applications/${appBundleName}/Contents/Resources/app.asar/node_modules/node-pty",
+    );
+    console.log("node-pty ok");
+    NODE
 
     runHook postInstallCheck
   '';

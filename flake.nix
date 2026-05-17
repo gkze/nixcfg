@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.1.10";
+      url = "github:generalaction/emdash/v1.1.16";
       flake = false;
     };
     flake-edit = {
@@ -141,7 +141,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.49.0";
+      url = "github:max-sixty/worktrunk/v0.50.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -251,7 +251,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad/v0.6.16";
+      url = "github:batrachianai/toad/v0.6.17";
       flake = false;
     };
     treewalker-nvim = {
@@ -339,7 +339,7 @@
           mkDevShell = import ./lib/dev-shell.nix {
             src = ./.;
             gitHooks = git-hooks;
-            inherit lib lintFiles;
+            inherit lib lintFiles mkNixcfgPackage;
           };
           mkNixcfgPackage =
             pkgs:

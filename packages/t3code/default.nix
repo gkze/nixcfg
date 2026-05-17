@@ -56,7 +56,8 @@ let
 
       ${lib.getExe python3} ${../t3code-desktop/render_runtime_package_json.py} \
         ${src} \
-        --output package.json
+        --output package.json \
+        --server-only
       cp ${./bun.lock} bun.lock
 
       bun install \

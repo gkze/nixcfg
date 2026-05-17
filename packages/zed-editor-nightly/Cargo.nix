@@ -114,6 +114,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "agent_skills" = rec {
+      packageId = "agent_skills";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "agent_skills";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "agent_ui" = rec {
       packageId = "agent_ui";
       build = internal.buildRustCrateWithFeatures {
@@ -1438,6 +1448,16 @@ rec {
       packageId = "notifications";
       build = internal.buildRustCrateWithFeatures {
         packageId = "notifications";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "oauth_callback_server" = rec {
+      packageId = "oauth_callback_server";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "oauth_callback_server";
       };
 
       # Debug support which might change between releases.
@@ -3109,6 +3129,10 @@ rec {
             packageId = "agent_settings";
           }
           {
+            name = "agent_skills";
+            packageId = "agent_skills";
+          }
+          {
             name = "anyhow";
             packageId = "anyhow";
           }
@@ -3223,6 +3247,10 @@ rec {
           {
             name = "prompt_store";
             packageId = "prompt_store";
+          }
+          {
+            name = "quick-xml";
+            packageId = "quick-xml 0.38.3";
           }
           {
             name = "regex";
@@ -3969,6 +3997,72 @@ rec {
         ];
 
       };
+      "agent_skills" = rec {
+        crateName = "agent_skills";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/agent_skills"; };
+        libPath = "agent_skills.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "const_format";
+            packageId = "const_format";
+          }
+          {
+            name = "fs";
+            packageId = "fs";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "paths";
+            packageId = "paths";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_yaml_ng";
+            packageId = "serde_yaml_ng";
+          }
+          {
+            name = "util";
+            packageId = "util";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "fs";
+            packageId = "fs";
+            features = [ "test-support" ];
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            features = [ "test-support" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+        ];
+
+      };
       "agent_ui" = rec {
         crateName = "agent_ui";
         version = "0.1.0";
@@ -4000,6 +4094,10 @@ rec {
           {
             name = "agent_settings";
             packageId = "agent_settings";
+          }
+          {
+            name = "agent_skills";
+            packageId = "agent_skills";
           }
           {
             name = "ai_onboarding";
@@ -14181,6 +14279,11 @@ rec {
             features = [ "test-support" ];
           }
           {
+            name = "git_graph";
+            packageId = "git_graph";
+            features = [ "test-support" ];
+          }
+          {
             name = "git_hosting_providers";
             packageId = "git_hosting_providers";
           }
@@ -15411,6 +15514,10 @@ rec {
             packageId = "net";
           }
           {
+            name = "oauth_callback_server";
+            packageId = "oauth_callback_server";
+          }
+          {
             name = "parking_lot";
             packageId = "parking_lot";
           }
@@ -15453,10 +15560,6 @@ rec {
           {
             name = "tempfile";
             packageId = "tempfile";
-          }
-          {
-            name = "tiny_http";
-            packageId = "tiny_http";
           }
           {
             name = "url";
@@ -15614,11 +15717,6 @@ rec {
           {
             name = "project";
             packageId = "project";
-          }
-          {
-            name = "semver";
-            packageId = "semver";
-            features = [ "serde" ];
           }
           {
             name = "serde";
@@ -17976,7 +18074,8 @@ rec {
             packageId = "workspace";
           }
         ];
-
+        features = {
+        };
       };
       "ctor" = rec {
         crateName = "ctor";
@@ -24898,6 +24997,10 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "language";
+            packageId = "language";
+          }
+          {
             name = "menu";
             packageId = "menu";
           }
@@ -28291,6 +28394,11 @@ rec {
             packageId = "project_panel";
           }
           {
+            name = "rand";
+            packageId = "rand 0.9.4";
+            optional = true;
+          }
+          {
             name = "search";
             packageId = "search";
           }
@@ -28302,6 +28410,10 @@ rec {
             name = "smallvec";
             packageId = "smallvec";
             features = [ "union" "const_new" ];
+          }
+          {
+            name = "task";
+            packageId = "task";
           }
           {
             name = "theme";
@@ -28382,9 +28494,9 @@ rec {
           }
         ];
         features = {
-          "test-support" = [ "project/test-support" "gpui/test-support" "remote_connection/test-support" ];
+          "test-support" = [ "dep:rand" "project/test-support" "gpui/test-support" "remote_connection/test-support" ];
         };
-        resolvedDefaultFeatures = [ "default" ];
+        resolvedDefaultFeatures = [ "default" "test-support" ];
       };
       "git_hosting_providers" = rec {
         crateName = "git_hosting_providers";
@@ -29882,7 +29994,7 @@ rec {
             name = "gpui_platform";
             packageId = "gpui_platform";
             usesDefaultFeatures = false;
-            features = [ "font-kit" ];
+            features = [ "font-kit" "wayland" "x11" ];
           }
           {
             name = "gpui_util";
@@ -36701,6 +36813,10 @@ rec {
             features = [ "schemars" ];
           }
           {
+            name = "oauth_callback_server";
+            packageId = "oauth_callback_server";
+          }
+          {
             name = "ollama";
             packageId = "ollama";
             features = [ "schemars" ];
@@ -36719,6 +36835,10 @@ rec {
             name = "opencode";
             packageId = "opencode";
             features = [ "schemars" ];
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.9.4";
           }
           {
             name = "release_channel";
@@ -36744,6 +36864,14 @@ rec {
             packageId = "settings";
           }
           {
+            name = "sha2";
+            packageId = "sha2";
+          }
+          {
+            name = "smol";
+            packageId = "smol";
+          }
+          {
             name = "strum";
             packageId = "strum 0.27.2";
             features = [ "derive" ];
@@ -36760,6 +36888,10 @@ rec {
           {
             name = "ui_input";
             packageId = "ui_input";
+          }
+          {
+            name = "url";
+            packageId = "url";
           }
           {
             name = "util";
@@ -36806,6 +36938,10 @@ rec {
             name = "language_model";
             packageId = "language_model";
             features = [ "test-support" ];
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot";
           }
           {
             name = "pretty_assertions";
@@ -36861,6 +36997,11 @@ rec {
           {
             name = "language_model";
             packageId = "language_model";
+          }
+          {
+            name = "log";
+            packageId = "log";
+            features = [ "kv_unstable_serde" "serde" ];
           }
           {
             name = "open_ai";
@@ -42868,6 +43009,41 @@ rec {
         ];
 
       };
+      "oauth_callback_server" = rec {
+        crateName = "oauth_callback_server";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/oauth_callback_server"; };
+        libPath = "src/oauth_callback_server.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
+          }
+          {
+            name = "log";
+            packageId = "log";
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
+            features = [ "kv_unstable_serde" "serde" ];
+          }
+          {
+            name = "tiny_http";
+            packageId = "tiny_http";
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
+          }
+          {
+            name = "url";
+            packageId = "url";
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
+          }
+        ];
+
+      };
       "objc" = rec {
         crateName = "objc";
         version = "0.2.7";
@@ -44715,6 +44891,10 @@ rec {
             packageId = "project";
           }
           {
+            name = "project_panel";
+            packageId = "project_panel";
+          }
+          {
             name = "schemars";
             packageId = "schemars 1.0.4";
             features = [ "indexmap2" ];
@@ -45933,6 +46113,10 @@ rec {
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/paths"; };
         libPath = "src/paths.rs";
         dependencies = [
+          {
+            name = "const_format";
+            packageId = "const_format";
+          }
           {
             name = "dirs";
             packageId = "dirs";
@@ -50451,6 +50635,10 @@ rec {
         libPath = "src/prompt_store.rs";
         dependencies = [
           {
+            name = "agent_skills";
+            packageId = "agent_skills";
+          }
+          {
             name = "anyhow";
             packageId = "anyhow";
           }
@@ -50466,6 +50654,14 @@ rec {
           {
             name = "collections";
             packageId = "collections";
+          }
+          {
+            name = "db";
+            packageId = "db";
+          }
+          {
+            name = "feature_flags";
+            packageId = "feature_flags";
           }
           {
             name = "fs";
@@ -50520,6 +50716,11 @@ rec {
             features = [ "derive" "rc" ];
           }
           {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+          {
             name = "strum";
             packageId = "strum 0.27.2";
             features = [ "derive" ];
@@ -50539,6 +50740,11 @@ rec {
           }
         ];
         devDependencies = [
+          {
+            name = "fs";
+            packageId = "fs";
+            features = [ "test-support" ];
+          }
           {
             name = "gpui";
             packageId = "gpui";
@@ -59292,6 +59498,38 @@ rec {
         ];
 
       };
+      "serde_yaml_ng" = rec {
+        crateName = "serde_yaml_ng";
+        version = "0.10.0";
+        edition = "2021";
+        sha256 = "07ylpzx9xykdj4fqfa0vb6xz4c1pazrqqibv78hd8dlbp4kvckbv";
+        authors = [
+          "Antoine Catton <devel@antoine.catton.fr>"
+        ];
+        dependencies = [
+          {
+            name = "indexmap";
+            packageId = "indexmap 2.11.4";
+          }
+          {
+            name = "itoa";
+            packageId = "itoa";
+          }
+          {
+            name = "ryu";
+            packageId = "ryu";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+          }
+          {
+            name = "unsafe-libyaml";
+            packageId = "unsafe-libyaml";
+          }
+        ];
+
+      };
       "serial2" = rec {
         crateName = "serial2";
         version = "0.2.33";
@@ -66548,6 +66786,10 @@ rec {
           {
             name = "db";
             packageId = "db";
+          }
+          {
+            name = "feature_flags";
+            packageId = "feature_flags";
           }
           {
             name = "fs";
@@ -85747,7 +85989,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "1.3.0";
+        version = "1.4.0";
         edition = "2024";
         crateBin = [
           {

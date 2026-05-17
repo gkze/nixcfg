@@ -185,6 +185,19 @@ in
       );
     };
 
+  removeProfileCopiesScript =
+    {
+      bundleNames,
+      targetDirectory,
+    }:
+    let
+      uniqueBundleNames = unique bundleNames;
+    in
+    callMacAppsHelper "remove-profile-copies" {
+      inherit targetDirectory;
+      bundleNames = uniqueBundleNames;
+    };
+
   profileBundleLeakAuditScript =
     {
       packagePaths,

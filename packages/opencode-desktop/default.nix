@@ -3,6 +3,7 @@
   inputs,
   lib,
   makeDesktopItem,
+  makeWrapper,
   models-dev,
   nixcfgElectron,
   nodejs,
@@ -36,6 +37,9 @@ let
   opencodeOverlayDir = repoRoot + "/overlays/opencode";
   appBundleName = "${appName}.app";
   appExecutableName = appName;
+  canonicalSessionDatabaseEnv = {
+    OPENCODE_DISABLE_CHANNEL_DB = "true";
+  };
 
   desktopPackagePath =
     if pathExists (src + "/packages/desktop/package.json") then
@@ -189,6 +193,7 @@ stdenv.mkDerivation {
 
   nativeBuildInputs = [
     bun
+    makeWrapper
     nodejs
     python3
   ];
@@ -338,7 +343,23 @@ stdenv.mkDerivation {
 
         mkdir -p "$out/Applications" "$out/bin"
         cp -R "$appBundle" "$out/Applications/${appBundleName}"
-        ln -s "$out/Applications/${appBundleName}/Contents/MacOS/${appExecutableName}" "$out/bin/${pname}"
+        ${lib.getExe python3} - "$out/Applications/${appBundleName}/Contents/Info.plist" <<'PY'
+        import plistlib
+        import sys
+
+        path = sys.argv[1]
+        with open(path, "rb") as handle:
+            info = plistlib.load(handle)
+        environment = dict(info.get("LSEnvironment", {}))
+        environment["OPENCODE_DISABLE_CHANNEL_DB"] = "${canonicalSessionDatabaseEnv.OPENCODE_DISABLE_CHANNEL_DB}"
+        info["LSEnvironment"] = environment
+        with open(path, "wb") as handle:
+            plistlib.dump(info, handle)
+        PY
+        makeWrapper \
+          "$out/Applications/${appBundleName}/Contents/MacOS/${appExecutableName}" \
+          "$out/bin/${pname}" \
+          --set-default OPENCODE_DISABLE_CHANNEL_DB ${lib.escapeShellArg canonicalSessionDatabaseEnv.OPENCODE_DISABLE_CHANNEL_DB}
 
         runHook postInstall
       ''
@@ -384,7 +405,10 @@ stdenv.mkDerivation {
 
         mkdir -p "$out/lib" "$out/bin" "$out/share/applications"
         cp -a "$appDir" "$out/lib/${linuxAppDirName}"
-        ln -s "$out/lib/${linuxAppDirName}/$(basename "$appBinary")" "$out/bin/${pname}"
+        makeWrapper \
+          "$out/lib/${linuxAppDirName}/$(basename "$appBinary")" \
+          "$out/bin/${pname}" \
+          --set-default OPENCODE_DISABLE_CHANNEL_DB ${lib.escapeShellArg canonicalSessionDatabaseEnv.OPENCODE_DISABLE_CHANNEL_DB}
 
         if [ -f "$out/lib/${linuxAppDirName}/resources/icons/icon.png" ]; then
           install -Dm644 \
@@ -398,6 +422,11 @@ stdenv.mkDerivation {
 
         runHook postInstall
       '';
+
+  postFixup = lib.optionalString stdenv.hostPlatform.isDarwin ''
+    /usr/bin/xattr -cr "$out/Applications/${appBundleName}"
+    /usr/bin/codesign --force --deep --sign - "$out/Applications/${appBundleName}"
+  '';
 
   doInstallCheck = true;
   installCheckPhase =
@@ -416,6 +445,20 @@ stdenv.mkDerivation {
           fi
         done
 
+        /usr/bin/codesign --verify --deep --strict "$out/Applications/${appBundleName}"
+        ${lib.getExe python3} - "$out/Applications/${appBundleName}/Contents/Info.plist" <<'PY'
+        import plistlib
+        import sys
+
+        path = sys.argv[1]
+        with open(path, "rb") as handle:
+            info = plistlib.load(handle)
+        actual = info.get("LSEnvironment", {}).get("OPENCODE_DISABLE_CHANNEL_DB")
+        if actual != "${canonicalSessionDatabaseEnv.OPENCODE_DISABLE_CHANNEL_DB}":
+            raise SystemExit(f"unexpected OPENCODE_DISABLE_CHANNEL_DB value: {actual!r}")
+        PY
+        grep -q 'OPENCODE_DISABLE_CHANNEL_DB' "$out/bin/${pname}"
+
         runHook postInstallCheck
       ''
     else
@@ -433,6 +476,8 @@ stdenv.mkDerivation {
           fi
         done
 
+        grep -q 'OPENCODE_DISABLE_CHANNEL_DB' "$out/bin/${pname}"
+
         runHook postInstallCheck
       '';
 
@@ -446,6 +491,7 @@ stdenv.mkDerivation {
       electronRuntime
       electronRuntimeVersion
       electronVersion
+      canonicalSessionDatabaseEnv
       node_modules
       opencodeChannel
       ;

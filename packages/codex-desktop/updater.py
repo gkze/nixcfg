@@ -46,6 +46,7 @@ class CodexDesktopUpdater(DownloadHashUpdater):
         "aarch64-darwin": "arm64",
         "x86_64-darwin": "x64",
     }
+    supported_platforms: ClassVar[tuple[str, ...]] = tuple(PLATFORMS)
 
     def _parse_appcast(self, xml_data: str, *, appcast_url: str) -> Element:
         try:

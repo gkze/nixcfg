@@ -311,309 +311,211 @@ def test_validate_workflow_structure_contracts_accepts_valid_certify_workflow(
     validate_workflow_structure_contracts(workflow_path=workflow)
 
 
-def test_validate_workflow_structure_contracts_requires_lock_smoke_marker(
-    tmp_path: Path,
-) -> None:
-    """The refresh workflow must keep using the lock-smoke command."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_refresh_workflow_text().replace(
-            "nix run .#nixcfg -- ci workflow darwin eval-lock-smoke",
-            "echo hi",
-            1,
-        ),
-    )
-    with pytest.raises(RuntimeError, match="missing required run step"):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_rejects_full_smoke_in_lock_phase(
-    tmp_path: Path,
-) -> None:
-    """The refresh workflow must never run the full-smoke command."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_refresh_workflow_text().replace(
-            "steps:\n              - run: nix run .#nixcfg -- ci workflow darwin eval-lock-smoke",
-            (
-                "steps:\n"
-                "              - run: nix run .#nixcfg -- ci workflow darwin eval-lock-smoke\n"
-                "              - run: nix run .#nixcfg -- ci workflow darwin eval-full-smoke"
+@pytest.mark.parametrize(
+    ("workflow_text", "error_match"),
+    [
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
+                "nix run .#nixcfg -- ci workflow darwin eval-lock-smoke",
+                "echo hi",
+                1,
             ),
-            1,
+            "missing required run step",
+            id="requires-lock-smoke-marker",
         ),
-    )
-    with pytest.raises(RuntimeError, match="must not run step"):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_requires_update_lock_dependency(
-    tmp_path: Path,
-) -> None:
-    """The refresh workflow must stay anchored to update-lock."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_refresh_workflow_text().replace(
-            "needs: update-lock", "needs: resolve-versions", 1
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
+                "steps:\n              - run: nix run .#nixcfg -- ci workflow darwin eval-lock-smoke",
+                (
+                    "steps:\n"
+                    "              - run: nix run .#nixcfg -- ci workflow darwin eval-lock-smoke\n"
+                    "              - run: nix run .#nixcfg -- ci workflow darwin eval-full-smoke"
+                ),
+                1,
+            ),
+            "must not run step",
+            id="rejects-full-smoke-in-lock-phase",
         ),
-    )
-    with pytest.raises(RuntimeError, match="must depend on update-lock"):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_rejects_merge_generated_in_lock_phase(
-    tmp_path: Path,
-) -> None:
-    """The early Darwin lock smoke must not slide into generated artifacts."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_refresh_workflow_text().replace(
-            "needs: update-lock",
-            "needs:\n              - update-lock\n              - merge-generated",
-            1,
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
+                "needs: update-lock", "needs: resolve-versions", 1
+            ),
+            "must depend on update-lock",
+            id="requires-update-lock-dependency",
         ),
-    )
-    with pytest.raises(RuntimeError, match="must stay in the lock-only phase"):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_requires_compute_hashes_lock_smoke(
-    tmp_path: Path,
-) -> None:
-    """Cross-platform hash computation must wait for the early lock smoke."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_refresh_workflow_text().replace(
-            "- darwin-lock-smoke", "- resolve-versions", 1
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
+                "needs: update-lock",
+                "needs:\n              - update-lock\n              - merge-generated",
+                1,
+            ),
+            "must stay in the lock-only phase",
+            id="rejects-merge-generated-in-lock-phase",
         ),
-    )
-    with pytest.raises(
-        RuntimeError, match="compute-hashes must depend on darwin-lock-smoke"
-    ):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_requires_pr_dispatch_permission(
-    tmp_path: Path,
-) -> None:
-    """The PR job must be allowed to start branch-bound validation workflows."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_refresh_workflow_text().replace("              actions: write\n", "", 1),
-    )
-    with pytest.raises(RuntimeError, match="must grant actions: write"):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_requires_ci_dispatch(
-    tmp_path: Path,
-) -> None:
-    """The update PR should kick off CI on the generated branch."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_refresh_workflow_text().replace("gh workflow run ci.yml", "echo", 1),
-    )
-    with pytest.raises(RuntimeError, match="must dispatch the CI workflow"):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_forbids_duplicate_certification_dispatch(
-    tmp_path: Path,
-) -> None:
-    """Certification already follows the update workflow through workflow_run."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_refresh_workflow_text().replace(
-            'gh workflow run ci.yml --ref "${UPDATE_BRANCH}"',
-            'gh workflow run ci.yml --ref "${UPDATE_BRANCH}"\n'
-            '                  gh workflow run update-certify.yml --ref "${UPDATE_BRANCH}" '
-            '-f ref="${UPDATE_BRANCH}"',
-            1,
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
+                "- darwin-lock-smoke", "- resolve-versions", 1
+            ),
+            "compute-hashes must depend on darwin-lock-smoke",
+            id="requires-compute-hashes-lock-smoke",
         ),
-    )
-    with pytest.raises(
-        RuntimeError, match="must not dispatch the certification workflow"
-    ):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_requires_full_smoke_marker(
-    tmp_path: Path,
-) -> None:
-    """The certification workflow must keep the full Darwin smoke step."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_certify_workflow_text().replace(
-            "nix run .#nixcfg -- ci workflow darwin eval-full-smoke",
-            "echo hi",
-            1,
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
+                "              actions: write\n", "", 1
+            ),
+            "must grant actions: write",
+            id="requires-pr-dispatch-permission",
         ),
-    )
-    with pytest.raises(RuntimeError, match="missing required run step"):
+        pytest.param(
+            _valid_refresh_workflow_text().replace("gh workflow run ci.yml", "echo", 1),
+            "must dispatch the CI workflow",
+            id="requires-ci-dispatch",
+        ),
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
+                'gh workflow run ci.yml --ref "${UPDATE_BRANCH}"',
+                'gh workflow run ci.yml --ref "${UPDATE_BRANCH}"\n'
+                '                  gh workflow run update-certify.yml --ref "${UPDATE_BRANCH}" '
+                '-f ref="${UPDATE_BRANCH}"',
+                1,
+            ),
+            "must not dispatch the certification workflow",
+            id="forbids-duplicate-certification-dispatch",
+        ),
+    ],
+)
+def test_validate_workflow_structure_contracts_rejects_refresh_drift(
+    tmp_path: Path,
+    workflow_text: str,
+    error_match: str,
+) -> None:
+    """The refresh workflow should reject each critical structural drift."""
+    workflow = _write_workflow(tmp_path / "workflow.yml", workflow_text)
+    with pytest.raises(RuntimeError, match=error_match):
         validate_workflow_structure_contracts(workflow_path=workflow)
 
 
-def test_validate_workflow_structure_contracts_requires_priority_darwin_full_smoke(
-    tmp_path: Path,
-) -> None:
-    """Priority Darwin fan-out must wait for the full Darwin smoke."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_certify_workflow_text().replace(
-            "          darwin-priority-heavy:\n"
-            "            needs:\n"
-            "              - darwin-full-smoke\n"
-            "              - warm-fod-cache-darwin",
-            (
+@pytest.mark.parametrize(
+    ("workflow_text", "error_match"),
+    [
+        pytest.param(
+            _valid_certify_workflow_text().replace(
+                "nix run .#nixcfg -- ci workflow darwin eval-full-smoke",
+                "echo hi",
+                1,
+            ),
+            "missing required run step",
+            id="requires-full-smoke-marker",
+        ),
+        pytest.param(
+            _valid_certify_workflow_text().replace(
                 "          darwin-priority-heavy:\n"
                 "            needs:\n"
-                "              - warm-fod-cache-darwin"
+                "              - darwin-full-smoke\n"
+                "              - warm-fod-cache-darwin",
+                (
+                    "          darwin-priority-heavy:\n"
+                    "            needs:\n"
+                    "              - warm-fod-cache-darwin"
+                ),
+                1,
             ),
-            1,
+            "darwin-priority-heavy must depend on darwin-full-smoke",
+            id="requires-priority-darwin-full-smoke",
         ),
-    )
-    with pytest.raises(
-        RuntimeError, match="darwin-priority-heavy must depend on darwin-full-smoke"
-    ):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_requires_extra_darwin_full_smoke(
-    tmp_path: Path,
-) -> None:
-    """Extra Darwin fan-out must wait for the full Darwin smoke."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_certify_workflow_text().replace(
-            "          darwin-extra-heavy:\n"
-            "            needs:\n"
-            "              - darwin-full-smoke\n"
-            "              - warm-fod-cache-darwin",
-            (
+        pytest.param(
+            _valid_certify_workflow_text().replace(
                 "          darwin-extra-heavy:\n"
                 "            needs:\n"
-                "              - warm-fod-cache-darwin"
-            ),
-            1,
-        ),
-    )
-    with pytest.raises(
-        RuntimeError, match="darwin-extra-heavy must depend on darwin-full-smoke"
-    ):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_requires_shared_darwin_full_smoke(
-    tmp_path: Path,
-) -> None:
-    """Shared Darwin closure computation must wait for the full Darwin smoke."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_certify_workflow_text().replace(
-            (
-                "          darwin-shared:\n"
-                "            needs:\n"
                 "              - darwin-full-smoke\n"
-                "              - warm-fod-cache-darwin"
+                "              - warm-fod-cache-darwin",
+                (
+                    "          darwin-extra-heavy:\n"
+                    "            needs:\n"
+                    "              - warm-fod-cache-darwin"
+                ),
+                1,
             ),
-            (
-                "          darwin-shared:\n"
-                "            needs:\n"
-                "              - warm-fod-cache-darwin"
+            "darwin-extra-heavy must depend on darwin-full-smoke",
+            id="requires-extra-darwin-full-smoke",
+        ),
+        pytest.param(
+            _valid_certify_workflow_text().replace(
+                (
+                    "          darwin-shared:\n"
+                    "            needs:\n"
+                    "              - darwin-full-smoke\n"
+                    "              - warm-fod-cache-darwin"
+                ),
+                (
+                    "          darwin-shared:\n"
+                    "            needs:\n"
+                    "              - warm-fod-cache-darwin"
+                ),
+                1,
             ),
-            1,
+            "darwin-shared must depend on darwin-full-smoke",
+            id="requires-shared-darwin-full-smoke",
         ),
-    )
-    with pytest.raises(
-        RuntimeError, match="darwin-shared must depend on darwin-full-smoke"
-    ):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_ungates_cache_jobs_from_quality_gates(
-    tmp_path: Path,
-) -> None:
-    """Cache-producing certify jobs must not depend on quality-gates."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_certify_workflow_text().replace(
-            "              - warm-fod-cache-darwin",
-            "              - warm-fod-cache-darwin\n              - quality-gates",
-            1,
-        ),
-    )
-    with pytest.raises(
-        RuntimeError, match="darwin-priority-heavy must not depend on quality-gates"
-    ):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_hosts_ignore_extra_heavy_gate(
-    tmp_path: Path,
-) -> None:
-    """Host builds should wait on priority-heavy targets, not extra-heavy ones."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_certify_workflow_text().replace(
-            "              - darwin-priority-heavy\n              - darwin-shared",
-            (
-                "              - darwin-priority-heavy\n"
-                "              - darwin-extra-heavy\n"
-                "              - darwin-shared"
+        pytest.param(
+            _valid_certify_workflow_text().replace(
+                "              - warm-fod-cache-darwin",
+                "              - warm-fod-cache-darwin\n              - quality-gates",
+                1,
             ),
-            1,
+            "darwin-priority-heavy must not depend on quality-gates",
+            id="ungates-cache-jobs-from-quality-gates",
         ),
-    )
-    with pytest.raises(
-        RuntimeError, match="darwin-argus must not depend on darwin-extra-heavy"
-    ):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_detects_missing_only_drift(
-    tmp_path: Path,
-) -> None:
-    """Report heavy targets that are not excluded from the shared closure."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_certify_workflow_text().replace(
-            "                  - package: alpha\n"
-            "                    target: .#pkgs.aarch64-darwin.alpha\n",
-            (
+        pytest.param(
+            _valid_certify_workflow_text().replace(
+                "              - darwin-priority-heavy\n              - darwin-shared",
+                (
+                    "              - darwin-priority-heavy\n"
+                    "              - darwin-extra-heavy\n"
+                    "              - darwin-shared"
+                ),
+                1,
+            ),
+            "darwin-argus must not depend on darwin-extra-heavy",
+            id="hosts-ignore-extra-heavy-gate",
+        ),
+        pytest.param(
+            _valid_certify_workflow_text().replace(
                 "                  - package: alpha\n"
-                "                    target: .#pkgs.aarch64-darwin.alpha\n"
-                "                  - package: gamma\n"
-                "                    target: .#pkgs.aarch64-darwin.gamma\n"
+                "                    target: .#pkgs.aarch64-darwin.alpha\n",
+                (
+                    "                  - package: alpha\n"
+                    "                    target: .#pkgs.aarch64-darwin.alpha\n"
+                    "                  - package: gamma\n"
+                    "                    target: .#pkgs.aarch64-darwin.gamma\n"
+                ),
+                1,
             ),
-            1,
+            "missing excludes: .#pkgs.aarch64-darwin.gamma",
+            id="detects-missing-only-drift",
         ),
-    )
-
-    with pytest.raises(
-        RuntimeError, match="missing excludes: .#pkgs.aarch64-darwin.gamma"
-    ):
-        validate_workflow_structure_contracts(workflow_path=workflow)
-
-
-def test_validate_workflow_structure_contracts_detects_extra_only_drift(
+        pytest.param(
+            _valid_certify_workflow_text().replace(
+                "                    --exclude-ref .#pkgs.aarch64-darwin.beta",
+                (
+                    "                    --exclude-ref .#pkgs.aarch64-darwin.beta\n"
+                    "                    --exclude-ref .#pkgs.aarch64-darwin.gamma"
+                ),
+                1,
+            ),
+            "unexpected excludes: .#pkgs.aarch64-darwin.gamma",
+            id="detects-extra-only-drift",
+        ),
+    ],
+)
+def test_validate_workflow_structure_contracts_rejects_certify_drift(
     tmp_path: Path,
+    workflow_text: str,
+    error_match: str,
 ) -> None:
-    """Report shared-closure excludes that no longer belong in the heavy split."""
-    workflow = _write_workflow(
-        tmp_path / "workflow.yml",
-        _valid_certify_workflow_text().replace(
-            "                    --exclude-ref .#pkgs.aarch64-darwin.beta",
-            (
-                "                    --exclude-ref .#pkgs.aarch64-darwin.beta\n"
-                "                    --exclude-ref .#pkgs.aarch64-darwin.gamma"
-            ),
-            1,
-        ),
-    )
-
-    with pytest.raises(
-        RuntimeError, match="unexpected excludes: .#pkgs.aarch64-darwin.gamma"
-    ):
+    """The certification workflow should reject each critical structural drift."""
+    workflow = _write_workflow(tmp_path / "workflow.yml", workflow_text)
+    with pytest.raises(RuntimeError, match=error_match):
         validate_workflow_structure_contracts(workflow_path=workflow)
 
 

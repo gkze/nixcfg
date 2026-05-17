@@ -1,7 +1,6 @@
 {
   config,
   lib,
-  pkgs,
   ...
 }:
 let
@@ -18,12 +17,6 @@ let
 
   cfg = config.nixcfg.opencode;
   opencodeMcpLib = import ../../lib/opencode-mcp.nix { inherit lib; };
-  mcpRemote = import ../../lib/mcp-remote-wrapper.nix { inherit lib pkgs; };
-  phoneMcpWrapper = mcpRemote.mkMcpRemoteWrapper {
-    name = "phone-mcp";
-    tokenEnv = "PHONE_AGENT_API_KEY";
-    url = "https://phone.kote.fyi/mcp";
-  };
 
   mcpServerType = types.submodule {
     freeformType = types.attrsOf types.anything;
@@ -104,23 +97,7 @@ let
     // optionalAttrs (url != null) { inherit url; }
     // optionalAttrs (environment != { }) { inherit environment; };
 
-  # Keep overlays sparse for shared/global servers, but preserve the historical
-  # disabled-by-default behavior for profile-only servers added outside the
-  # shared global config.
-  mkSparseServerOverride =
-    name: server:
-    let
-      extras = removeAttrs server [
-        "enable"
-        "enabled"
-      ];
-      enabled =
-        server.enabled or (server.enable or (if builtins.hasAttr name cfg.mcpServers then null else false));
-    in
-    extras // optionalAttrs (enabled != null) { inherit enabled; };
-
   renderMcpServers = servers: mapAttrs (_: mkServerConfig) servers;
-  renderSparseMcpServerOverrides = servers: mapAttrs mkSparseServerOverride servers;
 
   mergeProfileMcpServers =
     profileMcpServers: opencodeMcpLib.resolveSparseMcpServerOverrides cfg.mcpServers profileMcpServers;
@@ -159,15 +136,7 @@ let
     mcpServers = { };
   };
 
-  mkProfileOverlayConfig =
-    profile:
-    profile.settings
-    // {
-      "$schema" = profile.settings."$schema" or "https://opencode.ai/config.json";
-    }
-    // optionalAttrs (profile.mcpServers != { }) {
-      mcp = renderSparseMcpServerOverrides profile.mcpServers;
-    };
+  mkProfileOverlayConfig = opencodeMcpLib.mkProfileOverlayConfig cfg.mcpServers;
 
   selectedProfileConfig = cfg.profiles.${cfg.activeProfile} or emptyProfile;
   selectedProfilePath = "${config.home.homeDirectory}/.config/opencode/${cfg.activeProfile}.json";
@@ -274,10 +243,6 @@ in
           ];
         };
 
-        phone = {
-          type = "local";
-          command = [ "${phoneMcpWrapper}" ];
-        };
       };
       description = "Base MCP server definitions written to the global OpenCode config; servers default to disabled and can be enabled on demand.";
     };

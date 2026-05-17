@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -82,6 +83,7 @@ def _render_runtime_manifest(
     *,
     electron_builder_version: str | None = None,
     commit_hash: str | None = None,
+    server_only: bool = False,
 ) -> None:
     """Render the package-specific runtime manifest into *workspace*."""
     command = [
@@ -97,7 +99,41 @@ def _render_runtime_manifest(
         command.extend(["--electron-builder-version", electron_builder_version])
     if commit_hash is not None:
         command.extend(["--commit-hash", commit_hash])
+    if server_only:
+        command.append("--server-only")
     _run(command)
+
+
+def _runtime_workspace_dirs(workspace: Path) -> list[str]:
+    """Return explicit workspace package directories from the rendered manifest."""
+    manifest = json.loads((workspace / "package.json").read_text(encoding="utf-8"))
+    workspaces = manifest.get("workspaces")
+    if not isinstance(workspaces, dict):
+        return []
+    packages = workspaces.get("packages", [])
+    if not isinstance(packages, list) or not all(
+        isinstance(package, str) for package in packages
+    ):
+        msg = "rendered package.json workspaces.packages must be a string list"
+        raise UpdateRuntimeLocksError(msg)
+    return packages
+
+
+def _stage_runtime_workspace_dirs(workspace: Path) -> None:
+    """Copy workspace packages needed by workspace:* runtime dependencies."""
+    for rel_dir in _runtime_workspace_dirs(workspace):
+        src = UPSTREAM_SRC / rel_dir
+        if not src.is_dir():
+            msg = f"rendered package.json references missing workspace {rel_dir}"
+            raise UpdateRuntimeLocksError(msg)
+        dst = workspace / rel_dir
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(
+            src,
+            dst,
+            ignore=shutil.ignore_patterns("node_modules", ".turbo"),
+            dirs_exist_ok=True,
+        )
 
 
 def _refresh_lock(
@@ -106,6 +142,7 @@ def _refresh_lock(
     *,
     electron_builder_version: str | None = None,
     commit_hash: str | None = None,
+    server_only: bool = False,
 ) -> None:
     """Refresh one runtime lockfile from the rendered manifest."""
     with tempfile.TemporaryDirectory(prefix="t3code-runtime-lock.") as tmpdir_str:
@@ -115,7 +152,9 @@ def _refresh_lock(
             workspace,
             electron_builder_version=electron_builder_version,
             commit_hash=commit_hash,
+            server_only=server_only,
         )
+        _stage_runtime_workspace_dirs(workspace)
         shutil.copy2(lock_file, workspace / "bun.lock")
         _refresh_bun_lockfile(workspace)
         shutil.copy2(workspace / "bun.lock", lock_file)
@@ -126,7 +165,11 @@ def main() -> int:
     repo_root = Path.cwd()
     try:
         _ensure_repo_root(repo_root)
-        _refresh_lock(repo_root, repo_root / "packages" / "t3code" / "bun.lock")
+        _refresh_lock(
+            repo_root,
+            repo_root / "packages" / "t3code" / "bun.lock",
+            server_only=True,
+        )
         _refresh_lock(
             repo_root,
             repo_root / "packages" / "t3code-desktop" / "bun.lock",

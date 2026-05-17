@@ -191,6 +191,11 @@
           mode = "copy";
         }
         {
+          excludePackageName = "emdash";
+          package = pkgs.emdash;
+          mode = "copy";
+        }
+        {
           package = pkgs.vscode-insiders;
           mode = "copy";
         }

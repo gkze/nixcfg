@@ -18,21 +18,34 @@ _EVAL_JUSTIFICATION_TERMS = (
 )
 
 
+def _references_name(node: ast.AST | None, names: set[str]) -> bool:
+    if node is None:
+        return False
+    if isinstance(node, ast.Name):
+        return node.id in names
+    return node is not None and any(
+        isinstance(item, ast.Name) and item.id in names for item in ast.walk(node)
+    )
+
+
+def _references_repo_root(node: ast.AST | None) -> bool:
+    return _references_name(node, {"REPO_ROOT"})
+
+
 def _receiver_is_repo_source_path(
-    source: str,
     receiver: ast.expr,
     aliases: set[str] | None = None,
 ) -> bool:
-    text = ast.get_source_segment(source, receiver) or ""
-    if "REPO_ROOT" in text:
-        return True
     if isinstance(receiver, ast.Name):
-        return receiver.id.endswith("_PATH") or receiver.id in (aliases or set())
-    return False
+        return (
+            receiver.id == "REPO_ROOT"
+            or receiver.id.endswith("_PATH")
+            or receiver.id in (aliases or set())
+        )
+    return _references_repo_root(receiver)
 
 
 def _is_repo_source_read(
-    source: str,
     node: ast.AST | None,
     aliases: set[str] | None = None,
 ) -> bool:
@@ -40,55 +53,65 @@ def _is_repo_source_read(
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "read_text"
-        and _receiver_is_repo_source_path(source, node.func.value, aliases)
+        and _receiver_is_repo_source_path(node.func.value, aliases)
     )
 
 
-class _RepoSourceReaderVisitor(ast.NodeVisitor):
-    def __init__(self, source: str) -> None:
-        self.source = source
-        self.path_names: set[str] = set()
-        self.returns_repo_source_text = False
+class _RepoSourceReaderNameVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.names: set[str] = set()
+        self._function_names: list[str] = []
+        self._path_names: list[set[str]] = []
+        self._returns_repo_source_text: list[bool] = []
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function(node)
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self._function_names.append(node.name)
+        self._path_names.append(set())
+        self._returns_repo_source_text.append(False)
+        self.generic_visit(node)
+        returns_repo_source_text = self._returns_repo_source_text.pop()
+        function_name = self._function_names.pop()
+        self._path_names.pop()
+        if returns_repo_source_text:
+            self.names.add(function_name)
 
     def visit_Assign(self, node: ast.Assign) -> None:
         if self._is_repo_source_path(node.value):
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    self.path_names.add(target.id)
+                    self._path_names[-1].add(target.id)
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         if self._is_repo_source_path(node.value) and isinstance(node.target, ast.Name):
-            self.path_names.add(node.target.id)
+            self._path_names[-1].add(node.target.id)
         self.generic_visit(node)
 
     def visit_Return(self, node: ast.Return) -> None:
-        if _is_repo_source_read(self.source, node.value, self.path_names):
-            self.returns_repo_source_text = True
+        if _is_repo_source_read(node.value, self._path_names[-1]):
+            self._returns_repo_source_text[-1] = True
         self.generic_visit(node)
 
     def _is_repo_source_path(self, node: ast.AST | None) -> bool:
+        if not self._path_names:
+            return False
         if node is None:
             return False
-        text = ast.get_source_segment(self.source, node) or ""
-        if "REPO_ROOT" in text:
+        if _references_repo_root(node):
             return True
-        return any(
-            isinstance(item, ast.Name) and item.id in self.path_names
-            for item in ast.walk(node)
-        )
+        return _references_name(node, self._path_names[-1])
 
 
-def _repo_source_reader_names(source: str, tree: ast.AST) -> set[str]:
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef):
-            continue
-        visitor = _RepoSourceReaderVisitor(source)
-        visitor.visit(node)
-        if visitor.returns_repo_source_text:
-            names.add(node.name)
-    return names
+def _repo_source_reader_names(tree: ast.AST) -> set[str]:
+    visitor = _RepoSourceReaderNameVisitor()
+    visitor.visit(tree)
+    return visitor.names
 
 
 class _SourceSubstringVisitor(ast.NodeVisitor):
@@ -142,7 +165,7 @@ class _SourceSubstringVisitor(ast.NodeVisitor):
         self.violations.append(f"{rel}:{node.lineno}: {statement.strip()}")
 
     def _is_source_text(self, node: ast.AST | None) -> bool:
-        if _is_repo_source_read(self.source, node, self.source_path_names):
+        if _is_repo_source_read(node, self.source_path_names):
             return True
         return (
             isinstance(node, ast.Call)
@@ -153,13 +176,9 @@ class _SourceSubstringVisitor(ast.NodeVisitor):
     def _is_repo_source_path(self, node: ast.AST | None) -> bool:
         if node is None:
             return False
-        text = ast.get_source_segment(self.source, node) or ""
-        if "REPO_ROOT" in text:
+        if _references_repo_root(node):
             return True
-        return any(
-            isinstance(item, ast.Name) and item.id in self.source_path_names
-            for item in ast.walk(node)
-        )
+        return _references_name(node, self.source_path_names)
 
     def _uses_source_text(self, node: ast.AST) -> bool:
         if self._is_source_text(node):
@@ -347,7 +366,7 @@ assert "demo" in source_text
     visitor = _SourceSubstringVisitor(
         _REPO_ROOT / "lib/tests/test_demo.py",
         source,
-        _repo_source_reader_names(source, tree),
+        _repo_source_reader_names(tree),
     )
 
     visitor.visit(tree)
@@ -367,7 +386,7 @@ def read_source():
     return path.read_text(encoding="utf-8")
 """
 
-    assert _repo_source_reader_names(source, ast.parse(source)) == {"read_source"}
+    assert _repo_source_reader_names(ast.parse(source)) == {"read_source"}
 
 
 def test_tests_do_not_assert_substrings_in_repo_source_text() -> None:
@@ -379,11 +398,15 @@ def test_tests_do_not_assert_substrings_in_repo_source_text() -> None:
         if any(part in _EXCLUDED_PARTS for part in path.parts):
             continue
         source = path.read_text(encoding="utf-8")
+        if "read_text" not in source or (
+            "REPO_ROOT" not in source and "_PATH" not in source
+        ):
+            continue
         tree = ast.parse(source)
         visitor = _SourceSubstringVisitor(
             path,
             source,
-            _repo_source_reader_names(source, tree),
+            _repo_source_reader_names(tree),
         )
         visitor.visit(tree)
         violations.extend(visitor.violations)

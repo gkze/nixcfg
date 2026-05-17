@@ -48,14 +48,10 @@ in
       };
       agent = {
         default_model = {
-          model = "claude-opus-4-5-20251101";
-          provider = "anthropic";
+          model = "gpt-5.5";
+          provider = "openai";
         };
         dock = "left";
-        inline_assistant_model = {
-          model = "claude-opus-4-5-20251101";
-          provider = "anthropic";
-        };
         model_parameters = [ ];
         sidebar_side = "left";
       };
@@ -117,6 +113,20 @@ in
             env.VANTA_ENV_FILE = "${config.home.homeDirectory}/.config/vanta-credentials.env";
           };
         vercel = disabledRemoteMcp "https://mcp.vercel.com";
+      };
+      language_models.openai.available_models = [
+        {
+          name = "gpt-5.5";
+          display_name = "gpt-5.5 Extra High";
+          max_tokens = 1050000;
+          max_output_tokens = 128000;
+          reasoning_effort = "xhigh";
+          capabilities.chat_completions = false;
+        }
+      ];
+      edit_predictions = {
+        provider = "zed";
+        mode = "eager";
       };
       file_types = {
         "Shell Script" = [ ".envrc" ];

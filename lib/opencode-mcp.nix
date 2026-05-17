@@ -1,6 +1,11 @@
 { lib }:
 let
-  inherit (lib) recursiveUpdate types;
+  inherit (lib)
+    mapAttrs
+    optionalAttrs
+    recursiveUpdate
+    types
+    ;
 
   isNullable = check: value: value == null || check value;
 
@@ -40,9 +45,39 @@ let
   sparseMcpServerOverrideType = types.addCheck (types.attrsOf types.anything) isValidSparseMcpServerOverride;
 
   sparseMcpServerOverrideMapType = types.attrsOf sparseMcpServerOverrideType;
+
+  mkSparseServerOverride =
+    baseServers: name: server:
+    let
+      extras = removeAttrs server [
+        "enable"
+        "enabled"
+      ];
+      enabled =
+        server.enabled or (server.enable or (if builtins.hasAttr name baseServers then null else false));
+    in
+    extras // optionalAttrs (enabled != null) { inherit enabled; };
+
+  renderSparseMcpServerOverrides =
+    baseServers: servers: mapAttrs (mkSparseServerOverride baseServers) servers;
+
+  mkProfileOverlayConfig =
+    baseServers: profile:
+    profile.settings
+    // {
+      "$schema" = profile.settings."$schema" or "https://opencode.ai/config.json";
+    }
+    // optionalAttrs (profile.mcpServers != { }) {
+      mcp = renderSparseMcpServerOverrides baseServers profile.mcpServers;
+    };
 in
 {
-  inherit sparseMcpServerOverrideMapType sparseMcpServerOverrideType;
+  inherit
+    mkProfileOverlayConfig
+    renderSparseMcpServerOverrides
+    sparseMcpServerOverrideMapType
+    sparseMcpServerOverrideType
+    ;
 
   resolveSparseMcpServerOverrides =
     baseServers: overrideServers: recursiveUpdate baseServers overrideServers;

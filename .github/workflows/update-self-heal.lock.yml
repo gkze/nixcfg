@@ -1,4 +1,4 @@
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"ab53ced2212691438435e9e38bdae49e8f06f03c9e316e0542930c7031aa30ae","compiler_version":"v0.72.1","strict":true,"agent_id":"copilot","agent_model":"gpt-5.5"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"aa14e7347757fda0346533d8f61ce3ad91bb3e77b8a377295c43a469dda22c5c","compiler_version":"v0.72.1","strict":true,"agent_id":"copilot","agent_model":"gpt-5"}
 # gh-aw-manifest: {"version":1,"secrets":["COPILOT_GITHUB_TOKEN","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN","UPDATE_SELF_HEAL_GITHUB_TOKEN"],"actions":[{"repo":"actions/checkout","sha":"de0fac2e4500dabe0009e67214ff5f5447ce83dd","version":"v6.0.2"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9"},{"repo":"actions/setup-node","sha":"48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e","version":"v6.4.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw-actions/setup","sha":"bc56a0cad2f450c562810785ef38649c04db812a","version":"v0.72.1"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.25.41"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.25.41"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.25.41"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.3.6","digest":"sha256:2bb8eef86006a4c5963c55616a9c51c32f27bfdecb023b8aa6f91f6718d9171c","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.3.6@sha256:2bb8eef86006a4c5963c55616a9c51c32f27bfdecb023b8aa6f91f6718d9171c"},{"image":"ghcr.io/github/github-mcp-server:v1.0.3","digest":"sha256:2ac27ef03461ef2b877031b838a7d1fd7f12b12d4ace7796d8cad91446d55959","pinned_image":"ghcr.io/github/github-mcp-server:v1.0.3@sha256:2ac27ef03461ef2b877031b838a7d1fd7f12b12d4ace7796d8cad91446d55959"},{"image":"node:lts-alpine","digest":"sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f","pinned_image":"node:lts-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f"}]}
 #    ___                   _   _
 #   / _ \                 | | (_)
@@ -129,7 +129,7 @@ jobs:
         env:
           GH_AW_INFO_ENGINE_ID: "copilot"
           GH_AW_INFO_ENGINE_NAME: "GitHub Copilot CLI"
-          GH_AW_INFO_MODEL: "gpt-5.5"
+          GH_AW_INFO_MODEL: "gpt-5"
           GH_AW_INFO_VERSION: "1.0.40"
           GH_AW_INFO_AGENT_VERSION: "1.0.40"
           GH_AW_INFO_CLI_VERSION: "v0.72.1"
@@ -214,23 +214,23 @@ jobs:
         run: |
           bash "${RUNNER_TEMP}/gh-aw/actions/create_prompt_first.sh"
           {
-          cat << 'GH_AW_PROMPT_f5274d62e920b966_EOF'
+          cat << 'GH_AW_PROMPT_8ecc46acf1658fe6_EOF'
           <system>
-          GH_AW_PROMPT_f5274d62e920b966_EOF
+          GH_AW_PROMPT_8ecc46acf1658fe6_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/xpia.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/temp_folder_prompt.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/markdown.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/safe_outputs_prompt.md"
-          cat << 'GH_AW_PROMPT_f5274d62e920b966_EOF'
+          cat << 'GH_AW_PROMPT_8ecc46acf1658fe6_EOF'
           <safe-output-tools>
           Tools: create_pull_request, missing_tool, missing_data, noop, record_stop, retry_failed_jobs
-          GH_AW_PROMPT_f5274d62e920b966_EOF
+          GH_AW_PROMPT_8ecc46acf1658fe6_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/safe_outputs_create_pull_request.md"
-          cat << 'GH_AW_PROMPT_f5274d62e920b966_EOF'
+          cat << 'GH_AW_PROMPT_8ecc46acf1658fe6_EOF'
           </safe-output-tools>
-          GH_AW_PROMPT_f5274d62e920b966_EOF
+          GH_AW_PROMPT_8ecc46acf1658fe6_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/mcp_cli_tools_prompt.md"
-          cat << 'GH_AW_PROMPT_f5274d62e920b966_EOF'
+          cat << 'GH_AW_PROMPT_8ecc46acf1658fe6_EOF'
           <github-context>
           The following GitHub context information is available for this workflow:
           {{#if __GH_AW_GITHUB_ACTOR__ }}
@@ -262,12 +262,12 @@ jobs:
             - **Note**: If a branch you need is not in the list above and is not listed as an additional fetched ref, it has NOT been checked out. For private repositories you cannot fetch it without proper authentication. If the branch is required and not available, exit with an error and ask the user to add it to the `fetch:` option of the `checkout:` configuration (e.g., `fetch: ["refs/pulls/open/*"]` for all open PR refs, or `fetch: ["main", "feature/my-branch"]` for specific branches).
           </github-context>
 
-          GH_AW_PROMPT_f5274d62e920b966_EOF
+          GH_AW_PROMPT_8ecc46acf1658fe6_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/github_mcp_tools_with_safeoutputs_prompt.md"
-          cat << 'GH_AW_PROMPT_f5274d62e920b966_EOF'
+          cat << 'GH_AW_PROMPT_8ecc46acf1658fe6_EOF'
           </system>
           {{#runtime-import .github/workflows/update-self-heal.md}}
-          GH_AW_PROMPT_f5274d62e920b966_EOF
+          GH_AW_PROMPT_8ecc46acf1658fe6_EOF
           } > "$GH_AW_PROMPT"
       - name: Interpolate variables and render templates
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -412,7 +412,7 @@ jobs:
         run: |-
           set -euo pipefail
           test -n "${COPILOT_GITHUB_TOKEN}" || {
-            echo "COPILOT_GITHUB_TOKEN is required for the Copilot GPT-5.5 engine." >&2
+            echo "COPILOT_GITHUB_TOKEN is required for the Copilot GPT-5 engine." >&2
             exit 1
           }
           test -n "${UPDATE_SELF_HEAL_GITHUB_TOKEN}" || {
@@ -486,9 +486,9 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/gh-aw/safeoutputs"
           mkdir -p /tmp/gh-aw/safeoutputs
           mkdir -p /tmp/gh-aw/mcp-logs/safeoutputs
-          cat > "${RUNNER_TEMP}/gh-aw/safeoutputs/config.json" << 'GH_AW_SAFE_OUTPUTS_CONFIG_d637436c1e94d35b_EOF'
+          cat > "${RUNNER_TEMP}/gh-aw/safeoutputs/config.json" << 'GH_AW_SAFE_OUTPUTS_CONFIG_d45b239ac758692f_EOF'
           {"create_pull_request":{"allowed_base_branches":["main"],"allowed_files":["packages/**","overlays/**","lib/tests/**","tests/**","docs/**","misc/**"],"auto_close_issue":false,"base_branch":"main","draft":false,"fallback_as_issue":false,"labels":["agentic-update-repair"],"max":1,"max_patch_files":100,"max_patch_size":1024,"preserve_branch_name":true,"protect_top_level_dot_folders":true,"protected_files":["package.json","bun.lockb","bunfig.toml","deno.json","deno.jsonc","deno.lock","global.json","NuGet.Config","Directory.Packages.props","mix.exs","mix.lock","go.mod","go.sum","stack.yaml","stack.yaml.lock","pom.xml","build.gradle","build.gradle.kts","settings.gradle","settings.gradle.kts","gradle.properties","package-lock.json","yarn.lock","pnpm-lock.yaml","npm-shrinkwrap.json","requirements.txt","Pipfile","Pipfile.lock","pyproject.toml","setup.py","setup.cfg","Gemfile","Gemfile.lock","uv.lock","CODEOWNERS","DESIGN.md","README.md","CONTRIBUTING.md","CHANGELOG.md","SECURITY.md","CODE_OF_CONDUCT.md","AGENTS.md","CLAUDE.md","GEMINI.md"],"protected_files_policy":"allowed","title_prefix":"[agentic update repair] "},"create_report_incomplete_issue":{},"missing_data":{},"missing_tool":{},"noop":{"max":1,"report-as-issue":"true"},"record-stop":{"description":"Record a stopped campaign with evidence in the evergreen ledger.","inputs":{"campaign_key":{"default":null,"description":"Campaign key, normally update branch plus first failing run id.","required":true,"type":"string"},"evidence":{"default":null,"description":"Evidence supporting the stop decision.","required":true,"type":"string"},"reason":{"default":null,"description":"Refusal or stop reason.","required":true,"type":"string"},"run_id":{"default":null,"description":"GitHub Actions run id that caused the stop decision.","required":true,"type":"string"}}},"report_incomplete":{},"retry-failed-jobs":{"description":"Rerun failed jobs from a transient update failure after budget checks pass.","inputs":{"campaign_key":{"default":null,"description":"Campaign key, normally update branch plus first failing run id.","required":true,"type":"string"},"evidence":{"default":null,"description":"Evidence supporting the transient classification.","required":true,"type":"string"},"job_ids":{"default":null,"description":"JSON array of failed job databaseId values to rerun.","required":true,"type":"string"},"reason":{"default":null,"description":"Short retry reason.","required":true,"type":"string"},"run_id":{"default":null,"description":"GitHub Actions run id whose failed jobs should be rerun.","required":true,"type":"string"}}}}
-          GH_AW_SAFE_OUTPUTS_CONFIG_d637436c1e94d35b_EOF
+          GH_AW_SAFE_OUTPUTS_CONFIG_d45b239ac758692f_EOF
       - name: Generate Safe Outputs Tools
         env:
           GH_AW_TOOLS_META_JSON: |
@@ -766,7 +766,7 @@ jobs:
 
           mkdir -p /home/runner/.copilot
           GH_AW_NODE=$(which node 2>/dev/null || command -v node 2>/dev/null || echo node)
-          cat << GH_AW_MCP_CONFIG_ad419363858eab89_EOF | "$GH_AW_NODE" "${RUNNER_TEMP}/gh-aw/actions/start_mcp_gateway.cjs"
+          cat << GH_AW_MCP_CONFIG_23d2b0b6e26432a4_EOF | "$GH_AW_NODE" "${RUNNER_TEMP}/gh-aw/actions/start_mcp_gateway.cjs"
           {
             "mcpServers": {
               "github": {
@@ -807,7 +807,7 @@ jobs:
               "payloadDir": "${MCP_GATEWAY_PAYLOAD_DIR}"
             }
           }
-          GH_AW_MCP_CONFIG_ad419363858eab89_EOF
+          GH_AW_MCP_CONFIG_23d2b0b6e26432a4_EOF
       - name: Mount MCP servers as CLIs
         id: mount-mcp-clis
         continue-on-error: true
@@ -881,7 +881,7 @@ jobs:
           COPILOT_AGENT_RUNNER_TYPE: STANDALONE
           COPILOT_API_KEY: dummy-byok-key-for-offline-mode
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-          COPILOT_MODEL: gpt-5.5
+          COPILOT_MODEL: gpt-5
           GH_AW_MCP_CONFIG: /home/runner/.copilot/mcp-config.json
           GH_AW_PHASE: agent
           GH_AW_PROMPT: /tmp/gh-aw/aw-prompts/prompt.txt
@@ -1343,7 +1343,7 @@ jobs:
           COPILOT_AGENT_RUNNER_TYPE: STANDALONE
           COPILOT_API_KEY: dummy-byok-key-for-offline-mode
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-          COPILOT_MODEL: gpt-5.5
+          COPILOT_MODEL: gpt-5
           GH_AW_PHASE: detection
           GH_AW_PROMPT: /tmp/gh-aw/aw-prompts/prompt.txt
           GH_AW_VERSION: v0.72.1
@@ -1630,7 +1630,7 @@ jobs:
       GH_AW_DETECTION_REASON: ${{ needs.detection.outputs.detection_reason }}
       GH_AW_EFFECTIVE_TOKENS: ${{ needs.agent.outputs.effective_tokens }}
       GH_AW_ENGINE_ID: "copilot"
-      GH_AW_ENGINE_MODEL: "gpt-5.5"
+      GH_AW_ENGINE_MODEL: "gpt-5"
       GH_AW_ENGINE_VERSION: "1.0.40"
       GH_AW_WORKFLOW_ID: "update-self-heal"
       GH_AW_WORKFLOW_NAME: "Agentic Update Self-Heal"

@@ -84,6 +84,172 @@ def test_render_runtime_package_json_resolves_catalog_dependencies(
     assert "electron" not in payload["dependencies"]
 
 
+def test_render_runtime_package_json_preserves_runtime_workspace_dependencies(
+    tmp_path: Path,
+) -> None:
+    """Runtime workspace deps need an explicit, minimal workspaces stanza."""
+    module = _load_module(
+        "packages/t3code-desktop/render_runtime_package_json.py",
+        "t3code_desktop_manifest_workspace_test",
+    )
+
+    source_root = tmp_path / "t3code"
+    for rel_dir in (
+        "apps/server",
+        "apps/desktop",
+        "packages/contracts",
+        "packages/shared",
+        "packages/ssh",
+        "packages/tailscale",
+    ):
+        (source_root / rel_dir).mkdir(parents=True)
+
+    (source_root / "package.json").write_text(
+        json.dumps({
+            "workspaces": {
+                "packages": ["packages/*"],
+                "catalog": {"effect": "4.0.0"},
+            },
+            "overrides": {},
+        }),
+        encoding="utf-8",
+    )
+    (source_root / "apps/server/package.json").write_text(
+        json.dumps({"version": "0.0.23", "dependencies": {"effect": "catalog:"}}),
+        encoding="utf-8",
+    )
+    (source_root / "apps/desktop/package.json").write_text(
+        json.dumps({
+            "dependencies": {
+                "@t3tools/ssh": "workspace:*",
+                "@t3tools/tailscale": "workspace:*",
+                "electron": "41.5.0",
+            }
+        }),
+        encoding="utf-8",
+    )
+    (source_root / "packages/contracts/package.json").write_text(
+        json.dumps({
+            "name": "@t3tools/contracts",
+            "dependencies": {"effect": "catalog:"},
+        }),
+        encoding="utf-8",
+    )
+    (source_root / "packages/shared/package.json").write_text(
+        json.dumps({
+            "name": "@t3tools/shared",
+            "dependencies": {"@t3tools/contracts": "workspace:*"},
+        }),
+        encoding="utf-8",
+    )
+    (source_root / "packages/ssh/package.json").write_text(
+        json.dumps({
+            "name": "@t3tools/ssh",
+            "dependencies": {"@t3tools/shared": "workspace:*"},
+            "optionalDependencies": {"@t3tools/shared": "workspace:*"},
+        }),
+        encoding="utf-8",
+    )
+    (source_root / "packages/tailscale/package.json").write_text(
+        json.dumps({
+            "name": "@t3tools/tailscale",
+            "dependencies": {"effect": "catalog:"},
+        }),
+        encoding="utf-8",
+    )
+
+    payload = module.build_runtime_manifest(source_root)
+
+    assert payload["dependencies"] == {
+        "effect": "4.0.0",
+        "@t3tools/ssh": "workspace:*",
+        "@t3tools/tailscale": "workspace:*",
+    }
+    assert payload["workspaces"] == {
+        "packages": [
+            "packages/contracts",
+            "packages/shared",
+            "packages/ssh",
+            "packages/tailscale",
+        ],
+        "catalog": {"effect": "4.0.0"},
+    }
+    assert "electron" not in payload["dependencies"]
+
+
+def test_render_runtime_package_json_can_omit_desktop_runtime_dependencies(
+    tmp_path: Path,
+) -> None:
+    """The standalone CLI runtime should not pull desktop-only dependencies."""
+    module = _load_module(
+        "packages/t3code-desktop/render_runtime_package_json.py",
+        "t3code_desktop_manifest_server_only_test",
+    )
+
+    source_root = tmp_path / "t3code"
+    (source_root / "apps/server").mkdir(parents=True)
+    (source_root / "apps/desktop").mkdir(parents=True)
+
+    (source_root / "package.json").write_text(
+        json.dumps({"workspaces": {"catalog": {}}, "overrides": {}}),
+        encoding="utf-8",
+    )
+    (source_root / "apps/server/package.json").write_text(
+        json.dumps({"version": "0.0.23", "dependencies": {"node-pty": "^1.1.0"}}),
+        encoding="utf-8",
+    )
+    (source_root / "apps/desktop/package.json").write_text(
+        json.dumps({
+            "dependencies": {
+                "@t3tools/desktop-only": "workspace:*",
+                "electron": "41.5.0",
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    payload = module.build_runtime_manifest(
+        source_root,
+        include_desktop_runtime=False,
+    )
+
+    assert payload["dependencies"] == {"node-pty": "^1.1.0"}
+    assert "workspaces" not in payload
+
+
+def test_render_runtime_package_json_rejects_unresolved_workspace_dependency(
+    tmp_path: Path,
+) -> None:
+    """Raise a targeted error when workspace deps are absent from root workspaces."""
+    module = _load_module(
+        "packages/t3code-desktop/render_runtime_package_json.py",
+        "t3code_desktop_manifest_missing_workspace_test",
+    )
+
+    source_root = tmp_path / "t3code"
+    (source_root / "apps/server").mkdir(parents=True)
+    (source_root / "apps/desktop").mkdir(parents=True)
+
+    (source_root / "package.json").write_text(
+        json.dumps({"workspaces": {"packages": [], "catalog": {}}, "overrides": {}}),
+        encoding="utf-8",
+    )
+    (source_root / "apps/server/package.json").write_text(
+        json.dumps({"version": "0.0.23", "dependencies": {}}),
+        encoding="utf-8",
+    )
+    (source_root / "apps/desktop/package.json").write_text(
+        json.dumps({"dependencies": {"@t3tools/missing": "workspace:*"}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Unable to resolve workspace dependency '@t3tools/missing'",
+    ):
+        module.build_runtime_manifest(source_root)
+
+
 def test_render_runtime_package_json_rejects_unresolved_catalog_dependency(
     tmp_path: Path,
 ) -> None:
@@ -154,6 +320,10 @@ def test_render_runtime_package_json_rejects_invalid_root_shapes(
         (
             {"workspaces": {"catalog": {}}, "overrides": {"effect": 1}},
             "Expected string entries in 'overrides'",
+        ),
+        (
+            {"workspaces": {"catalog": {}, "packages": [1]}, "overrides": {}},
+            "Expected 'packages' to be a string list",
         ),
     ],
 )

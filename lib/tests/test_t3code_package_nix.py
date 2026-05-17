@@ -52,6 +52,17 @@ def _shared_output() -> AttributeSet:
 def test_t3code_package_wraps_the_bun_runtime_entrypoint() -> None:
     """The package should expose ``t3`` by wrapping Bun around the built dist."""
     assert_nix_ast_equal(_t3code_derivation().name, "stdenvNoCC.mkDerivation")
+    node_modules = expect_instance(
+        expect_scope_binding(_t3code_derivation(), "node_modules").value,
+        FunctionCall,
+    )
+    node_modules_args = expect_instance(node_modules.argument, AttributeSet)
+    node_modules_build = expect_instance(
+        expect_binding(node_modules_args.values, "buildPhase").value,
+        IndentedString,
+    )
+    assert "--server-only" in node_modules_build.value
+
     install_phase = expect_instance(
         expect_binding(_t3code_derivation_args().values, "installPhase").value,
         IndentedString,

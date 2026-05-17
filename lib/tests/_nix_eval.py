@@ -23,6 +23,20 @@ from lib.update.paths import REPO_ROOT
 _NIX_EVAL_TIMEOUT_SECONDS = 30
 
 
+def _nix_eval_command(*, raw: bool) -> list[str]:
+    nix_instantiate = shutil.which("nix-instantiate")
+    if nix_instantiate is not None:
+        command = [nix_instantiate, "--eval", "--strict"]
+        command.append("--raw" if raw else "--json")
+        return command
+
+    nix = shutil.which("nix")
+    assert nix is not None
+    command = [nix, "eval", "--impure"]
+    command.append("--raw" if raw else "--json")
+    return command
+
+
 def nix_value(value: object) -> NixExpression:
     """Convert a Python value into a nix-manipulator expression."""
     if isinstance(value, NixExpression):
@@ -72,10 +86,7 @@ def nix_let(bindings: Mapping[str, object], value: object) -> LetExpression:
 
 
 def _run_nix_eval(expression: NixExpression, *, raw: bool) -> str:
-    nix = shutil.which("nix")
-    assert nix is not None
-    command = [nix, "eval", "--impure"]
-    command.append("--raw" if raw else "--json")
+    command = _nix_eval_command(raw=raw)
     command.extend(["--expr", expression.rebuild()])
     result = subprocess.run(  # noqa: S603
         command,

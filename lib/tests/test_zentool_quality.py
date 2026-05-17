@@ -44,6 +44,13 @@ def _run(command: list[str], *, cwd: Path) -> None:
     raise AssertionError(message)
 
 
+def _ruff_command(*args: str) -> list[str]:
+    ruff = shutil.which("ruff")
+    if ruff is not None:
+        return [ruff, *args]
+    return [sys.executable, "-m", "ruff", *args]
+
+
 def _copy_zentool_tree(tmp_path: Path, *, source: str) -> tuple[Path, Path]:
     temp_root = tmp_path / "repo"
     temp_root.mkdir()
@@ -136,28 +143,22 @@ def _run_repo_python_quality_tools(temp_root: Path, script_path: Path) -> None:
     )
     relative_script = script_path.relative_to(temp_root)
     _run(
-        [
-            sys.executable,
-            "-m",
-            "ruff",
+        _ruff_command(
             "check",
             "--fix-only",
             "--config",
             "pyproject.toml",
             str(relative_script),
-        ],
+        ),
         cwd=temp_root,
     )
     _run(
-        [
-            sys.executable,
-            "-m",
-            "ruff",
+        _ruff_command(
             "format",
             "--config",
             "pyproject.toml",
             str(relative_script),
-        ],
+        ),
         cwd=temp_root,
     )
     py_compile.compile(str(script_path), doraise=True)

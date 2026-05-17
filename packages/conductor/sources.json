@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-hDHrmDBGf3cTlHu9E5B7NpHtwOLqNhRB5xzZWsvNwFk=",
-    "x86_64-darwin": "sha256-EeGlJWSD5sx6W7iR0tzgW4MaAlolgY2xO+JaOr3ms88="
+    "aarch64-darwin": "sha256-IbllwaENHiGQwYVQ2LErnnF7BJOvvT2puwRxw+L/FdU=",
+    "x86_64-darwin": "sha256-sou/SJZDFhG6UpHohZ/D8F+18KBUgkO6IrwMDhUalZM="
   },
   "urls": {
     "aarch64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-aarch64",
     "x86_64-darwin": "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/dmg-x86_64"
   },
-  "version": "0.52.2"
+  "version": "0.52.3"
 }

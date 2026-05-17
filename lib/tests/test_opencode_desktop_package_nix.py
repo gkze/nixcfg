@@ -256,6 +256,77 @@ def test_opencode_desktop_derivation_keeps_platform_branches() -> None:
         assert isinstance(phase.alternative, IndentedString)
 
 
+def test_opencode_desktop_darwin_bundle_is_resigned_after_copy() -> None:
+    """The final copied .app should have a valid ad-hoc bundle signature."""
+    derivation_args = _derivation_args()
+    install_check = expect_instance(
+        expect_binding(derivation_args.values, "installCheckPhase").value,
+        IfExpression,
+    )
+    post_fixup = expect_instance(
+        expect_binding(derivation_args.values, "postFixup").value,
+        FunctionCall,
+    )
+    darwin_check = expect_instance(install_check.consequence, IndentedString)
+    optional_string = expect_instance(post_fixup.name, FunctionCall)
+    darwin_post_fixup = expect_instance(post_fixup.argument, IndentedString)
+
+    assert_nix_ast_equal(optional_string.name, "lib.optionalString")
+    assert_nix_ast_equal(optional_string.argument, "stdenv.hostPlatform.isDarwin")
+    assert '/usr/bin/xattr -cr "$out/Applications/${appBundleName}"' in (
+        darwin_post_fixup.value
+    )
+    assert (
+        '/usr/bin/codesign --force --deep --sign - "$out/Applications/${appBundleName}"'
+        in darwin_post_fixup.value
+    )
+    assert (
+        '/usr/bin/codesign --verify --deep --strict "$out/Applications/${appBundleName}"'
+        in darwin_check.value
+    )
+
+
+def test_opencode_desktop_runtime_env_uses_canonical_session_database() -> None:
+    """Desktop packaging should select the canonical session DB downstream."""
+    package = _package_assertion()
+    derivation_args = _derivation_args()
+    install_phase = expect_instance(
+        expect_binding(derivation_args.values, "installPhase").value,
+        IfExpression,
+    )
+    install_check = expect_instance(
+        expect_binding(derivation_args.values, "installCheckPhase").value,
+        IfExpression,
+    )
+    darwin_install = expect_instance(install_phase.consequence, IndentedString)
+    linux_install = expect_instance(install_phase.alternative, IndentedString)
+    darwin_check = expect_instance(install_check.consequence, IndentedString)
+    linux_check = expect_instance(install_check.alternative, IndentedString)
+
+    assert_nix_ast_equal(
+        expect_scope_binding(package, "canonicalSessionDatabaseEnv").value,
+        '{ OPENCODE_DISABLE_CHANNEL_DB = "true"; }',
+    )
+    assert_nix_ast_equal(
+        expect_binding(derivation_args.values, "nativeBuildInputs").value,
+        """
+        [
+          bun
+          makeWrapper
+          nodejs
+          python3
+        ]
+        """,
+    )
+    assert "LSEnvironment" in darwin_install.value
+    assert "makeWrapper" in darwin_install.value
+    assert "makeWrapper" in linux_install.value
+    assert "--set-default OPENCODE_DISABLE_CHANNEL_DB" in darwin_install.value
+    assert "--set-default OPENCODE_DISABLE_CHANNEL_DB" in linux_install.value
+    assert "OPENCODE_DISABLE_CHANNEL_DB" in darwin_check.value
+    assert "OPENCODE_DISABLE_CHANNEL_DB" in linux_check.value
+
+
 def test_opencode_desktop_sources_platforms_match_supported_matrix() -> None:
     """Persisted source hashes should advertise the full supported platform matrix."""
     hashes = _sources_payload().get("hashes")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +21,11 @@ class _ProfileBundleLeakAuditPayload(TypedDict):
     label: ReadOnly[str]
     managedBundleNames: ReadOnly[list[str]]
     packagePaths: ReadOnly[list[str]]
+
+
+class _RemoveProfileCopiesPayload(TypedDict):
+    bundleNames: ReadOnly[list[str]]
+    targetDirectory: ReadOnly[str]
 
 
 class _SystemApplicationEntryPayload(TypedDict):
@@ -122,6 +128,15 @@ def _profile_bundle_leak_audit_payload(
     }
 
 
+def _remove_profile_copies_payload(
+    payload: Mapping[str, object],
+) -> _RemoveProfileCopiesPayload:
+    return {
+        "bundleNames": _required_str_list(payload, "bundleNames"),
+        "targetDirectory": _required_str(payload, "targetDirectory"),
+    }
+
+
 def _system_applications_payload(
     payload: Mapping[str, object],
 ) -> _SystemApplicationsPayload:
@@ -171,6 +186,39 @@ def _remove_path(path: Path) -> None:
         return
 
     path.unlink()
+
+
+def _ensure_single_path_component(value: str, *, field: str) -> None:
+    path = Path(value)
+    if path.is_absolute() or len(path.parts) != 1 or path.parts[0] in {".", ".."}:
+        _payload_error(f"payload field {field!r} must contain only path components")
+
+
+def _chmod_user_writable(path: Path) -> None:
+    if path.is_symlink():
+        return
+
+    try:
+        mode = path.stat().st_mode
+    except FileNotFoundError:
+        return
+
+    path.chmod(mode | stat.S_IWUSR)
+
+
+def _make_tree_user_writable(path: Path) -> None:
+    if not _path_exists(path) or path.is_symlink():
+        return
+
+    _chmod_user_writable(path)
+    if not path.is_dir():
+        return
+
+    for root, directories, files in os.walk(path, followlinks=False):
+        root_path = Path(root)
+        _chmod_user_writable(root_path)
+        for entry_name in [*directories, *files]:
+            _chmod_user_writable(root_path / entry_name)
 
 
 def _read_manifest(path: Path) -> list[str]:
@@ -271,6 +319,29 @@ def _profile_bundle_leak_audit(payload: Mapping[str, object]) -> None:
     raise SystemExit(1)
 
 
+def _remove_profile_copies(payload: Mapping[str, object]) -> None:
+    parsed = _remove_profile_copies_payload(payload)
+    target_directory = Path(parsed["targetDirectory"])
+    bundle_names = parsed["bundleNames"]
+
+    for bundle_name in bundle_names:
+        _ensure_single_path_component(bundle_name, field="bundleNames")
+
+    if target_directory.is_symlink():
+        return
+
+    for bundle_name in bundle_names:
+        target_path = target_directory / bundle_name
+        if not _path_exists(target_path):
+            continue
+
+        _print_stderr(
+            f"removing Home Manager copy of system-managed app {target_path}..."
+        )
+        _make_tree_user_writable(target_path)
+        _remove_path(target_path)
+
+
 def _system_applications(payload: Mapping[str, object]) -> None:
     parsed = _system_applications_payload(payload)
     entries = parsed["entries"]
@@ -322,6 +393,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "profile-bundle-leak-audit":
         _profile_bundle_leak_audit(payload)
+        return 0
+
+    if command == "remove-profile-copies":
+        _remove_profile_copies(payload)
         return 0
 
     if command == "system-applications":

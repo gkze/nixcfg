@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-E+upxNWpA6fugMrZmhSiDvCBQXuU/J0ERqIuEb3Va+k=",
-    "x86_64-darwin": "sha256-e/xW5LAN4zI6qeCUbLr1mRvuBwlJVSg4JC0WfC6RWpQ="
+    "aarch64-darwin": "sha256-YAHth2zIti4a5Bt8nhJGwx570T6xGqW6f/FjvZ74jIA=",
+    "x86_64-darwin": "sha256-VNmMw+/7j4Sr9BCKgqfZQ1HTQYaOzWNeDBjsGcOMrro="
   },
   "urls": {
-    "aarch64-darwin": "https://persistent.oaistatic.com/codex-app-prod/Codex-darwin-arm64-26.506.31421.zip",
-    "x86_64-darwin": "https://persistent.oaistatic.com/codex-app-prod/Codex-darwin-x64-26.506.31421.zip"
+    "aarch64-darwin": "https://persistent.oaistatic.com/codex-app-prod/Codex-darwin-arm64-26.513.31313.zip",
+    "x86_64-darwin": "https://persistent.oaistatic.com/codex-app-prod/Codex-darwin-x64-26.513.31313.zip"
   },
-  "version": "26.506.31421-2620"
+  "version": "26.513.31313-2867"
 }

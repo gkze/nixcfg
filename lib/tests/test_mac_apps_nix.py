@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import stat
 import textwrap
 from contextlib import redirect_stderr
 from functools import cache
@@ -243,6 +244,19 @@ def _managed_mac_app_routing_table() -> NixExpression:
                 Binding(
                     name="package",
                     value=identifier_attr_path("pkgs", "jetbrains", "datagrip"),
+                ),
+                Binding(name="mode", value=StringPrimitive(value="copy")),
+            ]
+        ),
+        AttributeSet(
+            values=[
+                Binding(
+                    name="excludePackageName",
+                    value=StringPrimitive(value="emdash"),
+                ),
+                Binding(
+                    name="package",
+                    value=identifier_attr_path("pkgs", "emdash"),
                 ),
                 Binding(name="mode", value=StringPrimitive(value="copy")),
             ]
@@ -616,6 +630,80 @@ def test_home_manager_mac_app_module_asserts_managed_apps_stay_out_of_home_packa
     )
 
 
+def test_home_manager_mac_app_module_removes_profile_copies_before_hm_check() -> None:
+    """Stale Home Manager copies should not block App Management checks."""
+    home_config = expect_instance(
+        expect_binding(
+            _module_output("modules/home/darwin.nix").values, "config"
+        ).value,
+        AttributeSet,
+    )
+    home_binding = expect_instance(
+        expect_binding(home_config.values, "home").value, AttributeSet
+    )
+    home_activation = expect_instance(
+        expect_binding(home_binding.values, "activation").value,
+        AttributeSet,
+    )
+    cleanup = expect_instance(
+        expect_binding(
+            home_activation.values, "nixcfgRemoveSystemApplicationProfileCopies"
+        ).value,
+        FunctionCall,
+    )
+    mk_if = expect_instance(cleanup.name, FunctionCall)
+    assert_nix_ast_equal(mk_if.name, identifier_attr_path("lib", "mkIf"))
+    assert_nix_ast_equal(
+        mk_if.argument,
+        BinaryExpression(
+            left=identifier_attr_path("cfg", "systemApplications"),
+            operator=Operator(name="!="),
+            right=nix_list([]),
+        ),
+    )
+
+    entry_before = expect_instance(
+        expect_instance(cleanup.argument, Parenthesis).value, FunctionCall
+    )
+    entry_before_name = expect_instance(entry_before.name, FunctionCall)
+    assert_nix_ast_equal(
+        entry_before_name.name,
+        identifier_attr_path("lib", "hm", "dag", "entryBefore"),
+    )
+    assert_nix_ast_equal(
+        entry_before_name.argument, nix_list(["checkAppManagementPermission"])
+    )
+
+    remove_copies = expect_instance(
+        expect_instance(entry_before.argument, Parenthesis).value,
+        FunctionCall,
+    )
+    assert_nix_ast_equal(
+        remove_copies.name,
+        identifier_attr_path("macApps", "removeProfileCopiesScript"),
+    )
+    remove_args = expect_instance(remove_copies.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(remove_args.values, "bundleNames").value,
+        FunctionCall(
+            name=FunctionCall(
+                name=Identifier(name="map"),
+                argument=Parenthesis(
+                    value=FunctionDefinition(
+                        argument_set=Identifier(name="entry"),
+                        output=identifier_attr_path("entry", "bundleName"),
+                    )
+                ),
+            ),
+            argument=identifier_attr_path("cfg", "systemApplications"),
+        ),
+    )
+    assert_nix_ast_equal(
+        expect_binding(remove_args.values, "targetDirectory").value,
+        identifier_attr_path("config", "targets", "darwin", "copyApps", "directory"),
+    )
+
+
 def test_home_manager_mac_app_module_audits_profile_bundle_leaks() -> None:
     """Home Manager should audit profile package outputs for managed app bundles."""
     home_config = expect_instance(
@@ -764,6 +852,106 @@ def test_profile_bundle_leak_audit_script_ignores_unmanaged_bundle_exposure(
         })
 
     assert stderr.getvalue() == ""
+
+
+def test_remove_profile_copies_script_removes_read_only_stale_bundles(
+    tmp_path: Path,
+) -> None:
+    """Profile-copy cleanup should unblock Home Manager's App Management check."""
+    remove_script = expect_instance(
+        _mac_apps_fragment_expr(
+            "  removeProfileCopiesScript =\n",
+            "\n\n  profileBundleLeakAuditScript =",
+        ),
+        FunctionDefinition,
+    )
+    assert [argument.rebuild() for argument in remove_script.argument_set] == [
+        "bundleNames",
+        "targetDirectory",
+    ]
+    remove_call = expect_instance(remove_script.output, FunctionCall)
+    assert_nix_ast_equal(
+        remove_call.name,
+        'callMacAppsHelper "remove-profile-copies"',
+    )
+    remove_args = expect_instance(remove_call.argument, AttributeSet)
+    assert_nix_ast_equal(
+        remove_args,
+        """
+        {
+          inherit targetDirectory;
+          bundleNames = uniqueBundleNames;
+        }
+        """,
+    )
+
+    target_directory = tmp_path / "Home Manager Apps"
+    target_directory.mkdir()
+    stale_bundle = target_directory / "Emdash.app"
+    stale_contents = stale_bundle / "Contents"
+    stale_contents.mkdir(parents=True)
+    stale_info = stale_contents / "Info.plist"
+    stale_info.write_text("old", encoding="utf-8")
+    stale_info.chmod(stat.S_IRUSR)
+    stale_link = stale_contents / "StoreLink"
+    stale_link.symlink_to(tmp_path / "missing-store-target")
+    stale_contents.chmod(stat.S_IRUSR | stat.S_IXUSR)
+    stale_bundle.chmod(stat.S_IRUSR | stat.S_IXUSR)
+
+    stale_file = target_directory / "DataGrip.app"
+    stale_file.write_text("not a directory", encoding="utf-8")
+    stale_file.chmod(stat.S_IRUSR)
+
+    stderr = StringIO()
+    with redirect_stderr(stderr):
+        mac_apps_helper._remove_profile_copies({
+            "bundleNames": ["Missing.app", "Emdash.app", "DataGrip.app"],
+            "targetDirectory": str(target_directory),
+        })
+
+    assert not stale_bundle.exists()
+    assert not stale_file.exists()
+    assert stderr.getvalue() == (
+        "removing Home Manager copy of system-managed app "
+        f"{target_directory / 'Emdash.app'}...\n"
+        "removing Home Manager copy of system-managed app "
+        f"{target_directory / 'DataGrip.app'}...\n"
+    )
+
+    mac_apps_helper._make_tree_user_writable(tmp_path / "missing-path")
+    symlinked_directory = tmp_path / "Linked Apps"
+    symlinked_directory.symlink_to(target_directory)
+    mac_apps_helper._make_tree_user_writable(symlinked_directory)
+    mac_apps_helper._chmod_user_writable(tmp_path / "missing-file")
+
+    payload = tmp_path / "cleanup.json"
+    payload.write_text(
+        json.dumps({
+            "bundleNames": [],
+            "targetDirectory": str(symlinked_directory),
+        }),
+        encoding="utf-8",
+    )
+    assert mac_apps_helper.main(["prog", "remove-profile-copies", str(payload)]) == 0
+
+
+@pytest.mark.parametrize("bundle_name", ["../Emdash.app", ".."])
+def test_remove_profile_copies_script_rejects_nested_bundle_names(
+    bundle_name: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Cleanup payloads must not escape the configured profile app directory."""
+    with pytest.raises(SystemExit) as exc:
+        mac_apps_helper._remove_profile_copies({
+            "bundleNames": [bundle_name],
+            "targetDirectory": str(tmp_path),
+        })
+
+    assert exc.value.code == 2
+    assert "payload field 'bundleNames' must contain only path components" in (
+        capsys.readouterr().err
+    )
 
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
@@ -1273,6 +1461,7 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
             "/Users/${primaryUser}/Applications/Home Manager Apps/ChatGPT.app"
             not in apps
         )
+        assert "/Applications/ChatGPT.app" not in apps
         assert (
             "/Users/${primaryUser}/Applications/Home Manager Apps/DataGrip.app"
             not in apps
@@ -1282,11 +1471,9 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
             not in apps
         )
 
-    assert "/Applications/ChatGPT.app" in george_dock
     assert "/Applications/DataGrip.app" in george_dock
     assert "/Applications/Spotify.app" in george_dock
 
-    assert "/Applications/ChatGPT.app" in town_dock
     assert "/Applications/Cursor.app" in town_dock
     assert "/Applications/Visual Studio Code - Insiders.app" in town_dock
     assert "/Applications/DataGrip.app" in town_dock

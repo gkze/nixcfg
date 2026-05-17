@@ -80,14 +80,6 @@ let
       type = "remote";
       url = "https://mcp.vercel.com";
     };
-    clerk = {
-      type = "remote";
-      url = "https://mcp.clerk.com/mcp";
-    };
-    supabase = {
-      type = "remote";
-      url = "https://mcp.supabase.com/mcp?project_ref=xfgralojsgvvibogtjxo";
-    };
     # GitHub MCP (remote via mcp-remote proxy) - uses PAT from sops secret
     # Toolsets: repos, pull_requests, actions
     github = {

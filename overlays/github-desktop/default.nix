@@ -126,6 +126,10 @@ in
         electronVersion = electronRuntime.version;
         upstreamChannel = "beta";
       };
+
+      meta = (oldAttrs.meta or { }) // {
+        platforms = prev.lib.unique ((oldAttrs.meta.platforms or [ ]) ++ prev.lib.platforms.darwin);
+      };
     }
   );
 }

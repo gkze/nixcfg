@@ -27,6 +27,17 @@ in
       })
     ];
 
+    home.activation.nixcfgRemoveSystemApplicationProfileCopies =
+      lib.mkIf (cfg.systemApplications != [ ])
+        (
+          lib.hm.dag.entryBefore [ "checkAppManagementPermission" ] (
+            macApps.removeProfileCopiesScript {
+              bundleNames = map (entry: entry.bundleName) cfg.systemApplications;
+              targetDirectory = config.targets.darwin.copyApps.directory;
+            }
+          )
+        );
+
     home.activation.nixcfgProfileAppBundleAudit = lib.mkIf (cfg.systemApplications != [ ]) (
       lib.hm.dag.entryAfter [ "installPackages" ] (
         macApps.profileBundleLeakAuditScript {

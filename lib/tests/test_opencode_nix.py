@@ -392,6 +392,82 @@ def _eval_opencode_json(
     return payload
 
 
+def _opencode_mcp_lib_call() -> FunctionCall:
+    return FunctionCall(
+        name=Parenthesis(value=nix_import(REPO_ROOT / "lib/opencode-mcp.nix")),
+        argument=nix_attrset({"lib": Identifier(name="lib")}),
+    )
+
+
+def _opencode_mcp_test_lib() -> AttributeSet:
+    return nix_attrset({
+        "mapAttrs": identifier_attr_path("builtins", "mapAttrs"),
+        "optionalAttrs": parse_nix_expr(
+            "condition: attrs: if condition then attrs else { }"
+        ),
+        "recursiveUpdate": parse_nix_expr("left: right: left // right"),
+        "types": {
+            "addCheck": parse_nix_expr("type: check: type"),
+            "anything": "anything",
+            "attrsOf": parse_nix_expr("type: type"),
+        },
+    })
+
+
+def _eval_profile_overlay_json(
+    profile_config: AttributeSet,
+    *,
+    base_servers: AttributeSet | None = None,
+) -> dict[str, Any]:
+    """Evaluate only the semantic profile overlay renderer without evalModules."""
+    renderer = FunctionCall(
+        name=identifier_attr_path("opencodeMcpLib", "mkProfileOverlayConfig"),
+        argument=base_servers if base_servers is not None else nix_attrset({}),
+    )
+    payload = nix_eval_json(
+        nix_let(
+            {
+                "lib": _opencode_mcp_test_lib(),
+                "opencodeMcpLib": _opencode_mcp_lib_call(),
+            },
+            FunctionCall(name=renderer, argument=profile_config),
+        )
+    )
+    assert isinstance(payload, dict)
+    return payload
+
+
+def _eval_sparse_mcp_override_map(
+    option_path: str,
+    value: AttributeSet,
+) -> object:
+    """Evaluate only sparse MCP override type-validation semantics."""
+    module = nix_attrset({
+        "options": {
+            option_path: _mk_option(
+                identifier_attr_path(
+                    "opencodeMcpLib", "sparseMcpServerOverrideMapType"
+                ),
+                {},
+            )
+        },
+        f"config.{option_path}": value,
+    })
+    return nix_eval_json(
+        nix_let(
+            {
+                "lib": nixpkgs_lib_expression(),
+                "opencodeMcpLib": _opencode_mcp_lib_call(),
+                "result": FunctionCall(
+                    name=identifier_attr_path("lib", "evalModules"),
+                    argument=nix_attrset({"modules": nix_list([module])}),
+                ),
+            },
+            identifier_attr_path("result", "config", *option_path.split(".")),
+        )
+    )
+
+
 def _work_profile_eval_kwargs(
     *,
     profile_config: AttributeSet | None = None,
@@ -603,29 +679,18 @@ def test_selected_profile_json_is_a_thin_overlay_when_no_overrides_exist() -> No
                 _opencode_module_output(), "mkProfileOverlayConfig"
             ).value
         )
-        == """profile:
-profile.settings
-// {
-  \"$schema\" = profile.settings.\"$schema\" or \"https://opencode.ai/config.json\";
-}
-// optionalAttrs (profile.mcpServers != { }) {
-  mcp = renderSparseMcpServerOverrides profile.mcpServers;
-}"""
+        == "opencodeMcpLib.mkProfileOverlayConfig cfg.mcpServers"
     )
 
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_selected_profile_json_contains_only_profile_overrides() -> None:
     """Profile overlays should omit shared base config and keep only overrides."""
-    profile = _eval_opencode_json(
+    profile = _eval_profile_overlay_json(
         nix_attrset({
-            "activeProfile": "personal",
-            "profiles.personal": {
-                "settings.model": "anthropic/claude-sonnet-4-5",
-                "mcpServers.macos-automator.enable": True,
-            },
+            "settings.model": "anthropic/claude-sonnet-4-5",
+            "mcpServers.macos-automator.enable": True,
         }),
-        profile_name="personal",
     )
 
     assert profile["$schema"] == "https://opencode.ai/config.json"
@@ -638,16 +703,15 @@ def test_selected_profile_json_contains_only_profile_overrides() -> None:
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_selected_profile_json_preserves_freeform_mcp_extras() -> None:
     """Profile-only MCP additions should keep extras and stay disabled by default."""
-    profile = _eval_opencode_json(
+    profile = _eval_profile_overlay_json(
         nix_attrset({
-            "activeProfile": "personal",
-            "profiles.personal.mcpServers.notion": {
+            "settings": {},
+            "mcpServers.notion": {
                 "type": "remote",
                 "url": "https://mcp.notion.com/mcp",
                 "oauth": {},
             },
         }),
-        profile_name="personal",
     )
 
     assert profile["mcp"]["notion"] == {
@@ -817,9 +881,18 @@ def test_work_profile_overlay_keeps_shared_defaults_in_global_config() -> None:
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_work_profile_sparse_mcp_overrides_stay_sparse() -> None:
-    """Work MCP override sparsity depends on module merge semantics, so keep a tiny eval."""
-    profile = _eval_work_profile_json(
-        work_config={"opencodeMcp.chrome-devtools.enable": True}
+    """Work MCP overrides for shared global servers should render sparsely."""
+    profile = _eval_profile_overlay_json(
+        nix_attrset({
+            "settings": {},
+            "mcpServers.chrome-devtools.enable": True,
+        }),
+        base_servers=nix_attrset({
+            "chrome-devtools": {
+                "type": "local",
+                "command": ["npx"],
+            }
+        }),
     )
 
     assert profile["mcp"]["chrome-devtools"] == {"enabled": True}
@@ -829,12 +902,11 @@ def test_work_profile_sparse_mcp_overrides_stay_sparse() -> None:
 def test_profile_mcp_override_invalid_shape_is_rejected() -> None:
     """Type errors come from ``evalModules`` validation, so this stays as a minimal eval."""
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
-        _eval_opencode_json(
+        _eval_sparse_mcp_override_map(
+            "nixcfg.opencode.profiles.personal.mcpServers",
             nix_attrset({
-                "activeProfile": "personal",
-                "profiles.personal.mcpServers.chrome-devtools.command": "bunx",
+                "chrome-devtools.command": "bunx",
             }),
-            profile_name="personal",
         )
 
     assert excinfo.value.stderr is not None
@@ -848,8 +920,9 @@ def test_profile_mcp_override_invalid_shape_is_rejected() -> None:
 def test_work_profile_mcp_override_invalid_shape_is_rejected() -> None:
     """Type errors come from ``evalModules`` validation, so this stays as a minimal eval."""
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
-        _eval_work_profile_json(
-            work_config={"opencodeMcp.chrome-devtools.command": "bunx"}
+        _eval_sparse_mcp_override_map(
+            "profiles.work.opencodeMcp",
+            nix_attrset({"chrome-devtools.command": "bunx"}),
         )
 
     assert excinfo.value.stderr is not None

@@ -89,6 +89,38 @@ def test_t3code_desktop_package_keeps_staged_runtime_and_electron_dist() -> None
         'outputs.lib.sourceHashForPlatform pname "nodeModulesHash" system',
     )
 
+    build_phase = expect_instance(
+        expect_binding(_desktop_derivation_args().values, "buildPhase").value,
+        IndentedString,
+    )
+    build_shell = parse_shell(build_phase.value)
+    build_commands = command_texts(build_shell)
+    for command in (
+        'export HOME="$TMPDIR/home"',
+        'export BUN_INSTALL_CACHE_DIR="$TMPDIR/.bun-cache"',
+        'export NODE_COMPILE_CACHE="$TMPDIR/node-compile-cache"',
+        "export NODE_DISABLE_COMPILE_CACHE=1",
+        'mkdir -p "$appBuildRoot"',
+        'cd "$appBuildRoot"',
+    ):
+        assert command in build_commands
+    electron_builder = command_texts(
+        build_shell, "./node_modules/.bin/electron-builder"
+    )
+    assert len(electron_builder) == 1
+    assert "-c.npmRebuild=false" in electron_builder[0]
+
+    for required_contract in (
+        'T3CODE_APP_ASAR="$appAsar"',
+        "@electron+asar@",
+        "createPackageFromFiles(",
+        '{ unpack: "*.node" },',
+        'appUnpacked = appAsar + ".unpacked"',
+        "${../../lib/asar_integrity.py}",
+        "set-info-plist-hash",
+    ):
+        assert required_contract in build_phase.value
+
     install_phase = expect_instance(
         expect_binding(_desktop_derivation_args().values, "installPhase").value,
         IndentedString,
@@ -106,6 +138,20 @@ def test_t3code_desktop_package_keeps_staged_runtime_and_electron_dist() -> None
         '      "$out/Applications/__NIX_INTERP__/Contents/MacOS/__NIX_INTERP__" \\\n'
         '      "$out/bin/__NIX_INTERP__"'
     ]
+    install_check_phase = expect_instance(
+        expect_binding(_desktop_derivation_args().values, "installCheckPhase").value,
+        IndentedString,
+    )
+    install_check_shell = parse_shell(install_check_phase.value)
+    electron_smokes = [
+        command
+        for command in command_texts(install_check_shell)
+        if command.startswith("ELECTRON_RUN_AS_NODE=1")
+    ]
+    assert len(electron_smokes) == 1
+    assert "check-info-plist-hash" in install_check_phase.value
+    assert "app.asar.unpacked" in install_check_phase.value
+    assert "app.asar/node_modules/node-pty" in install_check_phase.value
     passthru = expect_instance(
         expect_binding(_desktop_derivation_args().values, "passthru").value,
         AttributeSet,

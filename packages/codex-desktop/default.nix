@@ -27,6 +27,8 @@ stdenvNoCC.mkDerivation {
   };
 
   dontUnpack = true;
+  dontFixup = true;
+
   nativeBuildInputs = [
     unzip
     darwin.xattr
