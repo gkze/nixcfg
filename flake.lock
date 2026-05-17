@@ -88,17 +88,17 @@
     "brew-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1777713173,
-        "narHash": "sha256-OWP/gY6TrdZx5lj/FwVUJcQg61z+w0FCrFy0Fli1L+0=",
+        "lastModified": 1778949768,
+        "narHash": "sha256-+P8ePUKUd9+6fDSDsl584LZ4wyO9FE4XHuUcL6FZGTg=",
         "owner": "Homebrew",
         "repo": "brew",
-        "rev": "4a95077682ae5f342cf60ff181ebbcfb03d49117",
+        "rev": "fb60c879bac6e441c1e71468c0d0887d4c430558",
         "type": "github"
       },
       "original": {
         "owner": "Homebrew",
         "repo": "brew",
-        "rev": "4a95077682ae5f342cf60ff181ebbcfb03d49117",
+        "rev": "fb60c879bac6e441c1e71468c0d0887d4c430558",
         "type": "github"
       }
     },
@@ -1225,34 +1225,34 @@
     "homebrew-cask": {
       "flake": false,
       "locked": {
-        "lastModified": 1777741099,
-        "narHash": "sha256-jhg1b+Nidpc4VYk8Pyh/10hmCZsyYspiGtsLuCzN9O4=",
+        "lastModified": 1778991462,
+        "narHash": "sha256-ylHiCJZvbmk12g+Z1YCAcDICDuD1kyamLhnp/UIgPZQ=",
         "owner": "homebrew",
         "repo": "homebrew-cask",
-        "rev": "d680f10a0c8ce5142a9765536129a9d57e3f4b9c",
+        "rev": "b40e0b0c4faa6b0d7e458b67bb96820621411bde",
         "type": "github"
       },
       "original": {
         "owner": "homebrew",
         "repo": "homebrew-cask",
-        "rev": "d680f10a0c8ce5142a9765536129a9d57e3f4b9c",
+        "rev": "b40e0b0c4faa6b0d7e458b67bb96820621411bde",
         "type": "github"
       }
     },
     "homebrew-core": {
       "flake": false,
       "locked": {
-        "lastModified": 1777736898,
-        "narHash": "sha256-J0H8JHYMbD/23gbQlUmzCJ24p1DFbk7S8iFvyGwwPvw=",
+        "lastModified": 1778992252,
+        "narHash": "sha256-jW1Za6F37Ap+HVEw59mwutRPM9G38SXOfSAjBeX+cms=",
         "owner": "homebrew",
         "repo": "homebrew-core",
-        "rev": "60fd33c8b6bcb76248cb4e8f3cdde93d6ba8ce75",
+        "rev": "d1b066427e859ac2820238300a3a49fa2880fe1b",
         "type": "github"
       },
       "original": {
         "owner": "homebrew",
         "repo": "homebrew-core",
-        "rev": "60fd33c8b6bcb76248cb4e8f3cdde93d6ba8ce75",
+        "rev": "d1b066427e859ac2820238300a3a49fa2880fe1b",
         "type": "github"
       }
     },

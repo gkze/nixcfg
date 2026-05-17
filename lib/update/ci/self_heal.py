@@ -38,6 +38,33 @@ AUTO_FIX_ALLOWED_PATH_PREFIXES: Final = (
     "docs/",
     "misc/",
 )
+# Keep this list aligned with the PR CI surface; the workflow structure tests compare
+# it against .github/workflows/ci.yml so branch-protection drift fails locally.
+EXPECTED_REPAIR_PR_REQUIRED_CHECKS: Final = (
+    "commitlint",
+    "format-repo",
+    "lint-editorconfig",
+    "format-yaml-yamlfmt",
+    "lint-yaml-yamllint",
+    "format-web-oxfmt",
+    "lint-web-oxlint",
+    "format-python-pyupgrade",
+    "format-python-ruff",
+    "lint-python-compile",
+    "lint-python-ruff",
+    "lint-python-ty",
+    "lint-workflows-actionlint",
+    "test-nix-default-api",
+    "test-nix-opencode-desktop",
+    "cache-electron-runtimes",
+    "test-python-pytest",
+    "verify-workflow-artifacts-refresh",
+    "verify-workflow-artifacts-certify",
+    "verify-workflow-structure-refresh",
+    "verify-workflow-structure-certify",
+    "lint-pins-pinact",
+    "verify-crate2nix",
+)
 
 
 class SelfHealPolicyError(ValueError):
@@ -211,13 +238,22 @@ def _validate_auto_fix_path(path: str) -> None:
         raise SelfHealPolicyError(msg)
 
 
+def validate_auto_fix_paths(paths: Sequence[str]) -> None:
+    """Fail closed unless actual repair PR paths stay in allowed lanes."""
+    clean_paths = tuple(path.strip() for path in paths if path.strip())
+    if not clean_paths:
+        msg = "repair PR must change at least one path"
+        raise SelfHealPolicyError(msg)
+    for path in clean_paths:
+        _validate_auto_fix_path(path)
+
+
 def validate_auto_fix_classifier(classifier: ClassifierDecision) -> None:
     """Fail closed unless a classifier decision is eligible for repair auto-merge."""
     if classifier.decision is not Decision.AUTO_FIX:
         msg = "repair PR classifier marker must be an auto_fix decision"
         raise SelfHealPolicyError(msg)
-    for path in classifier.affected_paths:
-        _validate_auto_fix_path(path)
+    validate_auto_fix_paths(classifier.affected_paths)
 
 
 def _validate_decision_shape(classifier: ClassifierDecision) -> None:
@@ -361,15 +397,45 @@ def require_cycle_budget(
         raise SelfHealPolicyError(msg)
 
 
-def required_checks_present(protection_payload: Mapping[str, Any] | None) -> bool:
-    """Return whether branch protection has at least one required check."""
+def required_check_contexts(
+    protection_payload: Mapping[str, Any] | None,
+) -> frozenset[str]:
+    """Return configured required status/check contexts from branch protection."""
     if not protection_payload:
-        return False
-    contexts = protection_payload.get("contexts")
-    checks = protection_payload.get("checks")
-    return (isinstance(contexts, list) and bool(contexts)) or (
-        isinstance(checks, list) and bool(checks)
-    )
+        return frozenset()
+    contexts: set[str] = set()
+    raw_contexts = protection_payload.get("contexts")
+    if isinstance(raw_contexts, list):
+        contexts.update(
+            item.strip()
+            for item in raw_contexts
+            if isinstance(item, str) and item.strip()
+        )
+    raw_checks = protection_payload.get("checks")
+    if isinstance(raw_checks, list):
+        for check in raw_checks:
+            if isinstance(check, str) and check.strip():
+                contexts.add(check.strip())
+            elif isinstance(check, dict):
+                context = check.get("context")
+                if isinstance(context, str) and context.strip():
+                    contexts.add(context.strip())
+    return frozenset(contexts)
+
+
+def missing_required_checks(
+    protection_payload: Mapping[str, Any] | None,
+    *,
+    expected: Sequence[str] = EXPECTED_REPAIR_PR_REQUIRED_CHECKS,
+) -> tuple[str, ...]:
+    """Return expected CI gates absent from branch protection."""
+    contexts = required_check_contexts(protection_payload)
+    return tuple(check for check in expected if check not in contexts)
+
+
+def required_checks_present(protection_payload: Mapping[str, Any] | None) -> bool:
+    """Return whether branch protection requires every expected repair PR gate."""
+    return not missing_required_checks(protection_payload)
 
 
 def repair_pr_event_from_github(payload: Mapping[str, Any]) -> RepairPullRequestEvent:
@@ -463,10 +529,22 @@ def _cmd_required_checks_present(args: argparse.Namespace) -> int:
         json.loads(Path(args.protection_json).read_text(encoding="utf-8")),
         context="branch protection payload",
     )
-    if required_checks_present(payload):
+    missing = missing_required_checks(payload)
+    if not missing:
         return 0
-    sys.stderr.write("branch protection has no required checks\n")
+    sys.stderr.write(
+        f"branch protection is missing required repair checks: {', '.join(missing)}\n"
+    )
     return 2
+
+
+def _cmd_validate_auto_fix_paths(args: argparse.Namespace) -> int:
+    paths = tuple(
+        line.strip()
+        for line in Path(args.paths_file).read_text(encoding="utf-8").splitlines()
+    )
+    validate_auto_fix_paths(paths)
+    return 0
 
 
 def _cmd_parse_classifier(args: argparse.Namespace) -> int:
@@ -534,6 +612,10 @@ def _parser() -> argparse.ArgumentParser:
     checks.add_argument("--protection-json", required=True)
     checks.set_defaults(func=_cmd_required_checks_present)
 
+    paths = subparsers.add_parser("validate-auto-fix-paths")
+    paths.add_argument("--paths-file", required=True)
+    paths.set_defaults(func=_cmd_validate_auto_fix_paths)
+
     classifier = subparsers.add_parser("parse-classifier")
     classifier.add_argument("path")
     classifier.set_defaults(func=_cmd_parse_classifier)
@@ -568,6 +650,7 @@ __all__ = [
     "AUTO_FIX_ALLOWED_PATH_PREFIXES",
     "CAMPAIGN_MAX_CYCLES",
     "CLASSIFIER_MARKER_NAME",
+    "EXPECTED_REPAIR_PR_REQUIRED_CHECKS",
     "LEDGER_ISSUE_TITLE",
     "REPAIR_BRANCH_PREFIX",
     "REPAIR_LABEL",
@@ -581,6 +664,7 @@ __all__ = [
     "is_agentic_repair_pr",
     "ledger_marker_payload",
     "main",
+    "missing_required_checks",
     "parse_classifier_json",
     "parse_classifier_marker_from_text",
     "parse_ledger_events_from_comments_json",
@@ -590,8 +674,10 @@ __all__ = [
     "render_ledger_comment",
     "repair_pr_event_from_github",
     "require_cycle_budget",
+    "required_check_contexts",
     "required_checks_present",
     "retry_selection",
     "should_dispatch_update_after_merge",
     "validate_auto_fix_classifier",
+    "validate_auto_fix_paths",
 ]

@@ -18,6 +18,7 @@ from lib.update.paths import REPO_ROOT
 
 AGENTIC_SOURCE = REPO_ROOT / ".github/workflows/update-self-heal.md"
 AGENTIC_LOCK = REPO_ROOT / ".github/workflows/update-self-heal.lock.yml"
+CI_WORKFLOW = REPO_ROOT / ".github/workflows/ci.yml"
 REPAIR_COMPANION = REPO_ROOT / ".github/workflows/update-self-heal-pr.yml"
 
 
@@ -36,6 +37,16 @@ def _run_texts(workflow: dict[str, Any]) -> tuple[str, ...]:
             if isinstance(step, dict) and isinstance(step.get("run"), str):
                 runs.append(step["run"])
     return tuple(runs)
+
+
+def _ci_required_check_names() -> tuple[str, ...]:
+    workflow = load_workflow_yaml(CI_WORKFLOW)
+    return (
+        "commitlint",
+        *workflow["jobs"]["quality"]["strategy"]["matrix"]["check"],
+        "lint-pins-pinact",
+        "verify-crate2nix",
+    )
 
 
 def _checkout_refs(job: dict[str, Any]) -> tuple[str, ...]:
@@ -117,9 +128,17 @@ def test_agentic_source_pins_copilot_gpt5_and_safe_outputs() -> None:
         "retry-failed-jobs",
         "record-stop",
     }
+    pre_agent_runs = "\n".join(step["run"] for step in workflow["steps"])
+    assert "remaining-cycles" in pre_agent_runs
+    pre_agent_env = "\n".join(
+        str(value)
+        for step in workflow["steps"]
+        for value in step.get("env", {}).values()
+    )
+    assert "secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN" in pre_agent_env
     assert workflow["on"]["workflow_run"]["workflows"] == [
         "Update",
-        "Periodic Flake Update Certification",
+        "Update: Certify",
         "CI",
     ]
     assert workflow["on"]["workflow_run"]["branches"] == [
@@ -135,6 +154,11 @@ def test_agentic_source_pins_copilot_gpt5_and_safe_outputs() -> None:
         "main",
     )
     assert _checkout_refs(workflow["safe-outputs"]["jobs"]["record-stop"]) == ("main",)
+
+
+def test_expected_repair_checks_track_ci_workflow() -> None:
+    """The branch-protection allowlist matches the PR CI surface."""
+    assert _ci_required_check_names() == self_heal.EXPECTED_REPAIR_PR_REQUIRED_CHECKS
 
 
 def test_agentic_source_requires_parsed_auto_fix_classifier_marker() -> None:
@@ -167,7 +191,7 @@ def test_compiled_agentic_lock_tracks_source_and_gpt5() -> None:
     assert metadata["strict"] is True
     assert workflow["on"]["workflow_run"]["workflows"] == [
         "Update",
-        "Periodic Flake Update Certification",
+        "Update: Certify",
         "CI",
     ]
     assert workflow["on"]["workflow_run"]["branches"] == [
@@ -201,6 +225,8 @@ def test_repair_companion_enables_auto_merge_only_after_gates() -> None:
     assert _checkout_refs(enable_job) == ("${{ github.event.pull_request.base.sha }}",)
     assert "github.event.action != 'closed'" in enable_job["if"]
     assert "verify-auto-fix-classifier" in runs
+    assert "gh pr diff" in runs
+    assert "validate-auto-fix-paths" in runs
     assert "remaining-cycles" in runs
     assert "--attempt-kind repair" in runs
     assert "required-checks-present" in runs

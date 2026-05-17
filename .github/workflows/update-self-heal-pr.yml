@@ -64,6 +64,22 @@ jobs:
           PY
           python3 -m lib.update.ci.self_heal verify-auto-fix-classifier \
             --body-path "${body_path}"
+      - name: Fail closed unless actual repair diff stays in allowed lanes
+        env:
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN}" || {
+            echo "UPDATE_SELF_HEAL_GITHUB_TOKEN is required." >&2
+            exit 1
+          }
+          paths_file="${RUNNER_TEMP}/repair-pr-paths.txt"
+          gh pr diff "${PR_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name-only >"${paths_file}"
+          python3 -m lib.update.ci.self_heal validate-auto-fix-paths \
+            --paths-file "${paths_file}"
       - name: Record repair cycle
         env:
           GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
@@ -133,7 +149,7 @@ jobs:
             --evidence "remaining cycles before this attempt: ${remaining}" \
             --evidence "PR #${PR_NUMBER} at ${PR_SHA}" >"${comment_body}"
           gh issue comment "${issue_number}" --body-file "${comment_body}"
-      - name: Fail closed unless required checks are configured
+      - name: Fail closed unless expected branch-protection checks are required
         env:
           GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           TARGET_BRANCH: ${{ needs.classify-pr.outputs.base-ref }}

@@ -10,7 +10,7 @@
       url = "github:Yeradon/nix-homebrew";
       # Keep brew-src, homebrew-cask, and homebrew-core pinned as one tested
       # tuple; current tap syntax can require matching Homebrew/Ruby support.
-      inputs.brew-src.url = "github:Homebrew/brew/4a95077682ae5f342cf60ff181ebbcfb03d49117";
+      inputs.brew-src.url = "github:Homebrew/brew/fb60c879bac6e441c1e71468c0d0887d4c430558";
     };
     neovim-nightly-overlay = {
       url = "github:nix-community/neovim-nightly-overlay";
@@ -198,12 +198,12 @@
     };
     homebrew-cask = {
       # Update with nix-homebrew.inputs.brew-src and homebrew-core.
-      url = "github:homebrew/homebrew-cask/d680f10a0c8ce5142a9765536129a9d57e3f4b9c";
+      url = "github:homebrew/homebrew-cask/b40e0b0c4faa6b0d7e458b67bb96820621411bde";
       flake = false;
     };
     homebrew-core = {
       # Update with nix-homebrew.inputs.brew-src and homebrew-cask.
-      url = "github:homebrew/homebrew-core/60fd33c8b6bcb76248cb4e8f3cdde93d6ba8ce75";
+      url = "github:homebrew/homebrew-core/d1b066427e859ac2820238300a3a49fa2880fe1b";
       flake = false;
     };
     hwatch = {

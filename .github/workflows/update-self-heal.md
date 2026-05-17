@@ -5,7 +5,7 @@ on:
   workflow_run:
     workflows:
       - Update
-      - Periodic Flake Update Certification
+      - "Update: Certify"
       - CI
     types:
       - completed
@@ -29,7 +29,7 @@ if: >-
     github.event.workflow_run.conclusion == 'failure' &&
     (
       github.event.workflow_run.name == 'Update' ||
-      github.event.workflow_run.name == 'Periodic Flake Update Certification' ||
+      github.event.workflow_run.name == 'Update: Certify' ||
       (
         github.event.workflow_run.name == 'CI' &&
         startsWith(github.event.workflow_run.head_branch, 'agentic/update-self-heal/')
@@ -92,6 +92,49 @@ steps:
         echo "UPDATE_SELF_HEAL_GITHUB_TOKEN is required for safe write operations." >&2
         exit 1
       }
+  - name: Fail closed when campaign budget is exhausted
+    env:
+      GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+      LEDGER_TITLE: Agentic update self-healing ledger
+      MANUAL_CAMPAIGN_KEY: ${{ inputs['campaign-key'] || '' }}
+      MANUAL_RUN_ID: ${{ inputs['run-id'] || '' }}
+      REPAIR_BRANCH_PREFIX: agentic/update-self-heal/
+      WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || '' }}
+      WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id || '' }}
+    run: |
+      set -euo pipefail
+      campaign_key="${MANUAL_CAMPAIGN_KEY}"
+      if [ -z "${campaign_key}" ] && [ -n "${WORKFLOW_RUN_HEAD_BRANCH}" ]; then
+        repair_campaign="${WORKFLOW_RUN_HEAD_BRANCH#"${REPAIR_BRANCH_PREFIX}"}"
+        if [ "${repair_campaign}" != "${WORKFLOW_RUN_HEAD_BRANCH}" ]; then
+          campaign_key="${repair_campaign}"
+        fi
+      fi
+      if [ -z "${campaign_key}" ] && [ -n "${MANUAL_RUN_ID}" ]; then
+        campaign_key="update_flake_lock_action-${MANUAL_RUN_ID}"
+      fi
+      if [ -z "${campaign_key}" ] && [ -n "${WORKFLOW_RUN_ID}" ]; then
+        campaign_key="update_flake_lock_action-${WORKFLOW_RUN_ID}"
+      fi
+      if [ -z "${campaign_key}" ]; then
+        echo "No campaign key is available; skipping budget preflight."
+        exit 0
+      fi
+
+      issue_json="$(
+        gh issue list --state all --limit 100 --json number,title \
+          --jq ".[] | select(.title == env.LEDGER_TITLE) | @json" | head -n 1
+      )"
+      if [ -z "${issue_json}" ]; then
+        echo "No self-healing ledger exists; campaign has full budget."
+        exit 0
+      fi
+      issue_number="$(jq -r '.number' <<<"${issue_json}")"
+      comments_json="$(mktemp)"
+      gh issue view "${issue_number}" --json comments >"${comments_json}"
+      python3 -m lib.update.ci.self_heal remaining-cycles \
+        --comments-json "${comments_json}" \
+        --campaign-key "${campaign_key}" >/dev/null
 
 safe-outputs:
   github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
@@ -195,9 +238,28 @@ safe-outputs:
 
             comments_json="$(mktemp)"
             gh issue view "${issue_number}" --json comments >"${comments_json}"
-            python3 -m lib.update.ci.self_heal remaining-cycles \
-              --comments-json "${comments_json}" \
-              --campaign-key "${campaign_key}" >/dev/null
+            set +e
+            remaining="$(
+              python3 -m lib.update.ci.self_heal remaining-cycles \
+                --comments-json "${comments_json}" \
+                --campaign-key "${campaign_key}"
+            )"
+            remaining_status="$?"
+            set -e
+            if [ "${remaining_status}" -ne 0 ]; then
+              comment_body="$(mktemp)"
+              python3 -m lib.update.ci.self_heal render-ledger-comment \
+                --campaign-key "${campaign_key}" \
+                --attempt-kind stop \
+                --run-id "${run_id}" \
+                --status exhausted \
+                --reason "campaign exhausted automatic retry cycles" \
+                --evidence "retry request: ${reason}" \
+                --evidence "failed jobs: ${job_ids}" >"${comment_body}"
+              gh issue comment "${issue_number}" --body-file "${comment_body}"
+              echo "Campaign ${campaign_key} has no remaining cycles." >&2
+              exit 1
+            fi
 
             comment_body="$(mktemp)"
             python3 -m lib.update.ci.self_heal render-ledger-comment \
@@ -206,6 +268,7 @@ safe-outputs:
               --run-id "${run_id}" \
               --status rerun \
               --reason "${reason}" \
+              --evidence "remaining cycles before this attempt: ${remaining}" \
               --evidence "${evidence}" >"${comment_body}"
             gh issue comment "${issue_number}" --body-file "${comment_body}"
 
@@ -297,7 +360,7 @@ safe-outputs:
 # Agentic Update Self-Heal
 
 You are the unattended repair agent for the `Update` and
-`Periodic Flake Update Certification` workflows.
+`Update: Certify` workflows.
 
 ## Invariants
 
@@ -356,9 +419,11 @@ ledger entry, checks the campaign budget, and reruns those failed jobs.
 
 ## Auto-Fix Action
 
-For `auto_fix`, make only the targeted package or overlay lane changes. Allowed edit
-lanes are `packages/**`, `overlays/**`, focused tests, focused docs, and `misc/**`.
-Run the narrow reproduction and focused validation before opening a PR.
+For `auto_fix`, first confirm the campaign still has remaining automatic cycles in the
+ledger; if it does not, choose `stop` instead of editing. Then make only the targeted
+package or overlay lane changes. Allowed edit lanes are `packages/**`, `overlays/**`,
+focused tests, focused docs, and `misc/**`. Run the narrow reproduction and focused
+validation before opening a PR.
 
 Before creating a PR, validate and render the same classifier JSON as a required
 machine-readable PR marker:

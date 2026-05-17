@@ -283,12 +283,53 @@ def test_parse_ledger_events_from_comments_json_rejects_bad_json(
 
 
 def test_required_checks_present_is_fail_closed() -> None:
-    """Auto-merge needs branch protection with at least one required check."""
+    """Auto-merge needs branch protection with every expected repair PR gate."""
+    all_checks = self_heal.EXPECTED_REPAIR_PR_REQUIRED_CHECKS
+    protection = {
+        "contexts": list(all_checks[:3]),
+        "checks": [{"context": check} for check in all_checks[3:]],
+    }
+
     assert not self_heal.required_checks_present(None)
     assert not self_heal.required_checks_present({})
     assert not self_heal.required_checks_present({"contexts": [], "checks": []})
-    assert self_heal.required_checks_present({"contexts": ["ci"]})
-    assert self_heal.required_checks_present({"checks": [{"context": "quality"}]})
+    assert self_heal.required_check_contexts(protection) == frozenset(all_checks)
+    assert self_heal.required_check_contexts({
+        "contexts": ["ci", "", 1],
+        "checks": [
+            "quality",
+            {"context": "lint"},
+            {"context": ""},
+            {"context": 3},
+            2,
+        ],
+    }) == frozenset({"ci", "quality", "lint"})
+    assert self_heal.required_checks_present(protection)
+    assert self_heal.missing_required_checks({"contexts": ["commitlint"]}) == tuple(
+        all_checks[1:]
+    )
+
+
+@pytest.mark.parametrize(
+    ("paths", "message"),
+    [
+        (("packages/codex/sources.json", "overlays/goose-cli/sources.json"), ""),
+        ((), "at least one path"),
+        (("flake.nix",), "outside allowed lanes"),
+        (("packages/../flake.nix",), "inside the repository"),
+    ],
+)
+def test_validate_auto_fix_paths_checks_actual_repair_diff(
+    paths: tuple[str, ...],
+    message: str,
+) -> None:
+    """Actual repair PR diffs must stay in the same deterministic path lanes."""
+    if not message:
+        self_heal.validate_auto_fix_paths(paths)
+        return
+
+    with pytest.raises(self_heal.SelfHealPolicyError, match=message):
+        self_heal.validate_auto_fix_paths(paths)
 
 
 def _pull_request_event(**overrides: object) -> dict[str, object]:
@@ -592,7 +633,7 @@ def test_cli_pr_event_outputs_prints_json_without_github_output(
 def test_cli_required_checks_present(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The branch-protection CLI returns 2 when checks are absent."""
+    """The branch-protection CLI returns 2 when expected checks are absent."""
     protection = tmp_path / "protection.json"
     protection.write_text(json.dumps({"contexts": []}), encoding="utf-8")
 
@@ -605,15 +646,18 @@ def test_cli_required_checks_present(
         == 2
     )
 
-    assert "no required checks" in capsys.readouterr().err
+    assert "missing required repair checks" in capsys.readouterr().err
 
 
 def test_cli_required_checks_present_accepts_branch_protection(
     tmp_path: Path,
 ) -> None:
-    """The branch-protection CLI succeeds when required checks are configured."""
+    """The branch-protection CLI succeeds when expected checks are configured."""
     protection = tmp_path / "protection.json"
-    protection.write_text(json.dumps({"contexts": ["CI"]}), encoding="utf-8")
+    protection.write_text(
+        json.dumps({"contexts": list(self_heal.EXPECTED_REPAIR_PR_REQUIRED_CHECKS)}),
+        encoding="utf-8",
+    )
 
     assert (
         self_heal.main([
@@ -623,6 +667,35 @@ def test_cli_required_checks_present_accepts_branch_protection(
         ])
         == 0
     )
+
+
+def test_cli_validate_auto_fix_paths(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The path CLI validates actual repair PR filenames."""
+    paths = tmp_path / "paths.txt"
+    paths.write_text("packages/codex/sources.json\n", encoding="utf-8")
+
+    assert (
+        self_heal.main([
+            "validate-auto-fix-paths",
+            "--paths-file",
+            str(paths),
+        ])
+        == 0
+    )
+
+    paths.write_text("flake.nix\n", encoding="utf-8")
+    assert (
+        self_heal.main([
+            "validate-auto-fix-paths",
+            "--paths-file",
+            str(paths),
+        ])
+        == 2
+    )
+    assert "outside allowed lanes" in capsys.readouterr().err
 
 
 def test_cli_errors_return_policy_failure(

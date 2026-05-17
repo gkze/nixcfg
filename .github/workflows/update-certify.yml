@@ -1,5 +1,5 @@
 --- # !yamlfmt!:ignore
-name: Periodic Flake Update Certification
+name: "Update: Certify"
 
 env:
   CACHIX_NAME: gkze

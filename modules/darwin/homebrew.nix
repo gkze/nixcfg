@@ -39,28 +39,36 @@ let
       null
     else
       pkgs.runCommandLocal "brew-${brewVersion}-nixcfg-patched" { } ''
-        cp -r "${brewSource}" "$out"
-        chmod u+w "$out" "$out/Library/Homebrew" "$out/Library/Homebrew/cmd"
+                cp -r "${brewSource}" "$out"
+                chmod u+w "$out" "$out/Library/Homebrew" "$out/Library/Homebrew/cmd"
 
-        substituteInPlace "$out/Library/Homebrew/cmd/update.sh" \
-          --replace-fail 'for DIR in "''${HOMEBREW_REPOSITORY}"' "for DIR in "
+                substituteInPlace "$out/Library/Homebrew/cmd/update.sh" \
+                  --replace-fail 'for DIR in "''${HOMEBREW_REPOSITORY}"' "for DIR in "
 
-        ruby_sh="$out/Library/Homebrew/utils/ruby.sh"
-        if [[ ! -e "$ruby_sh" ]]; then
-          printf 'Expected Homebrew ruby helper at %s\n' "$ruby_sh" >&2
-          exit 1
-        fi
-        if ! grep -q 'setup-ruby-path' "$ruby_sh"; then
-          printf 'Expected setup-ruby-path in %s\n' "$ruby_sh" >&2
-          exit 1
-        fi
-        chmod u+w "$ruby_sh"
-        printf '%s\n' 'setup-ruby-path() { export HOMEBREW_RUBY_PATH="${pkgs.ruby_4_0}/bin/ruby"; }' >>"$ruby_sh"
+                ruby_sh="$out/Library/Homebrew/utils/ruby.sh"
+                if [[ ! -e "$ruby_sh" ]]; then
+                  printf 'Expected Homebrew ruby helper at %s\n' "$ruby_sh" >&2
+                  exit 1
+                fi
+                if ! grep -q 'setup-ruby-path' "$ruby_sh"; then
+                  printf 'Expected setup-ruby-path in %s\n' "$ruby_sh" >&2
+                  exit 1
+                fi
+                chmod u+w "$ruby_sh"
+                cat >>"$ruby_sh" <<'EOF'
+        # nixcfg: use the Nix-provided Ruby while preserving Homebrew's setup-ruby-path
+        # bookkeeping (GEM_HOME, BUNDLE_GEMFILE, bootsnap path, etc.).  Nix's Ruby 4.0
+        # packages fiddle as a default gem, so Homebrew's default --disable=gems would
+        # hide it from linkage_checker.rb.
+        export HOMEBREW_RUBY_DISABLE_OPTIONS="--disable=rubyopt"
+        system_ruby_supported() { return 0; }
+        find_ruby() { echo "${pkgs.ruby_4_0}/bin/ruby"; }
+        EOF
 
-        brew_sh="$out/Library/Homebrew/brew.sh"
-        chmod u+w "$brew_sh"
-        sed -i -e 's/^HOMEBREW_VERSION=.*/HOMEBREW_VERSION="${brewVersion}"/g' "$brew_sh"
-        sed -i -e 's/^GIT_REVISION=.*/GIT_REVISION=""; HOMEBREW_VERSION="${brewVersion}"/g' "$brew_sh"
+                brew_sh="$out/Library/Homebrew/brew.sh"
+                chmod u+w "$brew_sh"
+                sed -i -e 's/^HOMEBREW_VERSION=.*/HOMEBREW_VERSION="${brewVersion}"/g' "$brew_sh"
+                sed -i -e 's/^GIT_REVISION=.*/GIT_REVISION=""; HOMEBREW_VERSION="${brewVersion}"/g' "$brew_sh"
       '';
 
   defaultTaps =
