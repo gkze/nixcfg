@@ -44,7 +44,7 @@ def test_mux_uses_central_electron_runtime_artifacts() -> None:
 
     assert_nix_ast_equal(
         expect_scope_binding(derivation, "electronVersion").value,
-        '"38.7.2"',
+        '"40.9.3"',
     )
     assert_nix_ast_equal(
         expect_scope_binding(derivation, "electronRuntime").value,

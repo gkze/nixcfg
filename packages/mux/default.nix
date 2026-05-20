@@ -22,7 +22,7 @@ let
   # Keep this in sync with the exact Electron version resolved in mux's bun.lock.
   # We validate it against node_modules/electron/package.json during configurePhase
   # so lockfile bumps fail loudly until the matching headers hash is updated.
-  electronVersion = "38.7.2";
+  electronVersion = "40.9.3";
   electronRuntime = nixcfgElectron.runtimeFor electronVersion;
   electronRuntimeVersion = electronRuntime.version;
   electronHeaders = electronRuntime.passthru.headers;

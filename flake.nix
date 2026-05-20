@@ -297,7 +297,14 @@
             pname = pkg.pname or "";
             version = pkg.version or "";
           in
-          pname == "google-chrome" || (pname == "electron" && builtins.elem version [ "38.7.2" ]);
+          pname == "google-chrome"
+          || (
+            pname == "electron"
+            && builtins.elem version [
+              "38.7.2"
+              "40.9.3"
+            ]
+          );
       };
 
       overlayList = [
