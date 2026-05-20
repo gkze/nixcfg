@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, ClassVar
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.nix.models.sources import SourceEntry
+    from lib.update.updaters.base import UpdateContext
+
 from lib.update.net import fetch_headers, fetch_url
 from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
 from lib.update.updaters.metadata import (
@@ -88,6 +91,15 @@ class CommanderUpdater(DownloadHashUpdater):
         return self._download_url_from_metadata(
             info
         ) or self.VERSIONED_URL_TEMPLATE.format(version=info.version)
+
+    async def _is_latest(
+        self,
+        context: UpdateContext | SourceEntry | None,
+        info: VersionInfo,
+    ) -> bool:
+        """Recompute hashes for mutable Commander release artifacts."""
+        _ = (context, info)
+        return False
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Parse the latest release version from the changelog page."""

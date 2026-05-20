@@ -273,6 +273,16 @@ def test_commander_uses_versioned_download_urls(
     )
 
 
+def test_commander_recomputes_hashes_for_mutable_release_artifacts(
+    commander_module: ModuleType,
+) -> None:
+    """Commander latest-channel downloads can drift without a version change."""
+    updater = commander_module.CommanderUpdater()
+    latest = VersionInfo(version="0.7.890")
+
+    assert _run(updater._is_latest(None, latest)) is False
+
+
 def test_commander_falls_back_to_latest_download_url_when_versioned_asset_is_missing(
     commander_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
