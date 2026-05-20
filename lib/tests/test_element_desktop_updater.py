@@ -15,6 +15,7 @@ from lib.update.events import UpdateEventKind
 from lib.update.nix import (
     _build_fetch_from_github_call,
     _build_fetch_pnpm_deps_expr,
+    _build_pnpm_10_nodejs_22_expr,
 )
 from lib.update.updaters import base as updater_base
 from lib.update.updaters.base import VersionInfo
@@ -102,6 +103,7 @@ def test_element_desktop_expr_builders_include_expected_structure() -> None:
             pname="element",
             version="1.11.99",
             fetcher_version=3,
+            pnpm=_build_pnpm_10_nodejs_22_expr(),
         ),
     )
 

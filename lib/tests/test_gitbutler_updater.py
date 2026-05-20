@@ -15,7 +15,7 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import UpdateEvent, UpdateEventKind
 from lib.update.flake import flake_fetch_expression
-from lib.update.nix import _build_fetch_pnpm_deps_expr
+from lib.update.nix import _build_fetch_pnpm_deps_expr, _build_pnpm_10_nodejs_22_expr
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.metadata import FlakeInputMetadata
 
@@ -155,6 +155,7 @@ def test_gitbutler_updater_builds_pnpm_hash_expression(
             pname="gitbutler",
             version="0.19.9",
             fetcher_version=3,
+            pnpm=_build_pnpm_10_nodejs_22_expr(),
         ),
     )
 

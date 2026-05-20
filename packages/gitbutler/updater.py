@@ -15,7 +15,11 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.flake import flake_fetch_expression
-from lib.update.nix import _build_fetch_pnpm_deps_expr, compute_fixed_output_hash
+from lib.update.nix import (
+    _build_fetch_pnpm_deps_expr,
+    _build_pnpm_10_nodejs_22_expr,
+    compute_fixed_output_hash,
+)
 from lib.update.updaters.base import (
     Crate2NixArtifactsMixin,
     UpdateContext,
@@ -73,6 +77,7 @@ class GitButlerUpdater(Crate2NixArtifactsMixin, FlakeInputHashUpdater):
             pname=self.name,
             version=info.version,
             fetcher_version=3,
+            pnpm=_build_pnpm_10_nodejs_22_expr(),
         )
         return compute_fixed_output_hash(
             self.name,

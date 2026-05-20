@@ -14,6 +14,7 @@ from lib.update.nix import (
     _build_fetch_from_github_call,
     _build_fetch_from_github_expr,
     _build_fetch_pnpm_deps_expr,
+    _build_pnpm_10_nodejs_22_expr,
 )
 from lib.update.updaters.base import (
     FixedOutputHashStep,
@@ -69,6 +70,7 @@ class ElementDesktopUpdater(HashEntryUpdater):
             pname="element",
             version=version,
             fetcher_version=3,
+            pnpm=_build_pnpm_10_nodejs_22_expr(),
         )
 
     async def fetch_hashes(
