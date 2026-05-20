@@ -94,7 +94,7 @@ def test_web_formatters_use_oxc_tooling_with_tsgolint_backend() -> None:
     )
     assert_nix_ast_equal(
         expect_binding(oxlint_env.values, "OXLINT_TSGOLINT_PATH").value,
-        "oxlintTsgolintCmd",
+        "tsgolintCmd",
     )
 
 

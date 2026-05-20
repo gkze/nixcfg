@@ -110,6 +110,20 @@ def _fake_hash_expr() -> NixExpression:
     return _select_attrs(Identifier(name="pkgs"), "lib", "fakeHash")
 
 
+def _build_pnpm_10_nodejs_22_expr() -> FunctionCall:
+    return FunctionCall(
+        name=_select_attrs(Identifier(name="pkgs"), "pnpm_10", "override"),
+        argument=AttributeSet(
+            values=[
+                Binding(
+                    name="nodejs",
+                    value=_select_attrs(Identifier(name="pkgs"), "nodejs_22"),
+                ),
+            ]
+        ),
+    )
+
+
 def _build_get_flake_expr(flake_url: str) -> FunctionCall:
     return FunctionCall(
         name=_select_attrs(Identifier(name="builtins"), "getFlake"),
@@ -125,6 +139,7 @@ def _build_fetch_from_github_call(
     tag: str | None = None,
     hash_value: str | NixExpression | None = None,
     post_fetch: str | None = None,
+    fetch_submodules: bool | None = None,
 ) -> FunctionCall:
     if (rev is None) == (tag is None):
         msg = "Expected exactly one of rev or tag for fetchFromGitHub"
@@ -146,6 +161,10 @@ def _build_fetch_from_github_call(
         bindings.append(Binding(name="tag", value=tag))
     if post_fetch is not None:
         bindings.append(Binding(name="postFetch", value=post_fetch))
+    if fetch_submodules is not None:
+        bindings.append(
+            Binding(name="fetchSubmodules", value=Primitive(value=fetch_submodules))
+        )
     return FunctionCall(
         name=_select_attrs(Identifier(name="pkgs"), "fetchFromGitHub"),
         argument=AttributeSet(values=bindings),
@@ -160,6 +179,7 @@ def _build_fetch_from_github_expr(
     tag: str | None = None,
     hash_value: str | NixExpression | None = None,
     post_fetch: str | None = None,
+    fetch_submodules: bool | None = None,
 ) -> str:
     return compact_nix_expr(
         _build_fetch_from_github_call(
@@ -169,6 +189,7 @@ def _build_fetch_from_github_expr(
             tag=tag,
             hash_value=hash_value,
             post_fetch=post_fetch,
+            fetch_submodules=fetch_submodules,
         ).rebuild(),
     )
 
@@ -190,8 +211,9 @@ def _build_fetchgit_call(
             else _nix_string_or_expr(hash_value),
         ),
     ]
-    if fetch_submodules:
-        bindings.append(Binding(name="fetchSubmodules", value=Primitive(value=True)))
+    bindings.append(
+        Binding(name="fetchSubmodules", value=Primitive(value=fetch_submodules))
+    )
     return FunctionCall(
         name=_select_attrs(Identifier(name="pkgs"), "fetchgit"),
         argument=AttributeSet(values=bindings),
@@ -254,28 +276,30 @@ def _build_fetch_pnpm_deps_expr(
     pname: str,
     version: str,
     fetcher_version: int,
+    pnpm: NixExpression | None = None,
     hash_value: str | NixExpression | None = None,
 ) -> str:
+    fetch_pnpm_bindings: list[Binding | Inherit] = [
+        Binding(name="pname", value=pname),
+        Binding(name="version", value=version),
+        Inherit(names=[Identifier(name="src")]),
+    ]
+    if pnpm is not None:
+        fetch_pnpm_bindings.append(Binding(name="pnpm", value=pnpm))
+    fetch_pnpm_bindings.extend([
+        Binding(name="fetcherVersion", value=Primitive(value=fetcher_version)),
+        Binding(
+            name="hash",
+            value=_fake_hash_expr()
+            if hash_value is None
+            else _nix_string_or_expr(hash_value),
+        ),
+    ])
     expression = LetExpression(
         local_variables=[Binding(name="src", value=src_expr)],
         value=FunctionCall(
             name=_select_attrs(Identifier(name="pkgs"), "fetchPnpmDeps"),
-            argument=AttributeSet(
-                values=[
-                    Binding(name="pname", value=pname),
-                    Binding(name="version", value=version),
-                    Inherit(names=[Identifier(name="src")]),
-                    Binding(
-                        name="fetcherVersion", value=Primitive(value=fetcher_version)
-                    ),
-                    Binding(
-                        name="hash",
-                        value=_fake_hash_expr()
-                        if hash_value is None
-                        else _nix_string_or_expr(hash_value),
-                    ),
-                ]
-            ),
+            argument=AttributeSet(values=fetch_pnpm_bindings),
         ),
     )
     return compact_nix_expr(expression.rebuild())

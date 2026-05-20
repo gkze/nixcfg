@@ -45,7 +45,6 @@
         inherit (prev) flake-edit;
         google-chrome = final.mkSourceOverride "google-chrome" prev.google-chrome;
         inherit (inputs.googleworkspace-cli.packages.${system}) gws;
-        worktrunk = final.callPackage ../packages/worktrunk { };
         zed-editor-nightly =
           if prev.stdenv.hostPlatform.isDarwin then
             final.callPackage ../packages/zed-editor-nightly { }

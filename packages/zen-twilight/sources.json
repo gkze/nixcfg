@@ -1,7 +1,7 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-PARWIh0nxmbHLk9wJeHSKfH6F0o7nJ6QewrWpQUZXns=",
-    "x86_64-darwin": "sha256-PARWIh0nxmbHLk9wJeHSKfH6F0o7nJ6QewrWpQUZXns="
+    "aarch64-darwin": "sha256-Hr7M0cDkVIZme5ppN19DhraZGrent3JmKqnFOHOn5Lc=",
+    "x86_64-darwin": "sha256-Hr7M0cDkVIZme5ppN19DhraZGrent3JmKqnFOHOn5Lc="
   },
   "urls": {
     "aarch64-darwin": "https://github.com/zen-browser/desktop/releases/download/twilight-1/zen.macos-universal.dmg",

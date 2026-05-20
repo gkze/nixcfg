@@ -1,5 +1,5 @@
 {
-  "drvHash": "82p6wvxa6kcbbhdg69s68na4xigdz71q",
+  "drvHash": "hwaxy622iz7fa2rfzmr1p7xbkir872rv",
   "hashes": [
     {
       "hash": "sha256-c6Z157bUey0G4SCcwcd+XPKfgL4q//GTKKuZ8BLWMbI=",
@@ -18,5 +18,5 @@
     }
   ],
   "input": "emdash",
-  "version": "v1.1.16"
+  "version": "v1.1.19"
 }

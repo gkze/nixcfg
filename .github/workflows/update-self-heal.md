@@ -46,7 +46,7 @@ permissions:
 
 engine:
   id: copilot
-  model: gpt-5
+  model: gpt-4.1
 
 checkout:
   fetch-depth: 0
@@ -85,7 +85,7 @@ steps:
     run: |
       set -euo pipefail
       test -n "${COPILOT_GITHUB_TOKEN}" || {
-        echo "COPILOT_GITHUB_TOKEN is required for the Copilot GPT-5 engine." >&2
+        echo "COPILOT_GITHUB_TOKEN is required for the configured Copilot engine." >&2
         exit 1
       }
       test -n "${UPDATE_SELF_HEAL_GITHUB_TOKEN}" || {
@@ -364,7 +364,7 @@ You are the unattended repair agent for the `Update` and
 
 ## Invariants
 
-- Use Copilot GPT-5. If the configured model or token fails, stop; do not fall back.
+- Use the configured Copilot model. If the configured model or token fails, stop; do not fall back.
 - The campaign key is `update_flake_lock_action-<first failing run id>` unless manual
   dispatch supplied another key.
 - A campaign has at most 3 automatic cycles. Each retry or repair attempt consumes 1 cycle.

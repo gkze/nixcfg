@@ -51,7 +51,7 @@ let
     }
   '';
   oxfmtDefaultConfigPath = pkgs.writeText "nixcfg-oxfmt-defaults.jsonc" oxfmtDefaultConfigText;
-  oxlintTsgolintCmd = lib.getExe pkgs.oxlint-tsgolint;
+  tsgolintCmd = lib.getExe pkgs.tsgolint;
 
   scopeSectionTitles = scope: map (section: section.title) scope.sections;
 
@@ -471,7 +471,7 @@ in
                     "$FILENAME"
                   ];
                   env = {
-                    OXLINT_TSGOLINT_PATH = oxlintTsgolintCmd;
+                    OXLINT_TSGOLINT_PATH = tsgolintCmd;
                   };
                   stdin = false;
                   cwd.__raw = ''

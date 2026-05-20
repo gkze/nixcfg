@@ -142,7 +142,7 @@
       MANPAGER = "sh -c 'col -bx | bat -plman'";
       MANROFFOPT = "-c";
       NIX_PAGER = "bat -p";
-      OXLINT_TSGOLINT_PATH = lib.getExe pkgs.oxlint-tsgolint;
+      OXLINT_TSGOLINT_PATH = lib.getExe pkgs.tsgolint;
       OPENCODE_DB = "opencode.db";
       OPENCODE_EXPERIMENTAL = "1";
       PAGER = "bat -p";

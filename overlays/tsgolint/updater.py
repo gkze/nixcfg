@@ -1,4 +1,4 @@
-"""Updater for oxlint-tsgolint source and vendor hashes."""
+"""Updater for tsgolint source and vendor hashes."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from lib.update.events import EventStream
 
 from lib.nix.models.sources import HashCollection
-from lib.update.nix import _build_fetchgit_expr, _build_overlay_expr
+from lib.update.nix import _build_fetch_from_github_expr, _build_overlay_expr
 from lib.update.updaters.base import (
     UpdateContext,
     VersionInfo,
@@ -22,19 +22,20 @@ from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 
 @register_updater
-class OxlintTsgolintUpdater(GitHubReleaseUpdater):
+class TsgolintUpdater(GitHubReleaseUpdater):
     """Resolve tsgolint releases and refresh the checked-in Nix source hashes."""
 
-    name = "oxlint-tsgolint"
+    name = "tsgolint"
     GITHUB_OWNER = "oxc-project"
     GITHUB_REPO = "tsgolint"
 
     @staticmethod
     def _src_expr(version: str) -> str:
-        return _build_fetchgit_expr(
-            "https://github.com/oxc-project/tsgolint.git",
-            f"v{version}",
-            fetch_submodules=True,
+        return _build_fetch_from_github_expr(
+            "oxc-project",
+            "tsgolint",
+            tag=f"v{version}",
+            fetch_submodules=False,
         )
 
     async def _is_latest(

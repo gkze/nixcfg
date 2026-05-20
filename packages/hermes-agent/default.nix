@@ -1,6 +1,5 @@
 {
   callPackage,
-  coreutils,
   ffmpeg,
   git,
   inputs,
@@ -37,7 +36,6 @@ else
       "homeassistant"
       "honcho"
       "mcp"
-      "mistral"
       "modal"
       "pty"
       "slack"
@@ -84,6 +82,16 @@ else
       src = hermesSource + "/skills";
       filter = path: _type: !(lib.hasInfix "/index-cache/" path);
     };
+    bundledPlugins = lib.cleanSourceWith {
+      src = hermesSource + "/plugins";
+      filter =
+        path: _type:
+        !(lib.any (needle: lib.hasInfix needle path) [
+          "/__pycache__/"
+          ".pyc"
+          "/.pytest_cache/"
+        ]);
+    };
 
     runtimePath = lib.makeBinPath [
       nodejs_22
@@ -112,6 +120,7 @@ else
 
       mkdir -p $out/share/hermes-agent $out/bin
       cp -r ${bundledSkills} $out/share/hermes-agent/skills
+      cp -r ${bundledPlugins} $out/share/hermes-agent/plugins
       cp -r ${hermesWeb} $out/share/hermes-agent/web_dist
 
       mkdir -p $out/ui-tui
@@ -122,6 +131,7 @@ else
           makeWrapper ${hermesVenv}/bin/${name} $out/bin/${name} \
             --suffix PATH : "${runtimePath}" \
             --set HERMES_BUNDLED_SKILLS $out/share/hermes-agent/skills \
+            --set HERMES_BUNDLED_PLUGINS $out/share/hermes-agent/plugins \
             --set HERMES_WEB_DIST $out/share/hermes-agent/web_dist \
             --set HERMES_TUI_DIR $out/ui-tui \
             --set HERMES_PYTHON ${hermesVenv}/bin/python3 \
@@ -135,12 +145,6 @@ else
       }
 
       runHook postInstall
-    '';
-
-    postFixup = ''
-      substituteInPlace "$out/ui-tui/dist/entry.js" \
-        --replace-fail '#!${coreutils}/bin/env -S  --max-old-space-size=8192 --expose-gc' \
-        '#!${coreutils}/bin/env -S ${nodejs_22}/bin/node --max-old-space-size=8192 --expose-gc'
     '';
 
     passthru = (builtins.removeAttrs (upstreamPackage.passthru or { }) [ "devShellHook" ]) // {

@@ -59,9 +59,7 @@ sentry_cli_module = _module_fixture(
 conductor_module = _module_fixture("packages/conductor/updater.py", "conductor_module")
 droid_module = _module_fixture("packages/droid/updater.py", "droid_module")
 scratch_module = _module_fixture("packages/scratch/updater.py", "scratch_module")
-oxlint_tsgolint_module = _module_fixture(
-    "overlays/oxlint-tsgolint/updater.py", "oxlint_tsgolint_module"
-)
+tsgolint_module = _module_fixture("overlays/tsgolint/updater.py", "tsgolint_module")
 sculptor_module = _module_fixture("packages/sculptor/updater.py", "sculptor_module")
 neutils_module = _module_fixture("packages/neutils/updater.py", "neutils_module")
 
@@ -603,11 +601,11 @@ def test_scratch_updater_paths(
     assert built.commit == "f" * 40
 
 
-def test_oxlint_tsgolint_updater_paths(
-    oxlint_tsgolint_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+def test_tsgolint_updater_paths(
+    tsgolint_module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Exercise oxlint-tsgolint release parsing and override payload shape."""
-    updater = oxlint_tsgolint_module.OxlintTsgolintUpdater()
+    """Exercise tsgolint release parsing and override payload shape."""
+    updater = tsgolint_module.TsgolintUpdater()
 
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
@@ -617,7 +615,7 @@ def test_oxlint_tsgolint_updater_paths(
     assert latest.version == "0.21.0"
 
     env = source_override_env(
-        "oxlint-tsgolint",
+        "tsgolint",
         version=latest.version,
         src_hash=HASH_A,
         dependency_hash_type="vendorHash",
@@ -625,7 +623,7 @@ def test_oxlint_tsgolint_updater_paths(
     )
     payload = json.loads(env["UPDATE_SOURCE_OVERRIDES_JSON"])
     assert payload == {
-        "oxlint-tsgolint": {
+        "tsgolint": {
             "version": "0.21.0",
             "hashes": [
                 {"hashType": "srcHash", "hash": HASH_A},

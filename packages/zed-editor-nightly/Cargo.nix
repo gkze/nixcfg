@@ -1894,6 +1894,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "skill_creator" = rec {
+      packageId = "skill_creator";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "skill_creator";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "snippet" = rec {
       packageId = "snippet";
       build = internal.buildRustCrateWithFeatures {
@@ -2563,7 +2573,6 @@ rec {
           {
             name = "image";
             packageId = "image";
-            optional = true;
           }
           {
             name = "itertools";
@@ -2701,7 +2710,7 @@ rec {
           }
         ];
         features = {
-          "test-support" = [ "gpui/test-support" "project/test-support" "dep:parking_lot" "dep:image" ];
+          "test-support" = [ "gpui/test-support" "project/test-support" "dep:parking_lot" ];
         };
         resolvedDefaultFeatures = [ "test-support" ];
       };
@@ -2876,6 +2885,10 @@ rec {
             packageId = "gpui";
             usesDefaultFeatures = false;
             features = [ "test-support" ];
+          }
+          {
+            name = "indoc";
+            packageId = "indoc";
           }
           {
             name = "language";
@@ -3481,9 +3494,9 @@ rec {
       };
       "agent-client-protocol" = rec {
         crateName = "agent-client-protocol";
-        version = "0.11.1";
+        version = "0.12.1";
         edition = "2024";
-        sha256 = "0v73pg8526f452ss33x4ql7fp99zhj5xfpwg7n9hzbzj9nw2zxia";
+        sha256 = "1bqg4kzz8cjfr31c2dm2j58whndrkvxpfg0gn5ayj7g54xkblqa3";
         libName = "agent_client_protocol";
         authors = [
           "Zed <hi@zed.dev>"
@@ -3499,8 +3512,12 @@ rec {
             features = [ "tracing" ];
           }
           {
-            name = "anyhow";
-            packageId = "anyhow";
+            name = "async-process";
+            packageId = "async-process";
+          }
+          {
+            name = "blocking";
+            packageId = "blocking";
           }
           {
             name = "futures";
@@ -3539,8 +3556,8 @@ rec {
             features = [ "raw_value" ];
           }
           {
-            name = "thiserror";
-            packageId = "thiserror 2.0.17";
+            name = "shell-words";
+            packageId = "shell-words";
           }
           {
             name = "tokio";
@@ -3562,43 +3579,32 @@ rec {
             features = [ "v4" ];
           }
         ];
-        devDependencies = [
-          {
-            name = "tokio";
-            packageId = "tokio";
-            features = [ "full" ];
-          }
-        ];
         features = {
-          "unstable" = [ "unstable_auth_methods" "unstable_boolean_config" "unstable_logout" "unstable_message_id" "unstable_session_additional_directories" "unstable_session_close" "unstable_session_fork" "unstable_session_model" "unstable_session_resume" "unstable_session_usage" ];
+          "unstable" = [ "unstable_auth_methods" "unstable_boolean_config" "unstable_logout" "unstable_mcp_over_acp" "unstable_message_id" "unstable_session_additional_directories" "unstable_session_delete" "unstable_session_fork" "unstable_session_model" "unstable_session_usage" ];
           "unstable_auth_methods" = [ "agent-client-protocol-schema/unstable_auth_methods" ];
           "unstable_boolean_config" = [ "agent-client-protocol-schema/unstable_boolean_config" ];
           "unstable_logout" = [ "agent-client-protocol-schema/unstable_logout" ];
+          "unstable_mcp_over_acp" = [ "agent-client-protocol-schema/unstable_mcp_over_acp" ];
           "unstable_message_id" = [ "agent-client-protocol-schema/unstable_message_id" ];
           "unstable_session_additional_directories" = [ "agent-client-protocol-schema/unstable_session_additional_directories" ];
-          "unstable_session_close" = [ "agent-client-protocol-schema/unstable_session_close" ];
+          "unstable_session_delete" = [ "agent-client-protocol-schema/unstable_session_delete" ];
           "unstable_session_fork" = [ "agent-client-protocol-schema/unstable_session_fork" ];
           "unstable_session_model" = [ "agent-client-protocol-schema/unstable_session_model" ];
-          "unstable_session_resume" = [ "agent-client-protocol-schema/unstable_session_resume" ];
           "unstable_session_usage" = [ "agent-client-protocol-schema/unstable_session_usage" ];
         };
-        resolvedDefaultFeatures = [ "default" "unstable" "unstable_auth_methods" "unstable_boolean_config" "unstable_logout" "unstable_message_id" "unstable_session_additional_directories" "unstable_session_close" "unstable_session_fork" "unstable_session_model" "unstable_session_resume" "unstable_session_usage" ];
+        resolvedDefaultFeatures = [ "default" "unstable" "unstable_auth_methods" "unstable_boolean_config" "unstable_logout" "unstable_mcp_over_acp" "unstable_message_id" "unstable_session_additional_directories" "unstable_session_delete" "unstable_session_fork" "unstable_session_model" "unstable_session_usage" ];
       };
       "agent-client-protocol-derive" = rec {
         crateName = "agent-client-protocol-derive";
-        version = "0.11.0";
+        version = "0.11.1";
         edition = "2024";
-        sha256 = "0ca6ni4dzfakr5f65wf96b35acqyzzgpgrgjxsbjiha8q39w4hnf";
+        sha256 = "17zcj2z629spc598ambx800q668v9apf378c5pnwg3nh8pcckgfa";
         procMacro = true;
         libName = "agent_client_protocol_derive";
         authors = [
           "Zed <hi@zed.dev>"
         ];
         dependencies = [
-          {
-            name = "proc-macro2";
-            packageId = "proc-macro2";
-          }
           {
             name = "quote";
             packageId = "quote";
@@ -3613,10 +3619,10 @@ rec {
       };
       "agent-client-protocol-schema" = rec {
         crateName = "agent-client-protocol-schema";
-        version = "0.12.0";
+        version = "0.13.2";
         edition = "2024";
         crateBin = [];
-        sha256 = "0g5nlf05gmffkw8941x78lms05ikb2qbmxywzdia6a0wmmyybfj9";
+        sha256 = "0gj6bdbs4dn9p78ag3vd73y8yawda0f1fih4jhm3x4y338wxhmxr";
         libName = "agent_client_protocol_schema";
         authors = [
           "Zed <hi@zed.dev>"
@@ -3664,9 +3670,9 @@ rec {
         ];
         features = {
           "tracing" = [ "dep:tracing" ];
-          "unstable" = [ "unstable_auth_methods" "unstable_cancel_request" "unstable_elicitation" "unstable_llm_providers" "unstable_logout" "unstable_nes" "unstable_session_additional_directories" "unstable_session_fork" "unstable_session_model" "unstable_session_resume" "unstable_session_close" "unstable_session_usage" "unstable_message_id" "unstable_boolean_config" ];
+          "unstable" = [ "unstable_auth_methods" "unstable_cancel_request" "unstable_elicitation" "unstable_llm_providers" "unstable_logout" "unstable_mcp_over_acp" "unstable_nes" "unstable_session_additional_directories" "unstable_session_delete" "unstable_session_fork" "unstable_session_model" "unstable_session_usage" "unstable_message_id" "unstable_boolean_config" ];
         };
-        resolvedDefaultFeatures = [ "tracing" "unstable_auth_methods" "unstable_boolean_config" "unstable_logout" "unstable_message_id" "unstable_session_additional_directories" "unstable_session_close" "unstable_session_fork" "unstable_session_model" "unstable_session_resume" "unstable_session_usage" ];
+        resolvedDefaultFeatures = [ "tracing" "unstable_auth_methods" "unstable_boolean_config" "unstable_logout" "unstable_mcp_over_acp" "unstable_message_id" "unstable_session_additional_directories" "unstable_session_delete" "unstable_session_fork" "unstable_session_model" "unstable_session_usage" ];
       };
       "agent_servers" = rec {
         crateName = "agent_servers";
@@ -4363,6 +4369,10 @@ rec {
             packageId = "settings";
           }
           {
+            name = "skill_creator";
+            packageId = "skill_creator";
+          }
+          {
             name = "streaming_diff";
             packageId = "streaming_diff";
           }
@@ -4559,6 +4569,11 @@ rec {
           {
             name = "tempfile";
             packageId = "tempfile";
+          }
+          {
+            name = "terminal";
+            packageId = "terminal";
+            features = [ "test-support" ];
           }
           {
             name = "tree-sitter-md";
@@ -7196,8 +7211,8 @@ rec {
         libPath = "src/auto_update_ui.rs";
         dependencies = [
           {
-            name = "agent_settings";
-            packageId = "agent_settings";
+            name = "agent_skills";
+            packageId = "agent_skills";
           }
           {
             name = "anyhow";
@@ -7220,10 +7235,6 @@ rec {
             packageId = "editor";
           }
           {
-            name = "fs";
-            packageId = "fs";
-          }
-          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
@@ -7237,8 +7248,8 @@ rec {
             packageId = "notifications";
           }
           {
-            name = "project";
-            packageId = "project";
+            name = "prompt_store";
+            packageId = "prompt_store";
           }
           {
             name = "release_channel";
@@ -7258,10 +7269,6 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
-          }
-          {
-            name = "settings";
-            packageId = "settings";
           }
           {
             name = "smol";
@@ -10832,6 +10839,39 @@ rec {
           "diagnostics" = [ "dep:miette" ];
           "fuzz-testing" = [ "dep:arbitrary" ];
         };
+      };
+      "bs58" = rec {
+        crateName = "bs58";
+        version = "0.5.1";
+        edition = "2021";
+        sha256 = "1x3v51n5n2s3l0rgrsn142akdf331n2qsa75pscw71fi848vm25z";
+        dependencies = [
+          {
+            name = "tinyvec";
+            packageId = "tinyvec";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "grab_spare_slice" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tinyvec";
+            packageId = "tinyvec";
+            features = [ "rustc_1_55" ];
+          }
+        ];
+        features = {
+          "alloc" = [ "tinyvec?/alloc" ];
+          "cb58" = [ "sha2" ];
+          "check" = [ "sha2" ];
+          "default" = [ "std" ];
+          "sha2" = [ "dep:sha2" ];
+          "smallvec" = [ "dep:smallvec" ];
+          "std" = [ "alloc" "tinyvec?/std" ];
+          "tinyvec" = [ "dep:tinyvec" ];
+        };
+        resolvedDefaultFeatures = [ "alloc" "std" ];
       };
       "bstr" = rec {
         crateName = "bstr";
@@ -23697,6 +23737,14 @@ rec {
             packageId = "terminal_view";
           }
           {
+            name = "theme";
+            packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
             name = "util";
             packageId = "util";
           }
@@ -24147,6 +24195,10 @@ rec {
           {
             name = "theme_settings";
             packageId = "theme_settings";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.17";
           }
           {
             name = "tokio";
@@ -28399,6 +28451,10 @@ rec {
             optional = true;
           }
           {
+            name = "release_channel";
+            packageId = "release_channel";
+          }
+          {
             name = "search";
             packageId = "search";
           }
@@ -30924,6 +30980,10 @@ rec {
             packageId = "swash";
           }
           {
+            name = "unicode-segmentation";
+            packageId = "unicode-segmentation";
+          }
+          {
             name = "wasm-bindgen";
             packageId = "wasm-bindgen";
             target = { target, features }: (builtins.elem "wasm" target."family");
@@ -30948,6 +31008,13 @@ rec {
             packageId = "zed-font-kit";
             rename = "font-kit";
             optional = true;
+          }
+        ];
+        devDependencies = [
+          {
+            name = "criterion";
+            packageId = "criterion";
+            features = [ "html_reports" ];
           }
         ];
         features = {
@@ -36625,6 +36692,11 @@ rec {
             packageId = "http_client";
           }
           {
+            name = "log";
+            packageId = "log";
+            features = [ "kv_unstable_serde" "serde" ];
+          }
+          {
             name = "partial-json-fixer";
             packageId = "partial-json-fixer";
           }
@@ -41208,13 +41280,13 @@ rec {
       };
       "naga" = rec {
         crateName = "naga";
-        version = "29.0.0";
+        version = "29.0.3";
         edition = "2021";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/wgpu.git";
-          rev = "a466bc382ea747f8e1ac810efdb6dcd49a514575";
-          sha256 = "0ljbav9rln76s3y7k5lfihjfq1bghazjsf94d4d0k105r83yrlxh";
+          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
+          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
         };
         authors = [
           "gfx-rs developers"
@@ -41825,6 +41897,11 @@ rec {
           {
             name = "async-trait";
             packageId = "async-trait";
+          }
+          {
+            name = "chrono";
+            packageId = "chrono";
+            features = [ "serde" ];
           }
           {
             name = "futures";
@@ -50660,10 +50737,6 @@ rec {
             packageId = "db";
           }
           {
-            name = "feature_flags";
-            packageId = "feature_flags";
-          }
-          {
             name = "fs";
             packageId = "fs";
           }
@@ -54464,6 +54537,10 @@ rec {
         ];
         devDependencies = [
           {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
             name = "editor";
             packageId = "editor";
             features = [ "test-support" ];
@@ -54502,6 +54579,10 @@ rec {
             name = "settings";
             packageId = "settings";
             features = [ "test-support" ];
+          }
+          {
+            name = "task";
+            packageId = "task";
           }
           {
             name = "terminal_view";
@@ -59309,9 +59390,9 @@ rec {
       };
       "serde_with" = rec {
         crateName = "serde_with";
-        version = "3.18.0";
+        version = "3.20.0";
         edition = "2021";
-        sha256 = "07yhc7g7cmcsv02dxc8338ajcvldmr81li5wsnypv476v3x18m6x";
+        sha256 = "1qnddis0nz2yg0dl06fnhf2q3hkim0vraq8ac3xzl8xjnwn1qb77";
         authors = [
           "Jonas Bushart"
           "Marcin Kaźmierczak"
@@ -59320,6 +59401,12 @@ rec {
           {
             name = "base64";
             packageId = "base64 0.22.1";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "bs58";
+            packageId = "bs58";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -59410,7 +59497,8 @@ rec {
           }
         ];
         features = {
-          "alloc" = [ "serde_core/alloc" "base64?/alloc" "chrono_0_4?/alloc" "hex?/alloc" "serde_json?/alloc" "time_0_3?/alloc" ];
+          "alloc" = [ "serde_core/alloc" "base64?/alloc" "bs58?/alloc" "chrono_0_4?/alloc" "hex?/alloc" "serde_json?/alloc" "time_0_3?/alloc" ];
+          "base58" = [ "dep:bs58" "alloc" ];
           "base64" = [ "dep:base64" "alloc" ];
           "chrono" = [ "chrono_0_4" ];
           "chrono_0_4" = [ "dep:chrono_0_4" ];
@@ -59419,26 +59507,27 @@ rec {
           "hashbrown_0_14" = [ "dep:hashbrown_0_14" "alloc" ];
           "hashbrown_0_15" = [ "dep:hashbrown_0_15" "alloc" ];
           "hashbrown_0_16" = [ "dep:hashbrown_0_16" "alloc" ];
+          "hashbrown_0_17" = [ "dep:hashbrown_0_17" "alloc" ];
           "hex" = [ "dep:hex" "alloc" ];
           "indexmap" = [ "indexmap_1" ];
           "indexmap_1" = [ "dep:indexmap_1" "alloc" ];
           "indexmap_2" = [ "dep:indexmap_2" "alloc" ];
           "json" = [ "dep:serde_json" "alloc" ];
           "macros" = [ "dep:serde_with_macros" ];
-          "schemars_0_8" = [ "dep:schemars_0_8" "std" "serde_with_macros?/schemars_0_8" ];
+          "schemars_0_8" = [ "dep:schemars_0_8" "std" "serde_with_macros?/schemars_0_8" "dep:serde_json" ];
           "schemars_0_9" = [ "dep:schemars_0_9" "alloc" "serde_with_macros?/schemars_0_9" "dep:serde_json" ];
           "schemars_1" = [ "dep:schemars_1" "alloc" "serde_with_macros?/schemars_1" "dep:serde_json" ];
           "smallvec_1" = [ "dep:smallvec_1" ];
-          "std" = [ "alloc" "serde_core/std" "chrono_0_4?/clock" "chrono_0_4?/std" "indexmap_1?/std" "indexmap_2?/std" "time_0_3?/serde-well-known" "time_0_3?/std" "schemars_0_9?/std" "schemars_1?/std" ];
+          "std" = [ "alloc" "bs58?/std" "serde_core/std" "chrono_0_4?/clock" "chrono_0_4?/std" "indexmap_1?/std" "indexmap_2?/std" "time_0_3?/serde-well-known" "time_0_3?/std" "schemars_0_9?/std" "schemars_1?/std" ];
           "time_0_3" = [ "dep:time_0_3" ];
         };
         resolvedDefaultFeatures = [ "alloc" "default" "json" "macros" "schemars_1" "std" ];
       };
       "serde_with_macros" = rec {
         crateName = "serde_with_macros";
-        version = "3.18.0";
+        version = "3.20.0";
         edition = "2021";
-        sha256 = "0rgb0jsbczmvd4rpmfn1pa0axp5bv6grc4g2axrzxw88wrw8knyk";
+        sha256 = "1b5z2zs1flszvyfk2i5pky6qdigg82y467zlc81gpd7c723lh35r";
         procMacro = true;
         authors = [
           "Jonas Bushart"
@@ -59990,6 +60079,10 @@ rec {
           {
             name = "agent_settings";
             packageId = "agent_settings";
+          }
+          {
+            name = "agent_skills";
+            packageId = "agent_skills";
           }
           {
             name = "anyhow";
@@ -61061,6 +61154,103 @@ rec {
           "serde_std" = [ "std" "serde/std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "skill_creator" = rec {
+        crateName = "skill_creator";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/skill_creator"; };
+        libPath = "src/skill_creator.rs";
+        dependencies = [
+          {
+            name = "agent_skills";
+            packageId = "agent_skills";
+          }
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "editor";
+            packageId = "editor";
+          }
+          {
+            name = "fs";
+            packageId = "fs";
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "language";
+            packageId = "language";
+          }
+          {
+            name = "menu";
+            packageId = "menu";
+          }
+          {
+            name = "platform_title_bar";
+            packageId = "platform_title_bar";
+          }
+          {
+            name = "release_channel";
+            packageId = "release_channel";
+          }
+          {
+            name = "serde_yaml_ng";
+            packageId = "serde_yaml_ng";
+          }
+          {
+            name = "settings";
+            packageId = "settings";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
+            name = "ui";
+            packageId = "ui";
+          }
+          {
+            name = "ui_input";
+            packageId = "ui_input";
+          }
+          {
+            name = "util";
+            packageId = "util";
+          }
+          {
+            name = "workspace";
+            packageId = "workspace";
+          }
+          {
+            name = "worktree";
+            packageId = "worktree";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "fs";
+            packageId = "fs";
+            features = [ "test-support" ];
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            features = [ "test-support" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+        ];
+
       };
       "skrifa 0.37.0" = rec {
         crateName = "skrifa";
@@ -66727,7 +66917,7 @@ rec {
           "std" = [ "alloc" ];
           "tinyvec_macros" = [ "dep:tinyvec_macros" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "default" "tinyvec_macros" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "grab_spare_slice" "std" "tinyvec_macros" ];
       };
       "tinyvec_macros" = rec {
         crateName = "tinyvec_macros";
@@ -66786,10 +66976,6 @@ rec {
           {
             name = "db";
             packageId = "db";
-          }
-          {
-            name = "feature_flags";
-            packageId = "feature_flags";
           }
           {
             name = "fs";
@@ -70102,6 +70288,10 @@ rec {
           {
             name = "menu";
             packageId = "menu";
+          }
+          {
+            name = "num-format";
+            packageId = "num-format";
           }
           {
             name = "schemars";
@@ -75092,13 +75282,13 @@ rec {
       };
       "wgpu" = rec {
         crateName = "wgpu";
-        version = "29.0.0";
+        version = "29.0.3";
         edition = "2021";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/wgpu.git";
-          rev = "a466bc382ea747f8e1ac810efdb6dcd49a514575";
-          sha256 = "0ljbav9rln76s3y7k5lfihjfq1bghazjsf94d4d0k105r83yrlxh";
+          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
+          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
         };
         authors = [
           "gfx-rs developers"
@@ -75299,13 +75489,13 @@ rec {
       };
       "wgpu-core" = rec {
         crateName = "wgpu-core";
-        version = "29.0.0";
+        version = "29.0.3";
         edition = "2021";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/wgpu.git";
-          rev = "a466bc382ea747f8e1ac810efdb6dcd49a514575";
-          sha256 = "0ljbav9rln76s3y7k5lfihjfq1bghazjsf94d4d0k105r83yrlxh";
+          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
+          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
         };
         libName = "wgpu_core";
         authors = [
@@ -75469,13 +75659,13 @@ rec {
       };
       "wgpu-core-deps-apple" = rec {
         crateName = "wgpu-core-deps-apple";
-        version = "29.0.0";
+        version = "29.0.3";
         edition = "2021";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/wgpu.git";
-          rev = "a466bc382ea747f8e1ac810efdb6dcd49a514575";
-          sha256 = "0ljbav9rln76s3y7k5lfihjfq1bghazjsf94d4d0k105r83yrlxh";
+          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
+          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
         };
         libName = "wgpu_core_deps_apple";
         authors = [
@@ -75497,13 +75687,13 @@ rec {
       };
       "wgpu-core-deps-emscripten" = rec {
         crateName = "wgpu-core-deps-emscripten";
-        version = "29.0.0";
+        version = "29.0.3";
         edition = "2021";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/wgpu.git";
-          rev = "a466bc382ea747f8e1ac810efdb6dcd49a514575";
-          sha256 = "0ljbav9rln76s3y7k5lfihjfq1bghazjsf94d4d0k105r83yrlxh";
+          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
+          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
         };
         libName = "wgpu_core_deps_emscripten";
         authors = [
@@ -75523,13 +75713,13 @@ rec {
       };
       "wgpu-core-deps-windows-linux-android" = rec {
         crateName = "wgpu-core-deps-windows-linux-android";
-        version = "29.0.0";
+        version = "29.0.3";
         edition = "2021";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/wgpu.git";
-          rev = "a466bc382ea747f8e1ac810efdb6dcd49a514575";
-          sha256 = "0ljbav9rln76s3y7k5lfihjfq1bghazjsf94d4d0k105r83yrlxh";
+          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
+          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
         };
         libName = "wgpu_core_deps_windows_linux_android";
         authors = [
@@ -75552,13 +75742,13 @@ rec {
       };
       "wgpu-hal" = rec {
         crateName = "wgpu-hal";
-        version = "29.0.0";
+        version = "29.0.3";
         edition = "2021";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/wgpu.git";
-          rev = "a466bc382ea747f8e1ac810efdb6dcd49a514575";
-          sha256 = "0ljbav9rln76s3y7k5lfihjfq1bghazjsf94d4d0k105r83yrlxh";
+          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
+          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
         };
         libName = "wgpu_hal";
         authors = [
@@ -75857,6 +76047,13 @@ rec {
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
           }
+          {
+            name = "windows-result";
+            packageId = "windows-result 0.4.1";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (target."windows" or false);
+          }
         ];
         buildDependencies = [
           {
@@ -75872,9 +76069,9 @@ rec {
           }
         ];
         features = {
-          "dx12" = [ "naga/hlsl-out" "dep:arrayvec" "dep:bit-set" "dep:bytemuck" "dep:hashbrown" "dep:libloading" "dep:ordered-float" "dep:once_cell" "dep:parking_lot" "dep:profiling" "dep:range-alloc" "dep:windows-core" "dep:gpu-allocator" "gpu-allocator/d3d12" "windows/Win32_Devices_DeviceAndDriverInstallation" "windows/Win32_Graphics_Direct3D_Fxc" "windows/Win32_Graphics_Direct3D_Dxc" "windows/Win32_Graphics_Direct3D" "windows/Win32_Graphics_Direct3D12" "windows/Win32_Graphics_DirectComposition" "windows/Win32_Graphics_Dxgi_Common" "windows/Win32_Security" "windows/Win32_System_Diagnostics_Debug" "windows/Win32_System_Kernel" "windows/Win32_System_Performance" "windows/Win32_System_Threading" "windows/Win32_UI_WindowsAndMessaging" ];
+          "dx12" = [ "dep:arrayvec" "dep:bit-set" "dep:bytemuck" "dep:gpu-allocator" "dep:hashbrown" "dep:libloading" "dep:once_cell" "dep:ordered-float" "dep:parking_lot" "dep:profiling" "dep:range-alloc" "dep:windows-core" "gpu-allocator/d3d12" "naga/hlsl-out" "once_cell/std" "windows/Win32_Devices_DeviceAndDriverInstallation" "windows/Win32_Graphics_Direct3D_Dxc" "windows/Win32_Graphics_Direct3D_Fxc" "windows/Win32_Graphics_Direct3D" "windows/Win32_Graphics_Direct3D12" "windows/Win32_Graphics_DirectComposition" "windows/Win32_Graphics_Dxgi_Common" "windows/Win32_Security" "windows/Win32_System_Diagnostics_Debug" "windows/Win32_System_Kernel" "windows/Win32_System_Performance" "windows/Win32_System_Threading" "windows/Win32_UI_WindowsAndMessaging" ];
           "fragile-send-sync-non-atomic-wasm" = [ "wgpu-types/fragile-send-sync-non-atomic-wasm" ];
-          "gles" = [ "naga/glsl-out" "dep:arrayvec" "dep:bytemuck" "dep:glow" "dep:glutin_wgl_sys" "dep:hashbrown" "dep:js-sys" "dep:khronos-egl" "dep:wayland-sys" "dep:libloading" "dep:ndk-sys" "dep:objc2" "dep:parking_lot" "dep:profiling" "dep:wasm-bindgen" "dep:web-sys" "wgpu-types/web" "windows/Win32_Graphics_OpenGL" "windows/Win32_Graphics_Gdi" "windows/Win32_System_LibraryLoader" "windows/Win32_UI_WindowsAndMessaging" ];
+          "gles" = [ "dep:arrayvec" "dep:bytemuck" "dep:glow" "dep:glutin_wgl_sys" "dep:hashbrown" "dep:js-sys" "dep:khronos-egl" "dep:libloading" "dep:ndk-sys" "dep:objc2" "dep:parking_lot" "dep:profiling" "dep:wasm-bindgen" "dep:wayland-sys" "dep:web-sys" "dep:windows-result" "naga/glsl-out" "wgpu-types/web" "windows-result/std" "windows/Win32_Graphics_Gdi" "windows/Win32_Graphics_OpenGL" "windows/Win32_System_LibraryLoader" "windows/Win32_UI_WindowsAndMessaging" ];
           "metal" = [ "naga/msl-out" "dep:arrayvec" "dep:block2" "dep:bytemuck" "dep:hashbrown" "dep:libc" "dep:objc2" "dep:objc2-core-foundation" "dep:objc2-foundation" "dep:objc2-metal" "dep:objc2-quartz-core" "dep:parking_lot" "dep:profiling" "dep:smallvec" "dep:raw-window-metal" ];
           "portable-atomic" = [ "dep:portable-atomic" "dep:portable-atomic-util" ];
           "renderdoc" = [ "dep:libloading" "dep:renderdoc-sys" ];
@@ -75886,13 +76083,13 @@ rec {
       };
       "wgpu-naga-bridge" = rec {
         crateName = "wgpu-naga-bridge";
-        version = "29.0.0";
+        version = "29.0.3";
         edition = "2021";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/wgpu.git";
-          rev = "a466bc382ea747f8e1ac810efdb6dcd49a514575";
-          sha256 = "0ljbav9rln76s3y7k5lfihjfq1bghazjsf94d4d0k105r83yrlxh";
+          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
+          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
         };
         libName = "wgpu_naga_bridge";
         authors = [
@@ -75913,13 +76110,13 @@ rec {
       };
       "wgpu-types" = rec {
         crateName = "wgpu-types";
-        version = "29.0.0";
+        version = "29.0.3";
         edition = "2021";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/wgpu.git";
-          rev = "a466bc382ea747f8e1ac810efdb6dcd49a514575";
-          sha256 = "0ljbav9rln76s3y7k5lfihjfq1bghazjsf94d4d0k105r83yrlxh";
+          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
+          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
         };
         libName = "wgpu_types";
         authors = [

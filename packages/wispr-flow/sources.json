@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-ou2NgkyHC9LCIxO5xbf5gu8kyAZcBg0hJsktdYnWDLE=",
-    "x86_64-darwin": "sha256-bpyvq3JXarYZ9VibPZC0ucltj/naWo9GmnUZRFoFLNU="
+    "aarch64-darwin": "sha256-lduMVqToeZNpuPdGOm64kTrZ+q93yybaZ5KnU31lz3Y=",
+    "x86_64-darwin": "sha256-NPPLDZ0evZTIGhXDcAr/wUjVlENBynNBQyrV45ET5PI="
   },
   "urls": {
-    "aarch64-darwin": "https://dl.wisprflow.com/wispr-flow/darwin/arm64/dmgs/Flow-v1.5.339.dmg",
-    "x86_64-darwin": "https://dl.wisprflow.com/wispr-flow/darwin/x64/dmgs/Flow-v1.5.339.dmg"
+    "aarch64-darwin": "https://dl.wisprflow.com/wispr-flow/darwin/arm64/dmgs/Flow-v1.5.424.dmg",
+    "x86_64-darwin": "https://dl.wisprflow.com/wispr-flow/darwin/x64/dmgs/Flow-v1.5.424.dmg"
   },
-  "version": "1.5.339"
+  "version": "1.5.424"
 }

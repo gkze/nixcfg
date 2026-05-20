@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.1.16";
+      url = "github:generalaction/emdash/v1.1.19";
       flake = false;
     };
     flake-edit = {
@@ -52,7 +52,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gitbutler = {
-      url = "github:gitbutlerapp/gitbutler/release/0.19.10";
+      url = "github:gitbutlerapp/gitbutler/release/0.19.13";
       flake = false;
     };
     home-manager = {
@@ -87,7 +87,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.5.7";
+      url = "github:NousResearch/hermes-agent/v2026.5.16";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -141,7 +141,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.50.0";
+      url = "github:max-sixty/worktrunk/v0.52.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -162,7 +162,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.130.0";
+      url = "github:openai/codex/rust-v0.132.0";
       flake = false;
     };
     curator = {
@@ -170,7 +170,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.16.0";
+      url = "github:steipete/gogcli/v0.17.0";
       flake = false;
     };
     github-desktop = {
@@ -223,7 +223,7 @@
       flake = false;
     };
     mux = {
-      url = "github:coder/mux/v0.24.0";
+      url = "github:coder/mux/v0.25.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mountpoint-s3 = {
@@ -251,7 +251,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad/v0.6.17";
+      url = "github:batrachianai/toad/v0.6.18";
       flake = false;
     };
     treewalker-nvim = {
@@ -692,7 +692,7 @@
                 ...
               }:
               ''
-                OXLINT_TSGOLINT_PATH=${lib.getExe pkgs.oxlint-tsgolint} ${lib.getExe pkgs.oxlint} --config .oxlintrc.json --type-aware --quiet .
+                OXLINT_TSGOLINT_PATH=${lib.getExe pkgs.tsgolint} ${lib.getExe pkgs.oxlint} --config .oxlintrc.json --type-aware --quiet .
               '';
           };
 
@@ -768,7 +768,7 @@
               }:
               let
                 nixcfgPkg = mkNixcfgPackage pkgs;
-                tyPythonFlag = if nixcfgPkg != null then " --python ${nixcfgPkg}/bin/python" else "";
+                tyPythonFlag = if nixcfgPkg != null then " --python ${nixcfgPkg.passthru.venv}/bin/python" else "";
               in
               ''
                 ${lib.getExe pkgs.ty} check${tyPythonFlag} .
@@ -786,7 +786,8 @@
               }:
               ''
                 ${lib.getExe pkgs.git} init -q .
-                ${lib.getExe pkgs.actionlint}
+                ${pkgs.findutils}/bin/find .github/workflows -maxdepth 1 -type f ! -name '*.lock.yml' \( -name '*.yml' -o -name '*.yaml' \) -print0 \
+                  | ${pkgs.findutils}/bin/xargs -0 ${lib.getExe pkgs.actionlint}
               '';
           };
 
@@ -842,8 +843,8 @@
               ''
                 ${lib.getExe pkgs.git} init -q .
                 ${lib.getExe pkgs.git} add -A .
-                ${nixcfgPkg}/bin/coverage run -m pytest
-                ${nixcfgPkg}/bin/coverage report
+                ${nixcfgPkg.passthru.venv}/bin/coverage run -m pytest
+                ${nixcfgPkg.passthru.venv}/bin/coverage report
               '';
           };
 

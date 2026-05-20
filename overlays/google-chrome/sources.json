@@ -1,13 +1,13 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-LOFwwDzJWZEqsHKdH02WrYqljmxer7/cawmQ1S1Aktg=",
-    "x86_64-darwin": "sha256-LOFwwDzJWZEqsHKdH02WrYqljmxer7/cawmQ1S1Aktg=",
-    "x86_64-linux": "sha256-1k9PrK1mpUJFJ6RbC3ZEN0CqOLX4JbGpmpXQrDpZTVU="
+    "aarch64-darwin": "sha256-6StRgunAGKxEj8FXwpKeYOmK1QfIjdvrWY0VS9kVaqo=",
+    "x86_64-darwin": "sha256-6StRgunAGKxEj8FXwpKeYOmK1QfIjdvrWY0VS9kVaqo=",
+    "x86_64-linux": "sha256-3iuKxcuwt/+BIcUqC715hbeRLhUjepNU1GbB3daIokI="
   },
   "urls": {
     "aarch64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
     "x86_64-darwin": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
     "x86_64-linux": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
   },
-  "version": "148.0.7778.98"
+  "version": "148.0.7778.179"
 }

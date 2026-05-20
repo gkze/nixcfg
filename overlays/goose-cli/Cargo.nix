@@ -13546,7 +13546,7 @@ rec {
       };
       "goose" = rec {
         crateName = "goose";
-        version = "1.34.0";
+        version = "1.34.1";
         edition = "2021";
         crateBin = [
           {
@@ -14183,7 +14183,7 @@ rec {
       };
       "goose-acp-macros" = rec {
         crateName = "goose-acp-macros";
-        version = "1.34.0";
+        version = "1.34.1";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-acp-macros"; };
         procMacro = true;
@@ -14206,7 +14206,7 @@ rec {
       };
       "goose-cli" = rec {
         crateName = "goose-cli";
-        version = "1.34.0";
+        version = "1.34.1";
         edition = "2021";
         crateBin = [
           {
@@ -14456,7 +14456,7 @@ rec {
       };
       "goose-mcp" = rec {
         crateName = "goose-mcp";
-        version = "1.34.0";
+        version = "1.34.1";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-mcp"; };
         libName = "goose_mcp";
@@ -14579,7 +14579,7 @@ rec {
       };
       "goose-sdk" = rec {
         crateName = "goose-sdk";
-        version = "1.34.0";
+        version = "1.34.1";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-sdk"; };
         libName = "goose_sdk";
@@ -14629,7 +14629,7 @@ rec {
       };
       "goose-server" = rec {
         crateName = "goose-server";
-        version = "1.34.0";
+        version = "1.34.1";
         edition = "2021";
         crateBin = [
           {
@@ -14851,7 +14851,7 @@ rec {
       };
       "goose-test" = rec {
         crateName = "goose-test";
-        version = "1.34.0";
+        version = "1.34.1";
         edition = "2021";
         crateBin = [
           {
@@ -14880,7 +14880,7 @@ rec {
       };
       "goose-test-support" = rec {
         crateName = "goose-test-support";
-        version = "1.34.0";
+        version = "1.34.1";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-test-support"; };
         libName = "goose_test_support";

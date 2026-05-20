@@ -1,4 +1,4 @@
-"""Tests for the oxlint-tsgolint updater."""
+"""Tests for the tsgolint updater."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.nix import _build_fetchgit_call
+from lib.update.nix import _build_fetch_from_github_call
 from lib.update.updaters.base import VersionInfo, source_override_env
 
 if TYPE_CHECKING:
@@ -18,13 +18,13 @@ if TYPE_CHECKING:
 
 
 def _load_module(module_name: str):
-    return load_repo_module("overlays/oxlint-tsgolint/updater.py", module_name)
+    return load_repo_module("overlays/tsgolint/updater.py", module_name)
 
 
-def test_oxlint_tsgolint_is_latest_rejects_fake_and_empty_hash_mappings() -> None:
+def test_tsgolint_is_latest_rejects_fake_and_empty_hash_mappings() -> None:
     """Placeholder and empty mapping hashes should force a refresh."""
-    module = _load_module("oxlint_tsgolint_latest_test")
-    updater = module.OxlintTsgolintUpdater()
+    module = _load_module("tsgolint_latest_test")
+    updater = module.TsgolintUpdater()
     latest = VersionInfo("0.21.0")
 
     empty = SourceEntry(version="0.21.0", hashes={})
@@ -42,12 +42,10 @@ def test_oxlint_tsgolint_is_latest_rejects_fake_and_empty_hash_mappings() -> Non
     assert _run(updater._is_latest(real, latest)) is True
 
 
-def test_oxlint_tsgolint_is_latest_rejects_mismatched_empty_and_missing_entries() -> (
-    None
-):
+def test_tsgolint_is_latest_rejects_mismatched_empty_and_missing_entries() -> None:
     """Version mismatches and missing structured hashes should not be treated as current."""
-    module = _load_module("oxlint_tsgolint_latest_entries_test")
-    updater = module.OxlintTsgolintUpdater()
+    module = _load_module("tsgolint_latest_entries_test")
+    updater = module.TsgolintUpdater()
     latest = VersionInfo("0.21.0")
 
     assert (
@@ -80,10 +78,10 @@ def test_oxlint_tsgolint_is_latest_rejects_mismatched_empty_and_missing_entries(
     )
 
 
-def test_oxlint_tsgolint_is_latest_accepts_real_structured_entries() -> None:
+def test_tsgolint_is_latest_accepts_real_structured_entries() -> None:
     """A non-placeholder structured hash entry list should count as current."""
-    module = _load_module("oxlint_tsgolint_latest_real_entries_test")
-    updater = module.OxlintTsgolintUpdater()
+    module = _load_module("tsgolint_latest_real_entries_test")
+    updater = module.TsgolintUpdater()
     latest = VersionInfo("0.21.0")
 
     assert (
@@ -119,12 +117,12 @@ def test_oxlint_tsgolint_is_latest_accepts_real_structured_entries() -> None:
     )
 
 
-def test_oxlint_tsgolint_fetch_hashes_computes_src_and_vendor_hashes(
+def test_tsgolint_fetch_hashes_computes_src_and_vendor_hashes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The updater should compute srcHash first, then vendorHash with override env."""
-    module = _load_module("oxlint_tsgolint_hash_test")
-    updater = module.OxlintTsgolintUpdater()
+    module = _load_module("tsgolint_hash_test")
+    updater = module.TsgolintUpdater()
     calls = install_fixed_hash_stream(
         monkeypatch,
         (
@@ -138,18 +136,19 @@ def test_oxlint_tsgolint_fetch_hashes_computes_src_and_vendor_hashes(
     assert len(calls) == 2
     assert_nix_ast_equal(
         str(calls[0]["expr"]),
-        _build_fetchgit_call(
-            "https://github.com/oxc-project/tsgolint.git",
-            "v0.21.0",
-            fetch_submodules=True,
+        _build_fetch_from_github_call(
+            "oxc-project",
+            "tsgolint",
+            tag="v0.21.0",
+            fetch_submodules=False,
         ),
     )
     assert_nix_ast_equal(
         str(calls[1]["expr"]),
-        module._build_overlay_expr("oxlint-tsgolint"),
+        module._build_overlay_expr("tsgolint"),
     )
     assert calls[1]["env"] == source_override_env(
-        "oxlint-tsgolint",
+        "tsgolint",
         version="0.21.0",
         src_hash="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         dependency_hash_type="vendorHash",

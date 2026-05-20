@@ -1080,22 +1080,19 @@ def test_netnewswire_package_exposes_copy_mode_mac_app_metadata() -> None:
     derivation_args = expect_instance(derivation.argument, AttributeSet)
 
     assert isinstance(sources.get("version"), str)
-    version_inherit = next(
-        value for value in derivation_args.values if isinstance(value, Inherit)
-    )
-    assert_nix_ast_equal(version_inherit.from_expression, Identifier(name="selfSource"))
-    assert [name.rebuild() for name in version_inherit.names] == ["version"]
     assert_nix_ast_equal(
         derivation.name,
-        identifier_attr_path("stdenvNoCC", "mkDerivation"),
+        Identifier(name="mkZipApp"),
     )
     assert_nix_ast_equal(
-        expect_binding(derivation_args.values, "passthru").value,
-        _mac_app_metadata_attrset(
-            StringPrimitive(value="${appName}.app"),
-            StringPrimitive(value="Applications/${appName}.app"),
-            "copy",
-        ),
+        expect_binding(derivation_args.values, "info").value,
+        Identifier(name="selfSource"),
+    )
+    mac_app_binding = expect_binding(derivation_args.values, "macApp").value
+    assert isinstance(mac_app_binding, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(mac_app_binding.values, "installMode").value,
+        StringPrimitive(value="copy"),
     )
 
 

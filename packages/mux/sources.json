@@ -1,22 +1,22 @@
 {
-  "drvHash": "q8rxjs6g1fhph073n26ifwx4pvmhv9vc",
+  "drvHash": "qnndsk73awshh09nihlxssv34233vdbf",
   "hashes": [
     {
-      "hash": "sha256-5GaR7ZV20LyEovgqnMFZIA8/ZiTMe9VD9gWuNnJuCPE=",
+      "hash": "sha256-Iv2eJ7qi1zJ/xGjXAcnjtKuWsoz4Ji0uAidByQQJE/g=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     },
     {
-      "hash": "sha256-NXwWrHX1VHWPbREVxxuF4C8ac7gVW03uldb+myMRbdU=",
+      "hash": "sha256-Asxv6UuOsXgNOQVXrlYljA2skEFRvTlGE2hWBU1a7WA=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-linux"
     },
     {
-      "hash": "sha256-ZrgZ+Fsj+sGVbe1ZDhzwxSsk2DIwcRmmRflFSQGslLY=",
+      "hash": "sha256-7KIc24de24lD8yCrTzy9K5gqQLKFepHMaT0IDJQQQ8k=",
       "hashType": "nodeModulesHash",
       "platform": "x86_64-linux"
     }
   ],
   "input": "mux",
-  "version": "v0.24.0"
+  "version": "v0.25.0"
 }

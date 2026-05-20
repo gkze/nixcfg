@@ -3,7 +3,6 @@
   flake-edit,
   mkResolvedBuildSystemsOverlay,
   nix-prefetch-git,
-  symlinkJoin,
   python314,
   callPackage,
   lib,
@@ -42,14 +41,17 @@ let
 
   venv = pySet.mkVirtualEnv "nixcfg-venv" workspace.deps.all;
 in
-symlinkJoin {
-  name = "nixcfg";
-  paths = [ venv ];
-  nativeBuildInputs = [
-    makeWrapper
-    installShellFiles
-  ];
-  postBuild =
+runCommand "nixcfg"
+  {
+    nativeBuildInputs = [
+      makeWrapper
+      installShellFiles
+    ];
+    passthru = {
+      inherit venv;
+    };
+  }
+  (
     let
       mkCompletionScript =
         shell:
@@ -61,7 +63,9 @@ symlinkJoin {
         '';
     in
     ''
-      wrapProgram $out/bin/nixcfg \
+      mkdir -p $out/bin
+
+      makeWrapper ${venv}/bin/nixcfg $out/bin/nixcfg \
         --prefix PATH : ${
           lib.makeBinPath [
             flake-edit
@@ -73,5 +77,5 @@ symlinkJoin {
         --zsh ${mkCompletionScript "zsh"} \
         --bash ${mkCompletionScript "bash"} \
         --fish ${mkCompletionScript "fish"}
-    '';
-}
+    ''
+  )

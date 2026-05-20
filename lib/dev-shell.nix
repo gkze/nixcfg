@@ -9,7 +9,9 @@ pkgs:
 let
   hookPriority = 10;
   nixcfgPkg = if mkNixcfgPackage == null then null else mkNixcfgPackage pkgs;
-  tyPythonFlag = lib.optionalString (nixcfgPkg != null) " --python ${nixcfgPkg}/bin/python";
+  tyPythonFlag = lib.optionalString (
+    nixcfgPkg != null
+  ) " --python ${nixcfgPkg.passthru.venv}/bin/python";
   pythonScriptFindPredicates = lib.concatMapStringsSep " " (
     path: "-o -path './${path}'"
   ) lintFiles.python.pythonScriptPaths;
@@ -33,6 +35,13 @@ let
     set -euo pipefail
 
     ${lib.getExe pkgs.python3} ${./check_python_compile.py} ${lib.escapeShellArgs lintFiles.python.compilePaths}
+  '';
+
+  workflowActionlintCheck = pkgs.writeShellScriptBin "check-workflow-actionlint" ''
+    set -euo pipefail
+
+    ${pkgs.findutils}/bin/find .github/workflows -maxdepth 1 -type f ! -name '*.lock.yml' \( -name '*.yml' -o -name '*.yaml' \) -print0 \
+      | ${pkgs.findutils}/bin/xargs -0 ${lib.getExe pkgs.actionlint}
   '';
 
   pre-commit-check = gitHooks.lib.${pkgs.system}.run {
@@ -104,7 +113,7 @@ let
         enable = true;
         name = "lint-web-oxlint";
         package = pkgs.oxlint;
-        entry = "env OXLINT_TSGOLINT_PATH=${lib.getExe pkgs.oxlint-tsgolint} oxlint --config .oxlintrc.json --type-aware --quiet .";
+        entry = "env OXLINT_TSGOLINT_PATH=${lib.getExe pkgs.tsgolint} oxlint --config .oxlintrc.json --type-aware --quiet .";
         pass_filenames = false;
         always_run = true;
         priority = hookPriority;
@@ -163,8 +172,8 @@ let
       lint-workflows-actionlint = {
         enable = true;
         name = "lint-workflows-actionlint";
-        package = pkgs.actionlint;
-        entry = "actionlint";
+        package = workflowActionlintCheck;
+        entry = "${workflowActionlintCheck}/bin/check-workflow-actionlint";
         pass_filenames = false;
         always_run = true;
         priority = hookPriority;
@@ -232,7 +241,7 @@ pkgs.devshell.mkShell {
       nixos-generators
       oxfmt
       oxlint
-      oxlint-tsgolint
+      tsgolint
       nurl
       pinact
       prek
@@ -243,6 +252,7 @@ pkgs.devshell.mkShell {
       yamlfmt
     ]
     ++ lib.optional (pkgs ? nix-manipulator) nix-manipulator
+    ++ lib.optional (nixcfgPkg != null) nixcfgPkg
     ++ lib.optional pkgs.stdenv.isLinux dconf2nix
     ++ pre-commit-check.enabledPackages;
 

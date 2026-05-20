@@ -18,7 +18,7 @@ from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.flake_lock import FlakeLockNode, LockedRef
-from lib.tests._nix_ast import assert_nix_ast_equal
+from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.update.flake import (
     flake_fetch_expr,
     flake_fetch_expression,
@@ -38,6 +38,7 @@ from lib.update.nix import (
     _build_overlay_expr,
     _build_overlay_expression,
     _build_package_path_attr_expr,
+    _build_pnpm_10_nodejs_22_expr,
 )
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
@@ -315,6 +316,34 @@ def test_build_fetch_from_github_expr_supports_tag_post_fetch_and_expr_hash() ->
     )
 
 
+def test_build_fetch_from_github_expr_can_skip_submodules() -> None:
+    """FetchFromGitHub helper should explicitly disable submodule fetching."""
+    expr = _build_fetch_from_github_expr(
+        "oxc-project",
+        "tsgolint",
+        tag="v0.23.0",
+        fetch_submodules=False,
+    )
+
+    assert_nix_ast_equal(
+        expr,
+        _build_fetch_from_github_call(
+            "oxc-project",
+            "tsgolint",
+            tag="v0.23.0",
+            fetch_submodules=False,
+        ),
+    )
+    fetcher = parse_nix_expr(expr)
+    assert isinstance(fetcher, FunctionCall)
+    argument = fetcher.argument
+    assert isinstance(argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(argument.values, "fetchSubmodules").value,
+        Primitive(value=False),
+    )
+
+
 def test_build_fetch_from_github_call_requires_exactly_one_selector() -> None:
     """Exactly one of rev or tag must be provided."""
     with pytest.raises(ValueError, match="Expected exactly one of rev or tag"):
@@ -454,6 +483,53 @@ def test_build_fetch_pnpm_deps_expr_is_parseable() -> None:
     )
 
 
+def test_build_fetch_pnpm_deps_expr_accepts_explicit_pnpm_toolchain() -> None:
+    """FetchPnpmDeps helper should pin pnpm when callers need lockfile stability."""
+    src_call = _build_fetch_from_github_call(
+        "element-hq",
+        "element-web",
+        tag="v1.12.14",
+        hash_value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    )
+    pnpm_expr = _build_pnpm_10_nodejs_22_expr()
+
+    expr = _build_fetch_pnpm_deps_expr(
+        src_call,
+        pname="element",
+        version="1.12.14",
+        fetcher_version=3,
+        pnpm=pnpm_expr,
+    )
+
+    assert_nix_ast_equal(
+        expr,
+        LetExpression(
+            local_variables=[
+                Binding(
+                    name="src",
+                    value=src_call,
+                ),
+            ],
+            value=FunctionCall(
+                name=identifier_attr_path("pkgs", "fetchPnpmDeps"),
+                argument=AttributeSet(
+                    values=[
+                        Binding(name="pname", value=StringPrimitive(value="element")),
+                        Binding(name="version", value=StringPrimitive(value="1.12.14")),
+                        Inherit(names=[Identifier(name="src")]),
+                        Binding(name="pnpm", value=pnpm_expr),
+                        Binding(name="fetcherVersion", value=Primitive(value=3)),
+                        Binding(
+                            name="hash",
+                            value=identifier_attr_path("pkgs", "lib", "fakeHash"),
+                        ),
+                    ],
+                ),
+            ),
+        ),
+    )
+
+
 def test_build_fetchgit_expr_is_parseable() -> None:
     """Fetchgit helper should emit valid Nix via nix-manipulator."""
     expr = _build_fetchgit_expr(
@@ -471,7 +547,7 @@ def test_build_fetchgit_expr_is_parseable() -> None:
 
 
 def test_build_fetchgit_expr_can_skip_submodules() -> None:
-    """Fetchgit helper should omit fetchSubmodules when explicitly disabled."""
+    """Fetchgit helper should explicitly disable submodule fetching when requested."""
     expr = _build_fetchgit_expr(
         "https://example.com/demo.git",
         "deadbeef",
@@ -485,6 +561,14 @@ def test_build_fetchgit_expr_can_skip_submodules() -> None:
             "deadbeef",
             fetch_submodules=False,
         ),
+    )
+    fetchgit = parse_nix_expr(expr)
+    assert isinstance(fetchgit, FunctionCall)
+    argument = fetchgit.argument
+    assert isinstance(argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(argument.values, "fetchSubmodules").value,
+        Primitive(value=False),
     )
 
 

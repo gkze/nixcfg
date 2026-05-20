@@ -110,9 +110,10 @@ let
         amp-cli
         ast-grep
         axiom-cli
+        nixcfg
         oxfmt
         oxlint
-        oxlint-tsgolint
+        tsgolint
         curator
         droid
         ffmpeg
