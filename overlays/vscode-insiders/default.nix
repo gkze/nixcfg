@@ -27,6 +27,15 @@
         url = info.urls.${system};
         inherit hash;
       };
+      postPatch =
+        prev.lib.optionalString prev.stdenv.hostPlatform.isDarwin ''
+          vscodeRipgrep="Contents/Resources/app/node_modules/@vscode/ripgrep/bin/rg"
+          if [ ! -e "$vscodeRipgrep" ]; then
+            mkdir -p "Contents/Resources/app/node_modules/@vscode/ripgrep/bin"
+            cp ${prev.ripgrep}/bin/rg "$vscodeRipgrep"
+          fi
+        ''
+        + (old.postPatch or "");
       meta = (old.meta or { }) // {
         platforms = builtins.attrNames info.urls;
       };
