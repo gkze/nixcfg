@@ -959,6 +959,133 @@ def test_run_helper_and_build_patched_src_error_paths(
         )
 
 
+def test_run_crate2nix_generate_retries_transient_prefetch_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Retry the known nix-prefetch-git cleanup race without hiding real drift."""
+    generated_cargo = tmp_path / "Cargo.nix"
+    generated_hashes = tmp_path / "crate-hashes.json"
+    sleeps: list[float] = []
+    calls = 0
+
+    def _run(
+        args: list[str],
+        *,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        assert args == ["nix", "run", "nixpkgs#crate2nix"]
+        assert env == {"CARGO_HOME": "/tmp/cargo"}
+        if calls == 1:
+            generated_cargo.write_text("partial\n", encoding="utf-8")
+            generated_hashes.write_text("partial\n", encoding="utf-8")
+            raise RuntimeError(
+                "nix run nixpkgs#crate2nix\n"
+                "rm: cannot remove '/tmp/git-checkout/clone/.git/objects': "
+                "Directory not empty\n"
+                "Error: while prefetching crates for calculating sha256: "
+                "nix-prefetch-git"
+            )
+        assert not generated_cargo.exists()
+        assert not generated_hashes.exists()
+        return subprocess.CompletedProcess(args, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+    monkeypatch.setattr(crate2nix.time, "sleep", sleeps.append)
+
+    result = crate2nix._run_crate2nix_generate(
+        ["nix", "run", "nixpkgs#crate2nix"],
+        env={"CARGO_HOME": "/tmp/cargo"},
+        generated_outputs=(generated_cargo, generated_hashes),
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "ok\n"
+    assert calls == 2
+    assert sleeps == [2.0]
+
+
+def test_run_crate2nix_generate_does_not_retry_permanent_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Permanent crate2nix errors should fail immediately."""
+    calls = 0
+
+    def _run(
+        args: list[str],
+        *,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        del env
+        calls += 1
+        message = f"{' '.join(args)}\nreal crate graph error"
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+    monkeypatch.setattr(crate2nix.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(RuntimeError, match="real crate graph error"):
+        crate2nix._run_crate2nix_generate(
+            ["nix", "run", "nixpkgs#crate2nix"],
+            env={},
+            generated_outputs=(tmp_path / "Cargo.nix",),
+        )
+
+    assert calls == 1
+
+
+def test_run_crate2nix_generate_gives_up_after_retry_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Retryable failures remain failures when every bounded attempt fails."""
+    calls = 0
+    sleeps: list[float] = []
+
+    def _run(
+        args: list[str],
+        *,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        del args, env
+        calls += 1
+        raise RuntimeError(
+            "Error: while prefetching crates for calculating sha256: "
+            "nix-prefetch-git\n"
+            "fatal: early EOF"
+        )
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+    monkeypatch.setattr(crate2nix.time, "sleep", sleeps.append)
+
+    with pytest.raises(RuntimeError, match="early EOF"):
+        crate2nix._run_crate2nix_generate(
+            ["nix", "run", "nixpkgs#crate2nix"],
+            env={},
+            generated_outputs=(tmp_path / "Cargo.nix",),
+            attempts=2,
+        )
+
+    assert calls == 2
+    assert sleeps == [2.0]
+
+
+def test_retryable_crate2nix_generate_failure_requires_prefetch_context() -> None:
+    """Retry classification should stay scoped to crate2nix prefetch flakes."""
+    assert crate2nix._is_retryable_crate2nix_generate_failure(
+        "nix-prefetch-git\nRPC failed"
+    )
+    assert not crate2nix._is_retryable_crate2nix_generate_failure("RPC failed")
+    assert not crate2nix._is_retryable_crate2nix_generate_failure(
+        "nix-prefetch-git\nreal crate graph error"
+    )
+
+
 def test_refresh_target_materializes_normalized_outputs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

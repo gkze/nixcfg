@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast
@@ -22,6 +23,20 @@ from lib.update.paths import REPO_ROOT
 _NORMALIZER_RESULT_SIZE = 3
 _CRATE2NIX_COMMAND_TIMEOUT_SECONDS = 2400
 _CRATE2NIX_CARGO_HOME_ENV = "NIXCFG_CRATE2NIX_CARGO_HOME"
+_CRATE2NIX_GENERATE_ATTEMPTS = 3
+_CRATE2NIX_GENERATE_RETRY_DELAY_SECONDS = 2.0
+_RETRYABLE_CRATE2NIX_PREFETCH_MARKERS = (
+    "Directory not empty",
+    "Operation timed out",
+    "Connection timed out",
+    "Could not resolve host",
+    "Failed to connect",
+    "TLS connection",
+    "RPC failed",
+    "HTTP/2 stream",
+    "early EOF",
+    "The requested URL returned error: 5",
+)
 
 
 class _Normalizer(Protocol):
@@ -253,6 +268,40 @@ def _run(
     return completed
 
 
+def _is_retryable_crate2nix_generate_failure(message: str) -> bool:
+    """Return whether a crate2nix generation failure is likely transient."""
+    return "nix-prefetch-git" in message and any(
+        marker in message for marker in _RETRYABLE_CRATE2NIX_PREFETCH_MARKERS
+    )
+
+
+def _run_crate2nix_generate(
+    args: list[str],
+    *,
+    env: dict[str, str],
+    generated_outputs: tuple[Path, ...],
+    attempts: int = _CRATE2NIX_GENERATE_ATTEMPTS,
+) -> subprocess.CompletedProcess[str]:
+    """Run crate2nix generation with bounded retries for transient prefetch flakes."""
+    attempt = 1
+    while True:
+        try:
+            return _run(args, env=env)
+        except RuntimeError as exc:
+            if attempt >= attempts or not _is_retryable_crate2nix_generate_failure(
+                str(exc)
+            ):
+                raise
+            for path in generated_outputs:
+                path.unlink(missing_ok=True)
+            sys.stderr.write(
+                "Retrying crate2nix generation after transient nix-prefetch-git "
+                f"failure ({attempt}/{attempts})...\n"
+            )
+            time.sleep(_CRATE2NIX_GENERATE_RETRY_DELAY_SECONDS * attempt)
+            attempt += 1
+
+
 def _build_patched_src(target: Crate2NixTarget) -> Path:
     completed = _run([
         "nix",
@@ -280,7 +329,7 @@ def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
         generated_cargo = tmp_root / "Cargo.nix"
         generated_hashes = tmp_root / "crate-hashes.json"
 
-        _run(
+        _run_crate2nix_generate(
             [
                 "nix",
                 "run",
@@ -299,6 +348,7 @@ def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
                 "CARGO_HOME": str(cargo_home),
                 "CARGO_NET_GIT_FETCH_WITH_CLI": "true",
             },
+            generated_outputs=(generated_cargo, generated_hashes),
         )
 
         cargo_text, _rewrites, _added_root_src = normalize(
@@ -501,10 +551,12 @@ __all__ = [
     "Crate2NixTarget",
     "RefreshResult",
     "_current_platform",
+    "_is_retryable_crate2nix_generate_failure",
     "_normalize_json_text",
     "_normalize_trailing_newline",
     "_refresh_target",
     "_resolve_targets",
+    "_run_crate2nix_generate",
     "_stabilize_generated_command_comment",
     "_stabilize_generated_root_src_paths",
     "_target_has_changes",
