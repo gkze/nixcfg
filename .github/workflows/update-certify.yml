@@ -225,6 +225,11 @@ jobs:
             --output "$tmp_dir/repo.tar.gz" \
             "${GITHUB_API_URL:-https://api.github.com}/repos/${GITHUB_REPOSITORY}/tarball/${CHECKOUT_REF}"
           tar -xzf "$tmp_dir/repo.tar.gz" --strip-components=1
+          git init -q
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add -A
+          git commit -q -m "workspace snapshot"
       - *setup_nix
       - *cachix
       - *cache_nix
