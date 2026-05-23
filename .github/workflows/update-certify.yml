@@ -92,10 +92,9 @@ jobs:
       - &setup_nix # Determinate Nix v3.17.1
         uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919
         with:
-          # Prefer a PAT when configured, but always give Nix an authenticated
-          # GitHub token so flake input fetches do not fall back to the tiny
-          # unauthenticated API rate limit.
-          github-token: ${{ secrets.NIX_GITHUB_TOKEN || github.token }}
+          # Nix uses this token for external api.github.com flake fetches.
+          # The default github.token produces HTTP 401 "Bad credentials" there.
+          github-token: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
           extra-conf: |
             extra-substituters = https://cache.garnix.io
             extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
