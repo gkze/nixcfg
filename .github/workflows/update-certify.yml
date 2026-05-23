@@ -214,7 +214,7 @@ jobs:
       - name: Check out update branch archive
         env:
           CHECKOUT_REF: ${{ needs.select-ref.outputs.ref }}
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           tmp_dir="$(mktemp -d)"
