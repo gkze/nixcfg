@@ -16,6 +16,7 @@ from lib.update.ci._workflow_analysis import (
     analyze_workflow_job,
     load_workflow_analysis,
 )
+from lib.update.ci._workflow_yaml import load_workflow_yaml
 
 _DARWIN_FULL_SMOKE_MARKER = "nix run .#nixcfg -- ci workflow darwin eval-full-smoke"
 _DARWIN_LOCK_SMOKE_MARKER = "nix run .#nixcfg -- ci workflow darwin eval-lock-smoke"
@@ -48,6 +49,10 @@ _REFRESH_WORKFLOW_JOB_IDS = (
     "compute-hashes-x86_64-linux",
     "compute-hashes-aarch64-linux",
     "aggregate-platform-updates",
+)
+_REFRESH_CONCURRENCY_CANCEL_MESSAGE = (
+    "Update refresh workflow must set concurrency.cancel-in-progress: false "
+    "so scheduled refreshes do not cancel in-flight package slices"
 )
 _CERTIFY_WORKFLOW_SENTINEL_JOB_IDS = (
     "darwin-full-smoke",
@@ -271,6 +276,16 @@ def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -
         _validate_checkout_token(job)
 
 
+def _validate_refresh_workflow_concurrency(workflow_data: WorkflowObject) -> None:
+    """Require non-preemptive refresh concurrency for long package matrices."""
+    concurrency = workflow_data.get("concurrency")
+    cancel_in_progress = (
+        concurrency.get("cancel-in-progress") if isinstance(concurrency, dict) else None
+    )
+    if cancel_in_progress is not False:
+        raise RuntimeError(_REFRESH_CONCURRENCY_CANCEL_MESSAGE)
+
+
 def _validate_checkout_token(job: WorkflowJobAnalysis) -> None:
     """Require the update token for checkout steps in update workflows."""
     for step in job.steps:
@@ -442,6 +457,7 @@ def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -
 
 def validate_workflow_structure_contracts(*, workflow_path: Path) -> None:
     """Validate refresh/certification structure contracts in one workflow file."""
+    workflow_data = load_workflow_yaml(workflow_path)
     workflow = load_workflow_analysis(
         workflow_path,
         invalid_job_message="Workflow job {job_id} must be a mapping",
@@ -457,6 +473,7 @@ def validate_workflow_structure_contracts(*, workflow_path: Path) -> None:
         raise RuntimeError(msg)
 
     if has_refresh_jobs:
+        _validate_refresh_workflow_concurrency(workflow_data)
         _validate_refresh_workflow_structure_contracts(workflow)
     if has_certify_jobs:
         _validate_certify_workflow_structure_contracts(workflow)

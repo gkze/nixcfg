@@ -22,6 +22,9 @@ def _write_workflow(path: Path, content: str) -> Path:
 
 def _valid_refresh_workflow_text() -> str:
     return """
+        concurrency:
+          group: flake-update-refresh
+          cancel-in-progress: false
         on: workflow_dispatch
         jobs:
           resolve-versions:
@@ -388,6 +391,15 @@ def test_validate_workflow_structure_contracts_accepts_valid_certify_workflow(
 @pytest.mark.parametrize(
     ("workflow_text", "error_match"),
     [
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
+                "cancel-in-progress: false",
+                "cancel-in-progress: true",
+                1,
+            ),
+            "scheduled refreshes do not cancel in-flight package slices",
+            id="forbids-preemptive-refresh-concurrency",
+        ),
         pytest.param(
             _valid_refresh_workflow_text().replace(
                 "nix run .#nixcfg -- ci workflow darwin eval-lock-smoke",
