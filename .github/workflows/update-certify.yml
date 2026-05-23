@@ -211,7 +211,20 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
     steps:
-      - *checkout_update_ref
+      - name: Check out update branch archive
+        env:
+          CHECKOUT_REF: ${{ needs.select-ref.outputs.ref }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$tmp_dir"' EXIT
+          curl --fail --location --silent --show-error \
+            --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$tmp_dir/repo.tar.gz" \
+            "${GITHUB_API_URL:-https://api.github.com}/repos/${GITHUB_REPOSITORY}/tarball/${CHECKOUT_REF}"
+          tar -xzf "$tmp_dir/repo.tar.gz" --strip-components=1
       - *setup_nix
       - *cachix
       - *cache_nix

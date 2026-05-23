@@ -384,7 +384,19 @@ jobs:
       max-parallel: 8
       matrix: ${{ fromJSON(needs.discover-update-targets.outputs.targets) }}
     steps:
-      - *checkout
+      - name: Check out repository archive
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$tmp_dir"' EXIT
+          curl --fail --location --silent --show-error \
+            --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$tmp_dir/repo.tar.gz" \
+            "${GITHUB_API_URL:-https://api.github.com}/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}"
+          tar -xzf "$tmp_dir/repo.tar.gz" --strip-components=1
       - *setup_nix
       - *cachix
       - *download_flake_lock
