@@ -164,7 +164,7 @@ jobs:
       - *cache_nix_arch
       - name: Resolve upstream versions
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
         run: nix run .#nixcfg -- ci pipeline versions --output pinned-versions.json
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -190,7 +190,7 @@ jobs:
       - name: Build update target matrix
         id: matrix
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
         run: |
           nix run .#nixcfg -- update --list --json > update-targets.json
           python3 lib/update/ci/update_target_artifacts.py matrix \
@@ -260,7 +260,7 @@ jobs:
         # Run update with pinned versions to ensure all platforms use the
         # same upstream version (resolved in the resolve-versions job).
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           UPDATE_SUBPROCESS_TIMEOUT: "14400"
           UPDATE_MAX_NIX_BUILDS: "1"
         run: >-
@@ -337,7 +337,7 @@ jobs:
         id: update-target
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           UPDATE_SUBPROCESS_TIMEOUT: "14400"
           UPDATE_MAX_NIX_BUILDS: "1"
         run: |
@@ -431,7 +431,7 @@ jobs:
         id: update-target
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           UPDATE_SUBPROCESS_TIMEOUT: "14400"
         run: >-
           nix run .#nixcfg -- update --native-only

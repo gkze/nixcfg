@@ -24,6 +24,13 @@ def _valid_refresh_workflow_text() -> str:
     return """
         on: workflow_dispatch
         jobs:
+          resolve-versions:
+            needs: update-lock
+            runs-on: ubuntu-latest
+            steps:
+              - env:
+                  GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+                run: nix run .#nixcfg -- ci pipeline versions --output pinned-versions.json
           darwin-lock-smoke:
             needs: update-lock
             runs-on: ubuntu-latest
@@ -34,6 +41,10 @@ def _valid_refresh_workflow_text() -> str:
               - update-lock
               - resolve-versions
             runs-on: ubuntu-latest
+            steps:
+              - env:
+                  GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+                run: nix run .#nixcfg -- update --list --json > update-targets.json
           compute-hashes-aarch64-darwin:
             needs:
               - update-lock
@@ -41,18 +52,30 @@ def _valid_refresh_workflow_text() -> str:
               - resolve-versions
               - discover-update-targets
             runs-on: ubuntu-latest
+            steps:
+              - env:
+                  GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+                run: nix run .#nixcfg -- update --native-only "${{ matrix.target }}"
           compute-hashes-x86_64-linux:
             needs:
               - update-lock
               - resolve-versions
               - discover-update-targets
             runs-on: ubuntu-latest
+            steps:
+              - env:
+                  GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+                run: nix run .#nixcfg -- update --native-only "${{ matrix.target }}"
           compute-hashes-aarch64-linux:
             needs:
               - update-lock
               - resolve-versions
               - discover-update-targets
             runs-on: ubuntu-latest
+            steps:
+              - env:
+                  GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+                run: nix run .#nixcfg -- update --native-only "${{ matrix.target }}"
           aggregate-platform-updates:
             needs:
               - discover-update-targets
@@ -389,15 +412,20 @@ def test_validate_workflow_structure_contracts_accepts_valid_certify_workflow(
         ),
         pytest.param(
             _valid_refresh_workflow_text().replace(
-                "needs: update-lock", "needs: resolve-versions", 1
+                "          darwin-lock-smoke:\n            needs: update-lock",
+                "          darwin-lock-smoke:\n            needs: resolve-versions",
+                1,
             ),
             "must depend on update-lock",
             id="requires-update-lock-dependency",
         ),
         pytest.param(
             _valid_refresh_workflow_text().replace(
-                "needs: update-lock",
-                "needs:\n              - update-lock\n              - merge-generated",
+                "          darwin-lock-smoke:\n            needs: update-lock",
+                "          darwin-lock-smoke:\n"
+                "            needs:\n"
+                "              - update-lock\n"
+                "              - merge-generated",
                 1,
             ),
             "must stay in the lock-only phase",
@@ -434,6 +462,15 @@ def test_validate_workflow_structure_contracts_accepts_valid_certify_workflow(
             ),
             "target discovery did not succeed",
             id="requires-aggregate-discovery-guard",
+        ),
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
+                "${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}",
+                "${{ secrets.GITHUB_TOKEN }}",
+                1,
+            ),
+            "must define GITHUB_TOKEN to secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN",
+            id="requires-update-api-token",
         ),
         pytest.param(
             _valid_refresh_workflow_text().replace(

@@ -27,6 +27,12 @@ _CERTIFICATION_HEAD_SHA_MARKER = "WORKFLOW_RUN_HEAD_SHA"
 _CERTIFICATION_ANCESTRY_MARKER = "merge-base --is-ancestor"
 _CERTIFICATION_JOBS_API_MARKER = "/actions/runs/${{ github.run_id }}/jobs?per_page=100"
 _CERTIFICATION_JOBS_JSON_MARKER = "--jobs-json /tmp/certification-jobs.json"
+_UPDATE_GITHUB_ENV_VALUE = "${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}"
+_UPDATE_API_TOKEN_RUN_MARKERS = (
+    "nix run .#nixcfg -- ci pipeline versions",
+    "nix run .#nixcfg -- update --list --json",
+    "nix run .#nixcfg -- update --native-only",
+)
 _EXCLUDE_REF_RE = re.compile(r"--exclude-ref\s+([^\s\\]+)")
 _STRUCTURE_INVALID_NEEDS_VALUE_MESSAGE = (
     "Job {job_id} defines unsupported needs {raw_needs!r}"
@@ -252,6 +258,32 @@ def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -
             "update-certify.yml already follows Update via workflow_run"
         ),
     )
+    for job in (
+        workflow.require_job(job_id="resolve-versions"),
+        discover_update_targets,
+        compute_hashes_darwin,
+        compute_hashes_x86_64_linux,
+        compute_hashes_aarch64_linux,
+    ):
+        _validate_update_api_token(job)
+
+
+def _validate_update_api_token(job: WorkflowJobAnalysis) -> None:
+    """Require the high-scope update token for steps that call GitHub APIs."""
+    for step in job.steps:
+        run = step.get("run")
+        if not isinstance(run, str):
+            continue
+        if not any(marker in run for marker in _UPDATE_API_TOKEN_RUN_MARKERS):
+            continue
+        env = step.get("env")
+        token = env.get("GITHUB_TOKEN") if isinstance(env, dict) else None
+        if token != _UPDATE_GITHUB_ENV_VALUE:
+            msg = (
+                f"{job.job_id} package resolver steps must define "
+                "GITHUB_TOKEN to secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN"
+            )
+            raise RuntimeError(msg)
 
 
 def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -> None:
