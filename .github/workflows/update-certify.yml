@@ -73,6 +73,11 @@ jobs:
       - &setup_nix # Determinate Nix v3.17.1
         uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919
         with:
+          # The default github.token becomes a Nix access-token and has
+          # produced HTTP 401 "Bad credentials" on public flake tarball
+          # fetches. Use a real PAT when configured; otherwise leave Nix
+          # unauthenticated instead of injecting a bad credential.
+          github-token: ${{ secrets.NIX_GITHUB_TOKEN }}
           extra-conf: |
             extra-substituters = https://cache.garnix.io
             extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
