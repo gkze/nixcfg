@@ -32,7 +32,7 @@ jobs:
         with:
           # Nix uses this token for external api.github.com flake fetches.
           # The default github.token produces HTTP 401 "Bad credentials" there.
-          github-token: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           extra-conf: |
             extra-substituters = https://cache.garnix.io
             extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
