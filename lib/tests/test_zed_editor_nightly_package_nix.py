@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import cache
 
+from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.if_expression import IfExpression
@@ -16,6 +17,7 @@ from lib.tests._nix_ast import (
     expect_scope_binding,
     parse_nix_expr,
 )
+from lib.tests._package_registry import registry_override_metadata
 from lib.update.paths import REPO_ROOT
 
 
@@ -53,6 +55,16 @@ def _zed_module_output() -> AttributeSet:
         FunctionDefinition,
     )
     return expect_instance(root.output, AttributeSet)
+
+
+@cache
+def _managed_mac_app_routing() -> AttributeSet:
+    """Return George's managed macOS app routing table."""
+    nixcfg = expect_binding(_home_configuration_output().values, "nixcfg").value
+    routing = expect_scope_binding(nixcfg, "managedMacAppRouting").value
+    if isinstance(routing, BinaryExpression):
+        return expect_instance(routing.left, AttributeSet)
+    return expect_instance(routing, AttributeSet)
 
 
 @cache
@@ -154,8 +166,8 @@ def test_standalone_home_config_imports_the_shared_zed_module() -> None:
     )
 
 
-def test_shared_zed_module_keeps_nightly_package_wiring() -> None:
-    """George's shared module should still install and configure the nightly editor."""
+def test_zed_config_keeps_nightly_package_wiring() -> None:
+    """George's app routing should still install the nightly editor bundle."""
     programs = expect_instance(
         expect_binding(_zed_module_output().values, "programs").value,
         AttributeSet,
@@ -166,8 +178,14 @@ def test_shared_zed_module_keeps_nightly_package_wiring() -> None:
     )
 
     assert_nix_ast_equal(expect_binding(zed_editor.values, "enable").value, "true")
+    assert_nix_ast_equal(expect_binding(zed_editor.values, "package").value, "null")
+
+    zed_app = expect_instance(
+        expect_binding(_managed_mac_app_routing().values, "zed").value,
+        AttributeSet,
+    )
     assert_nix_ast_equal(
-        expect_binding(zed_editor.values, "package").value,
+        expect_binding(zed_app.values, "package").value,
         "pkgs.zed-editor-nightly",
     )
 
@@ -207,20 +225,13 @@ def test_shared_zed_module_uses_wrappers_for_shell_backed_mcp_servers() -> None:
 
 def test_registry_limits_zed_to_validated_primary_surfaces() -> None:
     """Keep Zed exports constrained to the currently validated Darwin/Linux outputs."""
-    overrides = expect_instance(
-        expect_scope_binding(_registry_output(), "packageMetadataOverrides").value,
-        AttributeSet,
-    )
+    overrides = registry_override_metadata(_registry_output())
 
     for package_name in (
-        '"zed-editor-nightly"',
-        '"zed-editor-nightly-crate2nix-src"',
+        "zed-editor-nightly",
+        "zed-editor-nightly-crate2nix-src",
     ):
-        entry = expect_instance(
-            expect_binding(overrides.values, package_name).value,
-            AttributeSet,
-        )
-        assert_nix_ast_equal(
-            expect_binding(entry.values, "constraint").value,
-            '[ "aarch64-darwin" "x86_64-linux" ]',
-        )
+        assert overrides[package_name]["constraint"] == [
+            "aarch64-darwin",
+            "x86_64-linux",
+        ]

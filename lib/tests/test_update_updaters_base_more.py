@@ -993,6 +993,15 @@ def test_asset_urls_metadata_updater() -> None:
             ),
         )
 
+    with pytest.raises(
+        RuntimeError,
+        match="Missing asset-urls-metadata URL for platform 'x86_64-linux'",
+    ):
+        updater.get_download_url(
+            "x86_64-linux",
+            VersionInfo(version="1.0.0", metadata={"asset_urls": "not a dict"}),
+        )
+
 
 def test_hash_entry_updater_emit_and_build_result() -> None:
     """Build and emit structured hash-entry updater results."""

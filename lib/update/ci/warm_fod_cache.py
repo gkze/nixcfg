@@ -525,6 +525,7 @@ def cli(
     list_json: Annotated[
         bool,
         typer.Option(
+            "-l",
             "--list-json",
             help="Print discovered FOD cache targets as JSON and exit.",
         ),

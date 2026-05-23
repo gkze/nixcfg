@@ -17,6 +17,7 @@ from lib.tests._nix_ast import (
     expect_scope_binding,
     parse_nix_expr,
 )
+from lib.tests._package_registry import registry_override_metadata
 from lib.update.paths import REPO_ROOT
 
 
@@ -109,15 +110,7 @@ def test_codex_webrtc_prebuilt_bundle_matches_the_host_platform() -> None:
 
 def test_registry_limits_codex_to_its_validated_primary_surface() -> None:
     """Keep Codex out of unsupported flake package sets on Linux and Intel macOS."""
-    overrides = expect_instance(
-        expect_scope_binding(_registry_output(), "packageMetadataOverrides").value,
-        AttributeSet,
-    )
-    entry = expect_instance(
-        expect_binding(overrides.values, "codex").value, AttributeSet
-    )
-
-    assert_nix_ast_equal(
-        expect_binding(entry.values, "constraint").value,
-        '[ "aarch64-darwin" "x86_64-linux" ]',
-    )
+    assert registry_override_metadata(_registry_output())["codex"]["constraint"] == [
+        "aarch64-darwin",
+        "x86_64-linux",
+    ]

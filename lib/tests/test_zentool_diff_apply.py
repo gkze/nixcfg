@@ -64,6 +64,170 @@ def make_state_diff(
     )
 
 
+def test_human_plan_renders_nested_add_remove_and_change(
+    zentool: ModuleType,
+) -> None:
+    """TTY plans should render scalar and nested authored-state deltas."""
+    current = {
+        "workspaces": {
+            "Work": {
+                "tree": [
+                    {"name": "Old", "url": "https://old.example"},
+                    {"nested": ["gone"]},
+                ],
+                "color": "blue",
+            }
+        },
+        "containers": {"Town": {"color": "orange"}, "Old": {"color": "red"}},
+    }
+    desired = {
+        "workspaces": {
+            "Work": {
+                "tree": [
+                    {"name": "New", "url": "https://new.example"},
+                    {"nested": ["kept", "added"]},
+                ],
+                "color": "green",
+                "extra-key": {"enabled": True},
+            },
+            "Home": {"tree": []},
+        },
+        "containers": {"Town": {"color": "orange"}, "Personal": {"color": "blue"}},
+    }
+
+    plan = zentool._format_human_plan(current, desired)
+
+    assert "Plan:" in plan
+    assert '- container["Old"]' in plan
+    assert '+ container["Personal"]' in plan
+    assert '~ workspace["Work"].color = "blue" -> "green"' in plan
+    assert 'workspace["Work"]["extra-key"]' in plan
+    assert "gone" in plan
+    assert "added" in plan
+
+
+def test_plan_helpers_cover_empty_roots_and_tty_fallbacks(
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Plan and preview formatters should handle empty and tty/non-tty output."""
+    assert zentool._format_plan_path(()) == "root"
+    assert zentool._format_plan_path(("custom", "child", 2, "not-key!")) == (
+        'custom.child[2]["not-key!"]'
+    )
+    assert zentool._render_plan_block(None, "+") == ["      + null", "      + ..."]
+    assert zentool._render_plan_block({}, "+") == ["      + {}"]
+    monkeypatch.setattr(zentool.yaml, "safe_dump", lambda *_args, **_kwargs: "")
+    assert zentool._render_plan_block({"ignored": True}, "+") == ["      + <empty>"]
+    assert zentool._format_human_plan({}, {}) == ""
+    assert (
+        zentool._format_human_plan(
+            {"workspaces": {"Work": {"tree": []}}},
+            {"workspaces": {"Work": {"tree": []}}},
+        )
+        == ""
+    )
+
+    lines: list[str] = []
+    counters = zentool._PlanChangeCounter()
+    zentool._collect_plan_changes(
+        {"removed": "old", "changed": {"nested": "old"}, "items": ["same", "gone"]},
+        {
+            "changed": {"nested": ["new"]},
+            "items": ["same", "added"],
+            "inserted": "new",
+        },
+        ("workspace", "Work"),
+        lines,
+        counters,
+    )
+    rendered_lines = "\n".join(lines)
+    assert 'workspace["Work"].removed = "old"' in rendered_lines
+    assert 'workspace["Work"].changed.nested' in rendered_lines
+    assert 'workspace["Work"].items[1] = "gone" -> "added"' in rendered_lines
+    assert 'workspace["Work"].inserted = "new"' in rendered_lines
+
+    list_lines: list[str] = []
+    list_counters = zentool._PlanChangeCounter()
+    zentool._collect_plan_changes(
+        ["same", "removed"],
+        ["same"],
+        ("workspace", "Work", "delete-only"),
+        list_lines,
+        list_counters,
+    )
+    zentool._collect_plan_changes(
+        ["same"],
+        ["same", "inserted"],
+        ("workspace", "Work", "insert-only"),
+        list_lines,
+        list_counters,
+    )
+    zentool._collect_plan_changes(
+        ["old", "extra"],
+        ["new"],
+        ("workspace", "Work", "replace-with-extra-current"),
+        list_lines,
+        list_counters,
+    )
+    rendered_list_lines = "\n".join(list_lines)
+    assert 'workspace["Work"]["delete-only"][1] = "removed"' in rendered_list_lines
+    assert 'workspace["Work"]["insert-only"][1] = "inserted"' in rendered_list_lines
+    assert (
+        'workspace["Work"]["replace-with-extra-current"][1] = "extra"'
+        in rendered_list_lines
+    )
+
+    monkeypatch.setattr(zentool, "_stdout_is_tty", lambda: False)
+    assert (
+        zentool._format_state_diff_text("machine", {}, {"Workspace": []}) == "machine"
+    )
+    assert zentool._format_asset_diff_text(["plain asset line"]) == "plain asset line"
+
+    monkeypatch.setattr(zentool, "_stdout_is_tty", lambda: True)
+    assert (
+        zentool._format_asset_diff_text(["plain asset line"])
+        == "Assets:\n  ~ plain asset line"
+    )
+
+    with monkeypatch.context() as plan_patch:
+        plan_patch.setattr(
+            zentool,
+            "_normal_plan_roots",
+            lambda snapshot: {
+                "container": [] if snapshot["kind"] == "current" else {},
+                "workspace": {},
+            },
+        )
+        assert (
+            zentool._format_human_plan({"kind": "current"}, {"kind": "desired"}) == ""
+        )
+
+
+def test_print_apply_preview_omits_empty_asset_diff(
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Preview printing should skip empty formatted asset sections."""
+    stdout: list[str] = []
+    monkeypatch.setattr(zentool, "_stdout", lambda text="": stdout.append(text))
+    monkeypatch.setattr(zentool, "_stdout_is_tty", lambda: True)
+    preview = zentool.ApplyPreview(
+        state_plan=None,
+        asset_lines=["create asset chrome/new.css"],
+    )
+
+    zentool.print_apply_preview(preview)
+
+    assert stdout == ["Assets:\n  + chrome/new.css"]
+
+    stdout.clear()
+    preview.asset_lines = ["asset"]
+    monkeypatch.setattr(zentool, "_format_asset_diff_text", lambda _lines: None)
+    zentool.print_apply_preview(preview)
+    assert stdout == []
+
+
 def test_asset_diff_lines_reports_create_update_remove_and_user_js_update(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

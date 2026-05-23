@@ -186,6 +186,7 @@ def test_collect_uploads_and_validate_job_flows_cover_error_branches(
         instance_id="download-probe",
         steps=(
             {"uses": "actions/download-artifact@v7"},
+            {"uses": "actions/download-artifact@v7", "with": {}},
             {"uses": "actions/download-artifact@v7", "with": {"name": "missing"}},
             {
                 "uses": "actions/upload-artifact@v6",

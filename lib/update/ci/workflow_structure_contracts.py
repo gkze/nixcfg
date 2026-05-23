@@ -22,6 +22,8 @@ _DARWIN_LOCK_SMOKE_MARKER = "nix run .#nixcfg -- ci workflow darwin eval-lock-sm
 _SHARED_CLOSURE_MARKER = "nix run .#nixcfg -- ci cache closure"
 _DISPATCH_CI_MARKER = "gh workflow run ci.yml"
 _DISPATCH_CERTIFY_MARKER = "gh workflow run update-certify.yml"
+_CERTIFICATION_HEAD_SHA_MARKER = "WORKFLOW_RUN_HEAD_SHA"
+_CERTIFICATION_ANCESTRY_MARKER = "merge-base --is-ancestor"
 _CERTIFICATION_JOBS_API_MARKER = "/actions/runs/${{ github.run_id }}/jobs?per_page=100"
 _CERTIFICATION_JOBS_JSON_MARKER = "--jobs-json /tmp/certification-jobs.json"
 _EXCLUDE_REF_RE = re.compile(r"--exclude-ref\s+([^\s\\]+)")
@@ -237,6 +239,7 @@ def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -
 
 def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -> None:
     (
+        select_ref,
         darwin_full_smoke,
         darwin_priority_heavy,
         darwin_extra_heavy,
@@ -246,6 +249,7 @@ def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -
         linux_x86_64,
         publish_pr_certification,
     ) = workflow.require_jobs(
+        "select-ref",
         "darwin-full-smoke",
         "darwin-priority-heavy",
         "darwin-extra-heavy",
@@ -254,6 +258,21 @@ def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -
         "darwin-rocinante",
         "linux-x86_64",
         "publish-pr-certification",
+    )
+
+    select_ref.require_run_marker(
+        _CERTIFICATION_HEAD_SHA_MARKER,
+        missing_run_message=(
+            "select-ref must read workflow_run head_sha before certifying "
+            "the update branch"
+        ),
+    )
+    select_ref.require_run_marker(
+        _CERTIFICATION_ANCESTRY_MARKER,
+        missing_run_message=(
+            "select-ref must skip stale update branches that do not contain "
+            "the triggering workflow_run head_sha"
+        ),
     )
 
     darwin_full_smoke.require_run_marker(_DARWIN_FULL_SMOKE_MARKER)

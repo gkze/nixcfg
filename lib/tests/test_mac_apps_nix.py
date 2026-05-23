@@ -988,6 +988,35 @@ def test_remove_profile_copies_script_removes_writable_apps_when_chmod_is_denied
     )
 
 
+def test_chmod_user_writable_skips_symlinks_and_warns_on_permission_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Writable repair should avoid symlinks and only warn when chmod is denied."""
+    target = tmp_path / "target"
+    target.write_text("x\n", encoding="utf-8")
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    mac_apps_helper._chmod_user_writable(link)
+
+    locked = tmp_path / "locked"
+    locked.write_text("x\n", encoding="utf-8")
+    locked.chmod(stat.S_IRUSR)
+    original_chmod = Path.chmod
+
+    def _chmod(self: Path, mode: int) -> None:
+        if self == locked:
+            raise PermissionError("denied")
+        original_chmod(self, mode)
+
+    monkeypatch.setattr(Path, "chmod", _chmod)
+    stderr = StringIO()
+    with redirect_stderr(stderr):
+        mac_apps_helper._chmod_user_writable(locked)
+
+    assert "could not make" in stderr.getvalue()
+
+
 @pytest.mark.parametrize("bundle_name", ["../Emdash.app", ".."])
 def test_remove_profile_copies_script_rejects_nested_bundle_names(
     bundle_name: str,

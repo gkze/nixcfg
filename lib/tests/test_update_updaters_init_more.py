@@ -11,6 +11,7 @@ from lib.update.updaters import (
     _DISCOVERY_STATE,
     UPDATERS,
     _discover_updaters,
+    _prepend_package_path,
     _updater_module_paths,
     ensure_updaters_loaded,
     resolve_registry_alias,
@@ -127,6 +128,19 @@ def test_discover_updaters_prefers_repo_helper_modules(
         sys.modules.pop("lib.update.updaters.local_helper", None)
         for name, entries in package_paths.items():
             sys.modules[name].__path__[:] = entries
+
+
+def test_prepend_package_path_ignores_missing_or_nonpackage_modules(
+    tmp_path: Path,
+) -> None:
+    """Helper path insertion should be a no-op for absent or non-package modules."""
+    module = ModuleType("_updater_pkg.not_package")
+    sys.modules[module.__name__] = module
+    try:
+        _prepend_package_path("_updater_pkg.missing", tmp_path)
+        _prepend_package_path(module.__name__, tmp_path)
+    finally:
+        sys.modules.pop(module.__name__, None)
 
 
 def test_ensure_updaters_loaded_fast_path_skips_discovery(monkeypatch) -> None:

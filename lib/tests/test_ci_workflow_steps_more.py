@@ -303,11 +303,64 @@ def test_workflow_certification_helper_error_paths(tmp_path: Path) -> None:
 
     assert cert._normalize_job_status("timed-out") == "timed_out"
     assert cert._normalize_job_status("not-real") == "unknown"
+    assert cert._normalize_job_status(1) == "unknown"
+    assert (
+        cert._overall_certification_status((
+            cert.CertificationJobResult(name="linux", status="success"),
+        ))
+        == "success"
+    )
+    assert cert._ordered_unique_pairs([
+        ("pkg", "target"),
+        ("other-pkg", "target"),
+        ("second", "second-target"),
+    ]) == (("pkg", "target"), ("second", "second-target"))
 
     jobs_payload = tmp_path / "jobs.json"
     jobs_payload.write_text(json.dumps({"jobs": {}}), encoding="utf-8")
     with pytest.raises(TypeError, match="Expected jobs list"):
         cert._load_certification_job_results(jobs_payload)
+
+    invalid_name_payload = tmp_path / "jobs-invalid-name.json"
+    invalid_name_payload.write_text(
+        json.dumps({"jobs": [{"name": "   ", "status": "success"}]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(TypeError, match="non-empty job name"):
+        cert._load_certification_job_results(invalid_name_payload)
+
+    status_fallback_payload = tmp_path / "jobs-status-fallback.json"
+    status_fallback_payload.write_text(
+        json.dumps({
+            "jobs": [
+                {"name": "linux", "conclusion": "unexpected", "status": "queued"},
+                {"name": "publish-pr-certification", "status": "failure"},
+            ]
+        }),
+        encoding="utf-8",
+    )
+    assert cert._load_certification_job_results(status_fallback_payload) == (
+        cert.CertificationJobResult(name="linux", status="queued"),
+    )
+
+    package_fallback_matrix = WorkflowAnalysis.from_jobs({
+        "linux-x86_64": {
+            "strategy": {
+                "matrix": {
+                    "include": [
+                        {"target": "codex"},
+                        {"package": "zed", "target": "zed-editor-nightly"},
+                        {"package": "dupe", "target": "codex"},
+                    ]
+                }
+            },
+            "steps": [],
+        }
+    })
+    assert cert._certification_matrix_entries(
+        package_fallback_matrix,
+        job_id="linux-x86_64",
+    ) == (("codex", "codex"), ("zed", "zed-editor-nightly"))
 
 
 def test_xcode_version_key_and_git_show_fallback(

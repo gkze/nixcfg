@@ -66,6 +66,41 @@ def test_build_matrix_rejects_missing_targets_list() -> None:
         artifacts.build_matrix(inventory={})
 
 
+def test_build_matrix_ignores_malformed_targets_and_unsafe_paths() -> None:
+    """Matrix generation should ignore malformed entries and unsafe artifact paths."""
+    matrix = artifacts.build_matrix(
+        inventory={
+            "targets": [
+                "not an object",
+                {"name": 1, "handles": {"sourceUpdate": True}},
+                {"name": "bad-handles", "handles": []},
+                {
+                    "name": "unsafe",
+                    "handles": {"sourceUpdate": True},
+                    "sourceTarget": {"path": "../outside"},
+                    "generatedArtifacts": ["/absolute", "safe/generated.txt", 1],
+                },
+                {
+                    "name": "source-only",
+                    "handles": {"sourceUpdate": True},
+                    "sourceTarget": {"path": "packages/source-only/sources.json"},
+                    "generatedArtifacts": "not a list",
+                },
+            ]
+        }
+    )
+
+    entry = matrix["include"][0]
+    assert entry["target"] == "unsafe"
+    assert entry["artifact_paths_aarch64_darwin"] == []
+    assert entry["artifact_paths_x86_64_linux"] == ["safe/generated.txt"]
+    source_entry = matrix["include"][1]
+    assert source_entry["target"] == "source-only"
+    assert source_entry["artifact_paths_x86_64_linux"] == [
+        "packages/source-only/sources.json"
+    ]
+
+
 def test_main_matrix_writes_stdout_and_output(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -157,6 +192,54 @@ def test_main_stage_accepts_path_alias_and_defaults_conclusion(tmp_path: Path) -
 
     status = json.loads((output / artifacts.STATUS_FILE_NAME).read_text("utf-8"))
     assert status["conclusion"] == "failure"
+
+    success_output = tmp_path / "success-artifact"
+    assert (
+        artifacts.main([
+            "stage",
+            "--artifact-paths-json",
+            '["packages/demo/sources.json"]',
+            "--root",
+            str(root),
+            "--output",
+            str(success_output),
+            "--target",
+            "demo",
+            "--platform",
+            "x86_64-linux",
+            "--exit-code",
+            "0",
+        ])
+        == 0
+    )
+    success_status = json.loads(
+        (success_output / artifacts.STATUS_FILE_NAME).read_text("utf-8")
+    )
+    assert success_status["conclusion"] == "success"
+
+    baseline_output = tmp_path / "baseline-artifact"
+    assert (
+        artifacts.main([
+            "stage",
+            "--artifact-paths-json",
+            '["packages/demo/sources.json"]',
+            "--root",
+            str(root),
+            "--output",
+            str(baseline_output),
+            "--target",
+            "demo",
+            "--platform",
+            "x86_64-linux",
+            "--conclusion",
+            "baseline",
+        ])
+        == 0
+    )
+    baseline_status = json.loads(
+        (baseline_output / artifacts.STATUS_FILE_NAME).read_text("utf-8")
+    )
+    assert baseline_status["conclusion"] == "baseline"
 
 
 def test_main_stage_rejects_non_list_paths(
@@ -315,6 +398,49 @@ def test_aggregate_artifacts_requires_all_platforms_for_target(tmp_path: Path) -
     assert not (output_root / "packages/demo/sources.json").exists()
 
 
+def test_aggregate_artifacts_skips_malformed_and_missing_copied_paths(
+    tmp_path: Path,
+) -> None:
+    """Aggregation should ignore malformed statuses and copied paths that are unsafe."""
+    artifacts_dir = tmp_path / "artifacts"
+    good = artifacts_dir / "update-target-x86_64-linux-good"
+    malformed = artifacts_dir / "update-target-x86_64-linux-malformed"
+    good.mkdir(parents=True)
+    malformed.mkdir(parents=True)
+    (good / artifacts.STATUS_FILE_NAME).write_text(
+        json.dumps({
+            "platform": "x86_64-linux",
+            "target": "good",
+            "conclusion": "success",
+            "copiedPaths": [
+                "../unsafe",
+                "packages/good/missing.json",
+            ],
+        }),
+        encoding="utf-8",
+    )
+    (malformed / artifacts.STATUS_FILE_NAME).write_text(
+        json.dumps({
+            "platform": "x86_64-linux",
+            "target": 1,
+            "conclusion": "success",
+            "copiedPaths": ["packages/bad/sources.json"],
+        }),
+        encoding="utf-8",
+    )
+
+    collection = artifacts.aggregate_artifacts(
+        artifacts_dir=artifacts_dir,
+        output_root=tmp_path / "repo",
+        platform="x86_64-linux",
+        status_output=tmp_path / "status.json",
+        required_platforms=("x86_64-linux",),
+    )
+
+    assert collection["eligibleTargets"] == ["good"]
+    assert collection["targets"][0]["target"] == 1
+
+
 def test_aggregate_artifacts_requires_matching_statuses(tmp_path: Path) -> None:
     """A platform aggregation with no target reports should fail loudly."""
     with pytest.raises(RuntimeError, match="No update target statuses"):
@@ -324,3 +450,11 @@ def test_aggregate_artifacts_requires_matching_statuses(tmp_path: Path) -> None:
             platform="x86_64-linux",
             status_output=tmp_path / "status.json",
         )
+
+
+def test_update_target_artifacts_main_reports_argument_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The CLI error adapter should convert validation errors to exit code 1."""
+    assert artifacts.main(["matrix", "--inventory", "/missing/inventory.json"]) == 1
+    assert "No such file" in capsys.readouterr().err

@@ -138,6 +138,17 @@ def test_normalize_trailing_newline_collapses_extra_newlines() -> None:
     assert crate2nix._normalize_trailing_newline("demo\n\n") == "demo\n"
 
 
+def test_xdg_cache_home_defaults_to_home_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset XDG cache home should fall back to the user's home cache directory."""
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    assert crate2nix._xdg_cache_home() == tmp_path / ".cache"
+
+
 def test_stabilize_generated_command_comment_rewrites_dynamic_paths() -> None:
     """Generated command comments should use stable repo-relative output paths."""
     target = crate2nix.Crate2NixTarget(

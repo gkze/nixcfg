@@ -568,6 +568,7 @@ def command_render_certification_pr_body(
     jobs_json: Annotated[
         Path | None,
         typer.Option(
+            "-J",
             "--jobs-json",
             help="GitHub Actions jobs JSON payload from gh api.",
         ),

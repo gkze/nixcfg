@@ -75,6 +75,13 @@ def _valid_certify_workflow_text() -> str:
     return """
         on: workflow_dispatch
         jobs:
+          select-ref:
+            runs-on: ubuntu-latest
+            steps:
+              - run: |
+                  WORKFLOW_RUN_HEAD_SHA="${WORKFLOW_RUN_HEAD_SHA}"
+                  git merge-base --is-ancestor \
+                    "${WORKFLOW_RUN_HEAD_SHA}" "refs/remotes/origin/$ref"
           darwin-full-smoke:
             runs-on: ubuntu-latest
             steps:
@@ -566,6 +573,23 @@ def test_validate_workflow_structure_contracts_rejects_refresh_drift(
             ),
             "unexpected excludes: .#pkgs.aarch64-darwin.gamma",
             id="detects-extra-only-drift",
+        ),
+        pytest.param(
+            _valid_certify_workflow_text().replace(
+                "WORKFLOW_RUN_HEAD_SHA",
+                "TRIGGERING_SHA",
+            ),
+            "must read workflow_run head_sha",
+            id="select-ref-reads-triggering-head-sha",
+        ),
+        pytest.param(
+            _valid_certify_workflow_text().replace(
+                "git merge-base --is-ancestor",
+                "git rev-parse --verify",
+                1,
+            ),
+            "must skip stale update branches",
+            id="select-ref-rejects-stale-update-branches",
         ),
         pytest.param(
             _valid_certify_workflow_text().replace(

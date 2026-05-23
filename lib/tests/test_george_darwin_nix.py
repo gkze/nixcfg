@@ -26,10 +26,10 @@ def _darwin_module_output() -> AttributeSet:
     return expect_instance(expr.output, AttributeSet)
 
 
-def test_darwin_home_activation_repairs_opencode_desktop_dev_dock_after_install_packages() -> (
+def test_darwin_home_activation_repairs_codex_bundled_plugins_after_write_boundary() -> (
     None
 ):
-    """The Dock repair must run after Home Manager materializes app bundles."""
+    """The Codex repair should run after Home Manager writes managed files."""
     home = expect_instance(
         expect_binding(_darwin_module_output().values, "home").value, AttributeSet
     )
@@ -37,34 +37,42 @@ def test_darwin_home_activation_repairs_opencode_desktop_dev_dock_after_install_
         expect_binding(home.values, "activation").value, AttributeSet
     )
     repair = expect_instance(
-        expect_binding(activation.values, "repairTownDockOpenCodeDesktopDev").value,
+        expect_binding(activation.values, "codexBundledPluginRepair").value,
         FunctionCall,
     )
     entry_after = expect_instance(repair.name, FunctionCall)
 
     assert_nix_ast_equal(entry_after.name, "lib.hm.dag.entryAfter")
-    assert_nix_ast_equal(entry_after.argument, '[ "installPackages" ]')
+    assert_nix_ast_equal(entry_after.argument, '[ "writeBoundary" ]')
 
     script = expect_instance(repair.argument, IndentedString)
     shell = parse_shell(indented_string_body(script.rebuild()))
+    assert "__NIX_INTERP__" in command_texts(shell)
 
-    dockutil_commands = [
-        text
-        for text in command_texts(shell)
-        if text.startswith("__NIX_INTERP__/bin/dockutil")
-    ]
-    assert any(
-        '--remove "OpenCode Electron Dev" --no-restart' in text
-        for text in dockutil_commands
+
+def test_darwin_launchd_reruns_codex_bundled_plugin_repair() -> None:
+    """The Codex repair should keep running after activation for app self-updates."""
+    launchd = expect_instance(
+        expect_binding(_darwin_module_output().values, "launchd").value,
+        AttributeSet,
     )
-    assert any(
-        '--remove "OpenCode Dev" --no-restart' in text for text in dockutil_commands
+    agents = expect_instance(
+        expect_binding(launchd.values, "agents").value, AttributeSet
     )
-    assert any(
-        '--remove "OpenCode Desktop Dev" --no-restart' in text
-        for text in dockutil_commands
+    agent = expect_instance(
+        expect_binding(agents.values, "codex-bundled-plugin-repair").value,
+        AttributeSet,
     )
-    assert any(
-        '--add __NIX_INTERP__ --after "Claude"' in text for text in dockutil_commands
+    config = expect_instance(expect_binding(agent.values, "config").value, AttributeSet)
+
+    assert_nix_ast_equal(expect_binding(agent.values, "enable").value, "true")
+    assert_nix_ast_equal(
+        expect_binding(config.values, "Label").value,
+        '"dev.george.codex-bundled-plugin-repair"',
     )
-    assert any(text == "exit 0" for text in command_texts(shell, "exit"))
+    assert_nix_ast_equal(expect_binding(config.values, "RunAtLoad").value, "true")
+    assert_nix_ast_equal(expect_binding(config.values, "StartInterval").value, "30")
+    assert_nix_ast_equal(
+        expect_binding(config.values, "ProgramArguments").value,
+        "[ (lib.getExe codexBundledPluginRepair) ]",
+    )

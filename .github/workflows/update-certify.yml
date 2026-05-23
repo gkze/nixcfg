@@ -41,6 +41,7 @@ jobs:
             ${{ github.event_name == 'workflow_dispatch' && inputs.ref ||
             env.UPDATE_BRANCH }}
           WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha || '' }}
         run: |
           ref="${TARGET_REF}"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
@@ -52,12 +53,30 @@ jobs:
               >&2
           fi
           repo_url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          if git ls-remote --exit-code --heads "$repo_url" "refs/heads/$ref" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
+          if ! git ls-remote --exit-code --heads "$repo_url" "refs/heads/$ref" >/dev/null 2>&1; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No update branch '$ref' found; skipping certification." >&2
             exit 0
           fi
-          echo "exists=false" >> "$GITHUB_OUTPUT"
-          echo "No update branch '$ref' found; skipping certification." >&2
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ] && \
+            [ -n "${WORKFLOW_RUN_HEAD_SHA}" ]; then
+            tmp_dir="$(mktemp -d)"
+            trap 'rm -rf "$tmp_dir"' EXIT
+            git init -q "$tmp_dir"
+            git -C "$tmp_dir" fetch --no-tags --filter=blob:none "$repo_url" \
+              "+refs/heads/$ref:refs/remotes/origin/$ref"
+            if ! git -C "$tmp_dir" cat-file -e "${WORKFLOW_RUN_HEAD_SHA}^{commit}" 2>/dev/null || \
+              ! git -C "$tmp_dir" merge-base --is-ancestor \
+                "${WORKFLOW_RUN_HEAD_SHA}" "refs/remotes/origin/$ref"; then
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              echo \
+                "Update branch '$ref' does not contain workflow_run head" \
+                "'${WORKFLOW_RUN_HEAD_SHA}'; skipping stale certification." \
+                >&2
+              exit 0
+            fi
+          fi
+          echo "exists=true" >> "$GITHUB_OUTPUT"
 
   quality-gates:
     needs: select-ref
