@@ -333,6 +333,8 @@ def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
             [
                 "nix",
                 "run",
+                "--inputs-from",
+                ".",
                 "nixpkgs#crate2nix",
                 "--",
                 "generate",

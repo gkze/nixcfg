@@ -1120,6 +1120,14 @@ def test_refresh_target_materializes_normalized_outputs(
         env: dict[str, str] | None = None,
     ):
         del cwd
+        assert args[:6] == [
+            "nix",
+            "run",
+            "--inputs-from",
+            ".",
+            "nixpkgs#crate2nix",
+            "--",
+        ]
         assert args[args.index("-f") + 1] == str(patched_src / "nested/Cargo.toml")
         generated_cargo = Path(args[args.index("-o") + 1])
         generated_hashes = Path(args[args.index("-h") + 1])
