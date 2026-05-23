@@ -219,7 +219,7 @@ jobs:
           set -euo pipefail
           tmp_dir="$(mktemp -d)"
           trap 'rm -rf "$tmp_dir"' EXIT
-          curl --fail --location --silent --show-error \
+          curl --fail --location --location-trusted --silent --show-error \
             --header "Authorization: Bearer ${GITHUB_TOKEN}" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
             --output "$tmp_dir/repo.tar.gz" \
