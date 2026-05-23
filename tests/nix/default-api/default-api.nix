@@ -61,16 +61,18 @@ let
       binaryNativeCode = "binaryNativeCode";
     };
   };
+  fakeDarwinAppArgs = {
+    mkDmgApp = attrs: attrs;
+    mkSimpleDarwinApp = attrs: attrs.builder attrs;
+    lib = fakePackageLib;
+  };
 
   fakePkgsFor = system: {
     stdenv.hostPlatform.system = system;
     callPackage =
       pkg: args:
       let
-        resolvedArgs = args // {
-          mkDmgApp = attrs: attrs;
-          lib = fakePackageLib;
-        };
+        resolvedArgs = args // fakeDarwinAppArgs;
       in
       if builtins.isPath pkg then import pkg resolvedArgs else pkg resolvedArgs;
   };
@@ -205,19 +207,13 @@ let
       (toString flake.packagePaths.wispr-flow)
     )
     (assertEq "helper wispr version" "1.4.661"
-      ((helperPackagesFor packageSmokeSystem).wispr-flow {
-        mkDmgApp = attrs: attrs;
-        lib = fakePackageLib;
-      }).info.version
+      ((helperPackagesFor packageSmokeSystem).wispr-flow fakeDarwinAppArgs).info.version
     )
     (assertEq "mkPackages wispr version" "1.4.661"
       (mkPackagesFor packageSmokeSystem).wispr-flow.info.version
     )
     (assertEq "flakelight wispr version" "1.4.661"
-      ((flakelightPackagesFor packageSmokeSystem).wispr-flow {
-        mkDmgApp = attrs: attrs;
-        lib = fakePackageLib;
-      }).info.version
+      ((flakelightPackagesFor packageSmokeSystem).wispr-flow fakeDarwinAppArgs).info.version
     )
     (assertEq "selfSource helper callPackage path" "1.2.3"
       (selfSourceHelper.callPackageArgs "demo").selfSource.version
