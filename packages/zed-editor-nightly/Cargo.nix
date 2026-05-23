@@ -4259,6 +4259,10 @@ rec {
             features = [ "kv_unstable_serde" "serde" ];
           }
           {
+            name = "lru";
+            packageId = "lru";
+          }
+          {
             name = "lsp";
             packageId = "lsp";
           }
@@ -13262,10 +13266,6 @@ rec {
           {
             name = "credentials_provider";
             packageId = "credentials_provider";
-          }
-          {
-            name = "db";
-            packageId = "db";
           }
           {
             name = "derive_more";
@@ -24473,10 +24473,6 @@ rec {
             packageId = "anyhow";
           }
           {
-            name = "client";
-            packageId = "client";
-          }
-          {
             name = "cloud_api_types";
             packageId = "cloud_api_types";
           }
@@ -28821,6 +28817,10 @@ rec {
             name = "strum";
             packageId = "strum 0.27.2";
             features = [ "derive" ];
+          }
+          {
+            name = "sysinfo";
+            packageId = "sysinfo 0.37.2";
           }
           {
             name = "telemetry";
@@ -69002,10 +69002,10 @@ rec {
       };
       "tree-sitter" = rec {
         crateName = "tree-sitter";
-        version = "0.26.8";
+        version = "0.26.9";
         edition = "2021";
         links = "tree-sitter";
-        sha256 = "0f055nmpkl9aq8pifkb4m5bglsb1cqrj5klf1lz5wb2qs2ax8yw8";
+        sha256 = "1wz17p63573vbkcq5vcw351wm89k0v7qhl8jaiwmbfi4nz87dasd";
         build = "binding_rust/build.rs";
         libName = "tree_sitter";
         libPath = "binding_rust/lib.rs";
@@ -70284,6 +70284,11 @@ rec {
           {
             name = "itertools";
             packageId = "itertools 0.14.0";
+          }
+          {
+            name = "log";
+            packageId = "log";
+            features = [ "kv_unstable_serde" "serde" ];
           }
           {
             name = "menu";
@@ -73138,10 +73143,10 @@ rec {
       };
       "wasmtime-c-api-impl" = rec {
         crateName = "wasmtime-c-api-impl";
-        version = "36.0.6";
+        version = "36.0.9";
         edition = "2024";
         links = "wasmtime-c-api";
-        sha256 = "07pd5385dvmjvazqw4dcc1f533qv28sk0sqic77v1rihzaijxipk";
+        sha256 = "19xxzyhhamdw9p31308n5k7wfvw2y709g5dpf68q3pr73abixrz5";
         libName = "wasmtime_c_api";
         authors = [
           "The Wasmtime Project Developers"
@@ -73353,9 +73358,9 @@ rec {
       };
       "wasmtime-internal-c-api-macros" = rec {
         crateName = "wasmtime-internal-c-api-macros";
-        version = "36.0.6";
+        version = "36.0.9";
         edition = "2024";
-        sha256 = "17yf4vk8p088h981f1fmxmkai4lk5xxcy21g40yd59jm84ln331w";
+        sha256 = "1qqzzbpw7zz8rp7325fqm65rdk3q0avdk65965ckd783clqmbf90";
         procMacro = true;
         libName = "wasmtime_internal_c_api_macros";
         authors = [
@@ -84472,6 +84477,10 @@ rec {
             packageId = "db";
           }
           {
+            name = "dirs";
+            packageId = "dirs";
+          }
+          {
             name = "fs";
             packageId = "fs";
           }
@@ -86186,7 +86195,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "1.4.0";
+        version = "1.5.0";
         edition = "2024";
         crateBin = [
           {

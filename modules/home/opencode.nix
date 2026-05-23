@@ -5,6 +5,7 @@
 }:
 let
   inherit (lib)
+    attrByPath
     concatLists
     mapAttrs
     mapAttrsToList
@@ -17,6 +18,13 @@ let
 
   cfg = config.nixcfg.opencode;
   opencodeMcpLib = import ../../lib/opencode-mcp.nix { inherit lib; };
+  twilightAppPath = attrByPath [
+    "nixcfg"
+    "macApps"
+    "resolved"
+    "zen-twilight"
+    "path"
+  ] "/Applications/Twilight.app" config;
 
   mcpServerType = types.submodule {
     freeformType = types.attrsOf types.anything;
@@ -213,7 +221,7 @@ in
             "npx"
             "-y"
             "@padenot/firefox-devtools-mcp@latest"
-            "--firefoxPath=/Applications/Twilight.app/Contents/MacOS/zen"
+            "--firefoxPath=${twilightAppPath}/Contents/MacOS/zen"
           ];
         };
 

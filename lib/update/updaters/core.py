@@ -31,6 +31,7 @@ from lib.update.events import (
     gather_event_streams,
     require_value,
 )
+from lib.update.updaters.metadata import metadata_get, require_metadata_str
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -616,6 +617,42 @@ class DownloadHashUpdater(Updater):
             yield event
 
 
+class DownloadUrlMetadataUpdater(DownloadHashUpdater):
+    """Download updater whose resolved artifact URL is stored in metadata."""
+
+    URL_METADATA_KEY: ClassVar[str] = "url"
+    URL_METADATA_CONTEXT: ClassVar[str | None] = None
+
+    def get_download_url(self, platform: str, info: VersionInfo) -> str:
+        """Return the metadata-provided artifact URL for platform."""
+        _ = platform
+        return require_metadata_str(
+            info.metadata,
+            self.URL_METADATA_KEY,
+            context=self.URL_METADATA_CONTEXT or f"{self.name} metadata",
+        )
+
+
+class AssetURLsMetadataUpdater(DownloadHashUpdater):
+    """Download updater whose resolved artifact URLs are keyed by platform."""
+
+    ASSET_URLS_METADATA_CONTEXT: ClassVar[str | None] = None
+
+    def get_download_url(self, platform: str, info: VersionInfo) -> str:
+        """Return the metadata-provided artifact URL for platform."""
+        asset_urls = metadata_get(
+            info.metadata,
+            "asset_urls",
+            context=self.ASSET_URLS_METADATA_CONTEXT or f"{self.name} metadata",
+        )
+        if isinstance(asset_urls, dict):
+            url = _ensure_str_mapping(asset_urls).get(platform)
+            if url:
+                return url
+        msg = f"Missing {self.name} URL for platform {platform!r}"
+        raise RuntimeError(msg)
+
+
 class HashEntryUpdater(Updater):
     """Updater that emits structured :class:`HashEntry` values."""
 
@@ -656,9 +693,11 @@ class HashEntryUpdater(Updater):
 
 
 __all__ = [
+    "AssetURLsMetadataUpdater",
     "CargoLockGitDep",
     "ChecksumProvidedUpdater",
     "DownloadHashUpdater",
+    "DownloadUrlMetadataUpdater",
     "FixedOutputHashStep",
     "HashEntryUpdater",
     "UpdateContext",

@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-G6/MlgnABdyXyJ83BXhclb44+MoGyg4u8LyisbqW54o=",
+    "x86_64-darwin": "sha256-g4WbsFZDNPgvLq3Y94LmqkZCYMwqioK+zBEqO7taUis="
+  },
+  "urls": {
+    "aarch64-darwin": "https://desktop.figma.com/mac-arm/Figma-126.3.12.zip",
+    "x86_64-darwin": "https://desktop.figma.com/mac/Figma-126.3.12.zip"
+  },
+  "version": "126.3.12"
+}

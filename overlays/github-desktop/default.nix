@@ -124,6 +124,11 @@ in
         electronHeaders = electronRuntime.passthru.headers;
         electronRuntimeVersion = electronRuntime.version;
         electronVersion = electronRuntime.version;
+        macApp = {
+          bundleName = "GitHub Desktop.app";
+          bundleRelPath = "Applications/GitHub Desktop.app";
+          installMode = "copy";
+        };
         upstreamChannel = "beta";
       };
 

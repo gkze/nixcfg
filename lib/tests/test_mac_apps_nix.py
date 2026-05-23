@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import stat
-import textwrap
+import threading
 from contextlib import redirect_stderr
 from functools import cache
 from io import StringIO
@@ -22,7 +22,6 @@ from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.list import NixList
-from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.select import Select
@@ -37,6 +36,7 @@ from lib.tests._nix_ast import (
     parse_nix_expr,
 )
 from lib.tests._nix_eval import nix_attrset, nix_eval_raw, nix_import, nix_let, nix_list
+from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
@@ -136,23 +136,8 @@ def _managed_app_overlap_assertion_result(
     return payload
 
 
-@cache
-def _mac_apps_source_fragment(start_marker: str, end_marker: str) -> IndentedString:
-    """Return one source fragment from ``lib/mac-apps.nix`` as an indented string."""
-    mac_apps = (REPO_ROOT / "lib/mac-apps.nix").read_text(encoding="utf-8")
-    start = mac_apps.index(start_marker)
-    end = mac_apps.index(end_marker, start)
-    fragment = textwrap.dedent(mac_apps[start:end]).rstrip()
-    parsed = parse_nix_expr(f"''\n{fragment}\n''")
-    return expect_instance(parsed, IndentedString)
-
-
 def _mac_apps_fragment_expr(start_marker: str, end_marker: str):
-    mac_apps = (REPO_ROOT / "lib/mac-apps.nix").read_text(encoding="utf-8")
-    start = mac_apps.index(start_marker) + len(start_marker)
-    end = mac_apps.index(end_marker, start)
-    fragment = textwrap.dedent(mac_apps[start:end]).rstrip().removesuffix(";")
-    return parse_nix_expr(fragment)
+    return nix_source_fragment_expr("lib/mac-apps.nix", start_marker, end_marker)
 
 
 def _curried_call(
@@ -176,16 +161,19 @@ def _curried_call(
 def _system_applications_script_expr(
     entries: NixExpression,
     *,
+    state_directory: str = "/Applications/.nixcfg-mac-apps",
     state_name: str,
+    target_directory: str,
     writable: bool,
 ) -> FunctionCall:
-    """Build the expected ``macApps.systemApplicationsScript`` invocation."""
+    """Build the expected ``macApps.applicationsScript`` invocation."""
     return FunctionCall(
-        name=identifier_attr_path("macApps", "systemApplicationsScript"),
+        name=identifier_attr_path("macApps", "applicationsScript"),
         argument=nix_attrset({
             "entries": entries,
-            "stateDirectory": "/Applications/.nixcfg-mac-apps",
+            "stateDirectory": state_directory,
             "stateName": state_name,
+            "targetDirectory": target_directory,
             "writable": writable,
         }),
     )
@@ -206,158 +194,36 @@ def _mac_app_metadata_attrset(
     })
 
 
-def _managed_mac_app_routing_table() -> NixExpression:
-    """Build George's canonical managed macOS app routing expression."""
-    base_entries = [
-        AttributeSet(
-            values=[
-                Binding(
-                    name="excludePackageName",
-                    value=StringPrimitive(value="chatgpt"),
-                ),
-                Binding(
-                    name="package",
-                    value=identifier_attr_path("pkgs", "chatgpt"),
-                ),
-                Binding(name="mode", value=StringPrimitive(value="copy")),
-            ]
-        ),
-        AttributeSet(
-            values=[
-                Binding(
-                    name="excludePackageName",
-                    value=StringPrimitive(value="cursor"),
-                ),
-                Binding(
-                    name="package",
-                    value=identifier_attr_path("pkgs", "code-cursor"),
-                ),
-                Binding(name="mode", value=StringPrimitive(value="copy")),
-            ]
-        ),
-        AttributeSet(
-            values=[
-                Binding(
-                    name="excludePackageName",
-                    value=StringPrimitive(value="datagrip"),
-                ),
-                Binding(
-                    name="package",
-                    value=identifier_attr_path("pkgs", "jetbrains", "datagrip"),
-                ),
-                Binding(name="mode", value=StringPrimitive(value="copy")),
-            ]
-        ),
-        AttributeSet(
-            values=[
-                Binding(
-                    name="excludePackageName",
-                    value=StringPrimitive(value="emdash"),
-                ),
-                Binding(
-                    name="package",
-                    value=identifier_attr_path("pkgs", "emdash"),
-                ),
-                Binding(name="mode", value=StringPrimitive(value="copy")),
-            ]
-        ),
-        AttributeSet(
-            values=[
-                Binding(
-                    name="package",
-                    value=identifier_attr_path("pkgs", "vscode-insiders"),
-                ),
-                Binding(name="mode", value=StringPrimitive(value="copy")),
-            ]
-        ),
-        AttributeSet(
-            values=[
-                Binding(
-                    name="package",
-                    value=identifier_attr_path("pkgs", "netnewswire"),
-                )
-            ]
-        ),
-        AttributeSet(
-            values=[
-                Binding(
-                    name="package",
-                    value=identifier_attr_path("pkgs", "gitbutler"),
-                )
-            ]
-        ),
-        AttributeSet(
-            values=[
-                Binding(
-                    name="excludePackageName",
-                    value=StringPrimitive(value="wispr-flow"),
-                ),
-                Binding(
-                    name="package",
-                    value=identifier_attr_path("pkgs", "wispr-flow"),
-                ),
-            ]
-        ),
-        AttributeSet(
-            values=[
-                Binding(
-                    name="package",
-                    value=identifier_attr_path("pkgs", "zoom-us"),
-                )
-            ]
-        ),
-        AttributeSet(
-            values=[
-                Binding(
-                    name="package",
-                    value=identifier_attr_path("pkgs", "zen-twilight"),
-                )
-            ]
-        ),
-    ]
-    return BinaryExpression(
-        left=NixList(value=base_entries),
-        operator=Operator(name="++"),
-        right=FunctionCall(
-            name=FunctionCall(
-                name=identifier_attr_path("lib", "optionals"),
-                argument=identifier_attr_path("config", "profiles", "work", "enable"),
-            ),
-            argument=NixList(
-                value=[
-                    AttributeSet(
-                        values=[
-                            Binding(
-                                name="package",
-                                value=identifier_attr_path(
-                                    "pkgs", "town-assistant-nightly"
-                                ),
-                            )
-                        ]
-                    )
-                ]
-            ),
-        ),
-    )
-
-
 def test_managed_mac_app_routing_projection_helper_splits_exclusions_from_apps() -> (
     None
 ):
     """The shared helper should keep exclusion stripping as a pure structural projection."""
-    assert _mac_apps_source_fragment(
-        "  managedMacAppRoutingProjection = managedMacAppRouting: {",
-        "  pythonExe =",
-    ).rebuild() == (
-        "''\n"
-        "managedMacAppRoutingProjection = managedMacAppRouting: {\n"
-        '  excludePackagesByName = builtins.catAttrs "excludePackageName" managedMacAppRouting;\n'
-        "  systemApplications = map (\n"
-        '    entry: builtins.removeAttrs entry [ "excludePackageName" ]\n'
-        "  ) managedMacAppRouting;\n"
-        "};\n"
-        "''"
+    projection = expect_instance(
+        _mac_apps_fragment_expr(
+            "  managedMacAppRoutingProjection = ",
+            "\n\n  resolveApplications =",
+        ),
+        FunctionDefinition,
     )
+    expected_projection = (
+        "{\n"
+        "  excludePackagesByName = unique (\n"
+        "    concatLists (map entryPackageNamesForExclusion (attrValues managedMacAppRouting))\n"
+        "  );\n"
+        "  applications = mapAttrs' (\n"
+        "    name: entry:\n"
+        "    nameValuePair name (\n"
+        "      builtins.removeAttrs entry [\n"
+        '        "excludePackageName"\n'
+        '        "excludePackageNames"\n'
+        "      ]\n"
+        "    )\n"
+        "  ) managedMacAppRouting;\n"
+        "}"
+    )
+
+    assert projection.argument_set.rebuild() == "managedMacAppRouting"
+    assert_nix_ast_equal(projection.output, expected_projection)
 
 
 def test_copy_mode_replaces_symlinked_application_destinations(
@@ -413,6 +279,37 @@ def test_copy_mode_replaces_symlinked_application_destinations(
     assert not destination.is_symlink()
 
 
+def test_mac_app_entry_defaults_to_copy_mode() -> None:
+    """Managed GUI apps should materialize as real bundles unless explicitly overridden."""
+    entry_config = expect_instance(
+        _mac_apps_fragment_expr("      config = ", "\n    }\n  );"),
+        AttributeSet,
+    )
+
+    assert_nix_ast_equal(
+        expect_binding(entry_config.values, "mode").value,
+        'mkDefault (attrByPath [ "passthru" "macApp" "installMode" ] "copy" config.package)',
+    )
+
+
+def test_shared_darwin_app_helpers_default_to_copy_mode_metadata() -> None:
+    """Shared macOS app helpers should advertise copy mode for dockable bundles."""
+    for occurrence in range(3):
+        mac_app = expect_instance(
+            nix_source_fragment_expr(
+                "overlays/_lib/helpers/darwin-apps.nix",
+                "      passthru.macApp = ",
+                "\n      // macApp;",
+                occurrence=occurrence,
+            ),
+            AttributeSet,
+        )
+        assert_nix_ast_equal(
+            expect_binding(mac_app.values, "installMode").value,
+            StringPrimitive(value="copy"),
+        )
+
+
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_manifest_cleanup_checks_other_mac_app_managers_first(tmp_path: Path) -> None:
     """Stale cleanup logic lives in Python; keep the Nix wrapper structurally wired."""
@@ -429,7 +326,9 @@ def test_manifest_cleanup_checks_other_mac_app_managers_first(tmp_path: Path) ->
     (state_directory / "other-manager.txt").write_text("Cursor.app\n", encoding="utf-8")
 
     system_script = expect_instance(
-        _mac_apps_fragment_expr("  systemApplicationsScript =\n", "\n}\n"),
+        _mac_apps_fragment_expr(
+            "  applicationsScript =\n", "\n\n  systemApplicationsScript ="
+        ),
         FunctionDefinition,
     )
     assert [argument.rebuild() for argument in system_script.argument_set] == [
@@ -485,8 +384,166 @@ def test_manifest_cleanup_checks_other_mac_app_managers_first(tmp_path: Path) ->
     )
 
 
+def test_system_applications_removes_read_only_stale_copied_bundle(
+    tmp_path: Path,
+) -> None:
+    """System cleanup should remove bundles previously copied with writable=false."""
+    target_directory = tmp_path / "Applications"
+    state_directory = tmp_path / ".nixcfg-mac-apps"
+    stale_bundle = target_directory / "Stale.app"
+    stale_contents = stale_bundle / "Contents"
+    stale_info = stale_contents / "Info.plist"
+
+    stale_contents.mkdir(parents=True)
+    stale_info.write_text("old", encoding="utf-8")
+    state_directory.mkdir()
+    (state_directory / "test-manager.txt").write_text("Stale.app\n", encoding="utf-8")
+
+    stale_info.chmod(stat.S_IRUSR)
+    stale_contents.chmod(stat.S_IRUSR | stat.S_IXUSR)
+    stale_bundle.chmod(stat.S_IRUSR | stat.S_IXUSR)
+
+    try:
+        mac_apps_helper._system_applications({
+            "entries": [],
+            "rsyncPath": _rsync_path(),
+            "stateDirectory": str(state_directory),
+            "stateName": "test-manager",
+            "targetDirectory": str(target_directory),
+            "writable": False,
+        })
+    finally:
+        if stale_contents.exists():
+            stale_contents.chmod(stat.S_IRWXU)
+        if stale_bundle.exists():
+            stale_bundle.chmod(stat.S_IRWXU)
+
+    assert not stale_bundle.exists()
+    assert (state_directory / "test-manager.txt").read_text(encoding="utf-8") == ""
+
+
+def test_system_applications_installs_current_apps_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Current app setup should run independent bundle installs in parallel."""
+    target_directory = tmp_path / "Applications"
+    state_directory = tmp_path / ".nixcfg-mac-apps"
+    barrier = threading.Barrier(2, timeout=5)
+    lock = threading.Lock()
+    installed: list[str] = []
+
+    def _fake_install_managed_app(*, bundle_name: str, **_kwargs: object) -> None:
+        barrier.wait()
+        with lock:
+            installed.append(bundle_name)
+
+    monkeypatch.setattr(
+        mac_apps_helper,
+        "_install_managed_app",
+        _fake_install_managed_app,
+    )
+
+    mac_apps_helper._system_applications({
+        "entries": [
+            {
+                "bundleName": "First.app",
+                "mode": "copy",
+                "sourcePath": str(tmp_path / "source" / "First.app"),
+            },
+            {
+                "bundleName": "Second.app",
+                "mode": "copy",
+                "sourcePath": str(tmp_path / "source" / "Second.app"),
+            },
+        ],
+        "rsyncPath": _rsync_path(),
+        "stateDirectory": str(state_directory),
+        "stateName": "test-manager",
+        "targetDirectory": str(target_directory),
+        "writable": False,
+    })
+
+    assert sorted(installed) == ["First.app", "Second.app"]
+    assert (state_directory / "test-manager.txt").read_text(
+        encoding="utf-8"
+    ) == "First.app\nSecond.app\n"
+
+
+@pytest.mark.parametrize(
+    ("payload_updates", "expected_field"),
+    [
+        ({"stateName": "../manager"}, "stateName"),
+        (
+            {
+                "entries": [
+                    {
+                        "bundleName": "../Escape.app",
+                        "mode": "symlink",
+                        "sourcePath": "/nix/store/fake/Applications/Escape.app",
+                    }
+                ]
+            },
+            "entries.bundleName",
+        ),
+    ],
+)
+def test_system_applications_rejects_nested_payload_path_components(
+    payload_updates: dict[str, object],
+    expected_field: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """System activation payload names must not escape managed state directories."""
+    payload: dict[str, object] = {
+        "entries": [],
+        "rsyncPath": _rsync_path(),
+        "stateDirectory": str(tmp_path / ".nixcfg-mac-apps"),
+        "stateName": "test-manager",
+        "targetDirectory": str(tmp_path / "Applications"),
+        "writable": False,
+    }
+    payload.update(payload_updates)
+
+    with pytest.raises(SystemExit) as exc:
+        mac_apps_helper._system_applications(payload)
+
+    assert exc.value.code == 2
+    assert f"payload field '{expected_field}' must contain only path components" in (
+        capsys.readouterr().err
+    )
+
+
+def test_system_applications_rejects_nested_manifest_entries(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Corrupted state manifests must not drive deletion outside /Applications."""
+    state_directory = tmp_path / ".nixcfg-mac-apps"
+    state_directory.mkdir()
+    (state_directory / "test-manager.txt").write_text(
+        "../Escape.app\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        mac_apps_helper._system_applications({
+            "entries": [],
+            "rsyncPath": _rsync_path(),
+            "stateDirectory": str(state_directory),
+            "stateName": "test-manager",
+            "targetDirectory": str(tmp_path / "Applications"),
+            "writable": False,
+        })
+
+    assert exc.value.code == 2
+    assert "payload field 'manifest entry' must contain only path components" in (
+        capsys.readouterr().err
+    )
+
+
 def test_embedded_home_manager_defers_system_app_management_to_darwin() -> None:
-    """Integrated nix-darwin should keep one /Applications owner and replay cleanup."""
+    """Integrated nix-darwin and Home Manager should each own their scoped app dir."""
     darwin_config = expect_instance(
         expect_binding(
             _module_output("modules/darwin/base.nix").values, "config"
@@ -505,19 +562,13 @@ def test_embedded_home_manager_defers_system_app_management_to_darwin() -> None:
         expect_binding(darwin_activation_scripts.values, "applications").value,
         AttributeSet,
     )
-    assert_nix_ast_equal(
-        expect_binding(darwin_applications.values, "text").value,
-        FunctionCall(
-            name=identifier_attr_path("lib", "mkAfter"),
-            argument=Parenthesis(
-                value=_system_applications_script_expr(
-                    Identifier(name="activeMacAppEntries"),
-                    state_name="darwin-system",
-                    writable=False,
-                )
-            ),
-        ),
-    )
+    darwin_text = expect_binding(darwin_applications.values, "text").value.rebuild()
+    assert "macApps.applicationsScript" in darwin_text
+    assert "entries = activeMacAppEntries;" in darwin_text
+    assert 'stateDirectory = "/Applications/.nixcfg-mac-apps";' in darwin_text
+    assert 'stateName = "darwin-system";' in darwin_text
+    assert 'targetDirectory = "/Applications";' in darwin_text
+    assert "writable = false;" in darwin_text
 
     home_config = expect_instance(
         expect_binding(
@@ -525,6 +576,25 @@ def test_embedded_home_manager_defers_system_app_management_to_darwin() -> None:
         ).value,
         AttributeSet,
     )
+    targets = expect_instance(
+        expect_binding(home_config.values, "targets").value,
+        AttributeSet,
+    )
+    darwin_targets = expect_instance(
+        expect_binding(targets.values, "darwin").value,
+        AttributeSet,
+    )
+    copy_apps = expect_instance(
+        expect_binding(darwin_targets.values, "copyApps").value,
+        AttributeSet,
+    )
+    link_apps = expect_instance(
+        expect_binding(darwin_targets.values, "linkApps").value,
+        AttributeSet,
+    )
+    assert expect_binding(copy_apps.values, "enable").value.rebuild() == "false"
+    assert expect_binding(link_apps.values, "enable").value.rebuild() == "false"
+
     home_binding = expect_instance(
         expect_binding(home_config.values, "home").value,
         AttributeSet,
@@ -533,22 +603,26 @@ def test_embedded_home_manager_defers_system_app_management_to_darwin() -> None:
         expect_binding(home_binding.values, "activation").value,
         AttributeSet,
     )
-    assert_nix_ast_equal(
-        expect_binding(home_activation.values, "nixcfgSystemApplications").value,
-        _curried_call(
-            identifier_attr_path("lib", "mkIf"),
-            Identifier(name="standaloneActivation"),
-            _curried_call(
-                identifier_attr_path("lib", "hm", "dag", "entryAfter"),
-                nix_list(["installPackages"]),
-                _system_applications_script_expr(
-                    identifier_attr_path("cfg", "systemApplications"),
-                    state_name="home-manager",
-                    writable=True,
-                ),
-            ),
-        ),
+    user_activation = expect_binding(
+        home_activation.values, "nixcfgUserApplications"
+    ).value.rebuild()
+    assert "lib.mkIf (userEntries != [ ])" in user_activation
+    assert (
+        'lib.hm.dag.entryAfter [ "nixcfgRemoveManagedApplicationProfileCopies" ]'
+        in user_activation
     )
+    assert "macApps.applicationsScript" in user_activation
+    assert "entries = userEntries;" in user_activation
+    assert (
+        'stateDirectory = "${config.home.homeDirectory}/Applications/.nixcfg-mac-apps";'
+        in user_activation
+    )
+    assert 'stateName = "home-manager-user";' in user_activation
+    assert (
+        'targetDirectory = "${config.home.homeDirectory}/Applications";'
+        in user_activation
+    )
+    assert "writable = true;" in user_activation
 
 
 def test_home_manager_mac_app_module_asserts_managed_apps_stay_out_of_home_packages() -> (
@@ -567,14 +641,7 @@ def test_home_manager_mac_app_module_asserts_managed_apps_stay_out_of_home_packa
     )
     optionals_call = expect_instance(assertions.name, FunctionCall)
     assert_nix_ast_equal(optionals_call.name, identifier_attr_path("lib", "optionals"))
-    assert_nix_ast_equal(
-        optionals_call.argument,
-        BinaryExpression(
-            left=identifier_attr_path("cfg", "systemApplications"),
-            operator=Operator(name="!="),
-            right=nix_list([]),
-        ),
-    )
+    assert optionals_call.argument.rebuild() == "(managedEntries != [ ])"
 
     assertion_list = expect_instance(assertions.argument, NixList).value
     assert len(assertion_list) == 2
@@ -587,9 +654,7 @@ def test_home_manager_mac_app_module_asserts_managed_apps_stay_out_of_home_packa
         unique_call.name,
         identifier_attr_path("macApps", "uniqueBundleNamesAssertion"),
     )
-    assert_nix_ast_equal(
-        unique_call.argument, identifier_attr_path("cfg", "systemApplications")
-    )
+    assert unique_call.argument.rebuild() == "managedEntries"
 
     overlap_call = expect_instance(
         expect_instance(assertion_list[1], Parenthesis).value,
@@ -600,9 +665,9 @@ def test_home_manager_mac_app_module_asserts_managed_apps_stay_out_of_home_packa
         identifier_attr_path("macApps", "managedAppsNotInPackageListsAssertion"),
     )
     overlap_args = expect_instance(overlap_call.argument, AttributeSet)
-    assert_nix_ast_equal(
-        expect_binding(overlap_args.values, "entries").value,
-        identifier_attr_path("cfg", "systemApplications"),
+    assert (
+        expect_binding(overlap_args.values, "entries").value.rebuild()
+        == "managedEntries"
     )
 
     package_lists = expect_instance(
@@ -630,8 +695,8 @@ def test_home_manager_mac_app_module_asserts_managed_apps_stay_out_of_home_packa
     )
 
 
-def test_home_manager_mac_app_module_removes_profile_copies_before_hm_check() -> None:
-    """Stale Home Manager copies should not block App Management checks."""
+def test_home_manager_mac_app_module_removes_profile_copies_before_user_apps() -> None:
+    """Stale Home Manager copies should be removed before user app installation."""
     home_config = expect_instance(
         expect_binding(
             _module_output("modules/home/darwin.nix").values, "config"
@@ -647,35 +712,23 @@ def test_home_manager_mac_app_module_removes_profile_copies_before_hm_check() ->
     )
     cleanup = expect_instance(
         expect_binding(
-            home_activation.values, "nixcfgRemoveSystemApplicationProfileCopies"
+            home_activation.values, "nixcfgRemoveManagedApplicationProfileCopies"
         ).value,
         FunctionCall,
     )
     mk_if = expect_instance(cleanup.name, FunctionCall)
     assert_nix_ast_equal(mk_if.name, identifier_attr_path("lib", "mkIf"))
-    assert_nix_ast_equal(
-        mk_if.argument,
-        BinaryExpression(
-            left=identifier_attr_path("cfg", "systemApplications"),
-            operator=Operator(name="!="),
-            right=nix_list([]),
-        ),
-    )
+    assert mk_if.argument.rebuild() == "(managedEntries != [ ])"
 
-    entry_before = expect_instance(
+    entry_after = expect_instance(
         expect_instance(cleanup.argument, Parenthesis).value, FunctionCall
     )
-    entry_before_name = expect_instance(entry_before.name, FunctionCall)
-    assert_nix_ast_equal(
-        entry_before_name.name,
-        identifier_attr_path("lib", "hm", "dag", "entryBefore"),
-    )
-    assert_nix_ast_equal(
-        entry_before_name.argument, nix_list(["checkAppManagementPermission"])
-    )
+    entry_after_name = expect_instance(entry_after.name, FunctionCall)
+    assert entry_after_name.name.rebuild() == "lib.hm.dag.entryAfter"
+    assert_nix_ast_equal(entry_after_name.argument, nix_list(["installPackages"]))
 
     remove_copies = expect_instance(
-        expect_instance(entry_before.argument, Parenthesis).value,
+        expect_instance(entry_after.argument, Parenthesis).value,
         FunctionCall,
     )
     assert_nix_ast_equal(
@@ -683,20 +736,9 @@ def test_home_manager_mac_app_module_removes_profile_copies_before_hm_check() ->
         identifier_attr_path("macApps", "removeProfileCopiesScript"),
     )
     remove_args = expect_instance(remove_copies.argument, AttributeSet)
-    assert_nix_ast_equal(
-        expect_binding(remove_args.values, "bundleNames").value,
-        FunctionCall(
-            name=FunctionCall(
-                name=Identifier(name="map"),
-                argument=Parenthesis(
-                    value=FunctionDefinition(
-                        argument_set=Identifier(name="entry"),
-                        output=identifier_attr_path("entry", "bundleName"),
-                    )
-                ),
-            ),
-            argument=identifier_attr_path("cfg", "systemApplications"),
-        ),
+    assert (
+        expect_binding(remove_args.values, "bundleNames").value.rebuild()
+        == "managedBundleNames"
     )
     assert_nix_ast_equal(
         expect_binding(remove_args.values, "targetDirectory").value,
@@ -725,14 +767,7 @@ def test_home_manager_mac_app_module_audits_profile_bundle_leaks() -> None:
     )
     mk_if = expect_instance(audit.name, FunctionCall)
     assert_nix_ast_equal(mk_if.name, identifier_attr_path("lib", "mkIf"))
-    assert_nix_ast_equal(
-        mk_if.argument,
-        BinaryExpression(
-            left=identifier_attr_path("cfg", "systemApplications"),
-            operator=Operator(name="!="),
-            right=nix_list([]),
-        ),
-    )
+    assert mk_if.argument.rebuild() == "(managedEntries != [ ])"
 
     entry_after = expect_instance(
         expect_instance(audit.argument, Parenthesis).value, FunctionCall
@@ -763,20 +798,10 @@ def test_home_manager_mac_app_module_audits_profile_bundle_leaks() -> None:
             argument=identifier_attr_path("config", "home.packages"),
         ),
     )
-    assert_nix_ast_equal(
-        expect_binding(leak_audit_args.values, "managedBundleNames").value,
-        FunctionCall(
-            name=FunctionCall(
-                name=Identifier(name="map"),
-                argument=Parenthesis(
-                    value=FunctionDefinition(
-                        argument_set=Identifier(name="entry"),
-                        output=identifier_attr_path("entry", "bundleName"),
-                    )
-                ),
-            ),
-            argument=identifier_attr_path("cfg", "systemApplications"),
-        ),
+    assert any(
+        isinstance(expr, Inherit)
+        and [name.rebuild() for name in expr.names] == ["managedBundleNames"]
+        for expr in leak_audit_args.values
     )
     label = expect_instance(
         expect_binding(leak_audit_args.values, "label").value,
@@ -795,7 +820,7 @@ def test_profile_bundle_leak_audit_script_reports_managed_bundle_exposure(
     leak_script = expect_instance(
         _mac_apps_fragment_expr(
             "  profileBundleLeakAuditScript =\n",
-            "\n\n  systemApplicationsScript =",
+            "\n\n  applicationsScript =",
         ),
         FunctionDefinition,
     )
@@ -912,9 +937,9 @@ def test_remove_profile_copies_script_removes_read_only_stale_bundles(
     assert not stale_bundle.exists()
     assert not stale_file.exists()
     assert stderr.getvalue() == (
-        "removing Home Manager copy of system-managed app "
+        "removing Home Manager copy of scoped managed app "
         f"{target_directory / 'Emdash.app'}...\n"
-        "removing Home Manager copy of system-managed app "
+        "removing Home Manager copy of scoped managed app "
         f"{target_directory / 'DataGrip.app'}...\n"
     )
 
@@ -933,6 +958,34 @@ def test_remove_profile_copies_script_removes_read_only_stale_bundles(
         encoding="utf-8",
     )
     assert mac_apps_helper.main(["prog", "remove-profile-copies", str(payload)]) == 0
+
+
+def test_remove_profile_copies_script_removes_writable_apps_when_chmod_is_denied(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Apple app metadata can deny chmod on bundles that are already removable."""
+    target_directory = tmp_path / "Home Manager Apps"
+    stale_bundle = target_directory / "AppCleaner.app"
+    (stale_bundle / "Contents").mkdir(parents=True)
+
+    def _deny_chmod(self: Path, mode: int) -> None:
+        raise PermissionError(1, "Operation not permitted", str(self))
+
+    monkeypatch.setattr(Path, "chmod", _deny_chmod)
+
+    stderr = StringIO()
+    with redirect_stderr(stderr):
+        mac_apps_helper._remove_profile_copies({
+            "bundleNames": ["AppCleaner.app"],
+            "targetDirectory": str(target_directory),
+        })
+
+    assert not stale_bundle.exists()
+    assert stderr.getvalue() == (
+        "removing Home Manager copy of scoped managed app "
+        f"{target_directory / 'AppCleaner.app'}...\n"
+    )
 
 
 @pytest.mark.parametrize("bundle_name", ["../Emdash.app", ".."])
@@ -973,7 +1026,7 @@ def test_managed_app_overlap_assertion_reports_conflicting_package_lists() -> No
     assert result == {
         "assertion": False,
         "message": (
-            "nixcfg.macApps.systemApplications packages must not also appear in other "
+            "nixcfg.macApps.applications packages must not also appear in other "
             "installed package lists.\n"
             "- Cursor.app (cursor) also appears in home.packages as cursor-wrapper."
         ),
@@ -999,7 +1052,31 @@ def test_managed_app_overlap_assertion_allows_distinct_package_lists() -> None:
     assert result == {
         "assertion": True,
         "message": (
-            "nixcfg.macApps.systemApplications packages must not also appear in other "
+            "nixcfg.macApps.applications packages must not also appear in other "
+            "installed package lists."
+        ),
+    }
+
+
+@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
+def test_managed_app_overlap_assertion_ignores_unevaluable_package_outputs() -> None:
+    """Platform-incompatible package outputs should not break overlap checks."""
+    result = _managed_app_overlap_assertion_result([
+        nix_attrset({
+            "label": "home.packages",
+            "packages": nix_list([
+                nix_attrset({
+                    "pname": "linux-only",
+                    "outPath": parse_nix_expr('throw "unsupported"'),
+                })
+            ]),
+        })
+    ])
+
+    assert result == {
+        "assertion": True,
+        "message": (
+            "nixcfg.macApps.applications packages must not also appear in other "
             "installed package lists."
         ),
     }
@@ -1152,18 +1229,58 @@ def test_zen_twilight_package_embeds_autoconfig_and_resigns_app() -> None:
     assert command_texts(install_shell, "unzip") == []
 
 
-def test_george_config_manages_mutable_gui_apps_via_system_applications() -> None:
+def test_george_config_manages_mutable_gui_apps_via_scoped_applications() -> None:
     """George's config should single-source managed macOS app routing."""
     root = _module_output("home/george/configuration.nix")
     nixcfg = expect_instance(expect_binding(root.values, "nixcfg").value, AttributeSet)
+
+    def entry_for(table: AttributeSet, name: str) -> AttributeSet:
+        try:
+            entry_binding = expect_binding(table.values, name)
+        except AssertionError:
+            entry_binding = expect_binding(table.values, f'"{name}"')
+        return expect_instance(entry_binding.value, AttributeSet)
+
+    def package_for(table: AttributeSet, name: str) -> str:
+        return expect_binding(entry_for(table, name).values, "package").value.rebuild()
+
+    def scope_for(table: AttributeSet, name: str) -> str:
+        return expect_binding(entry_for(table, name).values, "scope").value.rebuild()
 
     assert_nix_ast_equal(
         expect_scope_binding(nixcfg, "macAppHelpers").value,
         "import ../../lib/mac-apps.nix { inherit lib pkgs; }",
     )
-    assert_nix_ast_equal(
+    routing = expect_instance(
         expect_scope_binding(nixcfg, "managedMacAppRouting").value,
-        _managed_mac_app_routing_table(),
+        BinaryExpression,
+    )
+    assert routing.operator.name == "//"
+    base_routing = expect_instance(routing.left, AttributeSet)
+    assert package_for(base_routing, "slack") == "pkgs.slack"
+    assert package_for(base_routing, "ghostty") == "pkgs.ghostty-tip"
+    assert package_for(base_routing, "zed") == "pkgs.zed-editor-nightly"
+    assert package_for(base_routing, "zen-twilight") == "pkgs.zen-twilight"
+    assert package_for(base_routing, "code-cursor") == "pkgs.code-cursor"
+    assert package_for(base_routing, "vscode-insiders") == "pkgs.vscode-insiders"
+    assert package_for(base_routing, "superset") == "pkgs.superset"
+    assert package_for(base_routing, "nordvpn") == "pkgs.nordvpn"
+    assert scope_for(base_routing, "nordvpn") == '"system"'
+
+    work_call = expect_instance(routing.right, FunctionCall)
+    assert work_call.name.rebuild() == "lib.optionalAttrs config.profiles.work.enable"
+    work_routing = expect_instance(work_call.argument, AttributeSet)
+    assert package_for(work_routing, "onepassword") == "pkgs.onepassword"
+    assert scope_for(work_routing, "onepassword") == '"system"'
+    tailscale = expect_instance(
+        expect_binding(work_routing.values, "tailscale").value, AttributeSet
+    )
+    assert expect_binding(tailscale.values, "package").value.rebuild() == (
+        "pkgs.tailscale-app"
+    )
+    assert all(
+        not (isinstance(binding, Binding) and binding.name == "scope")
+        for binding in tailscale.values
     )
     assert_nix_ast_equal(
         expect_scope_binding(nixcfg, "managedMacAppProjection").value,
@@ -1215,8 +1332,8 @@ def test_george_config_manages_mutable_gui_apps_via_system_applications() -> Non
         AttributeSet,
     )
     assert_nix_ast_equal(
-        expect_binding(mac_apps.values, "systemApplications").value,
-        "managedMacAppProjection.systemApplications",
+        expect_binding(mac_apps.values, "applications").value,
+        "managedMacAppProjection.applications",
     )
 
     programs = expect_instance(
@@ -1422,81 +1539,158 @@ def test_vscode_insiders_overlay_keeps_copy_mode_mac_app_metadata_contract() -> 
 
 
 def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
-    """Dock modules should keep the targeted /Applications policy explicit for managed bundles."""
+    """Dock modules should consume resolved app paths instead of hard-coded app dirs."""
 
-    def persistent_apps(relative_path: str) -> list[str]:
-        system = expect_instance(
-            expect_binding(_module_output(relative_path).values, "system").value,
-            AttributeSet,
+    def dock_items(
+        relative_path: str,
+    ) -> tuple[str, list[str], list[str], list[str], FunctionCall, list[Inherit]]:
+        expr = expect_instance(
+            nix_file_expr(relative_path),
+            FunctionDefinition,
         )
-        defaults = expect_instance(
-            expect_binding(system.values, "defaults").value,
-            AttributeSet,
+        call = expect_instance(expr.output, FunctionCall)
+        assert call.name.rebuild() == "dock.mkDockModule"
+        args = expect_instance(call.argument, AttributeSet)
+        activation = expect_instance(
+            expect_binding(args.values, "activationName").value, StringPrimitive
+        ).value
+        apps = [
+            item.rebuild()
+            for item in expect_instance(
+                expect_binding(args.values, "apps").value, NixList
+            ).value
+        ]
+        others = [
+            item.rebuild()
+            for item in expect_instance(
+                expect_binding(args.values, "others").value, NixList
+            ).value
+        ]
+        remove_others = [
+            item.rebuild()
+            for item in expect_instance(
+                expect_binding(args.values, "removeOthers").value, NixList
+            ).value
+        ]
+        dock_context = expect_instance(
+            expect_scope_binding(call, "dockContext").value, FunctionCall
         )
-        dock = expect_instance(
-            expect_binding(defaults.values, "dock").value,
-            AttributeSet,
-        )
-        persistent = expect_instance(
-            expect_binding(dock.values, "persistent-apps").value,
-            NixList,
-        )
-        apps: list[str] = []
-        for item in persistent.value:
-            entry = expect_instance(item, AttributeSet)
-            app = expect_instance(
-                expect_binding(entry.values, "app").value, StringPrimitive
-            )
-            apps.append(app.value)
-        return apps
+        context_inherits = [value for value in call.scope if isinstance(value, Inherit)]
+        return activation, apps, others, remove_others, dock_context, context_inherits
 
-    george_dock = persistent_apps("modules/darwin/george/dock-apps.nix")
-    town_dock = persistent_apps("modules/darwin/george/town-dock-apps.nix")
+    (
+        george_activation,
+        george_dock,
+        george_others,
+        george_remove_others,
+        george_context,
+        george_context_inherits,
+    ) = dock_items("modules/darwin/george/dock-apps.nix")
+    (
+        town_activation,
+        town_dock,
+        town_others,
+        town_remove_others,
+        town_context,
+        town_context_inherits,
+    ) = dock_items("modules/darwin/george/town-dock-apps.nix")
+
+    assert george_activation == "nixcfgPersonalDock"
+    assert town_activation == "nixcfgTownDock"
+    for context in (george_context, town_context):
+        assert_nix_ast_equal(context.name, "dock.mkDockContext")
+        assert_nix_ast_equal(
+            context.argument,
+            """
+            {
+              inherit config primaryUser username;
+            }
+            """,
+        )
+    for context_inherits in (george_context_inherits, town_context_inherits):
+        assert any(
+            inherit_expr.from_expression is not None
+            and inherit_expr.from_expression.rebuild() == "dockContext"
+            and [name.rebuild() for name in inherit_expr.names]
+            == ["appPath", "homeDirectory"]
+            for inherit_expr in context_inherits
+        )
 
     for apps in (george_dock, town_dock):
-        assert (
-            "/Users/${primaryUser}/Applications/Home Manager Apps/ChatGPT.app"
-            not in apps
-        )
-        assert "/Applications/ChatGPT.app" not in apps
-        assert (
-            "/Users/${primaryUser}/Applications/Home Manager Apps/DataGrip.app"
-            not in apps
-        )
-        assert (
-            "/Users/${primaryUser}/Applications/Home Manager Apps/Spotify.app"
-            not in apps
-        )
+        assert '(appPath "claude" "Claude.app")' in apps
+        assert '(appPath "ghostty" "Ghostty.app")' in apps
+        assert '(appPath "spotify" "Spotify.app")' in apps
+        assert '"/Applications/Claude.app"' not in apps
+        assert '"/Applications/Ghostty.app"' not in apps
+        assert '"/Applications/Spotify.app"' not in apps
 
-    assert "/Applications/DataGrip.app" in george_dock
-    assert "/Applications/Spotify.app" in george_dock
+    assert '(appPath "datagrip" "DataGrip.app")' in george_dock
 
-    assert "/Applications/Cursor.app" in town_dock
-    assert "/Applications/Visual Studio Code - Insiders.app" in town_dock
-    assert "/Applications/DataGrip.app" in town_dock
-    assert "/Applications/Spotify.app" in town_dock
+    assert '(appPath "onepassword" "1Password.app")' in town_dock
+    assert '(appPath "code-cursor" "Cursor.app")' in town_dock
     assert (
-        "/Users/${primaryUser}/Applications/Home Manager Apps/OpenCode Desktop Dev.app"
-        in town_dock
+        '(appPath "vscode-insiders" "Visual Studio Code - Insiders.app")' in town_dock
     )
-    assert (
-        "/Users/${primaryUser}/Applications/Home Manager Apps/OpenCode Dev.app"
-        not in town_dock
+    assert '(appPath "datagrip" "DataGrip.app")' in town_dock
+    assert '(appPath "figma" "Figma.app")' in town_dock
+    assert '(appPath "linear" "Linear.app")' in town_dock
+    assert '(appPath "opencode" "OpenCode Desktop Dev.app")' in town_dock
+    assert '"/Applications/OpenCode Desktop Dev.app"' not in town_dock
+    assert '"/Applications/Cursor.app"' not in town_dock
+    assert '"/Applications/Visual Studio Code - Insiders.app"' not in town_dock
+
+    for others in (george_others, town_others):
+        assert '"${homeDirectory}/Applications"' not in others
+        assert '"/Applications"' in others
+        assert '"/Applications/Utilities"' in others
+        assert '"${homeDirectory}/Downloads"' in others
+
+    for remove_others in (george_remove_others, town_remove_others):
+        assert '"${homeDirectory}/Applications"' in remove_others
+        assert '"/Applications"' not in remove_others
+
+
+def test_dock_activation_updates_items_without_clearing_the_dock() -> None:
+    """Dock activation should avoid leaving the Dock empty after partial failures."""
+    mk_dock_module = expect_instance(
+        nix_source_fragment_expr(
+            "modules/darwin/george/dock-lib.nix",
+            "  mkDockModule =\n",
+            "\n}",
+        ),
+        FunctionDefinition,
     )
-    assert (
-        "/Users/${primaryUser}/Applications/Home Manager Apps/OpenCode Electron Dev.app"
-        not in town_dock
+    dock_label = expect_scope_binding(mk_dock_module.output, "dockLabel").value
+    add_apps = expect_scope_binding(mk_dock_module.output, "addAppCommands").value
+    add_others = expect_scope_binding(mk_dock_module.output, "addOtherCommands").value
+    remove_others = expect_scope_binding(
+        mk_dock_module.output, "removeOtherCommands"
+    ).value
+
+    assert_nix_ast_equal(
+        dock_label,
+        'path: lib.removeSuffix ".app" (builtins.baseNameOf path)',
     )
-    assert "/Applications/OpenCode Desktop Dev.app" not in town_dock
-    assert "/Applications/OpenCode Dev.app" not in town_dock
-    assert "/Applications/OpenCode Electron Dev.app" not in town_dock
-    assert (
-        "/Users/${primaryUser}/Applications/Home Manager Apps/Cursor.app"
-        not in town_dock
+    for expression in (add_apps, add_others, remove_others):
+        shell_text = expression.rebuild()
+        assert "--remove all" not in shell_text
+
+    assert "--replacing ${escapeShellArg (dockLabel app)}" in add_apps.rebuild()
+    assert "--replacing ${escapeShellArg (dockLabel other)}" in add_others.rebuild()
+    assert '"$dockutil" --find ${escapeShellArg other} --section others' in (
+        remove_others.rebuild()
     )
-    assert (
-        "/Users/${primaryUser}/Applications/Home Manager Apps/Visual Studio Code - Insiders.app"
-        not in town_dock
+    assert '"$dockutil" --remove ${escapeShellArg other} --section others' in (
+        remove_others.rebuild()
+    )
+    assert 'echo "warning: failed to remove stale Dock item ${other}" >&2' in (
+        remove_others.rebuild()
+    )
+    assert 'if ! "$dockutil" --add ${escapeShellArg app}' in add_apps.rebuild()
+    assert 'echo "warning: failed to add Dock app ${app}" >&2' in add_apps.rebuild()
+    assert 'if ! "$dockutil" --add ${escapeShellArg other}' in add_others.rebuild()
+    assert 'echo "warning: failed to add Dock item ${other}" >&2' in (
+        add_others.rebuild()
     )
 
 

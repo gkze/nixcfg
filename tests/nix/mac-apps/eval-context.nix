@@ -47,6 +47,10 @@ let
         _type = "enum";
         inherit values;
       };
+      attrsOf = value: {
+        _type = "attrsOf";
+        elemType = value;
+      };
       listOf = value: {
         _type = "listOf";
         elemType = value;

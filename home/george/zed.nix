@@ -22,6 +22,13 @@ let
     tokenCommand = ''security find-internet-password -s "mcp.render.com" -a "$USER" -r "htps" -w'';
     url = "https://mcp.render.com/mcp";
   };
+  twilightAppPath = lib.attrByPath [
+    "nixcfg"
+    "macApps"
+    "resolved"
+    "zen-twilight"
+    "path"
+  ] "/Applications/Twilight.app" config;
 
   disabledLocalMcp = command: args: {
     enabled = false;
@@ -36,7 +43,7 @@ in
 {
   programs.zed-editor = {
     enable = true;
-    package = pkgs.zed-editor-nightly;
+    package = null;
     userSettings = {
       agent_servers = {
         qwen-code.type = "registry";
@@ -78,11 +85,12 @@ in
           "mcp"
           "start"
         ];
+        docusign = disabledRemoteMcp "https://mcp-d.docusign.com/mcp";
         figma = disabledRemoteMcp "https://mcp.figma.com/mcp";
         firefox-devtools = disabledLocalMcp "npx" [
           "-y"
           "@padenot/firefox-devtools-mcp@latest"
-          "--firefoxPath=/Applications/Twilight.app/Contents/MacOS/zen"
+          "--firefoxPath=${twilightAppPath}/Contents/MacOS/zen"
         ];
         github = disabledLocalMcp "${githubMcpWrapper}" [ ];
         linear = disabledRemoteMcp "https://mcp.linear.app/mcp";

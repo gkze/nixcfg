@@ -296,6 +296,7 @@ def _cmd_render_certification_pr_body(
     run_json: Path,
     cachix_name: str,
     workflow: Path,
+    jobs_json: Path | None = None,
 ) -> int:
     try:
         run_payload = _load_json_file(
@@ -323,6 +324,7 @@ def _cmd_render_certification_pr_body(
                 ),
                 cachix_name=cachix_name,
                 workflow_path=workflow,
+                jobs_path=jobs_json,
             ),
         )
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
@@ -371,6 +373,21 @@ app.add_typer(workflow_update_targets_app, name="update-targets")
 
 def _exit_with_code(code: int) -> None:
     raise typer.Exit(code=code)
+
+
+def _register_commands(
+    target_app: typer.Typer,
+    commands: tuple[tuple[str, Callable[..., None], str | None], ...],
+) -> None:
+    for name, command, help_text in commands:
+        target_app.command(name, help=help_text)(command)
+
+
+def _register_callbacks(
+    callbacks: tuple[tuple[typer.Typer, Callable[..., None]], ...],
+) -> None:
+    for target_app, command in callbacks:
+        target_app.callback(invoke_without_command=True)(command)
 
 
 def command_build_darwin_config(
@@ -548,6 +565,13 @@ def command_render_certification_pr_body(
             "-j", "--run-json", help="GitHub Actions run JSON payload from gh api."
         ),
     ],
+    jobs_json: Annotated[
+        Path | None,
+        typer.Option(
+            "--jobs-json",
+            help="GitHub Actions jobs JSON payload from gh api.",
+        ),
+    ] = None,
     workflow: Annotated[
         Path,
         typer.Option(
@@ -563,6 +587,7 @@ def command_render_certification_pr_body(
             existing_body=existing_body,
             output=output,
             run_json=run_json,
+            jobs_json=jobs_json,
             cachix_name=cachix_name,
             workflow=workflow,
         )
@@ -661,84 +686,110 @@ def command_prepare_bun_lock(
     )
 
 
-workflow_darwin_app.command("build")(command_build_darwin_config)
-workflow_darwin_app.command("eval-lock-smoke")(command_eval_darwin_lock_smoke)
-workflow_darwin_app.command("eval-full-smoke")(command_eval_darwin_full_smoke)
-workflow_darwin_app.command(
-    "eval-smoke",
-    help="Backward-compatible alias for `darwin eval-full-smoke`.",
-)(command_eval_darwin_full_smoke)
-workflow_darwin_app.command("free")(command_free_disk_space)
-workflow_darwin_app.command("install")(command_install_darwin_tools)
-
-workflow_flake_app.command("prefetch")(command_prefetch_flake_inputs)
-workflow_flake_app.command("update")(command_nix_flake_update)
-workflow_flake_input_app.command("snapshot")(command_snapshot_flake_input)
-workflow_flake_input_app.command("compare")(command_compare_flake_input)
-
-workflow_pr_body_app.callback(invoke_without_command=True)(command_generate_pr_body)
-workflow_update_app.callback(invoke_without_command=True)(
-    command_smoke_check_update_app
-)
-workflow_update_targets_app.callback(invoke_without_command=True)(
-    command_list_update_targets
-)
-
-for _name, _command, _help in (
-    ("verify-artifacts", command_verify_artifacts, None),
-    ("verify-structure", command_verify_structure, None),
-    ("validate-bun-lock", command_validate_bun_lock, None),
-    ("prepare-bun-lock", command_prepare_bun_lock, None),
-    ("build-darwin-config", command_build_darwin_config, "Alias for `darwin build`."),
+for _target_app, _commands in (
     (
-        "eval-darwin-lock-smoke",
-        command_eval_darwin_lock_smoke,
-        "Alias for `darwin eval-lock-smoke`.",
+        workflow_darwin_app,
+        (
+            ("build", command_build_darwin_config, None),
+            ("eval-lock-smoke", command_eval_darwin_lock_smoke, None),
+            ("eval-full-smoke", command_eval_darwin_full_smoke, None),
+            (
+                "eval-smoke",
+                command_eval_darwin_full_smoke,
+                "Backward-compatible alias for `darwin eval-full-smoke`.",
+            ),
+            ("free", command_free_disk_space, None),
+            ("install", command_install_darwin_tools, None),
+        ),
     ),
     (
-        "eval-darwin-full-smoke",
-        command_eval_darwin_full_smoke,
-        "Alias for `darwin eval-full-smoke`.",
+        workflow_flake_app,
+        (
+            ("prefetch", command_prefetch_flake_inputs, None),
+            ("update", command_nix_flake_update, None),
+        ),
     ),
     (
-        "eval-darwin-smoke",
-        command_eval_darwin_full_smoke,
-        "Backward-compatible alias for `darwin eval-full-smoke`.",
+        workflow_flake_input_app,
+        (
+            ("snapshot", command_snapshot_flake_input, None),
+            ("compare", command_compare_flake_input, None),
+        ),
     ),
-    (
-        "free-disk-space",
-        command_free_disk_space,
-        "Legacy alias for CI runner disk cleanup.",
-    ),
-    (
-        "install-darwin-tools",
-        command_install_darwin_tools,
-        "Alias for `darwin install`.",
-    ),
-    (
-        "prefetch-flake-inputs",
-        command_prefetch_flake_inputs,
-        "Alias for `flake prefetch`.",
-    ),
-    (
-        "nix-flake-update",
-        command_nix_flake_update,
-        "Alias for pinned-aware flake input updates.",
-    ),
-    ("generate-pr-body", command_generate_pr_body, "Alias for `pr-body`."),
-    (
-        "render-certification-pr-body",
-        command_render_certification_pr_body,
-        "Render certification details into an existing PR body.",
-    ),
-    (
-        "smoke-check-update-app",
-        command_smoke_check_update_app,
-        "Alias for `update-app`.",
-    ),
-    ("list-update-targets", command_list_update_targets, "Alias for `update-targets`."),
 ):
-    app.command(_name, help=_help)(_command)
+    _register_commands(_target_app, _commands)
+
+_register_callbacks((
+    (workflow_pr_body_app, command_generate_pr_body),
+    (workflow_update_app, command_smoke_check_update_app),
+    (workflow_update_targets_app, command_list_update_targets),
+))
+
+_register_commands(
+    app,
+    (
+        ("verify-artifacts", command_verify_artifacts, None),
+        ("verify-structure", command_verify_structure, None),
+        ("validate-bun-lock", command_validate_bun_lock, None),
+        ("prepare-bun-lock", command_prepare_bun_lock, None),
+        (
+            "build-darwin-config",
+            command_build_darwin_config,
+            "Alias for `darwin build`.",
+        ),
+        (
+            "eval-darwin-lock-smoke",
+            command_eval_darwin_lock_smoke,
+            "Alias for `darwin eval-lock-smoke`.",
+        ),
+        (
+            "eval-darwin-full-smoke",
+            command_eval_darwin_full_smoke,
+            "Alias for `darwin eval-full-smoke`.",
+        ),
+        (
+            "eval-darwin-smoke",
+            command_eval_darwin_full_smoke,
+            "Backward-compatible alias for `darwin eval-full-smoke`.",
+        ),
+        (
+            "free-disk-space",
+            command_free_disk_space,
+            "Legacy alias for CI runner disk cleanup.",
+        ),
+        (
+            "install-darwin-tools",
+            command_install_darwin_tools,
+            "Alias for `darwin install`.",
+        ),
+        (
+            "prefetch-flake-inputs",
+            command_prefetch_flake_inputs,
+            "Alias for `flake prefetch`.",
+        ),
+        (
+            "nix-flake-update",
+            command_nix_flake_update,
+            "Alias for pinned-aware flake input updates.",
+        ),
+        ("generate-pr-body", command_generate_pr_body, "Alias for `pr-body`."),
+        (
+            "render-certification-pr-body",
+            command_render_certification_pr_body,
+            "Render certification details into an existing PR body.",
+        ),
+        (
+            "smoke-check-update-app",
+            command_smoke_check_update_app,
+            "Alias for `update-app`.",
+        ),
+        (
+            "list-update-targets",
+            command_list_update_targets,
+            "Alias for `update-targets`.",
+        ),
+    ),
+)
 
 
 main = make_main(app, prog_name="workflow-steps")

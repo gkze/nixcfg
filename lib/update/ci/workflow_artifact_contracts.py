@@ -20,9 +20,21 @@ _DOWNLOAD_ACTION_PREFIX = "actions/download-artifact@"
 _GLOB_CHARS = frozenset("*?[")
 _MATRIX_EXPR = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_]+)\s*\}\}")
 _OUTPUT_PATH_RE = re.compile(r"--output\s+([^\s\\]+)")
+_REDIRECT_PATH_RE = re.compile(r"(?:^|[\s;])>\s*([^\s\\]+)")
 _SOURCES_MATERIALIZER_MARKERS = (
     "nix run .#nixcfg -- ci pipeline sources",
     "nix run path:.#nixcfg -- ci pipeline sources",
+)
+_UPDATE_TARGET_AGGREGATE_MARKER = "lib/update/ci/update_target_artifacts.py aggregate"
+_UPDATE_TARGET_AGGREGATE_RELATIVE_SPECS = (
+    "packages/**/sources.json",
+    "overlays/**/sources.json",
+    "packages/**/uv.lock",
+    "packages/**/deno-deps.json",
+    "packages/**/build.zig.zon.nix",
+    "packages/t3code/bun.lock",
+    "packages/t3code-desktop/bun.lock",
+    "nixcfg-update-target-status.json",
 )
 _UPLOAD_ACTION_PREFIX = "actions/upload-artifact@"
 _REFRESH_FINAL_ARTIFACT_NAME = "merged-generated-formatted"
@@ -227,10 +239,18 @@ def _stored_paths_for(source_paths: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _materialized_paths_for(
-    upload: ArtifactUpload, destination: str
+    upload: ArtifactUpload,
+    destination: str,
+    *,
+    artifact_subdir: bool = False,
 ) -> tuple[str, ...]:
     """Return the repo-relative paths visible after download-artifact."""
-    return tuple(_join_relpath(destination, path) for path in upload.stored_paths)
+    root = (
+        _join_relpath(destination, upload.artifact_name)
+        if artifact_subdir
+        else destination
+    )
+    return tuple(_join_relpath(root, path) for path in upload.stored_paths)
 
 
 def _substitute_matrix(
@@ -349,6 +369,8 @@ def _build_upload(
 def _build_download(
     step: WorkflowObject,
     *,
+    artifact_name: str,
+    artifact_subdir: bool = False,
     job_id: str,
     step_index: int,
     upload: ArtifactUpload,
@@ -364,10 +386,14 @@ def _build_download(
 
     destination = _normalize_relpath(str(with_data.get("path", ".")))
     return ArtifactDownload(
-        artifact_name=upload.artifact_name,
+        artifact_name=artifact_name,
         destination=destination,
         job_id=job_id,
-        materialized_paths=_materialized_paths_for(upload, destination),
+        materialized_paths=_materialized_paths_for(
+            upload,
+            destination,
+            artifact_subdir=artifact_subdir,
+        ),
         step_name=_step_name(step, fallback=f"download-artifact[{step_index}]"),
     )
 
@@ -419,6 +445,48 @@ def _render_missing_need_error(
     )
 
 
+def _workflow_bool(value: WorkflowValue | None) -> bool:
+    """Return the GitHub Actions boolean value represented by one YAML field."""
+    return str(value).strip().lower() == "true"
+
+
+def _download_artifact_ref(with_data: WorkflowObject) -> tuple[str, bool]:
+    """Return a download-artifact name or pattern and whether it is a pattern."""
+    artifact_name = str(with_data.get("name", "")).strip()
+    if artifact_name:
+        return artifact_name, False
+
+    artifact_pattern = str(with_data.get("pattern", "")).strip()
+    if artifact_pattern:
+        return artifact_pattern, True
+
+    msg = "download-artifact step is missing a name or pattern"
+    raise RuntimeError(msg)
+
+
+def _artifact_pattern_matches(artifact_name: str, artifact_pattern: str) -> bool:
+    """Return whether an upload artifact name matches a download pattern."""
+    return PurePosixPath(artifact_name).match(artifact_pattern)
+
+
+def _matching_uploads(
+    uploads: dict[str, ArtifactUpload],
+    *,
+    artifact_ref: str,
+    is_pattern: bool,
+) -> tuple[ArtifactUpload, ...]:
+    """Return uploaded artifacts addressed by a name or pattern download."""
+    if not is_pattern:
+        upload = uploads.get(artifact_ref)
+        return () if upload is None else (upload,)
+
+    return tuple(
+        upload
+        for name, upload in sorted(uploads.items())
+        if _artifact_pattern_matches(name, artifact_ref)
+    )
+
+
 def _materialized_paths_from_run_step(
     step: WorkflowObject, *, repo_root: Path
 ) -> tuple[str, ...]:
@@ -438,11 +506,21 @@ def _materialized_paths_from_run_step(
         ):
             materialized_paths[path] = None
 
-    for match in _OUTPUT_PATH_RE.findall(run_value):
+    output_paths: list[str] = []
+    for match in (
+        *_OUTPUT_PATH_RE.findall(run_value),
+        *_REDIRECT_PATH_RE.findall(run_value),
+    ):
         output_path = _normalize_relpath(match.strip("\"'"))
         if not output_path or "$" in output_path or posixpath.isabs(output_path):
             continue
         materialized_paths[output_path] = None
+        output_paths.append(output_path)
+
+    if _UPDATE_TARGET_AGGREGATE_MARKER in run_value:
+        for output_path in output_paths:
+            for spec in _UPDATE_TARGET_AGGREGATE_RELATIVE_SPECS:
+                materialized_paths[_join_relpath(output_path, spec)] = None
 
     return tuple(materialized_paths)
 
@@ -464,16 +542,24 @@ def _collect_uploads(
             if uses.startswith(_DOWNLOAD_ACTION_PREFIX):
                 with_data = step.get("with")
                 if isinstance(with_data, dict):
-                    artifact_name = str(with_data.get("name", "")).strip()
-                    producer_upload = uploads.get(artifact_name)
-                    if artifact_name and producer_upload is not None:
+                    try:
+                        artifact_ref, is_pattern = _download_artifact_ref(with_data)
+                    except RuntimeError:
+                        continue
+                    merge_multiple = _workflow_bool(with_data.get("merge-multiple"))
+                    for producer_upload in _matching_uploads(
+                        uploads,
+                        artifact_ref=artifact_ref,
+                        is_pattern=is_pattern,
+                    ):
                         materialized_paths.update(
                             _materialized_paths_for(
                                 producer_upload,
                                 _normalize_relpath(str(with_data.get("path", "."))),
+                                artifact_subdir=is_pattern and not merge_multiple,
                             )
                         )
-                continue
+                    continue
             if not uses.startswith(_UPLOAD_ACTION_PREFIX):
                 continue
 
@@ -510,7 +596,7 @@ def _validate_job_artifact_flows(
 ) -> list[str]:
     """Validate one job's artifact downloads against later re-uploads."""
     errors: list[str] = []
-    downloaded_artifacts: dict[str, ArtifactDownload] = {}
+    downloaded_artifacts: dict[str, tuple[ArtifactUpload, ArtifactDownload]] = {}
     materialized_paths: set[str] = set()
 
     for step_index, step in enumerate(job.steps, start=1):
@@ -528,56 +614,77 @@ def _validate_job_artifact_flows(
                 )
                 continue
 
-            artifact_name = str(with_data.get("name", "")).strip()
-            if not artifact_name:
+            try:
+                artifact_ref, is_pattern = _download_artifact_ref(with_data)
+            except RuntimeError:
                 errors.append(
                     f"Download step {_step_name(step, fallback=str(step_index))} "
-                    f"in {job.instance_id} is missing a name"
+                    f"in {job.instance_id} is missing a name or pattern"
                 )
                 continue
 
-            producer_upload = uploads.get(artifact_name)
-            if producer_upload is None:
+            matching_uploads = tuple(
+                upload
+                for upload in _matching_uploads(
+                    uploads,
+                    artifact_ref=artifact_ref,
+                    is_pattern=is_pattern,
+                )
+                if upload.job_id != job.job_id
+            )
+            if not matching_uploads:
+                descriptor = "pattern" if is_pattern else "artifact"
                 errors.append(
-                    f"Job `{job.instance_id}` downloads unknown artifact `{artifact_name}`"
+                    f"Job `{job.instance_id}` downloads unknown {descriptor} `{artifact_ref}`"
                 )
                 continue
 
             job_needs = transitive_needs[job.job_id]
-            if producer_upload.job_id not in job_needs:
-                errors.append(
-                    _render_missing_need_error(
-                        artifact_name=artifact_name,
-                        consumer_job=job,
-                        producer_upload=producer_upload,
-                        transitive_needs=job_needs,
-                    )
-                )
-
-            download = _build_download(
-                step,
-                job_id=job.instance_id,
-                step_index=step_index,
-                upload=producer_upload,
-            )
-            existing_download = downloaded_artifacts.get(artifact_name)
-            if existing_download is None:
-                downloaded_artifacts[artifact_name] = download
-            else:
-                downloaded_artifacts[artifact_name] = ArtifactDownload(
-                    artifact_name=artifact_name,
-                    destination=existing_download.destination,
-                    job_id=job.instance_id,
-                    materialized_paths=tuple(
-                        sorted(
-                            set(existing_download.materialized_paths).union(
-                                download.materialized_paths
-                            )
+            merge_multiple = _workflow_bool(with_data.get("merge-multiple"))
+            for producer_upload in matching_uploads:
+                if producer_upload.job_id not in job_needs:
+                    errors.append(
+                        _render_missing_need_error(
+                            artifact_name=artifact_ref,
+                            consumer_job=job,
+                            producer_upload=producer_upload,
+                            transitive_needs=job_needs,
                         )
-                    ),
-                    step_name=existing_download.step_name,
+                    )
+
+                download = _build_download(
+                    step,
+                    artifact_name=artifact_ref,
+                    artifact_subdir=is_pattern and not merge_multiple,
+                    job_id=job.instance_id,
+                    step_index=step_index,
+                    upload=producer_upload,
                 )
-            materialized_paths.update(download.materialized_paths)
+                existing = downloaded_artifacts.get(producer_upload.artifact_name)
+                if existing is None:
+                    downloaded_artifacts[producer_upload.artifact_name] = (
+                        producer_upload,
+                        download,
+                    )
+                else:
+                    _, existing_download = existing
+                    downloaded_artifacts[producer_upload.artifact_name] = (
+                        producer_upload,
+                        ArtifactDownload(
+                            artifact_name=artifact_ref,
+                            destination=existing_download.destination,
+                            job_id=job.instance_id,
+                            materialized_paths=tuple(
+                                sorted(
+                                    set(existing_download.materialized_paths).union(
+                                        download.materialized_paths
+                                    )
+                                )
+                            ),
+                            step_name=existing_download.step_name,
+                        ),
+                    )
+                materialized_paths.update(download.materialized_paths)
             continue
 
         if not uses.startswith(_UPLOAD_ACTION_PREFIX):
@@ -597,8 +704,7 @@ def _validate_job_artifact_flows(
             continue
         consumer_sources = set(consumer_upload.source_paths)
 
-        for artifact_name, download in downloaded_artifacts.items():
-            producer_upload = uploads[artifact_name]
+        for producer_upload, download in downloaded_artifacts.values():
             overlapping_paths = sorted(
                 consumer_sources.intersection(producer_upload.source_paths)
             )

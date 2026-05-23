@@ -1,0 +1,13 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-pvMjFBPKH3k8r/piEXGksaAVjnSIzQtbs+dCy5nMcqg=",
+    "aarch64-linux": "sha256-tAtg5Q6ctp4TAp4QC+mV+/2zs3me8cz/YKgRd/eOa4I=",
+    "x86_64-linux": "sha256-dKHlO8UNbvbOG8Z72fe0jlSVBeCiRTrU1cy8crC+qHQ="
+  },
+  "urls": {
+    "aarch64-darwin": "https://github.com/pantsbuild/scie-pants/releases/download/v0.13.2/scie-pants-macos-aarch64",
+    "aarch64-linux": "https://github.com/pantsbuild/scie-pants/releases/download/v0.13.2/scie-pants-linux-aarch64",
+    "x86_64-linux": "https://github.com/pantsbuild/scie-pants/releases/download/v0.13.2/scie-pants-linux-x86_64"
+  },
+  "version": "0.13.2"
+}

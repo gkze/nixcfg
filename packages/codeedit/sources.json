@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-+lR4+A1ZHBXwj156k2YrW68zAScYdovwroALRKxO6sk=",
+    "x86_64-darwin": "sha256-+lR4+A1ZHBXwj156k2YrW68zAScYdovwroALRKxO6sk="
+  },
+  "urls": {
+    "aarch64-darwin": "https://github.com/CodeEditApp/CodeEdit/releases/download/v0.3.6/CodeEdit.dmg",
+    "x86_64-darwin": "https://github.com/CodeEditApp/CodeEdit/releases/download/v0.3.6/CodeEdit.dmg"
+  },
+  "version": "0.3.6"
+}

@@ -140,7 +140,13 @@ def test_build_upload_and_download_reject_invalid_shapes(tmp_path: Path) -> None
         stored_paths=("foo.txt",),
     )
     with pytest.raises(TypeError, match="missing 'with'"):
-        contracts._build_download({}, job_id="job", step_index=1, upload=dummy_upload)
+        contracts._build_download(
+            {},
+            artifact_name="demo",
+            job_id="job",
+            step_index=1,
+            upload=dummy_upload,
+        )
 
 
 def test_collect_uploads_and_validate_job_flows_cover_error_branches(
@@ -247,6 +253,26 @@ def test_collect_uploads_and_validate_job_flows_cover_error_branches(
         },
     )
     assert merged_errors == []
+
+    pattern_job = contracts.WorkflowJob(
+        job_id="pattern-consumer",
+        instance_id="pattern-consumer",
+        steps=(
+            {
+                "uses": "actions/download-artifact@v7",
+                "with": {"pattern": "update-target-*", "path": "artifacts"},
+            },
+        ),
+    )
+    pattern_errors = contracts._validate_job_artifact_flows(
+        pattern_job,
+        repo_root=tmp_path,
+        transitive_needs={"pattern-consumer": frozenset()},
+        uploads={},
+    )
+    assert pattern_errors == [
+        "Job `pattern-consumer` downloads unknown pattern `update-target-*`"
+    ]
 
     need_message = contracts._render_missing_need_error(
         artifact_name="foo",
@@ -420,6 +446,129 @@ jobs:
     validate_workflow_artifact_contracts(
         workflow_path=workflow_path, repo_root=tmp_path
     )
+
+
+def test_validate_workflow_artifact_contracts_accepts_pattern_download_merge(
+    tmp_path: Path,
+) -> None:
+    """Allow package-sliced artifacts downloaded by pattern into one merge root."""
+    _write_file(tmp_path / "alpha.txt")
+    _write_file(tmp_path / "beta.txt")
+
+    workflow_path = tmp_path / "workflow.yml"
+    workflow_path.write_text(
+        """
+on: workflow_dispatch
+jobs:
+  alpha:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/upload-artifact@v6
+        with:
+          name: sources-linux-alpha
+          path: alpha.txt
+  beta:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/upload-artifact@v6
+        with:
+          name: sources-linux-beta
+          path: beta.txt
+  merge:
+    needs:
+      - alpha
+      - beta
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: sources-linux-*
+          merge-multiple: true
+          path: .
+      - uses: actions/upload-artifact@v6
+        with:
+          name: merged-sources
+          path: |
+            alpha.txt
+            beta.txt
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    validate_workflow_artifact_contracts(
+        workflow_path=workflow_path, repo_root=tmp_path
+    )
+
+
+def test_validate_workflow_artifact_contracts_detects_unmerged_pattern_layout(
+    tmp_path: Path,
+) -> None:
+    """Pattern downloads without merge-multiple keep files under artifact subdirs."""
+    _write_file(tmp_path / "alpha.txt")
+
+    workflow_path = tmp_path / "workflow.yml"
+    workflow_path.write_text(
+        """
+on: workflow_dispatch
+jobs:
+  alpha:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/upload-artifact@v6
+        with:
+          name: sources-linux-alpha
+          path: alpha.txt
+  merge:
+    needs: alpha
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: sources-linux-*
+          path: packages
+      - uses: actions/upload-artifact@v6
+        with:
+          name: merged-sources
+          path: alpha.txt
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_workflow_artifact_contracts(
+            workflow_path=workflow_path,
+            repo_root=tmp_path,
+        )
+
+    message = str(exc_info.value)
+    assert "sources-linux-alpha" in message
+    assert "sources-linux-alpha/alpha.txt" in message
+
+
+def test_validate_workflow_artifact_contracts_detects_unknown_pattern(
+    tmp_path: Path,
+) -> None:
+    """Reject pattern downloads that do not match any uploaded artifact."""
+    workflow_path = tmp_path / "workflow.yml"
+    workflow_path.write_text(
+        """
+on: workflow_dispatch
+jobs:
+  consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: sources-linux-*
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="downloads unknown pattern"):
+        validate_workflow_artifact_contracts(
+            workflow_path=workflow_path,
+            repo_root=tmp_path,
+        )
 
 
 def test_validate_workflow_artifact_contracts_detects_missing_job_needs(

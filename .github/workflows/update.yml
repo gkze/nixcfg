@@ -169,32 +169,62 @@ jobs:
           if-no-files-found: error
           path: pinned-versions.json
 
-  # Phase 4: Compute platform-specific hashes in parallel on native runners
-  compute-hashes:
+  # Phase 4: Discover package update targets once for package-sliced refresh jobs.
+  discover-update-targets:
     needs:
       - update-lock
-      - darwin-lock-smoke
       - resolve-versions
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            platform: aarch64-darwin
-          - runner: ubuntu-24.04
-            platform: x86_64-linux
-          - runner: ubuntu-24.04-arm
-            platform: aarch64-linux
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 300
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      targets: ${{ steps.matrix.outputs.targets }}
     steps:
       - *checkout
       - *setup_nix
       - *cachix
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - *download_flake_lock
+      - *cache_nix_arch
+      - name: Build update target matrix
+        id: matrix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          nix run .#nixcfg -- update --list --json > update-targets.json
+          python3 lib/update/ci/update_target_artifacts.py matrix \
+            --inventory update-targets.json \
+            --output update-target-matrix.json
+          {
+            echo "targets<<EOF"
+            cat update-target-matrix.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: flake-lock
-          path: .
+          name: update-target-matrix
+          if-no-files-found: error
+          path: |
+            update-targets.json
+            update-target-matrix.json
+
+  # Phase 5: Compute package-specific hashes in parallel on native runners.
+  compute-hashes-aarch64-darwin:
+    needs:
+      - update-lock
+      - darwin-lock-smoke
+      - resolve-versions
+      - discover-update-targets
+    runs-on: macos-15
+    name: aarch64-darwin / ${{ matrix.target }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.discover-update-targets.outputs.targets) }}
+    steps:
+      - *checkout
+      - *setup_nix
+      - *cachix
+      - *download_flake_lock
       - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           # Cache immutable tarball fetch artifacts only. Nix recreates
@@ -219,49 +249,265 @@ jobs:
           enable-cache: true
           ignore-nothing-to-cache: true
       - name: Regenerate T3 Code runtime Bun locks
-        if: matrix.platform == 'aarch64-darwin'
+        if: matrix.regenerate_runtime_locks == true
         run: nix run .#t3code-desktop.passthru.updateRuntimeLocks
-      - name: Compute hashes for ${{ matrix.platform }}
+      - name: Compute hashes for ${{ matrix.target }} on aarch64-darwin
+        id: update-target
+        continue-on-error: true
         # Run update with pinned versions to ensure all platforms use the
         # same upstream version (resolved in the resolve-versions job).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           UPDATE_SUBPROCESS_TIMEOUT: "14400"
+          UPDATE_MAX_NIX_BUILDS: "1"
+        run: >-
+          nix run .#nixcfg -- update --native-only
+          --pinned-versions pinned-versions.json
+          "${{ matrix.target }}"
+      - name: Stage target artifact
+        if: always()
+        env:
+          ARTIFACT_PATHS_JSON: ${{ toJSON(matrix.artifact_paths_aarch64_darwin) }}
+          UPDATE_OUTCOME: ${{ steps.update-target.outcome }}
         run: |
-          case "${{ matrix.platform }}" in
-            x86_64-linux|aarch64-darwin)
-              export UPDATE_MAX_NIX_BUILDS=1
-              ;;
-          esac
-          nix run .#nixcfg -- update --native-only --pinned-versions pinned-versions.json
+          exit_code=1
+          if [ "$UPDATE_OUTCOME" = "success" ]; then
+            exit_code=0
+          fi
+          python3 lib/update/ci/update_target_artifacts.py stage \
+            --root . \
+            --output update-target-artifact \
+            --target "${{ matrix.target }}" \
+            --platform aarch64-darwin \
+            --artifact-paths-json "$ARTIFACT_PATHS_JSON" \
+            --exit-code "$exit_code"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: always()
+        with:
+          name: update-target-aarch64-darwin-${{ matrix.artifact_slug }}
+          if-no-files-found: error
+          path: update-target-artifact
+      - name: Fail target job if update failed
+        if: steps.update-target.outcome != 'success'
+        run: exit 1
+
+  compute-hashes-x86_64-linux:
+    needs:
+      - update-lock
+      - resolve-versions
+      - discover-update-targets
+    runs-on: ubuntu-24.04
+    name: x86_64-linux / ${{ matrix.target }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.discover-update-targets.outputs.targets) }}
+    steps:
+      - *checkout
+      - *setup_nix
+      - *cachix
+      - *download_flake_lock
+      - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          # Cache immutable tarball fetch artifacts only. Nix recreates
+          # mutable SQLite metadata caches locally, and persisting them via
+          # archive-based CI caches can restore malformed databases.
+          path: |
+            ~/.cache/nix/tarball-cache
+            ~/.cache/nix/tarball-cache-v2
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
+          restore-keys: |
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-
+            nix-cache-${{ runner.os }}-
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: pinned-versions
+          path: .
+      - name: Free disk space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          ignore-nothing-to-cache: true
+      - name: Compute hashes for ${{ matrix.target }} on x86_64-linux
+        id: update-target
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPDATE_SUBPROCESS_TIMEOUT: "14400"
+          UPDATE_MAX_NIX_BUILDS: "1"
+        run: |
+          nix run .#nixcfg -- update --native-only \
+            --pinned-versions pinned-versions.json \
+            "${{ matrix.target }}"
+      - name: Stage target artifact
+        if: always()
+        env:
+          ARTIFACT_PATHS_JSON: ${{ toJSON(matrix.artifact_paths_x86_64_linux) }}
+          UPDATE_OUTCOME: ${{ steps.update-target.outcome }}
+        run: |
+          exit_code=1
+          if [ "$UPDATE_OUTCOME" = "success" ]; then
+            exit_code=0
+          fi
+          python3 lib/update/ci/update_target_artifacts.py stage \
+            --root . \
+            --output update-target-artifact \
+            --target "${{ matrix.target }}" \
+            --platform x86_64-linux \
+            --artifact-paths-json "$ARTIFACT_PATHS_JSON" \
+            --exit-code "$exit_code"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: always()
+        with:
+          name: update-target-x86_64-linux-${{ matrix.artifact_slug }}
+          if-no-files-found: error
+          path: update-target-artifact
+      - name: Fail target job if update failed
+        if: steps.update-target.outcome != 'success'
+        run: exit 1
+
+  compute-hashes-aarch64-linux:
+    needs:
+      - update-lock
+      - resolve-versions
+      - discover-update-targets
+    runs-on: ubuntu-24.04-arm
+    name: aarch64-linux / ${{ matrix.target }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.discover-update-targets.outputs.targets) }}
+    steps:
+      - *checkout
+      - *setup_nix
+      - *cachix
+      - *download_flake_lock
+      - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          # Cache immutable tarball fetch artifacts only. Nix recreates
+          # mutable SQLite metadata caches locally, and persisting them via
+          # archive-based CI caches can restore malformed databases.
+          path: |
+            ~/.cache/nix/tarball-cache
+            ~/.cache/nix/tarball-cache-v2
+          key: nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
+          restore-keys: |
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-
+            nix-cache-${{ runner.os }}-
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: pinned-versions
+          path: .
+      - name: Free disk space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          ignore-nothing-to-cache: true
+      - name: Compute hashes for ${{ matrix.target }} on aarch64-linux
+        id: update-target
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPDATE_SUBPROCESS_TIMEOUT: "14400"
+        run: >-
+          nix run .#nixcfg -- update --native-only
+          --pinned-versions pinned-versions.json
+          "${{ matrix.target }}"
+      - name: Stage target artifact
+        if: always()
+        env:
+          ARTIFACT_PATHS_JSON: ${{ toJSON(matrix.artifact_paths_aarch64_linux) }}
+          UPDATE_OUTCOME: ${{ steps.update-target.outcome }}
+        run: |
+          exit_code=1
+          if [ "$UPDATE_OUTCOME" = "success" ]; then
+            exit_code=0
+          fi
+          python3 lib/update/ci/update_target_artifacts.py stage \
+            --root . \
+            --output update-target-artifact \
+            --target "${{ matrix.target }}" \
+            --platform aarch64-linux \
+            --artifact-paths-json "$ARTIFACT_PATHS_JSON" \
+            --exit-code "$exit_code"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: always()
+        with:
+          name: update-target-aarch64-linux-${{ matrix.artifact_slug }}
+          if-no-files-found: error
+          path: update-target-artifact
+      - name: Fail target job if update failed
+        if: steps.update-target.outcome != 'success'
+        run: exit 1
+
+  aggregate-platform-updates:
+    needs:
+      - discover-update-targets
+      - compute-hashes-aarch64-darwin
+      - compute-hashes-x86_64-linux
+      - compute-hashes-aarch64-linux
+    if: always() && !cancelled()
+    runs-on: ubuntu-24.04
+    name: aggregate / ${{ matrix.platform }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: aarch64-darwin
+          - platform: x86_64-linux
+          - platform: aarch64-linux
+    steps:
+      - *checkout
+      - *setup_nix
+      - *cachix
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: update-target-*
+          path: update-target-artifacts
+      - name: Aggregate successful package artifacts
+        run: >-
+          python3 lib/update/ci/update_target_artifacts.py aggregate
+          --artifacts-dir update-target-artifacts
+          --output "aggregated-${{ matrix.platform }}"
+          --platform "${{ matrix.platform }}"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: sources-${{ matrix.platform }}
           if-no-files-found: error
           path: |
-            packages/**/sources.json
-            overlays/**/sources.json
+            aggregated-${{ matrix.platform }}/packages/**/sources.json
+            aggregated-${{ matrix.platform }}/overlays/**/sources.json
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: matrix.platform == 'x86_64-linux'
         with:
           name: generated-artifacts-${{ matrix.platform }}
           if-no-files-found: error
           path: |
-            packages/**/uv.lock
-            packages/**/deno-deps.json
-            packages/**/build.zig.zon.nix
+            aggregated-${{ matrix.platform }}/packages/**/uv.lock
+            aggregated-${{ matrix.platform }}/packages/**/deno-deps.json
+            aggregated-${{ matrix.platform }}/packages/**/build.zig.zon.nix
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: matrix.platform == 'aarch64-darwin'
         with:
           name: generated-artifacts-${{ matrix.platform }}-runtime-locks
           if-no-files-found: error
           path: |
-            packages/t3code/bun.lock
-            packages/t3code-desktop/bun.lock
+            aggregated-${{ matrix.platform }}/packages/t3code/bun.lock
+            aggregated-${{ matrix.platform }}/packages/t3code-desktop/bun.lock
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: update-target-status-${{ matrix.platform }}
+          if-no-files-found: error
+          path: aggregated-${{ matrix.platform }}/nixcfg-update-target-status.json
 
-  # Phase 5: Merge platform-specific hashes
+  # Phase 6: Merge platform-specific hashes
   merge-hashes:
-    needs: compute-hashes
+    needs: aggregate-platform-updates
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -317,7 +563,7 @@ jobs:
             packages/**/build.zig.zon.nix
             overlays/**/sources.json
 
-  # Phase 6: Refresh checked-in generated artifacts on native platforms
+  # Phase 7: Refresh checked-in generated artifacts on native platforms
   crate2nix-linux:
     needs: merge-hashes
     runs-on: ubuntu-24.04
@@ -415,7 +661,7 @@ jobs:
             packages/zed-editor-nightly/Cargo.nix
             packages/zed-editor-nightly/crate-hashes.json
 
-  # Phase 7: Refresh sanity checks required before opening the PR
+  # Phase 8: Refresh sanity checks required before opening the PR
   refresh-sanity:
     needs: merge-generated
     runs-on: ubuntu-24.04
@@ -457,7 +703,7 @@ jobs:
             packages/zed-editor-nightly/Cargo.nix
             packages/zed-editor-nightly/crate-hashes.json
 
-  # Phase 8: Create PR with updates
+  # Phase 9: Create PR with updates
   create-pr:
     needs:
       - merge-generated

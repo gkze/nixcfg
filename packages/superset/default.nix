@@ -369,6 +369,11 @@ else
         electronVersion
         updateScript
         ;
+      macApp = {
+        bundleName = "Superset.app";
+        bundleRelPath = "Applications/Superset.app";
+        installMode = "copy";
+      };
     };
 
     meta = with lib; {

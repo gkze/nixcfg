@@ -24,20 +24,6 @@ index 41b256e..7d50e4d 100644
 
    # Build with C++ RTTI enabled. Chromium builds without RTTI by default,
    # but some sanitizers are known to require it, like CFI diagnostics
-diff --git a/build/config/compiler/compiler.gni b/build/config/compiler/compiler.gni
-index a223b25..68e17b0 100644
---- a/build/config/compiler/compiler.gni
-+++ b/build/config/compiler/compiler.gni
-@@ -27,7 +27,7 @@ if (is_apple) {
-   # Set to true to use lld, the LLVM linker.
-   # In late bring-up on macOS (see docs/mac_lld.md).
-   # Tentatively used on iOS.
-   # The default linker everywhere else.
--  use_lld = is_clang && current_os != "zos"
-+  use_lld = false
-
-   # If false, build using C++20; otherwise, build using C++23.
-   use_cxx23 = true
 diff --git a/build/rust/std/BUILD.gn b/build/rust/std/BUILD.gn
 index b6cb64d..74adddb 100644
 --- a/build/rust/std/BUILD.gn

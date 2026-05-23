@@ -76,13 +76,14 @@ def test_run_queue_task_reports_known_runtime_errors_to_events() -> None:
 
 
 def test_run_queue_task_reports_cancelled_as_error_event() -> None:
-    """Keep cancellation visible in the queue consumer."""
+    """Keep cancellation visible while preserving task cancellation semantics."""
 
     async def _task() -> None:
         await _raise_cancelled_error()
 
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-    asyncio.run(run_queue_task(source="demo", queue=queue, task=_task))
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(run_queue_task(source="demo", queue=queue, task=_task))
 
     event = queue.get_nowait()
     if not isinstance(event, UpdateEvent):

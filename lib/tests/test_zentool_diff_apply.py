@@ -50,6 +50,20 @@ class FakeDiff:
         return self.truthy
 
 
+def make_state_diff(
+    zentool: ModuleType,
+    text: str,
+    *,
+    truthy: bool = True,
+) -> object:
+    """Build one StateDiff test double with compact snapshots."""
+    return zentool.StateDiff(
+        current_snapshot={"Workspace": [{"Inbox": "https://old.example"}]},
+        desired_snapshot={"Workspace": [{"Inbox": "https://new.example"}]},
+        diff=FakeDiff(text, truthy=truthy),
+    )
+
+
 def test_asset_diff_lines_reports_create_update_remove_and_user_js_update(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -315,8 +329,12 @@ def test_cmd_diff_prints_no_changes_when_state_and_assets_match(
     monkeypatch.setattr(zentool, "load_config", lambda _path: object())
     monkeypatch.setattr(
         zentool,
-        "diff_session",
-        lambda _session, _config, _containers: None,
+        "build_state_diff",
+        lambda _session, _config, _containers: make_state_diff(
+            zentool,
+            "",
+            truthy=False,
+        ),
     )
     monkeypatch.setattr(zentool, "_asset_diff_lines", lambda _args: [])
     monkeypatch.setattr(zentool, "_stdout", lambda message="": stdout.append(message))
@@ -343,8 +361,11 @@ def test_cmd_diff_prints_state_and_asset_sections_together(
     monkeypatch.setattr(zentool, "load_config", lambda _path: object())
     monkeypatch.setattr(
         zentool,
-        "diff_session",
-        lambda _session, _config, _containers: FakeDiff("state diff"),
+        "build_state_diff",
+        lambda _session, _config, _containers: make_state_diff(
+            zentool,
+            "state diff",
+        ),
     )
     monkeypatch.setattr(
         zentool,
@@ -355,6 +376,59 @@ def test_cmd_diff_prints_state_and_asset_sections_together(
 
     assert zentool.cmd_diff(make_args()) == 0
     assert stdout == ["state diff\n\nasset one\nasset two"]
+
+
+def test_state_diff_text_renders_human_plan_on_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """TTY state diffs should render as a concise Terraform-style plan."""
+    monkeypatch.setattr(zentool, "_stdout_is_tty", lambda: True)
+
+    current = {
+        "Workspace": {
+            "icon": "old",
+            "tree": [{"Inbox": "https://old.example"}],
+        }
+    }
+    desired = {
+        "Workspace": {
+            "icon": "new",
+            "tree": [
+                {"Inbox": "https://new.example"},
+                {"Docs": "https://docs.example"},
+            ],
+        }
+    }
+
+    assert zentool._format_state_diff_text("machine diff", current, desired) == (
+        "Plan: 1 to add, 2 to change, 0 to destroy.\n"
+        "\n"
+        '  ~ workspace["Workspace"].icon = "old" -> "new"\n'
+        '  ~ workspace["Workspace"].tree[0].Inbox = '
+        '"https://old.example" -> "https://new.example"\n'
+        '  + workspace["Workspace"].tree[1]\n'
+        "      + Docs: https://docs.example"
+    )
+
+
+def test_asset_diff_text_renders_human_plan_on_tty(
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """TTY asset diffs should use the same add/change/remove markers."""
+    monkeypatch.setattr(zentool, "_stdout_is_tty", lambda: True)
+
+    assert zentool._format_asset_diff_text([
+        "create asset chrome/userChrome.css -> /nix/store/theme/userChrome.css",
+        "update asset user.js -> /nix/store/zen/user.js",
+        "remove asset chrome/stale.css",
+    ]) == (
+        "Assets:\n"
+        "  + chrome/userChrome.css -> /nix/store/theme/userChrome.css\n"
+        "  ~ user.js -> /nix/store/zen/user.js\n"
+        "  - chrome/stale.css"
+    )
 
 
 def test_cmd_apply_prints_no_changes_when_nothing_is_pending(

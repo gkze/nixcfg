@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import configparser
 import contextlib
+import difflib
 import errno
 import json
 import os
@@ -139,6 +140,13 @@ StateOption = Annotated[
 AssetsOption = Annotated[
     bool,
     typer.Option("-a", "--assets", help="Limit the operation to theme/profile assets"),
+]
+PruneCookiesOption = Annotated[
+    bool,
+    typer.Option(
+        "--prune-removed-container-cookies",
+        help="Delete cookies belonging to managed containers removed by this apply",
+    ),
 ]
 GROUP_COLOR: Final = "zen-workspace-color"
 DEFAULT_THEME_TYPE: Final = "gradient"
@@ -756,6 +764,7 @@ class CommandArgs:
     state: bool = False
     assets: bool = False
     yes: bool = False
+    prune_cookies: bool = False
     literal: bool = False
     inspect_command: str | None = None
     profile_command: str | None = None
@@ -851,6 +860,290 @@ def _stderr(message: str = "") -> None:
 
 def _stdout_raw(message: str) -> None:
     sys.stdout.write(message)
+
+
+def _stdout_is_tty() -> bool:
+    """Return whether stdout is connected to an interactive terminal."""
+    return sys.stdout.isatty()
+
+
+def _scalar_plan_value(value: object) -> str:
+    """Render one scalar-ish value on a single plan line."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _plan_value_key(value: object) -> str:
+    """Return a stable comparison key for one list item."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _is_plan_scalar(value: object) -> bool:
+    """Return whether *value* should render inline in the human plan."""
+    return value is None or isinstance(value, str | int | float | bool)
+
+
+def _render_plan_block(value: object, marker: str) -> list[str]:
+    """Render a nested added or removed value with a Terraform-style marker."""
+    payload = yaml.safe_dump(
+        value,
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+    ).rstrip()
+    if not payload:
+        return [f"      {marker} <empty>"]
+    return [f"      {marker} {line}" for line in payload.splitlines()]
+
+
+def _format_plan_path(parts: Sequence[object]) -> str:
+    """Render one snapshot path using stable resource-style labels."""
+    if not parts:
+        return "root"
+
+    index = 0
+    first = parts[0]
+    if first in {"workspace", "container"} and len(parts) > 1:
+        label = _scalar_plan_value(parts[1])
+        text = f"{first}[{label}]"
+        index = 2
+    else:
+        text = str(first)
+        index = 1
+
+    for part in parts[index:]:
+        if isinstance(part, int):
+            text = f"{text}[{part}]"
+        elif isinstance(part, str) and part.isidentifier():
+            text = f"{text}.{part}"
+        else:
+            text = f"{text}[{_scalar_plan_value(part)}]"
+    return text
+
+
+def _normal_plan_roots(snapshot_value: dict[str, Any]) -> dict[str, object]:
+    """Normalize authored snapshots into resource groups for plan rendering."""
+    roots: dict[str, object] = {}
+    workspaces = snapshot_value.get("workspaces")
+    if isinstance(workspaces, dict):
+        roots["workspace"] = workspaces
+        containers = snapshot_value.get("containers")
+        if isinstance(containers, dict):
+            roots["container"] = containers
+    else:
+        roots["workspace"] = snapshot_value
+
+    return roots
+
+
+def _append_plan_add(
+    lines: list[str],
+    counters: _PlanChangeCounter,
+    path: Sequence[object],
+    value: object,
+) -> None:
+    """Append one add operation to the human plan."""
+    counters.add += 1
+    path_text = _format_plan_path(path)
+    if _is_plan_scalar(value):
+        lines.append(f"  + {path_text} = {_scalar_plan_value(value)}")
+        return
+    lines.append(f"  + {path_text}")
+    lines.extend(_render_plan_block(value, "+"))
+
+
+def _append_plan_remove(
+    lines: list[str],
+    counters: _PlanChangeCounter,
+    path: Sequence[object],
+    value: object,
+) -> None:
+    """Append one destroy operation to the human plan."""
+    counters.destroy += 1
+    path_text = _format_plan_path(path)
+    if _is_plan_scalar(value):
+        lines.append(f"  - {path_text} = {_scalar_plan_value(value)}")
+        return
+    lines.append(f"  - {path_text}")
+    lines.extend(_render_plan_block(value, "-"))
+
+
+def _append_plan_change(
+    lines: list[str],
+    counters: _PlanChangeCounter,
+    path: Sequence[object],
+    current: object,
+    desired: object,
+) -> None:
+    """Append one update operation to the human plan."""
+    counters.change += 1
+    path_text = _format_plan_path(path)
+    if _is_plan_scalar(current) and _is_plan_scalar(desired):
+        lines.append(
+            "  ~ "
+            f"{path_text} = {_scalar_plan_value(current)} -> "
+            f"{_scalar_plan_value(desired)}"
+        )
+        return
+    lines.append(f"  ~ {path_text}")
+    lines.extend(_render_plan_block(current, "-"))
+    lines.extend(_render_plan_block(desired, "+"))
+
+
+def _collect_plan_changes(
+    current: object,
+    desired: object,
+    path: tuple[object, ...],
+    lines: list[str],
+    counters: _PlanChangeCounter,
+) -> None:
+    """Collect Terraform-style changes between two authored snapshot values."""
+    if current == desired:
+        return
+
+    if isinstance(current, dict) and isinstance(desired, dict):
+        current_mapping = cast("dict[object, object]", current)
+        desired_mapping = cast("dict[object, object]", desired)
+        current_keys = set(current_mapping)
+        desired_keys = set(desired_mapping)
+        for key in current_mapping:
+            if key not in desired_keys:
+                _append_plan_remove(
+                    lines,
+                    counters,
+                    (*path, key),
+                    current_mapping[key],
+                )
+        for key in desired_mapping:
+            if key not in current_keys:
+                _append_plan_add(lines, counters, (*path, key), desired_mapping[key])
+        for key in desired_mapping:
+            if key in current_keys:
+                _collect_plan_changes(
+                    current_mapping[key],
+                    desired_mapping[key],
+                    (*path, key),
+                    lines,
+                    counters,
+                )
+        return
+
+    if isinstance(current, list) and isinstance(desired, list):
+        matcher = difflib.SequenceMatcher(
+            None,
+            [_plan_value_key(item) for item in current],
+            [_plan_value_key(item) for item in desired],
+            autojunk=False,
+        )
+        for tag, current_start, current_end, desired_start, desired_end in (
+            matcher.get_opcodes()
+        ):
+            if tag == "equal":
+                continue
+            if tag == "delete":
+                for offset, value in enumerate(current[current_start:current_end]):
+                    _append_plan_remove(
+                        lines,
+                        counters,
+                        (*path, current_start + offset),
+                        value,
+                    )
+                continue
+            if tag == "insert":
+                for offset, value in enumerate(desired[desired_start:desired_end]):
+                    _append_plan_add(
+                        lines,
+                        counters,
+                        (*path, desired_start + offset),
+                        value,
+                    )
+                continue
+
+            current_items = current[current_start:current_end]
+            desired_items = desired[desired_start:desired_end]
+            paired_length = min(len(current_items), len(desired_items))
+            for offset in range(paired_length):
+                _collect_plan_changes(
+                    current_items[offset],
+                    desired_items[offset],
+                    (*path, desired_start + offset),
+                    lines,
+                    counters,
+                )
+            for offset, value in enumerate(current_items[paired_length:]):
+                _append_plan_remove(
+                    lines,
+                    counters,
+                    (*path, current_start + paired_length + offset),
+                    value,
+                )
+            for offset, value in enumerate(desired_items[paired_length:]):
+                _append_plan_add(
+                    lines,
+                    counters,
+                    (*path, desired_start + paired_length + offset),
+                    value,
+                )
+        return
+
+    _append_plan_change(lines, counters, path, current, desired)
+
+
+def _plan_summary(counters: _PlanChangeCounter) -> str:
+    """Render the Terraform-style operation summary."""
+    return (
+        f"Plan: {counters.add} to add, "
+        f"{counters.change} to change, {counters.destroy} to destroy."
+    )
+
+
+def _format_human_plan(current: dict[str, Any], desired: dict[str, Any]) -> str:
+    """Render a tty-friendly Terraform-style plan."""
+    lines: list[str] = []
+    counters = _PlanChangeCounter()
+    current_roots = _normal_plan_roots(current)
+    desired_roots = _normal_plan_roots(desired)
+    for root in ("container", "workspace"):
+        current_items = current_roots.get(root, {})
+        desired_items = desired_roots.get(root, {})
+        if isinstance(current_items, dict) and isinstance(desired_items, dict):
+            _collect_plan_changes(current_items, desired_items, (root,), lines, counters)
+
+    if not lines:
+        return ""
+    return "\n".join((_plan_summary(counters), "", *lines))
+
+
+def _format_state_diff_text(
+    machine_text: str | None,
+    current: dict[str, Any],
+    desired: dict[str, Any],
+) -> str | None:
+    """Render state diff text for the current output mode."""
+    if machine_text is None:
+        return None
+    if not _stdout_is_tty():
+        return machine_text
+    return _format_human_plan(current, desired) or machine_text
+
+
+def _format_asset_diff_text(asset_lines: Sequence[str]) -> str | None:
+    """Render asset diff text for the current output mode."""
+    if not asset_lines:
+        return None
+    if not _stdout_is_tty():
+        return "\n".join(asset_lines)
+
+    lines = ["Assets:"]
+    for line in asset_lines:
+        if line.startswith("create asset "):
+            lines.append(f"  + {line.removeprefix('create asset ')}")
+        elif line.startswith("update asset "):
+            lines.append(f"  ~ {line.removeprefix('update asset ')}")
+        elif line.startswith("remove asset "):
+            lines.append(f"  - {line.removeprefix('remove asset ')}")
+        else:
+            lines.append(f"  ~ {line}")
+    return "\n".join(lines)
 
 
 def _expand_path(raw: str) -> Path:
@@ -1815,6 +2108,23 @@ def tab_to_spec(tab: SessionTab) -> TabSpec:
     return TabSpec(name=display_name(tab), url=active_url(tab))
 
 
+def exportable_tab_spec(tab: SessionTab) -> TabSpec | None:
+    """Return a declarative tab spec, or None for transient blank tabs."""
+    name = display_name(tab).strip()
+    url = active_url(tab).strip()
+    if not name or not url:
+        return None
+    return TabSpec(name=name, url=url)
+
+
+def exportable_item_tab_spec(tab: SessionTab) -> ItemTabSpec | None:
+    """Return a pinned tab spec, or None for transient blank tabs."""
+    spec = exportable_tab_spec(tab)
+    if spec is None:
+        return None
+    return ItemTabSpec(name=spec.name, url=spec.url)
+
+
 def clone_tab(existing: SessionTab | None) -> SessionTab:
     """Return a deep copy of *existing* or a fresh tab shell."""
     if existing is not None:
@@ -1844,7 +2154,8 @@ def build_tab(
     tab = clone_tab(existing)
     desired_url = spec.url if not placeholder else ""
     current_url = active_url(tab)
-    if placeholder or current_url != desired_url:
+    reset_runtime_entry = placeholder or current_url != desired_url
+    if reset_runtime_entry:
         reset_active_entry(tab, name=spec.name, url=desired_url)
     tab.zen_sync_id = sync_id
     tab.pinned = pinned or essential
@@ -1855,8 +2166,9 @@ def build_tab(
     tab.zen_is_empty = placeholder
     tab.user_context_id = user_context_id
     tab.zen_static_label = None if placeholder else spec.name
-    tab.zen_has_static_icon = False
-    tab.zen_pinned_icon = None
+    if reset_runtime_entry:
+        tab.zen_has_static_icon = False
+        tab.zen_pinned_icon = None
     tab.zen_glance_id = None
     tab.zen_is_glance = False
     tab.zen_live_folder_item_id = None
@@ -1931,6 +2243,8 @@ class StateApplyPlan:
     diff_text: str | None
     containers_changed: bool
     removed_context_ids: set[int] = field(default_factory=set)
+    current_snapshot: dict[str, Any] = field(default_factory=dict)
+    desired_snapshot: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -1949,6 +2263,29 @@ class ApplyPreview:
     def has_changes(self) -> bool:
         """Return whether either selected apply scope has pending changes."""
         return self.state_diff_text is not None or bool(self.asset_lines)
+
+
+@dataclass(frozen=True, slots=True)
+class StateDiff:
+    """State diff payload with both machine and human rendering inputs."""
+
+    current_snapshot: dict[str, Any]
+    desired_snapshot: dict[str, Any]
+    diff: DeepDiff
+
+    @property
+    def machine_text(self) -> str | None:
+        """Return the stable non-TTY DeepDiff output, if changed."""
+        return self.diff.pretty() if self.diff else None
+
+
+@dataclass(slots=True)
+class _PlanChangeCounter:
+    """Count Terraform-style plan operations."""
+
+    add: int = 0
+    change: int = 0
+    destroy: int = 0
 
 
 def is_default_container_ref(value: str) -> bool:
@@ -2860,16 +3197,12 @@ def build_folder_tree(
         if parent_id is None
         else direct_folder_tabs(session, parent_id)
     )
-    tab_nodes = [
-        (
-            tab.zen_sync_id,
-            ItemTabSpec.model_validate({
-                "name": display_name(tab),
-                "url": active_url(tab),
-            }),
-        )
-        for tab in source_tabs
-    ]
+    tab_nodes: list[tuple[str, ItemTabSpec]] = []
+    for tab in source_tabs:
+        spec = exportable_item_tab_spec(tab)
+        if spec is None:
+            continue
+        tab_nodes.append((tab.zen_sync_id, spec))
 
     def build_folder_spec(folder: SessionFolder) -> FolderSpec:
         return FolderSpec(
@@ -2944,12 +3277,15 @@ def export_config(
             folders_by_parent=folders_by_parent,
         )
         workspace_tabs = [
-            tab_to_spec(tab) for tab in top_level_workspace_tabs(session, space.uuid)
+            spec
+            for tab in top_level_workspace_tabs(session, space.uuid)
+            if (spec := exportable_tab_spec(tab)) is not None
         ]
         workspace_essentials = [
-            tab_to_spec(tab)
+            spec
             for tab in top_level_essentials(session)
             if tab.zen_workspace == space.uuid
+            if (spec := exportable_tab_spec(tab)) is not None
         ]
 
         workspaces.append(
@@ -3137,12 +3473,12 @@ def format_snapshot_yaml(
     )
 
 
-def diff_session(
+def build_state_diff(
     session: SessionState,
     config: ZenConfig,
     containers: ContainerState | None = None,
-) -> DeepDiff:
-    """Return the structural diff between current and desired managed state."""
+) -> StateDiff:
+    """Build the structural diff between current and desired managed state."""
     plan = (
         build_desired_containers(containers, config, session)
         if containers is not None
@@ -3153,7 +3489,21 @@ def diff_session(
     current_containers = containers if config.manage_containers else None
     desired = snapshot(desired_state, desired_containers)
     current = snapshot(session, current_containers)
-    return DeepDiff(current, desired, ignore_order=False)
+    diff = DeepDiff(current, desired, ignore_order=False)
+    return StateDiff(
+        current_snapshot=current,
+        desired_snapshot=desired,
+        diff=diff,
+    )
+
+
+def diff_session(
+    session: SessionState,
+    config: ZenConfig,
+    containers: ContainerState | None = None,
+) -> DeepDiff:
+    """Return the structural diff between current and desired managed state."""
+    return build_state_diff(session, config, containers).diff
 
 
 def _container_state_diff(
@@ -3607,14 +3957,20 @@ def cmd_diff(args: CommandArgs) -> int:
         _path, session = load_session(args.profile)
         _containers_path, containers = load_containers(args.profile)
         config = load_config(Path(args.config))
-        diff = diff_session(session, config, containers)
-        if diff:
-            sections.append(diff.pretty())
+        state_diff = build_state_diff(session, config, containers)
+        diff_text = _format_state_diff_text(
+            state_diff.machine_text,
+            state_diff.current_snapshot,
+            state_diff.desired_snapshot,
+        )
+        if diff_text is not None:
+            sections.append(diff_text)
 
     if scope.assets:
         asset_lines = _asset_diff_lines(args)
-        if asset_lines:
-            sections.append("\n".join(asset_lines))
+        asset_diff_text = _format_asset_diff_text(asset_lines)
+        if asset_diff_text is not None:
+            sections.append(asset_diff_text)
 
     if not sections:
         _stdout("No changes needed.")
@@ -3656,6 +4012,8 @@ def build_state_apply_plan(args: CommandArgs) -> StateApplyPlan:
         diff_text=diff_text,
         containers_changed=containers_changed,
         removed_context_ids=container_plan.removed_context_ids,
+        current_snapshot=current_snapshot,
+        desired_snapshot=desired_snapshot,
     )
 
 
@@ -3690,7 +4048,7 @@ def apply_state_plan(args: CommandArgs, plan: StateApplyPlan) -> None:
     ):
         containers_backup = backup_file(plan.containers_path)
         _stdout(f"Backup: {containers_backup.name}")
-    if plan.removed_context_ids:
+    if plan.removed_context_ids and getattr(args, "prune_cookies", False):
         cookie_path = cookies_file(args.profile)
         if cookie_path.exists():
             cookies_backup = backup_file(cookie_path)
@@ -3720,13 +4078,21 @@ def build_apply_preview(args: CommandArgs, scope: ScopeSelection) -> ApplyPrevie
 
 def print_apply_preview(preview: ApplyPreview) -> None:
     """Print pending state and asset changes in CLI order."""
-    state_diff_text = preview.state_diff_text
+    state_diff_text = None
+    if preview.state_plan is not None:
+        state_diff_text = _format_state_diff_text(
+            preview.state_plan.diff_text,
+            preview.state_plan.current_snapshot,
+            preview.state_plan.desired_snapshot,
+        )
     if state_diff_text is not None:
         _stdout(state_diff_text)
     if preview.asset_lines:
         if state_diff_text is not None:
             _stdout()
-        _stdout("\n".join(preview.asset_lines))
+        asset_diff_text = _format_asset_diff_text(preview.asset_lines)
+        if asset_diff_text is not None:
+            _stdout(asset_diff_text)
 
 
 def cmd_apply(args: CommandArgs) -> int:
@@ -3994,6 +4360,7 @@ def _typer_apply(
         bool,
         typer.Option("-y", "--yes", help="Skip confirmation prompts"),
     ] = False,
+    prune_cookies: PruneCookiesOption = False,
 ) -> int:
     """Apply changes to the Zen session file."""
     return _run_handler(
@@ -4008,6 +4375,7 @@ def _typer_apply(
             state=state,
             assets=assets,
             yes=yes,
+            prune_cookies=prune_cookies,
         ),
     )
 

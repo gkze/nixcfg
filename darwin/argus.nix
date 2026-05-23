@@ -13,6 +13,7 @@ lib.mkDarwinHost {
   brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
   extraHomeModules = [
     "${lib.modulesPath}/home/darwin-closure-priority.nix"
+    "${lib.modulesPath}/darwin/george/town-dock-apps.nix"
     (
       { pkgs, ... }:
       {
@@ -33,7 +34,6 @@ lib.mkDarwinHost {
       # settings.json.
       home-manager.backupFileExtension = "backup";
     }
-    "${lib.modulesPath}/darwin/george/town-dock-apps.nix"
     (lib.mkSetOpencodeEnvModule "work.json")
   ];
 }

@@ -25,9 +25,11 @@ from lib.update.nix import (
 from lib.update.nix_deno import compute_deno_deps_hash
 from lib.update.updaters._sourcefile import resolve_sourcefile
 from lib.update.updaters.core import (
+    AssetURLsMetadataUpdater,
     CargoLockGitDep,
     ChecksumProvidedUpdater,
     DownloadHashUpdater,
+    DownloadUrlMetadataUpdater,
     FixedOutputHashStep,
     HashEntryUpdater,
     UpdateContext,
@@ -118,6 +120,7 @@ from lib.update.updaters.factories import (  # noqa: E402
 
 __all__ = [
     "UPDATERS",
+    "AssetURLsMetadataUpdater",
     "CargoLockGitDep",
     "ChecksumProvidedUpdater",
     "CommandResult",
@@ -126,6 +129,7 @@ __all__ = [
     "DenoDepsHashUpdater",
     "DenoManifestUpdater",
     "DownloadHashUpdater",
+    "DownloadUrlMetadataUpdater",
     "FixedOutputHashStep",
     "FlakeInputHashUpdater",
     "FlakeInputMetadataUpdater",

@@ -46,6 +46,12 @@ stdenvNoCC.mkDerivation {
     runHook postInstall
   '';
 
+  passthru.macApp = {
+    bundleName = "${appName}.app";
+    bundleRelPath = "Applications/${appName}.app";
+    installMode = "copy";
+  };
+
   meta = with lib; {
     description = "Native macOS workspace for AI coding agents";
     homepage = "https://thecommander.app/";

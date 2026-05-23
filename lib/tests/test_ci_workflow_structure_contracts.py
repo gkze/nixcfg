@@ -29,11 +29,35 @@ def _valid_refresh_workflow_text() -> str:
             runs-on: ubuntu-latest
             steps:
               - run: nix run .#nixcfg -- ci workflow darwin eval-lock-smoke
-          compute-hashes:
+          discover-update-targets:
+            needs:
+              - update-lock
+              - resolve-versions
+            runs-on: ubuntu-latest
+          compute-hashes-aarch64-darwin:
             needs:
               - update-lock
               - darwin-lock-smoke
               - resolve-versions
+              - discover-update-targets
+            runs-on: ubuntu-latest
+          compute-hashes-x86_64-linux:
+            needs:
+              - update-lock
+              - resolve-versions
+              - discover-update-targets
+            runs-on: ubuntu-latest
+          compute-hashes-aarch64-linux:
+            needs:
+              - update-lock
+              - resolve-versions
+              - discover-update-targets
+            runs-on: ubuntu-latest
+          aggregate-platform-updates:
+            needs:
+              - compute-hashes-aarch64-darwin
+              - compute-hashes-x86_64-linux
+              - compute-hashes-aarch64-linux
             runs-on: ubuntu-latest
           create-pr:
             runs-on: ubuntu-latest
@@ -58,7 +82,6 @@ def _valid_certify_workflow_text() -> str:
           darwin-priority-heavy:
             needs:
               - darwin-full-smoke
-              - warm-fod-cache-darwin
             runs-on: ubuntu-latest
             strategy:
               matrix:
@@ -68,7 +91,6 @@ def _valid_certify_workflow_text() -> str:
           darwin-extra-heavy:
             needs:
               - darwin-full-smoke
-              - warm-fod-cache-darwin
             runs-on: ubuntu-latest
             strategy:
               matrix:
@@ -78,7 +100,6 @@ def _valid_certify_workflow_text() -> str:
           darwin-shared:
             needs:
               - darwin-full-smoke
-              - warm-fod-cache-darwin
             runs-on: ubuntu-latest
             steps:
               - run: |
@@ -96,9 +117,28 @@ def _valid_certify_workflow_text() -> str:
               - darwin-shared
             runs-on: ubuntu-latest
           linux-x86_64:
-            needs:
-              - warm-fod-cache-x86_64-linux
+            needs: []
             runs-on: ubuntu-latest
+          publish-pr-certification:
+            needs:
+              - select-ref
+              - quality-gates
+              - darwin-priority-heavy
+              - darwin-extra-heavy
+              - darwin-shared
+              - darwin-argus
+              - darwin-rocinante
+              - linux-x86_64
+            if: always() && !cancelled() && needs.select-ref.outputs.exists == 'true'
+            runs-on: ubuntu-latest
+            steps:
+              - run: >-
+                  gh api
+                  "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100"
+                  > /tmp/certification-jobs.json
+              - run: >-
+                  nix run .#nixcfg -- ci workflow render-certification-pr-body
+                  --jobs-json /tmp/certification-jobs.json
     """
 
 
@@ -356,8 +396,22 @@ def test_validate_workflow_structure_contracts_accepts_valid_certify_workflow(
             _valid_refresh_workflow_text().replace(
                 "- darwin-lock-smoke", "- resolve-versions", 1
             ),
-            "compute-hashes must depend on darwin-lock-smoke",
-            id="requires-compute-hashes-lock-smoke",
+            "compute-hashes-aarch64-darwin must depend on darwin-lock-smoke",
+            id="requires-darwin-compute-hashes-lock-smoke",
+        ),
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
+                "- discover-update-targets", "- update-lock", 1
+            ),
+            "must depend on discover-update-targets",
+            id="requires-compute-hashes-discovery",
+        ),
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
+                "- compute-hashes-aarch64-linux", "- discover-update-targets", 1
+            ),
+            "aggregate-platform-updates must depend on compute-hashes-aarch64-linux",
+            id="requires-aggregate-aarch64-linux",
         ),
         pytest.param(
             _valid_refresh_workflow_text().replace(
@@ -411,13 +465,8 @@ def test_validate_workflow_structure_contracts_rejects_refresh_drift(
             _valid_certify_workflow_text().replace(
                 "          darwin-priority-heavy:\n"
                 "            needs:\n"
-                "              - darwin-full-smoke\n"
-                "              - warm-fod-cache-darwin",
-                (
-                    "          darwin-priority-heavy:\n"
-                    "            needs:\n"
-                    "              - warm-fod-cache-darwin"
-                ),
+                "              - darwin-full-smoke",
+                ("          darwin-priority-heavy:\n            needs: []"),
                 1,
             ),
             "darwin-priority-heavy must depend on darwin-full-smoke",
@@ -427,13 +476,8 @@ def test_validate_workflow_structure_contracts_rejects_refresh_drift(
             _valid_certify_workflow_text().replace(
                 "          darwin-extra-heavy:\n"
                 "            needs:\n"
-                "              - darwin-full-smoke\n"
-                "              - warm-fod-cache-darwin",
-                (
-                    "          darwin-extra-heavy:\n"
-                    "            needs:\n"
-                    "              - warm-fod-cache-darwin"
-                ),
+                "              - darwin-full-smoke",
+                ("          darwin-extra-heavy:\n            needs: []"),
                 1,
             ),
             "darwin-extra-heavy must depend on darwin-full-smoke",
@@ -444,14 +488,9 @@ def test_validate_workflow_structure_contracts_rejects_refresh_drift(
                 (
                     "          darwin-shared:\n"
                     "            needs:\n"
-                    "              - darwin-full-smoke\n"
-                    "              - warm-fod-cache-darwin"
+                    "              - darwin-full-smoke"
                 ),
-                (
-                    "          darwin-shared:\n"
-                    "            needs:\n"
-                    "              - warm-fod-cache-darwin"
-                ),
+                ("          darwin-shared:\n            needs: []"),
                 1,
             ),
             "darwin-shared must depend on darwin-full-smoke",
@@ -459,12 +498,34 @@ def test_validate_workflow_structure_contracts_rejects_refresh_drift(
         ),
         pytest.param(
             _valid_certify_workflow_text().replace(
-                "              - warm-fod-cache-darwin",
-                "              - warm-fod-cache-darwin\n              - quality-gates",
+                "              - darwin-full-smoke",
+                "              - darwin-full-smoke\n              - quality-gates",
                 1,
             ),
             "darwin-priority-heavy must not depend on quality-gates",
             id="ungates-cache-jobs-from-quality-gates",
+        ),
+        pytest.param(
+            _valid_certify_workflow_text().replace(
+                "              - darwin-full-smoke",
+                "              - darwin-full-smoke\n              - warm-fod-cache-darwin",
+                1,
+            ),
+            "FOD warm-up must stay inside the sliced package job",
+            id="ungates-package-jobs-from-global-fod-warmup",
+        ),
+        pytest.param(
+            _valid_certify_workflow_text().replace(
+                "          linux-x86_64:\n            needs: []",
+                (
+                    "          linux-x86_64:\n"
+                    "            needs:\n"
+                    "              - warm-fod-cache-x86_64-linux"
+                ),
+                1,
+            ),
+            "FOD warm-up must stay inside the representative Linux job",
+            id="ungates-linux-from-global-fod-warmup",
         ),
         pytest.param(
             _valid_certify_workflow_text().replace(
@@ -505,6 +566,36 @@ def test_validate_workflow_structure_contracts_rejects_refresh_drift(
             ),
             "unexpected excludes: .#pkgs.aarch64-darwin.gamma",
             id="detects-extra-only-drift",
+        ),
+        pytest.param(
+            _valid_certify_workflow_text().replace(
+                (
+                    "if: always() && !cancelled() && "
+                    "needs.select-ref.outputs.exists == 'true'"
+                ),
+                "if: needs.select-ref.outputs.exists == 'true'",
+                1,
+            ),
+            "must run after failed certification needs",
+            id="publish-runs-after-failed-needs",
+        ),
+        pytest.param(
+            _valid_certify_workflow_text().replace(
+                "/actions/runs/${{ github.run_id }}/jobs?per_page=100",
+                "/actions/runs/${{ github.run_id }}",
+                1,
+            ),
+            "must capture certification job results",
+            id="publish-captures-job-results",
+        ),
+        pytest.param(
+            _valid_certify_workflow_text().replace(
+                "--jobs-json /tmp/certification-jobs.json",
+                "--workflow .github/workflows/update-certify.yml",
+                1,
+            ),
+            "must pass certification job results",
+            id="publish-passes-job-results-to-renderer",
         ),
     ],
 )

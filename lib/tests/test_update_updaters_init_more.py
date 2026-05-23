@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -82,6 +83,50 @@ def test_updater_discovery_matches_repo_scan() -> None:
     discovered_paths = _updater_module_paths()
 
     assert discovered_paths == expected
+
+
+def test_discover_updaters_prefers_repo_helper_modules(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Resolve helper modules added in the current repo before installed copies."""
+    helper_dir = tmp_path / "lib" / "update" / "updaters"
+    helper_dir.mkdir(parents=True)
+    (helper_dir / "local_helper.py").write_text(
+        "VALUE = 'repo helper'\n",
+        encoding="utf-8",
+    )
+    updater_dir = tmp_path / "packages" / "demo"
+    updater_dir.mkdir(parents=True)
+    updater_file = updater_dir / "updater.py"
+    updater_file.write_text(
+        "from lib.update.updaters.local_helper import VALUE\nloaded_value = VALUE\n",
+        encoding="utf-8",
+    )
+    package_paths = {
+        name: list(sys.modules[name].__path__)
+        for name in ("lib", "lib.update", "lib.update.updaters")
+    }
+    monkeypatch.setattr("lib.update.updaters.REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "lib.update.updaters._updater_module_paths",
+        lambda: {"demo": updater_file},
+    )
+
+    try:
+        sys.modules.pop("_updater_pkg.demo", None)
+        sys.modules.pop("lib.update.updaters.local_helper", None)
+        _discover_updaters()
+
+        loaded = sys.modules["_updater_pkg.demo"]
+        assert loaded.loaded_value == "repo helper"
+        assert list(sys.modules["lib.update.updaters"].__path__)[:1] == [
+            str(helper_dir)
+        ]
+    finally:
+        sys.modules.pop("_updater_pkg.demo", None)
+        sys.modules.pop("lib.update.updaters.local_helper", None)
+        for name, entries in package_paths.items():
+            sys.modules[name].__path__[:] = entries
 
 
 def test_ensure_updaters_loaded_fast_path_skips_discovery(monkeypatch) -> None:

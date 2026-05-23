@@ -21,6 +21,7 @@ from lib.update.paths import REPO_ROOT
 
 _NORMALIZER_RESULT_SIZE = 3
 _CRATE2NIX_COMMAND_TIMEOUT_SECONDS = 2400
+_CRATE2NIX_CARGO_HOME_ENV = "NIXCFG_CRATE2NIX_CARGO_HOME"
 
 
 class _Normalizer(Protocol):
@@ -209,6 +210,20 @@ def _load_normalizer(path: Path) -> _Normalizer:
     return _normalize
 
 
+def _xdg_cache_home() -> Path:
+    raw_cache_home = os.environ.get("XDG_CACHE_HOME")
+    if raw_cache_home:
+        return Path(raw_cache_home).expanduser()
+    return Path.home() / ".cache"
+
+
+def _crate2nix_cargo_home() -> Path:
+    raw_cargo_home = os.environ.get(_CRATE2NIX_CARGO_HOME_ENV)
+    if raw_cargo_home:
+        return Path(raw_cargo_home).expanduser()
+    return _xdg_cache_home() / "nixcfg" / "crate2nix-cargo-home"
+
+
 def _run(
     args: list[str],
     *,
@@ -260,6 +275,8 @@ def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
 
     with tempfile.TemporaryDirectory(prefix=f"crate2nix-{target.name}-") as tmp_dir:
         tmp_root = Path(tmp_dir)
+        cargo_home = _crate2nix_cargo_home()
+        cargo_home.mkdir(parents=True, exist_ok=True)
         generated_cargo = tmp_root / "Cargo.nix"
         generated_hashes = tmp_root / "crate-hashes.json"
 
@@ -279,6 +296,7 @@ def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
                 "--default-features",
             ],
             env={
+                "CARGO_HOME": str(cargo_home),
                 "CARGO_NET_GIT_FETCH_WITH_CLI": "true",
             },
         )

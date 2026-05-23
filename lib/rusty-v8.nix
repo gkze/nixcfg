@@ -113,6 +113,10 @@
 
             ${lib.concatMapStringsSep "\n" (p: "patch -d $out -p1 < ${p}") extraPatches}
 
+            python ${patchScriptsDir}/patch_compiler_gni.py \
+              $out/build/config/compiler/compiler.gni
+            python ${patchScriptsDir}/patch_compiler_gni.py \
+              $out/build/config/compiler/BUILD.gn
             python ${patchScriptsDir}/patch_allocator_build.py \
               $out/build/rust/allocator/BUILD.gn
             python ${patchScriptsDir}/patch_whole_archive.py \

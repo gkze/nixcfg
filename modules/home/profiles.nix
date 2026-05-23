@@ -45,6 +45,10 @@ let
         "start"
       ];
     };
+    docusign = {
+      type = "remote";
+      url = "https://mcp-d.docusign.com/mcp";
+    };
     figma = {
       type = "remote";
       url = "https://mcp.figma.com/mcp";

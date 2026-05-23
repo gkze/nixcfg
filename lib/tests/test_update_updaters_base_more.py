@@ -23,12 +23,14 @@ from lib.update.updaters import UPDATERS
 from lib.update.updaters import flake_backed as flake_backed_module
 from lib.update.updaters import materialization as materialization_module
 from lib.update.updaters.base import (
+    AssetURLsMetadataUpdater,
     ChecksumProvidedUpdater,
     CommandResult,
     Crate2NixMetadataUpdater,
     DenoDepsHashUpdater,
     DenoManifestUpdater,
     DownloadHashUpdater,
+    DownloadUrlMetadataUpdater,
     FixedOutputHashStep,
     FlakeInputHashUpdater,
     FlakeInputMetadataUpdater,
@@ -49,6 +51,7 @@ from lib.update.updaters.base import (
     uv_lock_hash_updater,
     uv_lock_updater,
 )
+from lib.update.updaters.metadata import AssetURLsMetadata, DownloadUrlMetadata
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable
@@ -131,6 +134,37 @@ class _DummyDownload(DownloadHashUpdater):
         """Return a fixed download-backed version."""
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
+
+
+class _DummyDownloadUrlMetadata(DownloadUrlMetadataUpdater):
+    name = "download-url-metadata"
+    PLATFORMS: ClassVar[dict[str, str]] = {"x86_64-linux": "unused"}
+
+    async def fetch_latest(self, session: object) -> VersionInfo:
+        """Return a metadata-backed URL."""
+        _ = session
+        return VersionInfo(
+            version="1.0.0",
+            metadata=DownloadUrlMetadata("https://example.com/app.tar.gz"),
+        )
+
+
+class _DummyAssetURLsMetadata(AssetURLsMetadataUpdater):
+    name = "asset-urls-metadata"
+    PLATFORMS: ClassVar[dict[str, str]] = {
+        "x86_64-linux": "unused",
+        "aarch64-linux": "unused",
+    }
+
+    async def fetch_latest(self, session: object) -> VersionInfo:
+        """Return platform-keyed metadata URLs."""
+        _ = session
+        return VersionInfo(
+            version="1.0.0",
+            metadata=AssetURLsMetadata({
+                "x86_64-linux": "https://example.com/linux.tar.gz"
+            }),
+        )
 
 
 class _DummyHashEntry(HashEntryUpdater):
@@ -895,6 +929,69 @@ def test_download_hash_updater(monkeypatch: pytest.MonkeyPatch) -> None:
     final = [e for e in events if e.kind == UpdateEventKind.VALUE][-1]
     payload = _require_hash_mapping(final.payload)
     assert set(payload) == {"x86_64-linux", "aarch64-linux"}
+
+
+def test_download_url_metadata_updater() -> None:
+    """Read single-URL metadata through the shared download adapter."""
+    updater = _DummyDownloadUrlMetadata(config=resolve_config())
+    info = VersionInfo(
+        version="1.0.0",
+        metadata=DownloadUrlMetadata("https://example.com/app.tar.gz"),
+    )
+
+    assert (
+        updater.get_download_url("x86_64-linux", info)
+        == "https://example.com/app.tar.gz"
+    )
+    result = updater.build_result(info, {"x86_64-linux": HASH_A})
+    urls = expect_not_none(result.urls)
+    assert urls == {"x86_64-linux": "https://example.com/app.tar.gz"}
+
+    with pytest.raises(TypeError, match="Expected string field 'url'"):
+        updater.get_download_url(
+            "x86_64-linux",
+            VersionInfo(version="1.0.0", metadata={}),
+        )
+
+
+def test_asset_urls_metadata_updater() -> None:
+    """Read platform-keyed URL metadata through the shared adapter."""
+    updater = _DummyAssetURLsMetadata(config=resolve_config())
+    info = VersionInfo(
+        version="1.0.0",
+        metadata=AssetURLsMetadata({
+            "x86_64-linux": "https://example.com/linux.tar.gz",
+            "aarch64-linux": "https://example.com/arm.tar.gz",
+        }),
+    )
+
+    assert (
+        updater.get_download_url("x86_64-linux", info)
+        == "https://example.com/linux.tar.gz"
+    )
+    result = updater.build_result(
+        info,
+        {"x86_64-linux": HASH_A, "aarch64-linux": HASH_B},
+    )
+    urls = expect_not_none(result.urls)
+    assert urls == {
+        "x86_64-linux": "https://example.com/linux.tar.gz",
+        "aarch64-linux": "https://example.com/arm.tar.gz",
+    }
+
+    with pytest.raises(
+        RuntimeError,
+        match="Missing asset-urls-metadata URL for platform 'aarch64-linux'",
+    ):
+        updater.get_download_url(
+            "aarch64-linux",
+            VersionInfo(
+                version="1.0.0",
+                metadata=AssetURLsMetadata({
+                    "x86_64-linux": "https://example.com/linux.tar.gz"
+                }),
+            ),
+        )
 
 
 def test_hash_entry_updater_emit_and_build_result() -> None:
@@ -1983,6 +2080,66 @@ def test_uv_lock_updater_emits_lock_artifact(
     assert [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload == []
 
 
+def test_uv_lock_updater_rejects_failed_uv_lock_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Do not emit a checked-in uv.lock artifact when lock resolution fails."""
+    updater = _DummyUvLockUpdater(config=resolve_config())
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "pyproject.toml").write_text(
+        "[project]\nname='demo'\nversion='1.0.0'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_flake_input_node", lambda _name: _uv_lock_node()
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.package_dir_for", lambda _name: tmp_path
+    )
+
+    async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
+        _ = options
+        if args[:4] == ["nix", "eval", "--impure", "--raw"]:
+            yield UpdateEvent.value(
+                updater.name,
+                CommandResult(
+                    args=args, returncode=0, stdout=f"{source_dir}\n", stderr=""
+                ),
+            )
+            return
+        if args[:3] == ["uv", "-q", "lock"]:
+            workspace_dir = Path(args[-1])
+            (workspace_dir / "uv.lock").write_text("stale\n", encoding="utf-8")
+            yield UpdateEvent.value(
+                updater.name,
+                CommandResult(
+                    args=args,
+                    returncode=2,
+                    stdout="",
+                    stderr="lock resolution failed\n",
+                ),
+            )
+            return
+        msg = f"Unexpected command: {args}"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.update_process.run_command", _fake_run_command
+    )
+
+    with pytest.raises(RuntimeError, match="uv lock failed"):
+        asyncio.run(
+            _with_session(
+                lambda session: _collect_events(
+                    updater.fetch_hashes(
+                        VersionInfo(version="1.0.0", metadata={}), session
+                    )
+                )
+            )
+        )
+
+
 def test_uv_lock_updater_rejects_incomplete_lock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2067,6 +2224,14 @@ def test_uv_lock_updater_build_result_and_helper_paths(
     assert symlink.is_symlink()
 
 
+def test_raise_failed_command_omits_empty_detail() -> None:
+    """Failed command messages should not include a dangling detail separator."""
+    result = CommandResult(args=["demo"], returncode=1, stdout="\n", stderr="  \n")
+
+    with pytest.raises(RuntimeError, match=r"^demo failed \(exit 1\)$"):
+        flake_backed_module._raise_failed_command("demo", result)
+
+
 def test_deno_manifest_updater_build_result_includes_backing_input_identity() -> None:
     """Deno manifest materializers should persist input and commit witnesses."""
     updater = _DummyDenoManifest()
@@ -2117,6 +2282,50 @@ def test_uv_lock_updater_rejects_empty_source_path(
     )
 
     with pytest.raises(RuntimeError, match="Failed to resolve source path"):
+        asyncio.run(
+            _with_session(
+                lambda session: _collect_events(
+                    updater.fetch_hashes(
+                        VersionInfo(version="1.0.0", metadata={}), session
+                    )
+                )
+            )
+        )
+
+
+def test_uv_lock_updater_rejects_failed_source_resolution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Do not trust stdout from a failed nix eval source-path command."""
+    updater = _DummyUvLockUpdater(config=resolve_config())
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_flake_input_node", lambda _name: _uv_lock_node()
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.base.package_dir_for", lambda _name: tmp_path
+    )
+
+    async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
+        _ = options
+        if args[:4] == ["nix", "eval", "--impure", "--raw"]:
+            yield UpdateEvent.value(
+                updater.name,
+                CommandResult(
+                    args=args,
+                    returncode=1,
+                    stdout="/tmp/stale-source\n",
+                    stderr="eval failed\n",
+                ),
+            )
+            return
+        msg = f"Unexpected command: {args}"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(
+        "lib.update.updaters.base.update_process.run_command", _fake_run_command
+    )
+
+    with pytest.raises(RuntimeError, match="nix eval failed"):
         asyncio.run(
             _with_session(
                 lambda session: _collect_events(

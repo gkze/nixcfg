@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-A58a7AdhifI6z1itZjgQf+ABGCUCv9v1kyfOwCTbTTU=",
+    "x86_64-darwin": "sha256-tSh0sd/hCaOpJKKqNoJvjzKruYBRsBnoBVJDJirOi0c="
+  },
+  "urls": {
+    "aarch64-darwin": "https://packages.loom.com/desktop-packages/Loom-0.349.0-arm64.dmg",
+    "x86_64-darwin": "https://packages.loom.com/desktop-packages/Loom-0.349.0.dmg"
+  },
+  "version": "0.349.0"
+}

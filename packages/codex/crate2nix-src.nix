@@ -1,1 +1,7 @@
-{ callPackage, ... }: callPackage ./default.nix { crate2nixSourceOnly = true; }
+{
+  callPackage,
+  ...
+}:
+callPackage ./default.nix {
+  crate2nixSourceOnly = true;
+}

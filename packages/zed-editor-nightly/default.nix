@@ -515,6 +515,13 @@ else
     passthru = {
       inherit cargoNix crateOverrides patchedSrc;
       zedDrv = guardedZedDrv;
+    }
+    // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+      macApp = {
+        bundleName = "Zed Nightly.app";
+        bundleRelPath = "Applications/Zed Nightly.app";
+        installMode = "copy";
+      };
     };
 
     meta = {

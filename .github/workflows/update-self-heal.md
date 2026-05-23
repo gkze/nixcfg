@@ -132,7 +132,7 @@ steps:
       issue_number="$(jq -r '.number' <<<"${issue_json}")"
       comments_json="$(mktemp)"
       gh issue view "${issue_number}" --json comments >"${comments_json}"
-      python3 -m lib.update.ci.self_heal remaining-cycles \
+      python3 lib/update/ci/self_heal.py remaining-cycles \
         --comments-json "${comments_json}" \
         --campaign-key "${campaign_key}" >/dev/null
 
@@ -240,7 +240,7 @@ safe-outputs:
             gh issue view "${issue_number}" --json comments >"${comments_json}"
             set +e
             remaining="$(
-              python3 -m lib.update.ci.self_heal remaining-cycles \
+              python3 lib/update/ci/self_heal.py remaining-cycles \
                 --comments-json "${comments_json}" \
                 --campaign-key "${campaign_key}"
             )"
@@ -248,7 +248,7 @@ safe-outputs:
             set -e
             if [ "${remaining_status}" -ne 0 ]; then
               comment_body="$(mktemp)"
-              python3 -m lib.update.ci.self_heal render-ledger-comment \
+              python3 lib/update/ci/self_heal.py render-ledger-comment \
                 --campaign-key "${campaign_key}" \
                 --attempt-kind stop \
                 --run-id "${run_id}" \
@@ -262,7 +262,7 @@ safe-outputs:
             fi
 
             comment_body="$(mktemp)"
-            python3 -m lib.update.ci.self_heal render-ledger-comment \
+            python3 lib/update/ci/self_heal.py render-ledger-comment \
               --campaign-key "${campaign_key}" \
               --attempt-kind retry \
               --run-id "${run_id}" \
@@ -347,7 +347,7 @@ safe-outputs:
             fi
 
             comment_body="$(mktemp)"
-            python3 -m lib.update.ci.self_heal render-ledger-comment \
+            python3 lib/update/ci/self_heal.py render-ledger-comment \
               --campaign-key "${campaign_key}" \
               --attempt-kind stop \
               --run-id "${run_id}" \
@@ -385,6 +385,22 @@ Inspect the failed run, failed jobs, and logs. Output exactly one decision:
 - `stop`: the failure touches updater core, workflow logic, non-derivation-specific Nix,
   host/home/module config, auth/secrets, ambiguous evidence, or exhausted budget.
 
+Known classifications:
+
+- Choose `retry` for transient fetch and service failures, including DNS failures,
+  HTTP 5xx responses from source hosts, GitHub API timeouts, runner loss, Cachix
+  service failures, `nix-prefetch-git` transport errors, and npm registry network
+  failures where the same inputs should plausibly pass without edits.
+- Choose `auto_fix` for derivation-specific drift such as fixed-output hash
+  mismatches, `sources.json` updates, `Cargo.nix` / `crate-hashes.json` drift,
+  `uv.lock` drift, `pnpm` lockfile config mismatches inside one package,
+  missing vendored runtime dependencies, package-specific path drift such as a
+  moved bundled binary, and package updater failures that only affect
+  `packages/**` or `overlays/**`.
+- Choose `stop` when a fix would require workflow restructuring, updater core
+  changes, cache policy changes, host closure changes, secrets, credentials,
+  branch protection, or edits outside the allowed lanes.
+
 Use this JSON shape internally before taking action:
 
 ```json
@@ -402,7 +418,7 @@ Use this JSON shape internally before taking action:
 Write that JSON to a file and run the deterministic parser before any action:
 
 ```sh
-python3 -m lib.update.ci.self_heal parse-classifier classifier.json
+python3 lib/update/ci/self_heal.py parse-classifier classifier.json
 ```
 
 ## Retry Action
@@ -429,7 +445,7 @@ Before creating a PR, validate and render the same classifier JSON as a required
 machine-readable PR marker:
 
 ```sh
-python3 -m lib.update.ci.self_heal render-classifier-marker \
+python3 lib/update/ci/self_heal.py render-classifier-marker \
   --require-auto-fix classifier.json
 ```
 

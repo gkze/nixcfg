@@ -23,6 +23,10 @@
                 return "${vprev.codesnap-nvim.passthru.codesnap-lib}/lib/libgenerator.${libExt}"
               end
               function fetch._original_ensure_lib()'';
+            saveCallNew = ''
+              local config = config_module.get_config()
+                generator.save(save_path, config)
+                vim.cmd("delmarks <>")'';
           in
           (old.postPatch or "")
           + ''
@@ -31,6 +35,16 @@
 
             substituteInPlace lua/codesnap/fetch.lua \
               --replace-fail '${fetchLuaOld}' '${fetchLuaNew}'
+
+            substituteInPlace lua/codesnap/init.lua \
+              --replace-fail 'string.match(static.config.save_path, "%.(.+)$")' 'string.match(save_path, "%.(.+)$")' \
+              --replace-fail 'if matched_extension ~= "png" and matched_extension ~= nil then' 'if matched_extension ~= nil and matched_extension ~= "png" and matched_extension ~= "svg" and matched_extension ~= "html" then' \
+              --replace-fail 'error("The extension of save_path should be .png", 0)' 'error("The extension of save_path should be .png, .svg, or .html", 0)' \
+              --replace-fail 'require("generator").save_snapshot(config)' '${saveCallNew}' \
+              --replace-fail 'config.save_path' 'save_path'
+
+            substituteInPlace lua/codesnap/utils/table.lua \
+              --replace-fail 'if t1[k] == nil and v ~= nil then' 'if t1[k] == nil and v ~= nil and v ~= "none" then'
           '';
       });
 

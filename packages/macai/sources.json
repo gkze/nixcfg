@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-te7ifq5/WR2mRLgLEj2T6694iLRIcCoEyr9lsVnB1H0=",
+    "x86_64-darwin": "sha256-te7ifq5/WR2mRLgLEj2T6694iLRIcCoEyr9lsVnB1H0="
+  },
+  "urls": {
+    "aarch64-darwin": "https://renset.dev/macai/macai%202.4.2%20Universal.zip",
+    "x86_64-darwin": "https://renset.dev/macai/macai%202.4.2%20Universal.zip"
+  },
+  "version": "2.4.2"
+}

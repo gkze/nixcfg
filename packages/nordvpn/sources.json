@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-brhdyIpQ3sLZtYRz6VFT2tgKFppT7BKBMV82lIvg1/I="
+  },
+  "urls": {
+    "aarch64-darwin": "https://downloads.nordcdn.com/apps/macos/generic/NordVPN-OpenVPN/10.2.0/NordVPN.pkg"
+  },
+  "version": "10.2.0"
+}

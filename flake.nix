@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.1.19";
+      url = "github:generalaction/emdash/v1.1.24";
       flake = false;
     };
     flake-edit = {
@@ -137,11 +137,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     lumen = {
-      url = "github:jnsahaj/lumen/v2.22.0";
+      url = "github:jnsahaj/lumen/v2.24.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.52.0";
+      url = "github:max-sixty/worktrunk/v0.53.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -162,7 +162,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.132.0";
+      url = "github:openai/codex/rust-v0.133.0";
       flake = false;
     };
     curator = {
@@ -170,13 +170,13 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.17.0";
+      url = "github:steipete/gogcli/v0.19.0";
       flake = false;
     };
     github-desktop = {
       type = "git";
       url = "https://github.com/desktop/desktop.git";
-      ref = "refs/tags/release-3.5.9-beta3";
+      ref = "refs/tags/release-3.5.10";
       submodules = true;
       flake = false;
     };

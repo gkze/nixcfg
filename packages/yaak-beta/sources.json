@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-0qBed4KRlYlWQoSGgxK/BApMs9Q3qnjLgyWJhf5luwI="
+  },
+  "urls": {
+    "aarch64-darwin": "https://github.com/mountain-loop/yaak/releases/download/v2026.4.0/Yaak_2026.4.0_aarch64.dmg"
+  },
+  "version": "2026.4.0"
+}

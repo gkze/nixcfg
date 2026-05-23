@@ -7,8 +7,12 @@ from typing import TYPE_CHECKING, ClassVar
 from defusedxml import ElementTree
 
 from lib.update.net import fetch_url
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
-from lib.update.updaters.metadata import DownloadUrlMetadata, require_metadata_str
+from lib.update.updaters.base import (
+    DownloadUrlMetadataUpdater,
+    VersionInfo,
+    register_updater,
+)
+from lib.update.updaters.metadata import DownloadUrlMetadata
 
 if TYPE_CHECKING:
     from xml.etree.ElementTree import Element
@@ -21,7 +25,7 @@ _SPARKLE_BUILD_VERSION = f"{{{_SPARKLE_NS}}}version"
 
 
 @register_updater
-class TownAssistantNightlyUpdater(DownloadHashUpdater):
+class TownAssistantNightlyUpdater(DownloadUrlMetadataUpdater):
     """Resolve the latest Town Assistant nightly DMG from Sparkle metadata."""
 
     name = "town-assistant-nightly"
@@ -31,6 +35,7 @@ class TownAssistantNightlyUpdater(DownloadHashUpdater):
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin-aarch64",
     }
+    URL_METADATA_CONTEXT = "Town Assistant nightly metadata"
 
     def _parse_appcast(self, xml_data: str) -> Element:
         try:
@@ -110,13 +115,4 @@ class TownAssistantNightlyUpdater(DownloadHashUpdater):
         return VersionInfo(
             version=self._extract_version(item),
             metadata=DownloadUrlMetadata(url=self._extract_download_url(enclosure)),
-        )
-
-    def get_download_url(self, platform: str, info: VersionInfo) -> str:
-        """Return the appcast-provided nightly DMG URL for Darwin builds."""
-        _ = platform
-        return require_metadata_str(
-            info.metadata,
-            "url",
-            context="Town Assistant nightly metadata",
         )

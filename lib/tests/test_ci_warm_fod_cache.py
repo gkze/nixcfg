@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -307,6 +308,64 @@ def test_build_fod_expr(monkeypatch: pytest.MonkeyPatch) -> None:
     assert expr == "package-path:t3code-workspace::aarch64-darwin"
 
 
+def test_target_filtering_and_json_output(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Run this test case."""
+    targets = [
+        wfc.FodTarget(
+            package="demo", hash_type="nodeModulesHash", fod_attr=".node_modules"
+        ),
+        wfc.FodTarget(
+            package="other", hash_type="denoDeps", fod_attr=".passthru.denoDeps"
+        ),
+    ]
+    assert (
+        object.__getattribute__(wfc, "_target_label")(targets[0]) == "demo.node_modules"
+    )
+    assert object.__getattribute__(wfc, "_filter_fod_targets")(targets, ()) == targets
+    assert object.__getattribute__(wfc, "_filter_fod_targets")(
+        targets, ("demo", "missing")
+    ) == [targets[0]]
+    assert object.__getattribute__(wfc, "_target_json")(
+        targets[0], system="x86_64-linux"
+    ) == {
+        "fodAttr": ".node_modules",
+        "hashType": "nodeModulesHash",
+        "label": "demo.node_modules",
+        "package": "demo",
+        "system": "x86_64-linux",
+    }
+
+    monkeypatch.setattr(wfc, "_find_fod_targets", lambda _system: targets)
+    assert (
+        asyncio.run(
+            object.__getattribute__(wfc, "_async_main")(
+                system="x86_64-linux",
+                packages=("demo",),
+                list_json=True,
+            )
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "kind": "nixcfg-fod-cache-targets",
+        "schemaVersion": 1,
+        "system": "x86_64-linux",
+        "targets": [
+            {
+                "fodAttr": ".node_modules",
+                "hashType": "nodeModulesHash",
+                "label": "demo.node_modules",
+                "package": "demo",
+                "system": "x86_64-linux",
+            }
+        ],
+    }
+
+
 def test_resolve_output_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
 
@@ -545,6 +604,26 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         == 0
     )
+    built: list[wfc.FodTarget] = []
+    monkeypatch.setattr(
+        wfc,
+        "_build_one",
+        lambda target, *_a, **_k: asyncio.sleep(
+            0, result=built.append(target) is None or True
+        ),
+    )
+    assert (
+        asyncio.run(
+            object.__getattribute__(wfc, "_async_main")(
+                system="x86_64-linux",
+                dry_run=False,
+                cachix_cache="cache",
+                packages=("demo",),
+            )
+        )
+        == 0
+    )
+    assert built == targets
     monkeypatch.setattr(
         wfc, "_build_one", lambda *_a, **_k: asyncio.sleep(0, result=False)
     )
@@ -571,6 +650,28 @@ def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
     rc = wfc.main(["--verbose"])
     assert rc == 0
     assert calls[-1]["level"] == wfc.logging.DEBUG
+
+    cli_calls: list[dict[str, object]] = []
+    real_run = wfc.run
+    monkeypatch.setattr(wfc, "run", lambda **kwargs: cli_calls.append(kwargs) or 0)
+    rc = wfc.main([
+        "--package",
+        "demo",
+        "--package",
+        "other",
+        "--list-json",
+        "--dry-run",
+    ])
+    assert rc == 0
+    assert cli_calls[-1] == {
+        "cachix_cache": None,
+        "dry_run": True,
+        "list_json": True,
+        "packages": ("demo", "other"),
+        "system": None,
+        "verbose": False,
+    }
+    monkeypatch.setattr(wfc, "run", real_run)
 
     def _raise_runtime_error(_system: str) -> list[wfc.FodTarget]:
         msg = "bad sources"

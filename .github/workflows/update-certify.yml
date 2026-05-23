@@ -46,12 +46,10 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ] && \
             [ "${WORKFLOW_RUN_CONCLUSION}" != "success" ]; then
-            echo "exists=false" >> "$GITHUB_OUTPUT"
             echo \
               "Refresh workflow concluded with '${WORKFLOW_RUN_CONCLUSION}';" \
-              "skipping certification." \
+              "checking '${ref}' for partial certification." \
               >&2
-            exit 0
           fi
           repo_url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           if git ls-remote --exit-code --heads "$repo_url" "refs/heads/$ref" >/dev/null 2>&1; then
@@ -202,7 +200,6 @@ jobs:
     needs:
       - select-ref
       - darwin-full-smoke
-      - warm-fod-cache-darwin
     if: needs.select-ref.outputs.exists == 'true'
     runs-on: macos-15
     name: ${{ matrix.package }}
@@ -218,6 +215,7 @@ jobs:
             target: .#pkgs.aarch64-darwin.opencode
           - package: opencode-desktop-dev
             target: .#pkgs.aarch64-darwin.opencode-desktop-dev
+            fod_package: opencode-desktop
           - package: codex
             target: .#pkgs.aarch64-darwin.codex
           - package: gemini-cli
@@ -237,6 +235,10 @@ jobs:
         run: nix run .#nixcfg -- ci workflow free-disk-space
       - name: Pre-fetch flake inputs
         run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - name: Warm dependency cache for ${{ matrix.package }}
+        run: >-
+          nix run .#nixcfg -- ci cache fod
+          --package "${{ matrix.fod_package || matrix.package }}"
       - name: Build heavy target (${{ matrix.package }})
         run: nix build --impure ${{ matrix.target }}
 
@@ -244,7 +246,6 @@ jobs:
     needs:
       - select-ref
       - darwin-full-smoke
-      - warm-fod-cache-darwin
     if: needs.select-ref.outputs.exists == 'true'
     runs-on: macos-15
     name: ${{ matrix.package }}
@@ -281,6 +282,8 @@ jobs:
         run: nix run .#nixcfg -- ci workflow free-disk-space
       - name: Pre-fetch flake inputs
         run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - name: Warm dependency cache for ${{ matrix.package }}
+        run: nix run .#nixcfg -- ci cache fod --package "${{ matrix.package }}"
       - name: Build extra heavy target (${{ matrix.package }})
         run: nix build --impure ${{ matrix.target }}
 
@@ -288,7 +291,6 @@ jobs:
     needs:
       - select-ref
       - darwin-full-smoke
-      - warm-fod-cache-darwin
     if: needs.select-ref.outputs.exists == 'true'
     runs-on: macos-15
     timeout-minutes: 180
@@ -301,6 +303,8 @@ jobs:
         run: nix run .#nixcfg -- ci workflow free-disk-space
       - name: Pre-fetch flake inputs
         run: nix run .#nixcfg -- ci workflow prefetch-flake-inputs
+      - name: Warm shared Darwin dependency cache
+        run: nix run .#nixcfg -- ci cache fod
       - name: Build shared Darwin closure
         run: |
           nix run .#nixcfg -- ci cache closure \
@@ -368,9 +372,7 @@ jobs:
       - run: nix run .#nixcfg -- ci workflow build-darwin-config rocinante
 
   linux-x86_64:
-    needs:
-      - select-ref
-      - warm-fod-cache-x86_64-linux
+    needs: select-ref
     if: needs.select-ref.outputs.exists == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -379,6 +381,8 @@ jobs:
       - *setup_nix
       - *cachix
       - *cache_nix
+      - name: Warm dependency cache for nixcfg
+        run: nix run .#nixcfg -- ci cache fod --package nixcfg
       - name: Build representative Linux output
         run: nix build .#pkgs.x86_64-linux.nixcfg
       - name: List update targets
@@ -394,7 +398,7 @@ jobs:
       - darwin-argus
       - darwin-rocinante
       - linux-x86_64
-    if: needs.select-ref.outputs.exists == 'true'
+    if: always() && !cancelled() && needs.select-ref.outputs.exists == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -442,6 +446,14 @@ jobs:
         run: >-
           gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}
           > /tmp/certification-run.json
+      - name: Capture certification job results
+        if: steps.pr.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api
+          "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100"
+          > /tmp/certification-jobs.json
       - name: Render updated PR body
         if: steps.pr.outputs.found == 'true'
         run: >-
@@ -449,6 +461,7 @@ jobs:
           --existing-body /tmp/pr-body-current.md
           --output /tmp/pr-body-updated.md
           --run-json /tmp/certification-run.json
+          --jobs-json /tmp/certification-jobs.json
           --cachix-name "${{ env.CACHIX_NAME }}"
       - name: Update PR body with certification details
         if: steps.pr.outputs.found == 'true'

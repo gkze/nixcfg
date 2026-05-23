@@ -200,6 +200,16 @@ def test_github_desktop_passthru_exposes_shared_electron_runtime() -> None:
         expect_binding(merged_attrs.values, "electronVersion").value,
         "electronRuntime.version",
     )
+    assert_nix_ast_equal(
+        expect_binding(merged_attrs.values, "macApp").value,
+        """
+        {
+          bundleName = "GitHub Desktop.app";
+          bundleRelPath = "Applications/GitHub Desktop.app";
+          installMode = "copy";
+        }
+        """,
+    )
 
 
 def test_github_desktop_final_metadata_keeps_darwin_platforms() -> None:

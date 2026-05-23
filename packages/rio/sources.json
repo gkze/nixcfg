@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-lB7pLDzKmv8scxDyH88qHp73+8237m/Sz4KWQcljjOo="
+  },
+  "urls": {
+    "aarch64-darwin": "https://github.com/raphamorim/rio/releases/download/v0.4.5/rio.dmg"
+  },
+  "version": "0.4.5"
+}

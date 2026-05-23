@@ -402,6 +402,56 @@ def test_export_config_builds_workspace_specs_from_session_state(
     )
 
 
+def test_export_config_skips_transient_blank_tabs(zentool: ModuleType) -> None:
+    """Export should ignore blank tabs that Zen has not marked as empty."""
+    session = zentool.SessionState(
+        spaces=[make_space(zentool, uuid="ws-1", name="Work")],
+        tabs=[
+            make_tab(
+                zentool,
+                name="",
+                url="",
+                workspace="ws-1",
+                sync_id="blank-essential",
+                pinned=True,
+                essential=True,
+            ),
+            make_tab(
+                zentool,
+                name="",
+                url="",
+                workspace="ws-1",
+                sync_id="blank-pinned",
+                pinned=True,
+            ),
+            make_tab(
+                zentool,
+                name="",
+                url="",
+                workspace="ws-1",
+                sync_id="blank-tab",
+            ),
+            make_tab(
+                zentool,
+                name="Board",
+                url="https://board.example",
+                workspace="ws-1",
+                sync_id="tab-board",
+            ),
+        ],
+    )
+
+    config = zentool.export_config(session)
+
+    assert config.workspaces == [
+        zentool.WorkspaceSpec(
+            name="Work",
+            theme=zentool.ThemeSpec(),
+            tabs=[zentool.TabSpec(name="Board", url="https://board.example")],
+        )
+    ]
+
+
 def test_serialization_helpers_emit_compact_expected_shapes(
     zentool: ModuleType,
 ) -> None:

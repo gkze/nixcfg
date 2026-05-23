@@ -32,6 +32,8 @@ def make_tab(
     folder_id: str | None = None,
     user_context_id: int = 0,
     attributes: dict[str, object] | None = None,
+    pinned_icon: str | None = None,
+    has_static_icon: bool = False,
 ) -> object:
     """Build a compact session tab for helper tests."""
     return zentool.SessionTab(
@@ -44,6 +46,8 @@ def make_tab(
         zenSyncId=sync_id,
         zenEssential=essential,
         zenStaticLabel=static_label,
+        zenPinnedIcon=pinned_icon,
+        zenHasStaticIcon=has_static_icon,
         userContextId=user_context_id,
         groupId=folder_id,
         attributes=dict(attributes or {}),
@@ -53,6 +57,15 @@ def make_tab(
 def make_entry(zentool: ModuleType, *, url: str, title: str = "") -> object:
     """Build one session history entry."""
     return zentool.SessionEntry(url=url, title=title)
+
+
+def make_entry_with_extra(zentool: ModuleType, *, url: str, title: str = "") -> object:
+    """Build one session history entry with opaque runtime data."""
+    return zentool.SessionEntry.model_validate({
+        "url": url,
+        "title": title,
+        "structuredCloneState": "session-data",
+    })
 
 
 def make_folder(
@@ -214,11 +227,17 @@ def test_build_tab_reuses_active_entry_when_url_already_matches(
     existing = make_tab(
         zentool,
         entries=[
-            make_entry(zentool, url="https://example.com", title="Existing Title")
+            make_entry_with_extra(
+                zentool,
+                url="https://example.com",
+                title="Existing Title",
+            )
         ],
         static_label="Old Label",
         last_accessed=456,
         attributes={"nested": ["value"]},
+        pinned_icon="page-icon",
+        has_static_icon=True,
     )
     original_attributes = existing.attributes
     spec = zentool.TabSpec(name="Pinned Label", url="https://example.com")
@@ -245,6 +264,8 @@ def test_build_tab_reuses_active_entry_when_url_already_matches(
     assert built.group_id == "folder-1"
     assert built.zen_is_empty is False
     assert built.zen_static_label == "Pinned Label"
+    assert built.zen_pinned_icon == "page-icon"
+    assert built.zen_has_static_icon is True
     assert built.user_context_id == 7
     assert built.zen_default_user_context_id == "true"
     assert built.last_accessed == 456
@@ -294,12 +315,16 @@ def test_build_tab_resets_entry_for_mismatched_url_and_placeholder(
     ]
     assert built.index == 1
     assert built.zen_static_label == "Folder Tab"
+    assert built.zen_pinned_icon is None
+    assert built.zen_has_static_icon is False
     assert built.zen_is_empty is False
     assert built.last_accessed == 1234500
     assert built.zen_default_user_context_id is None
 
     assert placeholder.entries == [zentool.SessionEntry(url="", title="Folder Tab")]
     assert placeholder.zen_static_label is None
+    assert placeholder.zen_pinned_icon is None
+    assert placeholder.zen_has_static_icon is False
     assert placeholder.zen_is_empty is True
 
 

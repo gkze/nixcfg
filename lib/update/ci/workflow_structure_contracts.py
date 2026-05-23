@@ -22,6 +22,8 @@ _DARWIN_LOCK_SMOKE_MARKER = "nix run .#nixcfg -- ci workflow darwin eval-lock-sm
 _SHARED_CLOSURE_MARKER = "nix run .#nixcfg -- ci cache closure"
 _DISPATCH_CI_MARKER = "gh workflow run ci.yml"
 _DISPATCH_CERTIFY_MARKER = "gh workflow run update-certify.yml"
+_CERTIFICATION_JOBS_API_MARKER = "/actions/runs/${{ github.run_id }}/jobs?per_page=100"
+_CERTIFICATION_JOBS_JSON_MARKER = "--jobs-json /tmp/certification-jobs.json"
 _EXCLUDE_REF_RE = re.compile(r"--exclude-ref\s+([^\s\\]+)")
 _STRUCTURE_INVALID_NEEDS_VALUE_MESSAGE = (
     "Job {job_id} defines unsupported needs {raw_needs!r}"
@@ -29,7 +31,14 @@ _STRUCTURE_INVALID_NEEDS_VALUE_MESSAGE = (
 _STRUCTURE_INVALID_NEEDS_ITEM_MESSAGE = (
     "Job {job_id} defines unsupported needs {need!r}"
 )
-_REFRESH_WORKFLOW_JOB_IDS = ("darwin-lock-smoke", "compute-hashes")
+_REFRESH_WORKFLOW_JOB_IDS = (
+    "darwin-lock-smoke",
+    "discover-update-targets",
+    "compute-hashes-aarch64-darwin",
+    "compute-hashes-x86_64-linux",
+    "compute-hashes-aarch64-linux",
+    "aggregate-platform-updates",
+)
 _CERTIFY_WORKFLOW_SENTINEL_JOB_IDS = (
     "darwin-full-smoke",
     "darwin-priority-heavy",
@@ -141,7 +150,15 @@ def _darwin_shared_exclude_refs(
 
 
 def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -> None:
-    darwin_lock_smoke, compute_hashes, create_pr = workflow.require_jobs(
+    (
+        darwin_lock_smoke,
+        discover_update_targets,
+        compute_hashes_darwin,
+        compute_hashes_x86_64_linux,
+        compute_hashes_aarch64_linux,
+        aggregate_platform_updates,
+        create_pr,
+    ) = workflow.require_jobs(
         *_REFRESH_WORKFLOW_JOB_IDS,
         "create-pr",
     )
@@ -156,9 +173,50 @@ def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -
         "merge-generated",
         forbidden_need_message="darwin-lock-smoke must stay in the lock-only phase",
     )
-    compute_hashes.require_need(
+    discover_update_targets.require_need(
+        "update-lock",
+        missing_need_message="discover-update-targets must depend on update-lock",
+    )
+    discover_update_targets.require_need(
+        "resolve-versions",
+        missing_need_message="discover-update-targets must depend on resolve-versions",
+    )
+    for compute_hashes in (
+        compute_hashes_darwin,
+        compute_hashes_x86_64_linux,
+        compute_hashes_aarch64_linux,
+    ):
+        compute_hashes.require_need(
+            "discover-update-targets",
+            missing_need_message=("{job_id} must depend on discover-update-targets"),
+        )
+        compute_hashes.require_need(
+            "resolve-versions",
+            missing_need_message="{job_id} must depend on resolve-versions",
+        )
+    compute_hashes_darwin.require_need(
         "darwin-lock-smoke",
-        missing_need_message="compute-hashes must depend on darwin-lock-smoke",
+        missing_need_message=(
+            "compute-hashes-aarch64-darwin must depend on darwin-lock-smoke"
+        ),
+    )
+    aggregate_platform_updates.require_need(
+        "compute-hashes-aarch64-darwin",
+        missing_need_message=(
+            "aggregate-platform-updates must depend on compute-hashes-aarch64-darwin"
+        ),
+    )
+    aggregate_platform_updates.require_need(
+        "compute-hashes-x86_64-linux",
+        missing_need_message=(
+            "aggregate-platform-updates must depend on compute-hashes-x86_64-linux"
+        ),
+    )
+    aggregate_platform_updates.require_need(
+        "compute-hashes-aarch64-linux",
+        missing_need_message=(
+            "aggregate-platform-updates must depend on compute-hashes-aarch64-linux"
+        ),
     )
     permissions = create_pr.data.get("permissions")
     if not isinstance(permissions, dict) or permissions.get("actions") != "write":
@@ -186,6 +244,7 @@ def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -
         darwin_argus,
         darwin_rocinante,
         linux_x86_64,
+        publish_pr_certification,
     ) = workflow.require_jobs(
         "darwin-full-smoke",
         "darwin-priority-heavy",
@@ -194,12 +253,28 @@ def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -
         "darwin-argus",
         "darwin-rocinante",
         "linux-x86_64",
+        "publish-pr-certification",
     )
 
     darwin_full_smoke.require_run_marker(_DARWIN_FULL_SMOKE_MARKER)
 
     for job in (darwin_priority_heavy, darwin_extra_heavy, darwin_shared):
         job.require_need("darwin-full-smoke")
+        job.forbid_need(
+            "warm-fod-cache-darwin",
+            forbidden_need_message=(
+                "{job_id} must not depend on warm-fod-cache-darwin; "
+                "FOD warm-up must stay inside the sliced package job"
+            ),
+        )
+
+    linux_x86_64.forbid_need(
+        "warm-fod-cache-x86_64-linux",
+        forbidden_need_message=(
+            "linux_x86_64 must not depend on warm-fod-cache-x86_64-linux; "
+            "FOD warm-up must stay inside the representative Linux job"
+        ),
+    )
 
     for job in (
         darwin_priority_heavy,
@@ -234,6 +309,46 @@ def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -
             problems.append(f"unexpected excludes: {', '.join(extra)}")
         msg = "Darwin heavy-target split drift detected (" + "; ".join(problems) + ")"
         raise RuntimeError(msg)
+
+    for need in (
+        "select-ref",
+        "quality-gates",
+        "darwin-priority-heavy",
+        "darwin-extra-heavy",
+        "darwin-shared",
+        "darwin-argus",
+        "darwin-rocinante",
+        "linux-x86_64",
+    ):
+        publish_pr_certification.require_need(need)
+
+    publish_if = publish_pr_certification.data.get("if")
+    if not isinstance(publish_if, str) or not all(
+        marker in publish_if
+        for marker in (
+            "always()",
+            "!cancelled()",
+            "needs.select-ref.outputs.exists == 'true'",
+        )
+    ):
+        msg = (
+            "publish-pr-certification must run after failed certification needs "
+            "while preserving select-ref skip and cancel behavior"
+        )
+        raise RuntimeError(msg)
+
+    publish_pr_certification.require_run_marker(
+        _CERTIFICATION_JOBS_API_MARKER,
+        missing_run_message=(
+            "publish-pr-certification must capture certification job results"
+        ),
+    )
+    publish_pr_certification.require_run_marker(
+        _CERTIFICATION_JOBS_JSON_MARKER,
+        missing_run_message=(
+            "publish-pr-certification must pass certification job results to the renderer"
+        ),
+    )
 
 
 def validate_workflow_structure_contracts(*, workflow_path: Path) -> None:

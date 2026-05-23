@@ -168,10 +168,10 @@ def test_agentic_source_requires_parsed_auto_fix_classifier_marker() -> None:
     }
 
     assert (
-        "python3 -m lib.update.ci.self_heal parse-classifier classifier.json",
+        "python3 lib/update/ci/self_heal.py parse-classifier classifier.json",
     ) in sh_blocks
     assert (
-        "python3 -m lib.update.ci.self_heal render-classifier-marker \\",
+        "python3 lib/update/ci/self_heal.py render-classifier-marker \\",
         "  --require-auto-fix classifier.json",
     ) in sh_blocks
     assert (

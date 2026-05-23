@@ -100,6 +100,7 @@ async def run_queue_task(
         await task()
     except asyncio.CancelledError:
         await queue.put(UpdateEvent.error(source, "Operation cancelled"))
+        raise
     except Exception as exc:
         if not isinstance(exc, _TASK_ERROR_TYPES):
             _LOG.exception("Unexpected task failure for %s", source)

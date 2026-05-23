@@ -1,33 +1,7 @@
 {
   homebrew = {
-    brews = [ "mole" ];
-    casks = [
-      "airfoil"
-      "antigravity"
-      "arc"
-      "claude"
-      "claude-code"
-      "codeedit"
-      "comet"
-      "docker-desktop"
-      "figma"
-      "framer"
-      "ghostty@tip"
-      "google-drive"
-      "keepingyouawake"
-      "linear"
-      "lm-studio"
-      "logi-options+"
-      "loom"
-      "macai"
-      "macfuse"
-      "nordvpn"
-      "rio"
-      "signal@beta"
-      "spotify"
-      "wave"
-      "yaak@beta"
-    ];
+    brews = [ ];
+    casks = [ ];
     masApps = {
       "AdGuard for Safari" = 1440147259;
       "Amazon Kindle" = 302584613;

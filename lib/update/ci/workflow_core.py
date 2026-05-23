@@ -174,8 +174,17 @@ def cmd_free_disk_space(
 
 def cmd_install_darwin_tools(*, run: Callable[..., object]) -> int:
     """Install Darwin-specific CI tools."""
-    run(["brew", "install", "--cask", "macfuse"])
-    run(["brew", "install", "1password-cli"])
+    run(
+        _darwin_nix_args(
+            "profile",
+            "install",
+            "--impure",
+            "--inputs-from",
+            ".",
+            "nixpkgs#_1password-cli",
+            ".#pkgs.aarch64-darwin.macfuse",
+        )
+    )
     return 0
 
 

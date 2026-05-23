@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-G3EiGkroEheHtCYFehzLb3cFY0MVpH17FDiJFd47DCA=",
+    "x86_64-darwin": "sha256-G3EiGkroEheHtCYFehzLb3cFY0MVpH17FDiJFd47DCA="
+  },
+  "urls": {
+    "aarch64-darwin": "https://downloads.claude.ai/releases/darwin/universal/1.8555.1/Claude-cfe7d45eddd3d919d9d47913fd7b4f5f685d3044.zip",
+    "x86_64-darwin": "https://downloads.claude.ai/releases/darwin/universal/1.8555.1/Claude-cfe7d45eddd3d919d9d47913fd7b4f5f685d3044.zip"
+  },
+  "version": "1.8555.1"
+}

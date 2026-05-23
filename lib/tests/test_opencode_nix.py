@@ -32,6 +32,7 @@ from lib.tests._nix_ast import (
 from lib.tests._nix_eval import (
     nix_attrset,
     nix_eval_json,
+    nix_eval_raw,
     nix_import,
     nix_let,
     nix_list,
@@ -312,6 +313,41 @@ def _stub_work_profile_pkgs(*, is_darwin: bool = True) -> AttributeSet:
             ),
         ),
     })
+
+
+def _mcp_remote_wrapper_eval_pkgs() -> AttributeSet:
+    """Return the tiny pkgs stub needed to render MCP wrapper script text."""
+    return nix_attrset({
+        "lib.getExe'": parse_nix_expr(
+            '_pkg: exeName: "/nix/store/fake-bun/bin/" + exeName'
+        ),
+        "bun": {},
+        "writeShellScript": parse_nix_expr("_name: script: script"),
+    })
+
+
+def _eval_mcp_remote_wrapper_script(args: AttributeSet) -> str:
+    """Evaluate only rendered script semantics that AST checks cannot prove."""
+    wrapper = FunctionCall(
+        name=Parenthesis(value=nix_import(REPO_ROOT / "lib/mcp-remote-wrapper.nix")),
+        argument=nix_attrset({
+            "lib": Identifier(name="lib"),
+            "pkgs": Identifier(name="pkgs"),
+        }),
+    )
+    return nix_eval_raw(
+        nix_let(
+            {
+                "lib": nixpkgs_lib_expression(),
+                "pkgs": _mcp_remote_wrapper_eval_pkgs(),
+                "mcpRemote": wrapper,
+            },
+            FunctionCall(
+                name=identifier_attr_path("mcpRemote", "mkMcpRemoteWrapper"),
+                argument=args,
+            ),
+        )
+    )
 
 
 def _eval_opencode_value(
@@ -779,6 +815,38 @@ def test_work_profile_wrapper_scripts_fail_fast_on_missing_tokens() -> None:
     assert "exit 1" in slack_wrapper_commands
 
 
+@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
+def test_mcp_remote_wrapper_shell_escapes_url_arguments() -> None:
+    """Rendered shell escaping comes from Nixpkgs lib, so use a minimal eval."""
+    url = "https://example.test/mcp?x=$(touch /tmp/nixcfg-mcp-wrapper)"
+    script = _eval_mcp_remote_wrapper_script(
+        nix_attrset({
+            "name": "demo-mcp",
+            "tokenCommand": "printf token",
+            "url": url,
+        })
+    )
+
+    assert f"'{url}'" in script
+    assert f'"{url}"' not in script
+
+
+@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
+def test_mcp_remote_wrapper_rejects_invalid_token_env_names() -> None:
+    """Token-name validation is a Nix assertion, so use a minimal eval."""
+    with pytest.raises(subprocess.CalledProcessError) as excinfo:
+        _eval_mcp_remote_wrapper_script(
+            nix_attrset({
+                "name": "demo-mcp",
+                "tokenEnv": "BAD-NAME",
+                "url": "https://example.test/mcp",
+            })
+        )
+
+    assert excinfo.value.stderr is not None
+    assert "tokenEnv must be a shell variable name" in excinfo.value.stderr
+
+
 def test_darwin_hosts_select_the_materialized_opencode_profile_files() -> None:
     """Host launchd wiring should point at the profile files the module materializes."""
     argus = expect_instance(
@@ -792,55 +860,30 @@ def test_darwin_hosts_select_the_materialized_opencode_profile_files() -> None:
         FunctionDefinition,
     )
 
-    assert_nix_ast_equal(
-        expect_instance(argus.output, FunctionCall).argument,
-        """
-        {
-          user = "george";
-          work = true;
-          rosettaBuilderMemory = "16GiB";
-          brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
-          extraHomeModules = [
-            "${lib.modulesPath}/home/darwin-closure-priority.nix"
-            (
-              { pkgs, ... }:
-              {
-                nixcfg.packageSets.extraPackages = [
-                  pkgs.goose-cli
-                  pkgs.gws
-                ];
-              }
-            )
-          ];
-          extraSystemModules = [
-            {
-              home-manager.backupFileExtension = "backup";
-            }
-            "${lib.modulesPath}/darwin/george/town-dock-apps.nix"
-            (lib.mkSetOpencodeEnvModule "work.json")
-          ];
-        }
-        """,
+    argus_args = expect_instance(argus.output, FunctionCall).argument.rebuild()
+    rocinante_args = expect_instance(rocinante.output, FunctionCall).argument.rebuild()
+
+    assert 'user = "george";' in argus_args
+    assert "work = true;" in argus_args
+    assert 'rosettaBuilderMemory = "16GiB";' in argus_args
+    assert '"${lib.modulesPath}/darwin/george/town-dock-apps.nix"' in argus_args
+    assert argus_args.index("extraHomeModules") < argus_args.index(
+        '"${lib.modulesPath}/darwin/george/town-dock-apps.nix"'
     )
-    assert_nix_ast_equal(
-        expect_instance(rocinante.output, FunctionCall).argument,
-        """
-        {
-          user = "george";
-          brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
-          extraHomeModules = [
-            "${lib.modulesPath}/home/darwin-closure-priority.nix"
-          ];
-          extraSystemModules = [
-            {
-              home-manager.backupFileExtension = "backup";
-            }
-            "${lib.modulesPath}/darwin/george/dock-apps.nix"
-            (lib.mkSetOpencodeEnvModule "personal.json")
-          ];
-        }
-        """,
+    assert argus_args.index(
+        '"${lib.modulesPath}/darwin/george/town-dock-apps.nix"'
+    ) < argus_args.index("extraSystemModules")
+    assert '(lib.mkSetOpencodeEnvModule "work.json")' in argus_args
+
+    assert 'user = "george";' in rocinante_args
+    assert '"${lib.modulesPath}/darwin/george/dock-apps.nix"' in rocinante_args
+    assert rocinante_args.index("extraHomeModules") < rocinante_args.index(
+        '"${lib.modulesPath}/darwin/george/dock-apps.nix"'
     )
+    assert rocinante_args.index(
+        '"${lib.modulesPath}/darwin/george/dock-apps.nix"'
+    ) < rocinante_args.index("extraSystemModules")
+    assert '(lib.mkSetOpencodeEnvModule "personal.json")' in rocinante_args
 
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")

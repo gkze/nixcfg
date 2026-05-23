@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-mVeDNRw7iUYZHvQPKIr7MUdimvEDJjhf23wFmoeh/UY=",
+    "x86_64-darwin": "sha256-MzDtV+EsY3bRPX2ROaJXiUU/YukYwR2IAQceQ8NMLEU="
+  },
+  "urls": {
+    "aarch64-darwin": "https://github.com/tw93/Mole/releases/download/V1.39.0/binaries-darwin-arm64.tar.gz",
+    "x86_64-darwin": "https://github.com/tw93/Mole/releases/download/V1.39.0/binaries-darwin-amd64.tar.gz"
+  },
+  "version": "1.39.0"
+}

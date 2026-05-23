@@ -71,6 +71,16 @@ def _ensure_user_writable_tree(root: Path) -> None:
             file_path.chmod(file_path.stat().st_mode | 0o200)
 
 
+def _raise_failed_command(action: str, result: CommandResult) -> None:
+    if result.returncode == 0:
+        return
+    detail = result.stderr.strip() or result.stdout.strip()
+    message = f"{action} failed (exit {result.returncode})"
+    if detail:
+        message = f"{message}: {detail}"
+    raise RuntimeError(message)
+
+
 class FlakeInputUpdater(Updater):
     """Base updater for sources backed by a flake.lock input."""
 
@@ -589,6 +599,7 @@ class UvLockUpdater(FlakeInputUpdater):
             source_path_drain,
             "Missing nix eval result for source path",
         )
+        _raise_failed_command("nix eval", source_path_result)
         resolved_path = source_path_result.stdout.strip()
         if not resolved_path:
             msg = f"Failed to resolve source path for {self._input}"
@@ -636,7 +647,8 @@ class UvLockUpdater(FlakeInputUpdater):
             parse=expect_command_result,
         ):
             yield event
-        require_value(uv_result_drain, "Missing uv lock result")
+        uv_result = require_value(uv_result_drain, "Missing uv lock result")
+        _raise_failed_command("uv lock", uv_result)
         yield UpdateEvent.value(self.name, str(workspace_dir / self.lock_file))
 
     async def fetch_hashes(

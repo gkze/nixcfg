@@ -88,6 +88,11 @@ class FodTarget:
 _format_duration = format_duration
 
 
+def _target_label(target: FodTarget) -> str:
+    """Return the human-readable label used in logs and matrix entries."""
+    return f"{target.package}{target.fod_attr}"
+
+
 def _detect_system() -> str:
     """Return the current Nix system identifier (e.g. ``aarch64-darwin``)."""
     return normalize_nix_platform(platform.machine(), platform.system())
@@ -211,6 +216,49 @@ def _find_fod_targets(system: str) -> list[FodTarget]:
         )
 
     return targets
+
+
+def _filter_fod_targets(
+    targets: list[FodTarget],
+    packages: tuple[str, ...],
+) -> list[FodTarget]:
+    """Filter FOD targets to the requested package names."""
+    if not packages:
+        return targets
+
+    requested = frozenset(packages)
+    selected = [target for target in targets if target.package in requested]
+    matched = {target.package for target in selected}
+    missing = sorted(requested - matched)
+    if missing:
+        log.warning(
+            "No FOD sub-derivations matched package filter(s): %s",
+            ", ".join(missing),
+        )
+    return selected
+
+
+def _target_json(target: FodTarget, *, system: str) -> dict[str, str]:
+    """Return the stable JSON shape used by workflow matrix discovery."""
+    return {
+        "fodAttr": target.fod_attr,
+        "hashType": target.hash_type,
+        "label": _target_label(target),
+        "package": target.package,
+        "system": system,
+    }
+
+
+def _targets_json_payload(
+    targets: list[FodTarget], *, system: str
+) -> dict[str, object]:
+    """Return the JSON inventory for cache-warming workflow slices."""
+    return {
+        "kind": "nixcfg-fod-cache-targets",
+        "schemaVersion": 1,
+        "system": system,
+        "targets": [_target_json(target, system=system) for target in targets],
+    }
 
 
 def _build_fod_expr(package: str, fod_attr: str, *, system: str | None = None) -> str:
@@ -352,6 +400,8 @@ async def _async_main(
     system: str | None = None,
     dry_run: bool = False,
     cachix_cache: str | None = None,
+    packages: tuple[str, ...] = (),
+    list_json: bool = False,
 ) -> int:
     system = system or _detect_system()
     log.info("System: %s", system)
@@ -363,7 +413,12 @@ async def _async_main(
     else:
         log.info("No Cachix cache configured — relying on daemon for pushes")
 
-    targets = _find_fod_targets(system)
+    targets = _filter_fod_targets(_find_fod_targets(system), packages)
+    if list_json:
+        typer.echo(
+            json.dumps(_targets_json_payload(targets, system=system), sort_keys=True)
+        )
+        return 0
     if not targets:
         log.info("No FOD sub-derivations to build for %s", system)
         return 0
@@ -371,7 +426,7 @@ async def _async_main(
     log.info(
         "Found %d FOD target(s): %s",
         len(targets),
-        ", ".join(f"{t.package}{t.fod_attr}" for t in targets),
+        ", ".join(_target_label(target) for target in targets),
     )
 
     if dry_run:
@@ -383,7 +438,7 @@ async def _async_main(
     for target in targets:
         ok = await _build_one(target, system, cache_name=cache_name)
         if not ok:
-            failed.append(f"{target.package}{target.fod_attr}")
+            failed.append(_target_label(target))
 
     if failed:
         log.error(
@@ -403,6 +458,8 @@ def run(
     system: str | None = None,
     dry_run: bool = False,
     cachix_cache: str | None = None,
+    packages: tuple[str, ...] = (),
+    list_json: bool = False,
     verbose: bool = False,
 ) -> int:
     """Build cache-warming fixed-output derivations."""
@@ -413,7 +470,13 @@ def run(
     )
     try:
         return asyncio.run(
-            _async_main(system=system, dry_run=dry_run, cachix_cache=cachix_cache)
+            _async_main(
+                system=system,
+                dry_run=dry_run,
+                cachix_cache=cachix_cache,
+                packages=packages,
+                list_json=list_json,
+            )
         )
     except RuntimeError:
         log.exception("FOD cache warming failed")
@@ -448,6 +511,24 @@ def cli(
             help="List targets that would be built without building.",
         ),
     ] = False,
+    package: Annotated[
+        list[str] | None,
+        typer.Option(
+            "-p",
+            "--package",
+            help=(
+                "Only warm FOD targets for this package. "
+                "Repeat to select multiple packages."
+            ),
+        ),
+    ] = None,
+    list_json: Annotated[
+        bool,
+        typer.Option(
+            "--list-json",
+            help="Print discovered FOD cache targets as JSON and exit.",
+        ),
+    ] = False,
     system: Annotated[
         str | None,
         typer.Option(
@@ -466,6 +547,8 @@ def cli(
         code=run(
             cachix_cache=cachix_cache,
             dry_run=dry_run,
+            list_json=list_json,
+            packages=tuple(package or ()),
             system=system,
             verbose=verbose,
         )

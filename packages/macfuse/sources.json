@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-CaS0wjwZMK9FM1/BGWlnl9pBVi3sFjBgLS22N/SATyc="
+  },
+  "urls": {
+    "aarch64-darwin": "https://github.com/macfuse/macfuse/releases/download/macfuse-5.2.0/macfuse-5.2.0.dmg"
+  },
+  "version": "5.2.0"
+}

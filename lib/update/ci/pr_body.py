@@ -70,11 +70,30 @@ class SourceChange(PRBodyBaseModel):
     diff: str
 
 
+type CertificationStatus = Literal[
+    "success",
+    "degraded",
+    "failure",
+    "cancelled",
+    "skipped",
+    "timed_out",
+    "action_required",
+    "neutral",
+    "stale",
+    "queued",
+    "in_progress",
+    "waiting",
+    "pending",
+    "unknown",
+]
+
+
 class CertificationTarget(PRBodyBaseModel):
     """One specific installable cached during certification."""
 
     kind: Literal["target"] = "target"
     ref: str
+    status: CertificationStatus = "success"
 
 
 class CertificationSharedClosure(PRBodyBaseModel):
@@ -83,12 +102,20 @@ class CertificationSharedClosure(PRBodyBaseModel):
     kind: Literal["shared_closure"] = "shared_closure"
     refs: tuple[str, ...]
     excluded_heavy_closure_count: int
+    status: CertificationStatus = "success"
 
 
 type CertificationClosure = Annotated[
     CertificationSharedClosure | CertificationTarget,
     Field(discriminator="kind"),
 ]
+
+
+class CertificationJobResult(PRBodyBaseModel):
+    """One GitHub Actions job result captured from the certification run."""
+
+    name: str
+    status: CertificationStatus = "unknown"
 
 
 class CertificationSection(PRBodyBaseModel):
@@ -98,6 +125,8 @@ class CertificationSection(PRBodyBaseModel):
     updated_at: datetime
     elapsed_seconds: float
     cachix_name: str
+    status: CertificationStatus = "success"
+    jobs: tuple[CertificationJobResult, ...] = ()
     closures: tuple[CertificationClosure, ...]
 
 
@@ -283,24 +312,39 @@ def _render_source_changes(model: PRBodyModel) -> str | None:
 
 def render_certification_section(certification: CertificationSection) -> str:
     """Render one certification section as Markdown."""
+    degraded = certification.status != "success"
     lines = [
         "## Certification",
         f"Latest certification: {_markdown_link('workflow run', certification.workflow_url)}  ",
         f"Updated: `{_format_timestamp(certification.updated_at)}`  ",
         f"Elapsed: `{format_duration(certification.elapsed_seconds)}`",
-        "",
-        f"Closures pushed to Cachix (`{certification.cachix_name}`):",
     ]
+    if degraded:
+        lines.append(f"Status: `{certification.status}`")
+    lines.extend([
+        "",
+        (
+            "Certification target results:"
+            if degraded
+            else f"Closures pushed to Cachix (`{certification.cachix_name}`):"
+        ),
+    ])
     for closure in certification.closures:
+        status_suffix = f" - `{closure.status}`" if degraded else ""
         if isinstance(closure, CertificationTarget):
-            lines.append(f"- `{closure.ref}`")
+            lines.append(f"- `{closure.ref}`{status_suffix}")
             continue
         suffix = "s" if closure.excluded_heavy_closure_count != 1 else ""
         lines.append(
             "- Shared Darwin closure for "
             f"{_code_list_text(closure.refs)} excluding "
             f"{closure.excluded_heavy_closure_count} heavy package closure{suffix}"
+            f"{status_suffix}"
         )
+    non_success_jobs = [job for job in certification.jobs if job.status != "success"]
+    if non_success_jobs:
+        lines.extend(["", "Non-success jobs:"])
+        lines.extend(f"- `{job.name}`: `{job.status}`" for job in non_success_jobs)
     return "\n".join(lines)
 
 
@@ -335,8 +379,10 @@ def write_pr_body(*, output: str | Path, model: PRBodyModel) -> int:
 
 
 __all__ = [
+    "CertificationJobResult",
     "CertificationSection",
     "CertificationSharedClosure",
+    "CertificationStatus",
     "CertificationTarget",
     "FlakeInputSnapshot",
     "FlakeInputUpdate",

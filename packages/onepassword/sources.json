@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-dwE97R0ZXn5kH9GGlyE+Zizb2T5GasgpGW+5zUFog8U="
+  },
+  "urls": {
+    "aarch64-darwin": "https://downloads.1password.com/mac/1Password-8.12.21-aarch64.zip"
+  },
+  "version": "8.12.21"
+}

@@ -7,6 +7,7 @@ helpers, which populate :data:`UPDATERS`.
 
 import importlib.util
 import sys
+from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING
 
@@ -54,7 +55,6 @@ PlatformAPIUpdater = _platform_api_module.PlatformAPIUpdater
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 _DISCOVERY_LOCK = Lock()
 _DISCOVERY_STATE = {"complete": False}
@@ -65,8 +65,35 @@ def _updater_module_paths() -> dict[str, Path]:
     return package_file_map("updater.py")
 
 
+def _prepend_package_path(module_name: str, package_path: Path) -> None:
+    """Prefer a repo-local package path for dynamically imported updaters."""
+    module = sys.modules.get(module_name)
+    if module is None or not hasattr(module, "__path__"):
+        return
+
+    search_path = module.__path__
+    repo_path = str(package_path)
+    entries = list(search_path)
+    if entries[:1] == [repo_path]:
+        return
+
+    search_path[:] = [repo_path, *[entry for entry in entries if entry != repo_path]]
+
+
+def _prefer_repo_lib_paths() -> None:
+    """Allow current-worktree helper modules to satisfy updater imports."""
+    root = Path(REPO_ROOT)
+    _prepend_package_path("lib", root / "lib")
+    _prepend_package_path("lib.update", root / "lib" / "update")
+    _prepend_package_path(
+        "lib.update.updaters",
+        root / "lib" / "update" / "updaters",
+    )
+
+
 def _discover_updaters() -> None:
     """Import every discovered updater module to trigger registration."""
+    _prefer_repo_lib_paths()
     for name, updater_file in sorted(_updater_module_paths().items()):
         # Use a stable module name so re-imports are safe.
         mod_name = f"_updater_pkg.{name}"

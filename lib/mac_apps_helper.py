@@ -8,6 +8,7 @@ import shutil
 import stat
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Never, ReadOnly, TypedDict, TypeIs
 
@@ -15,6 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 EXPECTED_ARGC = 3
+MAX_INSTALL_WORKERS = 8
 
 
 class _ProfileBundleLeakAuditPayload(TypedDict):
@@ -203,7 +205,13 @@ def _chmod_user_writable(path: Path) -> None:
     except FileNotFoundError:
         return
 
-    path.chmod(mode | stat.S_IWUSR)
+    if mode & stat.S_IWUSR:
+        return
+
+    try:
+        path.chmod(mode | stat.S_IWUSR)
+    except PermissionError as exc:
+        _print_stderr(f"warning: could not make {path} user-writable: {exc}")
 
 
 def _make_tree_user_writable(path: Path) -> None:
@@ -214,10 +222,10 @@ def _make_tree_user_writable(path: Path) -> None:
     if not path.is_dir():
         return
 
-    for root, directories, files in os.walk(path, followlinks=False):
+    for root, directories, _files in os.walk(path, followlinks=False):
         root_path = Path(root)
         _chmod_user_writable(root_path)
-        for entry_name in [*directories, *files]:
+        for entry_name in directories:
             _chmod_user_writable(root_path / entry_name)
 
 
@@ -265,6 +273,7 @@ def _install_managed_app(
     rsync_path: str,
     writable: bool,
 ) -> None:
+    _ensure_single_path_component(bundle_name, field="bundleName")
     src = Path(source_path)
     dst = target_directory / bundle_name
 
@@ -311,8 +320,8 @@ def _profile_bundle_leak_audit(payload: Mapping[str, object]) -> None:
 
     _print_stderr(f"Managed macOS app bundles must not be exposed through {label}.")
     _print_stderr(
-        f"Move those packages out of {label} so /Applications stays the only "
-        "mutable app-bundle surface."
+        f"Move those packages out of {label} so the scoped macOS app manager "
+        "stays the only mutable app-bundle surface."
     )
     for offending_bundle in offending_bundles:
         _print_stderr(f" - {offending_bundle}")
@@ -336,7 +345,7 @@ def _remove_profile_copies(payload: Mapping[str, object]) -> None:
             continue
 
         _print_stderr(
-            f"removing Home Manager copy of system-managed app {target_path}..."
+            f"removing Home Manager copy of scoped managed app {target_path}..."
         )
         _make_tree_user_writable(target_path)
         _remove_path(target_path)
@@ -345,9 +354,14 @@ def _remove_profile_copies(payload: Mapping[str, object]) -> None:
 def _system_applications(payload: Mapping[str, object]) -> None:
     parsed = _system_applications_payload(payload)
     entries = parsed["entries"]
+    state_name = parsed["stateName"]
     target_directory = Path(parsed["targetDirectory"])
     state_directory = Path(parsed["stateDirectory"])
-    state_file = state_directory / f"{parsed['stateName']}.txt"
+    _ensure_single_path_component(state_name, field="stateName")
+    for entry in entries:
+        _ensure_single_path_component(entry["bundleName"], field="entries.bundleName")
+
+    state_file = state_directory / f"{state_name}.txt"
     current_apps = [entry["bundleName"] for entry in entries]
     current_app_set = set(current_apps)
     rsync_path = parsed["rsyncPath"]
@@ -359,6 +373,7 @@ def _system_applications(payload: Mapping[str, object]) -> None:
     for managed_app in _read_manifest(state_file):
         if not managed_app or managed_app in current_app_set:
             continue
+        _ensure_single_path_component(managed_app, field="manifest entry")
 
         target_path = target_directory / managed_app
         if _app_in_other_manifests(managed_app, state_directory, state_file):
@@ -368,17 +383,27 @@ def _system_applications(payload: Mapping[str, object]) -> None:
             continue
 
         _print_stderr(f"removing stale managed app {target_path}...")
+        _make_tree_user_writable(target_path)
         _remove_path(target_path)
 
-    for entry in entries:
-        _install_managed_app(
-            bundle_name=entry["bundleName"],
-            mode=entry["mode"],
-            source_path=entry["sourcePath"],
-            target_directory=target_directory,
-            rsync_path=rsync_path,
-            writable=writable,
-        )
+    if entries:
+        with ThreadPoolExecutor(
+            max_workers=min(len(entries), MAX_INSTALL_WORKERS)
+        ) as executor:
+            futures = [
+                executor.submit(
+                    _install_managed_app,
+                    bundle_name=entry["bundleName"],
+                    mode=entry["mode"],
+                    source_path=entry["sourcePath"],
+                    target_directory=target_directory,
+                    rsync_path=rsync_path,
+                    writable=writable,
+                )
+                for entry in entries
+            ]
+            for future in as_completed(futures):
+                future.result()
 
     state_file.write_text(
         "".join(f"{bundle_name}\n" for bundle_name in current_apps),

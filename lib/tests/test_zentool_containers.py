@@ -523,12 +523,12 @@ def test_session_check_reports_unknown_workspace_and_tab_containers(
     ]
 
 
-def test_apply_state_plan_writes_containers_and_prunes_removed_cookie_contexts(
+def test_apply_state_plan_writes_containers_and_prunes_removed_cookie_contexts_when_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     zentool: ModuleType,
 ) -> None:
-    """Applying a managed container change should back up and prune removed jars."""
+    """Opt-in cookie pruning should back up and prune removed container jars."""
     session_path = tmp_path / zentool.SESSION_FILENAME
     containers_path = tmp_path / zentool.CONTAINERS_FILENAME
     cookies_path = tmp_path / zentool.COOKIES_FILENAME
@@ -580,7 +580,9 @@ def test_apply_state_plan_writes_containers_and_prunes_removed_cookie_contexts(
         removed_context_ids={8},
     )
 
-    zentool.apply_state_plan(SimpleNamespace(profile="Default"), plan)
+    zentool.apply_state_plan(
+        SimpleNamespace(profile="Default", prune_cookies=True), plan
+    )
 
     assert container_writes == [(containers_path, desired_containers)]
     assert session_writes == [(session_path, desired_state)]
@@ -640,7 +642,9 @@ def test_apply_state_plan_skips_missing_cookie_backup_and_zero_prune_message(
         removed_context_ids={8},
     )
 
-    zentool.apply_state_plan(SimpleNamespace(profile="Default"), plan)
+    zentool.apply_state_plan(
+        SimpleNamespace(profile="Default", prune_cookies=True), plan
+    )
 
     assert backups == [containers_path]
     assert stdout == [
@@ -654,10 +658,77 @@ def test_apply_state_plan_skips_missing_cookie_backup_and_zero_prune_message(
     backups.clear()
     monkeypatch.setattr(zentool, "prune_cookie_contexts", lambda _path, _ids: 0)
 
-    zentool.apply_state_plan(SimpleNamespace(profile="Default"), plan)
+    zentool.apply_state_plan(
+        SimpleNamespace(profile="Default", prune_cookies=True), plan
+    )
 
     assert backups == [containers_path, cookies_path]
     assert "Pruned" not in "\n".join(stdout)
+
+
+def test_apply_state_plan_preserves_removed_container_cookies_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Apply should not touch cookies for removed containers unless asked."""
+    session_path = tmp_path / zentool.SESSION_FILENAME
+    containers_path = tmp_path / zentool.CONTAINERS_FILENAME
+    cookies_path = tmp_path / zentool.COOKIES_FILENAME
+    session_path.write_bytes(b"session")
+    containers_path.write_text("{}\n", encoding="utf-8")
+    with sqlite3.connect(cookies_path) as connection:
+        connection.execute(
+            "CREATE TABLE moz_cookies (id INTEGER PRIMARY KEY, originAttributes TEXT)"
+        )
+        connection.executemany(
+            "INSERT INTO moz_cookies(originAttributes) VALUES (?)",
+            [("^userContextId=8",), ("",)],
+        )
+
+    stdout: list[str] = []
+    backups: list[Path] = []
+    monkeypatch.setattr(zentool, "_stdout", stdout.append)
+    monkeypatch.setattr(
+        zentool,
+        "backup_session",
+        lambda path: path.with_name(f"{path.name}.bak"),
+    )
+
+    def fake_backup_file(path: Path) -> Path:
+        backups.append(path)
+        return path.with_name(f"{path.name}.bak")
+
+    monkeypatch.setattr(zentool, "backup_file", fake_backup_file)
+    monkeypatch.setattr(zentool, "cookies_file", lambda _profile: cookies_path)
+    monkeypatch.setattr(zentool, "write_containers", lambda _path, _state: None)
+    monkeypatch.setattr(zentool, "write_session", lambda _path, _state: None)
+    plan = zentool.StateApplyPlan(
+        session_path=session_path,
+        containers_path=containers_path,
+        desired_state=zentool.SessionState(),
+        desired_containers=zentool.ContainerState(),
+        diff_text="state diff",
+        containers_changed=True,
+        removed_context_ids={8},
+    )
+
+    zentool.apply_state_plan(SimpleNamespace(profile="Default"), plan)
+
+    assert backups == [containers_path]
+    assert stdout == [
+        f"Backup: {session_path.name}.bak",
+        f"Backup: {containers_path.name}.bak",
+        "Applied state successfully.",
+    ]
+    with sqlite3.connect(cookies_path) as connection:
+        remaining = [
+            row[0]
+            for row in connection.execute(
+                "SELECT originAttributes FROM moz_cookies ORDER BY id"
+            )
+        ]
+    assert remaining == ["^userContextId=8", ""]
 
 
 def test_build_state_apply_plan_reports_container_only_diffs(

@@ -125,6 +125,106 @@ def test_patch_apple_toolchain_main_guard_runs(
     assert exc.value.code == 0
 
 
+@pytest.mark.parametrize(
+    "use_lld_line",
+    [
+        '  use_lld = is_clang && current_os != "zos"\n',
+        '  use_lld = is_clang && current_os != "zos" && experimental_linker_path == ""\n',
+    ],
+)
+def test_patch_compiler_gni_script_success_and_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    use_lld_line: str,
+) -> None:
+    """Patch compiler.gni linker settings across pinned Chromium variants."""
+    namespace = _load_script("patch_compiler_gni.py")
+    target = tmp_path / "compiler.gni"
+    target.write_text(f"prefix\n{use_lld_line}suffix\n", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["patch_compiler_gni.py", str(target)])
+    assert _main(namespace)() == 0
+    patched = target.read_text(encoding="utf-8")
+    assert "use_lld = false" in patched
+
+    monkeypatch.setattr(sys, "argv", ["patch_compiler_gni.py"])
+    with pytest.raises(SystemExit, match="usage: patch_compiler_gni.py"):
+        _main(namespace)()
+
+    target.write_text("no anchor\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["patch_compiler_gni.py", str(target)])
+    with pytest.raises(SystemExit, match="compiler.gni use_lld anchor not found"):
+        _main(namespace)()
+
+
+def test_patch_compiler_gni_main_guard_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Execute the compiler.gni patch helper through its CLI entrypoint."""
+    script_path = _scripts_dir() / "patch_compiler_gni.py"
+    namespace = _load_script(script_path.name)
+    target = tmp_path / "compiler.gni"
+    target.write_text(f"prefix\n{namespace['_NEEDLES'][0]}suffix\n", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", [str(script_path), str(target)])
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(str(script_path), run_name="__main__")
+    assert exc.value.code == 0
+
+
+def test_patch_compiler_gni_script_patches_build_gn_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Strip newer Chromium compiler flags that packaged clangs do not support."""
+    namespace = _load_script("patch_compiler_gni.py")
+    target = tmp_path / "BUILD.gn"
+    target.write_text(
+        "prefix\n"
+        '      cflags += [ "-fno-lifetime-dse" ]\n'
+        '      "-fsanitize-ignore-for-ubsan-feature=array-bounds",\n'
+        '      cflags += [ "-fcrash-diagnostics-dir=" + clang_diagnostic_dir ]\n'
+        "suffix\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(sys, "argv", ["patch_compiler_gni.py", str(target)])
+    assert _main(namespace)() == 0
+    patched = target.read_text(encoding="utf-8")
+    assert "-fno-lifetime-dse" not in patched
+    assert "-fsanitize-ignore-for-ubsan-feature" not in patched
+    assert "-fcrash-diagnostics-dir=" in patched
+
+    monkeypatch.setattr(sys, "argv", ["patch_compiler_gni.py"])
+    with pytest.raises(SystemExit, match="usage: patch_compiler_gni.py"):
+        _main(namespace)()
+
+    target.write_text("no unsupported flags\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["patch_compiler_gni.py", str(target)])
+    assert _main(namespace)() == 0
+    assert target.read_text(encoding="utf-8") == "no unsupported flags\n"
+
+
+def test_patch_compiler_gni_main_guard_runs_for_build_gn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Execute the compiler BUILD.gn patch helper through its CLI entrypoint."""
+    script_path = _scripts_dir() / "patch_compiler_gni.py"
+    namespace = _load_script(script_path.name)
+    target = tmp_path / "BUILD.gn"
+    target.write_text(
+        str(namespace["_UNSUPPORTED_BUILD_GN_FLAG_LINES"][0]), encoding="utf-8"
+    )
+
+    monkeypatch.setattr(sys, "argv", [str(script_path), str(target)])
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(str(script_path), run_name="__main__")
+    assert exc.value.code == 0
+    assert target.read_text(encoding="utf-8") == ""
+
+
 def test_patch_build_rs_prebuilt_script_success_and_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

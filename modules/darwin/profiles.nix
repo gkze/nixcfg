@@ -8,7 +8,7 @@ let
 
   cfg = config.profiles.work;
   workProfileSkeleton = import ../_profiles-work-skeleton.nix {
-    enableDescription = "work profile — adds work Homebrew casks and Mac App Store apps";
+    enableDescription = "work profile — adds work Mac App Store apps";
   };
 in
 {
@@ -18,15 +18,8 @@ in
     darwin = {
       casks = mkOption {
         type = types.listOf types.str;
-        default = [
-          "1password"
-          "cleanshot"
-          "freelens"
-          "pants"
-          "tailscale-app"
-          "warp@preview"
-        ];
-        description = "Homebrew casks installed when the Darwin work profile is enabled.";
+        default = [ ];
+        description = "Additional Homebrew casks to install when the Darwin work profile needs an exception.";
       };
 
       masApps = mkOption {

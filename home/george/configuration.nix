@@ -168,49 +168,87 @@
     let
       macAppHelpers = import ../../lib/mac-apps.nix { inherit lib pkgs; };
 
-      # Keep the known-problem mutable macOS app bundles managed from /Applications
-      # only so Launch Services has one canonical bundle to touch and old store
-      # paths do not pick up App Management metadata that blocks garbage
-      # collection. `excludePackageName` marks the entries that also need to stay
-      # out of the GUI package set. VS Code Insiders still routes through
-      # /Applications, but keeps its dedicated programs.vscode handling.
-      managedMacAppRouting = [
-        {
-          excludePackageName = "chatgpt";
-          package = pkgs.chatgpt;
-          mode = "copy";
-        }
-        {
-          excludePackageName = "cursor";
-          package = pkgs.code-cursor;
-          mode = "copy";
-        }
-        {
-          excludePackageName = "datagrip";
-          package = pkgs.jetbrains.datagrip;
-          mode = "copy";
-        }
-        {
-          excludePackageName = "emdash";
-          package = pkgs.emdash;
-          mode = "copy";
-        }
-        {
-          package = pkgs.vscode-insiders;
-          mode = "copy";
-        }
-        { package = pkgs.netnewswire; }
-        { package = pkgs.gitbutler; }
-        {
-          excludePackageName = "wispr-flow";
-          package = pkgs.wispr-flow;
-        }
-        { package = pkgs.zoom-us; }
-        { package = pkgs.zen-twilight; }
-      ]
-      ++ lib.optionals config.profiles.work.enable [
-        { package = pkgs.town-assistant-nightly; }
-      ];
+      # Keep Nix-managed macOS app bundles in one scoped app manager. The
+      # default scope is user, which materializes apps in ~/Applications and
+      # keeps Dock paths, Launch Services, and Home Manager package exposure
+      # aligned from one source of truth.
+      managedMacAppRouting = {
+        airfoil.package = pkgs.airfoil;
+        antigravity.package = pkgs.antigravity;
+        appcleaner.package = pkgs.appcleaner;
+        arc.package = pkgs.arc;
+        betterdisplay.package = pkgs.betterdisplay;
+        chatgpt.package = pkgs.chatgpt;
+        claude.package = pkgs.claude;
+        codeedit.package = pkgs.codeedit;
+        "code-cursor".package = pkgs.code-cursor;
+        codex.package = pkgs.codex-desktop;
+        comet.package = pkgs.comet;
+        commander.package = pkgs.commander;
+        conductor.package = pkgs.conductor;
+        cyberduck.package = pkgs.cyberduck;
+        datagrip.package = pkgs.jetbrains.datagrip;
+        dbeaver.package = pkgs.dbeaver-bin;
+        discord.package = pkgs.discord;
+        docker.package = pkgs.docker-desktop;
+        element.package = pkgs.element-desktop;
+        emdash.package = pkgs.emdash;
+        figma.package = pkgs.figma;
+        framer.package = pkgs.framer;
+        "github-desktop".package = pkgs.github-desktop;
+        ghostty.package = pkgs.ghostty-tip;
+        gitbutler.package = pkgs.gitbutler;
+        "google-chrome".package = pkgs.google-chrome;
+        "google-drive".package = pkgs.google-drive;
+        granola.package = pkgs.granola;
+        hoppscotch.package = pkgs.hoppscotch;
+        iina.package = pkgs.iina;
+        keepingyouawake.package = pkgs.keepingyouawake;
+        linear.package = pkgs.linear;
+        "lm-studio".package = pkgs.lm-studio;
+        "logi-options-plus".package = pkgs.logi-options-plus;
+        loom.package = pkgs.loom;
+        macai.package = pkgs.macai;
+        netnewswire.package = pkgs.netnewswire;
+        nordvpn = {
+          package = pkgs.nordvpn;
+          scope = "system";
+        };
+        notion.package = pkgs.notion-app;
+        opencode.package = pkgs.opencode-desktop-dev;
+        postman.package = pkgs.postman;
+        raycast.package = pkgs.raycast;
+        rectangle.package = pkgs.rectangle;
+        rio.package = pkgs.rio;
+        "signal-beta".package = pkgs.signal-beta;
+        slack.package = pkgs.slack;
+        sloth.package = pkgs.sloth-app;
+        spacedrive.package = pkgs.spacedrive;
+        spotify.package = pkgs.spotify;
+        superset.package = pkgs.superset;
+        t3code.package = pkgs.t3code-desktop;
+        "vscode-insiders".package = pkgs.vscode-insiders;
+        wave.package = pkgs.wave;
+        "wispr-flow".package = pkgs.wispr-flow;
+        yaak.package = pkgs.yaak-beta;
+        zed.package = pkgs.zed-editor-nightly;
+        zen-twilight = {
+          package = pkgs.zen-twilight;
+          scope = "system";
+        };
+        zoom.package = pkgs.zoom-us;
+      }
+      // lib.optionalAttrs config.profiles.work.enable {
+        cleanshot.package = pkgs.cleanshot;
+        freelens.package = pkgs.freelens;
+        onepassword = {
+          package = pkgs.onepassword;
+          scope = "system";
+        };
+        tailscale.package = pkgs.tailscale-app;
+        "town-assistant".package = pkgs.town-assistant-nightly;
+        "warp-preview".package = pkgs.warp-preview;
+      };
       managedMacAppProjection = macAppHelpers.managedMacAppRoutingProjection managedMacAppRouting;
     in
     {
@@ -256,12 +294,22 @@
         heavyOptional.enable = lib.mkDefault false;
         cloud.enable = lib.mkDefault false;
         inherit (managedMacAppProjection) excludePackagesByName;
-        extraPackages = with pkgs; [
-          betterdisplay
-          rectangle
-        ];
+        extraPackages =
+          with pkgs;
+          [
+            claude-code
+            docker
+            docker-compose
+            docker-credential-helpers
+            kubectl
+            macfuse
+            mole-app
+          ]
+          ++ lib.optionals config.profiles.work.enable [
+            pkgs.pants-preview
+          ];
       };
-      macApps.systemApplications = managedMacAppProjection.systemApplications;
+      macApps.applications = managedMacAppProjection.applications;
       git = {
         signingKey = userMeta.gpg.keys.signing;
         identities = {
@@ -350,7 +398,7 @@
     };
     ghostty = {
       enable = true;
-      package = null; # installed via Homebrew on macOS
+      package = null; # GUI bundle is managed via nixcfg.macApps.applications on macOS
       enableZshIntegration = true;
       settings = {
         font-family = config.fonts.monospace.name;
@@ -534,8 +582,14 @@
     awscli.enable = true;
     bottom.enable = true;
     codex.enable = true;
-    discord.enable = true;
-    element-desktop.enable = true;
+    discord = {
+      enable = true;
+      package = null;
+    };
+    element-desktop = {
+      enable = true;
+      package = null;
+    };
     eza.enable = true;
     fd.enable = true;
     gemini-cli.enable = true;

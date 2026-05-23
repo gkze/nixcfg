@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-S+2mf2WTsJcYxLu18A5qfKd7T6wQEHsnJUzTO4CsWyk=",
+    "x86_64-darwin": "sha256-0KyU8b60dEBNOHXzKxGhwcQjPGBWNVnQxY/uVDn+NYs="
+  },
+  "urls": {
+    "aarch64-darwin": "https://updates.framer.com/electron/darwin/arm64/Framer-2026.12.6.zip",
+    "x86_64-darwin": "https://updates.framer.com/electron/darwin/x64/Framer-2026.12.6.zip"
+  },
+  "version": "2026.12.6"
+}

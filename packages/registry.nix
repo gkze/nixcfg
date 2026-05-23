@@ -40,134 +40,117 @@ let
       }) companionPackages.names
     );
 
-  packageMetadataOverrides = {
-    "go-cli-wrapper" = {
-      helper = true;
-    };
-    registry = {
-      helper = true;
-    };
-    "t3code-workspace" = {
-      helper = true;
-    };
-    commander = {
-      constraint = "darwin";
-    };
-    codex = {
-      constraint = [
-        "aarch64-darwin"
-        "x86_64-linux"
+  metadataFor =
+    attrs: names:
+    builtins.listToAttrs (
+      builtins.map (name: {
+        inherit name;
+        value = attrs;
+      }) names
+    );
+
+  constrainedTo = constraint: metadataFor { inherit constraint; };
+
+  packageMetadataOverrides =
+    let
+      helperPackages = [
+        "go-cli-wrapper"
+        "registry"
+        "t3code-workspace"
       ];
-    };
-    "codex-crate2nix-src" = {
-      constraint = [
-        "aarch64-darwin"
-        "x86_64-linux"
+      darwinPackages = [
+        "airfoil"
+        "arc"
+        "claude"
+        "cleanshot"
+        "codeedit"
+        "codex-desktop"
+        "comet"
+        "commander"
+        "conductor"
+        "figma"
+        "framer"
+        "granola"
+        "keepingyouawake"
+        "linear"
+        "loom"
+        "macai"
+        "mole-app"
+        "netnewswire"
+        "raycast"
+        "signal-beta"
+        "wispr-flow"
+        "zen-twilight"
       ];
-    };
-    "codex-desktop" = {
-      constraint = "darwin";
-    };
-    conductor = {
-      constraint = "darwin";
-    };
-    granola = {
-      constraint = "darwin";
-    };
-    netnewswire = {
-      constraint = "darwin";
-    };
-    "wispr-flow" = {
-      constraint = "darwin";
-    };
-    "zen-twilight" = {
-      constraint = "darwin";
-    };
-    emdash = {
-      constraint = [
-        "aarch64-darwin"
-        "aarch64-linux"
-        "x86_64-linux"
+      aarch64DarwinPackages = [
+        "antigravity"
+        "claude-code"
+        "docker-desktop"
+        "freelens"
+        "ghostty-tip"
+        "google-drive"
+        "lm-studio"
+        "logi-options-plus"
+        "macfuse"
+        "nordvpn"
+        "onepassword"
+        "rio"
+        "spotify"
+        "tailscale-app"
+        "t3code"
+        "t3code-desktop"
+        "town-assistant-nightly"
+        "warp-preview"
+        "wave"
+        "yaak-beta"
       ];
-    };
-    "goose-cli" = {
-      constraint = [
-        "aarch64-darwin"
-        "x86_64-linux"
+      darwinLinuxPackages = [
+        "codex"
+        "codex-crate2nix-src"
+        "gitbutler"
+        "gitbutler-crate2nix-src"
+        "goose-cli"
+        "goose-cli-crate2nix-src"
+        "superset"
+        "zed-editor-nightly"
+        "zed-editor-nightly-crate2nix-src"
       ];
-    };
-    "goose-cli-crate2nix-src" = {
-      constraint = [
-        "aarch64-darwin"
-        "x86_64-linux"
+      nonX86DarwinLinuxPackages = [
+        "emdash"
+        "pants-preview"
       ];
-    };
-    gitbutler = {
-      constraint = [
-        "aarch64-darwin"
-        "x86_64-linux"
+      allLocalSystemsPackages = [
+        "opencode-desktop"
+        "opencode-desktop-dev"
       ];
+    in
+    metadataFor { helper = true; } helperPackages
+    // constrainedTo "darwin" darwinPackages
+    // constrainedTo [ "aarch64-darwin" ] aarch64DarwinPackages
+    // constrainedTo [
+      "aarch64-darwin"
+      "x86_64-linux"
+    ] darwinLinuxPackages
+    // constrainedTo [
+      "aarch64-darwin"
+      "aarch64-linux"
+      "x86_64-linux"
+    ] nonX86DarwinLinuxPackages
+    // constrainedTo [
+      "aarch64-darwin"
+      "x86_64-darwin"
+      "aarch64-linux"
+      "x86_64-linux"
+    ] allLocalSystemsPackages
+    // {
+      sculptor = {
+        constraint = [
+          "aarch64-darwin"
+          "x86_64-darwin"
+          "x86_64-linux"
+        ];
+      };
     };
-    "gitbutler-crate2nix-src" = {
-      constraint = [
-        "aarch64-darwin"
-        "x86_64-linux"
-      ];
-    };
-    "opencode-desktop" = {
-      constraint = [
-        "aarch64-darwin"
-        "x86_64-darwin"
-        "aarch64-linux"
-        "x86_64-linux"
-      ];
-    };
-    "opencode-desktop-dev" = {
-      constraint = [
-        "aarch64-darwin"
-        "x86_64-darwin"
-        "aarch64-linux"
-        "x86_64-linux"
-      ];
-    };
-    raycast = {
-      constraint = "darwin";
-    };
-    sculptor = {
-      constraint = [
-        "aarch64-darwin"
-        "x86_64-darwin"
-        "x86_64-linux"
-      ];
-    };
-    superset = {
-      constraint = [
-        "aarch64-darwin"
-        "x86_64-linux"
-      ];
-    };
-    t3code = {
-      constraint = [ "aarch64-darwin" ];
-    };
-    "t3code-desktop" = {
-      constraint = [ "aarch64-darwin" ];
-    };
-    "town-assistant-nightly" = {
-      constraint = [ "aarch64-darwin" ];
-    };
-    "zed-editor-nightly" = {
-      constraint = [
-        "aarch64-darwin"
-        "x86_64-linux"
-      ];
-    };
-    "zed-editor-nightly-crate2nix-src" = {
-      constraint = [
-        "aarch64-darwin"
-        "x86_64-linux"
-      ];
-    };
-  };
 
   packageMetadata = builtins.listToAttrs (
     builtins.map (name: {

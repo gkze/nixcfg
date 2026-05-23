@@ -32,7 +32,7 @@ jobs:
       - name: Classify pull request event
         id: event
         run: >-
-          python3 -m lib.update.ci.self_heal pr-event-outputs --event-path
+          python3 lib/update/ci/self_heal.py pr-event-outputs --event-path
           "$GITHUB_EVENT_PATH" --github-output "$GITHUB_OUTPUT"
 
   enable-auto-merge:
@@ -62,7 +62,7 @@ jobs:
           body = payload["pull_request"].get("body") or ""
           print(body)
           PY
-          python3 -m lib.update.ci.self_heal verify-auto-fix-classifier \
+          python3 lib/update/ci/self_heal.py verify-auto-fix-classifier \
             --body-path "${body_path}"
       - name: Fail closed unless actual repair diff stays in allowed lanes
         env:
@@ -78,7 +78,7 @@ jobs:
           gh pr diff "${PR_NUMBER}" \
             --repo "${GITHUB_REPOSITORY}" \
             --name-only >"${paths_file}"
-          python3 -m lib.update.ci.self_heal validate-auto-fix-paths \
+          python3 lib/update/ci/self_heal.py validate-auto-fix-paths \
             --paths-file "${paths_file}"
       - name: Record repair cycle
         env:
@@ -119,7 +119,7 @@ jobs:
           gh issue view "${issue_number}" --json comments >"${comments_json}"
           set +e
           remaining="$(
-            python3 -m lib.update.ci.self_heal remaining-cycles \
+            python3 lib/update/ci/self_heal.py remaining-cycles \
               --comments-json "${comments_json}" \
               --campaign-key "${campaign_key}"
           )"
@@ -127,7 +127,7 @@ jobs:
           set -e
           if [ "${remaining_status}" -ne 0 ]; then
             comment_body="$(mktemp)"
-            python3 -m lib.update.ci.self_heal render-ledger-comment \
+            python3 lib/update/ci/self_heal.py render-ledger-comment \
               --campaign-key "${campaign_key}" \
               --attempt-kind stop \
               --run-id "${run_id}" \
@@ -140,7 +140,7 @@ jobs:
           fi
 
           comment_body="$(mktemp)"
-          python3 -m lib.update.ci.self_heal render-ledger-comment \
+          python3 lib/update/ci/self_heal.py render-ledger-comment \
             --campaign-key "${campaign_key}" \
             --attempt-kind repair \
             --run-id "${run_id}" \
@@ -164,7 +164,7 @@ jobs:
           gh api \
             "repos/${GITHUB_REPOSITORY}/${protection_path}" \
             >"${protection_json}"
-          python3 -m lib.update.ci.self_heal required-checks-present \
+          python3 lib/update/ci/self_heal.py required-checks-present \
             --protection-json "${protection_json}"
       - name: Enable signed squash auto-merge
         env:

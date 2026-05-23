@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-xUta3nG2t/Ddvd1ODlR5Wx+QvE933aLblvaqe2N48Rk=",
+    "x86_64-darwin": "sha256-xUta3nG2t/Ddvd1ODlR5Wx+QvE933aLblvaqe2N48Rk="
+  },
+  "urls": {
+    "aarch64-darwin": "https://releases.arc.net/release/Arc-1.148.0-81146.zip",
+    "x86_64-darwin": "https://releases.arc.net/release/Arc-1.148.0-81146.zip"
+  },
+  "version": "1.148.0"
+}

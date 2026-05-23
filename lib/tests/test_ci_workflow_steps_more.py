@@ -86,6 +86,45 @@ def _write_existing_pr_body(path: Path) -> Path:
     return path
 
 
+def _write_certification_jobs(path: Path) -> Path:
+    path.write_text(
+        json.dumps({
+            "jobs": [
+                {"name": "alpha", "status": "completed", "conclusion": "success"},
+                {"name": "beta", "status": "completed", "conclusion": "failure"},
+                {
+                    "name": "darwin-shared",
+                    "status": "completed",
+                    "conclusion": "success",
+                },
+                {
+                    "name": "darwin-argus",
+                    "status": "completed",
+                    "conclusion": "skipped",
+                },
+                {
+                    "name": "darwin-rocinante",
+                    "status": "completed",
+                    "conclusion": "success",
+                },
+                {
+                    "name": "linux-x86_64",
+                    "status": "completed",
+                    "conclusion": "success",
+                },
+                {
+                    "name": "publish-pr-certification",
+                    "status": "in_progress",
+                    "conclusion": None,
+                },
+            ]
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def _input_info(
     name: str,
     *,
@@ -175,7 +214,7 @@ def test_workflow_pr_body_helper_edge_paths(tmp_path: Path) -> None:
         )
 
 
-def test_workflow_certification_helper_error_paths() -> None:
+def test_workflow_certification_helper_error_paths(tmp_path: Path) -> None:
     """Exercise malformed certification workflow metadata branches."""
     with pytest.raises(TypeError, match="non-empty string field"):
         cert.required_string_field({"name": "   "}, field="name", context="payload")
@@ -261,6 +300,14 @@ def test_workflow_certification_helper_error_paths() -> None:
         cert._certification_linux_targets(
             WorkflowAnalysis.from_jobs({"linux-x86_64": {"steps": []}})
         )
+
+    assert cert._normalize_job_status("timed-out") == "timed_out"
+    assert cert._normalize_job_status("not-real") == "unknown"
+
+    jobs_payload = tmp_path / "jobs.json"
+    jobs_payload.write_text(json.dumps({"jobs": {}}), encoding="utf-8")
+    with pytest.raises(TypeError, match="Expected jobs list"):
+        cert._load_certification_job_results(jobs_payload)
 
 
 def test_xcode_version_key_and_git_show_fallback(
@@ -389,8 +436,18 @@ def test_direct_command_helpers_call_expected_subprocesses(
     assert ["nix", "flake", "lock", "--update-input", "alpha"] in commands
     assert ["nix", "flake", "lock", "--update-input", "nh"] not in commands
     assert ["nix", "flake", "lock", "--update-input", "nested-follow"] not in commands
-    assert ["brew", "install", "--cask", "macfuse"] in commands
-    assert ["brew", "install", "1password-cli"] in commands
+    assert [
+        "env",
+        "NIXPKGS_ALLOW_UNFREE=1",
+        "nix",
+        "profile",
+        "install",
+        "--impure",
+        "--inputs-from",
+        ".",
+        "nixpkgs#_1password-cli",
+        ".#pkgs.aarch64-darwin.macfuse",
+    ] in commands
     assert [
         "env",
         "NIXPKGS_ALLOW_UNFREE=1",
@@ -1268,6 +1325,46 @@ def test_render_certification_pr_body_appends_section(
     assert "- `.#darwinConfigurations.rocinante.system`" in rendered
     assert "- `.#pkgs.x86_64-linux.nixcfg`" in rendered
     assert ws.extract_pr_body_model(rendered).certification is not None
+
+
+def test_render_certification_pr_body_reports_degraded_jobs(
+    tmp_path: Path,
+) -> None:
+    """Render package-level certification results when some jobs did not pass."""
+    existing_body = tmp_path / "body.md"
+    output = tmp_path / "updated.md"
+    workflow = _write_certification_workflow(tmp_path / "workflow.yml")
+    jobs = _write_certification_jobs(tmp_path / "jobs.json")
+    _write_existing_pr_body(existing_body)
+
+    rc = ws.render_certification_pr_body(
+        existing_body=existing_body,
+        output=output,
+        options=ws.CertificationPRBodyOptions(
+            workflow_url="https://example.test/actions/runs/42",
+            started_at="2026-04-24T12:00:00Z",
+            updated_at="2026-04-24T14:15:00Z",
+            cachix_name="gkze",
+            workflow_path=workflow,
+            jobs_path=jobs,
+        ),
+    )
+
+    assert rc == 0
+    rendered = output.read_text(encoding="utf-8")
+    assert "Status: `degraded`" in rendered
+    assert "Certification target results:" in rendered
+    assert "- `.#pkgs.aarch64-darwin.alpha` - `success`" in rendered
+    assert "- `.#pkgs.aarch64-darwin.beta` - `failure`" in rendered
+    assert "- `.#darwinConfigurations.argus.system` - `skipped`" in rendered
+    assert "- `beta`: `failure`" in rendered
+    assert "- `darwin-argus`: `skipped`" in rendered
+    assert "publish-pr-certification" not in rendered
+    model = ws.extract_pr_body_model(rendered)
+    assert model.certification is not None
+    assert model.certification.status == "degraded"
+    assert model.certification.jobs[1].name == "beta"
+    assert model.certification.jobs[1].status == "failure"
 
 
 def test_render_certification_pr_body_replaces_existing_section(

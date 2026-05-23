@@ -50,6 +50,20 @@ class FakeDiff:
         return self.truthy
 
 
+def make_state_diff(
+    zentool: ModuleType,
+    text: str,
+    *,
+    truthy: bool = True,
+) -> object:
+    """Build one StateDiff test double with compact snapshots."""
+    return zentool.StateDiff(
+        current_snapshot={"Workspace": [{"Inbox": "https://old.example"}]},
+        desired_snapshot={"Workspace": [{"Inbox": "https://new.example"}]},
+        diff=FakeDiff(text, truthy=truthy),
+    )
+
+
 def make_entry(zentool: ModuleType, *, url: str, title: str = "") -> object:
     """Build one compact session history entry."""
     return zentool.SessionEntry(url=url, title=title)
@@ -210,7 +224,13 @@ def test_cmd_diff_reports_no_changes_for_state_only_scope(
     )
     monkeypatch.setattr(zentool, "load_config", lambda _path: zentool.ZenConfig())
     monkeypatch.setattr(
-        zentool, "diff_session", lambda _session, _config, _containers: None
+        zentool,
+        "build_state_diff",
+        lambda _session, _config, _containers: make_state_diff(
+            zentool,
+            "",
+            truthy=False,
+        ),
     )
     monkeypatch.setattr(
         zentool,

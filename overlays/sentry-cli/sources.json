@@ -1,13 +1,13 @@
 {
   "hashes": [
     {
-      "hash": "sha256-ibLkKvHRSQBjMwurH2DgB97Ub0bT70IR5CEGdobL3b0=",
+      "hash": "sha256-OsfMC9JKK4Bl08RjXdrw9CJ0KuLk0HUE/JBOsfe/WgU=",
       "hashType": "cargoHash"
     },
     {
-      "hash": "sha256-ZCjtrDHSHLK0P1OBMEirVZ12t1A85P4sLDM8jJlkvNk=",
+      "hash": "sha256-lKZ+3mSnXnL/Oqb/QhsmBxSQuCPlYai5psVmHY2+WmY=",
       "hashType": "srcHash"
     }
   ],
-  "version": "3.4.2"
+  "version": "3.4.3"
 }

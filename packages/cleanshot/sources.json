@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-3d1ySCEghWumophBWarKtHyiIb4Yy5RnhnpPO6HN2KA=",
+    "x86_64-darwin": "sha256-3d1ySCEghWumophBWarKtHyiIb4Yy5RnhnpPO6HN2KA="
+  },
+  "urls": {
+    "aarch64-darwin": "https://updates.getcleanshot.com/v3/CleanShot-X-4.8.8.dmg",
+    "x86_64-darwin": "https://updates.getcleanshot.com/v3/CleanShot-X-4.8.8.dmg"
+  },
+  "version": "4.8.8"
+}

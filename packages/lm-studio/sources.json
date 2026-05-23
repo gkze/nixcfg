@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-9Kcj+IA5DhJuxSetKCHCPJ5GECCpnjnZlYPXD9jafy0="
+  },
+  "urls": {
+    "aarch64-darwin": "https://installers.lmstudio.ai/darwin/arm64/0.4.14-4/LM-Studio-0.4.14-4-arm64.dmg"
+  },
+  "version": "0.4.14-4"
+}
