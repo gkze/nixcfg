@@ -412,6 +412,21 @@ def test_validate_workflow_structure_contracts_accepts_valid_certify_workflow(
         ),
         pytest.param(
             _valid_refresh_workflow_text().replace(
+                "steps:\n              - run: nix run .#nixcfg -- ci workflow darwin eval-lock-smoke",
+                (
+                    "steps:\n"
+                    "              - uses: actions/checkout@v4\n"
+                    "                with:\n"
+                    "                  persist-credentials: false\n"
+                    "              - run: nix run .#nixcfg -- ci workflow darwin eval-lock-smoke"
+                ),
+                1,
+            ),
+            "checkout steps must use secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN",
+            id="requires-checkout-token",
+        ),
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
                 "          darwin-lock-smoke:\n            needs: update-lock",
                 "          darwin-lock-smoke:\n            needs: resolve-versions",
                 1,

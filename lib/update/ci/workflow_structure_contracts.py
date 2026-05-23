@@ -33,6 +33,7 @@ _UPDATE_API_TOKEN_RUN_MARKERS = (
     "nix run .#nixcfg -- update --list --json",
     "nix run .#nixcfg -- update --native-only",
 )
+_CHECKOUT_ACTION_PREFIX = "actions/checkout@"
 _EXCLUDE_REF_RE = re.compile(r"--exclude-ref\s+([^\s\\]+)")
 _STRUCTURE_INVALID_NEEDS_VALUE_MESSAGE = (
     "Job {job_id} defines unsupported needs {raw_needs!r}"
@@ -266,6 +267,24 @@ def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -
         compute_hashes_aarch64_linux,
     ):
         _validate_update_api_token(job)
+    for job in workflow.jobs.values():
+        _validate_checkout_token(job)
+
+
+def _validate_checkout_token(job: WorkflowJobAnalysis) -> None:
+    """Require the update token for checkout steps in update workflows."""
+    for step in job.steps:
+        uses = step.get("uses")
+        if not isinstance(uses, str) or not uses.startswith(_CHECKOUT_ACTION_PREFIX):
+            continue
+        config = step.get("with")
+        token = config.get("token") if isinstance(config, dict) else None
+        if token != _UPDATE_GITHUB_ENV_VALUE:
+            msg = (
+                f"{job.job_id} checkout steps must use "
+                "secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN"
+            )
+            raise RuntimeError(msg)
 
 
 def _validate_update_api_token(job: WorkflowJobAnalysis) -> None:
@@ -323,6 +342,8 @@ def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -
             "the triggering workflow_run head_sha"
         ),
     )
+    for job in workflow.jobs.values():
+        _validate_checkout_token(job)
 
     darwin_full_smoke.require_run_marker(_DARWIN_FULL_SMOKE_MARKER)
 
