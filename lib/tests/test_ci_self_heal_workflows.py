@@ -54,10 +54,8 @@ def _checkout_refs(job: dict[str, Any]) -> tuple[str, ...]:
     for step in job.get("steps", ()):
         if not isinstance(step, dict):
             continue
-        if (
-            step.get("uses")
-            != "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd"
-        ):
+        uses = step.get("uses")
+        if not isinstance(uses, str) or not uses.startswith("actions/checkout@"):
             continue
         with_args = step.get("with", {})
         if isinstance(with_args, dict) and isinstance(with_args.get("ref"), str):
