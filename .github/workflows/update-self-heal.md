@@ -189,7 +189,7 @@ safe-outputs:
           required: true
           type: string
       steps:
-        - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
           with:
             ref: main
             persist-credentials: false
@@ -300,7 +300,7 @@ safe-outputs:
           required: true
           type: string
       steps:
-        - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
           with:
             ref: main
             persist-credentials: false
