@@ -30,11 +30,10 @@ jobs:
       - &setup_nix # Determinate Nix v3.17.1
         uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919
         with:
-          # The default github.token becomes a Nix access-token and has
-          # produced HTTP 401 "Bad credentials" on public flake tarball
-          # fetches. Use a real PAT when configured; otherwise leave Nix
-          # unauthenticated instead of injecting a bad credential.
-          github-token: ${{ secrets.NIX_GITHUB_TOKEN }}
+          # Prefer a PAT when configured, but always give Nix an authenticated
+          # GitHub token so flake input fetches do not fall back to the tiny
+          # unauthenticated API rate limit.
+          github-token: ${{ secrets.NIX_GITHUB_TOKEN || github.token }}
           extra-conf: |
             extra-substituters = https://cache.garnix.io
             extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
@@ -455,7 +454,9 @@ jobs:
       - compute-hashes-aarch64-darwin
       - compute-hashes-x86_64-linux
       - compute-hashes-aarch64-linux
-    if: always() && !cancelled()
+    if: >-
+      always() && !cancelled() &&
+      needs.discover-update-targets.result == 'success'
     runs-on: ubuntu-24.04
     name: aggregate / ${{ matrix.platform }}
     timeout-minutes: 30
@@ -487,11 +488,12 @@ jobs:
           path: |
             aggregated-${{ matrix.platform }}/packages/**/sources.json
             aggregated-${{ matrix.platform }}/overlays/**/sources.json
+            aggregated-${{ matrix.platform }}/nixcfg-update-target-status.json
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: matrix.platform == 'x86_64-linux'
         with:
           name: generated-artifacts-${{ matrix.platform }}
-          if-no-files-found: error
+          if-no-files-found: ignore
           path: |
             aggregated-${{ matrix.platform }}/packages/**/uv.lock
             aggregated-${{ matrix.platform }}/packages/**/deno-deps.json
@@ -500,7 +502,7 @@ jobs:
         if: matrix.platform == 'aarch64-darwin'
         with:
           name: generated-artifacts-${{ matrix.platform }}-runtime-locks
-          if-no-files-found: error
+          if-no-files-found: ignore
           path: |
             aggregated-${{ matrix.platform }}/packages/t3code/bun.lock
             aggregated-${{ matrix.platform }}/packages/t3code-desktop/bun.lock
@@ -537,11 +539,13 @@ jobs:
         # canonical artifact at the repository root so checked-in lockfiles and
         # manifests are carried forward into merged-sources and the PR branch.
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        continue-on-error: true
         with:
           name: generated-artifacts-x86_64-linux
           path: packages
       - name: Materialize checked-in Darwin updater artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        continue-on-error: true
         with:
           name: generated-artifacts-aarch64-darwin-runtime-locks
           path: packages

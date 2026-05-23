@@ -40,8 +40,10 @@ def _write_source_entry(path: Path, payload: dict[str, object] | None = None) ->
     )
 
 
-def test_merge_sources_fails_for_missing_and_empty_roots(tmp_path: Path) -> None:
-    """Reject merge inputs when any requested root is missing or empty."""
+def test_merge_sources_fails_for_missing_roots_and_unmarked_empty_roots(
+    tmp_path: Path,
+) -> None:
+    """Reject missing roots and accidental empty roots without status metadata."""
     valid_root = tmp_path / "sources-x86_64-linux"
     empty_root = tmp_path / "sources-aarch64-linux"
     missing_root = tmp_path / "sources-aarch64-darwin"
@@ -65,6 +67,17 @@ def test_merge_sources_fails_for_missing_and_empty_roots(tmp_path: Path) -> None
     message = str(exc.value)
     assert str(missing_root) in message
     assert str(empty_root) in message
+
+
+def test_merge_sources_allows_status_only_roots(tmp_path: Path) -> None:
+    """Status-only roots mean no package slice produced source changes."""
+    root = tmp_path / "sources-x86_64-linux"
+    output_root = tmp_path / "repo"
+    root.mkdir(parents=True)
+    (root / "nixcfg-update-target-status.json").write_text("{}\n", encoding="utf-8")
+    _write_source_entry(output_root / "packages" / "demo" / "sources.json")
+
+    assert main([str(root), "--output-root", str(output_root)]) == 0
 
 
 def test_merge_sources_keeps_platform_hashes_from_matching_roots(

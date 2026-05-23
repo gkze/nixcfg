@@ -20,6 +20,7 @@ from lib.update.paths import (
 )
 
 DEFAULT_OUTPUT_ROOT = Path()
+_UPDATE_TARGET_STATUS_FILE_NAME = "nixcfg-update-target-status.json"
 
 
 def _load_entry(path: Path) -> SourceEntry:
@@ -278,6 +279,8 @@ def _collect_merged_entries(
 
         source_files = package_file_map_in(root, SOURCES_FILE_NAME)
         if not source_files:
+            if (root / _UPDATE_TARGET_STATUS_FILE_NAME).is_file():
+                continue
             empty_roots.append(root_arg)
             continue
 
@@ -359,7 +362,7 @@ def run(*, roots: list[str], output_root: Path) -> int:
     _validate_input_roots(missing_roots, empty_roots)
 
     if loaded == 0:
-        return 1
+        return 0
 
     _write_merged_entries(output_root, merged)
 

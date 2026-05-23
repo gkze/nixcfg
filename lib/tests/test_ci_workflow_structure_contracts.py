@@ -55,9 +55,13 @@ def _valid_refresh_workflow_text() -> str:
             runs-on: ubuntu-latest
           aggregate-platform-updates:
             needs:
+              - discover-update-targets
               - compute-hashes-aarch64-darwin
               - compute-hashes-x86_64-linux
               - compute-hashes-aarch64-linux
+            if: >-
+              always() && !cancelled() &&
+              needs.discover-update-targets.result == 'success'
             runs-on: ubuntu-latest
           create-pr:
             runs-on: ubuntu-latest
@@ -419,6 +423,17 @@ def test_validate_workflow_structure_contracts_accepts_valid_certify_workflow(
             ),
             "aggregate-platform-updates must depend on compute-hashes-aarch64-linux",
             id="requires-aggregate-aarch64-linux",
+        ),
+        pytest.param(
+            _valid_refresh_workflow_text().replace(
+                "            if: >-\n"
+                "              always() && !cancelled() &&\n"
+                "              needs.discover-update-targets.result == 'success'\n",
+                "",
+                1,
+            ),
+            "target discovery did not succeed",
+            id="requires-aggregate-discovery-guard",
         ),
         pytest.param(
             _valid_refresh_workflow_text().replace(

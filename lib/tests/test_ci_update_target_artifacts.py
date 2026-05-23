@@ -441,15 +441,22 @@ def test_aggregate_artifacts_skips_malformed_and_missing_copied_paths(
     assert collection["targets"][0]["target"] == 1
 
 
-def test_aggregate_artifacts_requires_matching_statuses(tmp_path: Path) -> None:
-    """A platform aggregation with no target reports should fail loudly."""
-    with pytest.raises(RuntimeError, match="No update target statuses"):
-        artifacts.aggregate_artifacts(
-            artifacts_dir=tmp_path,
-            output_root=tmp_path / "repo",
-            platform="x86_64-linux",
-            status_output=tmp_path / "status.json",
-        )
+def test_aggregate_artifacts_writes_empty_collection_without_statuses(
+    tmp_path: Path,
+) -> None:
+    """A platform with no target reports still emits a status sentinel."""
+    collection = artifacts.aggregate_artifacts(
+        artifacts_dir=tmp_path,
+        output_root=tmp_path / "repo",
+        platform="x86_64-linux",
+        status_output=tmp_path / "status.json",
+    )
+
+    assert collection["targets"] == []
+    assert collection["eligibleTargets"] == []
+    assert json.loads((tmp_path / "status.json").read_text("utf-8"))["kind"] == (
+        artifacts.STATUS_COLLECTION_KIND
+    )
 
 
 def test_update_target_artifacts_main_reports_argument_errors(

@@ -22,6 +22,7 @@ _DARWIN_LOCK_SMOKE_MARKER = "nix run .#nixcfg -- ci workflow darwin eval-lock-sm
 _SHARED_CLOSURE_MARKER = "nix run .#nixcfg -- ci cache closure"
 _DISPATCH_CI_MARKER = "gh workflow run ci.yml"
 _DISPATCH_CERTIFY_MARKER = "gh workflow run update-certify.yml"
+_AGGREGATE_DISCOVER_SUCCESS_MARKER = "needs.discover-update-targets.result == 'success'"
 _CERTIFICATION_HEAD_SHA_MARKER = "WORKFLOW_RUN_HEAD_SHA"
 _CERTIFICATION_ANCESTRY_MARKER = "merge-base --is-ancestor"
 _CERTIFICATION_JOBS_API_MARKER = "/actions/runs/${{ github.run_id }}/jobs?per_page=100"
@@ -203,6 +204,12 @@ def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -
         ),
     )
     aggregate_platform_updates.require_need(
+        "discover-update-targets",
+        missing_need_message=(
+            "aggregate-platform-updates must depend on discover-update-targets"
+        ),
+    )
+    aggregate_platform_updates.require_need(
         "compute-hashes-aarch64-darwin",
         missing_need_message=(
             "aggregate-platform-updates must depend on compute-hashes-aarch64-darwin"
@@ -220,6 +227,16 @@ def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -
             "aggregate-platform-updates must depend on compute-hashes-aarch64-linux"
         ),
     )
+    aggregate_if = aggregate_platform_updates.data.get("if")
+    if (
+        not isinstance(aggregate_if, str)
+        or _AGGREGATE_DISCOVER_SUCCESS_MARKER not in aggregate_if
+    ):
+        msg = (
+            "aggregate-platform-updates must skip when target discovery did not "
+            "succeed so upstream lock failures do not create secondary aggregate failures"
+        )
+        raise RuntimeError(msg)
     permissions = create_pr.data.get("permissions")
     if not isinstance(permissions, dict) or permissions.get("actions") != "write":
         msg = "create-pr must grant actions: write to dispatch PR-head validation"

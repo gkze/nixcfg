@@ -213,10 +213,6 @@ def aggregate_artifacts(
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
 
-    if not statuses:
-        msg = f"No update target statuses found for {platform} under {artifacts_dir}"
-        raise RuntimeError(msg)
-
     collection = {
         "schemaVersion": 1,
         "kind": STATUS_COLLECTION_KIND,

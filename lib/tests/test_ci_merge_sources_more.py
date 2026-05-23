@@ -277,13 +277,13 @@ def test_merge_entry_fallback_to_hash_collection_merge() -> None:
 def test_collect_and_run_exit_paths(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Cover run() early return and validation failure paths."""
+    """Cover status-only no-op return and validation failure paths."""
     monkeypatch.setattr(
         ms,
         "_collect_merged_entries",
         lambda _roots, *, baseline=None: ({}, 0, [], []),
     )
-    assert ms.run(roots=["x"], output_root=tmp_path) == 1
+    assert ms.run(roots=["x"], output_root=tmp_path) == 0
 
     monkeypatch.setattr(
         ms,
