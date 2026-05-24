@@ -460,6 +460,7 @@ def test_direct_command_helpers_call_expected_subprocesses(
                     "inputs": {
                         "alpha": "alpha-node",
                         "nh": "nh-node",
+                        "nixvim": "nixvim-node",
                         "nested-follow": ["alpha", "nixpkgs"],
                     }
                 }
@@ -488,6 +489,7 @@ def test_direct_command_helpers_call_expected_subprocesses(
 
     assert ["nix", "flake", "lock", "--update-input", "alpha"] in commands
     assert ["nix", "flake", "lock", "--update-input", "nh"] not in commands
+    assert ["nix", "flake", "lock", "--update-input", "nixvim"] not in commands
     assert ["nix", "flake", "lock", "--update-input", "nested-follow"] not in commands
     assert [
         "env",

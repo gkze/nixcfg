@@ -36,11 +36,16 @@ _BRANCH_REF_PATTERNS = {
     "nixpkgs-unstable",
 }
 
-# These version-like refs are intentionally operational pins, not update targets.
+# These inputs are intentionally operational pins, not update targets.
 # In particular, nh >=4.3 currently drops Darwin activation logs even with
 # --show-activation-logs, so keep the flake input pinned until that is resolved
 # upstream.
-PINNED_REF_INPUTS = frozenset({"nh"})
+#
+# nixvim newer than cb0107f6 can recurse through Stylix's deprecated
+# config.lib.stylix.nixvim.config alias while evaluating Darwin Home Manager
+# lock-smoke expressions. Keep it pinned until that upstream integration is
+# fixed.
+PINNED_REF_INPUTS = frozenset({"nh", "nixvim"})
 
 _MIN_COMMIT_HEX_LEN = 7
 _GIT_TAG_REF_PREFIX = "refs/tags/"
