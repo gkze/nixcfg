@@ -241,7 +241,16 @@ jobs:
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
             nix-cache-${{ runner.os }}-
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - name: Download pinned versions
+        id: download-pinned-versions
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: pinned-versions
+          path: .
+      - name: Retry pinned versions artifact download
+        if: steps.download-pinned-versions.outcome != 'success'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: pinned-versions
           path: .
@@ -324,7 +333,16 @@ jobs:
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
             nix-cache-${{ runner.os }}-
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - name: Download pinned versions
+        id: download-pinned-versions
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: pinned-versions
+          path: .
+      - name: Retry pinned versions artifact download
+        if: steps.download-pinned-versions.outcome != 'success'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: pinned-versions
           path: .
@@ -418,7 +436,16 @@ jobs:
           restore-keys: |
             nix-cache-${{ runner.os }}-${{ runner.arch }}-
             nix-cache-${{ runner.os }}-
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - name: Download pinned versions
+        id: download-pinned-versions
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: pinned-versions
+          path: .
+      - name: Retry pinned versions artifact download
+        if: steps.download-pinned-versions.outcome != 'success'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: pinned-versions
           path: .
