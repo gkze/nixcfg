@@ -36,12 +36,24 @@
             substituteInPlace lua/codesnap/fetch.lua \
               --replace-fail '${fetchLuaOld}' '${fetchLuaNew}'
 
+            if grep -Fq 'string.match(static.config.save_path, "%.(.+)$")' lua/codesnap/init.lua; then
+              substituteInPlace lua/codesnap/init.lua \
+                --replace-fail 'string.match(static.config.save_path, "%.(.+)$")' 'string.match(save_path, "%.(.+)$")'
+            fi
+
             substituteInPlace lua/codesnap/init.lua \
-              --replace-fail 'string.match(static.config.save_path, "%.(.+)$")' 'string.match(save_path, "%.(.+)$")' \
               --replace-fail 'if matched_extension ~= "png" and matched_extension ~= nil then' 'if matched_extension ~= nil and matched_extension ~= "png" and matched_extension ~= "svg" and matched_extension ~= "html" then' \
-              --replace-fail 'error("The extension of save_path should be .png", 0)' 'error("The extension of save_path should be .png, .svg, or .html", 0)' \
-              --replace-fail 'require("generator").save_snapshot(config)' '${saveCallNew}' \
-              --replace-fail 'config.save_path' 'save_path'
+              --replace-fail 'error("The extension of save_path should be .png", 0)' 'error("The extension of save_path should be .png, .svg, or .html", 0)'
+
+            if grep -Fq 'require("generator").save_snapshot(config)' lua/codesnap/init.lua; then
+              substituteInPlace lua/codesnap/init.lua \
+                --replace-fail 'require("generator").save_snapshot(config)' '${saveCallNew}'
+            fi
+
+            if grep -Fq 'config.save_path' lua/codesnap/init.lua; then
+              substituteInPlace lua/codesnap/init.lua \
+                --replace-fail 'config.save_path' 'save_path'
+            fi
 
             substituteInPlace lua/codesnap/utils/table.lua \
               --replace-fail 'if t1[k] == nil and v ~= nil then' 'if t1[k] == nil and v ~= nil and v ~= "none" then'
