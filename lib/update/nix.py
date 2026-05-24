@@ -86,6 +86,27 @@ _HASH_MISMATCH_INDICATORS = (
     "specified:",
 )
 
+_FIXED_OUTPUT_HASH_MAX_ATTEMPTS = 3
+_FIXED_OUTPUT_HASH_TRANSIENT_MARKERS = (
+    "502 Bad Gateway",
+    "503 Service Unavailable",
+    "504 Gateway Time-out",
+    "Could not resolve host",
+    "Failed to connect",
+    "HTTP error 502",
+    "HTTP error 503",
+    "HTTP error 504",
+    "NameServerFailure",
+    "Operation timed out",
+    "Temporary failure in name resolution",
+    "cannot download source from any mirror",
+    "connection reset",
+    "returned error: 502",
+    "returned error: 503",
+    "returned error: 504",
+    "timed out",
+)
+
 _PLATFORM_HASH_PAYLOAD_SIZE = 2
 
 
@@ -425,9 +446,7 @@ def _extract_nix_hash(output: str, *, config: UpdateConfig | None = None) -> str
     if err is not None:
         return err.hash
     config = resolve_active_config(config)
-    has_mismatch_signal = any(
-        indicator in output for indicator in _HASH_MISMATCH_INDICATORS
-    )
+    has_mismatch_signal = _has_hash_mismatch_signal(output)
     if has_mismatch_signal:
         msg = (
             "Hash mismatch detected in nix output but could not extract the hash. "
@@ -441,6 +460,20 @@ def _extract_nix_hash(output: str, *, config: UpdateConfig | None = None) -> str
             f"{_tail_output_excerpt(output, max_lines=config.default_log_tail_lines)}"
         )
     raise RuntimeError(msg)
+
+
+def _has_hash_mismatch_signal(output: str) -> bool:
+    return any(indicator in output for indicator in _HASH_MISMATCH_INDICATORS)
+
+
+def _is_retryable_fixed_output_hash_failure(result: CommandResult) -> bool:
+    output = f"{result.stderr}\n{result.stdout}"
+    if _has_hash_mismatch_signal(output):
+        return False
+    folded = output.casefold()
+    return any(
+        marker.casefold() in folded for marker in _FIXED_OUTPUT_HASH_TRANSIENT_MARKERS
+    )
 
 
 def _tail_output_excerpt(output: str, *, max_lines: int) -> str:
@@ -547,34 +580,51 @@ async def compute_fixed_output_hash(
     config = resolve_active_config(config)
     expr = _build_nix_expr(expr)
     semaphore = _get_nix_build_semaphore(config)
-    async with semaphore:
-        result_drain = ValueDrain()
-        async for event in drain_value_events(
-            _run_fixed_output_build(
-                source,
-                expr,
-                options=_FixedOutputBuildOptions(
-                    allow_failure=True,
-                    suppress_patterns=FIXED_OUTPUT_NOISE,
-                    verbose=True,
-                    success_error=(
-                        "Expected nix build to fail with hash mismatch, but it succeeded"
+    attempt = 1
+    while True:
+        async with semaphore:
+            result_drain = ValueDrain()
+            async for event in drain_value_events(
+                _run_fixed_output_build(
+                    source,
+                    expr,
+                    options=_FixedOutputBuildOptions(
+                        allow_failure=True,
+                        suppress_patterns=FIXED_OUTPUT_NOISE,
+                        verbose=True,
+                        success_error=(
+                            "Expected nix build to fail with hash mismatch, "
+                            "but it succeeded"
+                        ),
+                        env=env,
+                        config=config,
                     ),
-                    env=env,
-                    config=config,
                 ),
-            ),
-            result_drain,
-            parse=expect_command_result,
+                result_drain,
+                parse=expect_command_result,
+            ):
+                yield event
+            result = require_value(result_drain, "nix build did not return output")
+        if (
+            attempt < _FIXED_OUTPUT_HASH_MAX_ATTEMPTS
+            and _is_retryable_fixed_output_hash_failure(result)
         ):
-            yield event
-        result = require_value(result_drain, "nix build did not return output")
+            attempt += 1
+            yield UpdateEvent.status(
+                source,
+                "fixed-output source fetch hit a transient failure; retrying...",
+                operation="compute_hash",
+                detail=f"attempt {attempt}/{_FIXED_OUTPUT_HASH_MAX_ATTEMPTS}",
+            )
+            await asyncio.sleep(max(0.0, config.default_retry_backoff))
+            continue
         async for event in _emit_sri_hash_from_build_result(
             source,
             result,
             config=config,
         ):
             yield event
+        return
 
 
 def _build_nix_expr(body: str | NixExpression) -> str:

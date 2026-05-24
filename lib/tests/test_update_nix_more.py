@@ -15,6 +15,7 @@ from lib.update.nix import (
     _extract_nix_hash,
     _FixedOutputBuildOptions,
     _get_nix_build_semaphore,
+    _is_retryable_fixed_output_hash_failure,
     _run_fixed_output_build,
     _tail_output_excerpt,
     compute_drv_fingerprint,
@@ -104,6 +105,40 @@ def test_extract_nix_hash_parses_representative_nix_outputs() -> None:
         _extract_nix_hash(nar_output)
         == "1d6b9xw51a1289ymqaax76ra2gi2i3297kdd4q5sxjaxhicnmwal"
     )
+
+
+def test_retryable_fixed_output_hash_failure_classification() -> None:
+    """Retry transient fetch failures only when Nix has not produced a hash."""
+    transient = CommandResult(
+        args=["nix"],
+        returncode=1,
+        stdout="",
+        stderr=(
+            "curl: (22) The requested URL returned error: 502\n"
+            "error: cannot download source from any mirror"
+        ),
+    )
+    assert _is_retryable_fixed_output_hash_failure(transient)
+
+    hash_mismatch = CommandResult(
+        args=["nix"],
+        returncode=1,
+        stdout="",
+        stderr=(
+            "error: hash mismatch in fixed-output derivation\n"
+            "  specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
+            "     got:    sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+        ),
+    )
+    assert not _is_retryable_fixed_output_hash_failure(hash_mismatch)
+
+    permanent = CommandResult(
+        args=["nix"],
+        returncode=1,
+        stdout="",
+        stderr="error: file 'missing.nix' was not found",
+    )
+    assert not _is_retryable_fixed_output_hash_failure(permanent)
 
 
 def test_emit_sri_hash_from_build_result_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -206,6 +241,94 @@ def test_run_fixed_output_build_and_compute_fixed_output_hash(
     monkeypatch.setattr("lib.update.nix._emit_sri_hash_from_build_result", _emit_sri)
     events = _collect_events(compute_fixed_output_hash("demo", "pkgs.hello"))
     assert events[-1].payload == "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
+
+
+def test_compute_fixed_output_hash_retries_transient_source_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry source fetch flakes before extracting the fixed-output hash."""
+    monkeypatch.setattr(
+        "lib.update.nix._get_nix_build_semaphore", lambda _cfg: asyncio.Semaphore(1)
+    )
+    attempts: list[int] = []
+    sleep_delays: list[float] = []
+
+    async def _build(*_args: object, **_kwargs: object) -> AsyncIterator[UpdateEvent]:
+        attempts.append(1)
+        if len(attempts) == 1:
+            result = CommandResult(
+                args=["nix"],
+                returncode=1,
+                stdout="",
+                stderr=(
+                    "curl: (22) The requested URL returned error: 502\n"
+                    "error: cannot download source from any mirror"
+                ),
+            )
+        else:
+            result = CommandResult(
+                args=["nix"],
+                returncode=1,
+                stdout="",
+                stderr=(
+                    "error: hash mismatch in fixed-output derivation\n"
+                    "  specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
+                    "     got:    "
+                    "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
+                ),
+            )
+        yield UpdateEvent.value("demo", result)
+
+    async def _sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    monkeypatch.setattr("lib.update.nix._run_fixed_output_build", _build)
+    monkeypatch.setattr("lib.update.nix.asyncio.sleep", _sleep)
+
+    cfg = resolve_config(retry_backoff=0.25)
+    events = _collect_events(
+        compute_fixed_output_hash("demo", "pkgs.hello", config=cfg)
+    )
+
+    assert len(attempts) == 2
+    assert sleep_delays == [0.25]
+    assert [
+        event.message for event in events if event.kind is UpdateEventKind.STATUS
+    ] == ["fixed-output source fetch hit a transient failure; retrying..."]
+    assert events[-1].payload == "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
+
+
+def test_compute_fixed_output_hash_stops_after_transient_retry_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Surface the final fetch failure after the bounded retry budget."""
+    monkeypatch.setattr(
+        "lib.update.nix._get_nix_build_semaphore", lambda _cfg: asyncio.Semaphore(1)
+    )
+    attempts: list[int] = []
+    sleep_delays: list[float] = []
+
+    async def _build(*_args: object, **_kwargs: object) -> AsyncIterator[UpdateEvent]:
+        attempts.append(1)
+        result = CommandResult(
+            args=["nix"],
+            returncode=1,
+            stdout="",
+            stderr="curl: (22) The requested URL returned error: 502",
+        )
+        yield UpdateEvent.value("demo", result)
+
+    async def _sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    monkeypatch.setattr("lib.update.nix._run_fixed_output_build", _build)
+    monkeypatch.setattr("lib.update.nix.asyncio.sleep", _sleep)
+
+    with pytest.raises(RuntimeError, match="Could not find hash"):
+        _collect_events(compute_fixed_output_hash("demo", "pkgs.hello"))
+
+    assert len(attempts) == 3
+    assert sleep_delays == [1.0, 1.0]
 
 
 def test_get_nix_build_semaphore_paths(monkeypatch: pytest.MonkeyPatch) -> None:
