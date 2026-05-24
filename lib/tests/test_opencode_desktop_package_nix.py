@@ -154,6 +154,38 @@ def test_opencode_desktop_detects_current_desktop_workspace_path() -> None:
     )
 
 
+def test_opencode_desktop_tracks_workspace_install_scope() -> None:
+    """Desktop dependency materialization should track all required workspaces."""
+    package = _package_assertion()
+
+    assert_nix_ast_equal(
+        expect_scope_binding(package, "optionalDesktopWorkspacePaths").value,
+        """
+        lib.optional (pathExists (src + "/packages/llm/package.json")) "packages/llm"
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(package, "desktopWorkspacePaths").value,
+        """
+        [
+          "packages/opencode"
+          desktopPackagePath
+          "packages/app"
+          "packages/core"
+          "packages/shared"
+          "packages/ui"
+          "packages/sdk/js"
+          "packages/script"
+        ]
+        ++ optionalDesktopWorkspacePaths
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(package, "desktopWorkspaceShellArgs").value,
+        "lib.escapeShellArgs desktopWorkspacePaths",
+    )
+
+
 def test_opencode_desktop_node_modules_derivation_tracks_platform_hashes() -> None:
     """The FOD should stay platform-specific and keep the package-side hash lookup."""
     package = _package_assertion()
@@ -205,13 +237,9 @@ def test_opencode_desktop_node_modules_derivation_tracks_platform_hashes() -> No
         expect_binding(override_args.values, "installPhase").value,
         IndentedString,
     )
-    assert "--filter './packages/core'" in build_phase.value
-    assert "--filter './${desktopPackagePath}'" in build_phase.value
+    assert "${desktopWorkspaceFilters}" in build_phase.value
     assert 'cp -R node_modules "$out/node_modules"' in install_phase.value
-    assert "${desktopPackagePath}" in install_phase.value
-    assert "packages/core" in install_phase.value
-    assert "packages/sdk/js" in install_phase.value
-    assert "packages/script" in install_phase.value
+    assert "${desktopWorkspaceShellArgs}" in install_phase.value
     assert 'cp -R --parents "$workspace/node_modules" "$out"' in install_phase.value
     assert "find . -type d -name node_modules" not in install_phase.value
 
