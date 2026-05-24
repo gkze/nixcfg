@@ -93,6 +93,12 @@ def test_superset_darwin_build_phase_uses_explicit_unsigned_packaging_flags() ->
         "export ELECTRON_SKIP_BINARY_DOWNLOAD=1",
         "export npm_config_nodedir=${lib.escapeShellArg (toString electronHeaders)}",
         "bun run --cwd apps/desktop install:deps",
+        (
+            "hostServiceXtermHeadless=apps/desktop/node_modules/"
+            "@superset/host-service/node_modules/@xterm/headless"
+        ),
+        'mkdir -p "$(dirname "$hostServiceXtermHeadless")"',
+        'cp -RL apps/desktop/node_modules/@xterm/headless "$hostServiceXtermHeadless"',
         "bun x electron-builder",
         "--config electron-builder.ts",
         "--mac",

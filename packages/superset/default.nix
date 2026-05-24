@@ -299,6 +299,12 @@ else
       bun run --cwd apps/desktop validate:native-runtime
       bun run --cwd apps/desktop install:deps
 
+      hostServiceXtermHeadless=apps/desktop/node_modules/@superset/host-service/node_modules/@xterm/headless
+      if [ ! -e "$hostServiceXtermHeadless" ]; then
+        mkdir -p "$(dirname "$hostServiceXtermHeadless")"
+        cp -RL apps/desktop/node_modules/@xterm/headless "$hostServiceXtermHeadless"
+      fi
+
       electronDistDir="$PWD/electron-dist"
       mkdir -p "$electronDistDir"
       cp -R ${electronDist}/. "$electronDistDir"/
