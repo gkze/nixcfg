@@ -37,24 +37,33 @@
     doCheck = !prev.stdenv.hostPlatform.isDarwin;
     postPatch = (old.postPatch or "") + ''
       declare -a metrics_dirs=()
-      if [[ -d "$cargoDepsCopy/metrics-0.24.1" ]]; then
-        metrics_dirs=("$cargoDepsCopy/metrics-0.24.1")
-      else
-        shopt -s nullglob
-        shopt -s globstar
-        metrics_dirs=("$cargoDepsCopy"/**/metrics-0.24.1)
-      fi
+      shopt -s nullglob
+      shopt -s globstar
+
+      for metrics_dir in "$cargoDepsCopy"/metrics-* "$cargoDepsCopy"/**/metrics-*; do
+        if [[ -f "$metrics_dir/src/recorder/mod.rs" ]]; then
+          case " ''${metrics_dirs[*]} " in
+            *" $metrics_dir "*) ;;
+            *) metrics_dirs+=("$metrics_dir") ;;
+          esac
+        fi
+      done
 
       if [[ "''${#metrics_dirs[@]}" -eq 0 ]]; then
-        echo >&2 "ERROR: '$cargoDepsCopy/**/metrics-0.24.1' not found"
-        false
-      elif [[ "''${#metrics_dirs[@]}" -gt 1 ]]; then
-        echo >&2 "ERROR: multiple metrics-0.24.1 directories found under '$cargoDepsCopy':"
-        printf '  %s\n' "''${metrics_dirs[@]}" >&2
-        false
+        echo >&2 "ERROR: no vendored metrics crate found under '$cargoDepsCopy'"
+        exit 1
       fi
 
-      patch -d "''${metrics_dirs[0]}" -p1 < ${./mountpoint-s3/metrics-recorder-lifetime.patch}
+      for metrics_dir in "''${metrics_dirs[@]}"; do
+        if grep -Fq "fn new(recorder: &'a (dyn Recorder + 'a)) -> Self" "$metrics_dir/src/recorder/mod.rs"; then
+          echo "metrics crate in $metrics_dir already includes recorder lifetime fix"
+        elif patch --batch --dry-run -d "$metrics_dir" -p1 < ${./mountpoint-s3/metrics-recorder-lifetime.patch} >/dev/null 2>&1; then
+          patch --batch -d "$metrics_dir" -p1 < ${./mountpoint-s3/metrics-recorder-lifetime.patch}
+        else
+          echo >&2 "ERROR: metrics recorder lifetime patch does not apply to '$metrics_dir'"
+          exit 1
+        fi
+      done
     '';
     meta = old.meta // {
       platforms = prev.lib.platforms.unix;

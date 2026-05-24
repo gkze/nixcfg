@@ -51,6 +51,24 @@ let
   electronVersion = lib.removePrefix "^" desktopPackageJson.devDependencies.electron;
   electronRuntime = nixcfgElectron.runtimeFor electronVersion;
   electronRuntimeVersion = electronRuntime.version;
+  optionalDesktopWorkspacePaths = lib.optional (pathExists (
+    src + "/packages/llm/package.json"
+  )) "packages/llm";
+  desktopWorkspacePaths = [
+    "packages/opencode"
+    desktopPackagePath
+    "packages/app"
+    "packages/core"
+    "packages/shared"
+    "packages/ui"
+    "packages/sdk/js"
+    "packages/script"
+  ]
+  ++ optionalDesktopWorkspacePaths;
+  desktopWorkspaceFilters = lib.concatMapStringsSep "\n" (
+    workspacePath: "        --filter './${workspacePath}' \\"
+  ) desktopWorkspacePaths;
+  desktopWorkspaceShellArgs = lib.escapeShellArgs desktopWorkspacePaths;
 
   desktopPackageVersionCheck =
     if
@@ -108,34 +126,27 @@ let
     '';
     outputHash = slib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
     buildPhase = ''
-      runHook preBuild
+            runHook preBuild
 
-      export BUN_INSTALL_CACHE_DIR="$(mktemp -d)"
-      # The desktop package shells into packages/opencode during prepare/build
-      # and pulls renderer code from app/ui/core, SDK helpers from
-      # packages/sdk/js, and version metadata helpers from packages/script.
-      bun install \
-        --cpu="${bunTarget.cpu}" \
-        --os="${bunTarget.os}" \
-        --filter '!./' \
-        --filter './packages/opencode' \
-        --filter './${desktopPackagePath}' \
-        --filter './packages/app' \
-        --filter './packages/core' \
-        --filter './packages/shared' \
-        --filter './packages/ui' \
-        --filter './packages/sdk/js' \
-        --filter './packages/script' \
-        --frozen-lockfile \
-        --ignore-scripts \
-        --no-progress
+            export BUN_INSTALL_CACHE_DIR="$(mktemp -d)"
+            # The desktop package shells into packages/opencode during prepare/build
+            # and pulls renderer code from app/ui/core, SDK helpers from
+            # packages/sdk/js, and version metadata helpers from packages/script.
+            bun install \
+              --cpu="${bunTarget.cpu}" \
+              --os="${bunTarget.os}" \
+              --filter '!./' \
+      ${desktopWorkspaceFilters}
+              --frozen-lockfile \
+              --ignore-scripts \
+              --no-progress
 
-      if [ -d node_modules/.bun/node_modules ] && [ -f ${inputs.opencode}/nix/scripts/canonicalize-node-modules.ts ]; then
-        bun --bun ${inputs.opencode}/nix/scripts/canonicalize-node-modules.ts
-        bun --bun ${inputs.opencode}/nix/scripts/normalize-bun-binaries.ts
-      fi
+            if [ -d node_modules/.bun/node_modules ] && [ -f ${inputs.opencode}/nix/scripts/canonicalize-node-modules.ts ]; then
+              bun --bun ${inputs.opencode}/nix/scripts/canonicalize-node-modules.ts
+              bun --bun ${inputs.opencode}/nix/scripts/normalize-bun-binaries.ts
+            fi
 
-      runHook postBuild
+            runHook postBuild
     '';
     installPhase = ''
       runHook preInstall
@@ -147,15 +158,7 @@ let
       # install materialized. Re-copying every nested .bun/*/node_modules
       # directory duplicates Bun's symlink farm and hits create_symlink EEXIST
       # on Darwin during fixed-output hash computation.
-      for workspace in \
-        packages/opencode \
-        ${desktopPackagePath} \
-        packages/app \
-        packages/core \
-        packages/shared \
-        packages/ui \
-        packages/sdk/js \
-        packages/script
+      for workspace in ${desktopWorkspaceShellArgs}
       do
         if [ -d "$workspace/node_modules" ]; then
           cp -R --parents "$workspace/node_modules" "$out"
