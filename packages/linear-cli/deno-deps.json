@@ -3233,7 +3233,7 @@
         {
           "cache_path": "remote/https/jsr.io/240bf5fc71a5ca7a5d8ff41a9adc4e29f138b1f12c604db1131dddad44bbe78f",
           "media_type": "application/json",
-          "sha256": "2e9d895e3b7b747b0f011d5ec387936306f0214cfe18f4966ba9b378fa536a55",
+          "sha256": "59edc87860096b38fd4fbd507a12c39a69b5ea8fc33bf80ad7c93c4327693b01",
           "url": "https://jsr.io/@std/async/meta.json"
         }
       ],
@@ -3444,7 +3444,7 @@
         {
           "cache_path": "remote/https/jsr.io/d28345c0850ac020d03e4341e629d574a81a47929c0f2bd6da0196822f1c9134",
           "media_type": "application/json",
-          "sha256": "8dd98871424472f1655f41cfea2cf861f923bf3738ee3d677c5efffd522ec221",
+          "sha256": "4a94d3e3c60414205a86ea27f8e0efec3a8d1192e7ac52b7f0090afd6a0a6a20",
           "url": "https://jsr.io/@std/cli/meta.json"
         }
       ],
@@ -4165,7 +4165,7 @@
         {
           "cache_path": "remote/https/jsr.io/43b2b26241717c7e65e74a2e4cd7c36bc58e75765a37cc9b81d059df775f1ecf",
           "media_type": "application/json",
-          "sha256": "bc7ca2086ec0671b4dac576ac4b14fe9286a38d13529eb7c26d5f3a43c2a7574",
+          "sha256": "6727ba03a6b20b7d972199cccf56c9083af1ea7d1590c4b9aaffad9de0896437",
           "url": "https://jsr.io/@std/collections/meta.json"
         }
       ],
@@ -4322,7 +4322,7 @@
         {
           "cache_path": "remote/https/jsr.io/88776d701a5322c48462df5f91ac6c8b7a21829e5028adaf550c980040633fb3",
           "media_type": "application/json",
-          "sha256": "a4ce492240e673c3814fd8f535bb154e831963ceb49c3001f24e3cb010a91025",
+          "sha256": "1f4e17bbe419f4eccbd8ef50bbe46cec535820fb598a428c0d90cb469d2aa9ba",
           "url": "https://jsr.io/@std/data-structures/meta.json"
         }
       ],
@@ -4401,7 +4401,7 @@
         {
           "cache_path": "remote/https/jsr.io/6e93eacee453ae985c9af5b017821e0621908a939b7f2e0907574bba27c31ed0",
           "media_type": "application/json",
-          "sha256": "8a64a74d2ffe523b7fd5da00f6c18aa0a49e14d1be717e87177bf2edf950be78",
+          "sha256": "7ea374d01ac49140b3a50a12d1dd6489a1f0562e0006ff241fd2aabc8f0771f1",
           "url": "https://jsr.io/@std/dotenv/meta.json"
         }
       ],
@@ -5365,7 +5365,7 @@
         {
           "cache_path": "remote/https/jsr.io/c98c1db2fae2202a82f5ce9623edfdf0f549ec762ce8a842216b145489888d6f",
           "media_type": "application/json",
-          "sha256": "3ee7b35c209dc8b75cbd597991b84f8781f5a676a00f231d55226d003a24daf1",
+          "sha256": "e24b999121f89226d972b936a1f4599c241d7793d7b0bca3f939f130138c576a",
           "url": "https://jsr.io/@std/fs/meta.json"
         }
       ],
@@ -5522,7 +5522,7 @@
         {
           "cache_path": "remote/https/jsr.io/0de6ff97cd9d64a2459d9c9e11fc96d6cde741fde6977f7ae95886a8d8090e5f",
           "media_type": "application/json",
-          "sha256": "88f92278472b5b28c85ee04b2b1650e2ebbfc9005cb71f40b6752b59195718cb",
+          "sha256": "9ade3fc2145f3a516066b13b5e763b127920a3486729df558102c3005decce69",
           "url": "https://jsr.io/@std/internal/meta.json"
         }
       ],
@@ -6274,7 +6274,7 @@
         {
           "cache_path": "remote/https/jsr.io/5334b42bb2b7dc27810790aff54c17b2c9c97486dd43fc5c5524866460a81632",
           "media_type": "application/json",
-          "sha256": "abdd38f3a4ff174de194d0b54ea90ec2bb581042f3d58543dcf1bed0ee20cfa1",
+          "sha256": "4e0aadab9e66efa7a66e2a7cdd6c149d10971aa7397f8acd071d6cef93dc667b",
           "url": "https://jsr.io/@std/path/meta.json"
         }
       ],
@@ -6899,7 +6899,7 @@
         {
           "cache_path": "remote/https/jsr.io/5334b42bb2b7dc27810790aff54c17b2c9c97486dd43fc5c5524866460a81632",
           "media_type": "application/json",
-          "sha256": "abdd38f3a4ff174de194d0b54ea90ec2bb581042f3d58543dcf1bed0ee20cfa1",
+          "sha256": "4e0aadab9e66efa7a66e2a7cdd6c149d10971aa7397f8acd071d6cef93dc667b",
           "url": "https://jsr.io/@std/path/meta.json"
         }
       ],
@@ -7381,7 +7381,7 @@
         {
           "cache_path": "remote/https/jsr.io/74c61ee77cf3d5bd22bc1763e1946f7d9691ff3ad4370527c5e7b6ab9b4fea20",
           "media_type": "application/json",
-          "sha256": "fa6fc4ba81674690db9be1c11ccc2526f251742845fd363ba755af383207bf8f",
+          "sha256": "f00ed660adea6fbb57fa96ea4bac719b7c117f0cedb71d8f1a22c54529af0738",
           "url": "https://jsr.io/@std/testing/meta.json"
         }
       ],
@@ -7610,7 +7610,7 @@
         {
           "cache_path": "remote/https/jsr.io/74c61ee77cf3d5bd22bc1763e1946f7d9691ff3ad4370527c5e7b6ab9b4fea20",
           "media_type": "application/json",
-          "sha256": "fa6fc4ba81674690db9be1c11ccc2526f251742845fd363ba755af383207bf8f",
+          "sha256": "f00ed660adea6fbb57fa96ea4bac719b7c117f0cedb71d8f1a22c54529af0738",
           "url": "https://jsr.io/@std/testing/meta.json"
         }
       ],
@@ -7893,7 +7893,7 @@
         {
           "cache_path": "remote/https/jsr.io/c8ea18759d7155f7f10cb55ccba5f1069c3a1f859a015c15ec239caa398ee17d",
           "media_type": "application/json",
-          "sha256": "dd01c1a037cda8a4b1d423920c6a2f90d8bc2c919c56938c82626a6c94f394b3",
+          "sha256": "10dba928ee495bf0b77715fcbbe50d3b53f21008a2536edb86ed79850ecebfb1",
           "url": "https://jsr.io/@std/text/meta.json"
         }
       ],

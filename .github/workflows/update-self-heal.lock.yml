@@ -1,5 +1,5 @@
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"a9af24dbc68217bbb06208344317be6e6677600854b02798d6651599914ded8d","compiler_version":"v0.74.8","strict":true,"agent_id":"copilot","agent_model":"gpt-4.1"}
-# gh-aw-manifest: {"version":1,"secrets":["COPILOT_GITHUB_TOKEN","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN","UPDATE_SELF_HEAL_GITHUB_TOKEN"],"actions":[{"repo":"actions/checkout","sha":"11bd71901bbe5b1630ceea73d27597364c9af683","version":"v4.2.2"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e","version":"v6.4.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw-actions/setup","sha":"efa55847f72aadb03490d955263ff911bf758700","version":"v0.74.8"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.25.49"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.25.49"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.25.49"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.3.9","digest":"sha256:64828b42a4482f58fab16509d7f8f495a6d97c972a98a68aff20543531ac0388","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.3.9@sha256:64828b42a4482f58fab16509d7f8f495a6d97c972a98a68aff20543531ac0388"},{"image":"ghcr.io/github/github-mcp-server:v1.0.4"},{"image":"node:lts-alpine","digest":"sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f","pinned_image":"node:lts-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f"}]}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"42779a15de30c532ad84b12b2807131764b133630f221c2b95a059e67472744c","compiler_version":"v0.74.8","strict":true,"agent_id":"copilot","agent_model":"gpt-4.1"}
+# gh-aw-manifest: {"version":1,"secrets":["COPILOT_GITHUB_TOKEN","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN","UPDATE_SELF_HEAL_GITHUB_TOKEN"],"actions":[{"repo":"actions/checkout","sha":"11bd71901bbe5b1630ceea73d27597364c9af683","version":"11bd71901bbe5b1630ceea73d27597364c9af683"},{"repo":"actions/checkout","sha":"de0fac2e4500dabe0009e67214ff5f5447ce83dd","version":"v6.0.2"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e","version":"v6.4.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw-actions/setup","sha":"efa55847f72aadb03490d955263ff911bf758700","version":"v0.74.8"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.25.49"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.25.49"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.25.49"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.3.9","digest":"sha256:64828b42a4482f58fab16509d7f8f495a6d97c972a98a68aff20543531ac0388","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.3.9@sha256:64828b42a4482f58fab16509d7f8f495a6d97c972a98a68aff20543531ac0388"},{"image":"ghcr.io/github/github-mcp-server:v1.0.4"},{"image":"node:lts-alpine","digest":"sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f","pinned_image":"node:lts-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f"}]}
 #    ___                   _   _
 #   / _ \                 | | (_)
 #  | |_| | __ _  ___ _ __ | |_ _  ___
@@ -31,7 +31,8 @@
 #   - UPDATE_SELF_HEAL_GITHUB_TOKEN
 #
 # Custom actions used:
-#   - actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+#   - actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # 11bd71901bbe5b1630ceea73d27597364c9af683
+#   - actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 #   - actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
 #   - actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
 #   - actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0 (source v9)
@@ -160,7 +161,7 @@ jobs:
         env:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
       - name: Checkout .github and .agents folders
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
           sparse-checkout: |
@@ -218,23 +219,23 @@ jobs:
         run: |
           bash "${RUNNER_TEMP}/gh-aw/actions/create_prompt_first.sh"
           {
-          cat << 'GH_AW_PROMPT_66eb8c5a4aaf4062_EOF'
+          cat << 'GH_AW_PROMPT_7d02432c55e644e7_EOF'
           <system>
-          GH_AW_PROMPT_66eb8c5a4aaf4062_EOF
+          GH_AW_PROMPT_7d02432c55e644e7_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/xpia.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/temp_folder_prompt.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/markdown.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/safe_outputs_prompt.md"
-          cat << 'GH_AW_PROMPT_66eb8c5a4aaf4062_EOF'
+          cat << 'GH_AW_PROMPT_7d02432c55e644e7_EOF'
           <safe-output-tools>
           Tools: create_pull_request, missing_tool, missing_data, noop, record_stop, retry_failed_jobs
-          GH_AW_PROMPT_66eb8c5a4aaf4062_EOF
+          GH_AW_PROMPT_7d02432c55e644e7_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/safe_outputs_create_pull_request.md"
-          cat << 'GH_AW_PROMPT_66eb8c5a4aaf4062_EOF'
+          cat << 'GH_AW_PROMPT_7d02432c55e644e7_EOF'
           </safe-output-tools>
-          GH_AW_PROMPT_66eb8c5a4aaf4062_EOF
+          GH_AW_PROMPT_7d02432c55e644e7_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/mcp_cli_tools_prompt.md"
-          cat << 'GH_AW_PROMPT_66eb8c5a4aaf4062_EOF'
+          cat << 'GH_AW_PROMPT_7d02432c55e644e7_EOF'
           <github-context>
           The following GitHub context information is available for this workflow:
           {{#if github.actor}}
@@ -266,12 +267,12 @@ jobs:
             - **Note**: If a branch you need is not in the list above and is not listed as an additional fetched ref, it has NOT been checked out. For private repositories you cannot fetch it without proper authentication. If the branch is required and not available, exit with an error and ask the user to add it to the `fetch:` option of the `checkout:` configuration (e.g., `fetch: ["refs/pulls/open/*"]` for all open PR refs, or `fetch: ["main", "feature/my-branch"]` for specific branches).
           </github-context>
 
-          GH_AW_PROMPT_66eb8c5a4aaf4062_EOF
+          GH_AW_PROMPT_7d02432c55e644e7_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/github_mcp_tools_with_safeoutputs_prompt.md"
-          cat << 'GH_AW_PROMPT_66eb8c5a4aaf4062_EOF'
+          cat << 'GH_AW_PROMPT_7d02432c55e644e7_EOF'
           </system>
           {{#runtime-import .github/workflows/update-self-heal.md}}
-          GH_AW_PROMPT_66eb8c5a4aaf4062_EOF
+          GH_AW_PROMPT_7d02432c55e644e7_EOF
           } > "$GH_AW_PROMPT"
       - name: Interpolate variables and render templates
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -404,7 +405,7 @@ jobs:
             echo "GH_AW_SAFE_OUTPUTS_TOOLS_PATH=${RUNNER_TEMP}/gh-aw/safeoutputs/tools.json"
           } >> "$GITHUB_OUTPUT"
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -438,6 +439,12 @@ jobs:
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id || '' }}
         name: Fail closed when campaign budget is exhausted
         run: "set -euo pipefail\ncampaign_key=\"${MANUAL_CAMPAIGN_KEY}\"\nif [ -z \"${campaign_key}\" ] && [ -n \"${WORKFLOW_RUN_HEAD_BRANCH}\" ]; then\n  repair_campaign=\"${WORKFLOW_RUN_HEAD_BRANCH#\"${REPAIR_BRANCH_PREFIX}\"}\"\n  if [ \"${repair_campaign}\" != \"${WORKFLOW_RUN_HEAD_BRANCH}\" ]; then\n    campaign_key=\"${repair_campaign}\"\n  fi\nfi\nif [ -z \"${campaign_key}\" ] && [ -n \"${MANUAL_RUN_ID}\" ]; then\n  campaign_key=\"update_flake_lock_action-${MANUAL_RUN_ID}\"\nfi\nif [ -z \"${campaign_key}\" ] && [ -n \"${WORKFLOW_RUN_ID}\" ]; then\n  campaign_key=\"update_flake_lock_action-${WORKFLOW_RUN_ID}\"\nfi\nif [ -z \"${campaign_key}\" ]; then\n  echo \"No campaign key is available; skipping budget preflight.\"\n  exit 0\nfi\n\nissue_json=\"$(\n  gh issue list --state all --limit 100 --json number,title \\\n    --jq \".[] | select(.title == env.LEDGER_TITLE) | @json\" | head -n 1\n)\"\nif [ -z \"${issue_json}\" ]; then\n  echo \"No self-healing ledger exists; campaign has full budget.\"\n  exit 0\nfi\nissue_number=\"$(jq -r '.number' <<<\"${issue_json}\")\"\ncomments_json=\"$(mktemp)\"\ngh issue view \"${issue_number}\" --json comments >\"${comments_json}\"\npython3 lib/update/ci/self_heal.py remaining-cycles \\\n  --comments-json \"${comments_json}\" \\\n  --campaign-key \"${campaign_key}\" >/dev/null\n"
+      - env:
+          GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          MANUAL_RUN_ID: ${{ inputs['run-id'] || '' }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id || '' }}
+        name: Collect failed run evidence for classifier
+        run: "set -euo pipefail\nevidence_dir=\"/tmp/gh-aw/agent/evidence\"\nmkdir -p \"${evidence_dir}/logs\"\n\ntarget_run_id=\"${MANUAL_RUN_ID:-${WORKFLOW_RUN_ID}}\"\ntest -n \"${target_run_id}\" || {\n  echo \"No failed workflow run id is available for classifier evidence.\" >&2\n  exit 1\n}\n\nprintf '%s\\n' \"${target_run_id}\" >\"${evidence_dir}/target-run-id.txt\"\ncp \"${GITHUB_EVENT_PATH}\" \"${evidence_dir}/event.json\"\ngh run view \"${target_run_id}\" \\\n  --json databaseId,name,workflowName,status,conclusion,event,headBranch,headSha,url,createdAt,updatedAt,jobs \\\n  >\"${evidence_dir}/run.json\"\njq '[.jobs[] | select(.conclusion == \"failure\") | {databaseId,name,conclusion,url}]' \\\n  \"${evidence_dir}/run.json\" >\"${evidence_dir}/failed-jobs.json\"\njq -e 'length > 0' \"${evidence_dir}/failed-jobs.json\" >/dev/null\n\njq -r '.[].databaseId' \"${evidence_dir}/failed-jobs.json\" |\n  while IFS= read -r job_id; do\n    gh api \"/repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs\" \\\n      >\"${evidence_dir}/logs/job-${job_id}.log\"\n  done\n\n{\n  printf 'Target run: %s\\n' \"${target_run_id}\"\n  jq -r '\"Workflow: \\(.workflowName)\\nBranch: \\(.headBranch)\\nSHA: \\(.headSha)\\nURL: \\(.url)\"' \\\n    \"${evidence_dir}/run.json\"\n  printf 'Failed jobs:\\n'\n  jq -r '.[] | \"- \\(.name) (\\(.databaseId)): \\(.url)\"' \\\n    \"${evidence_dir}/failed-jobs.json\"\n} >\"${evidence_dir}/summary.txt\"\n"
 
       - name: Configure Git credentials
         env:
@@ -505,9 +512,9 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/gh-aw/safeoutputs"
           mkdir -p /tmp/gh-aw/safeoutputs
           mkdir -p /tmp/gh-aw/mcp-logs/safeoutputs
-          cat > "${RUNNER_TEMP}/gh-aw/safeoutputs/config.json" << 'GH_AW_SAFE_OUTPUTS_CONFIG_44cb1f56cede8b11_EOF'
+          cat > "${RUNNER_TEMP}/gh-aw/safeoutputs/config.json" << 'GH_AW_SAFE_OUTPUTS_CONFIG_cbaba9e7a5e7cd01_EOF'
           {"create_pull_request":{"allowed_base_branches":["main"],"allowed_files":["packages/**","overlays/**","lib/tests/**","tests/**","docs/**","misc/**"],"auto_close_issue":false,"base_branch":"main","draft":false,"fallback_as_issue":false,"labels":["agentic-update-repair"],"max":1,"max_patch_files":100,"max_patch_size":1024,"preserve_branch_name":true,"protect_top_level_dot_folders":true,"protected_files":["package.json","bun.lockb","bunfig.toml","deno.json","deno.jsonc","deno.lock","global.json","NuGet.Config","Directory.Packages.props","mix.exs","mix.lock","go.mod","go.sum","stack.yaml","stack.yaml.lock","pom.xml","build.gradle","build.gradle.kts","settings.gradle","settings.gradle.kts","gradle.properties","package-lock.json","yarn.lock","pnpm-lock.yaml","npm-shrinkwrap.json","requirements.txt","Pipfile","Pipfile.lock","pyproject.toml","setup.py","setup.cfg","Gemfile","Gemfile.lock","uv.lock","CODEOWNERS","DESIGN.md","README.md","CONTRIBUTING.md","CHANGELOG.md","SECURITY.md","CODE_OF_CONDUCT.md","AGENTS.md","CLAUDE.md","GEMINI.md"],"protected_files_policy":"allowed","title_prefix":"[agentic update repair] "},"create_report_incomplete_issue":{},"missing_data":{},"missing_tool":{},"noop":{"max":1,"report-as-issue":"true"},"record-stop":{"description":"Record a stopped campaign with evidence in the evergreen ledger.","inputs":{"campaign_key":{"default":null,"description":"Campaign key, normally update branch plus first failing run id.","required":true,"type":"string"},"evidence":{"default":null,"description":"Evidence supporting the stop decision.","required":true,"type":"string"},"reason":{"default":null,"description":"Refusal or stop reason.","required":true,"type":"string"},"run_id":{"default":null,"description":"GitHub Actions run id that caused the stop decision.","required":true,"type":"string"}}},"report_incomplete":{},"retry-failed-jobs":{"description":"Rerun failed jobs from a transient update failure after budget checks pass.","inputs":{"campaign_key":{"default":null,"description":"Campaign key, normally update branch plus first failing run id.","required":true,"type":"string"},"evidence":{"default":null,"description":"Evidence supporting the transient classification.","required":true,"type":"string"},"job_ids":{"default":null,"description":"JSON array of failed job databaseId values to rerun.","required":true,"type":"string"},"reason":{"default":null,"description":"Short retry reason.","required":true,"type":"string"},"run_id":{"default":null,"description":"GitHub Actions run id whose failed jobs should be rerun.","required":true,"type":"string"}}}}
-          GH_AW_SAFE_OUTPUTS_CONFIG_44cb1f56cede8b11_EOF
+          GH_AW_SAFE_OUTPUTS_CONFIG_cbaba9e7a5e7cd01_EOF
       - name: Generate Safe Outputs Tools
         env:
           GH_AW_TOOLS_META_JSON: |
@@ -790,7 +797,7 @@ jobs:
 
           mkdir -p /home/runner/.copilot
           GH_AW_NODE=$(which node 2>/dev/null || command -v node 2>/dev/null || echo node)
-          cat << GH_AW_MCP_CONFIG_36d95f073afcf402_EOF | "$GH_AW_NODE" "${RUNNER_TEMP}/gh-aw/actions/start_mcp_gateway.cjs"
+          cat << GH_AW_MCP_CONFIG_60cce4cc647d6570_EOF | "$GH_AW_NODE" "${RUNNER_TEMP}/gh-aw/actions/start_mcp_gateway.cjs"
           {
             "mcpServers": {
               "github": {
@@ -831,7 +838,7 @@ jobs:
               "payloadDir": "${MCP_GATEWAY_PAYLOAD_DIR}"
             }
           }
-          GH_AW_MCP_CONFIG_36d95f073afcf402_EOF
+          GH_AW_MCP_CONFIG_60cce4cc647d6570_EOF
       - name: Mount MCP servers as CLIs
         id: mount-mcp-clis
         continue-on-error: true
@@ -1287,7 +1294,7 @@ jobs:
           echo "GH_AW_AGENT_OUTPUT=/tmp/gh-aw/agent_output.json" >> "$GITHUB_OUTPUT"
       - name: Checkout repository for patch context
         if: needs.agent.outputs.has_patch == 'true'
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       # --- Threat Detection ---
@@ -1506,7 +1513,7 @@ jobs:
         with:
           name: agent
           path: ${{ runner.temp }}/gh-aw/safe-jobs/
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # 11bd71901bbe5b1630ceea73d27597364c9af683
         env:
           GH_AW_AGENT_OUTPUT: ${{ runner.temp }}/gh-aw/safe-jobs/agent_output.json
         with:
@@ -1582,7 +1589,7 @@ jobs:
         with:
           name: agent
           path: ${{ runner.temp }}/gh-aw/safe-jobs/
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # 11bd71901bbe5b1630ceea73d27597364c9af683
         env:
           GH_AW_AGENT_OUTPUT: ${{ runner.temp }}/gh-aw/safe-jobs/agent_output.json
         with:
@@ -1762,7 +1769,7 @@ jobs:
           fi
       - name: Checkout repository (trusted default branch for comment events)
         if: (!cancelled()) && needs.agent.result != 'skipped' && contains(needs.agent.outputs.output_types, 'create_pull_request') && (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment')
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.repository.default_branch }}
           token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
@@ -1770,7 +1777,7 @@ jobs:
           fetch-depth: 1
       - name: Checkout repository
         if: (!cancelled()) && needs.agent.result != 'skipped' && contains(needs.agent.outputs.output_types, 'create_pull_request') && github.event_name != 'issue_comment' && github.event_name != 'pull_request_review_comment'
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: main
           token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}

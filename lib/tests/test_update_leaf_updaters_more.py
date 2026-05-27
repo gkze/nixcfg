@@ -216,6 +216,13 @@ def test_json_download_url_package_updaters(
     assert _download_url(info) == expected_url
 
 
+def test_onepassword_rechecks_same_version_download_hashes() -> None:
+    """1Password can replace same-version ZIPs, so updates must rehash."""
+    module = _load("packages/onepassword/updater.py")
+
+    assert _updater(module).materialize_when_current is True
+
+
 @pytest.mark.parametrize(
     ("path", "payload", "expected_version"),
     [

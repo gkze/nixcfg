@@ -475,30 +475,116 @@ def test_sentry_cli_updater_paths(
 def test_conductor_updater_paths(
     conductor_module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Exercise Conductor filename-based version parsing."""
+    """Exercise Conductor filename parsing and resolved asset URL persistence."""
     updater = conductor_module.ConductorUpdater()
+
+    assert (
+        updater._version_from_header('attachment; filename="Conductor_1.2.3_arm64.dmg"')
+        == "1.2.3"
+    )
+    assert (
+        updater._url_without_query(
+            "https://cdn.crabnebula.app/asset/example?from=latest#fragment"
+        )
+        == "https://cdn.crabnebula.app/asset/example"
+    )
+
+    class _HeadResponse:
+        def __init__(self, *, status: int, header: str, url: str) -> None:
+            self.status = status
+            self.headers = {"Content-Disposition": header}
+            self.url = url
+
+        async def __aenter__(self) -> _HeadResponse:
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+    class _HeadSession:
+        def __init__(self, *, status: int, header: str, url: str) -> None:
+            self.status = status
+            self.header = header
+            self.url = url
+            self.calls: list[tuple[str, bool, object]] = []
+
+        def head(
+            self,
+            url: str,
+            *,
+            allow_redirects: bool,
+            timeout: object,
+        ) -> _HeadResponse:
+            self.calls.append((url, allow_redirects, timeout))
+            return _HeadResponse(
+                status=self.status,
+                header=self.header,
+                url=self.url,
+            )
+
+    head_session = _HeadSession(
+        status=200,
+        header='attachment; filename="Conductor_1.2.3_arm64.dmg"',
+        url="https://cdn.crabnebula.app/asset/conductor-arm64.dmg?token=ephemeral",
+    )
+    resolved = _run(updater._fetch_resolved_artifact(head_session, "aarch64-darwin"))
+    assert resolved == conductor_module._ResolvedArtifact(
+        "1.2.3",
+        "https://cdn.crabnebula.app/asset/conductor-arm64.dmg",
+    )
+    [(discovery_url, allow_redirects, timeout)] = head_session.calls
+    assert discovery_url == (
+        "https://cdn.crabnebula.app/download/melty/conductor/latest/platform/"
+        "dmg-aarch64"
+    )
+    assert allow_redirects is True
+    assert timeout.total == updater.config.default_timeout
+
+    failed_head_session = _HeadSession(
+        status=500,
+        header='attachment; filename="Conductor_1.2.3_x64.dmg"',
+        url="https://cdn.crabnebula.app/asset/conductor-x64.dmg",
+    )
+    with pytest.raises(RuntimeError, match="x86_64-darwin failed with HTTP 500"):
+        _run(updater._fetch_resolved_artifact(failed_head_session, "x86_64-darwin"))
+
+    async def _artifact(_session: object, platform: str) -> object:
+        return conductor_module._ResolvedArtifact(
+            "1.2.3",
+            f"https://cdn.crabnebula.app/asset/{platform}",
+        )
+
     monkeypatch.setattr(
-        conductor_module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(
-            0,
-            result={
-                "Content-Disposition": 'attachment; filename="Conductor_1.2.3_arm64.dmg"'
-            },
-        ),
+        updater,
+        "_fetch_resolved_artifact",
+        _artifact,
     )
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == "1.2.3"
+    assert updater.get_download_url("aarch64-darwin", latest) == (
+        "https://cdn.crabnebula.app/asset/aarch64-darwin"
+    )
+    assert updater.get_download_url("x86_64-darwin", latest) == (
+        "https://cdn.crabnebula.app/asset/x86_64-darwin"
+    )
     assert _run(updater._is_latest(None, latest)) is False
 
-    monkeypatch.setattr(
-        conductor_module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(
-            0, result={"Content-Disposition": "attachment; filename=oops"}
-        ),
-    )
     with pytest.raises(RuntimeError, match="Could not parse version"):
+        updater._version_from_header("attachment; filename=oops")
+
+    async def _mismatched_artifact(_session: object, platform: str) -> object:
+        version = "1.2.3" if platform == "aarch64-darwin" else "1.2.4"
+        return conductor_module._ResolvedArtifact(
+            version,
+            f"https://cdn.crabnebula.app/asset/{platform}",
+        )
+
+    monkeypatch.setattr(
+        updater,
+        "_fetch_resolved_artifact",
+        _mismatched_artifact,
+    )
+    with pytest.raises(RuntimeError, match="mismatched versions"):
         _run(updater.fetch_latest(object()))
 
 

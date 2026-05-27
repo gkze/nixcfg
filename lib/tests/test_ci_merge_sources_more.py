@@ -260,6 +260,29 @@ def test_merge_entry_hash_mapping_branch() -> None:
     assert merged.hashes.mapping["aarch64-darwin"] == "sha256-b"
 
 
+def test_merge_entry_preserves_changed_drv_hash() -> None:
+    """Keep derivation fingerprints produced by platform update artifacts."""
+    baseline = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "drvHash": "drv-old",
+        "hashes": [{"hashType": "sha256", "hash": "sha256-old"}],
+    })
+    existing = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "drvHash": "drv-old",
+        "hashes": [{"hashType": "sha256", "hash": "sha256-old"}],
+    })
+    incoming = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "drvHash": "drv-new",
+        "hashes": [{"hashType": "sha256", "hash": "sha256-new"}],
+    })
+
+    merged = ms._merge_entry(existing, incoming, platform=None, baseline=baseline)
+
+    assert merged.drv_hash == "drv-new"
+
+
 def test_merge_entry_fallback_to_hash_collection_merge() -> None:
     """Use fallback HashCollection.merge path when hash storage differs."""
     existing = SourceEntry.model_validate({

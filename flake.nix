@@ -141,7 +141,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.53.0";
+      url = "github:max-sixty/worktrunk/v0.54.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -162,7 +162,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.133.0";
+      url = "github:openai/codex/rust-v0.134.0";
       flake = false;
     };
     curator = {
@@ -176,7 +176,7 @@
     github-desktop = {
       type = "git";
       url = "https://github.com/desktop/desktop.git";
-      ref = "refs/tags/release-3.5.10";
+      ref = "refs/tags/release-3.5.11";
       submodules = true;
       flake = false;
     };
@@ -251,7 +251,7 @@
       flake = false;
     };
     toad = {
-      url = "github:batrachianai/toad/v0.6.18";
+      url = "github:batrachianai/toad/v0.6.20";
       flake = false;
     };
     treewalker-nvim = {

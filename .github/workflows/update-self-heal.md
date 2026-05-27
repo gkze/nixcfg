@@ -135,6 +135,45 @@ steps:
       python3 lib/update/ci/self_heal.py remaining-cycles \
         --comments-json "${comments_json}" \
         --campaign-key "${campaign_key}" >/dev/null
+  - name: Collect failed run evidence for classifier
+    env:
+      GH_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+      MANUAL_RUN_ID: ${{ inputs['run-id'] || '' }}
+      WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id || '' }}
+    run: |
+      set -euo pipefail
+      evidence_dir="/tmp/gh-aw/agent/evidence"
+      mkdir -p "${evidence_dir}/logs"
+
+      target_run_id="${MANUAL_RUN_ID:-${WORKFLOW_RUN_ID}}"
+      test -n "${target_run_id}" || {
+        echo "No failed workflow run id is available for classifier evidence." >&2
+        exit 1
+      }
+
+      printf '%s\n' "${target_run_id}" >"${evidence_dir}/target-run-id.txt"
+      cp "${GITHUB_EVENT_PATH}" "${evidence_dir}/event.json"
+      gh run view "${target_run_id}" \
+        --json databaseId,name,workflowName,status,conclusion,event,headBranch,headSha,url,createdAt,updatedAt,jobs \
+        >"${evidence_dir}/run.json"
+      jq '[.jobs[] | select(.conclusion == "failure") | {databaseId,name,conclusion,url}]' \
+        "${evidence_dir}/run.json" >"${evidence_dir}/failed-jobs.json"
+      jq -e 'length > 0' "${evidence_dir}/failed-jobs.json" >/dev/null
+
+      jq -r '.[].databaseId' "${evidence_dir}/failed-jobs.json" |
+        while IFS= read -r job_id; do
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" \
+            >"${evidence_dir}/logs/job-${job_id}.log"
+        done
+
+      {
+        printf 'Target run: %s\n' "${target_run_id}"
+        jq -r '"Workflow: \(.workflowName)\nBranch: \(.headBranch)\nSHA: \(.headSha)\nURL: \(.url)"' \
+          "${evidence_dir}/run.json"
+        printf 'Failed jobs:\n'
+        jq -r '.[] | "- \(.name) (\(.databaseId)): \(.url)"' \
+          "${evidence_dir}/failed-jobs.json"
+      } >"${evidence_dir}/summary.txt"
 
 safe-outputs:
   github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
@@ -376,7 +415,21 @@ You are the unattended repair agent for the `Update` and
 
 ## Classifier Stage
 
-Inspect the failed run, failed jobs, and logs. Output exactly one decision:
+Inspect the failed run, failed jobs, and logs. The workflow has already
+materialized classifier evidence under `/tmp/gh-aw/agent/evidence/`:
+
+- `target-run-id.txt`: the failed `Update`, `Update: Certify`, or repair `CI` run.
+- `event.json`: the triggering workflow event.
+- `run.json`: run metadata and job metadata from GitHub Actions.
+- `failed-jobs.json`: the failed job database IDs and URLs.
+- `logs/job-<databaseId>.log`: failed job logs.
+- `summary.txt`: a short index of the same evidence.
+
+Classify the run named in `target-run-id.txt`; do not classify the current
+`Agentic Update Self-Heal` workflow run. There is no deterministic
+`classify` helper; inspect the evidence yourself, write `classifier.json`,
+and use the parser command below only to validate its shape. Output exactly one
+decision:
 
 - `retry`: the evidence points to transient infrastructure such as network flakes,
   GitHub API timeouts, runner loss, cache service failures, or other retryable failures.
@@ -424,11 +477,7 @@ python3 lib/update/ci/self_heal.py parse-classifier classifier.json
 ## Retry Action
 
 For `retry`, call the `retry_failed_jobs` safe-output tool. Pass failed job
-`databaseId` values from:
-
-```sh
-gh run view <run-id> --json jobs --jq '.jobs[] | select(.conclusion == "failure") | .databaseId'
-```
+`databaseId` values from `failed-jobs.json`.
 
 Pass `job_ids` as a JSON array string. The deterministic safe-output job records the
 ledger entry, checks the campaign budget, and reruns those failed jobs.

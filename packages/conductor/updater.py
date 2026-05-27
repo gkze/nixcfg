@@ -3,23 +3,36 @@
 from __future__ import annotations
 
 import re
+import urllib.parse
+from dataclasses import dataclass
 from email.message import Message
 from typing import TYPE_CHECKING, ClassVar
 
-if TYPE_CHECKING:
-    import aiohttp
+import aiohttp
 
+if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry
     from lib.update.updaters.base import UpdateContext
 
-from lib.update.net import fetch_headers
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
-from lib.update.updaters.metadata import NO_METADATA
+from lib.update.updaters.base import (
+    AssetURLsMetadataUpdater,
+    VersionInfo,
+    register_updater,
+)
+from lib.update.updaters.metadata import AssetURLsMetadata
+
+HTTP_BAD_REQUEST = 400
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedArtifact:
+    version: str
+    url: str
 
 
 @register_updater
-class ConductorUpdater(DownloadHashUpdater):
-    """Resolve latest Conductor version from artifact headers."""
+class ConductorUpdater(AssetURLsMetadataUpdater):
+    """Resolve latest Conductor artifacts to immutable CDN asset URLs."""
 
     name = "conductor"
     BASE_URL = "https://cdn.crabnebula.app/download/melty/conductor/latest/platform"
@@ -28,16 +41,8 @@ class ConductorUpdater(DownloadHashUpdater):
         "x86_64-darwin": "dmg-x86_64",
     }
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Infer the current version from the download filename."""
-        url = f"{self.BASE_URL}/dmg-aarch64"
-        headers = await fetch_headers(
-            session,
-            url,
-            request_timeout=self.config.default_timeout,
-            config=self.config,
-        )
-        header = headers.get("Content-Disposition", "")
+    @staticmethod
+    def _version_from_header(header: str) -> str:
         msg = Message()
         msg["Content-Disposition"] = header
         filename = msg.get_filename() or ""
@@ -45,7 +50,64 @@ class ConductorUpdater(DownloadHashUpdater):
         if not match:
             err = "Could not parse version from Content-Disposition filename"
             raise RuntimeError(err)
-        return VersionInfo(version=match.group(1), metadata=NO_METADATA)
+        return match.group(1)
+
+    @staticmethod
+    def _url_without_query(url: str) -> str:
+        parsed = urllib.parse.urlsplit(url)
+        return urllib.parse.urlunsplit((
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            "",
+            "",
+        ))
+
+    async def _fetch_resolved_artifact(
+        self,
+        session: aiohttp.ClientSession,
+        platform: str,
+    ) -> _ResolvedArtifact:
+        discovery_url = f"{self.BASE_URL}/{self.PLATFORMS[platform]}"
+        timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
+        async with session.head(
+            discovery_url,
+            allow_redirects=True,
+            timeout=timeout,
+        ) as response:
+            if response.status >= HTTP_BAD_REQUEST:
+                msg = (
+                    f"Conductor metadata request for {platform} failed with "
+                    f"HTTP {response.status}"
+                )
+                raise RuntimeError(msg)
+            version = self._version_from_header(
+                response.headers.get("Content-Disposition", "")
+            )
+            return _ResolvedArtifact(
+                version=version,
+                url=self._url_without_query(str(response.url)),
+            )
+
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        """Infer the current version and resolved asset URLs from redirects."""
+        artifacts = {
+            platform: await self._fetch_resolved_artifact(session, platform)
+            for platform in self.PLATFORMS
+        }
+        versions = {artifact.version for artifact in artifacts.values()}
+        if len(versions) != 1:
+            version_map = {
+                platform: artifact.version for platform, artifact in artifacts.items()
+            }
+            msg = f"Conductor release metadata returned mismatched versions: {version_map}"
+            raise RuntimeError(msg)
+        return VersionInfo(
+            version=versions.pop(),
+            metadata=AssetURLsMetadata({
+                platform: artifact.url for platform, artifact in artifacts.items()
+            }),
+        )
 
     async def _is_latest(
         self,

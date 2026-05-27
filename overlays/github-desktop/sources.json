@@ -1,5 +1,5 @@
 {
-  "drvHash": "8hdvic4y4x6ycgyi8c7m8pk2855q51a5",
+  "drvHash": "8pn0p3i9m1rd72aixf2vj01q1jf4b0gp",
   "hashes": [
     {
       "hash": "sha256-DYUlLNxWn4sn7PBir/miJUoDVAQ2/nbOVGWSGN+IPxw=",
@@ -11,5 +11,5 @@
     }
   ],
   "input": "github-desktop",
-  "version": "3.5.10"
+  "version": "3.5.11"
 }

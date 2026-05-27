@@ -233,32 +233,38 @@ def _merge_entry(
     else:
         merged_hashes = existing.hashes.merge(incoming.hashes)
 
-    return SourceEntry(
-        hashes=merged_hashes,
-        version=_merge_optional_scalar(
+    return SourceEntry.model_validate({
+        "hashes": merged_hashes,
+        "version": _merge_optional_scalar(
             "version",
             existing.version,
             incoming.version,
             baseline=None if baseline is None else baseline.version,
         ),
-        input=_merge_optional_scalar(
+        "input": _merge_optional_scalar(
             "input",
             existing.input,
             incoming.input,
             baseline=None if baseline is None else baseline.input,
         ),
-        commit=_merge_optional_scalar(
+        "commit": _merge_optional_scalar(
             "commit",
             existing.commit,
             incoming.commit,
             baseline=None if baseline is None else baseline.commit,
         ),
-        urls=_merge_urls(
+        "drvHash": _merge_optional_scalar(
+            "drvHash",
+            existing.drv_hash,
+            incoming.drv_hash,
+            baseline=None if baseline is None else baseline.drv_hash,
+        ),
+        "urls": _merge_urls(
             existing.urls,
             incoming.urls,
             baseline=None if baseline is None else baseline.urls,
         ),
-    )
+    })
 
 
 def _collect_merged_entries(

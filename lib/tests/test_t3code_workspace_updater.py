@@ -16,6 +16,7 @@ from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.core import UpdateContext
 
 HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+NEW_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 
 
 def _load_module() -> ModuleType:
@@ -48,6 +49,7 @@ def test_t3code_workspace_updater_tracks_only_aarch64_darwin() -> None:
     assert updater_cls.input_name == "t3code"
     assert updater_cls.hash_type == "nodeModulesHash"
     assert updater_cls.platform_specific is True
+    assert updater_cls.materialize_when_current is True
     assert updater_cls.native_only is True
     assert updater_cls.supported_platforms == ("aarch64-darwin",)
 
@@ -219,6 +221,53 @@ def test_t3code_workspace_is_latest_records_context_fingerprint(
 
     assert _run(updater._is_latest(context, VersionInfo(version="main"))) is True
     assert context.drv_fingerprint == "abc123"
+
+
+def test_t3code_workspace_rechecks_node_modules_when_drv_fingerprint_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A matching drvHash must not hide stale workspace nodeModulesHash data."""
+    module = _load_module()
+    updater = module.T3CodeWorkspaceUpdater()
+    captured: dict[str, object] = {}
+
+    async def _fake_fingerprint(source: str, expr: str, *, config: object) -> str:
+        captured.update({"fingerprint_source": source, "expr": expr, "config": config})
+        return "abc123"
+
+    async def _fake_compute(expr: str) -> str:
+        captured["hash_expr"] = expr
+        return NEW_HASH
+
+    monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
+    monkeypatch.setattr(module, "_compute_workspace_hash", _fake_compute)
+    monkeypatch.setattr(
+        "lib.update.updaters.base.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    events = _run(
+        _collect(
+            updater.update_stream(
+                _source_entry(drv_hash="abc123"),
+                object(),
+                pinned_version=VersionInfo(version="main"),
+            )
+        )
+    )
+
+    result_payloads = [
+        event.payload
+        for event in events
+        if event.kind is UpdateEventKind.RESULT and event.payload is not None
+    ]
+    assert len(result_payloads) == 1
+    result = result_payloads[0]
+    assert isinstance(result, SourceEntry)
+    assert result.drv_hash == "abc123"
+    assert result.hashes.entries[0].hash == NEW_HASH
+    assert captured["fingerprint_source"] == "t3code-workspace"
+    assert captured["hash_expr"] == captured["expr"]
 
 
 def test_t3code_workspace_finalize_result_uses_cached_context_fingerprint() -> None:

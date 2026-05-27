@@ -220,16 +220,16 @@
     "codex": {
       "flake": false,
       "locked": {
-        "lastModified": 1779377269,
-        "narHash": "sha256-RTxhhZjZ/64N60pmbNVzLwcSBomn67pPDpOjkL6RPUw=",
+        "lastModified": 1779813970,
+        "narHash": "sha256-eHe4bjUIvSK512ZTlFcOBqv5hhM+zfzkxcLfrzDA7L4=",
         "owner": "openai",
         "repo": "codex",
-        "rev": "9474e5cfc4494b0ba319352aa86ce436c59e65c8",
+        "rev": "a75c443fdb64db48c3cf4bdb247c7ee52c0144c9",
         "type": "github"
       },
       "original": {
         "owner": "openai",
-        "ref": "rust-v0.133.0",
+        "ref": "rust-v0.134.0",
         "repo": "codex",
         "type": "github"
       }
@@ -988,17 +988,17 @@
     "github-desktop": {
       "flake": false,
       "locked": {
-        "lastModified": 1779444634,
-        "narHash": "sha256-PpP0ASNEMBa3UhwPPtuswl85m6vmWpakDpaC96CM4PQ=",
-        "ref": "refs/tags/release-3.5.10",
-        "rev": "497192a5c34ff4728e5e515e14fb16a42b5f12b3",
-        "revCount": 39255,
+        "lastModified": 1779786735,
+        "narHash": "sha256-U0uxlhF0J02g+HqQDCVG8h2FV+y/EMxwoeaLRLNgd14=",
+        "ref": "refs/tags/release-3.5.11",
+        "rev": "0435ec9132498eec14b14406edc33c3f728ce766",
+        "revCount": 39257,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/desktop/desktop.git"
       },
       "original": {
-        "ref": "refs/tags/release-3.5.10",
+        "ref": "refs/tags/release-3.5.11",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/desktop/desktop.git"
@@ -2474,16 +2474,16 @@
     "toad": {
       "flake": false,
       "locked": {
-        "lastModified": 1779006747,
-        "narHash": "sha256-cR6QIsKZS4EdWGxrj42h4sF2IiX1T1amqUnr6jHFCD4=",
+        "lastModified": 1779784060,
+        "narHash": "sha256-nsmfXjXqnOU8b+hkURg1b11D0lc1clA99tR0QkbYv78=",
         "owner": "batrachianai",
         "repo": "toad",
-        "rev": "f68ebee8c7fe800a373b9eef948ad1fd09c43996",
+        "rev": "0631e0b54bee1f97fe234a0b743aa82c563f6512",
         "type": "github"
       },
       "original": {
         "owner": "batrachianai",
-        "ref": "v0.6.18",
+        "ref": "v0.6.20",
         "repo": "toad",
         "type": "github"
       }
@@ -2718,16 +2718,16 @@
         "rust-overlay": "rust-overlay_4"
       },
       "locked": {
-        "lastModified": 1779462725,
-        "narHash": "sha256-1qWVELd9+XINjnzNNKeeCR9CxX/0DJVV6TS2cI0KhP4=",
+        "lastModified": 1779823278,
+        "narHash": "sha256-HLIbb8SrBpMbnFMY1bSnTlEHP6kdsg420V4fZM60lco=",
         "owner": "max-sixty",
         "repo": "worktrunk",
-        "rev": "98c7f82eaf0c2f901655f072f70b54c06ecf45e7",
+        "rev": "cc754bc66e687d028ddbe76b3d948499eff7b6c4",
         "type": "github"
       },
       "original": {
         "owner": "max-sixty",
-        "ref": "v0.53.0",
+        "ref": "v0.54.0",
         "repo": "worktrunk",
         "type": "github"
       }
@@ -2742,11 +2742,11 @@
         "rust-overlay": "rust-overlay_5"
       },
       "locked": {
-        "lastModified": 1779475788,
-        "narHash": "sha256-M1co3w3SXU0mlXD35FE+L4pln5lvnPc4IBPQTevbpnU=",
+        "lastModified": 1779824484,
+        "narHash": "sha256-ePrXl7r6JmbdpeN84ggvsxMYnMjUo5QWvxty+rCYB/M=",
         "owner": "zed-industries",
         "repo": "zed",
-        "rev": "de529b56779c178237984bd64cd1b98169b538d4",
+        "rev": "1025b13951b0230245a1d1bfbfe5537082eedf4d",
         "type": "github"
       },
       "original": {

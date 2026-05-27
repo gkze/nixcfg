@@ -10930,15 +10930,13 @@ rec {
             packageId = "futures";
           }
           {
-            name = "git2";
-            packageId = "git2";
-            usesDefaultFeatures = false;
-            features = [ "vendored-libgit2" ];
-          }
-          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "imara-diff";
+            packageId = "imara-diff";
           }
           {
             name = "language";
@@ -16572,9 +16570,9 @@ rec {
       };
       "cosmic-text" = rec {
         crateName = "cosmic-text";
-        version = "0.17.1";
+        version = "0.19.0";
         edition = "2021";
-        sha256 = "0synqbv7l40qzg05nykj3ir0xj22w5839a190r0wb9jawrl9hp4c";
+        sha256 = "0wys9shmdcibqacxl3qy50z5h48ff2xbx8j87zhlr4qda64bc5xy";
         libName = "cosmic_text";
         authors = [
           "Jeremy Soller <jeremy@system76.com>"
@@ -16664,7 +16662,7 @@ rec {
           "fontconfig" = [ "fontdb/fontconfig" "std" ];
           "hashbrown" = [ "dep:hashbrown" ];
           "modit" = [ "dep:modit" ];
-          "no_std" = [ "hashbrown" "dep:libm" "skrifa/libm" "core_maths" ];
+          "no_std" = [ "hashbrown" "dep:libm" "skrifa/libm" "core_maths" "swash?/libm" ];
           "std" = [ "fontdb/memmap" "fontdb/std" "harfrust/std" "linebender_resource_handle/std" "skrifa/std" "swash?/std" "sys-locale" "unicode-bidi/std" ];
           "swash" = [ "dep:swash" ];
           "syntect" = [ "dep:syntect" ];
@@ -20045,6 +20043,10 @@ rec {
             features = [ "preserve_order" "raw_value" ];
           }
           {
+            name = "serde_yaml";
+            packageId = "serde_yaml";
+          }
+          {
             name = "settings";
             packageId = "settings";
           }
@@ -20092,6 +20094,10 @@ rec {
             packageId = "gpui";
             usesDefaultFeatures = false;
             features = [ "test-support" ];
+          }
+          {
+            name = "indoc";
+            packageId = "indoc";
           }
           {
             name = "project";
@@ -54284,6 +54290,10 @@ rec {
             features = [ "preserve_order" "raw_value" ];
           }
           {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+          {
             name = "theme";
             packageId = "theme";
             features = [ "test-support" ];
@@ -61179,9 +61189,17 @@ rec {
             packageId = "fs";
           }
           {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "http_client";
+            packageId = "http_client";
           }
           {
             name = "language";

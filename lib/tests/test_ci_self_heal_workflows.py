@@ -91,6 +91,50 @@ def _markdown_inline_code_spans(path: Path) -> tuple[str, ...]:
     return tuple(re.findall(r"`([^`\n]+)`", text))
 
 
+def _markdown_section_lines(path: Path, heading: str) -> tuple[str, ...]:
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    marker = f"## {heading}"
+    try:
+        start = lines.index(marker) + 1
+    except ValueError as error:
+        message = f"missing Markdown section: {heading}"
+        raise AssertionError(message) from error
+
+    end = next(
+        (
+            index
+            for index, line in enumerate(lines[start:], start)
+            if line.startswith("## ")
+        ),
+        len(lines),
+    )
+    return tuple(lines[start:end])
+
+
+def _markdown_paragraphs(lines: tuple[str, ...]) -> tuple[str, ...]:
+    paragraphs: list[str] = []
+    current: list[str] = []
+
+    def flush() -> None:
+        if current:
+            paragraphs.append(" ".join(current))
+            current.clear()
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("- ", "```")):
+            flush()
+            continue
+        current.append(stripped)
+    flush()
+    return tuple(paragraphs)
+
+
+def _inline_code_spans(lines: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(re.findall(r"`([^`\n]+)`", "\n".join(lines)))
+
+
 def test_agentic_source_pins_copilot_model_and_safe_outputs() -> None:
     """The source workflow uses Copilot and deterministic safe outputs."""
     workflow = _frontmatter(AGENTIC_SOURCE)
@@ -128,6 +172,11 @@ def test_agentic_source_pins_copilot_model_and_safe_outputs() -> None:
     }
     pre_agent_runs = "\n".join(step["run"] for step in workflow["steps"])
     assert "remaining-cycles" in pre_agent_runs
+    assert "/tmp/gh-aw/agent/evidence" in pre_agent_runs
+    assert "target-run-id.txt" in pre_agent_runs
+    assert "gh run view" in pre_agent_runs
+    assert "failed-jobs.json" in pre_agent_runs
+    assert "/actions/jobs/${job_id}/logs" in pre_agent_runs
     pre_agent_env = "\n".join(
         str(value)
         for step in workflow["steps"]
@@ -164,6 +213,7 @@ def test_agentic_source_requires_parsed_auto_fix_classifier_marker() -> None:
     sh_blocks = {
         lines for lang, lines in _markdown_fenced_blocks(AGENTIC_SOURCE) if lang == "sh"
     }
+    classifier_lines = _markdown_section_lines(AGENTIC_SOURCE, "Classifier Stage")
 
     assert (
         "python3 lib/update/ci/self_heal.py parse-classifier classifier.json",
@@ -176,6 +226,17 @@ def test_agentic_source_requires_parsed_auto_fix_classifier_marker() -> None:
         f"<!-- {self_heal.CLASSIFIER_MARKER_NAME}:{{...}} -->"
         in _markdown_inline_code_spans(AGENTIC_SOURCE)
     )
+    assert "/tmp/gh-aw/agent/evidence/" in _inline_code_spans(classifier_lines)
+    assert "target-run-id.txt" in _inline_code_spans(classifier_lines)
+    assert "Agentic Update Self-Heal" in _inline_code_spans(classifier_lines)
+    assert "classify" in _inline_code_spans(classifier_lines)
+    assert (
+        "Classify the run named in `target-run-id.txt`; do not classify the current "
+        "`Agentic Update Self-Heal` workflow run. There is no deterministic "
+        "`classify` helper; inspect the evidence yourself, write `classifier.json`, "
+        "and use the parser command below only to validate its shape. Output exactly one "
+        "decision:"
+    ) in _markdown_paragraphs(classifier_lines)
 
 
 def test_compiled_agentic_lock_tracks_source_and_model() -> None:

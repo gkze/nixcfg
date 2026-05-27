@@ -94,6 +94,7 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
     input_name = "t3code"
     hash_type: Literal["nodeModulesHash"] = "nodeModulesHash"
     platform_specific = True
+    materialize_when_current = True
     native_only = True
     supported_platforms = (DARWIN_PLATFORM,)
 

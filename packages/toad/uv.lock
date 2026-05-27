@@ -172,12 +172,13 @@ wheels = [
 
 [[package]]
 name = "batrachian-toad"
-version = "0.6.18"
+version = "0.6.20"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "bashlex" },
     { name = "click" },
+    { name = "format-currency" },
     { name = "httpx" },
     { name = "notify-py" },
     { name = "packaging" },
@@ -209,6 +210,7 @@ requires-dist = [
     { name = "aiosqlite", specifier = "==0.22.1" },
     { name = "bashlex", specifier = "==0.18" },
     { name = "click", specifier = "==8.4.0" },
+    { name = "format-currency", specifier = ">=0.0.10" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "notify-py", specifier = "==0.3.43" },
     { name = "packaging", specifier = "==26.2" },
@@ -218,7 +220,7 @@ requires-dist = [
     { name = "pyperclip", specifier = "==1.11.0" },
     { name = "rich", specifier = "==15.0.0" },
     { name = "setproctitle", specifier = "==1.3.7" },
-    { name = "textual", extras = ["syntax"], specifier = "==8.2.6" },
+    { name = "textual", extras = ["syntax"], specifier = "==8.2.7" },
     { name = "textual-diff-view", specifier = "==0.1.5" },
     { name = "textual-serve", specifier = ">=1.1.2" },
     { name = "textual-speedups", specifier = "==0.2.1" },
@@ -263,6 +265,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
+]
+
+[[package]]
+name = "format-currency"
+version = "0.0.10"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3d/18/ee5527f52565bd79f3111e7fac7fbfe384f5b9bf909431814c2dc0457815/format_currency-0.0.10.tar.gz", hash = "sha256:15f01e5aaecf7c636815911cf0cbab0b117c8a6bd992d61a666f5e038cce32d9", size = 169740, upload-time = "2024-07-27T12:11:34.41Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/94/cb/788941330c524422c87583121b0d589636a982fad0685f9f3b7c7588c2f4/format_currency-0.0.10-py3-none-any.whl", hash = "sha256:eedecf0b2c4d21b2435eff3eed95658160d0602c444f921dd22ce4bfab7735c7", size = 167894, upload-time = "2024-07-27T12:11:36.627Z" },
 ]
 
 [[package]]
@@ -800,7 +811,7 @@ wheels = [
 
 [[package]]
 name = "textual"
-version = "8.2.6"
+version = "8.2.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "markdown-it-py", extra = ["linkify"] },
@@ -810,9 +821,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1c/b3/b62658f6cf808d28e4d16a07509728a7b17824f55a6d3533f017fd4566b0/textual-8.2.6.tar.gz", hash = "sha256:cef3714498a120a99278b98d4c165c278844e73db50f1db039aaabd89f2d1b63", size = 1856990, upload-time = "2026-05-13T09:56:12.281Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9b/7a/c519db0aba5024f86e71e9631810bfdd6866ed2c8695bd7fa34b90e7ef59/textual-8.2.7.tar.gz", hash = "sha256:658f568ff81e30ed43890c3e07520390e5cf1b4763822006e060656b0a88f105", size = 1859249, upload-time = "2026-05-19T10:52:49.531Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/b4/c2b876f445e52522824cb900f2c7db3a7c24f89d20449ef278b4195d0ecb/textual-8.2.6-py3-none-any.whl", hash = "sha256:17c92bec7ff1617bd7db2a3d9734b0c3b7d2c274c67d5eba94371ea2f99a63fd", size = 729855, upload-time = "2026-05-13T09:56:14.687Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/f5/c1e18bc0707300a0e90204343abbf7d7acd6fb7ebe03a6d4893b99a234b8/textual-8.2.7-py3-none-any.whl", hash = "sha256:4caaa13a90bc4cf9c6c862c067ccd34fe84e9c161710a2a907a8026313b6bd73", size = 731129, upload-time = "2026-05-19T10:52:51.773Z" },
 ]
 
 [package.optional-dependencies]

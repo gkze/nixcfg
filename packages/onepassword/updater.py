@@ -22,6 +22,7 @@ class OnePasswordUpdater(DownloadUrlMetadataUpdater):
     """Resolve 1Password from AgileBits' update check endpoint."""
 
     name = "onepassword"
+    materialize_when_current = True
     UPDATE_URL = "https://app-updates.agilebits.com/check/2/99/aarch64/OPM8/en/0/A1/N"
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "aarch64",
