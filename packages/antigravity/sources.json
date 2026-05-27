@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-KHjxZxNVBgCnHCXz6lYAfEcqeWK7ddWK5BqSGa+x49I="
+    "aarch64-darwin": "sha256-vy7Fsx8D0fvJghPkWmEzGedSfZe6238Jy4NX2cHoap0="
   },
   "urls": {
-    "aarch64-darwin": "https://storage.googleapis.com/antigravity-public/antigravity-hub/2.0.1-6566078776737792/darwin-arm/Antigravity.dmg"
+    "aarch64-darwin": "https://storage.googleapis.com/antigravity-public/antigravity-hub/2.0.6-5413878570549248/darwin-arm/Antigravity.dmg"
   },
-  "version": "2.0.1-6566078776737792"
+  "version": "2.0.6-5413878570549248"
 }

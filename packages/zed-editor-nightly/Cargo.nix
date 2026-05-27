@@ -10930,15 +10930,13 @@ rec {
             packageId = "futures";
           }
           {
-            name = "git2";
-            packageId = "git2";
-            usesDefaultFeatures = false;
-            features = [ "vendored-libgit2" ];
-          }
-          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "imara-diff";
+            packageId = "imara-diff";
           }
           {
             name = "language";
@@ -16572,9 +16570,9 @@ rec {
       };
       "cosmic-text" = rec {
         crateName = "cosmic-text";
-        version = "0.17.1";
+        version = "0.19.0";
         edition = "2021";
-        sha256 = "0synqbv7l40qzg05nykj3ir0xj22w5839a190r0wb9jawrl9hp4c";
+        sha256 = "0wys9shmdcibqacxl3qy50z5h48ff2xbx8j87zhlr4qda64bc5xy";
         libName = "cosmic_text";
         authors = [
           "Jeremy Soller <jeremy@system76.com>"
@@ -16664,7 +16662,7 @@ rec {
           "fontconfig" = [ "fontdb/fontconfig" "std" ];
           "hashbrown" = [ "dep:hashbrown" ];
           "modit" = [ "dep:modit" ];
-          "no_std" = [ "hashbrown" "dep:libm" "skrifa/libm" "core_maths" ];
+          "no_std" = [ "hashbrown" "dep:libm" "skrifa/libm" "core_maths" "swash?/libm" ];
           "std" = [ "fontdb/memmap" "fontdb/std" "harfrust/std" "linebender_resource_handle/std" "skrifa/std" "swash?/std" "sys-locale" "unicode-bidi/std" ];
           "swash" = [ "dep:swash" ];
           "syntect" = [ "dep:syntect" ];
@@ -18119,47 +18117,32 @@ rec {
       };
       "ctor" = rec {
         crateName = "ctor";
-        version = "0.4.3";
+        version = "1.0.6";
         edition = "2021";
-        sha256 = "19p88hk42pyj9gyp29d57gfdh4y7sq0mg9x9glayc788yl1fh2gc";
+        sha256 = "1ia9wwwk8y212jyx44h91gb359axw5g5y67aw0qhv8dxq2qmwxkd";
         authors = [
           "Matt Mastracci <matthew@mastracci.com>"
         ];
         dependencies = [
           {
-            name = "ctor-proc-macro";
-            packageId = "ctor-proc-macro";
-            optional = true;
-          }
-          {
-            name = "dtor";
-            packageId = "dtor";
+            name = "link-section";
+            packageId = "link-section";
             optional = true;
             usesDefaultFeatures = false;
           }
+          {
+            name = "linktime-proc-macro";
+            packageId = "linktime-proc-macro";
+            optional = true;
+            features = [ "ctor" ];
+          }
         ];
         features = {
-          "__no_warn_on_missing_unsafe" = [ "dtor?/__no_warn_on_missing_unsafe" ];
-          "default" = [ "dtor" "proc_macro" "__no_warn_on_missing_unsafe" ];
-          "dtor" = [ "dep:dtor" ];
-          "proc_macro" = [ "dep:ctor-proc-macro" "dtor?/proc_macro" ];
-          "used_linker" = [ "dtor?/used_linker" ];
+          "default" = [ "std" "proc_macro" "priority" ];
+          "priority" = [ "dep:link-section" ];
+          "proc_macro" = [ "dep:linktime-proc-macro" ];
         };
-        resolvedDefaultFeatures = [ "__no_warn_on_missing_unsafe" "default" "dtor" "proc_macro" ];
-      };
-      "ctor-proc-macro" = rec {
-        crateName = "ctor-proc-macro";
-        version = "0.0.6";
-        edition = "2021";
-        sha256 = "1hl2cxpv92322sqq972w257dc5d1dz6gqsnjx7c4bh1xw7vim4z2";
-        procMacro = true;
-        libName = "ctor_proc_macro";
-        authors = [
-          "Matt Mastracci <matthew@mastracci.com>"
-        ];
-        features = {
-        };
-        resolvedDefaultFeatures = [ "default" ];
+        resolvedDefaultFeatures = [ "default" "priority" "proc_macro" "std" ];
       };
       "ctrlc" = rec {
         crateName = "ctrlc";
@@ -20045,6 +20028,10 @@ rec {
             features = [ "preserve_order" "raw_value" ];
           }
           {
+            name = "serde_yaml";
+            packageId = "serde_yaml";
+          }
+          {
             name = "settings";
             packageId = "settings";
           }
@@ -20092,6 +20079,10 @@ rec {
             packageId = "gpui";
             usesDefaultFeatures = false;
             features = [ "test-support" ];
+          }
+          {
+            name = "indoc";
+            packageId = "indoc";
           }
           {
             name = "project";
@@ -20796,41 +20787,6 @@ rec {
           }
         ];
 
-      };
-      "dtor" = rec {
-        crateName = "dtor";
-        version = "0.0.6";
-        edition = "2021";
-        sha256 = "1a1k0rbvx6sbwjhf0bm1mfmy6c7vmdqm3w2xwbl2aq44sqmdzjwp";
-        authors = [
-          "Matt Mastracci <matthew@mastracci.com>"
-        ];
-        dependencies = [
-          {
-            name = "dtor-proc-macro";
-            packageId = "dtor-proc-macro";
-            optional = true;
-          }
-        ];
-        features = {
-          "default" = [ "proc_macro" "__no_warn_on_missing_unsafe" ];
-          "proc_macro" = [ "dep:dtor-proc-macro" ];
-        };
-        resolvedDefaultFeatures = [ "__no_warn_on_missing_unsafe" "proc_macro" ];
-      };
-      "dtor-proc-macro" = rec {
-        crateName = "dtor-proc-macro";
-        version = "0.0.5";
-        edition = "2021";
-        sha256 = "0m8hgbs9p3ay96aq8mlhghdvk8xgwg2pbx7p7kah0b01z4gy8m3l";
-        procMacro = true;
-        libName = "dtor_proc_macro";
-        authors = [
-          "Matt Mastracci <matthew@mastracci.com>"
-        ];
-        features = {
-        };
-        resolvedDefaultFeatures = [ "default" ];
       };
       "dunce" = rec {
         crateName = "dunce";
@@ -38198,6 +38154,20 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" ];
       };
+      "link-section" = rec {
+        crateName = "link-section";
+        version = "0.17.2";
+        edition = "2021";
+        sha256 = "1030yd8z9yb1dp1gn1g8670w8h7azqv4mf23axr9yvkd865907jd";
+        libName = "link_section";
+        authors = [
+          "Matt Mastracci <matthew@mastracci.com>"
+        ];
+        features = {
+          "default" = [ "proc_macro" "std" ];
+          "proc_macro" = [ "dep:linktime-proc-macro" ];
+        };
+      };
       "linkify" = rec {
         crateName = "linkify";
         version = "0.10.0";
@@ -38213,6 +38183,20 @@ rec {
           }
         ];
 
+      };
+      "linktime-proc-macro" = rec {
+        crateName = "linktime-proc-macro";
+        version = "0.1.0";
+        edition = "2021";
+        sha256 = "108gasagydcdmb9hrqcd4a0y49ya21jicw905gikwl0dzw3dfk54";
+        procMacro = true;
+        libName = "linktime_proc_macro";
+        authors = [
+          "Matt Mastracci <matthew@mastracci.com>"
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "ctor" "default" ];
       };
       "linux-raw-sys 0.11.0" = rec {
         crateName = "linux-raw-sys";
@@ -54284,6 +54268,10 @@ rec {
             features = [ "preserve_order" "raw_value" ];
           }
           {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+          {
             name = "theme";
             packageId = "theme";
             features = [ "test-support" ];
@@ -61179,9 +61167,17 @@ rec {
             packageId = "fs";
           }
           {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "http_client";
+            packageId = "http_client";
           }
           {
             name = "language";
