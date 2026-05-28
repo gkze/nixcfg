@@ -51,8 +51,8 @@ _REFRESH_WORKFLOW_JOB_IDS = (
     "aggregate-platform-updates",
 )
 _REFRESH_CONCURRENCY_CANCEL_MESSAGE = (
-    "Update refresh workflow must set concurrency.cancel-in-progress: false "
-    "so scheduled refreshes do not cancel in-flight package slices"
+    "Update refresh workflow must set concurrency.cancel-in-progress: true "
+    "so stale scheduled refreshes do not queue behind newer work"
 )
 _CERTIFY_WORKFLOW_SENTINEL_JOB_IDS = (
     "darwin-full-smoke",
@@ -277,12 +277,12 @@ def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -
 
 
 def _validate_refresh_workflow_concurrency(workflow_data: WorkflowObject) -> None:
-    """Require non-preemptive refresh concurrency for long package matrices."""
+    """Require preemptive refresh concurrency to avoid stale scheduled queues."""
     concurrency = workflow_data.get("concurrency")
     cancel_in_progress = (
         concurrency.get("cancel-in-progress") if isinstance(concurrency, dict) else None
     )
-    if cancel_in_progress is not False:
+    if cancel_in_progress is not True:
         raise RuntimeError(_REFRESH_CONCURRENCY_CANCEL_MESSAGE)
 
 

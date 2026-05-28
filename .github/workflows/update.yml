@@ -12,7 +12,7 @@ on:
 
 concurrency:
   group: flake-update-refresh
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -222,7 +222,7 @@ jobs:
     timeout-minutes: 300
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 16
       matrix: ${{ fromJSON(needs.discover-update-targets.outputs.targets) }}
     steps:
       - *checkout
@@ -314,7 +314,7 @@ jobs:
     timeout-minutes: 300
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 16
       matrix: ${{ fromJSON(needs.discover-update-targets.outputs.targets) }}
     steps:
       - *checkout
@@ -400,7 +400,7 @@ jobs:
     timeout-minutes: 300
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 16
       matrix: ${{ fromJSON(needs.discover-update-targets.outputs.targets) }}
     steps:
       - name: Check out repository archive

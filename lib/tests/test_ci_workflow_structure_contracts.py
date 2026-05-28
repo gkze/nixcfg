@@ -24,7 +24,7 @@ def _valid_refresh_workflow_text() -> str:
     return """
         concurrency:
           group: flake-update-refresh
-          cancel-in-progress: false
+          cancel-in-progress: true
         on: workflow_dispatch
         jobs:
           resolve-versions:
@@ -393,12 +393,12 @@ def test_validate_workflow_structure_contracts_accepts_valid_certify_workflow(
     [
         pytest.param(
             _valid_refresh_workflow_text().replace(
-                "cancel-in-progress: false",
                 "cancel-in-progress: true",
+                "cancel-in-progress: false",
                 1,
             ),
-            "scheduled refreshes do not cancel in-flight package slices",
-            id="forbids-preemptive-refresh-concurrency",
+            "stale scheduled refreshes do not queue behind newer work",
+            id="requires-preemptive-refresh-concurrency",
         ),
         pytest.param(
             _valid_refresh_workflow_text().replace(
