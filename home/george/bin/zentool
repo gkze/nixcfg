@@ -4235,7 +4235,7 @@ TYPER_APP.add_typer(_PROFILE_APP, name="profile")
 
 def _context_profile(ctx: typer.Context) -> str | None:
     """Return the nearest Typer context profile value."""
-    current: click.Context | None = ctx
+    current: click.Context | None = cast("click.Context", ctx)
     while current is not None:
         obj = current.obj
         if isinstance(obj, dict) and isinstance(obj.get("profile"), str):

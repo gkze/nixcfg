@@ -220,6 +220,35 @@ def test_merge_optional_scalar_and_urls_conflicts() -> None:
         )
 
 
+def test_merge_drv_hash_drops_unstable_value_without_conflict() -> None:
+    """Merge drvHash differences without manufacturing a canonical winner."""
+    baseline = SourceEntry.model_validate(
+        {
+            "version": "1.0.0",
+            "drvHash": "drv-baseline",
+            "hashes": {"x86_64-linux": "sha256-a"},
+        },
+    )
+    existing = SourceEntry.model_validate(
+        {
+            "version": "1.0.0",
+            "drvHash": "drv-left",
+            "hashes": {"x86_64-linux": "sha256-a"},
+        },
+    )
+    incoming = SourceEntry.model_validate(
+        {
+            "version": "1.0.0",
+            "drvHash": "drv-right",
+            "hashes": {"x86_64-linux": "sha256-a"},
+        },
+    )
+
+    merged = ms._merge_entry(existing, incoming, platform=None, baseline=baseline)
+
+    assert merged.drv_hash is None
+
+
 def test_write_merged_entries_reports_missing_destinations(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

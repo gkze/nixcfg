@@ -17,6 +17,10 @@ if TYPE_CHECKING:
 
 EXPECTED_ARGC = 3
 MAX_INSTALL_WORKERS = 8
+LSREGISTER_PATH = Path(
+    "/System/Library/Frameworks/CoreServices.framework/Frameworks/"
+    "LaunchServices.framework/Support/lsregister",
+)
 
 
 class _ProfileBundleLeakAuditPayload(TypedDict):
@@ -264,6 +268,27 @@ def _rsync_copy(src: Path, dst: Path, *, rsync_path: str, writable: bool) -> Non
         raise SystemExit(result.returncode)
 
 
+def _refresh_launch_services_registration(
+    app_path: Path,
+    *,
+    lsregister_path: Path = LSREGISTER_PATH,
+) -> None:
+    if not (app_path / "Contents" / "Info.plist").is_file():
+        return
+    if not lsregister_path.is_file():
+        return
+
+    result = subprocess.run(  # noqa: S603
+        [str(lsregister_path), "-f", str(app_path)],
+        check=False,
+    )
+    if result.returncode != 0:
+        _print_stderr(
+            "warning: could not refresh LaunchServices registration for "
+            f"{app_path}: exit {result.returncode}",
+        )
+
+
 def _install_managed_app(
     *,
     bundle_name: str,
@@ -287,6 +312,7 @@ def _install_managed_app(
         if _path_exists(dst):
             _remove_path(dst)
         dst.symlink_to(src)
+        _refresh_launch_services_registration(dst)
         return
 
     if dst.is_symlink() or (_path_exists(dst) and not dst.is_dir()):
@@ -294,6 +320,7 @@ def _install_managed_app(
 
     dst.mkdir(parents=True, exist_ok=True)
     _rsync_copy(src, dst, rsync_path=rsync_path, writable=writable)
+    _refresh_launch_services_registration(dst)
 
 
 def _profile_bundle_leak_audit(payload: Mapping[str, object]) -> None:

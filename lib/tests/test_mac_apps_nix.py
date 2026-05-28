@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import stat
+import subprocess
 import threading
 from contextlib import redirect_stderr
 from functools import cache
@@ -277,6 +278,99 @@ def test_copy_mode_replaces_symlinked_application_destinations(
     assert destination.exists()
     assert destination.is_dir()
     assert not destination.is_symlink()
+
+
+def test_launch_services_registration_ignores_non_app_bundles(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Only real app bundles should trigger LaunchServices registration."""
+
+    def _unexpected_run(
+        *_args: object, **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("lsregister should not run")
+
+    monkeypatch.setattr(mac_apps_helper.subprocess, "run", _unexpected_run)
+
+    mac_apps_helper._refresh_launch_services_registration(
+        tmp_path / "Empty.app",
+        lsregister_path=tmp_path / "lsregister",
+    )
+
+    app_bundle = tmp_path / "Example.app"
+    (app_bundle / "Contents").mkdir(parents=True)
+    (app_bundle / "Contents" / "Info.plist").write_text("", encoding="utf-8")
+
+    mac_apps_helper._refresh_launch_services_registration(
+        app_bundle,
+        lsregister_path=tmp_path / "missing-lsregister",
+    )
+
+
+def test_launch_services_registration_refreshes_app_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Materialized app bundles should refresh stale LaunchServices metadata."""
+    app_bundle = tmp_path / "Example.app"
+    (app_bundle / "Contents").mkdir(parents=True)
+    (app_bundle / "Contents" / "Info.plist").write_text("", encoding="utf-8")
+    lsregister = tmp_path / "lsregister"
+    lsregister.write_text("", encoding="utf-8")
+
+    calls: list[list[str]] = []
+
+    def _run(
+        command: list[str],
+        *,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert check is False
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(mac_apps_helper.subprocess, "run", _run)
+
+    mac_apps_helper._refresh_launch_services_registration(
+        app_bundle,
+        lsregister_path=lsregister,
+    )
+
+    assert calls == [[str(lsregister), "-f", str(app_bundle)]]
+
+
+def test_launch_services_registration_warns_when_refresh_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """LaunchServices refresh failures should warn without breaking activation."""
+    app_bundle = tmp_path / "Example.app"
+    (app_bundle / "Contents").mkdir(parents=True)
+    (app_bundle / "Contents" / "Info.plist").write_text("", encoding="utf-8")
+    lsregister = tmp_path / "lsregister"
+    lsregister.write_text("", encoding="utf-8")
+
+    def _run(
+        command: list[str],
+        *,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        assert check is False
+        return subprocess.CompletedProcess(command, 73)
+
+    monkeypatch.setattr(mac_apps_helper.subprocess, "run", _run)
+
+    mac_apps_helper._refresh_launch_services_registration(
+        app_bundle,
+        lsregister_path=lsregister,
+    )
+
+    assert capsys.readouterr().err == (
+        "warning: could not refresh LaunchServices registration for "
+        f"{app_bundle}: exit 73\n"
+    )
 
 
 def test_mac_app_entry_defaults_to_copy_mode() -> None:

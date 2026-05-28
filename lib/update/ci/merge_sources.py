@@ -180,6 +180,31 @@ def _merge_optional_scalar(
     return incoming or existing
 
 
+def _merge_drv_hash(
+    existing: str | None,
+    incoming: str | None,
+    *,
+    baseline: str | None = None,
+) -> str | None:
+    """Keep drvHash only when it is stable across merged roots.
+
+    `drvHash` is provenance metadata. A disagreement between platform
+    artifacts should not fail the merge, but the merged file should not
+    manufacture a fake canonical value either.
+    """
+    if existing is None and incoming is None:
+        return baseline
+    if existing is None:
+        return incoming if baseline is None or incoming == baseline else None
+    if incoming is None:
+        return existing if baseline is None or existing == baseline else None
+    if existing == incoming or (baseline is not None and existing == baseline):
+        return incoming
+    if baseline is not None and incoming == baseline:
+        return existing
+    return None
+
+
 def _merge_urls(
     existing: dict[str, str] | None,
     incoming: dict[str, str] | None,
@@ -253,8 +278,7 @@ def _merge_entry(
             incoming.commit,
             baseline=None if baseline is None else baseline.commit,
         ),
-        "drvHash": _merge_optional_scalar(
-            "drvHash",
+        "drvHash": _merge_drv_hash(
             existing.drv_hash,
             incoming.drv_hash,
             baseline=None if baseline is None else baseline.drv_hash,
