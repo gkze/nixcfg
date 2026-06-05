@@ -77,11 +77,14 @@ def test_t3code_desktop_package_keeps_staged_runtime_and_electron_dist() -> None
         IndentedString,
     )
     for snippet in (
-        "${lib.getExe python3} ${./render_runtime_package_json.py}",
+        "${lib.getExe pythonForRuntimeManifest} ${./render_runtime_package_json.py}",
         "--electron-builder-version ${lib.escapeShellArg electronBuilderVersion}",
         "--commit-hash ${lib.escapeShellArg t3codeCommitHash}",
         "cp ${./bun.lock} bun.lock",
         "bun install",
+        'exports["./utils/*"]',
+        "if [ -d node_modules/.bun ]; then",
+        "find node_modules/.bun -path '*/node_modules/.bin'",
     ):
         assert snippet in node_modules_build.value
     assert_nix_ast_equal(

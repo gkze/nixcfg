@@ -30,6 +30,11 @@ if TYPE_CHECKING:
     from lib.update.events import EventStream
 
 
+def _local_flake_url() -> str:
+    """Return a local flake URL compatible with installed nixcfg CLIs."""
+    return f"git+file://{get_repo_file('.').resolve()}?dirty=1"
+
+
 _MIN_VERSION_PARTS = 2
 _PATCHED_VERSION_PARTS = 3
 
@@ -73,7 +78,7 @@ class CrushUpdater(GitHubReleaseUpdater):
     def _go_version_expr(platform: str, go_attr: str) -> str:
         """Build a flake expression that returns the active Go toolchain version."""
         return _build_flake_attr_expr(
-            f"path:{get_repo_file('.')}",
+            _local_flake_url(),
             "pkgs",
             platform,
             go_attr,

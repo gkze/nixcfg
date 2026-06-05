@@ -18,16 +18,27 @@ from lib.import_utils import load_module_from_path
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, UpdateEvent
 from lib.update.nix import get_current_nix_platform
-from lib.update.paths import REPO_ROOT
+from lib.update.paths import REPO_ROOT, local_flake_url
 
 _NORMALIZER_RESULT_SIZE = 3
 _CRATE2NIX_COMMAND_TIMEOUT_SECONDS = 2400
 _CRATE2NIX_CARGO_HOME_ENV = "NIXCFG_CRATE2NIX_CARGO_HOME"
 _CRATE2NIX_GENERATE_ATTEMPTS = 3
 _CRATE2NIX_GENERATE_RETRY_DELAY_SECONDS = 2.0
-_RETRYABLE_CRATE2NIX_PREFETCH_MARKERS = (
+_RETRYABLE_CRATE2NIX_NETWORK_CONTEXT_MARKERS = (
+    "cargo metadata",
+    "crates.io",
+    "failed to download",
+    "failed to get",
+    "git fetch",
+    "index.crates.io",
+    "nix-prefetch-git",
+)
+_RETRYABLE_CRATE2NIX_TRANSIENT_MARKERS = (
     "Directory not empty",
     "Operation timed out",
+    "Operation too slow",
+    "Timeout was reached",
     "Connection timed out",
     "Could not resolve host",
     "Failed to connect",
@@ -192,6 +203,13 @@ def _normalize_trailing_newline(text: str) -> str:
     return text.rstrip("\n") + "\n"
 
 
+def _read_generated_hash_text(path: Path) -> str:
+    """Return generated crate hashes, or an empty JSON object when none were emitted."""
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return "{}\n"
+
+
 def _load_normalizer(path: Path) -> _Normalizer:
     module_path = (REPO_ROOT / path).resolve()
     try:
@@ -223,6 +241,18 @@ def _load_normalizer(path: Path) -> _Normalizer:
         return cast("tuple[str, int, bool]", result)
 
     return _normalize
+
+
+def _local_flake_installable(installable: str) -> str:
+    """Rewrite repo-local ``path:`` installables through Git's clean source view."""
+    if installable.startswith("path:.#"):
+        return f"{local_flake_url()}#{installable.removeprefix('path:.#')}"
+
+    repo_prefix = f"path:{Path(REPO_ROOT).resolve()}#"
+    if installable.startswith(repo_prefix):
+        return f"{local_flake_url()}#{installable.removeprefix(repo_prefix)}"
+
+    return installable
 
 
 def _xdg_cache_home() -> Path:
@@ -270,8 +300,12 @@ def _run(
 
 def _is_retryable_crate2nix_generate_failure(message: str) -> bool:
     """Return whether a crate2nix generation failure is likely transient."""
-    return "nix-prefetch-git" in message and any(
-        marker in message for marker in _RETRYABLE_CRATE2NIX_PREFETCH_MARKERS
+    output = message.casefold()
+    return any(
+        marker.casefold() in output
+        for marker in _RETRYABLE_CRATE2NIX_NETWORK_CONTEXT_MARKERS
+    ) and any(
+        marker.casefold() in output for marker in _RETRYABLE_CRATE2NIX_TRANSIENT_MARKERS
     )
 
 
@@ -295,8 +329,8 @@ def _run_crate2nix_generate(
             for path in generated_outputs:
                 path.unlink(missing_ok=True)
             sys.stderr.write(
-                "Retrying crate2nix generation after transient nix-prefetch-git "
-                f"failure ({attempt}/{attempts})...\n"
+                "Retrying crate2nix generation after transient network failure "
+                f"({attempt}/{attempts})...\n"
             )
             time.sleep(_CRATE2NIX_GENERATE_RETRY_DELAY_SECONDS * attempt)
             attempt += 1
@@ -309,7 +343,7 @@ def _build_patched_src(target: Crate2NixTarget) -> Path:
         "--impure",
         "--no-link",
         "--print-out-paths",
-        target.patched_src_installable,
+        _local_flake_installable(target.patched_src_installable),
     ])
     out_paths = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
     if len(out_paths) != 1:
@@ -363,7 +397,7 @@ def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
         )
         cargo_text = _stabilize_generated_command_comment(target, cargo_text)
         cargo_text = _normalize_trailing_newline(cargo_text)
-        hash_text = _normalize_json_text(generated_hashes.read_text(encoding="utf-8"))
+        hash_text = _normalize_json_text(_read_generated_hash_text(generated_hashes))
         hash_text = _normalize_trailing_newline(hash_text)
         return RefreshResult(cargo_nix=cargo_text, crate_hashes=hash_text)
 

@@ -1,23 +1,23 @@
 {
-  "drvHash": "8dzk6cnjc1g3iw0rkc2biiahmd49zygw",
+  "drvHash": "v0k4hvglkafhz5wbl8rhyc6nvnl5l53m",
   "hashes": [
     {
-      "hash": "sha256-mTwAZwFBVBZ+vpd2cC/Maq8HrHt/ce4NGSzY7Z9lb90=",
+      "hash": "sha256-8jcqrvjDGXH2Jnvk8LXBR8EpZ4OFkGRItFBjcE0XTvM=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     },
     {
-      "hash": "sha256-EWBZPcFXxBwbD/g6MJSw9ukX4BUxzWUneOPjMwDnPDA=",
+      "hash": "sha256-Q+EBucx37uXsSGz3Ocao9T00xJlld26Ub0jrF0wqhqo=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-linux"
     },
     {
-      "hash": "sha256-rPttIf1AOPchHU5aF7LGCvsYD+4tbk7teXJNzzTt4W4=",
+      "hash": "sha256-bg3RfWaJvLEj9sKDGwnvm5RAr2WbbLsCMmCeGdA1+ww=",
       "hashType": "nodeModulesHash",
       "platform": "x86_64-darwin"
     },
     {
-      "hash": "sha256-ItsFV0Hs6W1Bj3VluIK9Oso2/p/jRY+3RTbDksJwLrI=",
+      "hash": "sha256-SEqgECxNY87l+dfW8h83TVaqBWGmQSGqtIGNz2z5dsI=",
       "hashType": "nodeModulesHash",
       "platform": "x86_64-linux"
     }

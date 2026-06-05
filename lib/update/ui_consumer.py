@@ -431,14 +431,24 @@ class EventConsumer:
     async def run(self) -> ConsumeEventsResult:
         """Consume events until sentinel and return aggregate results."""
         renderer = self.renderer
+        delayed_render: asyncio.Task[None] | None = None
 
-        async def _render_ticker() -> None:
-            while True:
-                await asyncio.sleep(self._render_interval)
-                renderer.request_render()
-                renderer.render_if_due(time.monotonic())
+        async def _render_after_interval() -> None:
+            delay = max(
+                0.0,
+                self._render_interval - (time.monotonic() - renderer.last_render),
+            )
+            if delay:
+                await asyncio.sleep(delay)
+            renderer.render_if_due(time.monotonic())
 
-        ticker = asyncio.create_task(_render_ticker()) if self._is_tty else None
+        def _schedule_delayed_render() -> None:
+            nonlocal delayed_render
+            if not self._is_tty or not renderer.needs_render:
+                return
+            if delayed_render is None or delayed_render.done():
+                delayed_render = asyncio.create_task(_render_after_interval())
+
         try:
             while True:
                 event = await self._queue.get()
@@ -452,11 +462,12 @@ class EventConsumer:
 
                 renderer.request_render()
                 renderer.render_if_due(time.monotonic())
+                _schedule_delayed_render()
         finally:
-            if ticker is not None:
-                ticker.cancel()
+            if delayed_render is not None and not delayed_render.done():
+                delayed_render.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
-                    await ticker
+                    await delayed_render
             renderer.finalize()
 
         return self.result

@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-7G31QDCnlfPrNQuSO0+o1UjRl5QC407uzwHYHmVxxUA="
+  },
+  "urls": {
+    "aarch64-darwin": "https://github.com/refactoringhq/tolaria/releases/download/v2026-06-01/Tolaria_2026.6.1_macOS_Silicon.app.tar.gz"
+  },
+  "version": "2026.6.1"
+}

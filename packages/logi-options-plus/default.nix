@@ -1,50 +1,17 @@
 {
-  darwin,
-  fetchurl,
   lib,
+  mkZipApp,
   selfSource,
-  stdenvNoCC,
-  system,
-  unzip,
   ...
 }:
-
-stdenvNoCC.mkDerivation {
+mkZipApp {
   pname = "logi-options-plus";
-  inherit (selfSource) version;
-
-  passthru.macApp = {
-    bundleName = "Logi Options+ Installer.app";
-    bundleRelPath = "Applications/Logi Options+ Installer.app";
-    installMode = "copy";
-  };
-
-  src = fetchurl {
-    url = selfSource.urls.${system};
-    hash = selfSource.hashes.${system};
-  };
-
-  nativeBuildInputs = [
-    darwin.xattr
-    unzip
-  ];
-
+  bundleName = "Logi Options+ Installer.app";
+  executableName = "logioptionsplus_installer";
+  binaryName = "logi-options-plus-installer";
+  sourceAppPath = "logioptionsplus_installer.app";
   dontFixup = true;
-  dontUnpack = true;
-
-  installPhase = ''
-    runHook preInstall
-
-    unpack_dir="$TMPDIR/logi-options-plus-unpack"
-    mkdir -p "$unpack_dir" "$out/Applications" "$out/bin"
-    unzip -qq "$src" -d "$unpack_dir"
-    cp -R "$unpack_dir/logioptionsplus_installer.app" "$out/Applications/Logi Options+ Installer.app"
-    ${darwin.xattr}/bin/xattr -cr "$out/Applications/Logi Options+ Installer.app"
-    ln -s "$out/Applications/Logi Options+ Installer.app/Contents/MacOS/logioptionsplus_installer" "$out/bin/logi-options-plus-installer"
-
-    runHook postInstall
-  '';
-
+  info = selfSource;
   meta = with lib; {
     description = "Installer for Logitech Options+";
     homepage = "https://www.logitech.com/en-us/software/logi-options-plus.html";

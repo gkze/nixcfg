@@ -77,6 +77,18 @@ def get_repo_root() -> Path:
 cast("_CacheClearable", get_repo_root).cache_clear = _clear_root_cache
 
 
+def local_flake_url(root: os.PathLike[str] | str | None = None) -> str:
+    """Return a local flake URL that uses Git's clean source view.
+
+    ``path:`` flake URLs copy the repository directory as-is, including local
+    ``.git`` implementation files.  Git fsmonitor creates a socket inside
+    ``.git`` that Nix cannot copy, so update-time local flake evaluations should
+    use ``git+file`` instead.
+    """
+    repo_root = get_repo_root() if root is None else Path(root).expanduser().resolve()
+    return f"git+file://{repo_root}?dirty=1"
+
+
 class _RepoPathProxy(os.PathLike[str]):
     """Lazy path-like wrapper rooted on :func:`find_root`."""
 

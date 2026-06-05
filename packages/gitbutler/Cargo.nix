@@ -134,16 +134,6 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "but-claude" = rec {
-      packageId = "but-claude";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "but-claude";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
     "but-core" = rec {
       packageId = "but-core";
       build = internal.buildRustCrateWithFeatures {
@@ -158,16 +148,6 @@ rec {
       packageId = "but-ctx";
       build = internal.buildRustCrateWithFeatures {
         packageId = "but-ctx";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "but-cursor" = rec {
-      packageId = "but-cursor";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "but-cursor";
       };
 
       # Debug support which might change between releases.
@@ -478,6 +458,16 @@ rec {
       packageId = "but-tools";
       build = internal.buildRustCrateWithFeatures {
         packageId = "but-tools";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "but-transaction" = rec {
+      packageId = "but-transaction";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "but-transaction";
       };
 
       # Debug support which might change between releases.
@@ -1189,7 +1179,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_System_Console" "Win32_Foundation" ];
           }
@@ -1244,7 +1234,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_System_Console" "Win32_Foundation" ];
           }
@@ -1404,7 +1394,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_DataExchange" "Win32_System_Memory" "Win32_System_Ole" "Win32_UI_Shell" ];
           }
@@ -1592,7 +1582,7 @@ rec {
           "zstd" = [ "compression-codecs/zstd" ];
           "zstdmt" = [ "compression-codecs/zstdmt" "zstd" ];
         };
-        resolvedDefaultFeatures = [ "brotli" "gzip" "tokio" "zlib" "zstd" ];
+        resolvedDefaultFeatures = [ "gzip" "tokio" ];
       };
       "async-executor" = rec {
         crateName = "async-executor";
@@ -1749,9 +1739,9 @@ rec {
       };
       "async-openai" = rec {
         crateName = "async-openai";
-        version = "0.33.1";
+        version = "0.38.2";
         edition = "2021";
-        sha256 = "11p99yj0xfc8b7aq7s6pgvhnjkppn2gcfr73r3l2x6mdnkgc6j6c";
+        sha256 = "1vhf5gp4vv6f4g777995vxg8hvc0jlqwp3i76yjqsshmjvb6ddib";
         libName = "async_openai";
         authors = [
           "Himanshu Neema"
@@ -1761,13 +1751,6 @@ rec {
             name = "async-openai-macros";
             packageId = "async-openai-macros";
             optional = true;
-          }
-          {
-            name = "backoff";
-            packageId = "backoff";
-            optional = true;
-            target = { target, features }: (!(builtins.elem "wasm" target."family"));
-            features = [ "tokio" ];
           }
           {
             name = "base64";
@@ -1788,13 +1771,11 @@ rec {
             name = "eventsource-stream";
             packageId = "eventsource-stream";
             optional = true;
-            target = { target, features }: (!(builtins.elem "wasm" target."family"));
           }
           {
             name = "futures";
             packageId = "futures";
             optional = true;
-            target = { target, features }: (!(builtins.elem "wasm" target."family"));
           }
           {
             name = "getrandom";
@@ -1809,16 +1790,10 @@ rec {
           }
           {
             name = "reqwest";
-            packageId = "reqwest 0.12.28";
+            packageId = "reqwest";
             optional = true;
             usesDefaultFeatures = false;
-            features = [ "json" "stream" "multipart" ];
-          }
-          {
-            name = "reqwest-eventsource";
-            packageId = "reqwest-eventsource";
-            optional = true;
-            target = { target, features }: (!(builtins.elem "wasm" target."family"));
+            features = [ "json" "stream" "multipart" "query" ];
           }
           {
             name = "secrecy";
@@ -1866,6 +1841,12 @@ rec {
             features = [ "codec" "io-util" ];
           }
           {
+            name = "tower";
+            packageId = "tower";
+            optional = true;
+            features = [ "limit" "retry" "timeout" "util" ];
+          }
+          {
             name = "tracing";
             packageId = "tracing";
             optional = true;
@@ -1883,7 +1864,7 @@ rec {
           }
         ];
         features = {
-          "_api" = [ "dep:async-openai-macros" "dep:backoff" "dep:base64" "dep:bytes" "dep:futures" "dep:rand" "dep:reqwest" "dep:reqwest-eventsource" "dep:thiserror" "dep:tokio" "dep:tokio-stream" "dep:tokio-util" "dep:tracing" "dep:secrecy" "dep:eventsource-stream" "dep:serde_urlencoded" "dep:url" ];
+          "_api" = [ "dep:async-openai-macros" "dep:base64" "dep:bytes" "dep:futures" "dep:rand" "dep:reqwest" "dep:thiserror" "dep:tokio" "dep:tokio-stream" "dep:tokio-util" "dep:tracing" "dep:tower" "dep:secrecy" "dep:eventsource-stream" "dep:serde_urlencoded" "dep:url" ];
           "administration" = [ "administration-types" "_api" ];
           "administration-types" = [ "dep:derive_builder" ];
           "assistant" = [ "assistant-types" "_api" ];
@@ -1910,11 +1891,12 @@ rec {
           "file-types" = [ "dep:derive_builder" "dep:bytes" ];
           "finetuning" = [ "finetuning-types" "_api" ];
           "finetuning-types" = [ "dep:derive_builder" "grader-types" ];
-          "full" = [ "responses" "webhook" "audio" "video" "image" "embedding" "evals" "finetuning" "batch" "file" "upload" "model" "moderation" "vectorstore" "chatkit" "container" "skill" "realtime" "chat-completion" "assistant" "administration" "completions" "types" "byot" ];
+          "full" = [ "responses" "webhook" "audio" "video" "image" "embedding" "evals" "finetuning" "batch" "file" "upload" "model" "moderation" "vectorstore" "chatkit" "container" "skill" "realtime" "chat-completion" "assistant" "administration" "completions" "types" "byot" "middleware" ];
           "grader" = [ "grader-types" ];
           "grader-types" = [ "dep:derive_builder" "eval-types" ];
           "image" = [ "image-types" "_api" ];
           "image-types" = [ "dep:derive_builder" "dep:bytes" ];
+          "middleware" = [ "dep:tower" "_api" ];
           "model" = [ "model-types" "_api" ];
           "model-types" = [ "dep:derive_builder" ];
           "moderation" = [ "moderation-types" "_api" ];
@@ -1925,8 +1907,7 @@ rec {
           "realtime-types" = [ "dep:derive_builder" "dep:bytes" "response-types" ];
           "response-types" = [ "dep:derive_builder" ];
           "responses" = [ "response-types" "_api" ];
-          "rustls" = [ "dep:reqwest" "reqwest/rustls-tls-native-roots" ];
-          "rustls-webpki-roots" = [ "dep:reqwest" "reqwest/rustls-tls-webpki-roots" ];
+          "rustls" = [ "dep:reqwest" "reqwest/rustls" ];
           "skill" = [ "skill-types" "_api" ];
           "skill-types" = [ "dep:derive_builder" "dep:bytes" ];
           "types" = [ "response-types" "webhook-types" "audio-types" "video-types" "image-types" "embedding-types" "eval-types" "finetuning-types" "grader-types" "batch-types" "file-types" "upload-types" "model-types" "moderation-types" "vectorstore-types" "chatkit-types" "container-types" "skill-types" "realtime-types" "chat-completion-types" "assistant-types" "administration-types" "completion-types" ];
@@ -1943,9 +1924,9 @@ rec {
       };
       "async-openai-macros" = rec {
         crateName = "async-openai-macros";
-        version = "0.1.1";
+        version = "0.3.0";
         edition = "2021";
-        sha256 = "1r05hwq5vvv3cx796c8y592knccf0zws2sqwnzmfr32yb672m1w1";
+        sha256 = "00k3na9aw6y1y57iccckp2i89knnvgm18lj2rwxfszi0fi3r8aj9";
         procMacro = true;
         libName = "async_openai_macros";
         authors = [
@@ -2128,58 +2109,6 @@ rec {
           {
             name = "async-io";
             packageId = "async-io";
-          }
-        ];
-
-      };
-      "async-stream" = rec {
-        crateName = "async-stream";
-        version = "0.3.6";
-        edition = "2021";
-        sha256 = "0xl4zqncrdmw2g6241wgr11dxdg4h7byy6bz3l6si03qyfk72nhb";
-        libName = "async_stream";
-        authors = [
-          "Carl Lerche <me@carllerche.com>"
-        ];
-        dependencies = [
-          {
-            name = "async-stream-impl";
-            packageId = "async-stream-impl";
-          }
-          {
-            name = "futures-core";
-            packageId = "futures-core";
-          }
-          {
-            name = "pin-project-lite";
-            packageId = "pin-project-lite";
-          }
-        ];
-
-      };
-      "async-stream-impl" = rec {
-        crateName = "async-stream-impl";
-        version = "0.3.6";
-        edition = "2021";
-        sha256 = "0kaplfb5axsvf1gfs2gk6c4zx6zcsns0yf3ssk7iwni7bphlvhn7";
-        procMacro = true;
-        libName = "async_stream_impl";
-        authors = [
-          "Carl Lerche <me@carllerche.com>"
-        ];
-        dependencies = [
-          {
-            name = "proc-macro2";
-            packageId = "proc-macro2";
-          }
-          {
-            name = "quote";
-            packageId = "quote";
-          }
-          {
-            name = "syn";
-            packageId = "syn 2.0.117";
-            features = [ "full" "visit-mut" ];
           }
         ];
 
@@ -2680,12 +2609,6 @@ rec {
         ];
         dependencies = [
           {
-            name = "futures-core";
-            packageId = "futures-core";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
             name = "getrandom";
             packageId = "getrandom 0.2.17";
           }
@@ -2694,28 +2617,8 @@ rec {
             packageId = "instant";
           }
           {
-            name = "pin-project-lite";
-            packageId = "pin-project-lite";
-            optional = true;
-          }
-          {
             name = "rand";
             packageId = "rand 0.8.5";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            rename = "tokio_1";
-            optional = true;
-            features = [ "time" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "tokio";
-            packageId = "tokio";
-            rename = "tokio_1";
-            features = [ "macros" "time" "rt-multi-thread" ];
           }
         ];
         features = {
@@ -2728,7 +2631,7 @@ rec {
           "tokio_1" = [ "dep:tokio_1" ];
           "wasm-bindgen" = [ "instant/wasm-bindgen" "getrandom/js" ];
         };
-        resolvedDefaultFeatures = [ "default" "futures" "futures-core" "pin-project-lite" "tokio" "tokio_1" ];
+        resolvedDefaultFeatures = [ "default" ];
       };
       "base64 0.21.7" = rec {
         crateName = "base64";
@@ -3209,7 +3112,7 @@ rec {
           "std" = [ "alloc-stdlib" "brotli-decompressor/std" ];
           "validation" = [ "sha2" ];
         };
-        resolvedDefaultFeatures = [ "alloc-stdlib" "default" "std" ];
+        resolvedDefaultFeatures = [ "alloc-stdlib" "std" ];
       };
       "brotli-decompressor" = rec {
         crateName = "brotli-decompressor";
@@ -3337,6 +3240,10 @@ rec {
             optional = true;
           }
           {
+            name = "but-agentlog";
+            packageId = "but-agentlog";
+          }
+          {
             name = "but-api";
             packageId = "but-api";
             features = [ "path-bytes" ];
@@ -3351,11 +3258,6 @@ rec {
             optional = true;
           }
           {
-            name = "but-claude";
-            packageId = "but-claude";
-            optional = true;
-          }
-          {
             name = "but-core";
             packageId = "but-core";
           }
@@ -3364,9 +3266,8 @@ rec {
             packageId = "but-ctx";
           }
           {
-            name = "but-cursor";
-            packageId = "but-cursor";
-            optional = true;
+            name = "but-db";
+            packageId = "but-db";
           }
           {
             name = "but-forge";
@@ -3429,6 +3330,10 @@ rec {
           {
             name = "but-settings";
             packageId = "but-settings";
+          }
+          {
+            name = "but-transaction";
+            packageId = "but-transaction";
           }
           {
             name = "but-update";
@@ -3689,6 +3594,10 @@ rec {
             features = [ "json" ];
           }
           {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "preserve_order" ];
@@ -3707,17 +3616,18 @@ rec {
             features = [ "term-svg" ];
           }
           {
+            name = "syn";
+            packageId = "syn 2.0.117";
+            features = [ "visit" "full" "extra-traits" "parsing" "printing" ];
+          }
+          {
             name = "temp-env";
             packageId = "temp-env";
           }
         ];
         features = {
-          "agentlog" = [ "dep:but-agentlog" ];
           "default" = [ "legacy" ];
-          "embedded-frontend" = [ "but-server?/embedded-frontend" ];
-          "irc" = [ "dep:but-server" "but-server/irc" ];
-          "legacy" = [ "but-workspace/legacy" "but-api/legacy" "but-ctx/legacy" "dep:but-action" "dep:but-claude" "dep:but-cursor" "dep:but-rules" "dep:but-gerrit" "dep:but-worktrees" "dep:but-cherry-apply" "dep:gitbutler-project" "dep:gitbutler-commit" "dep:gitbutler-branch-actions" "dep:gitbutler-oplog" "dep:gitbutler-edit-mode" "dep:gitbutler-operating-modes" "dep:gitbutler-repo" "dep:gitbutler-git" "dep:gitbutler-watcher" ];
-          "remote" = [ "dep:but-server" "embedded-frontend" ];
+          "legacy" = [ "but-workspace/legacy" "but-api/legacy" "but-ctx/legacy" "dep:but-action" "dep:but-rules" "dep:but-gerrit" "dep:but-worktrees" "dep:but-cherry-apply" "dep:gitbutler-project" "dep:gitbutler-commit" "dep:gitbutler-branch-actions" "dep:gitbutler-oplog" "dep:gitbutler-edit-mode" "dep:gitbutler-operating-modes" "dep:gitbutler-repo" "dep:gitbutler-git" "dep:gitbutler-watcher" ];
         };
         resolvedDefaultFeatures = [ "default" "legacy" ];
       };
@@ -3757,6 +3667,10 @@ rec {
             packageId = "but-error";
           }
           {
+            name = "but-graph";
+            packageId = "but-graph";
+          }
+          {
             name = "but-hunk-assignment";
             packageId = "but-hunk-assignment";
           }
@@ -3787,10 +3701,6 @@ rec {
             packageId = "chrono";
             usesDefaultFeatures = false;
             features = [ "std" ];
-          }
-          {
-            name = "gitbutler-branch";
-            packageId = "gitbutler-branch";
           }
           {
             name = "gitbutler-branch-actions";
@@ -3876,6 +3786,23 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "bstr";
+            packageId = "bstr";
+          }
+          {
+            name = "but-core";
+            packageId = "but-core";
+          }
+          {
+            name = "but-meta";
+            packageId = "but-meta";
+            features = [ "legacy" ];
+          }
+          {
+            name = "but-workspace";
+            packageId = "but-workspace";
+          }
+          {
             name = "chrono";
             packageId = "chrono";
             usesDefaultFeatures = false;
@@ -3889,7 +3816,7 @@ rec {
           }
           {
             name = "git-meta-lib";
-            packageId = "git-meta-lib 0.1.9";
+            packageId = "git-meta-lib";
           }
           {
             name = "gix";
@@ -3916,6 +3843,10 @@ rec {
           }
         ];
         devDependencies = [
+          {
+            name = "but-testsupport";
+            packageId = "but-testsupport";
+          }
           {
             name = "tempfile";
             packageId = "tempfile";
@@ -3963,11 +3894,6 @@ rec {
           {
             name = "but-cherry-apply";
             packageId = "but-cherry-apply";
-            optional = true;
-          }
-          {
-            name = "but-claude";
-            packageId = "but-claude";
             optional = true;
           }
           {
@@ -4184,12 +4110,6 @@ rec {
           {
             name = "url";
             packageId = "url";
-            optional = true;
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "serde" ];
           }
           {
             name = "which";
@@ -4211,10 +4131,16 @@ rec {
             name = "tempfile";
             packageId = "tempfile";
           }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "full" ];
+          }
         ];
         features = {
-          "export-schema" = [ "but-error/export-schema" "but-workspace/export-schema" "but-hunk-assignment/export-schema" "gitbutler-project/export-schema" "but-rebase/export-schema" "gitbutler-operating-modes/export-schema" "gitbutler-branch/export-schema" "gitbutler-branch-actions/export-schema" "gitbutler-edit-mode/export-schema" "gitbutler-oplog/export-schema" ];
-          "legacy" = [ "but-ctx/legacy" "but-workspace/legacy" "dep:but-askpass" "dep:gitbutler-user" "dep:gitbutler-project" "dep:gitbutler-branch" "dep:gitbutler-branch-actions" "dep:gitbutler-commit" "dep:gitbutler-reference" "dep:gitbutler-repo" "dep:gitbutler-edit-mode" "dep:gitbutler-operating-modes" "dep:gitbutler-oplog" "dep:gitbutler-git" "dep:but-action" "dep:but-claude" "dep:but-rules" "dep:but-gerrit" "dep:but-worktrees" "dep:but-cherry-apply" "dep:url" ];
+          "export-schema" = [ "but-error/export-schema" "but-workspace/export-schema" "but-hunk-assignment/export-schema" "gitbutler-project/export-schema" "but-rebase/export-schema" "gitbutler-operating-modes/export-schema" "gitbutler-branch/export-schema" "gitbutler-branch-actions/export-schema" "gitbutler-edit-mode/export-schema" "gitbutler-oplog/export-schema" "but-gerrit/export-schema" ];
+          "legacy" = [ "but-ctx/legacy" "but-workspace/legacy" "dep:but-askpass" "dep:gitbutler-user" "dep:gitbutler-project" "dep:gitbutler-branch" "dep:gitbutler-branch-actions" "dep:gitbutler-commit" "dep:gitbutler-reference" "dep:gitbutler-repo" "dep:gitbutler-edit-mode" "dep:gitbutler-operating-modes" "dep:gitbutler-oplog" "dep:gitbutler-git" "dep:but-action" "dep:but-rules" "dep:but-gerrit" "dep:but-worktrees" "dep:but-cherry-apply" ];
           "napi" = [ "dep:napi" "dep:napi-derive" "legacy" "export-schema" ];
           "tauri" = [ "dep:tauri" "legacy" ];
         };
@@ -4450,138 +4376,6 @@ rec {
         ];
 
       };
-      "but-claude" = rec {
-        crateName = "but-claude";
-        version = "0.0.0";
-        edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-claude"; };
-        libName = "but_claude";
-        authors = [
-          "GitButler <gitbutler@gitbutler.com>"
-        ];
-        dependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-          }
-          {
-            name = "but-action";
-            packageId = "but-action";
-          }
-          {
-            name = "but-core";
-            packageId = "but-core";
-          }
-          {
-            name = "but-ctx";
-            packageId = "but-ctx";
-            features = [ "legacy" ];
-          }
-          {
-            name = "but-db";
-            packageId = "but-db";
-          }
-          {
-            name = "but-hunk-assignment";
-            packageId = "but-hunk-assignment";
-          }
-          {
-            name = "but-llm";
-            packageId = "but-llm";
-          }
-          {
-            name = "but-path";
-            packageId = "but-path";
-          }
-          {
-            name = "but-rules";
-            packageId = "but-rules";
-          }
-          {
-            name = "but-settings";
-            packageId = "but-settings";
-          }
-          {
-            name = "but-workspace";
-            packageId = "but-workspace";
-            features = [ "legacy" ];
-          }
-          {
-            name = "chrono";
-            packageId = "chrono";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "claude-agent-sdk-rs";
-            packageId = "claude-agent-sdk-rs";
-          }
-          {
-            name = "dirs";
-            packageId = "dirs";
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "gitbutler-branch";
-            packageId = "gitbutler-branch";
-          }
-          {
-            name = "gitbutler-branch-actions";
-            packageId = "gitbutler-branch-actions";
-          }
-          {
-            name = "gix";
-            packageId = "gix";
-            usesDefaultFeatures = false;
-            features = [ "sha1" "sha256" ];
-          }
-          {
-            name = "notify-rust";
-            packageId = "notify-rust";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "std" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "serde_json_lenient";
-            packageId = "serde_json_lenient";
-          }
-          {
-            name = "strum";
-            packageId = "strum";
-            features = [ "derive" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "full" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "url";
-            packageId = "url";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "serde" ];
-          }
-        ];
-
-      };
       "but-core" = rec {
         crateName = "but-core";
         version = "0.0.0";
@@ -4801,76 +4595,6 @@ rec {
         };
         resolvedDefaultFeatures = [ "legacy" ];
       };
-      "but-cursor" = rec {
-        crateName = "but-cursor";
-        version = "0.0.0";
-        edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-cursor"; };
-        libName = "but_cursor";
-        authors = [
-          "GitButler <gitbutler@gitbutler.com>"
-        ];
-        dependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-          }
-          {
-            name = "but-action";
-            packageId = "but-action";
-          }
-          {
-            name = "but-claude";
-            packageId = "but-claude";
-          }
-          {
-            name = "but-core";
-            packageId = "but-core";
-          }
-          {
-            name = "but-ctx";
-            packageId = "but-ctx";
-          }
-          {
-            name = "but-hunk-assignment";
-            packageId = "but-hunk-assignment";
-          }
-          {
-            name = "but-llm";
-            packageId = "but-llm";
-          }
-          {
-            name = "but-workspace";
-            packageId = "but-workspace";
-            features = [ "legacy" ];
-          }
-          {
-            name = "gix";
-            packageId = "gix";
-            usesDefaultFeatures = false;
-            features = [ "sha1" "sha256" ];
-          }
-          {
-            name = "md5";
-            packageId = "md5";
-          }
-          {
-            name = "rusqlite";
-            packageId = "rusqlite";
-            features = [ "bundled" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "std" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-        ];
-
-      };
       "but-db" = rec {
         crateName = "but-db";
         version = "0.0.0";
@@ -4954,6 +4678,11 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "but-api";
+            packageId = "but-api";
+            features = [ "legacy" ];
+          }
+          {
             name = "but-core";
             packageId = "but-core";
           }
@@ -4966,10 +4695,18 @@ rec {
             packageId = "but-graph";
           }
           {
+            name = "but-workspace";
+            packageId = "but-workspace";
+          }
+          {
             name = "clap";
             packageId = "clap";
             usesDefaultFeatures = false;
             features = [ "derive" "std" "help" "unstable-markdown" "env" "wrap_help" "color" "error-context" "usage" "suggestions" ];
+          }
+          {
+            name = "gitbutler-reference";
+            packageId = "gitbutler-reference";
           }
           {
             name = "gix";
@@ -5086,6 +4823,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "but-core";
+            packageId = "but-core";
+          }
+          {
             name = "but-ctx";
             packageId = "but-ctx";
             features = [ "legacy" ];
@@ -5099,6 +4840,12 @@ rec {
             packageId = "chrono";
             usesDefaultFeatures = false;
             features = [ "std" ];
+          }
+          {
+            name = "gix";
+            packageId = "gix";
+            usesDefaultFeatures = false;
+            features = [ "sha1" "sha256" ];
           }
           {
             name = "walkdir";
@@ -5273,6 +5020,11 @@ rec {
             packageId = "but-db";
           }
           {
+            name = "but-schemars";
+            packageId = "but-schemars";
+            optional = true;
+          }
+          {
             name = "chrono";
             packageId = "chrono";
             usesDefaultFeatures = false;
@@ -5287,6 +5039,13 @@ rec {
             packageId = "gix";
             usesDefaultFeatures = false;
             features = [ "sha1" "sha256" ];
+          }
+          {
+            name = "schemars";
+            packageId = "schemars 1.2.1";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" "derive" "uuid1" "preserve_order" ];
           }
           {
             name = "serde";
@@ -5304,7 +5063,10 @@ rec {
             packageId = "snapbox";
           }
         ];
-
+        features = {
+          "export-schema" = [ "dep:but-schemars" "dep:schemars" ];
+        };
+        resolvedDefaultFeatures = [ "export-schema" ];
       };
       "but-github" = rec {
         crateName = "but-github";
@@ -5343,9 +5105,9 @@ rec {
           }
           {
             name = "reqwest";
-            packageId = "reqwest 0.12.28";
+            packageId = "reqwest";
             usesDefaultFeatures = false;
-            features = [ "rustls-tls" "json" "multipart" "json" ];
+            features = [ "rustls" "json" "multipart" "query" "stream" "json" ];
           }
           {
             name = "schemars";
@@ -5375,9 +5137,9 @@ rec {
         devDependencies = [
           {
             name = "reqwest";
-            packageId = "reqwest 0.12.28";
+            packageId = "reqwest";
             usesDefaultFeatures = false;
-            features = [ "rustls-tls" "json" "multipart" "blocking" ];
+            features = [ "rustls" "json" "multipart" "query" "stream" "blocking" ];
           }
         ];
         features = {
@@ -5418,9 +5180,9 @@ rec {
           }
           {
             name = "reqwest";
-            packageId = "reqwest 0.12.28";
+            packageId = "reqwest";
             usesDefaultFeatures = false;
-            features = [ "rustls-tls" "json" "multipart" "json" ];
+            features = [ "rustls" "json" "multipart" "query" "stream" "json" ];
           }
           {
             name = "schemars";
@@ -5450,9 +5212,9 @@ rec {
         devDependencies = [
           {
             name = "reqwest";
-            packageId = "reqwest 0.12.28";
+            packageId = "reqwest";
             usesDefaultFeatures = false;
-            features = [ "rustls-tls" "json" "multipart" "blocking" ];
+            features = [ "rustls" "json" "multipart" "query" "stream" "blocking" ];
           }
         ];
         features = {
@@ -5920,9 +5682,9 @@ rec {
           }
           {
             name = "reqwest";
-            packageId = "reqwest 0.12.28";
+            packageId = "reqwest";
             usesDefaultFeatures = false;
-            features = [ "rustls-tls" "json" "multipart" ];
+            features = [ "rustls" "json" "multipart" "query" "stream" ];
           }
           {
             name = "schemars";
@@ -6614,10 +6376,6 @@ rec {
             features = [ "ws" ];
           }
           {
-            name = "base64";
-            packageId = "base64 0.22.1";
-          }
-          {
             name = "but-api";
             packageId = "but-api";
             features = [ "path-bytes" "legacy" ];
@@ -6625,10 +6383,6 @@ rec {
           {
             name = "but-askpass";
             packageId = "but-askpass";
-          }
-          {
-            name = "but-claude";
-            packageId = "but-claude";
           }
           {
             name = "but-ctx";
@@ -6668,10 +6422,6 @@ rec {
             features = [ "sink" "std" ];
           }
           {
-            name = "gitbutler-user";
-            packageId = "gitbutler-user";
-          }
-          {
             name = "gitbutler-watcher";
             packageId = "gitbutler-watcher";
           }
@@ -6683,10 +6433,6 @@ rec {
           {
             name = "serde_json";
             packageId = "serde_json";
-          }
-          {
-            name = "sha2";
-            packageId = "sha2 0.10.9";
           }
           {
             name = "tokio";
@@ -6701,7 +6447,7 @@ rec {
           {
             name = "tower-http";
             packageId = "tower-http";
-            features = [ "cors" "compression-full" ];
+            features = [ "cors" ];
           }
           {
             name = "tracing";
@@ -6717,17 +6463,12 @@ rec {
             features = [ "env-filter" ];
           }
           {
-            name = "url";
-            packageId = "url";
-          }
-          {
             name = "uuid";
             packageId = "uuid";
             features = [ "v4" "serde" ];
           }
         ];
         features = {
-          "embedded-frontend" = [ "dep:rust-embed" "dep:mime_guess" ];
           "irc" = [ "dep:but-irc" ];
         };
       };
@@ -6929,6 +6670,77 @@ rec {
         ];
 
       };
+      "but-transaction" = rec {
+        crateName = "but-transaction";
+        version = "0.0.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-transaction"; };
+        libName = "but_transaction";
+        authors = [
+          "GitButler <gitbutler@gitbutler.com>"
+        ];
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "bstr";
+            packageId = "bstr";
+          }
+          {
+            name = "but-api";
+            packageId = "but-api";
+          }
+          {
+            name = "but-core";
+            packageId = "but-core";
+          }
+          {
+            name = "but-ctx";
+            packageId = "but-ctx";
+          }
+          {
+            name = "but-db";
+            packageId = "but-db";
+          }
+          {
+            name = "but-oplog";
+            packageId = "but-oplog";
+          }
+          {
+            name = "but-rebase";
+            packageId = "but-rebase";
+          }
+          {
+            name = "but-workspace";
+            packageId = "but-workspace";
+          }
+          {
+            name = "gix";
+            packageId = "gix";
+            usesDefaultFeatures = false;
+            features = [ "sha1" "sha256" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "but-api";
+            packageId = "but-api";
+            features = [ "legacy" ];
+          }
+          {
+            name = "but-testsupport";
+            packageId = "but-testsupport";
+            features = [ "sandbox-but-api" ];
+          }
+          {
+            name = "snapbox";
+            packageId = "snapbox";
+          }
+        ];
+
+      };
       "but-ts" = rec {
         crateName = "but-ts";
         version = "0.0.0";
@@ -7035,9 +6847,9 @@ rec {
           }
           {
             name = "reqwest";
-            packageId = "reqwest 0.12.28";
+            packageId = "reqwest";
             usesDefaultFeatures = false;
-            features = [ "rustls-tls" "json" "multipart" ];
+            features = [ "rustls" "json" "multipart" "query" "stream" ];
           }
           {
             name = "serde";
@@ -7127,6 +6939,10 @@ rec {
             optional = true;
           }
           {
+            name = "but-db";
+            packageId = "but-db";
+          }
+          {
             name = "but-error";
             packageId = "but-error";
           }
@@ -7155,7 +6971,7 @@ rec {
           }
           {
             name = "flume";
-            packageId = "flume 0.11.1";
+            packageId = "flume";
           }
           {
             name = "git2";
@@ -7241,6 +7057,12 @@ rec {
             name = "but-workspace";
             packageId = "but-workspace";
             features = [ "legacy" ];
+          }
+          {
+            name = "chrono";
+            packageId = "chrono";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
           }
           {
             name = "gitbutler-commit";
@@ -8237,95 +8059,6 @@ rec {
         sha256 = "0c8888qi1l9sayqlv666h8s0yxn2qc6jr88v1zagk43mpjjjx0is";
 
       };
-      "claude-agent-sdk-rs" = rec {
-        crateName = "claude-agent-sdk-rs";
-        version = "0.6.3";
-        edition = "2024";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/gitbutlerapp/claude-agent-sdk-rs";
-          rev = "b5e32cd6e8e3df4f2ac2d1aa1c90b66688c3d04c";
-          sha256 = "19dmpycrf3gg44hb6f49v16y4xgj5dn10ssizf8660ba11brandc";
-        };
-        libName = "claude_agent_sdk_rs";
-        authors = [
-          "Tyr Chen <tyr.chen@gmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-          }
-          {
-            name = "async-stream";
-            packageId = "async-stream";
-          }
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "dashmap";
-            packageId = "dashmap";
-          }
-          {
-            name = "flume";
-            packageId = "flume 0.12.0";
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "paste";
-            packageId = "paste";
-          }
-          {
-            name = "path-absolutize";
-            packageId = "path-absolutize";
-          }
-          {
-            name = "pin-project";
-            packageId = "pin-project";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 2.0.18";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            features = [ "macros" "rt-multi-thread" "process" "io-util" "sync" "time" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "typed-builder";
-            packageId = "typed-builder";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" ];
-          }
-        ];
-        features = {
-          "rand" = [ "dep:rand" ];
-          "testing" = [ "rand" ];
-        };
-        resolvedDefaultFeatures = [ "default" ];
-      };
       "cli-prompts" = rec {
         crateName = "cli-prompts";
         version = "0.1.0";
@@ -8497,7 +8230,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" ];
           }
@@ -8687,11 +8420,6 @@ rec {
         ];
         dependencies = [
           {
-            name = "brotli";
-            packageId = "brotli";
-            optional = true;
-          }
-          {
             name = "compression-core";
             packageId = "compression-core";
           }
@@ -8704,19 +8432,6 @@ rec {
             name = "memchr";
             packageId = "memchr";
             optional = true;
-          }
-          {
-            name = "zstd";
-            packageId = "zstd";
-            rename = "libzstd";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "zstd-safe";
-            packageId = "zstd-safe";
-            optional = true;
-            usesDefaultFeatures = false;
           }
         ];
         features = {
@@ -8739,7 +8454,7 @@ rec {
           "zstd-safe" = [ "dep:zstd-safe" ];
           "zstdmt" = [ "zstd" "zstd-safe/zstdmt" ];
         };
-        resolvedDefaultFeatures = [ "brotli" "flate2" "gzip" "libzstd" "memchr" "zlib" "zstd" "zstd-safe" ];
+        resolvedDefaultFeatures = [ "flate2" "gzip" "memchr" ];
       };
       "compression-core" = rec {
         crateName = "compression-core";
@@ -10942,7 +10657,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_UI_Shell" "Win32_Foundation" "Win32_Globalization" "Win32_System_Com" ];
           }
@@ -11654,7 +11369,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" ];
           }
@@ -11918,34 +11633,13 @@ rec {
         authors = [
           "Stjepan Glavina <stjepang@gmail.com>"
         ];
-        dependencies = [
-          {
-            name = "getrandom";
-            packageId = "getrandom 0.2.17";
-            optional = true;
-            target = { target, features }: ((("wasm32" == target."arch" or null) || ("wasm64" == target."arch" or null)) && ("unknown" == target."os" or null));
-            features = [ "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "getrandom";
-            packageId = "getrandom 0.2.17";
-          }
-          {
-            name = "getrandom";
-            packageId = "getrandom 0.2.17";
-            target = { target, features }: ((("wasm32" == target."arch" or null) || ("wasm64" == target."arch" or null)) && ("unknown" == target."os" or null));
-            features = [ "js" ];
-          }
-        ];
         features = {
           "default" = [ "std" ];
           "getrandom" = [ "dep:getrandom" ];
           "js" = [ "std" "getrandom" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "default" "getrandom" "js" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "std" ];
       };
       "fax" = rec {
         crateName = "fax";
@@ -12209,7 +11903,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "any_impl" "default" "miniz_oxide" "rust_backend" ];
       };
-      "flume 0.11.1" = rec {
+      "flume" = rec {
         crateName = "flume";
         version = "0.11.1";
         edition = "2018";
@@ -12252,50 +11946,6 @@ rec {
           "nanorand" = [ "dep:nanorand" ];
         };
         resolvedDefaultFeatures = [ "async" "default" "eventual-fairness" "futures-core" "futures-sink" "nanorand" "select" ];
-      };
-      "flume 0.12.0" = rec {
-        crateName = "flume";
-        version = "0.12.0";
-        edition = "2018";
-        sha256 = "1gnk7gji9r12ig35czj2cq441zf5ijmz0bgnz9gfnxx7dk29n4sy";
-        authors = [
-          "Joshua Barretto <joshua.s.barretto@gmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "fastrand";
-            packageId = "fastrand";
-            optional = true;
-            features = [ "std" "js" ];
-          }
-          {
-            name = "futures-core";
-            packageId = "futures-core";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "futures-sink";
-            packageId = "futures-sink";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "spin";
-            packageId = "spin";
-            rename = "spin1";
-            features = [ "mutex" ];
-          }
-        ];
-        features = {
-          "async" = [ "futures-sink" "futures-core" ];
-          "default" = [ "async" "select" "eventual-fairness" ];
-          "eventual-fairness" = [ "select" "fastrand" ];
-          "fastrand" = [ "dep:fastrand" ];
-          "futures-core" = [ "dep:futures-core" ];
-          "futures-sink" = [ "dep:futures-sink" ];
-        };
-        resolvedDefaultFeatures = [ "async" "default" "eventual-fairness" "fastrand" "futures-core" "futures-sink" "select" ];
       };
       "fnv" = rec {
         crateName = "fnv";
@@ -13615,35 +13265,6 @@ rec {
         };
         resolvedDefaultFeatures = [ "v2_58" "v2_60" "v2_62" "v2_64" "v2_66" "v2_68" "v2_70" ];
       };
-      "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19" = rec {
-        crateName = "gix-trace";
-        version = "0.1.19";
-        edition = "2024";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
-        };
-        libName = "gix_trace";
-        authors = [
-          "Sebastian Thiel <sebastian.thiel@icloud.com>"
-        ];
-        dependencies = [
-          {
-            name = "tracing";
-            packageId = "tracing";
-            optional = true;
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-        ];
-        features = {
-          "document-features" = [ "dep:document-features" ];
-          "tracing" = [ "dep:tracing" ];
-        };
-        resolvedDefaultFeatures = [ "default" "tracing" "tracing-detail" ];
-      };
       "git+https://github.com/notify-rs/notify?rev=978fe719b066a8ce76b9a9d346546b1569eecfb6#file-id@0.2.3" = rec {
         crateName = "file-id";
         version = "0.2.3";
@@ -13671,67 +13292,15 @@ rec {
           "serde" = [ "dep:serde" ];
         };
       };
-      "git-meta-lib 0.1.10" = rec {
+      "git-meta-lib" = rec {
         crateName = "git-meta-lib";
         version = "0.1.10";
         edition = "2021";
-        sha256 = "1h9h7rv58j041x9kd507yv2k56g9np67awsbxax3kbl2ykaqi38x";
-        libName = "git_meta_lib";
-        dependencies = [
-          {
-            name = "gix";
-            packageId = "gix";
-            usesDefaultFeatures = false;
-            features = [ "sha1" "revision" "merge" "tree-editor" "blob-diff" ];
-          }
-          {
-            name = "rusqlite";
-            packageId = "rusqlite";
-            features = [ "bundled" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "sha1";
-            packageId = "sha1";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 2.0.18";
-          }
-          {
-            name = "time";
-            packageId = "time";
-            features = [ "formatting" "parsing" "macros" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "gix";
-            packageId = "gix";
-            usesDefaultFeatures = false;
-            features = [ "sha1" "revision" "merge" "tree-editor" "blob-diff" ];
-          }
-        ];
-        features = {
-        };
-      };
-      "git-meta-lib 0.1.9" = rec {
-        crateName = "git-meta-lib";
-        version = "0.1.9";
-        edition = "2021";
         workspace_member = null;
         src = pkgs.fetchgit {
-          url = "https://github.com/git-meta/git-meta.git";
-          rev = "5d7ba3d77700938db819b645c746ab193df73e3a";
-          sha256 = "1303qlwkipxi54nz17r2m7jm5p2bknxbmwqiwvsx9h0sd65zs205";
+          url = "https://github.com/git-meta/git-meta";
+          rev = "b40c108514a992abea2f739889376334481af1a3";
+          sha256 = "1xm0m502nnv58cfx348wrrcm69qj7smmxjs9xm19fwx17dl8hybr";
         };
         libName = "git_meta_lib";
         dependencies = [
@@ -14176,6 +13745,11 @@ rec {
             packageId = "glob";
           }
           {
+            name = "insta";
+            packageId = "insta";
+            features = [ "json" ];
+          }
+          {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
           }
@@ -14291,7 +13865,7 @@ rec {
           }
           {
             name = "git-meta-lib";
-            packageId = "git-meta-lib 0.1.10";
+            packageId = "git-meta-lib";
           }
           {
             name = "git2";
@@ -15265,10 +14839,6 @@ rec {
             packageId = "but-askpass";
           }
           {
-            name = "but-claude";
-            packageId = "but-claude";
-          }
-          {
             name = "but-core";
             packageId = "but-core";
           }
@@ -15450,16 +15020,15 @@ rec {
           }
         ];
         features = {
-          "builtin-but" = [ "dep:but" "but-action/builtin-but" "but/embedded-frontend" ];
+          "builtin-but" = [ "dep:but" "but-action/builtin-but" ];
           "custom-protocol" = [ "tauri/custom-protocol" ];
           "default" = [ "custom-protocol" "devtools" "opener" ];
           "devtools" = [ "tauri/devtools" ];
           "document-features" = [ "dep:document-features" ];
           "error-context" = [ "dep:backtrace" ];
-          "irc" = [ "dep:but-irc" "but?/irc" ];
+          "irc" = [ "dep:but-irc" ];
           "opener" = [ "dep:opener" ];
           "packaged-but-distribution" = [ "but?/packaged-but-distribution" ];
-          "remote" = [ "but?/remote" ];
         };
         resolvedDefaultFeatures = [ "custom-protocol" "default" "devtools" "opener" ];
       };
@@ -15522,9 +15091,9 @@ rec {
           }
           {
             name = "reqwest";
-            packageId = "reqwest 0.12.28";
+            packageId = "reqwest";
             usesDefaultFeatures = false;
-            features = [ "rustls-tls" "json" "multipart" ];
+            features = [ "rustls" "json" "multipart" "query" "stream" ];
           }
           {
             name = "serde";
@@ -15695,22 +15264,18 @@ rec {
       };
       "gix" = rec {
         crateName = "gix";
-        version = "0.83.0";
+        version = "0.84.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         authors = [
           "Sebastian Thiel <sebastian.thiel@icloud.com>"
         ];
         dependencies = [
-          {
-            name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
-          }
           {
             name = "gix-actor";
             packageId = "gix-actor";
@@ -15832,7 +15397,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-pathspec";
@@ -15890,6 +15455,10 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.20";
+          }
+          {
             name = "gix-transport";
             packageId = "gix-transport";
             optional = true;
@@ -15908,7 +15477,7 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.1";
+            packageId = "gix-validate 0.11.2";
           }
           {
             name = "gix-worktree";
@@ -16028,13 +15597,13 @@ rec {
       };
       "gix-actor" = rec {
         crateName = "gix-actor";
-        version = "0.41.0";
+        version = "0.41.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_actor";
         authors = [
@@ -16071,13 +15640,13 @@ rec {
       };
       "gix-attributes" = rec {
         crateName = "gix-attributes";
-        version = "0.33.0";
+        version = "0.33.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_attributes";
         authors = [
@@ -16091,20 +15660,20 @@ rec {
             features = [ "std" "unicode" ];
           }
           {
-            name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
-          }
-          {
             name = "gix-glob";
             packageId = "gix-glob";
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-quote";
             packageId = "gix-quote";
+          }
+          {
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.20";
           }
           {
             name = "kstring";
@@ -16138,13 +15707,13 @@ rec {
       };
       "gix-bitmap" = rec {
         crateName = "gix-bitmap";
-        version = "0.3.1";
+        version = "0.3.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_bitmap";
         authors = [
@@ -16160,13 +15729,13 @@ rec {
       };
       "gix-chunk" = rec {
         crateName = "gix-chunk";
-        version = "0.7.1";
+        version = "0.7.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_chunk";
         authors = [
@@ -16182,13 +15751,13 @@ rec {
       };
       "gix-command" = rec {
         crateName = "gix-command";
-        version = "0.9.0";
+        version = "0.9.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_command";
         authors = [
@@ -16202,16 +15771,16 @@ rec {
             features = [ "std" "unicode" ];
           }
           {
-            name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
-          }
-          {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-quote";
             packageId = "gix-quote";
+          }
+          {
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.20";
           }
           {
             name = "shell-words";
@@ -16222,13 +15791,13 @@ rec {
       };
       "gix-commitgraph" = rec {
         crateName = "gix-commitgraph";
-        version = "0.37.0";
+        version = "0.37.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_commitgraph";
         authors = [
@@ -16287,13 +15856,13 @@ rec {
       };
       "gix-config" = rec {
         crateName = "gix-config";
-        version = "0.56.0";
+        version = "0.57.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_config";
         authors = [
@@ -16320,7 +15889,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-ref";
@@ -16352,13 +15921,13 @@ rec {
       };
       "gix-config-value" = rec {
         crateName = "gix-config-value";
-        version = "0.18.0";
+        version = "0.18.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_config_value";
         authors = [
@@ -16377,7 +15946,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "libc";
@@ -16396,13 +15965,13 @@ rec {
       };
       "gix-credentials" = rec {
         crateName = "gix-credentials";
-        version = "0.38.0";
+        version = "0.38.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_credentials";
         authors = [
@@ -16414,10 +15983,6 @@ rec {
             packageId = "bstr";
             usesDefaultFeatures = false;
             features = [ "std" ];
-          }
-          {
-            name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
           }
           {
             name = "gix-command";
@@ -16433,7 +15998,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-prompt";
@@ -16442,6 +16007,10 @@ rec {
           {
             name = "gix-sec";
             packageId = "gix-sec";
+          }
+          {
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.20";
           }
           {
             name = "gix-url";
@@ -16473,13 +16042,13 @@ rec {
       };
       "gix-date" = rec {
         crateName = "gix-date";
-        version = "0.15.3";
+        version = "0.15.4";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_date";
         authors = [
@@ -16511,11 +16080,6 @@ rec {
             usesDefaultFeatures = false;
             features = [ "derive" ];
           }
-          {
-            name = "smallvec";
-            packageId = "smallvec";
-            features = [ "write" ];
-          }
         ];
         features = {
           "document-features" = [ "dep:document-features" ];
@@ -16525,13 +16089,13 @@ rec {
       };
       "gix-diff" = rec {
         crateName = "gix-diff";
-        version = "0.63.0";
+        version = "0.64.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_diff";
         authors = [
@@ -16542,11 +16106,6 @@ rec {
             name = "bstr";
             packageId = "bstr";
             usesDefaultFeatures = false;
-          }
-          {
-            name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
-            optional = true;
           }
           {
             name = "gix-attributes";
@@ -16589,7 +16148,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
             optional = true;
           }
           {
@@ -16600,6 +16159,11 @@ rec {
           {
             name = "gix-tempfile";
             packageId = "gix-tempfile";
+            optional = true;
+          }
+          {
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.20";
             optional = true;
           }
           {
@@ -16668,13 +16232,13 @@ rec {
       };
       "gix-dir" = rec {
         crateName = "gix-dir";
-        version = "0.25.0";
+        version = "0.26.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_dir";
         authors = [
@@ -16685,10 +16249,6 @@ rec {
             name = "bstr";
             packageId = "bstr";
             usesDefaultFeatures = false;
-          }
-          {
-            name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
           }
           {
             name = "gix-discover";
@@ -16712,11 +16272,15 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-pathspec";
             packageId = "gix-pathspec";
+          }
+          {
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.20";
           }
           {
             name = "gix-utils";
@@ -16746,13 +16310,13 @@ rec {
       };
       "gix-discover" = rec {
         crateName = "gix-discover";
-        version = "0.51.0";
+        version = "0.52.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_discover";
         authors = [
@@ -16776,7 +16340,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-ref";
@@ -16798,13 +16362,13 @@ rec {
       };
       "gix-error" = rec {
         crateName = "gix-error";
-        version = "0.2.3";
+        version = "0.2.4";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_error";
         authors = [
@@ -16825,13 +16389,13 @@ rec {
       };
       "gix-features" = rec {
         crateName = "gix-features";
-        version = "0.48.0";
+        version = "0.48.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_features";
         authors = [
@@ -16854,13 +16418,13 @@ rec {
             optional = true;
           }
           {
-            name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
+            name = "gix-path";
+            packageId = "gix-path 0.12.1";
+            optional = true;
           }
           {
-            name = "gix-path";
-            packageId = "gix-path 0.12.0";
-            optional = true;
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.20";
           }
           {
             name = "gix-utils";
@@ -16924,13 +16488,13 @@ rec {
       };
       "gix-filter" = rec {
         crateName = "gix-filter";
-        version = "0.30.0";
+        version = "0.31.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_filter";
         authors = [
@@ -16946,10 +16510,6 @@ rec {
           {
             name = "encoding_rs";
             packageId = "encoding_rs";
-          }
-          {
-            name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
           }
           {
             name = "gix-attributes";
@@ -16974,11 +16534,15 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-quote";
             packageId = "gix-quote";
+          }
+          {
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.20";
           }
           {
             name = "gix-utils";
@@ -17011,13 +16575,13 @@ rec {
       };
       "gix-fs" = rec {
         crateName = "gix-fs";
-        version = "0.21.1";
+        version = "0.21.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_fs";
         authors = [
@@ -17041,7 +16605,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-utils";
@@ -17058,13 +16622,13 @@ rec {
       };
       "gix-glob" = rec {
         crateName = "gix-glob";
-        version = "0.26.0";
+        version = "0.26.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_glob";
         authors = [
@@ -17087,7 +16651,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "serde";
@@ -17105,13 +16669,13 @@ rec {
       };
       "gix-hash" = rec {
         crateName = "gix-hash";
-        version = "0.25.0";
+        version = "0.25.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_hash";
         authors = [
@@ -17163,13 +16727,13 @@ rec {
       };
       "gix-hashtable" = rec {
         crateName = "gix-hashtable";
-        version = "0.15.0";
+        version = "0.15.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_hashtable";
         authors = [
@@ -17205,13 +16769,13 @@ rec {
       };
       "gix-ignore" = rec {
         crateName = "gix-ignore";
-        version = "0.21.0";
+        version = "0.21.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_ignore";
         authors = [
@@ -17225,16 +16789,16 @@ rec {
             features = [ "std" "unicode" ];
           }
           {
-            name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
-          }
-          {
             name = "gix-glob";
             packageId = "gix-glob";
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
+          }
+          {
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.20";
           }
           {
             name = "serde";
@@ -17256,13 +16820,13 @@ rec {
       };
       "gix-imara-diff" = rec {
         crateName = "gix-imara-diff";
-        version = "0.2.1";
+        version = "0.2.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_imara_diff";
         authors = [
@@ -17288,13 +16852,13 @@ rec {
       };
       "gix-index" = rec {
         crateName = "gix-index";
-        version = "0.51.0";
+        version = "0.52.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_index";
         authors = [
@@ -17353,7 +16917,7 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.1";
+            packageId = "gix-validate 0.11.2";
           }
           {
             name = "hashbrown";
@@ -17421,13 +16985,13 @@ rec {
       };
       "gix-lock" = rec {
         crateName = "gix-lock";
-        version = "23.0.0";
+        version = "23.0.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_lock";
         authors = [
@@ -17453,13 +17017,13 @@ rec {
       };
       "gix-mailmap" = rec {
         crateName = "gix-mailmap";
-        version = "0.33.0";
+        version = "0.33.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_mailmap";
         authors = [
@@ -17500,13 +17064,13 @@ rec {
       };
       "gix-merge" = rec {
         crateName = "gix-merge";
-        version = "0.16.0";
+        version = "0.17.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_merge";
         authors = [
@@ -17517,10 +17081,6 @@ rec {
             name = "bstr";
             packageId = "bstr";
             usesDefaultFeatures = false;
-          }
-          {
-            name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
           }
           {
             name = "gix-command";
@@ -17559,7 +17119,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-quote";
@@ -17578,6 +17138,10 @@ rec {
           {
             name = "gix-tempfile";
             packageId = "gix-tempfile";
+          }
+          {
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.20";
           }
           {
             name = "gix-worktree";
@@ -17603,13 +17167,13 @@ rec {
       };
       "gix-negotiate" = rec {
         crateName = "gix-negotiate";
-        version = "0.31.0";
+        version = "0.32.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_negotiate";
         authors = [
@@ -17655,13 +17219,13 @@ rec {
       };
       "gix-object" = rec {
         crateName = "gix-object";
-        version = "0.60.0";
+        version = "0.61.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_object";
         authors = [
@@ -17701,7 +17265,7 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.1";
+            packageId = "gix-validate 0.11.2";
           }
           {
             name = "itoa";
@@ -17741,13 +17305,13 @@ rec {
       };
       "gix-odb" = rec {
         crateName = "gix-odb";
-        version = "0.80.0";
+        version = "0.81.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_odb";
         authors = [
@@ -17786,7 +17350,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-quote";
@@ -17838,13 +17402,13 @@ rec {
       };
       "gix-pack" = rec {
         crateName = "gix-pack";
-        version = "0.70.0";
+        version = "0.71.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_pack";
         authors = [
@@ -17884,7 +17448,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-tempfile";
@@ -17952,13 +17516,13 @@ rec {
       };
       "gix-packetline" = rec {
         crateName = "gix-packetline";
-        version = "0.21.3";
+        version = "0.21.4";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_packetline";
         authors = [
@@ -17979,7 +17543,7 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
+            packageId = "gix-trace 0.1.20";
           }
           {
             name = "thiserror";
@@ -18011,12 +17575,12 @@ rec {
             features = [ "std" ];
           }
           {
-            name = "gix-validate";
-            packageId = "gix-validate 0.10.1";
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.19";
           }
           {
-            name = "gix-trace";
-            packageId = "registry+https://github.com/rust-lang/crates.io-index#gix-trace@0.1.19";
+            name = "gix-validate";
+            packageId = "gix-validate 0.10.1";
           }
           {
             name = "thiserror";
@@ -18025,15 +17589,15 @@ rec {
         ];
 
       };
-      "gix-path 0.12.0" = rec {
+      "gix-path 0.12.1" = rec {
         crateName = "gix-path";
-        version = "0.12.0";
+        version = "0.12.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_path";
         authors = [
@@ -18048,11 +17612,11 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
+            packageId = "gix-trace 0.1.20";
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.1";
+            packageId = "gix-validate 0.11.2";
           }
           {
             name = "thiserror";
@@ -18063,13 +17627,13 @@ rec {
       };
       "gix-pathspec" = rec {
         crateName = "gix-pathspec";
-        version = "0.18.0";
+        version = "0.18.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_pathspec";
         authors = [
@@ -18100,7 +17664,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "thiserror";
@@ -18111,13 +17675,13 @@ rec {
       };
       "gix-prompt" = rec {
         crateName = "gix-prompt";
-        version = "0.15.0";
+        version = "0.15.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_prompt";
         authors = [
@@ -18152,13 +17716,13 @@ rec {
       };
       "gix-protocol" = rec {
         crateName = "gix-protocol";
-        version = "0.61.0";
+        version = "0.62.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_protocol";
         authors = [
@@ -18170,11 +17734,6 @@ rec {
             packageId = "bstr";
             usesDefaultFeatures = false;
             features = [ "std" "unicode" ];
-          }
-          {
-            name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
-            optional = true;
           }
           {
             name = "gix-credentials";
@@ -18228,6 +17787,11 @@ rec {
             packageId = "gix-shallow";
           }
           {
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.20";
+            optional = true;
+          }
+          {
             name = "gix-transport";
             packageId = "gix-transport";
           }
@@ -18277,13 +17841,13 @@ rec {
       };
       "gix-quote" = rec {
         crateName = "gix-quote";
-        version = "0.7.1";
+        version = "0.7.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_quote";
         authors = [
@@ -18309,13 +17873,13 @@ rec {
       };
       "gix-ref" = rec {
         crateName = "gix-ref";
-        version = "0.63.0";
+        version = "0.64.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_ref";
         authors = [
@@ -18349,7 +17913,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-tempfile";
@@ -18362,7 +17926,7 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.1";
+            packageId = "gix-validate 0.11.2";
           }
           {
             name = "memmap2";
@@ -18398,13 +17962,13 @@ rec {
       };
       "gix-refspec" = rec {
         crateName = "gix-refspec";
-        version = "0.41.0";
+        version = "0.42.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_refspec";
         authors = [
@@ -18436,7 +18000,7 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.1";
+            packageId = "gix-validate 0.11.2";
           }
           {
             name = "smallvec";
@@ -18461,13 +18025,13 @@ rec {
       };
       "gix-revision" = rec {
         crateName = "gix-revision";
-        version = "0.45.0";
+        version = "0.46.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_revision";
         authors = [
@@ -18484,11 +18048,6 @@ rec {
             packageId = "bstr";
             usesDefaultFeatures = false;
             features = [ "std" ];
-          }
-          {
-            name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=575113dfb10b3ba12eb57f57a81b241e773968bd#gix-trace@0.1.19";
-            optional = true;
           }
           {
             name = "gix-commitgraph";
@@ -18520,6 +18079,11 @@ rec {
             packageId = "gix-revwalk";
           }
           {
+            name = "gix-trace";
+            packageId = "gix-trace 0.1.20";
+            optional = true;
+          }
+          {
             name = "nonempty";
             packageId = "nonempty";
           }
@@ -18544,13 +18108,13 @@ rec {
       };
       "gix-revwalk" = rec {
         crateName = "gix-revwalk";
-        version = "0.31.0";
+        version = "0.32.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_revwalk";
         authors = [
@@ -18604,13 +18168,13 @@ rec {
       };
       "gix-sec" = rec {
         crateName = "gix-sec";
-        version = "0.14.0";
+        version = "0.14.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_sec";
         authors = [
@@ -18623,7 +18187,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
             target = { target, features }: (target."windows" or false);
           }
           {
@@ -18653,13 +18217,13 @@ rec {
       };
       "gix-shallow" = rec {
         crateName = "gix-shallow";
-        version = "0.12.0";
+        version = "0.12.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_shallow";
         authors = [
@@ -18704,13 +18268,13 @@ rec {
       };
       "gix-status" = rec {
         crateName = "gix-status";
-        version = "0.30.0";
+        version = "0.31.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_status";
         authors = [
@@ -18766,7 +18330,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-pathspec";
@@ -18838,13 +18402,13 @@ rec {
       };
       "gix-submodule" = rec {
         crateName = "gix-submodule";
-        version = "0.30.0";
+        version = "0.31.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_submodule";
         authors = [
@@ -18862,7 +18426,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-pathspec";
@@ -18888,13 +18452,13 @@ rec {
       };
       "gix-tempfile" = rec {
         crateName = "gix-tempfile";
-        version = "23.0.0";
+        version = "23.0.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_tempfile";
         authors = [
@@ -18952,8 +18516,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_testtools";
         authors = [
@@ -19037,15 +18601,59 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "worktree-exclusions" ];
       };
-      "gix-transport" = rec {
-        crateName = "gix-transport";
-        version = "0.57.0";
+      "gix-trace 0.1.19" = rec {
+        crateName = "gix-trace";
+        version = "0.1.19";
+        edition = "2021";
+        sha256 = "03i7s9zj3z1ybsmfwff435y2mmd76jbknd8phsaszzzjang5c8vg";
+        libName = "gix_trace";
+        authors = [
+          "Sebastian Thiel <sebastian.thiel@icloud.com>"
+        ];
+        features = {
+          "document-features" = [ "dep:document-features" ];
+          "tracing" = [ "dep:tracing" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "gix-trace 0.1.20" = rec {
+        crateName = "gix-trace";
+        version = "0.1.20";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
+        };
+        libName = "gix_trace";
+        authors = [
+          "Sebastian Thiel <sebastian.thiel@icloud.com>"
+        ];
+        dependencies = [
+          {
+            name = "tracing";
+            packageId = "tracing";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+        ];
+        features = {
+          "document-features" = [ "dep:document-features" ];
+          "tracing" = [ "dep:tracing" ];
+        };
+        resolvedDefaultFeatures = [ "default" "tracing" "tracing-detail" ];
+      };
+      "gix-transport" = rec {
+        crateName = "gix-transport";
+        version = "0.57.1";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/GitoxideLabs/gitoxide";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_transport";
         authors = [
@@ -19094,7 +18702,7 @@ rec {
           }
           {
             name = "reqwest";
-            packageId = "reqwest 0.13.2";
+            packageId = "reqwest";
             optional = true;
             usesDefaultFeatures = false;
             features = [ "blocking" "charset" "http2" ];
@@ -19138,13 +18746,13 @@ rec {
       };
       "gix-traverse" = rec {
         crateName = "gix-traverse";
-        version = "0.57.0";
+        version = "0.58.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_traverse";
         authors = [
@@ -19210,13 +18818,13 @@ rec {
       };
       "gix-url" = rec {
         crateName = "gix-url";
-        version = "0.36.0";
+        version = "0.36.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_url";
         authors = [
@@ -19231,7 +18839,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "percent-encoding";
@@ -19257,13 +18865,13 @@ rec {
       };
       "gix-utils" = rec {
         crateName = "gix-utils";
-        version = "0.3.2";
+        version = "0.3.3";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_utils";
         authors = [
@@ -19315,15 +18923,15 @@ rec {
         ];
 
       };
-      "gix-validate 0.11.1" = rec {
+      "gix-validate 0.11.2" = rec {
         crateName = "gix-validate";
-        version = "0.11.1";
+        version = "0.11.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_validate";
         authors = [
@@ -19341,13 +18949,13 @@ rec {
       };
       "gix-worktree" = rec {
         crateName = "gix-worktree";
-        version = "0.52.0";
+        version = "0.53.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_worktree";
         authors = [
@@ -19390,11 +18998,11 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.1";
+            packageId = "gix-validate 0.11.2";
             optional = true;
           }
           {
@@ -19426,13 +19034,13 @@ rec {
       };
       "gix-worktree-state" = rec {
         crateName = "gix-worktree-state";
-        version = "0.30.0";
+        version = "0.31.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_worktree_state";
         authors = [
@@ -19466,7 +19074,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-worktree";
@@ -19509,13 +19117,13 @@ rec {
       };
       "gix-worktree-stream" = rec {
         crateName = "gix-worktree-stream";
-        version = "0.32.0";
+        version = "0.33.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "575113dfb10b3ba12eb57f57a81b241e773968bd";
-          sha256 = "0wwrb5cf4llcs3v9nb4n7jj49g0bp334xsiva2ahr04zplj6zax2";
+          rev = "b5b2d54d6a63921621d48c492eaa77faf89e8cb5";
+          sha256 = "0dn9lgcasyfn1pa1xz8m23nji113xlg09kbgsdff7l7hbfrkrksv";
         };
         libName = "gix_worktree_stream";
         authors = [
@@ -19553,7 +19161,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.0";
+            packageId = "gix-path 0.12.1";
           }
           {
             name = "gix-traverse";
@@ -20840,11 +20448,6 @@ rec {
             usesDefaultFeatures = false;
           }
           {
-            name = "rustls-native-certs";
-            packageId = "rustls-native-certs";
-            optional = true;
-          }
-          {
             name = "rustls-pki-types";
             packageId = "rustls-pki-types";
             rename = "pki-types";
@@ -20861,11 +20464,6 @@ rec {
           {
             name = "tower-service";
             packageId = "tower-service";
-          }
-          {
-            name = "webpki-roots";
-            packageId = "webpki-roots";
-            optional = true;
           }
         ];
         devDependencies = [
@@ -20903,7 +20501,7 @@ rec {
           "webpki-roots" = [ "dep:webpki-roots" ];
           "webpki-tokio" = [ "webpki-roots" ];
         };
-        resolvedDefaultFeatures = [ "aws-lc-rs" "http1" "http2" "native-tokio" "ring" "rustls-native-certs" "tls12" "webpki-roots" "webpki-tokio" ];
+        resolvedDefaultFeatures = [ "aws-lc-rs" "http1" "http2" "tls12" ];
       };
       "hyper-timeout" = rec {
         crateName = "hyper-timeout";
@@ -21126,7 +20724,7 @@ rec {
           }
           {
             name = "windows-core";
-            packageId = "windows-core 0.62.2";
+            packageId = "windows-core 0.61.2";
             target = { target, features }: ("windows" == target."os" or null);
           }
         ];
@@ -22241,7 +21839,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" ];
           }
@@ -22444,7 +22042,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             optional = true;
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
@@ -24179,7 +23777,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: ("windows" == target."os" or null);
             features = [ "Win32_UI_WindowsAndMessaging" "Win32_Foundation" "Win32_Graphics_Gdi" "Win32_UI_Shell" "Win32_Globalization" "Win32_UI_Input_KeyboardAndMouse" "Win32_System_SystemServices" "Win32_UI_Accessibility" "Win32_UI_HiDpi" "Win32_System_LibraryLoader" "Win32_UI_Controls" ];
           }
@@ -25122,7 +24720,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             rename = "windows";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_Security" ];
@@ -28042,7 +27640,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.45.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Pipes" "Win32_Security" ];
           }
@@ -28362,17 +27960,6 @@ rec {
           "petgraph" = [ "dep:petgraph" ];
         };
       };
-      "paste" = rec {
-        crateName = "paste";
-        version = "1.0.15";
-        edition = "2018";
-        sha256 = "02pxffpdqkapy292harq6asfjvadgp1s005fip9ljfsn9fvxgh2p";
-        procMacro = true;
-        authors = [
-          "David Tolnay <dtolnay@gmail.com>"
-        ];
-
-      };
       "pastey" = rec {
         crateName = "pastey";
         version = "0.2.1";
@@ -28384,48 +27971,6 @@ rec {
           "David Tolnay <dtolnay@gmail.com>"
         ];
 
-      };
-      "path-absolutize" = rec {
-        crateName = "path-absolutize";
-        version = "3.1.1";
-        edition = "2021";
-        sha256 = "1xc36c5lz187wy452qph3lrr41x8ffgxk1clj2s9b8czwwgkibz4";
-        libName = "path_absolutize";
-        authors = [
-          "Magic Len <len@magiclen.org>"
-        ];
-        dependencies = [
-          {
-            name = "path-dedot";
-            packageId = "path-dedot";
-          }
-        ];
-        features = {
-          "lazy_static_cache" = [ "path-dedot/lazy_static_cache" ];
-          "once_cell_cache" = [ "path-dedot/once_cell_cache" ];
-          "unsafe_cache" = [ "path-dedot/unsafe_cache" ];
-          "use_unix_paths_on_wasm" = [ "path-dedot/use_unix_paths_on_wasm" ];
-        };
-      };
-      "path-dedot" = rec {
-        crateName = "path-dedot";
-        version = "3.1.1";
-        edition = "2021";
-        sha256 = "15wkx8q3vra34fslzlg1lkq7liyxwqrpbxiz44a28wa7w3bhmfh7";
-        libName = "path_dedot";
-        authors = [
-          "Magic Len <len@magiclen.org>"
-        ];
-        dependencies = [
-          {
-            name = "once_cell";
-            packageId = "once_cell";
-          }
-        ];
-        features = {
-          "lazy_static" = [ "dep:lazy_static" ];
-          "lazy_static_cache" = [ "lazy_static" ];
-        };
       };
       "pathdiff" = rec {
         crateName = "pathdiff";
@@ -29226,7 +28771,7 @@ rec {
           }
           {
             name = "reqwest";
-            packageId = "reqwest 0.13.2";
+            packageId = "reqwest";
             usesDefaultFeatures = false;
             features = [ "rustls" "blocking" "json" "gzip" ];
           }
@@ -30069,7 +29614,7 @@ rec {
           "rustls-ring" = [ "dep:rustls" "ring" "proto/rustls-ring" "proto/ring" ];
           "smol" = [ "dep:smol" ];
         };
-        resolvedDefaultFeatures = [ "aws-lc-rs" "ring" "runtime-tokio" "rustls" "rustls-aws-lc-rs" "rustls-ring" ];
+        resolvedDefaultFeatures = [ "aws-lc-rs" "runtime-tokio" "rustls-aws-lc-rs" ];
       };
       "quinn-proto" = rec {
         crateName = "quinn-proto";
@@ -30172,7 +29717,7 @@ rec {
           "rustls-log" = [ "rustls?/logging" ];
           "rustls-ring" = [ "dep:rustls" "rustls?/ring" "ring" ];
         };
-        resolvedDefaultFeatures = [ "aws-lc-rs" "ring" "rustls-aws-lc-rs" "rustls-ring" ];
+        resolvedDefaultFeatures = [ "aws-lc-rs" "rustls-aws-lc-rs" ];
       };
       "quinn-udp" = rec {
         crateName = "quinn-udp";
@@ -30204,7 +29749,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_IO" "Win32_Networking_WinSock" ];
           }
@@ -31168,21 +30713,6 @@ rec {
           "serde" = [ "dep:serde" ];
         };
       };
-      "registry+https://github.com/rust-lang/crates.io-index#gix-trace@0.1.19" = rec {
-        crateName = "gix-trace";
-        version = "0.1.19";
-        edition = "2021";
-        sha256 = "03i7s9zj3z1ybsmfwff435y2mmd76jbknd8phsaszzzjang5c8vg";
-        libName = "gix_trace";
-        authors = [
-          "Sebastian Thiel <sebastian.thiel@icloud.com>"
-        ];
-        features = {
-          "document-features" = [ "dep:document-features" ];
-          "tracing" = [ "dep:tracing" ];
-        };
-        resolvedDefaultFeatures = [ "default" ];
-      };
       "relative-path" = rec {
         crateName = "relative-path";
         version = "1.9.3";
@@ -31222,315 +30752,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "bytecheck" "std" ];
       };
-      "reqwest 0.12.28" = rec {
+      "reqwest" = rec {
         crateName = "reqwest";
-        version = "0.12.28";
+        version = "0.13.3";
         edition = "2021";
-        sha256 = "0iqidijghgqbzl3bjg5hb4zmigwa4r612bgi0yiq0c90b6jkrpgd";
-        authors = [
-          "Sean McArthur <sean@seanmonstar.com>"
-        ];
-        dependencies = [
-          {
-            name = "base64";
-            packageId = "base64 0.22.1";
-          }
-          {
-            name = "bytes";
-            packageId = "bytes";
-          }
-          {
-            name = "futures-channel";
-            packageId = "futures-channel";
-            optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "futures-core";
-            packageId = "futures-core";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "futures-util";
-            packageId = "futures-util";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "http";
-            packageId = "http";
-          }
-          {
-            name = "http-body";
-            packageId = "http-body";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "http-body-util";
-            packageId = "http-body-util";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "hyper";
-            packageId = "hyper";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "http1" "client" ];
-          }
-          {
-            name = "hyper-rustls";
-            packageId = "hyper-rustls";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "http1" "tls12" ];
-          }
-          {
-            name = "hyper-util";
-            packageId = "hyper-util";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "http1" "client" "client-legacy" "client-proxy" "tokio" ];
-          }
-          {
-            name = "js-sys";
-            packageId = "js-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "log";
-            packageId = "log";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "mime_guess";
-            packageId = "mime_guess";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "percent-encoding";
-            packageId = "percent-encoding";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "pin-project-lite";
-            packageId = "pin-project-lite";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "quinn";
-            packageId = "quinn";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "rustls" "runtime-tokio" ];
-          }
-          {
-            name = "rustls";
-            packageId = "rustls";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "std" "tls12" ];
-          }
-          {
-            name = "rustls-native-certs";
-            packageId = "rustls-native-certs";
-            optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "rustls-pki-types";
-            packageId = "rustls-pki-types";
-            optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "std" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-            optional = true;
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "serde_urlencoded";
-            packageId = "serde_urlencoded";
-          }
-          {
-            name = "sync_wrapper";
-            packageId = "sync_wrapper";
-            features = [ "futures" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "net" "time" ];
-          }
-          {
-            name = "tokio-rustls";
-            packageId = "tokio-rustls";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "tls12" ];
-          }
-          {
-            name = "tokio-util";
-            packageId = "tokio-util";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "io" ];
-          }
-          {
-            name = "tower";
-            packageId = "tower";
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "retry" "timeout" "util" ];
-          }
-          {
-            name = "tower-http";
-            packageId = "tower-http";
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "follow-redirect" ];
-          }
-          {
-            name = "tower-service";
-            packageId = "tower-service";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "url";
-            packageId = "url";
-          }
-          {
-            name = "wasm-bindgen";
-            packageId = "wasm-bindgen";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "wasm-bindgen-futures";
-            packageId = "wasm-bindgen-futures";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "wasm-streams";
-            packageId = "wasm-streams 0.4.2";
-            optional = true;
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "web-sys";
-            packageId = "web-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "AbortController" "AbortSignal" "Headers" "Request" "RequestInit" "RequestMode" "Response" "Window" "FormData" "Blob" "BlobPropertyBag" "ServiceWorkerGlobalScope" "RequestCredentials" "File" "ReadableStream" "RequestCache" ];
-          }
-          {
-            name = "webpki-roots";
-            packageId = "webpki-roots";
-            optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-        ];
-        devDependencies = [
-          {
-            name = "futures-util";
-            packageId = "futures-util";
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "std" "alloc" ];
-          }
-          {
-            name = "hyper";
-            packageId = "hyper";
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "http1" "http2" "client" "server" ];
-          }
-          {
-            name = "hyper-util";
-            packageId = "hyper-util";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "http1" "http2" "client" "client-legacy" "server-auto" "server-graceful" "tokio" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "derive" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "macros" "rt-multi-thread" ];
-          }
-          {
-            name = "tower";
-            packageId = "tower";
-            usesDefaultFeatures = false;
-            features = [ "limit" ];
-          }
-          {
-            name = "wasm-bindgen";
-            packageId = "wasm-bindgen";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "serde-serialize" ];
-          }
-        ];
-        features = {
-          "__rustls" = [ "dep:hyper-rustls" "dep:tokio-rustls" "dep:rustls" "__tls" ];
-          "__rustls-ring" = [ "hyper-rustls?/ring" "tokio-rustls?/ring" "rustls?/ring" "quinn?/ring" ];
-          "__tls" = [ "dep:rustls-pki-types" "tokio/io-util" ];
-          "blocking" = [ "dep:futures-channel" "futures-channel?/sink" "dep:futures-util" "futures-util?/io" "futures-util?/sink" "tokio/sync" ];
-          "brotli" = [ "tower-http/decompression-br" ];
-          "charset" = [ "dep:encoding_rs" "dep:mime" ];
-          "cookies" = [ "dep:cookie_crate" "dep:cookie_store" ];
-          "default" = [ "default-tls" "charset" "http2" "system-proxy" ];
-          "default-tls" = [ "dep:hyper-tls" "dep:native-tls-crate" "__tls" "dep:tokio-native-tls" ];
-          "deflate" = [ "tower-http/decompression-deflate" ];
-          "gzip" = [ "tower-http/decompression-gzip" ];
-          "h2" = [ "dep:h2" ];
-          "hickory-dns" = [ "dep:hickory-resolver" "dep:once_cell" ];
-          "http2" = [ "h2" "hyper/http2" "hyper-util/http2" "hyper-rustls?/http2" ];
-          "http3" = [ "rustls-tls-manual-roots" "dep:h3" "dep:h3-quinn" "dep:quinn" "tokio/macros" ];
-          "json" = [ "dep:serde_json" ];
-          "macos-system-configuration" = [ "system-proxy" ];
-          "multipart" = [ "dep:mime_guess" "dep:futures-util" ];
-          "native-tls" = [ "default-tls" ];
-          "native-tls-alpn" = [ "native-tls" "native-tls-crate?/alpn" "hyper-tls?/alpn" ];
-          "native-tls-vendored" = [ "native-tls" "native-tls-crate?/vendored" ];
-          "rustls-tls" = [ "rustls-tls-webpki-roots" ];
-          "rustls-tls-manual-roots" = [ "rustls-tls-manual-roots-no-provider" "__rustls-ring" ];
-          "rustls-tls-manual-roots-no-provider" = [ "__rustls" ];
-          "rustls-tls-native-roots" = [ "rustls-tls-native-roots-no-provider" "__rustls-ring" ];
-          "rustls-tls-native-roots-no-provider" = [ "dep:rustls-native-certs" "hyper-rustls?/native-tokio" "__rustls" ];
-          "rustls-tls-no-provider" = [ "rustls-tls-manual-roots-no-provider" ];
-          "rustls-tls-webpki-roots" = [ "rustls-tls-webpki-roots-no-provider" "__rustls-ring" ];
-          "rustls-tls-webpki-roots-no-provider" = [ "dep:webpki-roots" "hyper-rustls?/webpki-tokio" "__rustls" ];
-          "stream" = [ "tokio/fs" "dep:futures-util" "dep:tokio-util" "dep:wasm-streams" ];
-          "system-proxy" = [ "hyper-util/client-proxy-system" ];
-          "zstd" = [ "tower-http/decompression-zstd" ];
-        };
-        resolvedDefaultFeatures = [ "__rustls" "__rustls-ring" "__tls" "blocking" "json" "multipart" "rustls-tls" "rustls-tls-native-roots" "rustls-tls-native-roots-no-provider" "rustls-tls-webpki-roots" "rustls-tls-webpki-roots-no-provider" "stream" ];
-      };
-      "reqwest 0.13.2" = rec {
-        crateName = "reqwest";
-        version = "0.13.2";
-        edition = "2021";
-        sha256 = "00d8xyrbcp0519rr9rhl685ymb6hi3lv0i2bca5lic9s53il6gxb";
+        sha256 = "1h7fgnllk7ihw7836b7z73h9fb5vk90y3irvcm0ysan2l8g05q32";
         authors = [
           "Sean McArthur <sean@seanmonstar.com>"
         ];
@@ -31547,13 +30773,13 @@ rec {
             name = "encoding_rs";
             packageId = "encoding_rs";
             optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
           }
           {
             name = "futures-channel";
             packageId = "futures-channel";
             optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
           }
           {
             name = "futures-core";
@@ -31570,7 +30796,7 @@ rec {
             name = "h2";
             packageId = "h2";
             optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
           }
           {
             name = "http";
@@ -31579,17 +30805,17 @@ rec {
           {
             name = "http-body";
             packageId = "http-body";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
           }
           {
             name = "http-body-util";
             packageId = "http-body-util";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
           }
           {
             name = "hyper";
             packageId = "hyper";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "http1" "client" ];
           }
           {
@@ -31597,47 +30823,53 @@ rec {
             packageId = "hyper-rustls";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "http1" "tls12" ];
           }
           {
             name = "hyper-util";
             packageId = "hyper-util";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "http1" "client" "client-legacy" "client-proxy" "tokio" ];
           }
           {
             name = "js-sys";
             packageId = "js-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            target = { target, features }: (("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null)));
           }
           {
             name = "log";
             packageId = "log";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
           }
           {
             name = "mime";
             packageId = "mime";
             optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
+          }
+          {
+            name = "mime_guess";
+            packageId = "mime_guess";
+            optional = true;
+            usesDefaultFeatures = false;
           }
           {
             name = "percent-encoding";
             packageId = "percent-encoding";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
           }
           {
             name = "pin-project-lite";
             packageId = "pin-project-lite";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
           }
           {
             name = "quinn";
             packageId = "quinn";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "runtime-tokio" ];
           }
           {
@@ -31645,21 +30877,21 @@ rec {
             packageId = "rustls";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "std" "tls12" ];
           }
           {
             name = "rustls-pki-types";
             packageId = "rustls-pki-types";
             optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "std" ];
           }
           {
             name = "rustls-platform-verifier";
             packageId = "rustls-platform-verifier";
             optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
           }
           {
             name = "serde";
@@ -31672,6 +30904,11 @@ rec {
             optional = true;
           }
           {
+            name = "serde_urlencoded";
+            packageId = "serde_urlencoded";
+            optional = true;
+          }
+          {
             name = "sync_wrapper";
             packageId = "sync_wrapper";
             features = [ "futures" ];
@@ -31680,7 +30917,7 @@ rec {
             name = "tokio";
             packageId = "tokio";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "net" "time" ];
           }
           {
@@ -31688,7 +30925,7 @@ rec {
             packageId = "tokio-rustls";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "tls12" ];
           }
           {
@@ -31696,27 +30933,27 @@ rec {
             packageId = "tokio-util";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "io" ];
           }
           {
             name = "tower";
             packageId = "tower";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "retry" "timeout" "util" ];
           }
           {
             name = "tower-http";
             packageId = "tower-http";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "follow-redirect" ];
           }
           {
             name = "tower-service";
             packageId = "tower-service";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
           }
           {
             name = "url";
@@ -31725,23 +30962,23 @@ rec {
           {
             name = "wasm-bindgen";
             packageId = "wasm-bindgen";
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            target = { target, features }: (("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null)));
           }
           {
             name = "wasm-bindgen-futures";
             packageId = "wasm-bindgen-futures";
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            target = { target, features }: (("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null)));
           }
           {
             name = "wasm-streams";
-            packageId = "wasm-streams 0.5.0";
+            packageId = "wasm-streams";
             optional = true;
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            target = { target, features }: (("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null)));
           }
           {
             name = "web-sys";
             packageId = "web-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            target = { target, features }: (("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null)));
             features = [ "AbortController" "AbortSignal" "Headers" "Request" "RequestInit" "RequestMode" "Response" "Window" "FormData" "Blob" "BlobPropertyBag" "ServiceWorkerGlobalScope" "RequestCredentials" "File" "ReadableStream" "RequestCache" ];
           }
         ];
@@ -31750,33 +30987,33 @@ rec {
             name = "futures-util";
             packageId = "futures-util";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "std" "alloc" ];
           }
           {
             name = "hyper";
             packageId = "hyper";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "http1" "http2" "client" "server" ];
           }
           {
             name = "hyper-util";
             packageId = "hyper-util";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "http1" "http2" "client" "client-legacy" "server-auto" "server-graceful" "tokio" ];
           }
           {
             name = "serde";
             packageId = "serde";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "derive" ];
           }
           {
             name = "tokio";
             packageId = "tokio";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null))));
             features = [ "macros" "rt-multi-thread" ];
           }
           {
@@ -31788,7 +31025,7 @@ rec {
           {
             name = "wasm-bindgen";
             packageId = "wasm-bindgen";
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            target = { target, features }: (("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null)));
             features = [ "serde-serialize" ];
           }
         ];
@@ -31823,54 +31060,7 @@ rec {
           "system-proxy" = [ "hyper-util/client-proxy-system" ];
           "zstd" = [ "tower-http/decompression-zstd" ];
         };
-        resolvedDefaultFeatures = [ "__rustls" "__rustls-aws-lc-rs" "__tls" "blocking" "charset" "gzip" "http2" "json" "rustls" "rustls-no-provider" "stream" ];
-      };
-      "reqwest-eventsource" = rec {
-        crateName = "reqwest-eventsource";
-        version = "0.6.0";
-        edition = "2018";
-        sha256 = "1pkbxjk0vjdfialjm155q4nnmh87r507n3k4j5b2fi5vdms5ab33";
-        libName = "reqwest_eventsource";
-        authors = [
-          "Julian Popescu <jpopesculian@gmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "eventsource-stream";
-            packageId = "eventsource-stream";
-          }
-          {
-            name = "futures-core";
-            packageId = "futures-core";
-          }
-          {
-            name = "futures-timer";
-            packageId = "futures-timer";
-          }
-          {
-            name = "mime";
-            packageId = "mime";
-          }
-          {
-            name = "nom";
-            packageId = "nom 7.1.3";
-          }
-          {
-            name = "pin-project-lite";
-            packageId = "pin-project-lite";
-          }
-          {
-            name = "reqwest";
-            packageId = "reqwest 0.12.28";
-            usesDefaultFeatures = false;
-            features = [ "stream" ];
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-        ];
-
+        resolvedDefaultFeatures = [ "__rustls" "__rustls-aws-lc-rs" "__tls" "blocking" "charset" "gzip" "http2" "json" "multipart" "query" "rustls" "rustls-no-provider" "stream" ];
       };
       "rfd" = rec {
         crateName = "rfd";
@@ -32764,7 +31954,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" "Win32_NetworkManagement_IpHelper" "Win32_System_Threading" ];
           }
@@ -32875,7 +32065,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" ];
           }
@@ -33136,7 +32326,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Security_Cryptography" ];
@@ -36653,7 +35843,7 @@ rec {
           }
           {
             name = "reqwest";
-            packageId = "reqwest 0.13.2";
+            packageId = "reqwest";
             usesDefaultFeatures = false;
             target = { target, features }: (("android" == target."os" or null) || (("apple" == target."vendor" or null) && (!("macos" == target."os" or null))));
             features = [ "json" "stream" ];
@@ -37912,7 +37102,7 @@ rec {
           }
           {
             name = "reqwest";
-            packageId = "reqwest 0.13.2";
+            packageId = "reqwest";
             usesDefaultFeatures = false;
             features = [ "json" "stream" ];
           }
@@ -38566,7 +37756,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Storage_FileSystem" "Win32_Foundation" ];
           }
@@ -38635,7 +37825,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" ];
           }
@@ -39521,7 +38711,7 @@ rec {
           "tls12" = [ "rustls/tls12" ];
           "zlib" = [ "rustls/zlib" ];
         };
-        resolvedDefaultFeatures = [ "aws-lc-rs" "aws_lc_rs" "ring" "tls12" ];
+        resolvedDefaultFeatures = [ "aws-lc-rs" "aws_lc_rs" "tls12" ];
       };
       "tokio-stream" = rec {
         crateName = "tokio-stream";
@@ -40494,7 +39684,7 @@ rec {
           "uuid" = [ "dep:uuid" ];
           "validate-request" = [ "mime" ];
         };
-        resolvedDefaultFeatures = [ "async-compression" "compression-br" "compression-deflate" "compression-full" "compression-gzip" "compression-zstd" "cors" "decompression-gzip" "default" "follow-redirect" "futures-core" "futures-util" "iri-string" "tokio" "tokio-util" "tower" ];
+        resolvedDefaultFeatures = [ "async-compression" "cors" "decompression-gzip" "default" "follow-redirect" "futures-core" "futures-util" "iri-string" "tokio" "tokio-util" "tower" ];
       };
       "tower-layer" = rec {
         crateName = "tower-layer";
@@ -40929,7 +40119,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: ("windows" == target."os" or null);
             features = [ "Win32_UI_WindowsAndMessaging" "Win32_Foundation" "Win32_System_SystemServices" "Win32_Graphics_Gdi" "Win32_UI_Shell" ];
           }
@@ -41096,52 +40286,6 @@ rec {
           "webpki-roots" = [ "dep:webpki-roots" ];
         };
         resolvedDefaultFeatures = [ "data-encoding" "handshake" "http" "httparse" "sha1" ];
-      };
-      "typed-builder" = rec {
-        crateName = "typed-builder";
-        version = "0.23.2";
-        edition = "2024";
-        sha256 = "1npzaxvjhwkyfjwrx6dniqygka6a1v68r10xa0149ybh3d983aii";
-        libName = "typed_builder";
-        authors = [
-          "IdanArye <idanarye@gmail.com>"
-          "Chris Morgan <me@chrismorgan.info>"
-        ];
-        dependencies = [
-          {
-            name = "typed-builder-macro";
-            packageId = "typed-builder-macro";
-          }
-        ];
-
-      };
-      "typed-builder-macro" = rec {
-        crateName = "typed-builder-macro";
-        version = "0.23.2";
-        edition = "2024";
-        sha256 = "09pvj20y47cs73lmv5byfhi1xyxw83nq50lw5rf7jinxakf04sh7";
-        procMacro = true;
-        libName = "typed_builder_macro";
-        authors = [
-          "IdanArye <idanarye@gmail.com>"
-          "Chris Morgan <me@chrismorgan.info>"
-        ];
-        dependencies = [
-          {
-            name = "proc-macro2";
-            packageId = "proc-macro2";
-          }
-          {
-            name = "quote";
-            packageId = "quote";
-          }
-          {
-            name = "syn";
-            packageId = "syn 2.0.117";
-            features = [ "full" "extra-traits" ];
-          }
-        ];
-
       };
       "typeid" = rec {
         crateName = "typeid";
@@ -42169,49 +41313,7 @@ rec {
           "serde" = [ "dep:serde_derive" "dep:serde" ];
         };
       };
-      "wasm-streams 0.4.2" = rec {
-        crateName = "wasm-streams";
-        version = "0.4.2";
-        edition = "2021";
-        sha256 = "0rddn007hp6k2cm91mm9y33n79b0jxv0c3znzszcvv67hn6ks18m";
-        libName = "wasm_streams";type = [ "cdylib" "rlib" ];
-        authors = [
-          "Mattias Buelens <mattias@buelens.com>"
-        ];
-        dependencies = [
-          {
-            name = "futures-util";
-            packageId = "futures-util";
-            features = [ "io" "sink" ];
-          }
-          {
-            name = "js-sys";
-            packageId = "js-sys";
-          }
-          {
-            name = "wasm-bindgen";
-            packageId = "wasm-bindgen";
-          }
-          {
-            name = "wasm-bindgen-futures";
-            packageId = "wasm-bindgen-futures";
-          }
-          {
-            name = "web-sys";
-            packageId = "web-sys";
-            features = [ "AbortSignal" "QueuingStrategy" "ReadableStream" "ReadableStreamType" "ReadableWritablePair" "ReadableStreamByobReader" "ReadableStreamReaderMode" "ReadableStreamReadResult" "ReadableStreamByobRequest" "ReadableStreamDefaultReader" "ReadableByteStreamController" "ReadableStreamGetReaderOptions" "ReadableStreamDefaultController" "StreamPipeOptions" "TransformStream" "TransformStreamDefaultController" "Transformer" "UnderlyingSink" "UnderlyingSource" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "web-sys";
-            packageId = "web-sys";
-            features = [ "console" "AbortSignal" "ErrorEvent" "PromiseRejectionEvent" "Response" "ReadableStream" "Window" ];
-          }
-        ];
-
-      };
-      "wasm-streams 0.5.0" = rec {
+      "wasm-streams" = rec {
         crateName = "wasm-streams";
         version = "0.5.0";
         edition = "2021";
@@ -43253,22 +42355,6 @@ rec {
         ];
 
       };
-      "webpki-roots" = rec {
-        crateName = "webpki-roots";
-        version = "1.0.6";
-        edition = "2021";
-        sha256 = "1v8brkarm4spqkjs6y5b67xixnz4zlg33d1wwxigz4rr0qyazkr2";
-        libName = "webpki_roots";
-        dependencies = [
-          {
-            name = "rustls-pki-types";
-            packageId = "rustls-pki-types";
-            rename = "pki-types";
-            usesDefaultFeatures = false;
-          }
-        ];
-
-      };
       "webview2-com" = rec {
         crateName = "webview2-com";
         version = "0.38.2";
@@ -43641,7 +42727,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" "Win32_System_SystemInformation" ];
           }
@@ -45262,7 +44348,7 @@ rec {
           "default" = [ "std" ];
           "std" = [ "windows-result/std" "windows-strings/std" ];
         };
-        resolvedDefaultFeatures = [ "default" "std" ];
+        resolvedDefaultFeatures = [ "std" ];
       };
       "windows-future 0.2.1" = rec {
         crateName = "windows-future";
@@ -45863,7 +44949,7 @@ rec {
           "Win32_UI_WindowsAndMessaging" = [ "Win32_UI" ];
           "Win32_UI_Wpf" = [ "Win32_UI" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Globalization" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Security" "Win32_System" "Win32_System_Pipes" "default" ];
       };
       "windows-sys 0.52.0" = rec {
         crateName = "windows-sys";
@@ -46111,7 +45197,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authorization" "Win32_System" "Win32_System_Memory" "Win32_System_Threading" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authorization" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_DataExchange" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_Time" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.59.0" = rec {
         crateName = "windows-sys";
@@ -46370,7 +45456,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_LibraryLoader" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_Time" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_LibraryLoader" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Time" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-sys 0.60.2" = rec {
         crateName = "windows-sys";
@@ -46635,7 +45721,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Credentials" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Controls" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Credentials" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-sys 0.61.2" = rec {
         crateName = "windows-sys";
@@ -46897,7 +45983,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Time" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-targets 0.42.2" = rec {
         crateName = "windows-targets";
@@ -49184,99 +48270,6 @@ rec {
         features = {
           "no-panic" = [ "dep:no-panic" ];
         };
-      };
-      "zstd" = rec {
-        crateName = "zstd";
-        version = "0.13.3";
-        edition = "2018";
-        sha256 = "12n0h4w9l526li7jl972rxpyf012jw3nwmji2qbjghv9ll8y67p9";
-        authors = [
-          "Alexandre Bury <alexandre.bury@gmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "zstd-safe";
-            packageId = "zstd-safe";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-        ];
-        features = {
-          "arrays" = [ "zstd-safe/arrays" ];
-          "bindgen" = [ "zstd-safe/bindgen" ];
-          "debug" = [ "zstd-safe/debug" ];
-          "default" = [ "legacy" "arrays" "zdict_builder" ];
-          "experimental" = [ "zstd-safe/experimental" ];
-          "fat-lto" = [ "zstd-safe/fat-lto" ];
-          "legacy" = [ "zstd-safe/legacy" ];
-          "no_asm" = [ "zstd-safe/no_asm" ];
-          "pkg-config" = [ "zstd-safe/pkg-config" ];
-          "thin" = [ "zstd-safe/thin" ];
-          "thin-lto" = [ "zstd-safe/thin-lto" ];
-          "zdict_builder" = [ "zstd-safe/zdict_builder" ];
-          "zstdmt" = [ "zstd-safe/zstdmt" ];
-        };
-      };
-      "zstd-safe" = rec {
-        crateName = "zstd-safe";
-        version = "7.2.4";
-        edition = "2018";
-        sha256 = "179vxmkzhpz6cq6mfzvgwc99bpgllkr6lwxq7ylh5dmby3aw8jcg";
-        libName = "zstd_safe";
-        authors = [
-          "Alexandre Bury <alexandre.bury@gmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "zstd-sys";
-            packageId = "zstd-sys";
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "bindgen" = [ "zstd-sys/bindgen" ];
-          "debug" = [ "zstd-sys/debug" ];
-          "default" = [ "legacy" "arrays" "zdict_builder" ];
-          "experimental" = [ "zstd-sys/experimental" ];
-          "fat-lto" = [ "zstd-sys/fat-lto" ];
-          "legacy" = [ "zstd-sys/legacy" ];
-          "no_asm" = [ "zstd-sys/no_asm" ];
-          "pkg-config" = [ "zstd-sys/pkg-config" ];
-          "seekable" = [ "zstd-sys/seekable" ];
-          "std" = [ "zstd-sys/std" ];
-          "thin" = [ "zstd-sys/thin" ];
-          "thin-lto" = [ "zstd-sys/thin-lto" ];
-          "zdict_builder" = [ "zstd-sys/zdict_builder" ];
-          "zstdmt" = [ "zstd-sys/zstdmt" ];
-        };
-        resolvedDefaultFeatures = [ "std" ];
-      };
-      "zstd-sys" = rec {
-        crateName = "zstd-sys";
-        version = "2.0.16+zstd.1.5.7";
-        edition = "2018";
-        links = "zstd";
-        sha256 = "0j1pd2iaqpvaxlgqmmijj68wma7xwdv9grrr63j873yw5ay9xqci";
-        libName = "zstd_sys";
-        authors = [
-          "Alexandre Bury <alexandre.bury@gmail.com>"
-        ];
-        buildDependencies = [
-          {
-            name = "cc";
-            packageId = "cc";
-            features = [ "parallel" ];
-          }
-          {
-            name = "pkg-config";
-            packageId = "pkg-config";
-          }
-        ];
-        features = {
-          "bindgen" = [ "dep:bindgen" ];
-          "default" = [ "legacy" "zdict_builder" "bindgen" ];
-        };
-        resolvedDefaultFeatures = [ "std" ];
       };
       "zune-core" = rec {
         crateName = "zune-core";

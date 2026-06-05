@@ -165,6 +165,7 @@ in
       bundleName,
       executableName ? null,
       sourceAppPath ? null,
+      sourceName ? null,
       createBin ? true,
       postInstallApp ? "",
       macApp ? { },
@@ -194,11 +195,15 @@ in
       }
       // macApp;
 
-      src = prev.fetchurl {
-        name = "${pname}-${info.version}-${system}.dmg";
-        url = info.urls.${system};
-        hash = info.hashes.${system};
-      };
+      src = prev.fetchurl (
+        {
+          url = info.urls.${system};
+          hash = info.hashes.${system};
+        }
+        // prev.lib.optionalAttrs (sourceName != null) {
+          name = sourceName;
+        }
+      );
 
       nativeBuildInputs = [
         prev._7zz
@@ -247,6 +252,7 @@ in
       binaryName ? pname,
       makeBinary ? true,
       sourceName ? null,
+      sourceAppPath ? null,
       dontFixup ? false,
       postInstallApp ? "",
       macApp ? { },
@@ -302,7 +308,12 @@ in
         ${prev.lib.optionalString makeBinary ''mkdir -p "$out/bin"''}
         unzip -qq "$src" -d "$unpack_dir"
 
-        app_bundle="$unpack_dir/${resolvedBundleName}"
+        app_bundle="${
+          if sourceAppPath == null then
+            "$unpack_dir/${resolvedBundleName}"
+          else
+            "$unpack_dir/${sourceAppPath}"
+        }"
         if [ ! -d "$app_bundle" ]; then
           echo "Expected ${resolvedBundleName} in ${pname} archive" >&2
           find "$unpack_dir" -maxdepth 2 -type d >&2
@@ -314,6 +325,73 @@ in
         ${postInstallApp}
         ${prev.lib.optionalString makeBinary ''
           ln -s "$out/Applications/${resolvedBundleName}/Contents/MacOS/${resolvedExecutableName}" "$out/bin/${binaryName}"
+        ''}
+
+        runHook postInstall
+      '';
+    };
+
+  mkTgzApp =
+    {
+      pname,
+      info,
+      bundleName,
+      executableName ? null,
+      createBin ? true,
+      postInstallApp ? "",
+      macApp ? { },
+      meta ? { },
+    }:
+    let
+      resolvedExecutableName =
+        if executableName == null then prev.lib.removeSuffix ".app" bundleName else executableName;
+    in
+    prev.stdenvNoCC.mkDerivation {
+      inherit pname meta;
+      inherit (info) version;
+
+      passthru.macApp = {
+        inherit bundleName;
+        bundleRelPath = "Applications/${bundleName}";
+        installMode = "copy";
+      }
+      // macApp;
+
+      src = prev.fetchurl {
+        name = "${pname}-${info.version}-${system}.tar.gz";
+        url = info.urls.${system};
+        hash = info.hashes.${system};
+      };
+
+      nativeBuildInputs = [ prev.darwin.xattr ];
+
+      dontFixup = true;
+      dontUnpack = true;
+
+      installPhase = ''
+        runHook preInstall
+
+        unpack_dir="$TMPDIR/${pname}-unpack"
+        mkdir -p "$unpack_dir" "$out/Applications" "$out/bin"
+        tar -xzf "$src" -C "$unpack_dir"
+
+        app_bundle="$(find "$unpack_dir" -maxdepth 4 -type d -name "${bundleName}" -print -quit)"
+        if [ -z "''${app_bundle:-}" ] || [ ! -d "$app_bundle" ]; then
+          echo "Expected ${bundleName} in ${pname} archive" >&2
+          find "$unpack_dir" -maxdepth 4 -type d -name "*.app" >&2
+          exit 1
+        fi
+
+        cp -R "$app_bundle" "$out/Applications/${bundleName}"
+        ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${bundleName}"
+        ${postInstallApp}
+        ${prev.lib.optionalString createBin ''
+          if [ ! -e "$out/Applications/${bundleName}/Contents/MacOS/${resolvedExecutableName}" ]; then
+            echo "Expected executable ${resolvedExecutableName} in ${bundleName}" >&2
+            find "$out/Applications/${bundleName}/Contents/MacOS" -maxdepth 1 -type f >&2
+            exit 1
+          fi
+          ln -s "$out/Applications/${bundleName}/Contents/MacOS/${resolvedExecutableName}" "$out/bin/${pname}"
         ''}
 
         runHook postInstall

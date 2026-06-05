@@ -84,6 +84,72 @@ def test_render_runtime_package_json_resolves_catalog_dependencies(
     assert "electron" not in payload["dependencies"]
 
 
+def test_render_runtime_package_json_reads_pnpm_workspace_metadata(
+    tmp_path: Path,
+) -> None:
+    """Current upstream T3 Code stores workspace metadata in pnpm YAML."""
+    module = _load_module(
+        "packages/t3code-desktop/render_runtime_package_json.py",
+        "t3code_desktop_manifest_pnpm_workspace_test",
+    )
+
+    source_root = tmp_path / "t3code"
+    for rel_dir in ("apps/server", "apps/desktop", "packages/shared"):
+        (source_root / rel_dir).mkdir(parents=True)
+
+    (source_root / "package.json").write_text(
+        json.dumps({"packageManager": "pnpm@10.24.0"}),
+        encoding="utf-8",
+    )
+    (source_root / "pnpm-workspace.yaml").write_text(
+        "\n".join((
+            "packages:",
+            '  - "packages/*"',
+            "catalog:",
+            "  effect: 4.0.0-beta.73",
+            "  vite: npm:@voidzero-dev/vite-plus-core@latest",
+            "overrides:",
+            "  effect: 'catalog:'",
+        ))
+        + "\n",
+        encoding="utf-8",
+    )
+    (source_root / "apps/server/package.json").write_text(
+        json.dumps({
+            "version": "0.0.24",
+            "dependencies": {
+                "effect": "catalog:",
+                "@t3tools/shared": "workspace:*",
+            },
+        }),
+        encoding="utf-8",
+    )
+    (source_root / "apps/desktop/package.json").write_text(
+        json.dumps({"dependencies": {"electron": "41.5.0", "vite": "catalog:"}}),
+        encoding="utf-8",
+    )
+    (source_root / "packages/shared/package.json").write_text(
+        json.dumps({"name": "@t3tools/shared", "dependencies": {}}),
+        encoding="utf-8",
+    )
+
+    payload = module.build_runtime_manifest(source_root)
+
+    assert payload["dependencies"] == {
+        "effect": "4.0.0-beta.73",
+        "@t3tools/shared": "workspace:*",
+        "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+    }
+    assert payload["overrides"] == {"effect": "4.0.0-beta.73"}
+    assert payload["workspaces"] == {
+        "packages": ["packages/shared"],
+        "catalog": {
+            "effect": "4.0.0-beta.73",
+            "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+        },
+    }
+
+
 def test_render_runtime_package_json_preserves_runtime_workspace_dependencies(
     tmp_path: Path,
 ) -> None:

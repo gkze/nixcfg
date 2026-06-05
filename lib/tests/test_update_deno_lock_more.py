@@ -40,6 +40,18 @@ class _Client:
         return self._payloads[url]
 
 
+class _FlakyClient:
+    def __init__(self, response: _Response) -> None:
+        self.calls = 0
+        self._response = response
+
+    def get(self, _url: str) -> _Response:
+        self.calls += 1
+        if self.calls == 1:
+            raise TimeoutError
+        return self._response
+
+
 def test_json_adapter_helpers_and_required_string() -> None:
     """Validate strict object/list/string coercion helpers."""
     assert deno_lock._as_object_dict({"x": 1}, context="ctx") == {"x": 1}
@@ -120,6 +132,31 @@ def test_fetch_jsr_meta_and_resolve_jsr_package() -> None:
     assert package.version == "1.2.3"
     assert len(package.files) >= 4
     assert any(file.media_type == "application/json" for file in package.files)
+
+
+def test_fetch_jsr_bytes_retries_transient_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry transient JSR metadata fetch failures before failing the update."""
+    sleeps: list[float] = []
+
+    async def _sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr("lib.update.deno_lock.asyncio.sleep", _sleep)
+    client = _FlakyClient(_Response(body=b"ok"))
+
+    body = asyncio.run(
+        deno_lock._fetch_jsr_bytes(
+            client,
+            "https://jsr.io/@scope/pkg/meta.json",
+            context="JSR package metadata for @scope/pkg",
+        )
+    )
+
+    assert body == b"ok"
+    assert client.calls == 2
+    assert sleeps == [0.5]
 
 
 def test_resolve_all_jsr_and_npm_paths(monkeypatch: pytest.MonkeyPatch) -> None:

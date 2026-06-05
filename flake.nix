@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.1.24";
+      url = "github:generalaction/emdash/v1.1.27";
       flake = false;
     };
     flake-edit = {
@@ -52,7 +52,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gitbutler = {
-      url = "github:gitbutlerapp/gitbutler/release/0.19.13";
+      url = "github:gitbutlerapp/gitbutler/release/0.20.0";
       flake = false;
     };
     home-manager = {
@@ -87,7 +87,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.5.16";
+      url = "github:NousResearch/hermes-agent/v2026.5.29.2";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -137,11 +137,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     lumen = {
-      url = "github:jnsahaj/lumen/v2.24.0";
+      url = "github:jnsahaj/lumen/v2.29.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.54.0";
+      url = "github:max-sixty/worktrunk/v0.56.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -162,7 +162,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.134.0";
+      url = "github:openai/codex/rust-v0.137.0";
       flake = false;
     };
     curator = {
@@ -170,13 +170,13 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.19.0";
+      url = "github:steipete/gogcli/v0.21.0";
       flake = false;
     };
     github-desktop = {
       type = "git";
       url = "https://github.com/desktop/desktop.git";
-      ref = "refs/tags/release-3.5.11";
+      ref = "refs/tags/release-3.5.12";
       submodules = true;
       flake = false;
     };
@@ -223,7 +223,7 @@
       flake = false;
     };
     mux = {
-      url = "github:coder/mux/v0.25.0";
+      url = "github:coder/mux/v0.26.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mountpoint-s3 = {

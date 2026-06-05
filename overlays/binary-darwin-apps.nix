@@ -12,12 +12,15 @@ let
 in
 {
   airfoil = callDarwinAppPackage "airfoil";
+  agentastic-dev = callDarwinAppPackage "agentastic-dev";
   antigravity = callDarwinAppPackage "antigravity";
   arc = callDarwinAppPackage "arc";
+  ara = callDarwinAppPackage "ara";
   claude = callDarwinAppPackage "claude";
   claude-code = callDarwinAppPackage "claude-code";
   cleanshot = callDarwinAppPackage "cleanshot";
   codeedit = callDarwinAppPackage "codeedit";
+  cogito = callDarwinAppPackage "cogito";
   comet = callDarwinAppPackage "comet";
   docker-desktop = callDarwinAppPackage "docker-desktop";
   figma = callDarwinAppPackage "figma";
@@ -25,6 +28,8 @@ in
   framer = callDarwinAppPackage "framer";
   ghostty-tip = callDarwinAppPackage "ghostty-tip";
   google-drive = callDarwinAppPackage "google-drive";
+  goose-desktop = callDarwinAppPackage "goose-desktop";
+  jacq = callDarwinAppPackage "jacq";
   keepingyouawake = callDarwinAppPackage "keepingyouawake";
   linear = callDarwinAppPackage "linear";
   lm-studio = callDarwinAppPackage "lm-studio";
@@ -36,10 +41,15 @@ in
   nordvpn = callDarwinAppPackage "nordvpn";
   onepassword = callDarwinAppPackage "onepassword";
   pants-preview = callDarwinAppPackage "pants-preview";
+  pica = callDarwinAppPackage "pica";
   rio = callDarwinAppPackage "rio";
   signal-beta = callDarwinAppPackage "signal-beta";
+  solo = callDarwinAppPackage "solo";
   spotify = callDarwinAppPackage "spotify";
+  superconductor = callDarwinAppPackage "superconductor";
   tailscale-app = callDarwinAppPackage "tailscale-app";
+  todoist-desktop = callDarwinAppPackage "todoist-desktop";
+  tolaria = callDarwinAppPackage "tolaria";
   warp-preview = callDarwinAppPackage "warp-preview";
   wave = callDarwinAppPackage "wave";
   yaak-beta = callDarwinAppPackage "yaak-beta";

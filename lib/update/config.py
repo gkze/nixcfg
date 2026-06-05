@@ -47,7 +47,7 @@ class UpdateSettings(BaseSettings):
     http_timeout: int = 30
     subprocess_timeout: int = 2400
     log_tail_lines: int = 10
-    render_interval: float = 0.05
+    render_interval: float = 0.2
     user_agent: str = "nixcfg"
     retries: int = 3
     retry_backoff: float = 1.0

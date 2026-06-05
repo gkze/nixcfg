@@ -5,9 +5,8 @@ from __future__ import annotations
 
 import pathlib  # noqa: TC003
 import sys
-from typing import Annotated
+from typing import Annotated, Protocol, cast
 
-import click
 import httpx
 import typer
 from rich.console import Console
@@ -31,6 +30,17 @@ from lib.update.cli import app as update_app
 from lib.update.paths import get_repo_root
 
 _is_tty = sys.stdout.isatty()
+
+
+class _Command(Protocol):
+    """Minimal Click/Typer command surface used for command-tree rendering."""
+
+    hidden: bool
+    help: str | None
+    short_help: str | None
+
+    def get_short_help_str(self) -> str: ...
+
 
 app = typer.Typer(
     name="nixcfg",
@@ -56,20 +66,29 @@ schema_app = typer.Typer(
 app.add_typer(schema_app)
 
 
-def _command_description(command: click.Command) -> str:
+def _command_description(command: _Command) -> str:
     """Return a single-line description from declared command help text."""
     description = command.help or command.short_help or command.get_short_help_str()
     return " ".join((description or "").split())
 
 
-def _has_visible_subcommands(command: click.Command) -> bool:
+def _command_children(command: _Command) -> dict[str, _Command] | None:
+    """Return declared child commands for Click command groups."""
+    commands = getattr(command, "commands", None)
+    if not isinstance(commands, dict):
+        return None
+    return cast("dict[str, _Command]", commands)
+
+
+def _has_visible_subcommands(command: _Command) -> bool:
     """Return whether a command group exposes any non-hidden child commands."""
-    if not isinstance(command, click.Group):
+    commands = _command_children(command)
+    if commands is None:
         return False
-    return any(not subcommand.hidden for subcommand in command.commands.values())
+    return any(not subcommand.hidden for subcommand in commands.values())
 
 
-def _command_label(name: str, command: click.Command) -> str:
+def _command_label(name: str, command: _Command) -> str:
     """Return a styled label for one command in the tree output."""
     style = "bold cyan" if _has_visible_subcommands(command) else "green"
     description = _command_description(command)
@@ -78,14 +97,17 @@ def _command_label(name: str, command: click.Command) -> str:
     return f"[{style}]{name}[/{style}]"
 
 
-def _add_command_nodes(tree: Tree, group: click.Group) -> None:
+def _add_command_nodes(tree: Tree, group: _Command) -> None:
     """Append child command nodes recursively in alphabetical order."""
-    for name in sorted(group.commands):
-        command = group.commands[name]
+    commands = _command_children(group)
+    if commands is None:
+        return
+    for name in sorted(commands):
+        command = commands[name]
         if command.hidden:
             continue
         child = tree.add(_command_label(name, command))
-        if isinstance(command, click.Group):
+        if _command_children(command) is not None:
             _add_command_nodes(child, command)
 
 
@@ -93,7 +115,7 @@ def _add_command_nodes(tree: Tree, group: click.Group) -> None:
 def command_tree() -> None:
     """Render all available commands as a Rich tree."""
     root = get_command(app)
-    if not isinstance(root, click.Group):
+    if not hasattr(root, "commands"):
         typer.echo("nixcfg")
         return
 

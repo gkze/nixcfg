@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-i/owqXCBNle4I4u43eDHlk0cpp+NkRMkQhCLTtZGb8E="
+  },
+  "urls": {
+    "aarch64-darwin": "https://db.ara.so/storage/v1/object/public/releases/Ara_0.1.109.zip"
+  },
+  "version": "0.1.109"
+}

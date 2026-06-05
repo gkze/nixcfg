@@ -10,6 +10,7 @@ from typing import Protocol, cast
 import pytest
 
 from lib.tests._updater_helpers import load_repo_module, run_async
+from lib.update.updaters import factories as updater_factories
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata, DownloadUrlMetadata
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
@@ -59,6 +60,16 @@ async def _fake_sparkle_items(
     **_kwargs: object,
 ) -> tuple[SparkleAppcastItem, ...]:
     return (item,)
+
+
+def _patch_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
+    name: str,
+    value: object,
+) -> None:
+    target = module if hasattr(module, name) else updater_factories
+    monkeypatch.setattr(target, name, value)
 
 
 @pytest.mark.parametrize(
@@ -122,7 +133,7 @@ def test_sparkle_package_updaters(
     ) -> tuple[SparkleAppcastItem, ...]:
         return await _fake_sparkle_items(*args, item=item, **kwargs)
 
-    monkeypatch.setattr(module, "fetch_sparkle_appcast_items", fake_fetch)
+    _patch_dependency(monkeypatch, module, "fetch_sparkle_appcast_items", fake_fetch)
     info = run_async(_updater(module).fetch_latest(object()))
     assert info.version == expected_version
     if expected_url is not None:
@@ -210,7 +221,7 @@ def test_json_download_url_package_updaters(
     async def fake_fetch_json(*_args: object, **_kwargs: object) -> dict[str, object]:
         return payload
 
-    monkeypatch.setattr(module, "fetch_json", fake_fetch_json)
+    _patch_dependency(monkeypatch, module, "fetch_json", fake_fetch_json)
     info = run_async(_updater(module).fetch_latest(object()))
     assert info.version == expected_version
     assert _download_url(info) == expected_url
@@ -254,7 +265,7 @@ def test_json_hash_package_updaters(
     async def fake_fetch_json(*_args: object, **_kwargs: object) -> dict[str, object]:
         return payload
 
-    monkeypatch.setattr(module, "fetch_json", fake_fetch_json)
+    _patch_dependency(monkeypatch, module, "fetch_json", fake_fetch_json)
     assert (
         run_async(_updater(module).fetch_latest(object())).version == expected_version
     )
@@ -328,7 +339,7 @@ def test_text_version_package_updaters(
     async def fake_fetch_url(*_args: object, **_kwargs: object) -> bytes:
         return payload
 
-    monkeypatch.setattr(module, "fetch_url", fake_fetch_url)
+    _patch_dependency(monkeypatch, module, "fetch_url", fake_fetch_url)
     updater = _updater(module)
     info = run_async(updater.fetch_latest(object()))
     assert info.version == expected_version
@@ -349,7 +360,7 @@ def test_text_version_package_updaters_require_version(
     async def fake_fetch_url(*_args: object, **_kwargs: object) -> bytes:
         return b"  \n"
 
-    monkeypatch.setattr(module, "fetch_url", fake_fetch_url)
+    _patch_dependency(monkeypatch, module, "fetch_url", fake_fetch_url)
     with pytest.raises(RuntimeError, match="Missing"):
         run_async(_updater(module).fetch_latest(object()))
 
@@ -400,7 +411,12 @@ def test_head_artifact_package_updaters(
     async def fake_head_version(*_args: object, **_kwargs: object) -> str:
         return "20260101.stable"
 
-    monkeypatch.setattr(module, "fetch_head_artifact_version", fake_head_version)
+    _patch_dependency(
+        monkeypatch,
+        module,
+        "fetch_head_artifact_version",
+        fake_head_version,
+    )
     assert (
         run_async(_updater(module).fetch_latest(object())).version == "20260101.stable"
     )
@@ -475,7 +491,12 @@ def test_electron_builder_asset_url_package_updaters(
     ) -> tuple[str, dict[str, str]]:
         return "1.2.3", {"aarch64-darwin": "https://example.com/app.dmg"}
 
-    monkeypatch.setattr(module, "fetch_electron_builder_asset_urls", fake_asset_urls)
+    _patch_dependency(
+        monkeypatch,
+        module,
+        "fetch_electron_builder_asset_urls",
+        fake_asset_urls,
+    )
     updater = _updater(module)
     info = run_async(updater.fetch_latest(object()))
     assert isinstance(info.metadata, AssetURLsMetadata)
@@ -492,9 +513,14 @@ def test_electron_builder_asset_url_package_updaters(
     ).endswith(expected_fallback)
 
 
-def test_mole_app_pinned_version_and_urls() -> None:
+def test_mole_app_pinned_version_and_urls(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load("packages/mole-app/updater.py")
-    module.read_pinned_source_version = lambda _name: "1.2.3"
+    _patch_dependency(
+        monkeypatch,
+        module,
+        "read_pinned_source_version",
+        lambda _name: "1.2.3",
+    )
     updater = _updater(module)
     info = run_async(updater.fetch_latest(object()))
     assert info.version == "1.2.3"
@@ -635,7 +661,7 @@ def test_leaf_updaters_reject_invalid_vendor_payloads(
         async def fake_fetch_json(*_args: object, **_kwargs: object) -> object:
             return payload
 
-        monkeypatch.setattr(module, "fetch_json", fake_fetch_json)
+        _patch_dependency(monkeypatch, module, "fetch_json", fake_fetch_json)
 
     with pytest.raises((RuntimeError, TypeError)):
         run_async(_updater(module).fetch_latest(object()))

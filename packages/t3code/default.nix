@@ -1,11 +1,14 @@
 {
   bun,
   cacert,
+  fetchPnpmDeps ? null,
   inputs,
   lib,
   makeWrapper,
   nodejs,
   outputs,
+  pnpm_10,
+  pnpmConfigHook,
   python3,
   stdenv,
   stdenvNoCC,
@@ -14,12 +17,14 @@
 let
   shared = import ./_shared.nix {
     inherit
-      bun
       cacert
+      fetchPnpmDeps
       inputs
       lib
       nodejs
       outputs
+      pnpm_10
+      pnpmConfigHook
       stdenv
       ;
     sourceHashPackageName = "t3code-workspace";
@@ -31,6 +36,7 @@ let
     workspaceBuild
     ;
   inherit (stdenv.hostPlatform) system;
+  pythonForRuntimeManifest = python3.withPackages (ps: [ ps.pyyaml ]);
 
   node_modules = stdenv.mkDerivation {
     pname = "${pname}-node_modules";
@@ -39,7 +45,7 @@ let
     nativeBuildInputs = [
       bun
       cacert
-      python3
+      pythonForRuntimeManifest
     ];
 
     dontPatchShebangs = true;
@@ -54,7 +60,7 @@ let
       export NODE_EXTRA_CA_CERTS="$SSL_CERT_FILE"
       export BUN_INSTALL_CACHE_DIR="$TMPDIR/.bun-cache"
 
-      ${lib.getExe python3} ${../t3code-desktop/render_runtime_package_json.py} \
+      ${lib.getExe pythonForRuntimeManifest} ${../t3code-desktop/render_runtime_package_json.py} \
         ${src} \
         --output package.json \
         --server-only
@@ -64,6 +70,29 @@ let
         --frozen-lockfile \
         --ignore-scripts \
         --no-progress
+
+      ${lib.getExe pythonForRuntimeManifest} - <<'PY'
+      import json
+      from pathlib import Path
+
+      package_json = Path("node_modules/@pierre/diffs/package.json")
+      payload = json.loads(package_json.read_text(encoding="utf-8"))
+      exports = payload.get("exports")
+      if not isinstance(exports, dict):
+          raise TypeError("@pierre/diffs package.json exports must be an object")
+      exports["./utils/*"] = {
+          "types": "./dist/utils/*.d.ts",
+          "import": "./dist/utils/*.js",
+      }
+      package_json.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+      PY
+
+      # Bun can create package-local bin links nondeterministically inside its
+      # private .bun store. The runtime only needs the top-level node_modules
+      # links, so remove nested .bin directories before hashing the output.
+      if [ -d node_modules/.bun ]; then
+        find node_modules/.bun -path '*/node_modules/.bin' -type d -prune -exec rm -rf {} +
+      fi
 
       runHook postBuild
     '';

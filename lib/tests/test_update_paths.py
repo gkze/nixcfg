@@ -9,6 +9,7 @@ import pytest
 from lib.update.paths import (
     SOURCES_GIT_PATHSPECS,
     is_sources_file_path,
+    local_flake_url,
     package_dir_for_in,
     package_file_map_in,
 )
@@ -84,3 +85,11 @@ def test_package_dir_for_in_rejects_duplicate_package_dirs(tmp_path: Path) -> No
 
     with pytest.raises(RuntimeError, match="Duplicate package directories"):
         package_dir_for_in(tmp_path, "demo")
+
+
+def test_local_flake_url_uses_git_source_view(tmp_path: Path) -> None:
+    """Local update-time flake reads should avoid raw path copies of .git."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    assert local_flake_url(repo_root) == f"git+file://{repo_root}?dirty=1"

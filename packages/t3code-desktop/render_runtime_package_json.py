@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
+import yaml
+
 JsonObject = dict[str, Any]
 JsonStringMap = dict[str, str]
 
@@ -15,6 +17,14 @@ def _load_json(path: Path) -> JsonObject:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         msg = f"Expected a JSON object in {path}"
+        raise TypeError(msg)
+    return cast("JsonObject", payload)
+
+
+def _load_yaml(path: Path) -> JsonObject:
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        msg = f"Expected a YAML object in {path}"
         raise TypeError(msg)
     return cast("JsonObject", payload)
 
@@ -73,11 +83,16 @@ def _workspace_package_dirs(source_root: Path, patterns: list[str]) -> list[str]
     return dirs
 
 
-def _workspace_package_map(source_root: Path, workspaces: JsonObject) -> dict[str, str]:
+def _workspace_package_map(
+    source_root: Path,
+    workspaces: JsonObject,
+    *,
+    context: str,
+) -> dict[str, str]:
     patterns = _string_list(
         workspaces,
         "packages",
-        context="root package.json workspaces",
+        context=context,
     )
     packages: dict[str, str] = {}
     for rel_dir in _workspace_package_dirs(source_root, patterns):
@@ -89,6 +104,39 @@ def _workspace_package_map(source_root: Path, workspaces: JsonObject) -> dict[st
         )
         packages[package_name] = rel_dir
     return packages
+
+
+def _workspace_metadata(
+    source_root: Path,
+    root_package: JsonObject,
+) -> tuple[JsonObject, JsonStringMap]:
+    pnpm_workspace = source_root / "pnpm-workspace.yaml"
+    if pnpm_workspace.is_file():
+        payload = _load_yaml(pnpm_workspace)
+        workspaces: JsonObject = {
+            "packages": _string_list(
+                payload,
+                "packages",
+                context="pnpm-workspace.yaml",
+            ),
+            "catalog": _string_map(
+                payload,
+                "catalog",
+                context="pnpm-workspace.yaml",
+            ),
+        }
+        overrides = _string_map(
+            payload,
+            "overrides",
+            context="pnpm-workspace.yaml",
+        )
+        return workspaces, overrides
+
+    workspaces = _require_object(
+        root_package, "workspaces", context="root package.json"
+    )
+    overrides = _string_map(root_package, "overrides", context="root package.json")
+    return workspaces, overrides
 
 
 def _workspace_dependency_names(dependencies: JsonStringMap) -> set[str]:
@@ -164,11 +212,13 @@ def build_runtime_manifest(
     server_package = _load_json(source_root / "apps/server/package.json")
     desktop_package = _load_json(source_root / "apps/desktop/package.json")
 
-    workspaces = _require_object(
-        root_package, "workspaces", context="root package.json"
+    workspaces, workspace_overrides = _workspace_metadata(source_root, root_package)
+    catalog = _string_map(workspaces, "catalog", context="workspace metadata")
+    workspace_packages = _workspace_package_map(
+        source_root,
+        workspaces,
+        context="workspace metadata",
     )
-    catalog = _string_map(workspaces, "catalog", context="root package.json workspaces")
-    workspace_packages = _workspace_package_map(source_root, workspaces)
 
     server_dependencies = resolve_catalog_dependencies(
         _string_map(server_package, "dependencies", context="apps/server/package.json"),
@@ -199,9 +249,9 @@ def build_runtime_manifest(
         runtime_dependencies,
     )
     overrides = resolve_catalog_dependencies(
-        _string_map(root_package, "overrides", context="root package.json"),
+        workspace_overrides,
         catalog,
-        label="root overrides",
+        label="workspace overrides",
     )
 
     version = _require_string(

@@ -229,6 +229,57 @@ def test_linear_cli_fetch_hashes_forwards_events_and_emits_sorted_entries(
     assert all(entry.hash_type == "sha256" for entry in events[-1].payload)
 
 
+def test_linear_cli_fetch_hashes_retries_transient_manifest_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry installed-core Deno manifest resolution timeouts before failing."""
+    module = _load_module()
+    updater = module.LinearCliUpdater()
+    calls = 0
+    sleeps: list[float] = []
+
+    async def _sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    async def _manifest_fetch(self, info, session, *, context=None):
+        nonlocal calls
+        _ = (self, info, session, context)
+        calls += 1
+        if calls == 1:
+            yield UpdateEvent.status("linear-cli", "manifest pending")
+            raise TimeoutError
+        yield UpdateEvent.status("linear-cli", "manifest ready")
+        yield UpdateEvent.value("linear-cli", [])
+
+    async def _resolve_deno_version() -> str:
+        return "2.3.4"
+
+    async def _compute_url_hashes(name: str, urls) -> object:
+        url_list = list(urls)
+        yield UpdateEvent.value(
+            name,
+            {url: f"sha256-{index:0<43}=" for index, url in enumerate(url_list)},
+        )
+
+    monkeypatch.setattr(module.asyncio, "sleep", _sleep)
+    monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
+    monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
+    monkeypatch.setattr(module, "compute_url_hashes", _compute_url_hashes)
+
+    events = _run(
+        _collect_events(updater.fetch_hashes(VersionInfo(version="1.2.3"), object()))
+    )
+
+    assert calls == 2
+    assert sleeps == [0.5]
+    assert [event.message for event in events[:-1]] == [
+        "manifest pending",
+        "Retrying Deno manifest resolution after transient TimeoutError (1/3)",
+        "manifest ready",
+        "Fetching denort runtime hashes for Deno v2.3.4...",
+    ]
+
+
 def test_linear_cli_fetch_hashes_requires_manifest_value(monkeypatch) -> None:
     """Raise when the superclass manifest stream never yields a VALUE event."""
     module = _load_module()

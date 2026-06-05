@@ -54,6 +54,25 @@ def _patch_build_rs(source_root: Path) -> None:
     build_rs_path.write_text(original.replace(old, new, 1))
 
 
+def _patch_but_cli_alias_guard(source_root: Path) -> None:
+    lib_rs_path = source_root / "crates/but/src/lib.rs"
+    original = lib_rs_path.read_text()
+    old = """    match &parsed_args.cmd {
+        Some(Subcommands::External(subcommand_args))
+            if let Some(command_name) = subcommand_args.first() =>
+        {
+            if let Some(command_name) = command_name.to_str() {
+"""
+    new = """    match &parsed_args.cmd {
+        Some(Subcommands::External(subcommand_args)) => {
+            if let Some(command_name) = subcommand_args.first().and_then(|arg| arg.to_str()) {
+"""
+    if old not in original:
+        msg = f"expected GitButler but alias guard snippet not found in {lib_rs_path}"
+        raise SystemExit(msg)
+    lib_rs_path.write_text(original.replace(old, new, 1))
+
+
 def main() -> int:
     """Patch the GitButler source tree named on the command line."""
     if len(sys.argv) != EXPECTED_ARG_COUNT:
@@ -62,6 +81,7 @@ def main() -> int:
     source_root = Path(sys.argv[1])
     _patch_tauri_config(source_root)
     _patch_build_rs(source_root)
+    _patch_but_cli_alias_guard(source_root)
     return 0
 
 

@@ -40,7 +40,7 @@ from lib.update.events import (
 )
 from lib.update.flake import nixpkgs_expression
 from lib.update.nix_expr import compact_nix_expr
-from lib.update.paths import get_repo_file
+from lib.update.paths import get_repo_file, local_flake_url
 from lib.update.process import (
     NixBuildOptions,
     RunCommandOptions,
@@ -369,7 +369,7 @@ def _build_package_path_attr_expr(
     repo_root: str | None = None,
 ) -> str:
     repo_path = get_repo_file(".") if repo_root is None else Path(repo_root).resolve()
-    flake_url = f"git+file://{repo_path}?dirty=1"
+    flake_url = local_flake_url(repo_path)
     system_expr: NixExpression = (
         _select_attrs(Identifier(name="builtins"), "currentSystem")
         if system is None
@@ -669,7 +669,7 @@ def _build_overlay_expression(
     hitting the aliases.nix ``with self`` trap.
     """
     repo_path = get_repo_file(".") if repo_root is None else Path(repo_root).resolve()
-    flake_url = f"git+file://{repo_path}?dirty=1"
+    flake_url = local_flake_url(repo_path)
     system_expr: NixExpression = (
         _select_attrs(Identifier(name="builtins"), "currentSystem")
         if system is None

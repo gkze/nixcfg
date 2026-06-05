@@ -172,6 +172,8 @@ def test_opencode_desktop_tracks_workspace_install_scope() -> None:
           desktopPackagePath
           "packages/app"
           "packages/core"
+          "packages/effect-drizzle-sqlite"
+          "packages/effect-sqlite-node"
           "packages/shared"
           "packages/ui"
           "packages/sdk/js"

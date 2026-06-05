@@ -6,7 +6,6 @@ import asyncio
 import sys
 from typing import Annotated
 
-import click
 import typer
 from githubkit.exception import RequestError as GitHubKitRequestError
 from rich.console import Console
@@ -56,7 +55,8 @@ def list_workflows(
         RuntimeError,
         ValueError,
     ) as exc:
-        raise click.ClickException(str(exc)) from None
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
 
     table = Table(title="GitHub Actions workflows")
     table.add_column("Workflow")
@@ -145,7 +145,8 @@ def tail_workflow(
         RuntimeError,
         ValueError,
     ) as exc:
-        raise click.ClickException(str(exc)) from None
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
 
 
 async def _tail_workflow_async(

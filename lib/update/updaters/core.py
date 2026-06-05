@@ -39,7 +39,6 @@ if TYPE_CHECKING:
 
     import aiohttp
 
-    from lib.update.events import EventStream
     from lib.update.updaters.metadata import VersionInfo
 
 from lib.update.updaters.dependencies import updater_dependencies

@@ -49,6 +49,11 @@ def _run(command: list[str], *, cwd: Path | None = None) -> None:
         raise UpdateBunLockError(msg) from exc
 
 
+def _local_flake_installable(repo_root: Path, attr: str) -> str:
+    """Return a local installable through Git's clean source view."""
+    return f"git+file://{repo_root.resolve()}?dirty=1#{attr}"
+
+
 def main() -> int:
     """Refresh ``bun.lock`` and ``bun.nix`` for the pinned Superset source."""
     repo_root = Path.cwd()
@@ -66,7 +71,7 @@ def main() -> int:
             _run([
                 "nix",
                 "run",
-                f"path:{repo_root}#nixcfg",
+                _local_flake_installable(repo_root, "nixcfg"),
                 "--",
                 "ci",
                 "workflow",

@@ -182,7 +182,7 @@ class Renderer:
                     Text(""),
                     console=self._console,
                     auto_refresh=False,
-                    transient=True,
+                    transient=False,
                 )
             )
             self._live.start()
@@ -345,8 +345,10 @@ class Renderer:
     def finalize(self) -> None:
         """Stop live rendering and print final status when enabled."""
         if self._live:
+            self._live.update(self._build_display(full_output=True), refresh=False)
             self._live.stop()
             self._live = None
+            return
         if self.is_tty and not self.quiet:
             self._print_final_status()
 

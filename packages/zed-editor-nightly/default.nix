@@ -2,7 +2,6 @@
   pkgs,
   inputs,
   lib,
-  rustPlatform,
   symlinkJoin,
   makeFontsConf,
   git,
@@ -36,6 +35,7 @@
   libxfixes,
   libxkbcommon,
   libxrandr,
+  lld,
   libx11,
   libxcb,
   makeWrapper,
@@ -53,6 +53,16 @@ let
   zedManifest = builtins.fromTOML (builtins.readFile "${src}/crates/zed/Cargo.toml");
   appVersion = zedManifest.package.version;
   releaseChannel = "nightly";
+  rustToolchainChannel = (builtins.fromTOML (builtins.readFile "${src}/rust-toolchain.toml")).toolchain.channel;
+  rustToolchain = pkgs.rust-bin.stable.${rustToolchainChannel}.default;
+  zedRustPlatform = pkgs.makeRustPlatform {
+    cargo = rustToolchain;
+    rustc = rustToolchain;
+  };
+  zedBuildRustCrate = pkgs.buildRustCrate.override {
+    cargo = rustToolchain;
+    rustc = rustToolchain;
+  };
 
   copyZedManifestFor = crateName: ''
     if [ -d "$workspaceRoot/crates/${crateName}" ]; then
@@ -208,6 +218,7 @@ let
   cargoNix = import ./Cargo.nix {
     inherit pkgs;
     rootSrc = patchedSrc;
+    buildRustCrateForPkgs = _: zedBuildRustCrate;
   };
   cargoNixVersion = cargoNix.internal.crates.zed.version;
   cargoNixVersionCheck =
@@ -243,9 +254,14 @@ let
     perl
     pkg-config
     protobuf
-    rustPlatform.bindgenHook
+    zedRustPlatform.bindgenHook
   ]
-  ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ xcodebuild ];
+  ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+    # Zed's Darwin binary is large enough that nixpkgs' ld64 can fail to
+    # synthesize ARM64 branch thunks.
+    lld
+    xcodebuild
+  ];
 
   commonBuildInputs = [
     fontconfig
@@ -423,6 +439,11 @@ let
         makeWrapper
       ];
     buildInputs = (attrs.buildInputs or [ ]) ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ git ];
+    extraRustcOpts =
+      (attrs.extraRustcOpts or [ ])
+      ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+        "-C link-arg=-fuse-ld=${lld}/bin/ld64.lld"
+      ];
     installPhase =
       if pkgs.stdenv.hostPlatform.isDarwin then
         ''

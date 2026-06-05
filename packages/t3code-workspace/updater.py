@@ -1,4 +1,4 @@
-"""Updater for the internal T3 Code workspace Bun dependency cache."""
+"""Updater for the internal T3 Code workspace dependency cache."""
 
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ async def _compute_workspace_hash(expr: str) -> str:
 
 @register_updater
 class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
-    """Compute the shared T3 Code workspace Bun cache hash."""
+    """Compute the shared T3 Code workspace dependency cache hash."""
 
     DARWIN_PLATFORM = "aarch64-darwin"
 
@@ -177,7 +177,7 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
         *,
         context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
-        """Compute the fixed-output workspace Bun cache hash."""
+        """Compute the fixed-output workspace dependency cache hash."""
         _ = (info, session, context)
 
         hash_value = await _compute_workspace_hash(self._workspace_expr())

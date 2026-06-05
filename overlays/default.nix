@@ -56,6 +56,7 @@
         iina = withManagedMacApp prev.iina "IINA.app";
         inherit (inputs.googleworkspace-cli.packages.${system}) gws;
         notion-app = withManagedMacApp prev.notion-app "Notion.app";
+        orbstack = withManagedMacApp (final.mkSourceOverride "orbstack" prev.orbstack) "OrbStack.app";
         postman = withManagedMacApp prev.postman "Postman.app";
         rectangle = withManagedMacApp prev.rectangle "Rectangle.app";
         slack = withManagedMacApp prev.slack "Slack.app";

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.commands.base import run_nix
@@ -29,6 +30,32 @@ if TYPE_CHECKING:
     import aiohttp
 
 
+DENO_MANIFEST_ATTEMPTS = 3
+
+
+def _local_flake_url() -> str:
+    """Return a local flake URL compatible with installed nixcfg CLIs."""
+    return f"git+file://{get_repo_file('.').resolve()}?dirty=1"
+
+
+def _is_transient_deno_manifest_error(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    exc_type = type(exc)
+    if exc_type.__module__.startswith("aiohttp"):
+        return True
+    detail = f"{exc_type.__name__}: {exc}"
+    return any(
+        marker in detail
+        for marker in (
+            "Connection reset",
+            "Server disconnected",
+            "TimeoutError",
+            "timed out",
+        )
+    )
+
+
 @register_updater
 class LinearCliUpdater(DenoManifestUpdater):
     """Update deno-deps manifest plus denort runtime hashes per platform."""
@@ -49,7 +76,7 @@ class LinearCliUpdater(DenoManifestUpdater):
     @staticmethod
     def _deno_version_expr(platform: str) -> str:
         return _build_flake_attr_expr(
-            f"path:{get_repo_file('.')}",
+            _local_flake_url(),
             "pkgs",
             platform,
             "deno",
@@ -112,14 +139,32 @@ class LinearCliUpdater(DenoManifestUpdater):
         context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Resolve manifest plus per-platform denort fixed-output hashes."""
-        manifest_drain = ValueDrain()
-        async for event in drain_value_events(
-            super().fetch_hashes(info, session, context=context),
-            manifest_drain,
-            parse=expect_source_hashes,
-        ):
-            yield event
-        require_value(manifest_drain, "Missing deno manifest output")
+        for attempt in range(1, DENO_MANIFEST_ATTEMPTS + 1):
+            manifest_drain = ValueDrain()
+            try:
+                async for event in drain_value_events(
+                    super().fetch_hashes(info, session, context=context),
+                    manifest_drain,
+                    parse=expect_source_hashes,
+                ):
+                    yield event
+                require_value(manifest_drain, "Missing deno manifest output")
+                break
+            except BaseException as exc:
+                if (
+                    attempt >= DENO_MANIFEST_ATTEMPTS
+                    or not _is_transient_deno_manifest_error(exc)
+                ):
+                    raise
+                yield UpdateEvent.status(
+                    self.name,
+                    "Retrying Deno manifest resolution after transient "
+                    f"{type(exc).__name__} ({attempt}/{DENO_MANIFEST_ATTEMPTS})",
+                    operation="compute_hash",
+                    status="retry",
+                    detail=type(exc).__name__,
+                )
+                await asyncio.sleep(0.5 * attempt)
 
         deno_version = await self._resolve_deno_version()
         urls = {

@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-MpepEYoeA8TxRgmcPKANaP7zLGs+EJk8gMPE/97/yBo="
+  },
+  "urls": {
+    "aarch64-darwin": "https://downloads.jacquard.dev/releases/0.3.22/Jacq-darwin-arm64-0.3.22.zip"
+  },
+  "version": "0.3.22"
+}

@@ -100,6 +100,75 @@ def test_zed_fontconfig_uses_raw_source_paths() -> None:
     )
 
 
+def test_zed_darwin_uses_lld_for_large_arm64_link() -> None:
+    """Keep Zed's large Darwin binary off ld64's ARM64 branch-range failure path."""
+    zed_override = expect_instance(
+        expect_scope_binding(_zed_platform_switch(), "zedOverride").value,
+        FunctionDefinition,
+    )
+    zed_override_output = expect_instance(zed_override.output, AttributeSet)
+
+    assert_nix_ast_equal(
+        expect_scope_binding(_zed_platform_switch(), "commonNativeBuildInputs").value,
+        """
+        [
+          cmake
+          curl
+          perl
+          pkg-config
+          protobuf
+          zedRustPlatform.bindgenHook
+        ]
+        ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+          lld
+          xcodebuild
+        ]
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_binding(zed_override_output.values, "extraRustcOpts").value,
+        """
+        (attrs.extraRustcOpts or [ ])
+        ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+          "-C link-arg=-fuse-ld=${lld}/bin/ld64.lld"
+        ]
+        """,
+    )
+
+
+def test_zed_crate2nix_build_uses_upstream_rust_toolchain() -> None:
+    """Keep crate2nix builds aligned with Zed's pinned Rust toolchain."""
+    assert_nix_ast_equal(
+        expect_scope_binding(_zed_platform_switch(), "rustToolchainChannel").value,
+        """
+        (builtins.fromTOML (builtins.readFile "${src}/rust-toolchain.toml")).toolchain.channel
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_zed_platform_switch(), "rustToolchain").value,
+        "pkgs.rust-bin.stable.${rustToolchainChannel}.default",
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_zed_platform_switch(), "zedBuildRustCrate").value,
+        """
+        pkgs.buildRustCrate.override {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        }
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_zed_platform_switch(), "cargoNix").value,
+        """
+        import ./Cargo.nix {
+          inherit pkgs;
+          rootSrc = patchedSrc;
+          buildRustCrateForPkgs = _: zedBuildRustCrate;
+        }
+        """,
+    )
+
+
 def test_zed_package_keeps_linux_and_darwin_branches_while_exporting_validated_surfaces() -> (
     None
 ):
@@ -132,6 +201,23 @@ def test_zed_disables_unneeded_perf_binary_in_dependency_builds() -> None:
         """
         _attrs: {
           crateBin = [ ];
+        }
+        """,
+    )
+
+
+def test_zed_final_driver_keeps_linker_selection_in_crate_override() -> None:
+    """Keep final linker selection out of derivation-wide flags."""
+    assert_nix_ast_equal(
+        expect_scope_binding(_zed_platform_switch(), "zedDrv").value,
+        """
+        cargoNix.workspaceMembers.zed.build.override {
+          inherit crateOverrides;
+          runTests = false;
+          features = [
+            "default"
+            "gpui_platform/runtime_shaders"
+          ];
         }
         """,
     )

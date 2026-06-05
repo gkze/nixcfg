@@ -2,49 +2,21 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from lib.update.updaters.base import sparkle_appcast_updater
 
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
-from lib.update.updaters.vendor_feeds import (
-    fetch_sparkle_appcast_items,
-    require_version,
-)
-
-if TYPE_CHECKING:
-    import aiohttp
-
-
-@register_updater
-class NordvpnUpdater(DownloadHashUpdater):
-    """Resolve NordVPN from Nord's Sparkle package appcast."""
-
-    name = "nordvpn"
-    APPCAST_URL = (
+NordvpnUpdater = sparkle_appcast_updater(
+    "nordvpn",
+    appcast_url=(
         "https://downloads.nordcdn.com/apps/macos/generic/NordVPN-OpenVPN/"
         "latest/update_pkg.xml"
-    )
-    PLATFORMS: ClassVar[dict[str, str]] = {
+    ),
+    platforms={
         "aarch64-darwin": "darwin",
-    }
-
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Fetch the latest NordVPN package version."""
-        items = await fetch_sparkle_appcast_items(
-            session,
-            self.APPCAST_URL,
-            config=self.config,
-        )
-        item = items[0]
-        version = require_version(
-            item.short_version or item.version,
-            context=self.APPCAST_URL,
-        )
-        return VersionInfo(version=version)
-
-    def get_download_url(self, platform: str, info: VersionInfo) -> str:
-        """Return NordVPN's versioned package URL."""
-        _ = platform
-        return (
-            "https://downloads.nordcdn.com/apps/macos/generic/NordVPN-OpenVPN/"
-            f"{info.version}/NordVPN.pkg"
-        )
+    },
+    download_url=(
+        "https://downloads.nordcdn.com/apps/macos/generic/NordVPN-OpenVPN/"
+        "{version}/NordVPN.pkg"
+    ),
+    version_field="short_or_version",
+    module=__name__,
+)

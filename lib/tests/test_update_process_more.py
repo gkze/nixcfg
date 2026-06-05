@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from lib.nix.commands.base import CommandResult as LibCommandResult
-from lib.nix.commands.base import ProcessDone, ProcessLine
+from lib.nix.commands.base import NixCommandError, ProcessDone, ProcessLine
 from lib.update.config import resolve_config
 from lib.update.events import GatheredValues, UpdateEvent, UpdateEventKind
 from lib.update.process import (
@@ -279,6 +279,59 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
         ),
         ("https://example.com/app.dmg", None),
     ]
+
+
+def test_compute_sri_hash_retries_transient_prefetch_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry transient nix-prefetch-url failures before surfacing an error."""
+    calls = 0
+
+    async def _prefetch_url(url: str, *, name: str | None = None) -> str:
+        nonlocal calls
+        calls += 1
+        assert url == "https://example.com/archive.tar.gz"
+        assert name is None
+        if calls == 1:
+            raise NixCommandError(
+                LibCommandResult(
+                    args=["nix-prefetch-url"],
+                    returncode=1,
+                    stdout="",
+                    stderr="Failure when receiving data from the peer",
+                ),
+                "prefetch failed",
+            )
+        return "sha256-CCC="
+
+    monkeypatch.setattr("lib.update.process.libnix_prefetch_url", _prefetch_url)
+    monkeypatch.setattr(
+        "lib.update.process.resolve_active_config",
+        lambda _config: resolve_config(retries=2, retry_backoff=0),
+    )
+
+    events = _collect_stream(
+        compute_sri_hash("demo", "https://example.com/archive.tar.gz")
+    )
+
+    assert calls == 2
+    command_starts = [
+        event for event in events if event.kind is UpdateEventKind.COMMAND_START
+    ]
+    command_ends = [
+        event for event in events if event.kind is UpdateEventKind.COMMAND_END
+    ]
+    assert len(command_starts) == len(command_ends) == 2
+    retry_end = command_ends[0].payload
+    assert retry_end.returncode == 1
+    assert retry_end.allow_failure
+    assert any(
+        event.message == "nix-prefetch-url hit a transient failure; retrying..."
+        and event.payload["detail"] == "attempt 2/2"
+        for event in events
+        if event.kind is UpdateEventKind.STATUS
+    )
+    assert events[-1].payload == "sha256-CCC="
 
 
 def test_compute_url_hashes_gather_and_type_errors(

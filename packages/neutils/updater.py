@@ -44,6 +44,11 @@ from lib.update.updaters.base import (
 from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 
+def _local_flake_url(root: Path) -> str:
+    """Return a local flake URL compatible with installed nixcfg CLIs."""
+    return f"git+file://{root.resolve()}?dirty=1"
+
+
 @register_updater
 class NeutilsUpdater(GitHubReleaseUpdater):
     """Refresh neutils source metadata and checked-in Zig dependency cache Nix."""
@@ -205,7 +210,9 @@ class NeutilsUpdater(GitHubReleaseUpdater):
 
         current_system = get_current_nix_platform()
         repo_root = get_repo_file(".")
-        zig_installable = f"path:{repo_root}#pkgs.{current_system}.zig_0_15"
+        zig_installable = (
+            f"{_local_flake_url(repo_root)}#pkgs.{current_system}.zig_0_15"
+        )
 
         with tempfile.TemporaryDirectory(prefix=f"{self.name}-zon2nix-") as tmpdir_str:
             tmpdir = Path(tmpdir_str)

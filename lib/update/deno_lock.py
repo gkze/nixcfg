@@ -37,6 +37,8 @@ NPM_REGISTRY = "https://registry.npmjs.org"
 
 # Concurrency limit for fetching JSR meta files.
 JSR_FETCH_CONCURRENCY = 20
+JSR_FETCH_ATTEMPTS = 3
+RETRYABLE_HTTP_STATUS_MIN = 500
 
 _as_object_dict = json_utils.as_object_dict
 _as_object_list = json_utils.as_object_list
@@ -177,6 +179,41 @@ def _parse_jsr_checksum(checksum: str, *, context: str) -> str:
     return sha256_hex.lower()
 
 
+def _is_retryable_jsr_fetch_error(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return exc.status in {408, 429} or exc.status >= RETRYABLE_HTTP_STATUS_MIN
+    return isinstance(exc, aiohttp.ClientError)
+
+
+async def _fetch_jsr_bytes(
+    client: aiohttp.ClientSession,
+    url: str,
+    *,
+    context: str,
+) -> bytes:
+    for attempt in range(1, JSR_FETCH_ATTEMPTS + 1):
+        try:
+            async with client.get(url) as resp:
+                resp.raise_for_status()
+                return await resp.read()
+        except BaseException as exc:
+            if attempt >= JSR_FETCH_ATTEMPTS or not _is_retryable_jsr_fetch_error(exc):
+                raise
+            delay = 0.5 * attempt
+            log.warning(
+                "Retrying %s after transient %s (%d/%d)",
+                context,
+                type(exc).__name__,
+                attempt,
+                JSR_FETCH_ATTEMPTS,
+            )
+            await asyncio.sleep(delay)
+    msg = f"Exhausted retries fetching {context}"
+    raise RuntimeError(msg)
+
+
 async def _fetch_jsr_meta(
     client: aiohttp.ClientSession,
     scope: str,
@@ -185,9 +222,11 @@ async def _fetch_jsr_meta(
 ) -> JsrMetaDocument:
     """Fetch the ``_meta.json`` for a JSR package version."""
     url = f"{JSR_REGISTRY}/{scope}/{name}/{version}_meta.json"
-    async with client.get(url) as resp:
-        resp.raise_for_status()
-        payload = await resp.read()
+    payload = await _fetch_jsr_bytes(
+        client,
+        url,
+        context=f"JSR version metadata for {scope}/{name}@{version}",
+    )
     return JsrMetaDocument(
         payload=payload,
         document=_as_object_dict(
@@ -246,9 +285,11 @@ async def _resolve_jsr_package(
         f"/{scope}/{name}/{version}_meta.json": version_meta.payload,
     }
     meta_url = f"{JSR_REGISTRY}/{scope}/{name}/meta.json"
-    async with client.get(meta_url) as meta_resp:
-        meta_resp.raise_for_status()
-        meta_documents[f"/{scope}/{name}/meta.json"] = await meta_resp.read()
+    meta_documents[f"/{scope}/{name}/meta.json"] = await _fetch_jsr_bytes(
+        client,
+        meta_url,
+        context=f"JSR package metadata for {scope}/{name}",
+    )
 
     for meta_path, meta_content in meta_documents.items():
         resolved_meta_url = f"{JSR_REGISTRY}{meta_path}"

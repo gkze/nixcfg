@@ -46,7 +46,7 @@ permissions:
 
 engine:
   id: copilot
-  model: gpt-4.1
+  model: gpt-5.5
 
 checkout:
   fetch-depth: 0

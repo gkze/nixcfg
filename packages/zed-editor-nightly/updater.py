@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import tomllib
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from lib.update import crate2nix as _crate2nix
 from lib.update.net import fetch_url
+from lib.update.paths import get_repo_file
 from lib.update.updaters.base import (
     Crate2NixMetadataUpdater,
     VersionInfo,
@@ -15,6 +18,23 @@ from lib.update.updaters.metadata import FlakeInputMetadata
 
 if TYPE_CHECKING:
     import aiohttp
+
+
+def _patch_installed_crate2nix_target(name: str) -> None:
+    """Keep worktree updaters compatible with older installed nixcfg CLIs."""
+    if hasattr(_crate2nix, "_local_flake_installable"):
+        return
+    target = _crate2nix.TARGETS.get(name)
+    if target is None or not target.patched_src_installable.startswith("path:.#"):
+        return
+    attr = target.patched_src_installable.removeprefix("path:.#")
+    _crate2nix.TARGETS[name] = replace(
+        target,
+        patched_src_installable=f"git+file://{get_repo_file('.').resolve()}?dirty=1#{attr}",
+    )
+
+
+_patch_installed_crate2nix_target("zed-editor-nightly")
 
 
 @register_updater

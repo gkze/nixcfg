@@ -1370,6 +1370,12 @@ def test_george_config_manages_mutable_gui_apps_via_scoped_applications() -> Non
     def scope_for(table: AttributeSet, name: str) -> str:
         return expect_binding(entry_for(table, name).values, "scope").value.rebuild()
 
+    def has_scope(table: AttributeSet, name: str) -> bool:
+        return any(
+            isinstance(binding, Binding) and binding.name == "scope"
+            for binding in entry_for(table, name).values
+        )
+
     assert_nix_ast_equal(
         expect_scope_binding(nixcfg, "macAppHelpers").value,
         "import ../../lib/mac-apps.nix { inherit lib pkgs; }",
@@ -1387,8 +1393,11 @@ def test_george_config_manages_mutable_gui_apps_via_scoped_applications() -> Non
     assert package_for(base_routing, "code-cursor") == "pkgs.code-cursor"
     assert package_for(base_routing, "vscode-insiders") == "pkgs.vscode-insiders"
     assert package_for(base_routing, "superset") == "pkgs.superset"
+    assert package_for(base_routing, "goose") == "pkgs.goose-desktop"
     assert package_for(base_routing, "nordvpn") == "pkgs.nordvpn"
     assert scope_for(base_routing, "nordvpn") == '"system"'
+    assert package_for(base_routing, "zoom") == "pkgs.zoom-us"
+    assert not has_scope(base_routing, "zoom")
 
     work_call = expect_instance(routing.right, FunctionCall)
     assert work_call.name.rebuild() == "lib.optionalAttrs config.profiles.work.enable"

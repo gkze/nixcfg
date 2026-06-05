@@ -38,6 +38,29 @@ def _write_tauri_source(root: Path, build_rs: str) -> Path:
     return tauri_root
 
 
+def _write_but_source(root: Path, lib_rs: str | None = None) -> Path:
+    but_root = root / "crates" / "but" / "src"
+    but_root.mkdir(parents=True)
+    if lib_rs is None:
+        lib_rs = """fn expand_aliases(args: Vec<OsString>) -> Vec<OsString> {
+    match &parsed_args.cmd {
+        Some(Subcommands::External(subcommand_args))
+            if let Some(command_name) = subcommand_args.first() =>
+        {
+            if let Some(command_name) = command_name.to_str() {
+                command_name.into()
+            } else {
+                args
+            }
+        }
+        _ => args,
+    }
+}
+"""
+    (but_root / "lib.rs").write_text(lib_rs, encoding="utf-8")
+    return but_root
+
+
 def test_patch_sources_rewrites_tauri_config_and_build_script(tmp_path: Path) -> None:
     """Patched sources should match the Nix-packaged app layout."""
     module = _load_patch_module()
@@ -75,6 +98,31 @@ def test_patch_sources_rewrites_tauri_config_and_build_script(tmp_path: Path) ->
     )
 
 
+def test_patch_sources_rewrites_but_alias_guard(tmp_path: Path) -> None:
+    """Patched sources should avoid Rust's experimental if-let guards."""
+    module = _load_patch_module()
+    but_root = _write_but_source(tmp_path)
+
+    module._patch_but_cli_alias_guard(tmp_path)
+
+    assert (
+        (but_root / "lib.rs").read_text(encoding="utf-8")
+        == """fn expand_aliases(args: Vec<OsString>) -> Vec<OsString> {
+    match &parsed_args.cmd {
+        Some(Subcommands::External(subcommand_args)) => {
+            if let Some(command_name) = subcommand_args.first().and_then(|arg| arg.to_str()) {
+                command_name.into()
+            } else {
+                args
+            }
+        }
+        _ => args,
+    }
+}
+"""
+    )
+
+
 def test_patch_build_rs_errors_when_frontend_dist_snippet_is_missing(
     tmp_path: Path,
 ) -> None:
@@ -84,6 +132,17 @@ def test_patch_build_rs_errors_when_frontend_dist_snippet_is_missing(
 
     with pytest.raises(SystemExit, match="frontendDist snippet not found"):
         module._patch_build_rs(tmp_path)
+
+
+def test_patch_but_cli_alias_guard_errors_when_snippet_is_missing(
+    tmp_path: Path,
+) -> None:
+    """Unexpected upstream but CLI shape should fail loudly."""
+    module = _load_patch_module()
+    _write_but_source(tmp_path, "fn expand_aliases() {}\n")
+
+    with pytest.raises(SystemExit, match="but alias guard snippet not found"):
+        module._patch_but_cli_alias_guard(tmp_path)
 
 
 def test_main_validates_argv_and_patches_sources(
@@ -107,6 +166,7 @@ def test_main_validates_argv_and_patches_sources(
 }
 """,
     )
+    _write_but_source(tmp_path)
 
     monkeypatch.setattr(module.sys, "argv", ["patch_sources.py"])
     with pytest.raises(SystemExit, match="usage: patch_sources.py"):
@@ -136,6 +196,7 @@ def test_main_guard_exits_with_main_result(
 }
 """,
     )
+    _write_but_source(tmp_path)
     script_path = REPO_ROOT / "packages/gitbutler/patch_sources.py"
 
     monkeypatch.setattr("sys.argv", [str(script_path), str(tmp_path)])

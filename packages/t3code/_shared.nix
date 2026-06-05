@@ -1,10 +1,12 @@
 {
-  bun,
   cacert,
+  fetchPnpmDeps ? null,
   inputs,
   lib,
   nodejs,
   outputs,
+  pnpm_10,
+  pnpmConfigHook,
   stdenv,
   sourceHashPackageName ? "t3code",
   ...
@@ -19,6 +21,7 @@ let
   revSuffix = builtins.substring 0 7 (outputs.lib.flakeLock.t3code.locked.rev or "unknown");
   version = "${baseVersion}-main-${revSuffix}";
   nodeModulesVersion = "deps";
+  pnpm = pnpm_10.override { inherit nodejs; };
   childDirectoryNames =
     path: builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir path));
   nestedWorkspaceDirs =
@@ -37,16 +40,27 @@ let
   explicitRootWorkspaceDirs = builtins.filter (
     dir: !lib.hasInfix "*" dir && builtins.pathExists (src + "/${dir}/package.json")
   ) rootWorkspacePackagePatterns;
+  topLevelWorkspaceNames = [
+    "oxlint-plugin-t3code"
+    "scripts"
+  ];
+  topLevelWorkspaceDirs = builtins.filter (
+    dir: builtins.pathExists (src + "/${dir}/package.json")
+  ) topLevelWorkspaceNames;
+  mobileModuleRoot = "apps/mobile/modules";
+  mobileModulePackageDirs = lib.optionals (builtins.pathExists (src + "/${mobileModuleRoot}")) (
+    map (name: "${mobileModuleRoot}/${name}") (childDirectoryNames (src + "/${mobileModuleRoot}"))
+  );
   workspaceDirs = lib.unique (
     nestedWorkspaceDirs
     ++ explicitRootWorkspaceDirs
-    ++ lib.optional (builtins.pathExists (src + "/scripts/package.json")) "scripts"
+    ++ topLevelWorkspaceDirs
   );
   workspaceBuildDirectories = lib.unique (
     lib.optionals (builtins.pathExists (src + "/apps")) [ "apps" ]
     ++ lib.optionals (builtins.pathExists (src + "/packages")) [ "packages" ]
     ++ explicitRootWorkspaceDirs
-    ++ lib.optional (builtins.pathExists (src + "/scripts")) "scripts"
+    ++ topLevelWorkspaceDirs
   );
   workspaceBuildShellDirs = lib.escapeShellArgs workspaceBuildDirectories;
   dependencySourceDirectories = [
@@ -55,6 +69,8 @@ let
   ++ lib.optionals (builtins.pathExists (src + "/apps")) [ "apps" ]
   ++ lib.optionals (builtins.pathExists (src + "/packages")) [ "packages" ]
   ++ workspaceDirs
+  ++ lib.optional (builtins.pathExists (src + "/${mobileModuleRoot}")) mobileModuleRoot
+  ++ mobileModulePackageDirs
   ++ lib.optional (builtins.pathExists (src + "/patches")) "patches";
   dependencySource = builtins.path {
     name = "${pname}-dependency-source";
@@ -70,77 +86,41 @@ let
       || lib.hasPrefix "patches/" relativePath
       || builtins.elem relativePath (
         [
-          "bun.lock"
-          "bunfig.toml"
           "package.json"
+          "pnpm-lock.yaml"
+          "pnpm-workspace.yaml"
         ]
         ++ map (dir: "${dir}/package.json") workspaceDirs
+        ++ map (dir: "${dir}/package.json") mobileModulePackageDirs
       );
   };
 
-  bunTarget =
-    {
-      aarch64-darwin = {
-        cpu = "arm64";
-        os = "darwin";
+  node_modules =
+    let
+      args = {
+        pname = "${sourceHashPackageName}-node_modules";
+        version = nodeModulesVersion;
+        src = dependencySource;
+        pnpm = pnpm;
+        fetcherVersion = 3;
+        hash = outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
       };
-    }
-    .${system} or (throw "packages/t3code/_shared.nix unsupported system ${system}");
-
-  node_modules = stdenv.mkDerivation {
-    pname = "${sourceHashPackageName}-node_modules";
-    version = nodeModulesVersion;
-    src = dependencySource;
-
-    nativeBuildInputs = [
-      bun
-      cacert
-    ];
-
-    dontPatchShebangs = true;
-    dontFixup = true;
-
-    buildPhase = ''
-      runHook preBuild
-
-      export HOME="$TMPDIR/home"
-      mkdir -p "$HOME"
-      export SSL_CERT_FILE="${cacert}/etc/ssl/certs/ca-bundle.crt"
-      export NODE_EXTRA_CA_CERTS="$SSL_CERT_FILE"
-      export BUN_INSTALL_CACHE_DIR="$TMPDIR/.bun-cache"
-
-      bun install \
-        --cpu="${bunTarget.cpu}" \
-        --os="${bunTarget.os}" \
-        --frozen-lockfile \
-        --ignore-scripts \
-        --no-progress
-
-      runHook postBuild
-    '';
-
-    installPhase = ''
-      runHook preInstall
-
-      mkdir -p "$out"
-      find . -type d -name node_modules -prune -exec cp -R --parents {} "$out" \;
-
-      runHook postInstall
-    '';
-
-    outputHashMode = "recursive";
-    outputHashAlgo = "sha256";
-    outputHash = outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
-  };
+    in
+    if fetchPnpmDeps != null then
+      fetchPnpmDeps args
+    else
+      pnpm.fetchDeps args;
 
   workspaceBuild = stdenv.mkDerivation {
     pname = "${pname}-workspace-build";
     inherit version src;
+    pnpmDeps = node_modules;
 
     nativeBuildInputs = [
-      bun
-      nodejs
       cacert
+      nodejs
+      pnpm
+      pnpmConfigHook
     ];
 
     strictDeps = true;
@@ -148,6 +128,7 @@ let
     env = {
       CI = "1";
       NODE_OPTIONS = "--max-old-space-size=6144";
+      npm_config_manage_package_manager_versions = "false";
     };
 
     postUnpack = ''
@@ -163,8 +144,14 @@ let
       export NODE_EXTRA_CA_CERTS="$SSL_CERT_FILE"
       export TURBO_CACHE_DIR="$TMPDIR/.turbo-cache"
       export TURBO_TELEMETRY_DISABLED=1
+      export XDG_CACHE_HOME="$TMPDIR/xdg-cache"
+      export XDG_CONFIG_HOME="$TMPDIR/xdg-config"
+      export XDG_DATA_HOME="$TMPDIR/xdg-data"
+      export XDG_STATE_HOME="$TMPDIR/xdg-state"
+      export npm_config_manage_package_manager_versions=false
+      mkdir -p "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME"
+      pnpm config set manage-package-manager-versions false
 
-      cp -a ${node_modules}/. .
       chmod -R u+w node_modules ${workspaceBuildShellDirs}
 
       patchShebangs node_modules
@@ -172,7 +159,7 @@ let
         patchShebangs "$nested_node_modules"
       done
 
-      bun run build:desktop
+      pnpm run build:desktop
 
       runHook postBuild
     '';
@@ -192,9 +179,9 @@ let
 in
 {
   inherit
-    bunTarget
     node_modules
     pname
+    pnpm
     src
     version
     workspaceBuild

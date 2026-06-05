@@ -259,6 +259,7 @@ in
           gooseServerDrv
           patchedSrc
           patchedV8Src
+          version
           chromiumToolchainBundle
           v8Build
           ;

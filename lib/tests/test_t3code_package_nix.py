@@ -62,6 +62,11 @@ def test_t3code_package_wraps_the_bun_runtime_entrypoint() -> None:
         IndentedString,
     )
     assert "--server-only" in node_modules_build.value
+    assert 'exports["./utils/*"]' in node_modules_build.value
+    assert "if [ -d node_modules/.bun ]; then" in node_modules_build.value
+    assert "find node_modules/.bun -path '*/node_modules/.bin'" in (
+        node_modules_build.value
+    )
 
     install_phase = expect_instance(
         expect_binding(_t3code_derivation_args().values, "installPhase").value,
@@ -103,6 +108,10 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
         '"deps"',
     )
     assert_nix_ast_equal(
+        expect_scope_binding(_shared_output(), "pnpm").value,
+        "pnpm_10.override { inherit nodejs; }",
+    )
+    assert_nix_ast_equal(
         expect_scope_binding(_shared_output(), "rootWorkspacePackagePatterns").value,
         "rootPackageJson.workspaces.packages or [ ]",
     )
@@ -115,12 +124,41 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
         """,
     )
     assert_nix_ast_equal(
+        expect_scope_binding(_shared_output(), "topLevelWorkspaceNames").value,
+        """
+        [
+          "oxlint-plugin-t3code"
+          "scripts"
+        ]
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_shared_output(), "topLevelWorkspaceDirs").value,
+        """
+        builtins.filter (
+          dir: builtins.pathExists (src + "/${dir}/package.json")
+        ) topLevelWorkspaceNames
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_shared_output(), "mobileModuleRoot").value,
+        '"apps/mobile/modules"',
+    )
+    assert_nix_ast_equal(
+        expect_scope_binding(_shared_output(), "mobileModulePackageDirs").value,
+        """
+        lib.optionals (builtins.pathExists (src + "/${mobileModuleRoot}")) (
+          map (name: "${mobileModuleRoot}/${name}") (childDirectoryNames (src + "/${mobileModuleRoot}"))
+        )
+        """,
+    )
+    assert_nix_ast_equal(
         expect_scope_binding(_shared_output(), "workspaceDirs").value,
         """
         lib.unique (
           nestedWorkspaceDirs
           ++ explicitRootWorkspaceDirs
-          ++ lib.optional (builtins.pathExists (src + "/scripts/package.json")) "scripts"
+          ++ topLevelWorkspaceDirs
         )
         """,
     )
@@ -147,6 +185,8 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
         ++ lib.optionals (builtins.pathExists (src + "/apps")) [ "apps" ]
         ++ lib.optionals (builtins.pathExists (src + "/packages")) [ "packages" ]
         ++ workspaceDirs
+        ++ lib.optional (builtins.pathExists (src + "/${mobileModuleRoot}")) mobileModuleRoot
+        ++ mobileModulePackageDirs
         ++ lib.optional (builtins.pathExists (src + "/patches")) "patches"
         """,
     )
@@ -163,43 +203,34 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
         || lib.hasPrefix "patches/" relativePath
         || builtins.elem relativePath (
           [
-            "bun.lock"
-            "bunfig.toml"
             "package.json"
+            "pnpm-lock.yaml"
+            "pnpm-workspace.yaml"
           ]
           ++ map (dir: "${dir}/package.json") workspaceDirs
+          ++ map (dir: "${dir}/package.json") mobileModulePackageDirs
         )
         """,
     )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "bunTarget").value,
-        """
-        {
-          aarch64-darwin = {
-            cpu = "arm64";
-            os = "darwin";
-          };
-        }
-        .${system} or (throw "packages/t3code/_shared.nix unsupported system ${system}")
-        """,
-    )
 
-    node_modules = expect_instance(
+    assert_nix_ast_equal(
         expect_scope_binding(_shared_output(), "node_modules").value,
-        FunctionCall,
-    )
-    node_modules_args = expect_instance(node_modules.argument, AttributeSet)
-    assert_nix_ast_equal(
-        expect_binding(node_modules_args.values, "version").value,
-        "nodeModulesVersion",
-    )
-    assert_nix_ast_equal(
-        expect_binding(node_modules_args.values, "src").value,
-        "dependencySource",
-    )
-    assert_nix_ast_equal(
-        expect_binding(node_modules_args.values, "outputHash").value,
-        'outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system',
+        """
+        let
+          args = {
+            pname = "${sourceHashPackageName}-node_modules";
+            version = nodeModulesVersion;
+            src = dependencySource;
+            pnpm = pnpm;
+            fetcherVersion = 3;
+            hash = outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
+          };
+        in
+        if fetchPnpmDeps != null then
+          fetchPnpmDeps args
+        else
+          pnpm.fetchDeps args
+        """,
     )
 
     workspace_build = expect_instance(
@@ -207,6 +238,10 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
         FunctionCall,
     )
     workspace_build_args = expect_instance(workspace_build.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(workspace_build_args.values, "pnpmDeps").value,
+        "node_modules",
+    )
     workspace_build_phase = expect_instance(
         expect_binding(workspace_build_args.values, "buildPhase").value,
         IndentedString,
@@ -217,6 +252,7 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
     assert "find ${workspaceBuildShellDirs} -type d -name node_modules -print" in (
         workspace_build_phase.value
     )
+    assert "pnpm run build:desktop" in workspace_build_phase.value
     workspace_install = expect_instance(
         expect_binding(workspace_build_args.values, "installPhase").value,
         IndentedString,

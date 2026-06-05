@@ -44,12 +44,17 @@ from lib.update.updaters.base import (
     deno_deps_updater,
     deno_manifest_updater,
     flake_input_hash_updater,
+    github_release_asset_urls_updater,
     go_vendor_updater,
+    head_artifact_download_updater,
     npm_deps_updater,
+    pinned_source_download_updater,
     register_updater,
+    sparkle_appcast_updater,
     stream_fixed_output_hashes,
     uv_lock_hash_updater,
     uv_lock_updater,
+    version_endpoint_download_updater,
 )
 from lib.update.updaters.metadata import AssetURLsMetadata, DownloadUrlMetadata
 
@@ -2370,6 +2375,81 @@ def test_factory_helpers_return_expected_subclasses() -> None:
     assert uv_lock_updater("x").__name__.endswith("Updater")
     assert deno_deps_updater("x").__name__.endswith("Updater")
     assert deno_manifest_updater("x").__name__.endswith("Updater")
+
+    github_cls = github_release_asset_urls_updater(
+        "factory-github-asset",
+        github_owner="owner",
+        github_repo="repo",
+        platforms={"x86_64-linux": "linux-x64"},
+        asset_name="demo-{version}-{platform_value}.tar.gz",
+        module=__name__,
+    )
+    github_updater = github_cls()
+    assert github_cls.__module__ == __name__
+    assert (
+        github_updater._asset_name("1.2.3", "linux-x64")
+        == "demo-1.2.3-linux-x64.tar.gz"
+    )
+
+    version_cls = version_endpoint_download_updater(
+        "factory-version-endpoint",
+        version_url="https://example.test/version",
+        platforms={"x86_64-linux": "linux-x64"},
+        download_url="https://example.test/{version}/{platform_value}.tgz",
+        module=__name__,
+    )
+    assert (
+        version_cls().get_download_url(
+            "x86_64-linux",
+            VersionInfo(version="4.5.6"),
+        )
+        == "https://example.test/4.5.6/linux-x64.tgz"
+    )
+
+    sparkle_cls = sparkle_appcast_updater(
+        "factory-sparkle",
+        appcast_url="https://example.test/appcast.xml",
+        platforms={"aarch64-darwin": "darwin"},
+        download_url="https://example.test/{version}/{platform_value}.pkg",
+        version_field="short_or_version",
+        module=__name__,
+    )
+    assert (
+        sparkle_cls().get_download_url(
+            "aarch64-darwin",
+            VersionInfo(version="7.8.9"),
+        )
+        == "https://example.test/7.8.9/darwin.pkg"
+    )
+
+    head_cls = head_artifact_download_updater(
+        "factory-head-artifact",
+        download_url="https://example.test/app.dmg",
+        platforms={"aarch64-darwin": "https://example.test/app.dmg"},
+        module=__name__,
+    )
+    assert (
+        head_cls().get_download_url(
+            "aarch64-darwin",
+            VersionInfo(version="2026-01-01"),
+        )
+        == "https://example.test/app.dmg"
+    )
+
+    pinned_cls = pinned_source_download_updater(
+        "factory-pinned-source",
+        platforms={"aarch64-darwin": "darwin-arm64"},
+        download_url="https://example.test/{version}/{platform_value}.tgz",
+        module=__name__,
+    )
+    assert pinned_cls.materialize_when_current is True
+    assert (
+        pinned_cls().get_download_url(
+            "aarch64-darwin",
+            VersionInfo(version="1.0.0"),
+        )
+        == "https://example.test/1.0.0/darwin-arm64.tgz"
+    )
 
 
 def _fresh_loaded_updaters() -> dict[str, type[object]]:

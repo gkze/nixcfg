@@ -50,9 +50,15 @@
           ${jq} '${rmNodePty}' packages/core/package.json > tmp.json
           mv tmp.json packages/core/package.json
 
-          # Fix ripgrep path for SearchText
+          # Fix ripgrep path for SearchText. Upstream now falls back through
+          # resolveExecutable + trusted-path validation, so keep the runtime
+          # binary deterministic and explicitly allow the Nix store path.
           substituteInPlace packages/core/src/tools/ripGrep.ts \
-            --replace-fail "await ensureRgPath();" "'${rg}';"
+            --replace-fail "const systemRg = resolveExecutable('rg');" \
+            "const systemRg = '${rg}' || resolveExecutable('rg');"
+          substituteInPlace packages/core/src/tools/ripGrep.ts \
+            --replace-fail "if (isTrustedSystemPath(realPath)) {" \
+            "if (realPath === '${rg}' || isTrustedSystemPath(realPath)) {"
 
           # Disable auto-update defaults in settingsSchema.ts (v0.26.0+)
           sed -i '/enableAutoUpdate: {/,/}/ ${disableDefault}' ${schema}
@@ -69,6 +75,7 @@
         rm -rf $out/share/gemini-cli/node_modules/keytar/build
         rm -rf $out/share/gemini-cli/node_modules/@google/gemini-cli-sdk
         rm -rf $out/share/gemini-cli/node_modules/@google/gemini-cli-devtools
+        mkdir -p $out/share/gemini-cli/node_modules/@google
         cp -r packages/devtools \
           $out/share/gemini-cli/node_modules/@google/gemini-cli-devtools
       '';

@@ -51,6 +51,19 @@ _TASK_ERROR_TYPES: tuple[type[Exception], ...] = (
 )
 _LOG = logging.getLogger(__name__)
 _NIX_STORE_NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9+._?=-]+")
+_NIX_PREFETCH_TRANSIENT_MARKERS = (
+    "Could not resolve host",
+    "Failure when receiving data from the peer",
+    "Failed to connect",
+    "HTTP error 502",
+    "HTTP error 503",
+    "HTTP error 504",
+    "Operation timed out",
+    "Operation too slow",
+    "Temporary failure in name resolution",
+    "connection reset",
+    "timed out",
+)
 
 
 @dataclass(frozen=True)
@@ -324,6 +337,13 @@ def _nix_prefetch_name(url: str) -> str | None:
     return safe_name
 
 
+def _is_retryable_prefetch_error(exc: NixCommandError) -> bool:
+    output = str(exc).casefold()
+    return any(
+        marker.casefold() in output for marker in _NIX_PREFETCH_TRANSIENT_MARKERS
+    )
+
+
 async def compute_sri_hash(source: str, url: str) -> EventStream:
     """Prefetch a URL and return its SRI hash via :func:`lib.nix.commands.hash.nix_prefetch_url`."""
     args = ["nix-prefetch-url", "--type", "sha256"]
@@ -331,13 +351,41 @@ async def compute_sri_hash(source: str, url: str) -> EventStream:
     if prefetch_name is not None:
         args.extend(["--name", prefetch_name])
     args.append(url)
-    async for event in _emit_successful_command(
-        source=source,
-        args=args,
-        message=shlex.join(args),
-        runner=lambda: libnix_prefetch_url(url, name=prefetch_name),
-    ):
-        yield event
+    config = resolve_active_config(None)
+    attempts = max(1, config.default_retries)
+    for attempt in range(1, attempts + 1):
+        try:
+            async for event in _emit_successful_command(
+                source=source,
+                args=args,
+                message=shlex.join(args),
+                runner=lambda: libnix_prefetch_url(url, name=prefetch_name),
+            ):
+                yield event
+        except NixCommandError as exc:
+            if attempt >= attempts or not _is_retryable_prefetch_error(exc):
+                raise
+            yield UpdateEvent(
+                source=source,
+                kind=UpdateEventKind.COMMAND_END,
+                payload=CommandResult(
+                    args=args,
+                    returncode=exc.result.returncode,
+                    stdout=exc.result.stdout,
+                    stderr=exc.result.stderr,
+                    allow_failure=True,
+                ),
+            )
+            next_attempt = attempt + 1
+            yield UpdateEvent.status(
+                source,
+                "nix-prefetch-url hit a transient failure; retrying...",
+                operation="compute_hash",
+                detail=f"attempt {next_attempt}/{attempts}",
+            )
+            await asyncio.sleep(max(0.0, config.default_retry_backoff))
+        else:
+            return
 
 
 async def compute_url_hashes(source: str, urls: Iterable[str]) -> EventStream:

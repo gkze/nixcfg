@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-8bB9LLNPCq046bShEMT4ytqXIvdWMcvkd1DDvpQCXr0="
+  },
+  "urls": {
+    "aarch64-darwin": "https://downloads.cogito.md/releases/0.12.3/1/Cogito-0.12.3-1-mac.zip"
+  },
+  "version": "0.12.3"
+}

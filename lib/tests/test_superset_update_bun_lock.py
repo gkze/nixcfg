@@ -156,7 +156,7 @@ def test_main_happy_path_runs_prepare_and_copies_outputs(
             [
                 "nix",
                 "run",
-                f"path:{repo_root}#nixcfg",
+                f"git+file://{repo_root}?dirty=1#nixcfg",
                 "--",
                 "ci",
                 "workflow",

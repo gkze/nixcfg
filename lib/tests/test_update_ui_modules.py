@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -682,6 +683,7 @@ def test_renderer_lifecycle_and_render_if_due(monkeypatch: pytest.MonkeyPatch) -
 
     assert object.__getattribute__(renderer, "_live") is not None
     assert _LiveStub.instances[0].started
+    assert not _LiveStub.instances[0].transient
 
     renderer.render()
     assert _LiveStub.instances[0].updated
@@ -696,11 +698,25 @@ def test_renderer_lifecycle_and_render_if_due(monkeypatch: pytest.MonkeyPatch) -
 
     called: list[bool] = []
     monkeypatch.setattr(renderer, "_print_final_status", lambda: called.append(True))
+    update_count = len(_LiveStub.instances[0].updated)
     renderer.finalize()
 
     assert _LiveStub.instances[0].stopped
-    assert called == [True]
+    assert called == []
+    assert len(_LiveStub.instances[0].updated) == update_count + 1
+    assert _LiveStub.instances[0].updated[-1][1] is False
     assert object.__getattribute__(renderer, "_live") is None
+
+    fallback = Renderer(
+        {"demo": _item()},
+        ["demo"],
+        is_tty=False,
+        render_interval=0.1,
+    )
+    fallback.is_tty = True
+    monkeypatch.setattr(fallback, "_print_final_status", lambda: called.append(True))
+    fallback.finalize()
+    assert called == [True]
 
 
 def test_renderer_formatting_symbols_and_spinner_updates() -> None:
@@ -979,6 +995,8 @@ class _RendererStub:
     request_calls: int = 0
     render_due_calls: list[float] = field(default_factory=list)
     finalized: bool = False
+    last_render: float = 0.0
+    needs_render: bool = False
 
     def log_line(self, source: str, message: str) -> None:
         """Run this test case."""
@@ -995,10 +1013,15 @@ class _RendererStub:
     def request_render(self) -> None:
         """Run this test case."""
         self.request_calls += 1
+        if self.is_tty:
+            self.needs_render = True
 
     def render_if_due(self, now: float) -> None:
         """Run this test case."""
         self.render_due_calls.append(now)
+        if self.is_tty and now - self.last_render >= self.render_interval:
+            self.last_render = now
+            self.needs_render = False
 
     def finalize(self) -> None:
         """Run this test case."""
@@ -1012,6 +1035,7 @@ def _consumer(
     verbose: bool = False,
     op_order: tuple[OperationKind, ...] = DEFAULT_OP_ORDER,
     sources: SourcesFile | None = None,
+    render_interval: float = 0.0,
 ) -> tuple[EventConsumer, asyncio.Queue[UpdateEvent | None]]:
     monkeypatch.setattr(ui_consumer_module, "Renderer", _RendererStub)
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
@@ -1028,7 +1052,7 @@ def _consumer(
             is_tty=is_tty,
             full_output=False,
             verbose=verbose,
-            render_interval=0.0,
+            render_interval=render_interval,
             build_failure_tail_lines=2,
             quiet=False,
         ),
@@ -1634,26 +1658,16 @@ def test_event_consumer_run_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:
     assert renderer.finalized
 
 
-def test_event_consumer_run_tty_ticker_and_wrapper(
+def test_event_consumer_run_tty_and_wrapper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Run this test case."""
     consumer, queue = _consumer(monkeypatch, is_tty=True)
 
-    original_sleep = asyncio.sleep
-    sleep_calls = 0
-
-    async def _patched_sleep(_delay: float) -> None:
-        nonlocal sleep_calls
-        sleep_calls += 1
-        await original_sleep(0)
-
-    monkeypatch.setattr(ui_consumer_module.asyncio, "sleep", _patched_sleep)
-
     async def _run_consumer() -> ui_consumer_module.ConsumeEventsResult:
         run_task = asyncio.create_task(consumer.run())
         await queue.put(UpdateEvent.status("demo", "Checking demo (current: 1.0)"))
-        await original_sleep(0)
+        await asyncio.sleep(0)
         await queue.put(None)
         return await run_task
 
@@ -1662,8 +1676,9 @@ def test_event_consumer_run_tty_ticker_and_wrapper(
     assert result.errors == 0
     assert result.source_updates == {}
     assert result.artifact_updates == {}
-    assert sleep_calls >= 1
     renderer = _renderer(consumer)
+    assert renderer.request_calls == 1
+    assert len(renderer.render_due_calls) == 1
     assert renderer.finalized
 
     async def _run_wrapper() -> ui_consumer_module.ConsumeEventsResult:
@@ -1820,30 +1835,35 @@ def test_event_consumer_internal_branch_paths(monkeypatch: pytest.MonkeyPatch) -
     assert hash_op.status == "error"
 
 
-def test_event_consumer_ticker_requests_render(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run this test case."""
-    consumer, queue = _consumer(monkeypatch, is_tty=True)
+def test_event_consumer_schedules_one_delayed_render_for_pending_tty_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Avoid continuous idle redraws while still flushing pending state changes."""
+    consumer, queue = _consumer(monkeypatch, is_tty=True, render_interval=999.0)
     renderer = _renderer(consumer)
+    renderer.last_render = time.monotonic()
 
     original_sleep = asyncio.sleep
-    ticked = asyncio.Event()
+    sleep_calls: list[float] = []
 
     async def _patched_sleep(_delay: float) -> None:
-        ticked.set()
+        sleep_calls.append(_delay)
         await original_sleep(0)
 
     monkeypatch.setattr(ui_consumer_module.asyncio, "sleep", _patched_sleep)
 
     async def _run() -> None:
         task = asyncio.create_task(consumer.run())
-        await ticked.wait()
+        await queue.put(UpdateEvent.status("demo", "Checking demo (current: 1.0)"))
+        await original_sleep(0)
         await original_sleep(0)
         await queue.put(None)
         _ = await task
 
     asyncio.run(_run())
-    assert renderer.request_calls >= 1
-    assert len(renderer.render_due_calls) >= 1
+    assert renderer.request_calls == 1
+    assert len(sleep_calls) == 1
+    assert len(renderer.render_due_calls) == TWO
 
 
 def test_event_consumer_error_empty_splitlines_branch(

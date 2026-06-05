@@ -192,6 +192,11 @@ def test_render_build_zig_zon_nix_renders_artifact_with_resolved_tools(
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
     monkeypatch.setattr(module, "get_current_nix_platform", lambda: "aarch64-darwin")
     monkeypatch.setattr(module, "get_repo_file", lambda _path: Path("/repo/root"))
+    monkeypatch.setattr(
+        module,
+        "_local_flake_url",
+        lambda root: f"git+file://{root}?dirty=1",
+    )
     monkeypatch.setattr(updater, "_resolve_installable_path", _resolve)
     monkeypatch.setattr(module, "run_command", _run_command)
 
@@ -205,7 +210,7 @@ def test_render_build_zig_zon_nix_renders_artifact_with_resolved_tools(
     assert events[0].message == "running zon2nix"
     assert events[1].payload == "# rendered\n"
     assert installables == [
-        "path:/repo/root#pkgs.aarch64-darwin.zig_0_15",
+        "git+file:///repo/root?dirty=1#pkgs.aarch64-darwin.zig_0_15",
         updater._ZON2NIX_FLAKE,
     ]
     assert command_calls[0][0][0] == "/nix/store/zon2nix-tool/bin/zon2nix"
@@ -240,6 +245,11 @@ def test_render_build_zig_zon_nix_surfaces_zon2nix_failure(
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
     monkeypatch.setattr(module, "get_current_nix_platform", lambda: "aarch64-darwin")
     monkeypatch.setattr(module, "get_repo_file", lambda _path: Path("/repo/root"))
+    monkeypatch.setattr(
+        module,
+        "_local_flake_url",
+        lambda root: f"git+file://{root}?dirty=1",
+    )
     monkeypatch.setattr(updater, "_resolve_installable_path", _resolve)
     monkeypatch.setattr(module, "run_command", _run_command)
 
@@ -366,7 +376,7 @@ def test_render_build_zig_zon_nix_yields_tool_resolution_events(
     )
 
     assert [event.message for event in events[:-1]] == [
-        "resolving path:/repo/root#pkgs.aarch64-darwin.zig_0_15",
+        "resolving git+file:///repo/root?dirty=1#pkgs.aarch64-darwin.zig_0_15",
         f"resolving {updater._ZON2NIX_FLAKE}",
     ]
     assert events[-1].payload == "# rendered\n"

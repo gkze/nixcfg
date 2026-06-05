@@ -173,16 +173,19 @@
       # keeps Dock paths, Launch Services, and Home Manager package exposure
       # aligned from one source of truth.
       managedMacAppRouting = {
+        agentastic-dev.package = pkgs.agentastic-dev;
         airfoil.package = pkgs.airfoil;
         antigravity.package = pkgs.antigravity;
         appcleaner.package = pkgs.appcleaner;
         arc.package = pkgs.arc;
+        ara.package = pkgs.ara;
         betterdisplay.package = pkgs.betterdisplay;
         chatgpt.package = pkgs.chatgpt;
         claude.package = pkgs.claude;
         codeedit.package = pkgs.codeedit;
         "code-cursor".package = pkgs.code-cursor;
         codex.package = pkgs.codex-desktop;
+        cogito.package = pkgs.cogito;
         comet.package = pkgs.comet;
         commander.package = pkgs.commander;
         conductor.package = pkgs.conductor;
@@ -200,9 +203,11 @@
         gitbutler.package = pkgs.gitbutler;
         "google-chrome".package = pkgs.google-chrome;
         "google-drive".package = pkgs.google-drive;
+        goose.package = pkgs.goose-desktop;
         granola.package = pkgs.granola;
         hoppscotch.package = pkgs.hoppscotch;
         iina.package = pkgs.iina;
+        jacq.package = pkgs.jacq;
         keepingyouawake.package = pkgs.keepingyouawake;
         linear.package = pkgs.linear;
         "lm-studio".package = pkgs.lm-studio;
@@ -216,6 +221,8 @@
         };
         notion.package = pkgs.notion-app;
         opencode.package = pkgs.opencode-desktop-dev;
+        orbstack.package = pkgs.orbstack;
+        pica.package = pkgs.pica;
         postman.package = pkgs.postman;
         raycast.package = pkgs.raycast;
         rectangle.package = pkgs.rectangle;
@@ -223,10 +230,14 @@
         "signal-beta".package = pkgs.signal-beta;
         slack.package = pkgs.slack;
         sloth.package = pkgs.sloth-app;
+        solo.package = pkgs.solo;
         spacedrive.package = pkgs.spacedrive;
         spotify.package = pkgs.spotify;
         superset.package = pkgs.superset;
+        superconductor.package = pkgs.superconductor;
         t3code.package = pkgs.t3code-desktop;
+        todoist.package = pkgs.todoist-desktop;
+        tolaria.package = pkgs.tolaria;
         "vscode-insiders".package = pkgs.vscode-insiders;
         wave.package = pkgs.wave;
         "wispr-flow".package = pkgs.wispr-flow;

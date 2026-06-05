@@ -23,6 +23,7 @@ from lib.tests._nix_ast import (
     expect_scope_binding,
     parse_nix_expr,
 )
+from lib.tests._updater_helpers import load_repo_module
 from lib.update import crate2nix
 from lib.update.events import UpdateEvent, UpdateEventKind, expect_artifact_updates
 
@@ -510,6 +511,45 @@ def test_targets_use_dedicated_source_installables() -> None:
     }
 
 
+def test_worktree_crate2nix_updaters_patch_old_installed_cli_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Worktree updaters should keep old installed nixcfg CLIs off raw path URLs."""
+    target_names = ("codex", "goose-cli", "gitbutler", "zed-editor-nightly")
+    targets = {
+        name: crate2nix.Crate2NixTarget(
+            name=name,
+            patched_src_installable=f"path:.#{name}-crate2nix-src",
+            cargo_nix=Path(f"packages/{name}/Cargo.nix"),
+            crate_hashes=Path(f"packages/{name}/crate-hashes.json"),
+            normalizer_path=Path(f"packages/{name}/normalize_cargo_nix.py"),
+            supported_platforms=("aarch64-darwin",),
+        )
+        for name in target_names
+    }
+    monkeypatch.setattr(crate2nix, "TARGETS", targets)
+    monkeypatch.delattr(crate2nix, "_local_flake_installable", raising=False)
+    monkeypatch.setattr(
+        "lib.update.paths.get_repo_file", lambda _path: Path("/repo/root")
+    )
+
+    for path, module_name in (
+        ("packages/codex/updater.py", "codex"),
+        ("overlays/goose-cli/updater.py", "goose"),
+        ("packages/gitbutler/updater.py", "gitbutler"),
+        ("packages/zed-editor-nightly/updater.py", "zed"),
+    ):
+        load_repo_module(path, f"crate2nix_compat_{module_name}")
+
+    assert {
+        name: target.patched_src_installable
+        for name, target in crate2nix.TARGETS.items()
+    } == {
+        name: f"git+file:///repo/root?dirty=1#{name}-crate2nix-src"
+        for name in target_names
+    }
+
+
 def test_crate2nix_companion_discovery_uses_package_registry() -> None:
     """Package registry contracts should discover crate2nix companions."""
     packages_root = (crate2nix.REPO_ROOT / "packages").resolve()
@@ -594,6 +634,7 @@ def test_package_registry_metadata_overrides_are_intentional() -> None:
         "wispr-flow",
         "zen-twilight",
     ]
+    assert overrides["goose-desktop"]["constraint"] == ["aarch64-darwin"]
     assert overrides["sculptor"]["constraint"] == [
         "aarch64-darwin",
         "x86_64-darwin",
@@ -921,6 +962,7 @@ def test_run_helper_and_build_patched_src_error_paths(
             supported_platforms=("linux",),
         )
     ) == Path("/tmp/demo")
+
     monkeypatch.setattr(
         crate2nix,
         "_run",
@@ -957,6 +999,35 @@ def test_run_helper_and_build_patched_src_error_paths(
                 supported_platforms=("linux",),
             )
         )
+
+
+def test_build_patched_src_rewrites_local_path_installable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Build local crate2nix sources through Git's clean source view."""
+    captured: list[str] = []
+    monkeypatch.setattr(
+        crate2nix, "local_flake_url", lambda: "git+file:///repo?dirty=1"
+    )
+
+    def _run(args: list[str], *, cwd=crate2nix.REPO_ROOT):
+        del cwd
+        captured.extend(args)
+        return subprocess.CompletedProcess(args, 0, stdout="/tmp/demo\n", stderr="")
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+
+    assert crate2nix._build_patched_src(
+        crate2nix.Crate2NixTarget(
+            name="demo",
+            patched_src_installable="path:.#demo",
+            cargo_nix=Path("Cargo.nix"),
+            crate_hashes=Path("crate-hashes.json"),
+            normalizer_path=Path("normalize.py"),
+            supported_platforms=("linux",),
+        )
+    ) == Path("/tmp/demo")
+    assert captured[-1] == "git+file:///repo?dirty=1#demo"
 
 
 def test_run_crate2nix_generate_retries_transient_prefetch_cleanup_failure(
@@ -1080,10 +1151,25 @@ def test_retryable_crate2nix_generate_failure_requires_prefetch_context() -> Non
     assert crate2nix._is_retryable_crate2nix_generate_failure(
         "nix-prefetch-git\nRPC failed"
     )
+    assert crate2nix._is_retryable_crate2nix_generate_failure(
+        "cargo metadata\n"
+        "failed to download from https://index.crates.io/config.json\n"
+        "[28] Timeout was reached (Operation too slow)"
+    )
     assert not crate2nix._is_retryable_crate2nix_generate_failure("RPC failed")
     assert not crate2nix._is_retryable_crate2nix_generate_failure(
         "nix-prefetch-git\nreal crate graph error"
     )
+
+
+def test_read_generated_hash_text_defaults_to_empty_json(tmp_path: Path) -> None:
+    """crate2nix may skip the hash file when a target has no git dependencies."""
+    missing_hashes = tmp_path / "crate-hashes.json"
+
+    assert crate2nix._read_generated_hash_text(missing_hashes) == "{}\n"
+
+    missing_hashes.write_text('{"demo": "hash"}\n', encoding="utf-8")
+    assert crate2nix._read_generated_hash_text(missing_hashes) == '{"demo": "hash"}\n'
 
 
 def test_refresh_target_materializes_normalized_outputs(

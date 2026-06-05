@@ -59,6 +59,8 @@ let
     desktopPackagePath
     "packages/app"
     "packages/core"
+    "packages/effect-drizzle-sqlite"
+    "packages/effect-sqlite-node"
     "packages/shared"
     "packages/ui"
     "packages/sdk/js"
