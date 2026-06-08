@@ -1,13 +1,13 @@
 {
   "hashes": [
     {
-      "hash": "sha256-Xge7umt6zjs9Gb527n65u9TW/dGpmPRHylATGlx+5Rc=",
+      "hash": "sha256-I/zh0ins1X4mbepzIcC/MTyKuazcAVmhdgsLk4EOXcA=",
       "hashType": "npmDepsHash"
     },
     {
-      "hash": "sha256-qab0cfc47C33enSmoV1t3GIkTSGFdC3tmY/ZCEAeF5Y=",
+      "hash": "sha256-Dexn501qF47PbQuxSFYjRFseZZifmq3/zSNYkeruZNA=",
       "hashType": "srcHash"
     }
   ],
-  "version": "0.45.0"
+  "version": "0.45.2"
 }

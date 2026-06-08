@@ -60,6 +60,7 @@ _SHARED_FLAKE_CHECKS = (
     "lint-python-ty",
     "lint-workflows-actionlint",
     "test-nix-default-api",
+    "test-nix-package-helpers",
     "test-nix-opencode-desktop",
     "cache-electron-runtimes",
     "test-python-pytest",

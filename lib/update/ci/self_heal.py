@@ -55,6 +55,7 @@ EXPECTED_REPAIR_PR_REQUIRED_CHECKS: Final = (
     "lint-python-ty",
     "lint-workflows-actionlint",
     "test-nix-default-api",
+    "test-nix-package-helpers",
     "test-nix-opencode-desktop",
     "cache-electron-runtimes",
     "test-python-pytest",

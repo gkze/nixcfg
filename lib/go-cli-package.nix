@@ -5,11 +5,13 @@
 }:
 {
   pname,
-  inputName,
-  subPackage,
   cmdName,
+  inputName ? pname,
+  subPackage ? "cmd/${cmdName}",
   description,
   homepage,
+  license ? lib.licenses.mit,
+  meta ? { },
   ...
 }@args:
 mkGoCliPackage (
@@ -17,10 +19,14 @@ mkGoCliPackage (
     inherit pname cmdName;
     input = inputs.${inputName};
     subPackages = [ subPackage ];
-    meta = with lib; {
-      inherit description homepage;
-      license = licenses.mit;
-    };
+    meta = {
+      inherit
+        description
+        homepage
+        license
+        ;
+    }
+    // meta;
   }
   // (builtins.removeAttrs args [
     "pname"
@@ -29,5 +35,7 @@ mkGoCliPackage (
     "cmdName"
     "description"
     "homepage"
+    "license"
+    "meta"
   ])
 )

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from lib.fix_python_multi_except import normalize_multi_except_text
 from lib.tests._zen_tooling import resolve_zen_script_path
 from lib.update.paths import REPO_ROOT
 
@@ -190,16 +191,12 @@ def test_zentool_main_guard_executes_help(
     assert "usage: zentool" in capsys.readouterr().out.lower()
 
 
-def test_parenthesized_zentool_multi_excepts_survive_python_quality_tools(
-    tmp_path: Path,
-) -> None:
-    """Running the Python quality toolchain should not de-parenthesize zentool."""
+def test_parenthesized_zentool_multi_excepts_are_normalizer_stable() -> None:
+    """Already-valid zentool multi-excepts should not be rewritten."""
     source = ZENTOOL_PATH.read_text(encoding="utf-8")
-    temp_root, script_path = _copy_zentool_tree(tmp_path, source=source)
 
-    _run_repo_python_quality_tools(temp_root, script_path)
-
-    assert _collect_multi_except_handlers(script_path) == list(
+    assert normalize_multi_except_text(source) == source
+    assert _collect_multi_except_handlers(ZENTOOL_PATH) == list(
         _EXPECTED_MULTI_EXCEPT_HANDLERS
     )
 

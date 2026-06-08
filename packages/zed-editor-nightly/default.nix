@@ -53,7 +53,8 @@ let
   zedManifest = builtins.fromTOML (builtins.readFile "${src}/crates/zed/Cargo.toml");
   appVersion = zedManifest.package.version;
   releaseChannel = "nightly";
-  rustToolchainChannel = (builtins.fromTOML (builtins.readFile "${src}/rust-toolchain.toml")).toolchain.channel;
+  rustToolchainChannel =
+    (builtins.fromTOML (builtins.readFile "${src}/rust-toolchain.toml")).toolchain.channel;
   rustToolchain = pkgs.rust-bin.stable.${rustToolchainChannel}.default;
   zedRustPlatform = pkgs.makeRustPlatform {
     cargo = rustToolchain;

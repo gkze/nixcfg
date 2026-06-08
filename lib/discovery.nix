@@ -1,4 +1,67 @@
 {
+  discoverSidecarEntries =
+    {
+      root,
+      fileName,
+    }:
+    let
+      entries = if builtins.pathExists root then builtins.readDir root else { };
+      entryNames = builtins.attrNames entries;
+
+      suffix = ".${fileName}";
+      suffixLen = builtins.stringLength suffix;
+      hasSuffix =
+        value:
+        let
+          valueLen = builtins.stringLength value;
+        in
+        valueLen >= suffixLen && builtins.substring (valueLen - suffixLen) suffixLen value == suffix;
+      stripSuffix = value: builtins.substring 0 ((builtins.stringLength value) - suffixLen) value;
+
+      dirEntries = builtins.listToAttrs (
+        builtins.map
+          (name: {
+            inherit name;
+            value = root + "/${name}/${fileName}";
+          })
+          (
+            builtins.filter (
+              name: entries.${name} == "directory" && builtins.pathExists (root + "/${name}/${fileName}")
+            ) entryNames
+          )
+      );
+
+      flatFileNames = builtins.filter (name: entries.${name} == "regular" && hasSuffix name) entryNames;
+      flatEntries = builtins.listToAttrs (
+        builtins.map (name: {
+          name = stripSuffix name;
+          value = root + "/${name}";
+        }) flatFileNames
+      );
+
+      entryNameCollisions = builtins.filter (name: builtins.hasAttr name dirEntries) (
+        builtins.attrNames flatEntries
+      );
+      collisionGuard =
+        if entryNameCollisions == [ ] then
+          null
+        else
+          throw (
+            "Duplicate sidecar files under "
+            + toString root
+            + " for "
+            + fileName
+            + ": "
+            + builtins.concatStringsSep ", " entryNameCollisions
+          );
+      sidecarEntries = builtins.seq collisionGuard (dirEntries // flatEntries);
+    in
+    {
+      entries = sidecarEntries;
+      names = builtins.attrNames sidecarEntries;
+      pathFor = name: sidecarEntries.${name};
+    };
+
   discoverDefaultNixEntries =
     {
       root,

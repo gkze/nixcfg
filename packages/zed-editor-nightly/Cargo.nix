@@ -3720,9 +3720,9 @@ rec {
       };
       "agent-client-protocol" = rec {
         crateName = "agent-client-protocol";
-        version = "0.13.1";
+        version = "0.14.0";
         edition = "2024";
-        sha256 = "1y5s8snwnrfsjf9nzjvrvjgxm31qldhx0ydmryib74bvd59pc6cd";
+        sha256 = "00qiqv8gwj1323ga5xwl9nndhcwr5ndxgs3xr6d8mvs841csdysy";
         libName = "agent_client_protocol";
         authors = [
           "Zed <hi@zed.dev>"
@@ -3791,23 +3791,22 @@ rec {
           }
         ];
         features = {
-          "unstable" = [ "unstable_auth_methods" "unstable_boolean_config" "unstable_mcp_over_acp" "unstable_message_id" "unstable_session_delete" "unstable_session_fork" "unstable_session_usage" ];
+          "unstable" = [ "unstable_auth_methods" "unstable_boolean_config" "unstable_elicitation" "unstable_end_turn_token_usage" "unstable_mcp_over_acp" "unstable_session_fork" ];
           "unstable_auth_methods" = [ "agent-client-protocol-schema/unstable_auth_methods" ];
           "unstable_boolean_config" = [ "agent-client-protocol-schema/unstable_boolean_config" ];
+          "unstable_elicitation" = [ "agent-client-protocol-schema/unstable_elicitation" ];
+          "unstable_end_turn_token_usage" = [ "agent-client-protocol-schema/unstable_end_turn_token_usage" ];
           "unstable_mcp_over_acp" = [ "agent-client-protocol-schema/unstable_mcp_over_acp" ];
-          "unstable_message_id" = [ "agent-client-protocol-schema/unstable_message_id" ];
           "unstable_protocol_v2" = [ "agent-client-protocol-schema/unstable_protocol_v2" ];
-          "unstable_session_delete" = [ "agent-client-protocol-schema/unstable_session_delete" ];
           "unstable_session_fork" = [ "agent-client-protocol-schema/unstable_session_fork" ];
-          "unstable_session_usage" = [ "agent-client-protocol-schema/unstable_session_usage" ];
         };
-        resolvedDefaultFeatures = [ "default" "unstable" "unstable_auth_methods" "unstable_boolean_config" "unstable_mcp_over_acp" "unstable_message_id" "unstable_session_delete" "unstable_session_fork" "unstable_session_usage" ];
+        resolvedDefaultFeatures = [ "default" "unstable" "unstable_auth_methods" "unstable_boolean_config" "unstable_elicitation" "unstable_end_turn_token_usage" "unstable_mcp_over_acp" "unstable_session_fork" ];
       };
       "agent-client-protocol-derive" = rec {
         crateName = "agent-client-protocol-derive";
-        version = "0.13.1";
+        version = "0.14.0";
         edition = "2024";
-        sha256 = "1g6f4pkr44dwdwsnmdr042s1abk10sn2l6wjzca0i41sfgvgpr5r";
+        sha256 = "0z1fsz9s756arcqnwrisn66rdw0zy9dkr33k58kf01nbsh86l5sd";
         procMacro = true;
         libName = "agent_client_protocol_derive";
         authors = [
@@ -3828,10 +3827,10 @@ rec {
       };
       "agent-client-protocol-schema" = rec {
         crateName = "agent-client-protocol-schema";
-        version = "0.13.5";
+        version = "0.13.6";
         edition = "2024";
         crateBin = [];
-        sha256 = "1pa3kydl8z5h3dr10vmhspl5mffc3fwsbwpx9f79fh42wa3rlh8d";
+        sha256 = "1l2klb5xc97z37bgfa85h0q8bw6m27vrr3kgnsfk6lkb1jhbz462";
         libName = "agent_client_protocol_schema";
         authors = [
           "Zed <hi@zed.dev>"
@@ -3879,9 +3878,9 @@ rec {
         ];
         features = {
           "tracing" = [ "dep:tracing" ];
-          "unstable" = [ "unstable_auth_methods" "unstable_cancel_request" "unstable_elicitation" "unstable_llm_providers" "unstable_mcp_over_acp" "unstable_nes" "unstable_plan_operations" "unstable_session_delete" "unstable_session_fork" "unstable_session_usage" "unstable_message_id" "unstable_boolean_config" ];
+          "unstable" = [ "unstable_auth_methods" "unstable_cancel_request" "unstable_elicitation" "unstable_llm_providers" "unstable_mcp_over_acp" "unstable_nes" "unstable_plan_operations" "unstable_session_fork" "unstable_end_turn_token_usage" "unstable_boolean_config" ];
         };
-        resolvedDefaultFeatures = [ "tracing" "unstable_auth_methods" "unstable_boolean_config" "unstable_mcp_over_acp" "unstable_message_id" "unstable_session_delete" "unstable_session_fork" "unstable_session_usage" ];
+        resolvedDefaultFeatures = [ "tracing" "unstable_auth_methods" "unstable_boolean_config" "unstable_elicitation" "unstable_end_turn_token_usage" "unstable_mcp_over_acp" "unstable_session_fork" ];
       };
       "agent_servers" = rec {
         crateName = "agent_servers";
@@ -15008,6 +15007,10 @@ rec {
         libPath = "src/collections.rs";
         dependencies = [
           {
+            name = "gpui_util";
+            packageId = "gpui_util";
+          }
+          {
             name = "indexmap";
             packageId = "indexmap 2.11.4";
             features = [ "serde" ];
@@ -24615,6 +24618,10 @@ rec {
           {
             name = "fs";
             packageId = "fs";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
           }
           {
             name = "gpui_platform";
@@ -61397,6 +61404,10 @@ rec {
             packageId = "audio";
           }
           {
+            name = "cloud_api_types";
+            packageId = "cloud_api_types";
+          }
+          {
             name = "codestral";
             packageId = "codestral";
           }
@@ -85936,6 +85947,10 @@ rec {
             packageId = "ui";
           }
           {
+            name = "url";
+            packageId = "url";
+          }
+          {
             name = "util";
             packageId = "util";
           }
@@ -89122,7 +89137,7 @@ rec {
       };
       "zed_glsl" = rec {
         crateName = "zed_glsl";
-        version = "0.2.3";
+        version = "0.2.4";
         edition = "2024";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/extensions/glsl"; };
         libPath = "src/glsl.rs";type = [ "cdylib" ];

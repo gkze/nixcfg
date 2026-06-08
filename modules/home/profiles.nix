@@ -136,9 +136,11 @@ in
       type = types.listOf types.package;
       default = with pkgs; [
         _1password-cli
+        anthropic-cli
         google-cloud-sdk
         linear-cli
         linearis
+        openai-cli
         pscale
       ];
       description = "Packages installed when the work profile is enabled.";

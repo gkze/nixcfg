@@ -6,7 +6,9 @@ from functools import cache
 
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.indented_string import IndentedString
+from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
@@ -49,6 +51,10 @@ def _shared_output() -> AttributeSet:
     return expect_instance(root.output, AttributeSet)
 
 
+def _assert_shared_binding(name: str, expected: str) -> None:
+    assert_nix_ast_equal(expect_scope_binding(_shared_output(), name).value, expected)
+
+
 def test_t3code_package_wraps_the_bun_runtime_entrypoint() -> None:
     """The package should expose ``t3`` by wrapping Bun around the built dist."""
     assert_nix_ast_equal(_t3code_derivation().name, "stdenvNoCC.mkDerivation")
@@ -87,44 +93,52 @@ def test_t3code_package_wraps_the_bun_runtime_entrypoint() -> None:
 
 def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
     """The shared helper should keep runtime versioning separate from dependency FODs."""
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "rootPackageJson").value,
-        'builtins.fromJSON (builtins.readFile "${src}/package.json")',
+    _assert_shared_binding(
+        "rootPackageJson", 'builtins.fromJSON (builtins.readFile "${src}/package.json")'
     )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "serverPackageJson").value,
+    _assert_shared_binding(
+        "serverPackageJson",
         'builtins.fromJSON (builtins.readFile "${src}/apps/server/package.json")',
     )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "baseVersion").value,
-        "serverPackageJson.version",
+    _assert_shared_binding("baseVersion", "serverPackageJson.version")
+    _assert_shared_binding("version", '"${baseVersion}-main-${revSuffix}"')
+    _assert_shared_binding("nodeModulesVersion", '"deps"')
+    _assert_shared_binding("pnpm", "pnpm_10.override { inherit nodejs; }")
+    _assert_shared_binding(
+        "workspaceParentNames",
+        """
+        [
+          "apps"
+          "infra"
+          "packages"
+        ]
+        """,
     )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "version").value,
-        '"${baseVersion}-main-${revSuffix}"',
+    _assert_shared_binding(
+        "workspaceParentDirs",
+        """
+        builtins.filter (
+          parent: builtins.pathExists (src + "/${parent}")
+        ) workspaceParentNames
+        """,
     )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "nodeModulesVersion").value,
-        '"deps"',
+    _assert_shared_binding("rootWorkspaces", "rootPackageJson.workspaces or { }")
+    _assert_shared_binding(
+        "rootWorkspacePackagePatterns",
+        """
+        if builtins.isList rootWorkspaces then rootWorkspaces else rootWorkspaces.packages or [ ]
+        """,
     )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "pnpm").value,
-        "pnpm_10.override { inherit nodejs; }",
-    )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "rootWorkspacePackagePatterns").value,
-        "rootPackageJson.workspaces.packages or [ ]",
-    )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "explicitRootWorkspaceDirs").value,
+    _assert_shared_binding(
+        "explicitRootWorkspaceDirs",
         """
         builtins.filter (
           dir: !lib.hasInfix "*" dir && builtins.pathExists (src + "/${dir}/package.json")
         ) rootWorkspacePackagePatterns
         """,
     )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "topLevelWorkspaceNames").value,
+    _assert_shared_binding(
+        "topLevelWorkspaceNames",
         """
         [
           "oxlint-plugin-t3code"
@@ -132,28 +146,25 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
         ]
         """,
     )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "topLevelWorkspaceDirs").value,
+    _assert_shared_binding(
+        "topLevelWorkspaceDirs",
         """
         builtins.filter (
           dir: builtins.pathExists (src + "/${dir}/package.json")
         ) topLevelWorkspaceNames
         """,
     )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "mobileModuleRoot").value,
-        '"apps/mobile/modules"',
-    )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "mobileModulePackageDirs").value,
+    _assert_shared_binding("mobileModuleRoot", '"apps/mobile/modules"')
+    _assert_shared_binding(
+        "mobileModulePackageDirs",
         """
         lib.optionals (builtins.pathExists (src + "/${mobileModuleRoot}")) (
           map (name: "${mobileModuleRoot}/${name}") (childDirectoryNames (src + "/${mobileModuleRoot}"))
         )
         """,
     )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "workspaceDirs").value,
+    _assert_shared_binding(
+        "workspaceDirs",
         """
         lib.unique (
           nestedWorkspaceDirs
@@ -162,9 +173,18 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
         )
         """,
     )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "workspaceBuildShellDirs").value,
-        "lib.escapeShellArgs workspaceBuildDirectories",
+    _assert_shared_binding(
+        "workspaceBuildShellDirs", "lib.escapeShellArgs workspaceBuildDirectories"
+    )
+    _assert_shared_binding(
+        "workspaceBuildDirectories",
+        """
+        lib.unique (
+          workspaceParentDirs
+          ++ explicitRootWorkspaceDirs
+          ++ topLevelWorkspaceDirs
+        )
+        """,
     )
     dependency_source = expect_instance(
         expect_scope_binding(_shared_output(), "dependencySource").value,
@@ -176,14 +196,13 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
         expect_binding(dependency_source_args.values, "name").value,
         '"${pname}-dependency-source"',
     )
-    assert_nix_ast_equal(
-        expect_scope_binding(_shared_output(), "dependencySourceDirectories").value,
+    _assert_shared_binding(
+        "dependencySourceDirectories",
         """
         [
           ""
         ]
-        ++ lib.optionals (builtins.pathExists (src + "/apps")) [ "apps" ]
-        ++ lib.optionals (builtins.pathExists (src + "/packages")) [ "packages" ]
+        ++ workspaceParentDirs
         ++ workspaceDirs
         ++ lib.optional (builtins.pathExists (src + "/${mobileModuleRoot}")) mobileModuleRoot
         ++ mobileModulePackageDirs
@@ -213,24 +232,40 @@ def test_t3code_shared_build_keeps_workspace_and_hash_contracts() -> None:
         """,
     )
 
-    assert_nix_ast_equal(
+    node_modules = expect_instance(
         expect_scope_binding(_shared_output(), "node_modules").value,
-        """
-        let
-          args = {
-            pname = "${sourceHashPackageName}-node_modules";
-            version = nodeModulesVersion;
-            src = dependencySource;
-            pnpm = pnpm;
-            fetcherVersion = 3;
-            hash = outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
-          };
-        in
-        if fetchPnpmDeps != null then
-          fetchPnpmDeps args
-        else
-          pnpm.fetchDeps args
-        """,
+        IfExpression,
+    )
+    assert_nix_ast_equal(node_modules.condition, "fetchPnpmDeps != null")
+    assert_nix_ast_equal(node_modules.consequence, "fetchPnpmDeps args")
+    assert_nix_ast_equal(node_modules.alternative, "pnpm.fetchDeps args")
+    node_modules_args = expect_instance(
+        expect_scope_binding(node_modules, "args").value,
+        AttributeSet,
+    )
+    assert str(expect_binding(node_modules_args.values, "pname").value) == (
+        '"${sourceHashPackageName}-node_modules"'
+    )
+    assert_nix_ast_equal(
+        expect_binding(node_modules_args.values, "version").value,
+        "nodeModulesVersion",
+    )
+    assert_nix_ast_equal(
+        expect_binding(node_modules_args.values, "src").value,
+        "dependencySource",
+    )
+    assert [
+        [str(name) for name in item.names]
+        for item in node_modules_args.values
+        if isinstance(item, Inherit)
+    ] == [["pnpm"]]
+    assert_nix_ast_equal(
+        expect_binding(node_modules_args.values, "fetcherVersion").value,
+        "3",
+    )
+    assert_nix_ast_equal(
+        expect_binding(node_modules_args.values, "hash").value,
+        'outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system',
     )
 
     workspace_build = expect_instance(

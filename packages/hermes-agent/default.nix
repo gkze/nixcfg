@@ -37,7 +37,6 @@ else
       "honcho"
       "mcp"
       "modal"
-      "pty"
       "slack"
       "sms"
       "tts-premium"

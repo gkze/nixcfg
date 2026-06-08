@@ -139,7 +139,7 @@ def test_agentic_source_pins_copilot_model_and_safe_outputs() -> None:
     """The source workflow uses Copilot and deterministic safe outputs."""
     workflow = _frontmatter(AGENTIC_SOURCE)
 
-    assert workflow["engine"] == {"id": "copilot", "model": "gpt-4.1"}
+    assert workflow["engine"] == {"id": "copilot", "model": "gpt-5.5"}
     assert workflow["safe-outputs"]["github-token"] == (
         "${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}"
     )
@@ -246,7 +246,7 @@ def test_compiled_agentic_lock_tracks_source_and_model() -> None:
     workflow = load_workflow_yaml(AGENTIC_LOCK)
 
     assert metadata["agent_id"] == "copilot"
-    assert metadata["agent_model"] == "gpt-4.1"
+    assert metadata["agent_model"] == "gpt-5.5"
     assert metadata["strict"] is True
     assert workflow["on"]["workflow_run"]["workflows"] == [
         "Update",

@@ -87,7 +87,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.5.29.2";
+      url = "github:NousResearch/hermes-agent/v2026.6.5";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -137,7 +137,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     lumen = {
-      url = "github:jnsahaj/lumen/v2.29.0";
+      url = "github:jnsahaj/lumen/v2.30.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
@@ -146,6 +146,10 @@
     };
     axiom-cli = {
       url = "github:axiomhq/cli/v0.16.0";
+      flake = false;
+    };
+    anthropic-cli = {
+      url = "github:anthropics/anthropic-cli/v1.10.0";
       flake = false;
     };
     catppuccin = {
@@ -170,7 +174,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.21.0";
+      url = "github:steipete/gogcli/v0.22.0";
+      flake = false;
+    };
+    openai-cli = {
+      url = "github:openai/openai-cli/v1.2.0";
       flake = false;
     };
     github-desktop = {
@@ -802,6 +810,13 @@
             { pkgs, ... }:
             assert import ./tests/nix/default-api/default-api.nix { src = ./.; };
             pkgs.runCommand "check-test-nix-default-api" { } ''
+              touch $out
+            '';
+
+          checks."test-nix-package-helpers" =
+            { pkgs, ... }:
+            assert import ./tests/nix/package-helpers.nix { src = ./.; };
+            pkgs.runCommand "check-test-nix-package-helpers" { } ''
               touch $out
             '';
 

@@ -29,14 +29,6 @@ def _load_yaml(path: Path) -> JsonObject:
     return cast("JsonObject", payload)
 
 
-def _require_object(parent: JsonObject, key: str, *, context: str) -> JsonObject:
-    value = parent.get(key)
-    if not isinstance(value, dict):
-        msg = f"Expected '{key}' to be a JSON object in {context}"
-        raise TypeError(msg)
-    return cast("JsonObject", value)
-
-
 def _require_string(parent: JsonObject, key: str, *, context: str) -> str:
     value = parent.get(key)
     if not isinstance(value, str) or not value:
@@ -132,9 +124,29 @@ def _workspace_metadata(
         )
         return workspaces, overrides
 
-    workspaces = _require_object(
-        root_package, "workspaces", context="root package.json"
-    )
+    workspace_value = root_package.get("workspaces")
+    root_catalog = _string_map(root_package, "catalog", context="root package.json")
+    if workspace_value is None:
+        workspaces = {"packages": [], "catalog": root_catalog}
+    elif isinstance(workspace_value, list):
+        if not all(isinstance(item, str) for item in workspace_value):
+            msg = "Expected 'workspaces' to be a string list in root package.json"
+            raise TypeError(msg)
+        workspaces = {
+            "packages": cast("list[str]", workspace_value),
+            "catalog": root_catalog,
+        }
+    elif isinstance(workspace_value, dict):
+        workspaces = dict(cast("JsonObject", workspace_value))
+        if root_catalog:
+            catalog = _string_map(workspaces, "catalog", context="root package.json")
+            workspaces["catalog"] = catalog | root_catalog
+    else:
+        msg = (
+            "Expected 'workspaces' to be a JSON object or string list "
+            "in root package.json"
+        )
+        raise TypeError(msg)
     overrides = _string_map(root_package, "overrides", context="root package.json")
     return workspaces, overrides
 
@@ -173,6 +185,32 @@ def _runtime_workspace_dirs(
                 - selected
             )
     return sorted(workspace_packages[name] for name in selected)
+
+
+def _runtime_workspace_external_dependencies(
+    source_root: Path,
+    workspace_dirs: list[str],
+    workspace_packages: dict[str, str],
+    catalog: JsonStringMap,
+) -> JsonStringMap:
+    dependencies: JsonStringMap = {}
+    workspace_names = set(workspace_packages)
+    for rel_dir in workspace_dirs:
+        package_json = _load_json(source_root / rel_dir / "package.json")
+        for section in ("dependencies", "optionalDependencies"):
+            package_dependencies = resolve_catalog_dependencies(
+                {
+                    name: spec
+                    for name, spec in _string_map(
+                        package_json, section, context=f"{rel_dir}/package.json"
+                    ).items()
+                    if name not in workspace_names
+                },
+                catalog,
+                label=rel_dir,
+            )
+            dependencies.update(package_dependencies)
+    return dependencies
 
 
 def resolve_catalog_dependencies(
@@ -247,6 +285,12 @@ def build_runtime_manifest(
         source_root,
         workspace_packages,
         runtime_dependencies,
+    )
+    runtime_dependencies |= _runtime_workspace_external_dependencies(
+        source_root,
+        runtime_workspace_dirs,
+        workspace_packages,
+        catalog,
     )
     overrides = resolve_catalog_dependencies(
         workspace_overrides,

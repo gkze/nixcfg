@@ -10,7 +10,6 @@ let
   inherit (builtins)
     attrNames
     elemAt
-    filter
     fromJSON
     getEnv
     hasAttr
@@ -19,7 +18,6 @@ let
     listToAttrs
     map
     pathExists
-    readDir
     readFile
     split
     ;
@@ -29,6 +27,7 @@ let
   isCI = getEnv "CI" != "";
 
   maybePath = p: if pathExists p then p else null;
+  discovery = import ./discovery.nix;
   toList =
     value:
     if value == null then
@@ -45,53 +44,12 @@ let
   scanSourcesIn =
     dir:
     let
-      entries = if pathExists dir then readDir dir else { };
-      entryNames = attrNames entries;
-
-      dirSources = listToAttrs (
-        map
-          (name: {
-            inherit name;
-            value = fromJSON (readFile (dir + "/${name}/sources.json"));
-          })
-          (
-            filter (
-              name: entries.${name} == "directory" && pathExists (dir + "/${name}/sources.json")
-            ) entryNames
-          )
-      );
-
-      suffix = ".sources.json";
-      suffixLen = builtins.stringLength suffix;
-
-      flatSourceFiles = filter (
-        fileName: entries.${fileName} == "regular" && builtins.match ".*\\.sources\\.json" fileName != null
-      ) entryNames;
-
-      stripSourcesSuffix =
-        fileName: builtins.substring 0 ((builtins.stringLength fileName) - suffixLen) fileName;
-
-      flatSources = listToAttrs (
-        map (fileName: {
-          name = stripSourcesSuffix fileName;
-          value = fromJSON (readFile (dir + "/${fileName}"));
-        }) flatSourceFiles
-      );
-
-      sourceNameCollisions = filter (name: hasAttr name dirSources) (attrNames flatSources);
-
-      sourceCollisionGuard =
-        if sourceNameCollisions == [ ] then
-          null
-        else
-          throw (
-            "Duplicate source definitions under "
-            + toString dir
-            + ": "
-            + builtins.concatStringsSep ", " sourceNameCollisions
-          );
+      sourceFiles = discovery.discoverSidecarEntries {
+        root = dir;
+        fileName = "sources.json";
+      };
     in
-    builtins.seq sourceCollisionGuard (dirSources // flatSources);
+    builtins.mapAttrs (_name: path: fromJSON (readFile path)) sourceFiles.entries;
   packageSources = scanSourcesIn (src + "/packages") // scanSourcesIn (src + "/overlays");
   readSourceOverrides = raw: if raw == "" then { } else fromJSON raw;
   updateEvaluation = {

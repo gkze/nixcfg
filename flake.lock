@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "anthropic-cli": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1779987688,
+        "narHash": "sha256-81JVAjErXCbnRxwypUlzSrL+S73jsfazBRSfR/b8lsk=",
+        "owner": "anthropics",
+        "repo": "anthropic-cli",
+        "rev": "7d86b05b03f3cb37936b1ca8b2a8b607a3b9726a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "anthropics",
+        "ref": "v1.10.0",
+        "repo": "anthropic-cli",
+        "type": "github"
+      }
+    },
     "axiom-cli": {
       "flake": false,
       "locked": {
@@ -1118,16 +1135,16 @@
     "gogcli": {
       "flake": false,
       "locked": {
-        "lastModified": 1780350264,
-        "narHash": "sha256-V7kTXdLO2zsf69d4QV+7tGelQUYzaOMhDE17tffokts=",
+        "lastModified": 1780827597,
+        "narHash": "sha256-MdxUrtSJnY5DGUGunjZGoo9/NRW77ryyaLGq+zXCAlw=",
         "owner": "steipete",
         "repo": "gogcli",
-        "rev": "2c84d8981dd59b9206bf975a066a8cf5f659043c",
+        "rev": "9738b315ff026d66c2cdcb4b23549f737b8cc152",
         "type": "github"
       },
       "original": {
         "owner": "steipete",
-        "ref": "v0.21.0",
+        "ref": "v0.22.0",
         "repo": "gogcli",
         "type": "github"
       }
@@ -1188,16 +1205,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1780061757,
-        "narHash": "sha256-0CmNH879jnsAAszo1nkkFm8RNE49xtwUditYdFIYBCM=",
+        "lastModified": 1780707343,
+        "narHash": "sha256-ngpkopVczNrT0bfCXHm38QjgrZT96Bm/rO89NA/ls3Y=",
         "owner": "NousResearch",
         "repo": "hermes-agent",
-        "rev": "77a1650c78a4cb1813d8a81fa1da40a15b6a3ec5",
+        "rev": "3c231eb3979ab9c57d5cd6d02f1d577a3b718b43",
         "type": "github"
       },
       "original": {
         "owner": "NousResearch",
-        "ref": "v2026.5.29.2",
+        "ref": "v2026.6.5",
         "repo": "hermes-agent",
         "type": "github"
       }
@@ -1314,16 +1331,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1780589113,
-        "narHash": "sha256-0UWL235fT2//xkWfG3saPVlK+ajBfLCSt8eRiyE8Xs4=",
+        "lastModified": 1780614758,
+        "narHash": "sha256-EoxMYlWHmuprjjhvj3GyCxGDIcT/d+JMda9j75pqs+k=",
         "owner": "jnsahaj",
         "repo": "lumen",
-        "rev": "ccbfb57ab4d2414ca83d6bd5f10f09c90aa0e18c",
+        "rev": "4ad27231c3614e3f2acbc07bc794a4e8fde06fbf",
         "type": "github"
       },
       "original": {
         "owner": "jnsahaj",
-        "ref": "v2.29.0",
+        "ref": "v2.30.0",
         "repo": "lumen",
         "type": "github"
       }
@@ -1781,6 +1798,23 @@
         "type": "github"
       }
     },
+    "openai-cli": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1780341367,
+        "narHash": "sha256-8k9WzOkm/24Xb9KcGDtGynImgDxbAiqcnRW4/bABiuc=",
+        "owner": "openai",
+        "repo": "openai-cli",
+        "rev": "b407c1b5e1afff278d217d54ab10ee27a1a3c704",
+        "type": "github"
+      },
+      "original": {
+        "owner": "openai",
+        "ref": "v1.2.0",
+        "repo": "openai-cli",
+        "type": "github"
+      }
+    },
     "opencode": {
       "inputs": {
         "nixpkgs": [
@@ -1967,6 +2001,7 @@
     },
     "root": {
       "inputs": {
+        "anthropic-cli": "anthropic-cli",
         "axiom-cli": "axiom-cli",
         "bun2nix": "bun2nix",
         "catppuccin": "catppuccin",
@@ -2009,6 +2044,7 @@
         "nixpkgs": "nixpkgs_4",
         "nixpkgs-swift": "nixpkgs-swift",
         "nixvim": "nixvim",
+        "openai-cli": "openai-cli",
         "opencode": "opencode",
         "pantsbuild-tap": "pantsbuild-tap",
         "pyproject-build-systems": "pyproject-build-systems",
@@ -2393,11 +2429,11 @@
     "t3code": {
       "flake": false,
       "locked": {
-        "lastModified": 1780599227,
-        "narHash": "sha256-R9FTqKT67POU9dED/EdPJVsu/rSEQ2C4WoNUwgkL0e8=",
+        "lastModified": 1780888907,
+        "narHash": "sha256-VviFp2VBTsKppt4PPzQXX6nEg/4T6fFjOtlX3GMKhbk=",
         "owner": "pingdotgg",
         "repo": "t3code",
-        "rev": "348a9140e9d352fdcb1779d467b4b68000b61bdf",
+        "rev": "0e4a43519fe4fa85ce60aa8d6d53c067e56d2fca",
         "type": "github"
       },
       "original": {
@@ -2742,11 +2778,11 @@
         "rust-overlay": "rust-overlay_5"
       },
       "locked": {
-        "lastModified": 1780597366,
-        "narHash": "sha256-1uGtUZWViaRICaNVh5WMjwo6MsOzoRV9RjRZ9rFGFlw=",
+        "lastModified": 1780851854,
+        "narHash": "sha256-PB1k/eNEgzGGf3xScm54tRHAafmiif7Cs27BRU2hNTM=",
         "owner": "zed-industries",
         "repo": "zed",
-        "rev": "d1271beee7882e77a9102ac369e67ecac1188c17",
+        "rev": "3f5705b98542f597d5ffe4d984636c7e0c68fa11",
         "type": "github"
       },
       "original": {

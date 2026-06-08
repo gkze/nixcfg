@@ -88,11 +88,13 @@ def test_list_schema_codegen_targets_reads_repo_config() -> None:
     assert [summary.name for summary in summaries] == [
         "codegen-manifest-models",
         "github-actions",
-        "nix-models",
     ]
     assert str(summaries[0].output).endswith("lib/schema_codegen/models/_generated.py")
     assert str(summaries[1].output).endswith("lib/github_actions/models/_generated.py")
-    assert str(summaries[2].output).endswith("lib/nix/models/_generated.py")
+    assert all(
+        not str(summary.output).endswith("lib/nix/models/_generated.py")
+        for summary in summaries
+    )
 
 
 def test_load_schema_codegen_config_resolves_explicit_paths_from_cwd(

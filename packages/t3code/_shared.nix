@@ -24,19 +24,20 @@ let
   pnpm = pnpm_10.override { inherit nodejs; };
   childDirectoryNames =
     path: builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir path));
-  nestedWorkspaceDirs =
-    lib.concatMap
-      (
-        parent:
-        lib.optionals (builtins.pathExists (src + "/${parent}")) (
-          map (name: "${parent}/${name}") (childDirectoryNames (src + "/${parent}"))
-        )
-      )
-      [
-        "apps"
-        "packages"
-      ];
-  rootWorkspacePackagePatterns = rootPackageJson.workspaces.packages or [ ];
+  workspaceParentNames = [
+    "apps"
+    "infra"
+    "packages"
+  ];
+  workspaceParentDirs = builtins.filter (
+    parent: builtins.pathExists (src + "/${parent}")
+  ) workspaceParentNames;
+  nestedWorkspaceDirs = lib.concatMap (
+    parent: map (name: "${parent}/${name}") (childDirectoryNames (src + "/${parent}"))
+  ) workspaceParentDirs;
+  rootWorkspaces = rootPackageJson.workspaces or { };
+  rootWorkspacePackagePatterns =
+    if builtins.isList rootWorkspaces then rootWorkspaces else rootWorkspaces.packages or [ ];
   explicitRootWorkspaceDirs = builtins.filter (
     dir: !lib.hasInfix "*" dir && builtins.pathExists (src + "/${dir}/package.json")
   ) rootWorkspacePackagePatterns;
@@ -52,22 +53,16 @@ let
     map (name: "${mobileModuleRoot}/${name}") (childDirectoryNames (src + "/${mobileModuleRoot}"))
   );
   workspaceDirs = lib.unique (
-    nestedWorkspaceDirs
-    ++ explicitRootWorkspaceDirs
-    ++ topLevelWorkspaceDirs
+    nestedWorkspaceDirs ++ explicitRootWorkspaceDirs ++ topLevelWorkspaceDirs
   );
   workspaceBuildDirectories = lib.unique (
-    lib.optionals (builtins.pathExists (src + "/apps")) [ "apps" ]
-    ++ lib.optionals (builtins.pathExists (src + "/packages")) [ "packages" ]
-    ++ explicitRootWorkspaceDirs
-    ++ topLevelWorkspaceDirs
+    workspaceParentDirs ++ explicitRootWorkspaceDirs ++ topLevelWorkspaceDirs
   );
   workspaceBuildShellDirs = lib.escapeShellArgs workspaceBuildDirectories;
   dependencySourceDirectories = [
     ""
   ]
-  ++ lib.optionals (builtins.pathExists (src + "/apps")) [ "apps" ]
-  ++ lib.optionals (builtins.pathExists (src + "/packages")) [ "packages" ]
+  ++ workspaceParentDirs
   ++ workspaceDirs
   ++ lib.optional (builtins.pathExists (src + "/${mobileModuleRoot}")) mobileModuleRoot
   ++ mobileModulePackageDirs
@@ -101,15 +96,12 @@ let
         pname = "${sourceHashPackageName}-node_modules";
         version = nodeModulesVersion;
         src = dependencySource;
-        pnpm = pnpm;
+        inherit pnpm;
         fetcherVersion = 3;
         hash = outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
       };
     in
-    if fetchPnpmDeps != null then
-      fetchPnpmDeps args
-    else
-      pnpm.fetchDeps args;
+    if fetchPnpmDeps != null then fetchPnpmDeps args else pnpm.fetchDeps args;
 
   workspaceBuild = stdenv.mkDerivation {
     pname = "${pname}-workspace-build";

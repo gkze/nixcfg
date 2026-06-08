@@ -14,6 +14,7 @@ rec {
       input,
       subPackages,
       cmdName ? pname,
+      completionCommand ? "completion",
       version ? null,
       meta ? { },
       doCheck ? true,
@@ -37,9 +38,9 @@ rec {
         nativeBuildInputs = [ prev.installShellFiles ];
         postInstall = ''
           installShellCompletion --cmd ${cmdName} \
-            --bash <($out/bin/${cmdName} completion bash) \
-            --fish <($out/bin/${cmdName} completion fish) \
-            --zsh <($out/bin/${cmdName} completion zsh)
+            --bash <($out/bin/${cmdName} ${completionCommand} bash) \
+            --fish <($out/bin/${cmdName} ${completionCommand} fish) \
+            --zsh <($out/bin/${cmdName} ${completionCommand} zsh)
         '';
         meta = {
           mainProgram = cmdName;
@@ -51,6 +52,7 @@ rec {
         "input"
         "subPackages"
         "cmdName"
+        "completionCommand"
         "version"
         "meta"
         "doCheck"
