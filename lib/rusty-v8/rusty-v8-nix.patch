@@ -24,15 +24,3 @@ index 41b256e..7d50e4d 100644
 
    # Build with C++ RTTI enabled. Chromium builds without RTTI by default,
    # but some sanitizers are known to require it, like CFI diagnostics
-diff --git a/build/rust/std/BUILD.gn b/build/rust/std/BUILD.gn
-index b6cb64d..74adddb 100644
---- a/build/rust/std/BUILD.gn
-+++ b/build/rust/std/BUILD.gn
-@@ -49,7 +49,7 @@ if (toolchain_has_rust) {
-     if (rustc_nightly_capability) {
-       stdlib_files += [ "adler2" ]
-     } else {
--      stdlib_files += [ "adler" ]
-+      stdlib_files += [ "adler2" ]
-     }
-   }

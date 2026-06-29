@@ -8,6 +8,9 @@ import shutil
 import tomllib
 from pathlib import Path
 
+from lib.codemods.errors import CodemodError
+from lib.codemods.text import regex_replace_file_exactly, replace_exactly
+
 _LOGO_REWRITES = {
     "../../../../documentation/static/img/logo_dark.png": "../../static/img/logo_dark.png",
     "../../../../documentation/static/img/logo_light.png": "../../static/img/logo_light.png",
@@ -61,7 +64,15 @@ def rewrite_goose_logo_paths(root: Path) -> bool:
         text = path.read_text()
         updated = text
         for old, new in _LOGO_REWRITES.items():
-            updated = updated.replace(old, new)
+            match_count = updated.count(old)
+            if match_count:
+                updated = replace_exactly(
+                    updated,
+                    old,
+                    new,
+                    expected_count=match_count,
+                    context=f"Goose logo path in {path}",
+                )
         if updated == text:
             continue
         path.write_text(updated)
@@ -86,18 +97,18 @@ def copy_goose_logos(root: Path) -> None:
 def rewrite_v8_dependency(root: Path) -> None:
     """Point Goose's vendored V8 crate at the locally patched rusty_v8 fork."""
     v8_cargo_toml = root / "vendor/v8/Cargo.toml"
-    v8_cargo_text = v8_cargo_toml.read_text()
-    v8_cargo_text, replacements = re.subn(
-        r"^v8-goose\s*=\s*.*$",
-        'v8-goose = { path = "../v8-goose-src" }',
-        v8_cargo_text,
-        count=1,
-        flags=re.MULTILINE,
-    )
-    if replacements != 1:
+    try:
+        regex_replace_file_exactly(
+            v8_cargo_toml,
+            r"^v8-goose\s*=\s*.*$",
+            'v8-goose = { path = "../v8-goose-src" }',
+            expected_count=1,
+            flags=re.MULTILINE,
+            context="Goose vendor/v8 v8-goose dependency",
+        )
+    except CodemodError as exc:
         msg = "expected one v8-goose dependency line in vendor/v8/Cargo.toml"
-        raise SystemExit(msg)
-    v8_cargo_toml.write_text(v8_cargo_text)
+        raise SystemExit(msg) from exc
 
 
 def strip_v8_goose_workspace_sections(root: Path) -> str:

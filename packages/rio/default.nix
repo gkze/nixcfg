@@ -10,12 +10,8 @@ mkDmgApp7zz {
   executableName = "rio";
   info = selfSource;
   createBin = true;
-  meta = with lib; {
-    description = "Hardware-accelerated GPU terminal emulator powered by WebGPU";
-    homepage = "https://github.com/raphamorim/rio/";
-    license = licenses.mit;
-    platforms = [ "aarch64-darwin" ];
-    sourceProvenance = with sourceTypes; [ binaryNativeCode ];
-    mainProgram = "rio";
-  };
+  description = "Hardware-accelerated GPU terminal emulator powered by WebGPU";
+  homepage = "https://github.com/raphamorim/rio/";
+  license = lib.licenses.mit;
+  platforms = [ "aarch64-darwin" ];
 }

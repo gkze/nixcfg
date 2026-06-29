@@ -18,6 +18,7 @@ from lib.tests._nix_ast import (
     expect_scope_binding,
     parse_nix_expr,
 )
+from lib.tests._shell_ast import command_texts, parse_shell
 from lib.update.paths import REPO_ROOT
 
 
@@ -47,16 +48,20 @@ def test_mux_uses_central_electron_runtime_artifacts() -> None:
         '"40.9.3"',
     )
     assert_nix_ast_equal(
+        expect_scope_binding(derivation, "electronBuild").value,
+        "nixcfgElectron.sourceBuildFor electronVersion",
+    )
+    assert_nix_ast_equal(
         expect_scope_binding(derivation, "electronRuntime").value,
-        "nixcfgElectron.runtimeFor electronVersion",
+        "electronBuild.runtime",
     )
     assert_nix_ast_equal(
         expect_scope_binding(derivation, "electronHeaders").value,
-        "electronRuntime.passthru.headers",
+        "electronBuild.headers",
     )
     assert_nix_ast_equal(
         expect_scope_binding(derivation, "electronDist").value,
-        "electronRuntime.passthru.dist",
+        "electronBuild.dist",
     )
 
 
@@ -118,10 +123,17 @@ def test_mux_derivation_encodes_the_hermetic_darwin_packaging_contract() -> None
     darwin_build = expect_instance(build_phase.consequence, IndentedString)
     assert "bun scripts/generate-icons.ts png icns linux-icons" in darwin_build.value
     assert "bun x electron-builder" in darwin_build.value
-    assert 'cp -R ${electronDist}/. "$electronDistDir"/' in darwin_build.value
-    assert '-c.electronDist="$electronDistDir"' in darwin_build.value
-    assert (
-        "-c.electronVersion=${lib.escapeShellArg electronRuntimeVersion}"
-        in darwin_build.value
-    )
+    assert "${electronBuild.copyDist}" in darwin_build.value
+    assert "${electronBuild.electronBuilderConfigFlags}" in darwin_build.value
     assert "-c.mac.identity=null" in darwin_build.value
+    electron_builder_start = darwin_build.value.index("        bun x electron-builder")
+    electron_builder_end = darwin_build.value.index(
+        "\n\n        runHook postBuild",
+        electron_builder_start,
+    )
+    electron_builder_commands = command_texts(
+        parse_shell(darwin_build.value[electron_builder_start:electron_builder_end]),
+        "bun",
+    )
+    assert len(electron_builder_commands) == 1
+    assert "-c.mac.identity=null" in electron_builder_commands[0]

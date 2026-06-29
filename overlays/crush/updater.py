@@ -9,25 +9,20 @@ from lib.update.net import fetch_github_api_paginated, fetch_url, github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_expr,
     _build_flake_attr_expr,
-    _build_overlay_expr,
     get_current_nix_platform,
 )
 from lib.update.paths import get_repo_file
 from lib.update.updaters.base import (
-    UpdateContext,
+    SourceThenOverlayHashMixin,
     VersionInfo,
     read_pinned_source_version,
     register_updater,
-    stream_source_then_overlay_hashes,
 )
 from lib.update.updaters.github_release import GitHubReleaseUpdater
 from lib.update.updaters.metadata import GitHubReleaseMetadata
 
 if TYPE_CHECKING:
     import aiohttp
-
-    from lib.nix.models.sources import SourceEntry
-    from lib.update.events import EventStream
 
 
 def _local_flake_url() -> str:
@@ -67,12 +62,13 @@ def _extract_required_go_version(go_mod: str) -> tuple[int, int, int]:
 
 
 @register_updater
-class CrushUpdater(GitHubReleaseUpdater):
+class CrushUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     """Resolve the newest crush release compatible with the current Go floor."""
 
     name = "crush"
     GITHUB_OWNER = "charmbracelet"
     GITHUB_REPO = "crush"
+    dependency_hash_type = "vendorHash"
 
     @staticmethod
     def _go_version_expr(platform: str, go_attr: str) -> str:
@@ -179,23 +175,3 @@ class CrushUpdater(GitHubReleaseUpdater):
             "crush",
             tag=f"v{version}",
         )
-
-    async def fetch_hashes(
-        self,
-        info: VersionInfo,
-        session: aiohttp.ClientSession,
-        *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
-        """Compute source and vendor fixed-output hashes for the release."""
-        _ = (session, context)
-
-        async for event in stream_source_then_overlay_hashes(
-            self.name,
-            version=info.version,
-            src_expr=self._src_expr(info.version),
-            overlay_expr=_build_overlay_expr(self.name),
-            dependency_hash_type="vendorHash",
-            config=self.config,
-        ):
-            yield event

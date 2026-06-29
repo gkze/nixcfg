@@ -1,5 +1,4 @@
 {
-  lib,
   mkDmgApp7zz,
   selfSource,
   system,
@@ -11,12 +10,6 @@ mkDmgApp7zz {
   executableName = "Loom";
   sourceName = "Loom_${selfSource.version}_${system}.dmg";
   info = selfSource;
-  meta = with lib; {
-    description = "Screen recording and video messaging app";
-    homepage = "https://www.loom.com/";
-    license = licenses.unfree;
-    platforms = platforms.darwin;
-    sourceProvenance = with sourceTypes; [ binaryNativeCode ];
-    mainProgram = "loom";
-  };
+  description = "Screen recording and video messaging app";
+  homepage = "https://www.loom.com/";
 }

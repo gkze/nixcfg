@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from lib.codemods.text import replace_file_once
+
 OLD = (
     "static const napi_typedarray_type unknown_array_type = "
     "static_cast<napi_typedarray_type>(-1);"
@@ -31,11 +33,10 @@ def main() -> int:
         if not path.exists():
             continue
 
-        text = path.read_text(encoding="utf-8")
-        if OLD not in text:
+        if OLD not in path.read_text(encoding="utf-8"):
             continue
 
-        path.write_text(text.replace(OLD, NEW), encoding="utf-8")
+        replace_file_once(path, OLD, NEW, context=str(path))
         patched.append(path)
 
     if patched:

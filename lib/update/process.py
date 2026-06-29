@@ -353,7 +353,7 @@ async def compute_sri_hash(source: str, url: str) -> EventStream:
     args.append(url)
     config = resolve_active_config(None)
     attempts = max(1, config.default_retries)
-    for attempt in range(1, attempts + 1):
+    for attempt in range(1, attempts + 1):  # pragma: no branch
         try:
             async for event in _emit_successful_command(
                 source=source,

@@ -11,18 +11,21 @@ from lib.update.updaters.base import (
     DenoDepsHashUpdater,
     DenoManifestUpdater,
     DownloadHashUpdater,
+    DownloadUrlMetadataUpdater,
     FlakeInputHashUpdater,
     UvLockUpdater,
     VersionInfo,
     read_pinned_source_version,
 )
 from lib.update.updaters.github_release import GitHubReleaseAssetURLsUpdater
-from lib.update.updaters.metadata import AssetURLsMetadata
+from lib.update.updaters.metadata import AssetURLsMetadata, DownloadUrlMetadata
 from lib.update.updaters.registry import register_updater
 from lib.update.updaters.vendor_feeds import (
+    SparkleAppcastItem,
     fetch_electron_builder_asset_urls,
     fetch_head_artifact_version,
     fetch_sparkle_appcast_items,
+    require_url,
     require_version,
 )
 
@@ -30,14 +33,13 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import HashType
-    from lib.update.updaters.vendor_feeds import SparkleAppcastItem
-
 type AssetNameTemplate = str | Callable[[str, str], str]
 type DownloadURLTemplate = str | Callable[[str, str, str], str]
 type DownloadURLMethod = Callable[[DownloadHashUpdater, str, VersionInfo], str]
 type ElectronAssetSelector = Callable[[str, str], bool]
 type JsonVersionTransform = Callable[[str], str]
 type SparkleVersionField = Literal["version", "short_version", "short_or_version"]
+type SparkleVersionTransform = Callable[[SparkleAppcastItem], str]
 
 
 def _resolve_module_name(module: str | None) -> str:
@@ -377,6 +379,9 @@ def sparkle_appcast_updater(
     platforms: Mapping[str, str],
     download_url: DownloadURLTemplate | None = None,
     version_field: SparkleVersionField = "version",
+    version_transform: SparkleVersionTransform | None = None,
+    appcast_url_metadata: bool = False,
+    url_metadata_context: str | None = None,
     module: str | None = None,
 ) -> type[DownloadHashUpdater]:
     """Create a download updater driven by a Sparkle appcast feed."""
@@ -390,11 +395,19 @@ def sparkle_appcast_updater(
             appcast_url,
             config=self.config,
         )
+        item = items[0]
         version = require_version(
-            _sparkle_item_version(items[0], version_field=version_field),
+            version_transform(item)
+            if version_transform is not None
+            else _sparkle_item_version(item, version_field=version_field),
             context=appcast_url,
         )
-        return VersionInfo(version=version)
+        metadata = (
+            DownloadUrlMetadata(url=require_url(item.url, context=appcast_url))
+            if appcast_url_metadata
+            else None
+        )
+        return VersionInfo(version=version, metadata=metadata)
 
     attrs: dict[str, object] = {
         "__module__": _resolve_module_name(module),
@@ -403,9 +416,15 @@ def sparkle_appcast_updater(
         "PLATFORMS": dict(platforms),
         "fetch_latest": fetch_latest,
     }
+    if url_metadata_context is not None:
+        attrs["URL_METADATA_CONTEXT"] = url_metadata_context
     if download_url is not None:
         attrs["get_download_url"] = _templated_download_url(download_url)
 
+    if appcast_url_metadata:
+        return register_updater(
+            type(f"{name}Updater", (DownloadUrlMetadataUpdater,), attrs)
+        )
     return register_updater(type(f"{name}Updater", (DownloadHashUpdater,), attrs))
 
 

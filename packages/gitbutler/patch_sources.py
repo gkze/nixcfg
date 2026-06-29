@@ -7,6 +7,9 @@ import json
 import sys
 from pathlib import Path
 
+from lib.codemods.errors import CodemodError
+from lib.codemods.text import replace_file_once
+
 EXPECTED_ARG_COUNT = 2
 
 
@@ -36,7 +39,6 @@ def _patch_tauri_config(source_root: Path) -> None:
 
 def _patch_build_rs(source_root: Path) -> None:
     build_rs_path = source_root / "crates/gitbutler-tauri/build.rs"
-    original = build_rs_path.read_text()
     old = """    let build_dir = manifest_dir
         .parent()
         .unwrap()
@@ -48,15 +50,20 @@ def _patch_build_rs(source_root: Path) -> None:
 """
     new = """    let build_dir = manifest_dir.join("frontend-dist");
 """
-    if old not in original:
+    try:
+        replace_file_once(
+            build_rs_path,
+            old,
+            new,
+            context="GitButler build.rs frontendDist snippet",
+        )
+    except CodemodError as exc:
         msg = f"expected GitButler build.rs frontendDist snippet not found in {build_rs_path}"
-        raise SystemExit(msg)
-    build_rs_path.write_text(original.replace(old, new, 1))
+        raise SystemExit(msg) from exc
 
 
 def _patch_but_cli_alias_guard(source_root: Path) -> None:
     lib_rs_path = source_root / "crates/but/src/lib.rs"
-    original = lib_rs_path.read_text()
     old = """    match &parsed_args.cmd {
         Some(Subcommands::External(subcommand_args))
             if let Some(command_name) = subcommand_args.first() =>
@@ -67,10 +74,97 @@ def _patch_but_cli_alias_guard(source_root: Path) -> None:
         Some(Subcommands::External(subcommand_args)) => {
             if let Some(command_name) = subcommand_args.first().and_then(|arg| arg.to_str()) {
 """
-    if old not in original:
+    try:
+        replace_file_once(
+            lib_rs_path,
+            old,
+            new,
+            context="GitButler but alias guard snippet",
+        )
+    except CodemodError as exc:
         msg = f"expected GitButler but alias guard snippet not found in {lib_rs_path}"
-        raise SystemExit(msg)
-    lib_rs_path.write_text(original.replace(old, new, 1))
+        raise SystemExit(msg) from exc
+
+
+def _patch_but_uncommitted_file_index_guard(source_root: Path) -> None:
+    id_mod_path = source_root / "crates/but/src/id/mod.rs"
+    old = """        match element.strip_prefix(INDEX_SEPARATOR) {
+            Some(maybe_index) if let Ok(index) = usize::from_str(maybe_index) => {
+                if let Some((hunk_id, hunk_assignment)) = self.short_id_hunk_assignments.get(index)
+                {
+                    let cli_id = CliId::UncommittedHunkOrFile(UncommittedHunkOrFile {
+                        id: format!("{}:{}", self.short_id, hunk_id.short_id()),
+                        hunk_assignments: NonEmpty::new(hunk_assignment.to_owned()),
+                        is_entire_file: false,
+                    });
+                    Ok(vec![Box::new(Leaf { cli_id })])
+                } else {
+                    Ok(vec![])
+                }
+            }
+            _ => {
+                let matches = self
+                    .short_id_hunk_assignments
+                    .iter()
+                    .filter(|(hunk_id, _)| hunk_id.matches_prefix(element))
+                    .map(|(hunk_id, hunk_assignment)| {
+                        let cli_id = CliId::UncommittedHunkOrFile(UncommittedHunkOrFile {
+                            id: format!("{}:{}", self.short_id, hunk_id.short_id()),
+                            hunk_assignments: NonEmpty::new(hunk_assignment.to_owned()),
+                            is_entire_file: false,
+                        });
+                        Box::new(Leaf { cli_id }) as Box<dyn Node<'a> + 'a>
+                    });
+
+                Ok(matches.collect())
+            }
+        }
+"""
+    new = """        if let Some(maybe_index) = element.strip_prefix(INDEX_SEPARATOR) {
+            if let Ok(index) = usize::from_str(maybe_index) {
+                return if let Some((hunk_id, hunk_assignment)) =
+                    self.short_id_hunk_assignments.get(index)
+                {
+                    let cli_id = CliId::UncommittedHunkOrFile(UncommittedHunkOrFile {
+                        id: format!("{}:{}", self.short_id, hunk_id.short_id()),
+                        hunk_assignments: NonEmpty::new(hunk_assignment.to_owned()),
+                        is_entire_file: false,
+                    });
+                    Ok(vec![Box::new(Leaf { cli_id })])
+                } else {
+                    Ok(vec![])
+                };
+            }
+        }
+
+        let matches = self
+            .short_id_hunk_assignments
+            .iter()
+            .filter(|(hunk_id, _)| hunk_id.matches_prefix(element))
+            .map(|(hunk_id, hunk_assignment)| {
+                let cli_id = CliId::UncommittedHunkOrFile(UncommittedHunkOrFile {
+                    id: format!("{}:{}", self.short_id, hunk_id.short_id()),
+                    hunk_assignments: NonEmpty::new(hunk_assignment.to_owned()),
+                    is_entire_file: false,
+                });
+                Box::new(Leaf { cli_id }) as Box<dyn Node<'a> + 'a>
+            });
+
+        Ok(matches.collect())
+"""
+    try:
+        replace_file_once(
+            id_mod_path,
+            old,
+            new,
+            context="GitButler but uncommitted file index guard snippet",
+        )
+    except CodemodError as exc:
+        msg = (
+            "expected GitButler but uncommitted file index guard snippet "
+            f"not found in {id_mod_path}"
+        )
+        raise SystemExit(msg) from exc
 
 
 def main() -> int:
@@ -82,6 +176,7 @@ def main() -> int:
     _patch_tauri_config(source_root)
     _patch_build_rs(source_root)
     _patch_but_cli_alias_guard(source_root)
+    _patch_but_uncommitted_file_index_guard(source_root)
     return 0
 
 

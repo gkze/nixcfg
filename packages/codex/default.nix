@@ -55,7 +55,7 @@ let
     # Darwin weak symbols in force-loaded static archives are not resolved
     # properly. Remove weak linkage so the symbols are strong externals.
     extraPatchCommands = ''
-      ${pkgs.python3}/bin/python3 \
+      PYTHONPATH=${../..} ${pkgs.python3}/bin/python3 \
         ${./patch_allocator_weak_linkage.py} \
         "$out/build/rust/allocator/lib.rs"
     '';

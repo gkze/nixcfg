@@ -84,6 +84,7 @@ class SourceTaskContext:
     generated_artifacts: dict[Path, str]
     config: UpdateConfig | None = None
     pinned_version: VersionInfo | None = None
+    dry_run: bool = False
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,7 @@ class SourcesPhaseContext:
     native_only: bool
     config: UpdateConfig
     pinned: dict[str, VersionInfo]
+    dry_run: bool = False
 
 
 @dataclass(frozen=True)
@@ -187,6 +189,7 @@ async def update_source_task(
         put = context.queue.put
         update_context = UpdateContext(
             current=current,
+            dry_run=context.dry_run,
             generated_artifacts=context.generated_artifacts,
         )
 
@@ -282,6 +285,7 @@ async def run_sources_phase(
                 generated_artifacts=generated_artifacts,
                 config=context.config,
                 pinned_version=context.pinned.get(name),
+                dry_run=context.dry_run,
             )
 
         completed_sources: dict[str, bool] = {}

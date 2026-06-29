@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._zen_tooling import load_zen_script_module
+from lib.tests._zen_tooling import load_zentool_module
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 @pytest.fixture(scope="module")
 def zentool() -> ModuleType:
     """Load the zentool script for narrow edge-helper tests."""
-    return load_zen_script_module("zentool", "zentool_edge_helpers")
+    return load_zentool_module("zentool_edge_helpers")
 
 
 def test_load_profiles_ini_and_profiles_from_ini_handle_missing_ini(
@@ -46,6 +46,7 @@ def test_default_profile_dir_returns_none_without_unique_fallback_directory(
     """Directory fallback should only pick a unique profile directory."""
     profiles_dir = tmp_path / "Profiles"
     monkeypatch.setattr(zentool, "ZEN_PROFILES", profiles_dir)
+    monkeypatch.setattr(zentool, "zen_running_profile_dirs", list)
     monkeypatch.setattr(zentool, "_load_profiles_ini", lambda: None)
     monkeypatch.setattr(zentool, "_profiles_from_ini", list)
 

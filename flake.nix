@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.1.27";
+      url = "github:generalaction/emdash/v1.1.35";
       flake = false;
     };
     flake-edit = {
@@ -52,7 +52,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gitbutler = {
-      url = "github:gitbutlerapp/gitbutler/release/0.20.0";
+      url = "github:gitbutlerapp/gitbutler/release/0.20.4";
       flake = false;
     };
     home-manager = {
@@ -87,7 +87,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.6.5";
+      url = "github:NousResearch/hermes-agent/v2026.6.19";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -141,7 +141,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.56.0";
+      url = "github:max-sixty/worktrunk/v0.62.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -149,7 +149,7 @@
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.10.0";
+      url = "github:anthropics/anthropic-cli/v1.12.2";
       flake = false;
     };
     catppuccin = {
@@ -166,7 +166,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.137.0";
+      url = "github:openai/codex/rust-v0.142.3";
       flake = false;
     };
     curator = {
@@ -174,17 +174,17 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.22.0";
+      url = "github:steipete/gogcli/v0.31.1";
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.2.0";
+      url = "github:openai/openai-cli/v1.3.0";
       flake = false;
     };
     github-desktop = {
       type = "git";
       url = "https://github.com/desktop/desktop.git";
-      ref = "refs/tags/release-3.5.12";
+      ref = "refs/tags/release-3.6.1";
       submodules = true;
       flake = false;
     };
@@ -231,7 +231,7 @@
       flake = false;
     };
     mux = {
-      url = "github:coder/mux/v0.26.1";
+      url = "github:coder/mux/v0.27.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mountpoint-s3 = {
@@ -435,6 +435,11 @@
             pkgs:
             with treefmt-nix.lib;
             let
+              nixcfgPkg = mkNixcfgPackage pkgs;
+              nixcfgVenv = nixcfgPkg.passthru.venv;
+              pythonExe = "${nixcfgVenv}/bin/python";
+              pyupgradeExe = "${nixcfgVenv}/bin/pyupgrade";
+              ruffExe = "${nixcfgVenv}/bin/ruff";
               textHygieneScript = ./lib/format_text.py;
               textHygieneFormat = pkgs.writeShellScriptBin "format-text-hygiene" ''
                 exec ${lib.getExe pkgs.python3} ${textHygieneScript} "$@"
@@ -537,34 +542,39 @@
                   settings = {
                     excludes = lintFiles.nix.excludeGlobs;
                     formatter = {
-                      # pyupgrade currently tops out at --py314-plus, but these
-                      # repo helpers still need to parse under nixpkgs'
-                      # generic python3 (3.13 today), so keep the formatter floor
-                      # aligned to the real minimum runtime. Normalize invalid
-                      # multi-except rewrites first so pyupgrade and compile
-                      # checks converge on valid Python 3 syntax.
+                      # Normalize invalid multi-except rewrites first so
+                      # pyupgrade and compile checks converge on valid Python 3
+                      # syntax using the uv-managed nixcfg runtime. Keep the
+                      # established pyupgrade floor until Python 3.14 rewrites
+                      # are applied as an intentional formatting migration.
                       python-pyupgrade = {
-                        command = lib.getExe pkgs.python3;
+                        command = pythonExe;
                         options = [
                           "-m"
                           "lib.fix_python_multi_except"
                           "--pyupgrade-exe"
-                          (lib.getExe pkgs.pyupgrade)
+                          pyupgradeExe
                           "--pyupgrade-arg=--py313-plus"
                           "--pyupgrade-arg=--exit-zero-even-if-changed"
                         ];
                         includes = pyupgradePaths;
                         excludes = [ "**/_generated.py" ];
                       };
-                      ruff-check.options = [
-                        "--config"
-                        "pyproject.toml"
-                        "--fix-only"
-                      ];
-                      ruff-format.options = [
-                        "--config"
-                        "pyproject.toml"
-                      ];
+                      ruff-check = {
+                        command = ruffExe;
+                        options = [
+                          "--config"
+                          "pyproject.toml"
+                          "--fix-only"
+                        ];
+                      };
+                      ruff-format = {
+                        command = ruffExe;
+                        options = [
+                          "--config"
+                          "pyproject.toml"
+                        ];
+                      };
                       shfmt.options = [
                         "-i"
                         "2"
@@ -716,6 +726,10 @@
             repoWritable = true;
             command =
               { lib, pkgs, ... }:
+              let
+                nixcfgPkg = mkNixcfgPackage pkgs;
+                nixcfgVenv = nixcfgPkg.passthru.venv;
+              in
               ''
                 ${lib.getExe pkgs.git} init -q .
                 ${lib.getExe pkgs.git} add -A
@@ -724,7 +738,7 @@
                   -type f \
                   \( -name '*.py' -o -name '*.pyi' ${pythonScriptFindPredicates} \) \
                   -print0 \
-                  | ${pkgs.findutils}/bin/xargs -0 -r ${lib.getExe pkgs.python3} -m lib.fix_python_multi_except --pyupgrade-exe ${lib.getExe pkgs.pyupgrade} --pyupgrade-arg=--py313-plus
+                  | ${pkgs.findutils}/bin/xargs -0 -r ${nixcfgVenv}/bin/python -m lib.fix_python_multi_except --pyupgrade-exe ${nixcfgVenv}/bin/pyupgrade --pyupgrade-arg=--py313-plus
                 ${lib.getExe pkgs.git} diff --exit-code -- .
               '';
           };
@@ -735,9 +749,10 @@
               { lib, pkgs, ... }:
               let
                 compileTargets = lib.escapeShellArgs compilePaths;
+                nixcfgPkg = mkNixcfgPackage pkgs;
               in
               ''
-                ${lib.getExe pkgs.python3} ${./lib/check_python_compile.py} ${compileTargets}
+                ${nixcfgPkg.passthru.venv}/bin/python ${./lib/check_python_compile.py} ${compileTargets}
               '';
           };
 
@@ -748,12 +763,14 @@
             '';
             command =
               {
-                lib,
                 pkgs,
                 ...
               }:
+              let
+                nixcfgPkg = mkNixcfgPackage pkgs;
+              in
               ''
-                ${lib.getExe pkgs.ruff} format --check --config pyproject.toml .
+                ${nixcfgPkg.passthru.venv}/bin/ruff format --check --config pyproject.toml .
               '';
           };
 
@@ -764,12 +781,14 @@
             '';
             command =
               {
-                lib,
                 pkgs,
                 ...
               }:
+              let
+                nixcfgPkg = mkNixcfgPackage pkgs;
+              in
               ''
-                ${lib.getExe pkgs.ruff} check --config pyproject.toml .
+                ${nixcfgPkg.passthru.venv}/bin/ruff check --config pyproject.toml .
               '';
           };
 
@@ -777,16 +796,15 @@
             name = "check-lint-python-ty";
             command =
               {
-                lib,
                 pkgs,
                 ...
               }:
               let
                 nixcfgPkg = mkNixcfgPackage pkgs;
-                tyPythonFlag = if nixcfgPkg != null then " --python ${nixcfgPkg.passthru.venv}/bin/python" else "";
+                nixcfgVenv = nixcfgPkg.passthru.venv;
               in
               ''
-                ${lib.getExe pkgs.ty} check${tyPythonFlag} .
+                ${nixcfgVenv}/bin/ty check --python ${nixcfgVenv}/bin/python .
               '';
           };
 

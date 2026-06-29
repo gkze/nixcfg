@@ -22,6 +22,8 @@ _EXPECTED_MULTI_EXCEPT_HANDLERS = (
     (("RuntimeError", "ValueError"), "exc"),
     (("OSError", "ValueError"), "exc"),
     (("FileNotFoundError", "subprocess.SubprocessError", "OSError"), "exc"),
+    (("OSError", "urllib.error.URLError", "ZenFoldersError"), None),
+    (("OSError", "urllib.error.URLError", "ZenFoldersError"), None),
     (("EOFError", "KeyboardInterrupt"), None),
 )
 

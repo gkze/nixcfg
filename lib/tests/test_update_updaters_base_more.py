@@ -57,6 +57,7 @@ from lib.update.updaters.base import (
     version_endpoint_download_updater,
 )
 from lib.update.updaters.metadata import AssetURLsMetadata, DownloadUrlMetadata
+from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable
@@ -2422,6 +2423,27 @@ def test_factory_helpers_return_expected_subclasses() -> None:
         == "https://example.test/7.8.9/darwin.pkg"
     )
 
+    sparkle_metadata_cls = sparkle_appcast_updater(
+        "factory-sparkle-metadata",
+        appcast_url="https://example.test/appcast.xml",
+        platforms={"aarch64-darwin": "darwin"},
+        appcast_url_metadata=True,
+        url_metadata_context="Factory Sparkle metadata",
+        module=__name__,
+    )
+    assert issubclass(sparkle_metadata_cls, DownloadUrlMetadataUpdater)
+    assert sparkle_metadata_cls.URL_METADATA_CONTEXT == "Factory Sparkle metadata"
+    assert (
+        sparkle_metadata_cls().get_download_url(
+            "aarch64-darwin",
+            VersionInfo(
+                version="7.8.9",
+                metadata=DownloadUrlMetadata("https://example.test/app.pkg"),
+            ),
+        )
+        == "https://example.test/app.pkg"
+    )
+
     head_cls = head_artifact_download_updater(
         "factory-head-artifact",
         download_url="https://example.test/app.dmg",
@@ -2449,6 +2471,41 @@ def test_factory_helpers_return_expected_subclasses() -> None:
             VersionInfo(version="1.0.0"),
         )
         == "https://example.test/1.0.0/darwin-arm64.tgz"
+    )
+
+
+def test_sparkle_factory_preserves_appcast_metadata_and_transform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sparkle factory should support URL metadata and item-level transforms."""
+
+    async def _fetch_items(*_args: object, **_kwargs: object):
+        return (
+            SparkleAppcastItem(
+                "42",
+                "1.2.3",
+                "https://example.test/downloads/App.zip",
+            ),
+        )
+
+    monkeypatch.setattr(
+        "lib.update.updaters.factories.fetch_sparkle_appcast_items",
+        _fetch_items,
+    )
+    updater_cls = sparkle_appcast_updater(
+        "factory-sparkle-transform",
+        appcast_url="https://example.test/appcast.xml",
+        platforms={"aarch64-darwin": "darwin"},
+        version_transform=lambda item: f"{item.short_version}-{item.version}",
+        appcast_url_metadata=True,
+        module=__name__,
+    )
+
+    info = asyncio.run(updater_cls().fetch_latest(object()))
+
+    assert info == VersionInfo(
+        version="1.2.3-42",
+        metadata=DownloadUrlMetadata("https://example.test/downloads/App.zip"),
     )
 
 

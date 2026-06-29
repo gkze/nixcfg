@@ -36,6 +36,7 @@ dependencies = [
   "tomlkit>=0.14.0",
   "typer>=0.24.1",
   "githubkit>=0.15.1",
+  "tree-sitter>=0.25.2",
 ]
 
 [project.scripts]
@@ -173,6 +174,10 @@ include = [
 [tool.ty.rules]
 # Treat all Ty diagnostics as errors.
 all = "error"
+# Keep newly introduced preview-style strictness opt-in until the codebase is
+# migrated deliberately.
+missing-override-decorator = "ignore"
+missing-type-argument = "ignore"
 
 [[tool.ty.overrides]]
 # Test modules still contain intentionally dynamic fixtures and negative type
@@ -259,7 +264,6 @@ dev = [
   "mutmut>=3.5.0",
   "pytest>=9.0.2",
   "pytest-xdist>=3.8.0",
-  "tree-sitter>=0.25.0",
   "tree-sitter-bash>=0.25.0",
   "pyupgrade>=3.21.2",
   "referencing>=0.37.0",

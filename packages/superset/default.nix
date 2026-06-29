@@ -59,10 +59,11 @@ let
   # centrally-packaged runtime and headers so Electron builder/rebuild stays
   # offline and shares cache entries with other Electron apps.
   electronVersion = "40.8.5";
-  electronRuntime = nixcfgElectron.runtimeFor electronVersion;
-  electronRuntimeVersion = electronRuntime.version;
-  electronHeaders = electronRuntime.passthru.headers;
-  electronDist = electronRuntime.passthru.dist;
+  electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
+  electronRuntime = electronBuild.runtime;
+  electronRuntimeVersion = electronBuild.runtimeVersion;
+  electronHeaders = electronBuild.headers;
+  electronDist = electronBuild.dist;
   invalidBunNixErr = ''
     packages/superset/bun.nix failed to evaluate.
 
@@ -258,6 +259,8 @@ else
 
     inherit bunDeps;
 
+    env = electronBuild.commonEnv;
+
     bunInstallFlags = [
       "--frozen-lockfile"
     ]
@@ -283,15 +286,10 @@ else
       export SKIP_ENV_VALIDATION=1
       export NEXT_PUBLIC_OUTLIT_KEY="nix-build"
       export CSC_IDENTITY_AUTO_DISCOVERY=false
-      export ELECTRON_SKIP_BINARY_DOWNLOAD=1
-      export npm_config_runtime=electron
-      export npm_config_target=${electronVersion}
-
-      export npm_config_nodedir=${lib.escapeShellArg (toString electronHeaders)}
 
       bun run --cwd apps/desktop copy:native-modules
 
-      ${lib.getExe python3} ${patchBindingGypHelper} \
+      PYTHONPATH=${../..} ${lib.getExe python3} ${patchBindingGypHelper} \
         apps/desktop/node_modules
 
       bun run --cwd apps/desktop generate:icons
@@ -305,10 +303,7 @@ else
         cp -RL apps/desktop/node_modules/@xterm/headless "$hostServiceXtermHeadless"
       fi
 
-      electronDistDir="$PWD/electron-dist"
-      mkdir -p "$electronDistDir"
-      cp -R ${electronDist}/. "$electronDistDir"/
-      chmod -R u+w "$electronDistDir"
+      ${electronBuild.copyDist}
 
       (
         cd apps/desktop
@@ -317,8 +312,7 @@ else
           --mac \
           --dir \
           --publish never \
-          -c.electronDist="$electronDistDir" \
-          -c.electronVersion=${lib.escapeShellArg electronRuntimeVersion} \
+          ${electronBuild.electronBuilderConfigFlags} \
           -c.mac.identity=null \
           -c.mac.hardenedRuntime=false \
           -c.mac.notarize=false

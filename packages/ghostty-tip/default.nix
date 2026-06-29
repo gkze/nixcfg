@@ -10,12 +10,9 @@ mkDmgApp7zz {
   executableName = "ghostty";
   info = selfSource;
   createBin = true;
-  meta = with lib; {
-    description = "Nightly tip build of the Ghostty terminal emulator";
-    homepage = "https://ghostty.org/";
-    license = licenses.mit;
-    platforms = [ "aarch64-darwin" ];
-    sourceProvenance = with sourceTypes; [ binaryNativeCode ];
-    mainProgram = "ghostty";
-  };
+  description = "Nightly tip build of the Ghostty terminal emulator";
+  homepage = "https://ghostty.org/";
+  license = lib.licenses.mit;
+  mainProgram = "ghostty";
+  platforms = [ "aarch64-darwin" ];
 }

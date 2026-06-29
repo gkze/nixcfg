@@ -11,6 +11,7 @@ from lib.nix.models.sources import HashEntry
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
+from lib.update.nix import _build_overlay_expr
 from lib.update.updaters.base import VersionInfo, source_override_env
 
 
@@ -335,7 +336,7 @@ def test_fetch_hashes_computes_src_and_vendor_hashes(
         },
         {
             "name": "crush",
-            "expr": module._build_overlay_expr("crush"),
+            "expr": _build_overlay_expr("crush"),
             "env": source_override_env(
                 "crush",
                 version=info.version,

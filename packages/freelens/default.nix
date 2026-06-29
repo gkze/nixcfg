@@ -10,12 +10,8 @@ mkDmgApp7zz {
   executableName = "Freelens";
   info = selfSource;
   createBin = true;
-  meta = with lib; {
-    description = "Open-source Kubernetes IDE";
-    homepage = "https://freelens.app/";
-    license = licenses.mit;
-    platforms = [ "aarch64-darwin" ];
-    sourceProvenance = with sourceTypes; [ binaryNativeCode ];
-    mainProgram = "freelens";
-  };
+  description = "Open-source Kubernetes IDE";
+  homepage = "https://freelens.app/";
+  license = lib.licenses.mit;
+  platforms = [ "aarch64-darwin" ];
 }

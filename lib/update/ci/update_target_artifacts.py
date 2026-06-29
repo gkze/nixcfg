@@ -19,7 +19,7 @@ STATUS_FILE_NAME = "nixcfg-update-target-status.json"
 STATUS_COLLECTION_KIND = "nixcfg-update-target-status-collection"
 STATUS_KIND = "nixcfg-update-target-status"
 
-_RUNTIME_LOCK_TARGET = "t3code-desktop"
+_RUNTIME_LOCK_TARGETS = {"t3code", "t3code-desktop"}
 _RUNTIME_LOCK_PATHS = (
     "packages/t3code/bun.lock",
     "packages/t3code-desktop/bun.lock",
@@ -76,7 +76,7 @@ def _artifact_paths_for_target(target: dict[str, Any], *, platform: str) -> list
         if isinstance(generated, list):
             paths.extend(path for item in generated if (path := _repo_path(item)))
 
-    if platform == "aarch64-darwin" and target.get("name") == _RUNTIME_LOCK_TARGET:
+    if platform == "aarch64-darwin" and target.get("name") in _RUNTIME_LOCK_TARGETS:
         paths.extend(_RUNTIME_LOCK_PATHS)
 
     return _ordered_paths(paths)
@@ -115,7 +115,7 @@ def build_matrix(*, inventory: dict[str, Any]) -> dict[str, list[dict[str, Any]]
                 target,
                 platform="aarch64-linux",
             ),
-            "regenerate_runtime_locks": name == _RUNTIME_LOCK_TARGET,
+            "regenerate_runtime_locks": name in _RUNTIME_LOCK_TARGETS,
         })
     return {"include": include}
 

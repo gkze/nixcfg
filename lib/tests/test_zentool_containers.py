@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._zen_tooling import load_zen_script_module
+from lib.tests._zen_tooling import load_zentool_module
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 @pytest.fixture(scope="module")
 def zentool() -> ModuleType:
     """Load the zentool script for container-helper testing."""
-    return load_zen_script_module("zentool", "zentool_container_helpers")
+    return load_zentool_module("zentool_container_helpers")
 
 
 def test_load_config_accepts_explicit_container_root(

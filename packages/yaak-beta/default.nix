@@ -10,12 +10,8 @@ mkDmgApp7zz {
   executableName = "yaak-app-client";
   info = selfSource;
   createBin = true;
-  meta = with lib; {
-    description = "Beta desktop API client for REST, GraphQL, and gRPC requests";
-    homepage = "https://yaak.app/";
-    license = licenses.mit;
-    platforms = [ "aarch64-darwin" ];
-    sourceProvenance = with sourceTypes; [ binaryNativeCode ];
-    mainProgram = "yaak-beta";
-  };
+  description = "Beta desktop API client for REST, GraphQL, and gRPC requests";
+  homepage = "https://yaak.app/";
+  license = lib.licenses.mit;
+  platforms = [ "aarch64-darwin" ];
 }

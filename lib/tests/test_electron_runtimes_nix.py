@@ -22,6 +22,7 @@ _EXPECTED_ELECTRON_VERSIONS = [
     "41.0.0",
     "41.2.1",
     "41.5.0",
+    "42.3.3",
 ]
 _EXPECTED_HASH_KEYS = {
     "headers",
@@ -57,6 +58,7 @@ def test_central_electron_runtime_versions_cover_packaged_apps() -> None:
     )
 
     assert _string_list(versions) == _EXPECTED_ELECTRON_VERSIONS
+    expect_scope_binding(_electron_helper().output, "sourceBuildFor")
 
 
 def test_central_electron_runtime_hashes_cover_supported_platforms() -> None:

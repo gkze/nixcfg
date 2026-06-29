@@ -10,7 +10,7 @@ from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEventKind
-from lib.update.nix import _build_fetch_from_github_call
+from lib.update.nix import _build_fetch_from_github_call, _build_overlay_expr
 from lib.update.updaters.base import VersionInfo, source_override_env
 
 
@@ -94,7 +94,7 @@ def test_gemini_cli_updater_fetch_hashes(monkeypatch) -> None:
         },
         {
             "name": "gemini-cli",
-            "expr": module._build_overlay_expr("gemini-cli"),
+            "expr": _build_overlay_expr("gemini-cli"),
             "env": source_override_env(
                 "gemini-cli",
                 version=info.version,

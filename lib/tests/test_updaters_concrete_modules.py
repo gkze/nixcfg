@@ -18,7 +18,9 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.paths import REPO_ROOT
+from lib.update.updaters import factories as updater_factories
 from lib.update.updaters.base import VersionInfo, source_override_env
+from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -58,7 +60,13 @@ sentry_cli_module = _module_fixture(
 )
 conductor_module = _module_fixture("packages/conductor/updater.py", "conductor_module")
 droid_module = _module_fixture("packages/droid/updater.py", "droid_module")
+goose_desktop_module = _module_fixture(
+    "packages/goose-desktop/updater.py", "goose_desktop_module"
+)
 scratch_module = _module_fixture("packages/scratch/updater.py", "scratch_module")
+superconductor_module = _module_fixture(
+    "packages/superconductor/updater.py", "superconductor_module"
+)
 tsgolint_module = _module_fixture("overlays/tsgolint/updater.py", "tsgolint_module")
 sculptor_module = _module_fixture("packages/sculptor/updater.py", "sculptor_module")
 neutils_module = _module_fixture("packages/neutils/updater.py", "neutils_module")
@@ -69,17 +77,11 @@ def test_chatgpt_updater_paths(
 ) -> None:
     """Exercise ChatGPT appcast parsing and download URL selection."""
     updater = chatgpt_module.ChatGPTUpdater()
-    xml = (
-        b'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
-        b"<channel><item>"
-        b"<sparkle:shortVersionString>1.2.3</sparkle:shortVersionString>"
-        b'<enclosure url="https://example.com/app.dmg" />'
-        b"</item></channel></rss>"
-    )
 
-    monkeypatch.setattr(
-        chatgpt_module, "fetch_url", lambda *_a, **_k: asyncio.sleep(0, result=xml)
-    )
+    async def _items(*_args: object, **_kwargs: object):
+        return (SparkleAppcastItem("100", "1.2.3", "https://example.com/app.dmg"),)
+
+    monkeypatch.setattr(updater_factories, "fetch_sparkle_appcast_items", _items)
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == "1.2.3"
     assert latest.metadata["url"] == "https://example.com/app.dmg"
@@ -88,51 +90,238 @@ def test_chatgpt_updater_paths(
         updater.get_download_url("x86_64-darwin", latest)
         == "https://example.com/app.dmg"
     )
+
+    async def _missing_url(*_args: object, **_kwargs: object):
+        return (SparkleAppcastItem("100", "1", None),)
+
     monkeypatch.setattr(
-        chatgpt_module, "fetch_url", lambda *_a, **_k: asyncio.sleep(0, result=b"<")
+        updater_factories,
+        "fetch_sparkle_appcast_items",
+        _missing_url,
     )
-    with pytest.raises(RuntimeError, match="Invalid appcast XML"):
+    with pytest.raises(RuntimeError, match="Missing download URL"):
         _run(updater.fetch_latest(object()))
 
-    no_item = b"<rss><channel></channel></rss>"
+
+def test_goose_desktop_updater_uses_goose_cli_source_file(
+    goose_desktop_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Goose desktop should follow the overlay-managed Goose CLI source version."""
+    updater = goose_desktop_module.GooseDesktopUpdater()
+    assert updater.companion_of == "goose-cli"
+    source_file = tmp_path / "sources.json"
+    entry = SourceEntry.model_validate({"version": "1.37.0", "hashes": []})
+
     monkeypatch.setattr(
-        chatgpt_module, "fetch_url", lambda *_a, **_k: asyncio.sleep(0, result=no_item)
+        goose_desktop_module,
+        "sources_file_for",
+        lambda name: source_file if name == "goose-cli" else None,
     )
-    with pytest.raises(RuntimeError, match="No items found"):
+    monkeypatch.setattr(
+        goose_desktop_module.update_sources,
+        "load_source_entry",
+        lambda path: entry if path == source_file else None,
+    )
+
+    assert _run(updater.fetch_latest(object())).version == "1.37.0"
+
+    monkeypatch.setattr(goose_desktop_module, "sources_file_for", lambda _name: None)
+    with pytest.raises(RuntimeError, match="goose-cli sources.json was not found"):
         _run(updater.fetch_latest(object()))
 
-    no_version = b"<rss><channel><item><enclosure url='x'/></item></channel></rss>"
+    missing_version = SourceEntry.model_validate({"hashes": []})
     monkeypatch.setattr(
-        chatgpt_module,
-        "fetch_url",
-        lambda *_a, **_k: asyncio.sleep(0, result=no_version),
+        goose_desktop_module,
+        "sources_file_for",
+        lambda name: source_file if name == "goose-cli" else None,
     )
-    with pytest.raises(RuntimeError, match="No version found"):
+    monkeypatch.setattr(
+        goose_desktop_module.update_sources,
+        "load_source_entry",
+        lambda _path: missing_version,
+    )
+    with pytest.raises(RuntimeError, match="missing a pinned version"):
         _run(updater.fetch_latest(object()))
 
-    no_enclosure = (
-        b'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
-        b"<channel><item><sparkle:shortVersionString>1</sparkle:shortVersionString>"
-        b"</item></channel></rss>"
-    )
-    monkeypatch.setattr(
-        chatgpt_module,
-        "fetch_url",
-        lambda *_a, **_k: asyncio.sleep(0, result=no_enclosure),
-    )
-    with pytest.raises(RuntimeError, match="No enclosure found"):
-        _run(updater.fetch_latest(object()))
 
-    no_url = (
-        b'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
-        b"<channel><item><sparkle:shortVersionString>1</sparkle:shortVersionString>"
-        b"<enclosure /></item></channel></rss>"
-    )
+def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
+    goose_desktop_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dependency hash should target the package's fixed-output pnpm deps."""
+    updater = goose_desktop_module.GooseDesktopUpdater()
+    captured: dict[str, object] = {}
+
+    async def _fake_compute_fixed_output_hash(
+        source: str,
+        expr: str,
+        *,
+        env: dict[str, str] | None = None,
+        config: object | None = None,
+    ) -> EventStream:
+        captured.update({"source": source, "expr": expr, "env": env, "config": config})
+        yield UpdateEvent.value(source, HASH_A)
+
     monkeypatch.setattr(
-        chatgpt_module, "fetch_url", lambda *_a, **_k: asyncio.sleep(0, result=no_url)
+        goose_desktop_module,
+        "_base_module",
+        lambda: SimpleNamespace(
+            compute_fixed_output_hash=_fake_compute_fixed_output_hash
+        ),
     )
-    with pytest.raises(RuntimeError, match="No URL found"):
-        _run(updater.fetch_latest(object()))
+
+    events = _run(_collect(updater.fetch_hashes(VersionInfo("1.37.0"), object())))
+    payload = _require_hash_entries(events[-1].payload)
+    assert payload == [
+        HashEntry.create("nodeModulesHash", HASH_A),
+    ]
+    assert captured["source"] == "goose-desktop"
+    env = expect_instance(captured["env"], dict)
+    override_payload = json.loads(env["UPDATE_SOURCE_OVERRIDES_JSON"])
+    assert override_payload == {
+        "goose-desktop": {
+            "version": "1.37.0",
+            "hashes": [
+                {
+                    "hashType": "nodeModulesHash",
+                    "hash": updater.config.fake_hash,
+                    "platform": "aarch64-darwin",
+                }
+            ],
+        }
+    }
+    assert 'packages."aarch64-darwin"."goose-desktop".pnpmDeps' in str(captured["expr"])
+
+    result = updater.build_result(VersionInfo("1.37.0"), payload)
+    assert result.version == "1.37.0"
+    assert result.hashes.entries == [
+        HashEntry.create(
+            "nodeModulesHash",
+            HASH_A,
+            platform="aarch64-darwin",
+        )
+    ]
+
+    with pytest.raises(RuntimeError, match="expected structured hash entries"):
+        updater.build_result(VersionInfo("1.37.0"), {"aarch64-darwin": HASH_A})
+
+
+class _FakeHeadResponse:
+    def __init__(
+        self,
+        *,
+        status: int,
+        url: str,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.status = status
+        self.url = url
+        self.headers = headers or {}
+
+    async def __aenter__(self) -> _FakeHeadResponse:
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+class _FakeHeadSession:
+    def __init__(self, responses: list[_FakeHeadResponse]) -> None:
+        self.responses = responses
+        self.calls: list[dict[str, object]] = []
+
+    def head(
+        self,
+        url: str,
+        *,
+        allow_redirects: bool,
+        timeout: object,
+    ) -> _FakeHeadResponse:
+        self.calls.append({
+            "url": url,
+            "allow_redirects": allow_redirects,
+            "timeout": timeout,
+        })
+        return self.responses.pop(0)
+
+
+def test_superconductor_updater_resolves_nightly_redirect(
+    superconductor_module: ModuleType,
+) -> None:
+    """Superconductor should follow the mutable download endpoint to a stable URL."""
+    updater = superconductor_module.SuperconductorUpdater()
+    url = (
+        "https://releases.superconductor.so/nightly/"
+        "Superconductor-nightly-9bd387bf-arm64.dmg?signature=ignored"
+    )
+    session = _FakeHeadSession([
+        _FakeHeadResponse(
+            status=200,
+            url=url,
+            headers={"Last-Modified": "Fri, 12 Jun 2026 16:42:50 GMT"},
+        )
+    ])
+
+    latest = _run(updater.fetch_latest(session))
+
+    resolved_url = url.removesuffix("?signature=ignored")
+    assert latest.version == "2026-06-12-9bd387bf"
+    assert latest.metadata["asset_urls"] == {"aarch64-darwin": resolved_url}
+    assert updater.get_download_url("aarch64-darwin", latest) == resolved_url
+    assert session.calls[0]["url"] == updater.DISCOVERY_URL
+    assert session.calls[0]["allow_redirects"] is True
+
+
+def test_superconductor_updater_rejects_bad_metadata(
+    superconductor_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invalid Superconductor redirect metadata should fail before hashing."""
+    updater = superconductor_module.SuperconductorUpdater()
+
+    with pytest.raises(RuntimeError, match="Could not parse"):
+        updater._version_from_url(
+            "https://example.com/Superconductor-nightly-arm64.dmg",
+            "Fri, 12 Jun 2026 16:42:50 GMT",
+        )
+    with pytest.raises(RuntimeError, match="Missing Last-Modified"):
+        updater._version_from_url(
+            "https://example.com/Superconductor-nightly-9bd387bf-arm64.dmg",
+            None,
+        )
+
+    failing_session = _FakeHeadSession([
+        _FakeHeadResponse(
+            status=500,
+            url="https://example.com/failure.dmg",
+        )
+    ])
+    with pytest.raises(RuntimeError, match="failed with HTTP 500"):
+        _run(updater._fetch_resolved_artifact(failing_session, "aarch64-darwin"))
+
+    monkeypatch.setattr(
+        superconductor_module.SuperconductorUpdater,
+        "PLATFORMS",
+        {"aarch64-darwin": "arm64", "x86_64-darwin": "x64"},
+    )
+    mismatch_session = _FakeHeadSession([
+        _FakeHeadResponse(
+            status=200,
+            url=(
+                "https://releases.superconductor.so/nightly/"
+                "Superconductor-nightly-9bd387bf-arm64.dmg"
+            ),
+            headers={"Last-Modified": "Fri, 12 Jun 2026 16:42:50 GMT"},
+        ),
+        _FakeHeadResponse(
+            status=200,
+            url=(
+                "https://releases.superconductor.so/nightly/"
+                "Superconductor-nightly-deadbeef-x64.dmg"
+            ),
+            headers={"Last-Modified": "Fri, 12 Jun 2026 16:42:50 GMT"},
+        ),
+    ])
+    with pytest.raises(RuntimeError, match="mismatched versions"):
+        _run(updater.fetch_latest(mismatch_session))
 
 
 def test_code_cursor_updater_paths(
@@ -279,19 +468,17 @@ def test_netnewswire_updater_paths(
 ) -> None:
     """Exercise NetNewsWire appcast parsing and download URL selection."""
     updater = netnewswire_module.NetNewsWireUpdater()
-    xml = (
-        b'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
-        b"<channel><item>"
-        b'<enclosure url="https://example.com/NetNewsWire.zip" '
-        b'sparkle:shortVersionString="6.2.1" />'
-        b"</item></channel></rss>"
-    )
 
-    monkeypatch.setattr(
-        netnewswire_module,
-        "fetch_url",
-        lambda *_a, **_k: asyncio.sleep(0, result=xml),
-    )
+    async def _items(*_args: object, **_kwargs: object):
+        return (
+            SparkleAppcastItem(
+                "100",
+                "6.2.1",
+                "https://example.com/NetNewsWire.zip",
+            ),
+        )
+
+    monkeypatch.setattr(updater_factories, "fetch_sparkle_appcast_items", _items)
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == "6.2.1"
     assert latest.metadata["url"] == "https://example.com/NetNewsWire.zip"
@@ -300,52 +487,27 @@ def test_netnewswire_updater_paths(
         updater.get_download_url("aarch64-darwin", latest)
         == "https://example.com/NetNewsWire.zip"
     )
+
+    async def _missing_version(*_args: object, **_kwargs: object):
+        return (SparkleAppcastItem("100", None, "https://example.com/app.zip"),)
+
     monkeypatch.setattr(
-        netnewswire_module,
-        "fetch_url",
-        lambda *_a, **_k: asyncio.sleep(0, result=b"<"),
+        updater_factories,
+        "fetch_sparkle_appcast_items",
+        _missing_version,
     )
-    with pytest.raises(RuntimeError, match="Invalid appcast XML"):
+    with pytest.raises(RuntimeError, match="Missing version"):
         _run(updater.fetch_latest(object()))
 
-    no_item = b"<rss><channel></channel></rss>"
-    monkeypatch.setattr(
-        netnewswire_module,
-        "fetch_url",
-        lambda *_a, **_k: asyncio.sleep(0, result=no_item),
-    )
-    with pytest.raises(RuntimeError, match="No items found"):
-        _run(updater.fetch_latest(object()))
+    async def _missing_url(*_args: object, **_kwargs: object):
+        return (SparkleAppcastItem("100", "6.2.1", None),)
 
-    no_enclosure = b"<rss><channel><item /></channel></rss>"
     monkeypatch.setattr(
-        netnewswire_module,
-        "fetch_url",
-        lambda *_a, **_k: asyncio.sleep(0, result=no_enclosure),
+        updater_factories,
+        "fetch_sparkle_appcast_items",
+        _missing_url,
     )
-    with pytest.raises(RuntimeError, match="No enclosure found"):
-        _run(updater.fetch_latest(object()))
-
-    no_version = b"<rss><channel><item><enclosure url='x'/></item></channel></rss>"
-    monkeypatch.setattr(
-        netnewswire_module,
-        "fetch_url",
-        lambda *_a, **_k: asyncio.sleep(0, result=no_version),
-    )
-    with pytest.raises(RuntimeError, match="No version found in appcast enclosure"):
-        _run(updater.fetch_latest(object()))
-
-    no_url = (
-        b'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
-        b"<channel><item><enclosure sparkle:shortVersionString='6.2.1' />"
-        b"</item></channel></rss>"
-    )
-    monkeypatch.setattr(
-        netnewswire_module,
-        "fetch_url",
-        lambda *_a, **_k: asyncio.sleep(0, result=no_url),
-    )
-    with pytest.raises(RuntimeError, match="No URL found"):
+    with pytest.raises(RuntimeError, match="Missing download URL"):
         _run(updater.fetch_latest(object()))
 
 

@@ -94,7 +94,6 @@ let
         "goose-desktop"
         "google-drive"
         "jacq"
-        "lm-studio"
         "logi-options-plus"
         "macfuse"
         "nordvpn"

@@ -210,7 +210,6 @@
         jacq.package = pkgs.jacq;
         keepingyouawake.package = pkgs.keepingyouawake;
         linear.package = pkgs.linear;
-        "lm-studio".package = pkgs.lm-studio;
         "logi-options-plus".package = pkgs.logi-options-plus;
         loom.package = pkgs.loom;
         macai.package = pkgs.macai;

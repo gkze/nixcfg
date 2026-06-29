@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._zen_tooling import load_zen_script_module
+from lib.tests._zen_tooling import load_zentool_module, make_session_entry
+from lib.tests._zen_tooling import make_session_tab as make_zentool_tab
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 @pytest.fixture(scope="module")
 def zentool() -> ModuleType:
     """Load the zentool script for model and helper testing."""
-    return load_zen_script_module("zentool", "zentool_models")
+    return load_zentool_module("zentool_models")
 
 
 def make_session_tab(
@@ -27,9 +28,11 @@ def make_session_tab(
     sync_id: str,
 ) -> object:
     """Build one minimal session tab with an active URL."""
-    return zentool.SessionTab(
-        entries=[zentool.SessionEntry(url=url, title="Tab")],
-        zenSyncId=sync_id,
+    return make_zentool_tab(
+        zentool,
+        entries=[make_session_entry(zentool, url=url, title="Tab")],
+        sync_id=sync_id,
+        hidden=False,
     )
 
 
@@ -186,6 +189,35 @@ def test_session_state_normalizes_nullable_folder_links(
     assert state.folders[1].prev_sibling_info == zentool.PrevSiblingInfo(
         type="group", id="group-1"
     )
+
+
+def test_session_models_preserve_only_json_shaped_opaque_fields(
+    zentool: ModuleType,
+) -> None:
+    """Opaque Zen fields should be preserved but still runtime-validated as JSON."""
+    state = zentool.SessionState.model_validate({
+        "tabs": [
+            {
+                "zenSyncId": "tab-1",
+                "searchMode": {"kind": "url", "enabled": True},
+                "attributes": {"nested": ["value", 1, None]},
+                "opaqueTabField": {"ok": [False]},
+            }
+        ],
+        "opaqueRootField": {"count": 1},
+    })
+
+    assert state.model_extra == {"opaqueRootField": {"count": 1}}
+    assert state.tabs[0].model_extra == {"opaqueTabField": {"ok": [False]}}
+
+    with pytest.raises(zentool.ValidationError):
+        zentool.SessionState.model_validate({"opaqueRootField": object()})
+
+    with pytest.raises(zentool.ValidationError):
+        zentool.SessionTab.model_validate({
+            "zenSyncId": "tab-1",
+            "attributes": {"notJson": object()},
+        })
 
 
 def test_tab_pool_indexes_tabs_by_active_url_and_claims_in_order(

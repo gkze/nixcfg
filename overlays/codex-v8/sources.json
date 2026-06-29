@@ -1,22 +1,22 @@
 {
   "hashes": [
     {
-      "hash": "sha256-Cd3vbFEZKv/wVBExoO+cAPgxhdI5HaqxgDgqOr82rJU=",
+      "hash": "sha256-iu2YY323533Iv7i7R1nsW95HLQv3lD9Y4OYqNQlFxVk=",
       "hashType": "rustyV8ArchiveHash",
       "platform": "x86_64-linux",
-      "url": "https://github.com/denoland/rusty_v8/releases/download/v147.4.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz"
+      "url": "https://github.com/denoland/rusty_v8/releases/download/v149.2.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz"
     },
     {
-      "hash": "sha256-Cd7niar3f7PV3OxVamLnijQsxKAvjPNuD0hUL3ZFvzk=",
+      "hash": "sha256-XbPsB4NTHRKGKj843VpnknNVDmeWImC4HwfmEqaKDCQ=",
       "hashType": "rustyV8BindingHash",
       "platform": "x86_64-linux",
-      "url": "https://github.com/denoland/rusty_v8/releases/download/v147.4.0/src_binding_release_x86_64-unknown-linux-gnu.rs"
+      "url": "https://github.com/denoland/rusty_v8/releases/download/v149.2.0/src_binding_release_x86_64-unknown-linux-gnu.rs"
     },
     {
-      "hash": "sha256-cS9oBDY2+9RtdqPuOadNl0Lce89ESpBb1qPiWSHPiCg=",
+      "hash": "sha256-OAwfrSU1bu80+qcseUHtScVLZCTe9mY3NEfq0+hmVMg=",
       "hashType": "srcHash"
     }
   ],
   "input": "codex-v8",
-  "version": "v147.4.0"
+  "version": "v149.2.0"
 }

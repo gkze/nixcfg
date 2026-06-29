@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-S+2mf2WTsJcYxLu18A5qfKd7T6wQEHsnJUzTO4CsWyk=",
-    "x86_64-darwin": "sha256-0KyU8b60dEBNOHXzKxGhwcQjPGBWNVnQxY/uVDn+NYs="
+    "aarch64-darwin": "sha256-u9ekASPiS4/bczxru8aCZpYw5lpmBIoLMKtQL30JBqA=",
+    "x86_64-darwin": "sha256-WoYk4XZvrMiYM1FYbgXFrqpvmQsSNFPa2yEOLE+f+yg="
   },
   "urls": {
-    "aarch64-darwin": "https://updates.framer.com/electron/darwin/arm64/Framer-2026.12.6.zip",
-    "x86_64-darwin": "https://updates.framer.com/electron/darwin/x64/Framer-2026.12.6.zip"
+    "aarch64-darwin": "https://updates.framer.com/electron/darwin/arm64/Framer-2026.24.3.zip",
+    "x86_64-darwin": "https://updates.framer.com/electron/darwin/x64/Framer-2026.24.3.zip"
   },
-  "version": "2026.12.6"
+  "version": "2026.24.3"
 }

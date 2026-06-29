@@ -12,12 +12,14 @@ from lib.tests._updater_helpers import install_fixed_hash_stream
 from lib.tests._updater_helpers import load_repo_module as _load_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEvent, UpdateEventKind
+from lib.update.updaters import factories as updater_factories
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.metadata import (
     DownloadUrlMetadata,
     PlatformAPIMetadata,
     ReleasePayloadMetadata,
 )
+from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
 HASH_A = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 HASH_B = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
@@ -26,30 +28,26 @@ HASH_B = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 def test_chatgpt_fetch_latest_passes_expected_request_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ChatGPT should fetch the Sparkle appcast with the expected client settings."""
+    """ChatGPT should select its Sparkle short version and appcast URL."""
     module = _load_module("overlays/chatgpt/updater.py", "chatgpt_lane_test")
     updater = module.ChatGPTUpdater()
     captured: dict[str, object] = {}
 
-    async def _fetch_url(
-        session, url: str, *, user_agent: str, timeout: object, config
-    ):
+    async def _fetch_items(session: object, url: str, *, config: object):
         captured.update({
             "session": session,
             "url": url,
-            "user_agent": user_agent,
-            "timeout": timeout,
             "config": config,
         })
         return (
-            b'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
-            b"<channel><item>"
-            b"<sparkle:shortVersionString>1.2.3</sparkle:shortVersionString>"
-            b'<enclosure url="https://example.com/chatgpt.dmg" />'
-            b"</item></channel></rss>"
+            SparkleAppcastItem(
+                "100",
+                "1.2.3",
+                "https://example.com/chatgpt.dmg",
+            ),
         )
 
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(updater_factories, "fetch_sparkle_appcast_items", _fetch_items)
 
     session = object()
     latest = _run(updater.fetch_latest(session))
@@ -59,8 +57,6 @@ def test_chatgpt_fetch_latest_passes_expected_request_options(
     assert captured == {
         "session": session,
         "url": updater.APPCAST_URL,
-        "user_agent": "Sparkle/2.0",
-        "timeout": updater.config.default_timeout,
         "config": updater.config,
     }
 
@@ -81,46 +77,41 @@ def test_chatgpt_get_download_url_requires_typed_metadata() -> None:
         == "https://example.com/chatgpt.dmg"
     )
 
-    with pytest.raises(RuntimeError, match="Missing ChatGPT download URL"):
+    with pytest.raises(TypeError, match="Expected string field 'url' in ChatGPT"):
         updater.get_download_url(
             "aarch64-darwin",
-            VersionInfo(
-                version="1.2.3", metadata={"url": "https://example.com/chatgpt.dmg"}
-            ),
+            VersionInfo(version="1.2.3", metadata=object()),
         )
 
 
-def test_chatgpt_parser_helpers_reject_missing_appcast_fields() -> None:
-    """ChatGPT helper methods should reject malformed appcast structures."""
+def test_chatgpt_factory_rejects_missing_appcast_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ChatGPT should fail through the shared Sparkle field validators."""
     module = _load_module("overlays/chatgpt/updater.py", "chatgpt_lane_helpers")
     updater = module.ChatGPTUpdater()
 
-    with pytest.raises(RuntimeError, match="Invalid appcast XML"):
-        updater._parse_appcast("<")
+    async def _missing_version(*_args: object, **_kwargs: object):
+        return (SparkleAppcastItem("100", None, "https://example.com/app.dmg"),)
 
-    with pytest.raises(RuntimeError, match="No items found in appcast"):
-        updater._extract_item(updater._parse_appcast("<rss><channel /></rss>"))
+    monkeypatch.setattr(
+        updater_factories,
+        "fetch_sparkle_appcast_items",
+        _missing_version,
+    )
+    with pytest.raises(RuntimeError, match="Missing version"):
+        _run(updater.fetch_latest(object()))
 
-    item_without_version = updater._parse_appcast(
-        "<rss><channel><item><enclosure url='https://example.com/app.dmg' /></item></channel></rss>"
-    ).find("./channel/item")
-    assert item_without_version is not None
-    with pytest.raises(RuntimeError, match="No version found in appcast"):
-        updater._extract_version(item_without_version)
+    async def _missing_url(*_args: object, **_kwargs: object):
+        return (SparkleAppcastItem("100", "1.2.3", None),)
 
-    item_without_enclosure = updater._parse_appcast(
-        "<rss xmlns:sparkle='http://www.andymatuschak.org/xml-namespaces/sparkle'><channel><item><sparkle:shortVersionString>1.2.3</sparkle:shortVersionString></item></channel></rss>"
-    ).find("./channel/item")
-    assert item_without_enclosure is not None
-    with pytest.raises(RuntimeError, match="No enclosure found in appcast"):
-        updater._extract_download_url(item_without_enclosure)
-
-    item_without_url = updater._parse_appcast(
-        "<rss xmlns:sparkle='http://www.andymatuschak.org/xml-namespaces/sparkle'><channel><item><sparkle:shortVersionString>1.2.3</sparkle:shortVersionString><enclosure /></item></channel></rss>"
-    ).find("./channel/item")
-    assert item_without_url is not None
-    with pytest.raises(RuntimeError, match="No URL found in enclosure"):
-        updater._extract_download_url(item_without_url)
+    monkeypatch.setattr(
+        updater_factories,
+        "fetch_sparkle_appcast_items",
+        _missing_url,
+    )
+    with pytest.raises(RuntimeError, match="Missing download URL"):
+        _run(updater.fetch_latest(object()))
 
 
 def test_code_cursor_fetch_checksums_and_download_url_validation(

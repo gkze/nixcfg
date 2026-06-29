@@ -95,7 +95,7 @@ let
         cp -r ${patchedV8Src} $out/vendor/v8-goose-src
         chmod -R u+w $out/vendor/v8-goose-src
 
-        ${prev.lib.getExe prev.python3} ${./patch_source.py} "$out"
+        PYTHONPATH=${../..} ${prev.lib.getExe prev.python3} ${./patch_source.py} "$out"
 
         cp ${./crate-hashes.json} $out/crate-hashes.json
       '';
@@ -148,6 +148,7 @@ let
     CARGO_CFG_TARGET_FEATURE = "";
     CMAKE_BUILD_PARALLEL_LEVEL = "1";
     LIBCLANG_PATH = "${prev.lib.getLib prev.llvmPackages.libclang}/lib";
+    NIX_CC_WRAPPER_SUPPRESS_TARGET_WARNING = "1";
   };
 
   # hipstr 0.6.0's serde path assumes serde_bytes is available; patch the

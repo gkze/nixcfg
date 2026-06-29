@@ -29,12 +29,12 @@ let
     root = fixtures + "/missing";
     fileName = "sources.json";
   };
-  duplicateSidecars = builtins.tryEval (
-    (discovery.discoverSidecarEntries {
-      root = fixtures + "/duplicates";
-      fileName = "sources.json";
-    }).names
-  );
+  duplicateSidecars =
+    builtins.tryEval
+      (discovery.discoverSidecarEntries {
+        root = fixtures + "/duplicates";
+        fileName = "sources.json";
+      }).names;
 
   pathBasenames = builtins.mapAttrs (_: path: builtins.baseNameOf (toString path));
 

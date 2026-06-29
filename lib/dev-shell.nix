@@ -8,18 +8,32 @@
 pkgs:
 let
   hookPriority = 10;
-  nixcfgPkg = if mkNixcfgPackage == null then null else mkNixcfgPackage pkgs;
-  tyPythonFlag = lib.optionalString (
-    nixcfgPkg != null
-  ) " --python ${nixcfgPkg.passthru.venv}/bin/python";
+  nixcfgPkg =
+    if mkNixcfgPackage == null then
+      throw "lib/dev-shell.nix: mkNixcfgPackage is required for uv2nix-managed Python tooling."
+    else
+      mkNixcfgPackage pkgs;
+  nixcfgVenv = nixcfgPkg.passthru.venv;
+  pythonToolBins = pkgs.runCommand "nixcfg-python-tool-bins" { } ''
+    mkdir -p "$out/bin"
+    for tool in ${nixcfgVenv}/bin/*; do
+      name="$(basename "$tool")"
+      [ "$name" = nixcfg ] && continue
+      ln -s "$tool" "$out/bin/$name"
+    done
+  '';
+  pythonExe = "${nixcfgVenv}/bin/python";
+  pyupgradeExe = "${pythonToolBins}/bin/pyupgrade";
+  ruffExe = "${pythonToolBins}/bin/ruff";
+  tyExe = "${pythonToolBins}/bin/ty";
+  tyPythonFlag = " --python ${pythonExe}";
   pythonScriptFindPredicates = lib.concatMapStringsSep " " (
     path: "-o -path './${path}'"
   ) lintFiles.python.pythonScriptPaths;
   oxfmtPatterns = lintFiles.oxfmt.globs ++ map (glob: "!${glob}") lintFiles.oxfmt.excludeGlobs;
 
-  # pyupgrade currently tops out at --py314-plus, but these repo helpers still
-  # need to parse under nixpkgs' generic python3 (3.13 today), so keep the
-  # floor aligned to the real minimum runtime.
+  # Keep the established pyupgrade floor until Python 3.14 rewrites are applied
+  # as an intentional repo-wide formatting migration.
   pythonPyupgradeCheck = pkgs.writeShellScriptBin "check-python-pyupgrade" ''
     set -euo pipefail
 
@@ -28,13 +42,13 @@ let
       -type f \
       \( -name '*.py' -o -name '*.pyi' ${pythonScriptFindPredicates} \) \
       -print0 \
-      | ${pkgs.findutils}/bin/xargs -0 -r ${lib.getExe pkgs.python3} -m lib.fix_python_multi_except --pyupgrade-exe ${lib.getExe pkgs.pyupgrade} --pyupgrade-arg=--py313-plus
+      | ${pkgs.findutils}/bin/xargs -0 -r ${pythonExe} -m lib.fix_python_multi_except --pyupgrade-exe ${pyupgradeExe} --pyupgrade-arg=--py313-plus
   '';
 
   pythonCompileCheck = pkgs.writeShellScriptBin "check-python-compile" ''
     set -euo pipefail
 
-    ${lib.getExe pkgs.python3} ${./check_python_compile.py} ${lib.escapeShellArgs lintFiles.python.compilePaths}
+    ${pythonExe} ${./check_python_compile.py} ${lib.escapeShellArgs lintFiles.python.compilePaths}
   '';
 
   workflowActionlintCheck = pkgs.writeShellScriptBin "check-workflow-actionlint" ''
@@ -132,8 +146,8 @@ let
       format-python-ruff = {
         enable = true;
         name = "format-python-ruff";
-        package = pkgs.ruff;
-        entry = "ruff format --check --config pyproject.toml .";
+        package = pythonToolBins;
+        entry = "${ruffExe} format --check --config pyproject.toml .";
         pass_filenames = false;
         always_run = true;
         priority = hookPriority;
@@ -152,8 +166,8 @@ let
       lint-python-ruff = {
         enable = true;
         name = "lint-python-ruff";
-        package = pkgs.ruff;
-        entry = "ruff check --config pyproject.toml .";
+        package = pythonToolBins;
+        entry = "${ruffExe} check --config pyproject.toml .";
         pass_filenames = false;
         always_run = true;
         priority = hookPriority;
@@ -162,8 +176,8 @@ let
       lint-python-ty = {
         enable = true;
         name = "lint-python-ty";
-        package = pkgs.ty;
-        entry = "ty check${tyPythonFlag} .";
+        package = pythonToolBins;
+        entry = "${tyExe} check${tyPythonFlag} .";
         pass_filenames = false;
         always_run = true;
         priority = hookPriority;
@@ -245,14 +259,12 @@ pkgs.devshell.mkShell {
       nurl
       pinact
       prek
-      pyupgrade
       sops
       taplo
       uv
       yamlfmt
     ]
-    ++ lib.optional (pkgs ? nix-manipulator) nix-manipulator
-    ++ lib.optional (nixcfgPkg != null) nixcfgPkg
+    ++ [ nixcfgPkg ]
     ++ lib.optional pkgs.stdenv.isLinux dconf2nix
     ++ pre-commit-check.enabledPackages;
 

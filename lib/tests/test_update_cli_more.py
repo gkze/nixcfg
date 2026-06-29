@@ -25,6 +25,7 @@ from lib.update.cli import (
     ResolvedTargets,
     UpdateOptions,
     UpdateSummary,
+    _argv_runs_top_level_update,
     _build_item_meta,
     _build_run_plan,
     _build_update_inventory,
@@ -41,6 +42,7 @@ from lib.update.cli import (
     _is_tty,
     _load_pinned_versions,
     _load_sources_for_run,
+    _maybe_reexec_checkout_update,
     _merge_source_updates,
     _persist_generated_artifacts,
     _persist_materialized_updates,
@@ -49,6 +51,7 @@ from lib.update.cli import (
     _resolve_runtime_config,
     _resolve_tty_settings,
     _split_trailing_target_options,
+    _update_library_matches_checkout,
     check_required_tools,
     cli,
     run_update_command,
@@ -93,6 +96,145 @@ from lib.update.updaters.platform_api import PlatformAPIUpdater
 
 def _run_async[T](awaitable: object) -> T:
     return asyncio.run(awaitable)  # type: ignore[arg-type]
+
+
+def _write_update_file(root: Path, relative_path: str, content: str) -> None:
+    path = root / "lib" / "update" / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def test_update_library_matches_checkout_same_and_equal_trees(tmp_path: Path) -> None:
+    """Treat the current update tree and byte-identical copies as compatible."""
+    repo_root = tmp_path / "repo"
+    _write_update_file(repo_root, "cli.py", "VALUE = 1\n")
+
+    assert _update_library_matches_checkout(
+        repo_root,
+        runtime_update_root=repo_root / "lib" / "update",
+    )
+
+    _write_update_file(tmp_path / "runtime-root", "cli.py", "VALUE = 1\n")
+    runtime_root = tmp_path / "runtime-root" / "lib" / "update"
+
+    assert _update_library_matches_checkout(repo_root, runtime_update_root=runtime_root)
+
+
+def test_update_library_detects_missing_or_changed_checkout(tmp_path: Path) -> None:
+    """Reject missing, differently shaped, or content-skewed update libraries."""
+    repo_root = tmp_path / "repo"
+    runtime_source_root = tmp_path / "runtime-root"
+    runtime_root = runtime_source_root / "lib" / "update"
+
+    assert not _update_library_matches_checkout(
+        repo_root,
+        runtime_update_root=runtime_root,
+    )
+
+    _write_update_file(repo_root, "cli.py", "VALUE = 1\n")
+    _write_update_file(runtime_source_root, "other.py", "VALUE = 1\n")
+    assert not _update_library_matches_checkout(
+        repo_root, runtime_update_root=runtime_root
+    )
+
+    (runtime_root / "other.py").unlink()
+    _write_update_file(runtime_source_root, "cli.py", "VALUE = 2\n")
+    assert not _update_library_matches_checkout(
+        repo_root, runtime_update_root=runtime_root
+    )
+
+
+def test_maybe_reexec_checkout_update_skips_non_update_or_matching(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Only top-level update commands with mismatched code trigger re-exec."""
+    monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg", "tree"])
+    assert _maybe_reexec_checkout_update() is None
+
+    monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg", "update"])
+    monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "lib.update.cli._update_library_matches_checkout", lambda _: True
+    )
+    assert _maybe_reexec_checkout_update() is None
+
+
+def test_maybe_reexec_checkout_update_reports_blockers(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Recursion and missing nix produce actionable errors instead of skewed imports."""
+    monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg", "update"])
+    monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "lib.update.cli._update_library_matches_checkout", lambda _: False
+    )
+    monkeypatch.setenv("NIXCFG_UPDATE_REEXECED_FROM_CHECKOUT", "1")
+
+    assert _maybe_reexec_checkout_update() == 1
+    assert "still differs" in capsys.readouterr().err
+
+    monkeypatch.delenv("NIXCFG_UPDATE_REEXECED_FROM_CHECKOUT")
+    monkeypatch.setattr("lib.update.cli.shutil.which", lambda _tool: None)
+
+    assert _maybe_reexec_checkout_update() == 1
+    assert "nix` was not found" in capsys.readouterr().err
+
+
+def test_maybe_reexec_checkout_update_execs_checkout_flake(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Handoff uses the checkout flake and preserves the original update argv."""
+    calls: dict[str, object] = {}
+
+    def _execvpe(file: str, args: list[str], env: dict[str, str]) -> None:
+        calls["file"] = file
+        calls["args"] = args
+        calls["env"] = env
+        raise RuntimeError("exec called")
+
+    monkeypatch.setattr(
+        "lib.update.cli.sys.argv",
+        ["nixcfg", "update", "--check", "t3code"],
+    )
+    monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "lib.update.cli._update_library_matches_checkout", lambda _: False
+    )
+    monkeypatch.setattr("lib.update.cli.shutil.which", lambda _tool: "/bin/nix")
+    monkeypatch.setattr(
+        "lib.update.cli.os.chdir", lambda path: calls.setdefault("cwd", path)
+    )
+    monkeypatch.setattr("lib.update.cli.os.execvpe", _execvpe)
+
+    with pytest.raises(RuntimeError, match="exec called"):
+        _maybe_reexec_checkout_update()
+
+    assert calls["cwd"] == tmp_path
+    assert calls["file"] == "/bin/nix"
+    assert calls["args"] == [
+        "/bin/nix",
+        "run",
+        ".#nixcfg",
+        "--",
+        "update",
+        "--check",
+        "t3code",
+    ]
+    assert (
+        cast("dict[str, str]", calls["env"])["NIXCFG_UPDATE_REEXECED_FROM_CHECKOUT"]
+        == "1"
+    )
+
+
+def test_argv_runs_top_level_update() -> None:
+    """Recognize only top-level nixcfg update invocations."""
+    assert _argv_runs_top_level_update(["nixcfg", "update"])
+    assert not _argv_runs_top_level_update(["nixcfg"])
+    assert not _argv_runs_top_level_update(["nixcfg", "ci", "update"])
 
 
 def test_build_update_options_and_required_tools(

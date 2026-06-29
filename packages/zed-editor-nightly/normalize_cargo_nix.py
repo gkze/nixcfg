@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 import os
 import re
 import sys
@@ -37,6 +36,10 @@ def _bootstrap_repo_import_path() -> None:
 _bootstrap_repo_import_path()
 
 from lib.cargo_nix_normalizer import normalize as normalize_cargo_nix  # noqa: E402
+from lib.cargo_nix_normalizer_cli import (  # noqa: E402
+    resolve_path as resolve_cli_path,
+)
+from lib.cargo_nix_normalizer_cli import run_normalizer  # noqa: E402
 from lib.update.paths import get_repo_root  # noqa: E402
 
 _STORE_SOURCE_PATTERN = re.compile(
@@ -46,10 +49,7 @@ _STORE_SOURCE_PATTERN = re.compile(
 
 def _resolve_path(path_text: str) -> Path:
     """Resolve one CLI path against the repository root."""
-    path = Path(path_text).expanduser()
-    if path.is_absolute():
-        return path
-    return get_repo_root() / path
+    return resolve_cli_path(path_text, repo_root=get_repo_root())
 
 
 def normalize(text: str) -> tuple[str, int, bool]:
@@ -61,29 +61,15 @@ def normalize(text: str) -> tuple[str, int, bool]:
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Normalize a Zed Cargo.nix file in place and report what changed."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "path",
-        nargs="?",
-        default=str(get_repo_root() / "packages/zed-editor-nightly/Cargo.nix"),
+    return run_normalizer(
+        normalize=normalize,
+        default_path="packages/zed-editor-nightly/Cargo.nix",
+        description=__doc__,
+        argv=argv,
+        repo_root=get_repo_root(),
     )
-    args = parser.parse_args()
-
-    path = _resolve_path(args.path)
-    original = path.read_text()
-    normalized, path_rewrites, added_root_src = normalize(original)
-
-    if normalized != original:
-        path.write_text(normalized)
-
-    status = []
-    status.append("added rootSrc" if added_root_src else "rootSrc already present")
-    status.append(f"rewrote {path_rewrites} source path(s)")
-    status.append("updated file" if normalized != original else "no content change")
-    sys.stdout.write(f"{path}: " + ", ".join(status) + "\n")
-    return 0
 
 
 if __name__ == "__main__":

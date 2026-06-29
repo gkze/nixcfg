@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from lib.codemods.text import replace_file_once
+
 OLD = '"<!@(node -p \\"require(\'node-addon-api\').include\\")"'
 NEW = '"../../node-addon-api"'
 
@@ -22,7 +24,7 @@ def main() -> int:
         text = path.read_text(encoding="utf-8")
         if OLD not in text:
             continue
-        path.write_text(text.replace(OLD, NEW), encoding="utf-8")
+        replace_file_once(path, OLD, NEW, context=str(path))
         patched.append(path)
 
     if patched:

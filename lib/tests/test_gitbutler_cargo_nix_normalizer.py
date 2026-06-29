@@ -94,6 +94,103 @@ def test_normalize_disambiguates_registry_gix_trace_metadata() -> None:
     assert_nix_ast_equal(normalized_again, expected)
 
 
+def test_normalize_disambiguates_registry_gix_validate_metadata() -> None:
+    """Duplicate gix-validate sources should not collide in target/deps."""
+    module = _load_normalizer_module()
+    sample = r"""
+{ rootSrc ? ./. }:
+{
+  crates = {
+      "gix-path 0.11.3" = rec {
+        crateName = "gix-path";
+        dependencies = [
+          {
+            name = "gix-validate";
+            packageId = "registry+https://github.com/rust-lang/crates.io-index#gix-validate@0.11.2";
+          }
+        ];
+      };
+
+      "git+https://github.com/GitoxideLabs/gitoxide?rev=abc#gix-validate@0.11.2" = rec {
+        crateName = "gix-validate";
+        version = "0.11.2";
+        libName = "gix_validate";
+      };
+
+      "registry+https://github.com/rust-lang/crates.io-index#gix-validate@0.11.2" = rec {
+        crateName = "gix-validate";
+        version = "0.11.2";
+        edition = "2024";
+        sha256 = "1qzs9bzb0x48ggzbfr1vh9m1q9bnc3xr2yzls9yblqs03ivzrikv";
+        libName = "gix_validate";
+        dependencies = [
+          {
+            name = "bstr";
+            packageId = "bstr";
+          }
+        ];
+
+      };
+  };
+}
+"""
+    expected = r"""
+{ rootSrc ? ./. }:
+{
+  crates = {
+      "gix-path 0.11.3" = rec {
+        crateName = "gix-path";
+        dependencies = [
+          {
+            name = "gix-validate";
+            packageId = "registry+https://github.com/rust-lang/crates.io-index#gix-validate@0.11.2";
+            features = [ "crate2nix-source-registry" ];
+          }
+        ];
+      };
+
+      "git+https://github.com/GitoxideLabs/gitoxide?rev=abc#gix-validate@0.11.2" = rec {
+        crateName = "gix-validate";
+        version = "0.11.2";
+        libName = "gix_validate";
+      };
+
+      "registry+https://github.com/rust-lang/crates.io-index#gix-validate@0.11.2" = rec {
+        crateName = "gix-validate";
+        version = "0.11.2";
+        edition = "2024";
+        sha256 = "1qzs9bzb0x48ggzbfr1vh9m1q9bnc3xr2yzls9yblqs03ivzrikv";
+        libName = "gix_validate";
+        dependencies = [
+          {
+            name = "bstr";
+            packageId = "bstr";
+          }
+        ];
+
+        features = {
+          "crate2nix-source-registry" = [ ];
+        };
+        resolvedDefaultFeatures = [ "crate2nix-source-registry" ];
+      };
+  };
+}
+"""
+
+    normalized, rewrites, added_root_src = module.normalize(sample)
+
+    assert rewrites == 0
+    assert added_root_src is False
+    assert_nix_ast_equal(normalized, expected)
+
+    normalized_again, rewrites_again, added_root_src_again = module.normalize(
+        normalized
+    )
+    assert rewrites_again == 0
+    assert added_root_src_again is False
+    assert_nix_ast_equal(normalized_again, expected)
+
+
 def test_normalize_restores_gitbutler_tauri_builtin_but_dependency() -> None:
     """The builtin-but feature should have its optional but dependency edge."""
     module = _load_normalizer_module()

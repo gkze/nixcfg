@@ -142,16 +142,20 @@ def test_emdash_uses_central_electron_runtime_and_keeps_platform_surface() -> No
     derivation = _emdash_derivation()
 
     assert_nix_ast_equal(
+        expect_scope_binding(derivation, "electronBuild").value,
+        "nixcfgElectron.sourceBuildFor electronVersion",
+    )
+    assert_nix_ast_equal(
         expect_scope_binding(derivation, "electronRuntime").value,
-        "nixcfgElectron.runtimeFor electronVersion",
+        "electronBuild.runtime",
     )
     assert_nix_ast_equal(
         expect_scope_binding(derivation, "electronHeaders").value,
-        "electronRuntime.passthru.headers",
+        "electronBuild.headers",
     )
     assert_nix_ast_equal(
         expect_scope_binding(derivation, "electronDist").value,
-        "electronRuntime.passthru.dist",
+        "electronBuild.dist",
     )
     assert_nix_ast_equal(
         expect_scope_binding(derivation, "supportedSystems").value,

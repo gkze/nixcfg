@@ -31,6 +31,7 @@ from lib.update.events import (
     gather_event_streams,
     require_value,
 )
+from lib.update.nix import _build_overlay_expr
 from lib.update.updaters.metadata import metadata_get, require_metadata_str
 
 if TYPE_CHECKING:
@@ -96,6 +97,7 @@ class UpdateContext:
 
     current: SourceEntry | None
     drv_fingerprint: str | None = None
+    dry_run: bool = False
     generated_artifacts: dict[Path, str] = field(default_factory=dict)
     hashes_fully_computed: bool = True
 
@@ -246,6 +248,40 @@ async def stream_source_then_overlay_hashes(
         config=config,
     ):
         yield event
+
+
+class SourceThenOverlayHashMixin:
+    """Mixin for updaters that hash src first, then one overlay dependency output."""
+
+    name: str
+    config: UpdateConfig
+    dependency_hash_type: ClassVar[HashType]
+
+    @staticmethod
+    @abstractmethod
+    def _src_expr(version: str) -> str:
+        """Build the fixed-output source expression for version."""
+        raise NotImplementedError
+
+    async def fetch_hashes(
+        self,
+        info: VersionInfo,
+        session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
+    ) -> EventStream:
+        """Compute source and dependency fixed-output hashes."""
+        _ = (session, context)
+
+        async for event in stream_source_then_overlay_hashes(
+            self.name,
+            version=info.version,
+            src_expr=self._src_expr(info.version),
+            overlay_expr=_build_overlay_expr(self.name),
+            dependency_hash_type=self.dependency_hash_type,
+            config=self.config,
+        ):
+            yield event
 
 
 class Updater(ABC):
@@ -699,6 +735,7 @@ __all__ = [
     "DownloadUrlMetadataUpdater",
     "FixedOutputHashStep",
     "HashEntryUpdater",
+    "SourceThenOverlayHashMixin",
     "UpdateContext",
     "Updater",
     "_call_with_optional_context",
@@ -707,5 +744,6 @@ __all__ = [
     "_ensure_str_mapping",
     "_verify_platform_versions",
     "stream_fixed_output_hashes",
+    "stream_source_then_overlay_hashes",
     "stream_url_hash_mapping",
 ]

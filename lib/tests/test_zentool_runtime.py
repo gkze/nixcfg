@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._zen_tooling import load_zen_script_module
+from lib.tests._zen_tooling import load_zentool_module
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 @pytest.fixture(scope="module")
 def zentool() -> ModuleType:
     """Load the zentool script for direct runtime-helper testing."""
-    return load_zen_script_module("zentool", "zentool_runtime_helpers")
+    return load_zentool_module("zentool_runtime_helpers")
 
 
 def write_profiles_ini(path: Path, content: str) -> None:
@@ -101,12 +101,91 @@ def test_profiles_from_ini_resolves_relative_and_absolute_paths(
     ]
 
 
-def test_default_profile_dir_prefers_install_default(
+def test_zen_running_profile_dirs_matches_known_profile_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     zentool: ModuleType,
 ) -> None:
-    """Install-level defaults should win before profile flags or directory fallback."""
+    """Process scanning should return unique known profile directories."""
+    profiles_dir = tmp_path / "Profiles"
+    dormant = profiles_dir / "dormant.Default (twilight)"
+    prefix = profiles_dir / "prefix"
+    prefix_extra = profiles_dir / "prefix-extra"
+    running = profiles_dir / "running.Default (twilight)"
+    dormant.mkdir(parents=True)
+    prefix.mkdir()
+    prefix_extra.mkdir()
+    running.mkdir()
+    monkeypatch.setattr(zentool, "ZEN_PROFILES", profiles_dir)
+
+    def fake_run(_command: list[str], *, capture: bool) -> str:
+        assert capture is True
+        return (
+            "/Applications/Twilight.app/Contents/MacOS/zen\n"
+            f"other-process {dormant}\n"
+            f"plugin-container -profile {running} org.mozilla.machname.1\n"
+            f"gpu-helper -profile {running} org.mozilla.machname.2\n"
+            f"plugin-container -profile {prefix_extra} org.mozilla.machname.3\n"
+            f"other-process {tmp_path / 'Profiles/missing'}\n"
+        )
+
+    monkeypatch.setattr(zentool, "subprocess_run", fake_run)
+
+    assert zentool.zen_running_profile_dirs() == [running, prefix_extra]
+
+
+def test_zen_running_profile_dirs_reports_unknown_on_ps_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Failed process inspection should preserve uncertainty for callers."""
+    profiles_dir = tmp_path / "Profiles"
+    (profiles_dir / "default").mkdir(parents=True)
+    monkeypatch.setattr(zentool, "ZEN_PROFILES", profiles_dir)
+
+    def raise_run(_command: list[str], *, capture: bool) -> str:
+        raise zentool.ZenFoldersError("ps failed")
+
+    monkeypatch.setattr(zentool, "subprocess_run", raise_run)
+
+    assert zentool.zen_running_profile_dirs() is None
+
+
+def test_default_profile_dir_prefers_single_running_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """The active browser profile should win over stale install defaults."""
+    app_support = tmp_path / "app-support"
+    profiles_dir = app_support / "Profiles"
+    install_default = profiles_dir / "install-default"
+    running = profiles_dir / "running.Default (twilight)"
+    install_default.mkdir(parents=True)
+    running.mkdir()
+    profiles_ini = app_support / "profiles.ini"
+    write_profiles_ini(
+        profiles_ini,
+        """
+        [Install123]
+        Default = Profiles/install-default
+        """,
+    )
+    monkeypatch.setattr(zentool, "ZEN_APPLICATION_SUPPORT", app_support)
+    monkeypatch.setattr(zentool, "ZEN_PROFILES", profiles_dir)
+    monkeypatch.setattr(zentool, "PROFILES_INI", profiles_ini)
+    monkeypatch.setattr(zentool, "zen_running_profile_dirs", lambda: [running])
+
+    assert zentool._default_profile_dir() == running
+
+
+def test_default_profile_dir_falls_back_to_install_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Install defaults should win when no single running profile is detected."""
     app_support = tmp_path / "app-support"
     profiles_ini = app_support / "profiles.ini"
     write_profiles_ini(
@@ -123,6 +202,7 @@ def test_default_profile_dir_prefers_install_default(
     )
     monkeypatch.setattr(zentool, "ZEN_APPLICATION_SUPPORT", app_support)
     monkeypatch.setattr(zentool, "PROFILES_INI", profiles_ini)
+    monkeypatch.setattr(zentool, "zen_running_profile_dirs", list)
 
     assert zentool._default_profile_dir() == app_support / "Profiles/install-default"
 
@@ -137,6 +217,7 @@ def test_default_profile_dir_falls_back_to_first_profile_then_single_directory(
     lone_profile = profiles_dir / "solo"
     lone_profile.mkdir(parents=True)
     monkeypatch.setattr(zentool, "ZEN_PROFILES", profiles_dir)
+    monkeypatch.setattr(zentool, "zen_running_profile_dirs", list)
     monkeypatch.setattr(
         zentool,
         "_load_profiles_ini",

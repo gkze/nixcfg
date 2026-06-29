@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-Z6KYzCQNLRyq8yUfIERjmC00LHWqjYG0FvyGhfH02/4="
+    "aarch64-darwin": "sha256-ZCdZhA+EpR9i0iR54G/RRwzgxEpi+pa4qGGiMm9GO9E="
   },
   "urls": {
     "aarch64-darwin": "https://download01.logi.com/web/ftp/pub/techsupport/optionsplus/logioptionsplus_installer.zip"
   },
-  "version": "20260428"
+  "version": "20260626"
 }

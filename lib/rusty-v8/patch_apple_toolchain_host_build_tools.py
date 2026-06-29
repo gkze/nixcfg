@@ -14,6 +14,7 @@ _REPLACEMENT = """      toolchain_for_rust_host_build_tools = true
       use_lld = false
       fatal_linker_warnings = false
 """
+_UNSUPPORTED_RUST_TOOL_INPUT = "        inputs = rustc_wrapper_inputs\n"
 
 
 def main() -> int:
@@ -26,10 +27,9 @@ def main() -> int:
     if _NEEDLE not in original:
         raise SystemExit(_MISSING_ANCHOR)
 
-    toolchain_gni.write_text(
-        original.replace(_NEEDLE, _REPLACEMENT, 1),
-        encoding="utf-8",
-    )
+    patched = original.replace(_NEEDLE, _REPLACEMENT, 1)
+    patched = patched.replace(_UNSUPPORTED_RUST_TOOL_INPUT, "")
+    toolchain_gni.write_text(patched, encoding="utf-8")
     return 0
 
 

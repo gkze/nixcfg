@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._zen_tooling import load_zen_script_module
+from lib.tests._zen_tooling import load_zentool_module
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 @pytest.fixture(scope="module")
 def zentool() -> ModuleType:
     """Load the zentool script for CLI-surface testing."""
-    return load_zen_script_module("zentool", "zentool_cli_surface")
+    return load_zentool_module("zentool_cli_surface")
 
 
 def test_cmd_inspect_workspaces_handles_empty_and_populated_sessions(
@@ -272,6 +272,7 @@ def test_typer_wrappers_forward_to_existing_namespace_handlers(
     assert by_name["cmd_diff"].profile == "Root"
     assert by_name["cmd_apply"].profile == "Local"
     assert by_name["cmd_apply"].yes is True
+    assert by_name["cmd_apply"].verbose is False
     assert by_name["cmd_inspect_raw"].literal is True
     assert by_name["cmd_profile_path"].profile == "Profile"
 
@@ -316,6 +317,57 @@ def test_main_routes_typer_commands(
         ("apply", "Default (twilight)", True, True),
         ("nested", "raw"),
     ]
+
+
+def test_main_accepts_short_apply_flags(
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Apply should expose short aliases for every custom option."""
+    seen: list[SimpleNamespace] = []
+
+    def apply_handler(args: SimpleNamespace) -> int:
+        seen.append(args)
+        return 0
+
+    monkeypatch.setattr(zentool, "cmd_apply", apply_handler)
+
+    assert (
+        zentool.main([
+            "apply",
+            "-p",
+            "Default (twilight)",
+            "-c",
+            "folders.yaml",
+            "-d",
+            "assets",
+            "-C",
+            "chrome",
+            "-u",
+            "user.js",
+            "-s",
+            "-a",
+            "-y",
+            "-P",
+            "-R",
+            "-v",
+        ])
+        == 0
+    )
+
+    assert len(seen) == 1
+    args = seen[0]
+    assert args.profile == "Default (twilight)"
+    assert args.config == "folders.yaml"
+    assert args.asset_dir == "assets"
+    assert args.chrome_source == "chrome"
+    assert args.user_js_source == "user.js"
+    assert args.state is True
+    assert args.assets is True
+    assert args.yes is True
+    assert args.prune_cookies is True
+    assert args.resolve_favicons is False
+    assert args.verbose is True
 
 
 def test_main_handles_help_errors_and_interrupts(

@@ -64,7 +64,6 @@ let
     cargo = rustToolchain;
     rustc = rustToolchain;
   };
-
   copyZedManifestFor = crateName: ''
     if [ -d "$workspaceRoot/crates/${crateName}" ]; then
       cp "$workspaceRoot/crates/zed/Cargo.toml" "$workspaceRoot/crates/${crateName}/zed-Cargo.toml"
@@ -384,7 +383,9 @@ let
           (builtins.filter (dep: (dep.crateName or "") == "wasmtime-c-api-impl") (attrs.dependencies or [ ]));
     in
     {
-      nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [ python3 ];
+      nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [
+        python3
+      ];
       preConfigure = (attrs.preConfigure or "") + ''
         export DEP_WASMTIME_C_API_INCLUDE="${wasmtimeCApiIncludeDirs}"
         if [ -z "$DEP_WASMTIME_C_API_INCLUDE" ]; then
@@ -393,7 +394,7 @@ let
         fi
       '';
       postPatch = (attrs.postPatch or "") + ''
-        ${lib.getExe python3} \
+        PYTHONPATH=${../..} ${lib.getExe python3} \
           ${./patch_tree_sitter_build_rs.py} \
           binding_rust/build.rs
       '';

@@ -26,17 +26,21 @@ workspaces:
           url: https://app.rippling.com/dashboard
           role: essential
       - Town:
-          url: https://www.town.com/
+          url: https://www.town.com
           role: essential
       - GitHub:
-          url: https://github.com/
+          url: https://github.com/coder
           role: essential
       - AI / LLM:
-          - Anthropic: https://platform.claude.com
-          - Cursor: https://cursor.com/dashboard
-          - Exa: https://dashboard.exa.ai/home
-          - OpenAI: https://platform.openai.com
-          - OpenRouter: https://openrouter.ai
+          collapsed: false
+          children:
+            - Anthropic: https://platform.claude.com/dashboard
+            - Capy: https://capy.ai
+            - Cursor: https://cursor.com/dashboard
+            - Devin: https://app.devin.ai/org/michael-lai
+            - Exa: https://dashboard.exa.ai/home
+            - OpenAI: https://platform.openai.com
+            - OpenRouter: https://openrouter.ai
       - Voice AI:
           - Cartesia: https://play.cartesia.ai/dashboard
           - Deepgram: https://console.deepgram.com/project/0bae0bb4-0800-481e-a23a-796a283fe168
@@ -52,10 +56,9 @@ workspaces:
           - HubSpot: https://hubspot.com
           - NewsData: https://newsdata.io
       - Data & Backend:
-          children:
-            - Convex: https://dashboard.convex.dev
-            - PlanetScale: https://app.planetscale.com
-            - Supabase: https://supabase.com
+          - Convex: https://dashboard.convex.dev
+          - PlanetScale: https://app.planetscale.com
+          - Supabase: https://supabase.com
       - Finance & HR:
           - Branch: https://app.link.com
           - Ramp: https://app.ramp.com
@@ -64,38 +67,35 @@ workspaces:
           - Resend: https://resend.com
           - SendGrid: https://sendgrid.com
       - Infrastructure:
-          children:
-            - AWS: https://us-west-2.console.aws.amazon.com/console/home?region=us-west-2#
-            - Fly.io: https://fly.io
-            - Google Cloud: https://console.cloud.google.com
-            - Hatchet: https://cloud.onhatchet.run
-            - Meter: https://dashboard.meter.com
-            - Render: https://dashboard.render.com
-            - Temporal: https://cloud.temporal.io
-            - Vercel: https://vercel.com
+          - AWS: https://us-west-2.console.aws.amazon.com/console/home?region=us-west-2#
+          - Cloudflare: https://dash.cloudflare.com/2769529724cc7756595c311ca54e2875/home/overview
+          - Fly.io: https://fly.io
+          - Google Cloud: https://console.cloud.google.com
+          - Hatchet: https://cloud.onhatchet.run/auth/login
+          - Meter: https://dashboard.meter.com/org/town-com/home
+          - Render: https://dashboard.render.com
+          - Temporal: https://cloud.temporal.io
+          - Vercel: https://vercel.com
       - News:
-          children:
-            - DevHunt: https://devhunt.org
-            - Hacker News: https://news.ycombinator.com
-            - Lobsters: https://lobste.rs
-            - Product Hunt: https://producthunt.com
-            - Reddit: https://reddit.com
-            - Terminal Trove: https://terminaltrove.com
-            - X: https://x.com
+          - DevHunt: https://devhunt.org
+          - Hacker News: https://news.ycombinator.com
+          - Lobsters: https://lobste.rs
+          - Product Hunt: https://www.producthunt.com
+          - Reddit: https://www.reddit.com
+          - Terminal Trove: https://terminaltrove.com
+          - X: https://x.com/home
       - Observability & Analytics:
-          children:
-            - Axiom: https://app.axiom.co
-            - Datadog: https://us5.datadoghq.com
-            - LangSmith: https://smith.langchain.com
-            - PostHog: https://posthog.com
-            - Sentry: https://sentry.io
-            - Statsig: https://console.statsig.com
+          - Axiom: https://app.axiom.co
+          - Datadog: https://us5.datadoghq.com
+          - LangSmith: https://smith.langchain.com
+          - PostHog: https://posthog.com
+          - Sentry: https://sentry.io
+          - Statsig: https://console.statsig.com
       - Productivity:
-          children:
-            - Dropbox: https://dropbox.com
-            - Linear: https://linear.app
-            - Notion: https://notion.so
-            - Slack: https://app.slack.com
+          - Dropbox: https://dropbox.com
+          - Linear: https://linear.app
+          - Notion: https://notion.so
+          - Slack: https://app.slack.com
   Home:
     icon: "🏡"
     container: Personal

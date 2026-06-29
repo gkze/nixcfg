@@ -49,10 +49,11 @@ let
   desktopPackageJson = builtins.fromJSON (builtins.readFile "${src}/apps/desktop/package.json");
   appVersion = serverPackageJson.version;
   electronVersion = desktopPackageJson.dependencies.electron;
-  electronRuntime = nixcfgElectron.runtimeFor electronVersion;
-  electronRuntimeVersion = electronRuntime.version;
-  electronHeaders = electronRuntime.passthru.headers;
-  electronDist = electronRuntime.passthru.dist;
+  electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
+  electronRuntime = electronBuild.runtime;
+  electronRuntimeVersion = electronBuild.runtimeVersion;
+  electronHeaders = electronBuild.headers;
+  electronDist = electronBuild.dist;
   versionSyncCheck =
     if serverPackageJson.version == desktopPackageJson.version then
       true
@@ -196,10 +197,9 @@ stdenv.mkDerivation {
 
   strictDeps = true;
 
-  env = {
+  env = electronBuild.commonEnv // {
     CI = "1";
     CSC_IDENTITY_AUTO_DISCOVERY = "false";
-    ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
     NODE_OPTIONS = "--max-old-space-size=6144";
   };
 
@@ -236,10 +236,7 @@ stdenv.mkDerivation {
 
     patchShebangs node_modules
 
-    electronDistDir="$PWD/electron-dist"
-    mkdir -p "$electronDistDir"
-    cp -R ${electronDist}/. "$electronDistDir"/
-    chmod -R u+w "$electronDistDir"
+    ${electronBuild.copyDist}
 
     ./node_modules/.bin/electron-builder \
       --mac dir \
@@ -252,8 +249,7 @@ stdenv.mkDerivation {
       -c.mac.identity=null \
       -c.mac.hardenedRuntime=false \
       -c.mac.notarize=false \
-      -c.electronVersion=${lib.escapeShellArg electronRuntimeVersion} \
-      -c.electronDist="$electronDistDir" \
+      ${electronBuild.electronBuilderConfigFlags} \
       -c.npmRebuild=false
 
     appResources="dist/mac-arm64/${appBundleName}/Contents/Resources"

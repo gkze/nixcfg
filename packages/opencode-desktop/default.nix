@@ -49,8 +49,9 @@ let
   desktopPackageJson = fromJSON (readFile (src + "/${desktopPackagePath}/package.json"));
   desktopPackageVersion = desktopPackageJson.version;
   electronVersion = lib.removePrefix "^" desktopPackageJson.devDependencies.electron;
-  electronRuntime = nixcfgElectron.runtimeFor electronVersion;
-  electronRuntimeVersion = electronRuntime.version;
+  electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
+  electronRuntime = electronBuild.runtime;
+  electronRuntimeVersion = electronBuild.runtimeVersion;
   optionalDesktopWorkspacePaths = lib.optional (pathExists (
     src + "/packages/llm/package.json"
   )) "packages/llm";
@@ -59,6 +60,7 @@ let
     desktopPackagePath
     "packages/app"
     "packages/core"
+    "packages/server"
     "packages/effect-drizzle-sqlite"
     "packages/effect-sqlite-node"
     "packages/shared"
@@ -115,7 +117,7 @@ let
     }
     .${system} or (throw "Unsupported system ${system} for ${pname}");
 
-  electronDist = electronRuntime.passthru.dist;
+  electronDist = electronBuild.dist;
 
   node_modules = opencode.node_modules.overrideAttrs (old: {
     pname = "${pname}-node_modules";
@@ -205,10 +207,9 @@ stdenv.mkDerivation {
 
   strictDeps = true;
 
-  env = {
+  env = electronBuild.commonEnv // {
     CI = "1";
     CSC_IDENTITY_AUTO_DISCOVERY = "false";
-    ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
     MODELS_DEV_API_JSON = "${models-dev}/dist/_api.json";
     NODE_OPTIONS = "--max-old-space-size=6144";
     OPENCODE_APP_ID = appId;
@@ -249,10 +250,7 @@ stdenv.mkDerivation {
         export HOME="$TMPDIR/home"
         mkdir -p "$HOME"
 
-        electronDistDir="$PWD/electron-dist"
-        mkdir -p "$electronDistDir"
-        cp -R ${electronDist}/. "$electronDistDir"/
-        chmod -R u+w "$electronDistDir"
+        ${electronBuild.copyDist}
 
         cp -a ${node_modules}/{node_modules,packages} .
         chmod -R u+w node_modules packages
@@ -278,8 +276,7 @@ stdenv.mkDerivation {
             --config electron-builder.config.ts \
             -c.productName=${lib.escapeShellArg appName} \
             -c.appId=${lib.escapeShellArg appId} \
-            -c.electronDist="$electronDistDir" \
-            -c.electronVersion=${electronRuntimeVersion} \
+            ${electronBuild.electronBuilderConfigFlags} \
             -c.mac.identity=null \
             -c.mac.hardenedRuntime=false \
             -c.mac.notarize=false \

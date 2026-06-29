@@ -6,88 +6,31 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._zen_tooling import load_zen_script_module
+from lib.tests._zen_tooling import load_zentool_module
+from lib.tests._zen_tooling import make_session_entry as make_entry
+from lib.tests._zen_tooling import make_session_folder as make_folder
+from lib.tests._zen_tooling import make_session_space as make_space
+from lib.tests._zen_tooling import make_session_tab as make_tab
 
 if TYPE_CHECKING:
-    from types import ModuleType
+    from collections.abc import Callable, Iterable
+    from types import ModuleType, TracebackType
 
 
 @pytest.fixture(scope="module")
 def zentool() -> ModuleType:
     """Load the zentool script for direct helper testing."""
-    return load_zen_script_module("zentool", "zentool_tab_helpers")
-
-
-def make_tab(
-    zentool: ModuleType,
-    *,
-    entries: list[object] | None = None,
-    index: int = 1,
-    sync_id: str = "sync-1",
-    static_label: str | None = None,
-    last_accessed: int = 123,
-    pinned: bool = False,
-    essential: bool = False,
-    workspace: str | None = "{ws}",
-    folder_id: str | None = None,
-    user_context_id: int = 0,
-    attributes: dict[str, object] | None = None,
-    pinned_icon: str | None = None,
-    has_static_icon: bool = False,
-) -> object:
-    """Build a compact session tab for helper tests."""
-    return zentool.SessionTab(
-        entries=list(entries or []),
-        index=index,
-        lastAccessed=last_accessed,
-        hidden=True,
-        pinned=pinned,
-        zenWorkspace=workspace,
-        zenSyncId=sync_id,
-        zenEssential=essential,
-        zenStaticLabel=static_label,
-        zenPinnedIcon=pinned_icon,
-        zenHasStaticIcon=has_static_icon,
-        userContextId=user_context_id,
-        groupId=folder_id,
-        attributes=dict(attributes or {}),
-    )
-
-
-def make_entry(zentool: ModuleType, *, url: str, title: str = "") -> object:
-    """Build one session history entry."""
-    return zentool.SessionEntry(url=url, title=title)
+    return load_zentool_module("zentool_tab_helpers")
 
 
 def make_entry_with_extra(zentool: ModuleType, *, url: str, title: str = "") -> object:
     """Build one session history entry with opaque runtime data."""
-    return zentool.SessionEntry.model_validate({
-        "url": url,
-        "title": title,
-        "structuredCloneState": "session-data",
-    })
-
-
-def make_folder(
-    zentool: ModuleType,
-    *,
-    folder_id: str,
-    name: str,
-    workspace_id: str,
-    parent_id: str | None = None,
-) -> object:
-    """Build one session folder record."""
-    return zentool.SessionFolder(
-        id=folder_id,
-        name=name,
-        workspaceId=workspace_id,
-        parentId=parent_id,
+    return make_entry(
+        zentool,
+        url=url,
+        title=title,
+        structuredCloneState="session-data",
     )
-
-
-def make_space(zentool: ModuleType, *, uuid: str, name: str) -> object:
-    """Build one session space record."""
-    return zentool.SessionSpace(uuid=uuid, name=name)
 
 
 @pytest.mark.parametrize(
@@ -326,6 +269,243 @@ def test_build_tab_resets_entry_for_mismatched_url_and_placeholder(
     assert placeholder.zen_pinned_icon is None
     assert placeholder.zen_has_static_icon is False
     assert placeholder.zen_is_empty is True
+
+
+def test_build_tab_resolves_favicon_for_new_tab(
+    zentool: ModuleType,
+) -> None:
+    """New tabs should get an image cache when a resolver can find one."""
+    spec = zentool.ItemTabSpec(name="Example", url="https://example.com")
+
+    built = zentool.build_tab(
+        spec,
+        existing=None,
+        sync_id="sync-new",
+        pinned=True,
+        essential=False,
+        workspace_uuid="{workspace}",
+        folder_id=None,
+        user_context_id=0,
+        favicon_resolver=lambda url: f"data:image/png;base64,{url}",
+    )
+
+    assert built.model_extra["image"] == "data:image/png;base64,https://example.com"
+
+
+def test_build_tab_preserves_same_origin_image_when_url_is_canonicalized(
+    zentool: ModuleType,
+) -> None:
+    """Canonicalizing a URL within one origin should keep the old image cache."""
+    existing = make_tab(
+        zentool,
+        entries=[make_entry(zentool, url="https://example.com/dashboard", title="Old")],
+        image="data:image/png;base64,old",
+    )
+    spec = zentool.ItemTabSpec(name="Example", url="https://example.com")
+
+    built = zentool.build_tab(
+        spec,
+        existing=existing,
+        sync_id="sync-new",
+        pinned=True,
+        essential=False,
+        workspace_uuid="{workspace}",
+        folder_id=None,
+        user_context_id=0,
+        favicon_resolver=lambda _url: pytest.fail("same-origin image should be kept"),
+    )
+
+    assert built.entries == [
+        zentool.SessionEntry(url="https://example.com", title="Example")
+    ]
+    assert built.model_extra["image"] == "data:image/png;base64,old"
+
+
+def test_build_tab_replaces_cross_origin_image_when_url_changes(
+    zentool: ModuleType,
+) -> None:
+    """Cross-origin URL resets should not keep a stale image cache."""
+    existing = make_tab(
+        zentool,
+        entries=[make_entry(zentool, url="https://old.example", title="Old")],
+        image="data:image/png;base64,old",
+    )
+    spec = zentool.ItemTabSpec(name="Example", url="https://new.example")
+
+    built = zentool.build_tab(
+        spec,
+        existing=existing,
+        sync_id="sync-new",
+        pinned=True,
+        essential=False,
+        workspace_uuid="{workspace}",
+        folder_id=None,
+        user_context_id=0,
+        favicon_resolver=lambda _url: "data:image/png;base64,new",
+    )
+
+    assert built.model_extra["image"] == "data:image/png;base64,new"
+
+
+def test_resolve_missing_tab_images_updates_only_missing_nonempty_tabs(
+    zentool: ModuleType,
+) -> None:
+    """Favicon repair should leave existing images and empty sentinels alone."""
+    missing = make_tab(
+        zentool,
+        entries=[make_entry(zentool, url="https://missing.example", title="Missing")],
+    )
+    existing = make_tab(
+        zentool,
+        entries=[make_entry(zentool, url="https://existing.example", title="Existing")],
+        image="data:image/png;base64,existing",
+    )
+    empty = zentool.build_placeholder_tab(
+        sync_id="empty",
+        workspace_uuid="{workspace}",
+        folder_id="folder",
+        user_context_id=0,
+    )
+    session = zentool.SessionState(tabs=[missing, existing, empty])
+    seen: list[str] = []
+
+    count = zentool.resolve_missing_tab_images(
+        session,
+        lambda url: seen.append(url) or "data:image/png;base64,missing",
+    )
+
+    assert count == 1
+    assert seen == ["https://missing.example"]
+    assert missing.model_extra["image"] == "data:image/png;base64,missing"
+    assert existing.model_extra["image"] == "data:image/png;base64,existing"
+    assert empty.model_extra is None or "image" not in empty.model_extra
+
+
+def test_resolve_missing_tab_images_uses_worker_pool_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Favicon repair should dedupe URLs before concurrent resolution."""
+    first = make_tab(
+        zentool,
+        entries=[make_entry(zentool, url="https://same.example", title="First")],
+    )
+    second = make_tab(
+        zentool,
+        entries=[make_entry(zentool, url="https://same.example", title="Second")],
+    )
+    third = make_tab(
+        zentool,
+        entries=[make_entry(zentool, url="https://other.example", title="Third")],
+    )
+    session = zentool.SessionState(tabs=[first, second, third])
+    seen: list[str] = []
+    worker_counts: list[int] = []
+    logs: list[str] = []
+
+    class FakeExecutor:
+        def __init__(self, *, max_workers: int) -> None:
+            worker_counts.append(max_workers)
+
+        def __enter__(self) -> FakeExecutor:
+            return self
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> bool:
+            _ = exc_type, exc, traceback
+            return False
+
+        def map(
+            self,
+            func: Callable[[str], str | None],
+            urls: Iterable[str],
+        ) -> list[str | None]:
+            return [func(url) for url in urls]
+
+    monkeypatch.setattr(
+        zentool.concurrent.futures,
+        "ThreadPoolExecutor",
+        FakeExecutor,
+    )
+
+    count = zentool.resolve_missing_tab_images(
+        session,
+        lambda url: seen.append(url) or f"data:image/png;base64,{url}",
+        log=logs.append,
+        verbose=True,
+    )
+
+    assert count == 3
+    assert worker_counts == [2]
+    assert seen == ["https://same.example", "https://other.example"]
+    assert logs == [
+        "Resolving favicons for 3 tab(s) across 2 URL(s)...",
+        "Resolved favicon for https://same.example",
+        "Resolved favicon for https://other.example",
+        "Resolved favicon images for 3 of 3 tab(s).",
+    ]
+    assert first.model_extra["image"] == "data:image/png;base64,https://same.example"
+    assert second.model_extra["image"] == "data:image/png;base64,https://same.example"
+    assert third.model_extra["image"] == "data:image/png;base64,https://other.example"
+
+
+def test_resolve_favicon_data_url_uses_discovered_icons_before_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Favicon resolution should try page-declared icons, then origin fallback."""
+    fetched: list[str] = []
+    monkeypatch.setattr(
+        zentool,
+        "_discover_favicon_urls",
+        lambda _url: ["https://example.com/icon.svg"],
+    )
+
+    def fake_fetch(url: str) -> str | None:
+        fetched.append(url)
+        return "data:image/svg+xml;base64,icon" if url.endswith("icon.svg") else None
+
+    monkeypatch.setattr(zentool, "_fetch_image_data_url", fake_fetch)
+
+    assert zentool.resolve_favicon_data_url("https://example.com/path") == (
+        "data:image/svg+xml;base64,icon"
+    )
+    assert fetched == ["https://example.com/icon.svg"]
+
+
+def test_discover_favicon_urls_scans_large_pages_and_icon_relations(
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Discovery should scan HTML beyond image limits and accept icon-like rels."""
+    calls: list[tuple[str, int]] = []
+
+    def fake_read_url_bytes(
+        url: str,
+        *,
+        timeout: float,
+        max_bytes: int,
+    ) -> tuple[bytes, str]:
+        del timeout
+        calls.append((url, max_bytes))
+        return (
+            b'<link rel="apple-touch-icon" href="/apple.png">'
+            b'<link rel="shortcut icon" href="/favicon.ico">',
+            "text/html",
+        )
+
+    monkeypatch.setattr(zentool, "_read_url_bytes", fake_read_url_bytes)
+
+    assert zentool._discover_favicon_urls("https://example.com/path") == [
+        "https://example.com/apple.png",
+        "https://example.com/favicon.ico",
+    ]
+    assert calls == [("https://example.com/path", zentool.MAX_FAVICON_DISCOVERY_BYTES)]
+    assert zentool.MAX_FAVICON_DISCOVERY_BYTES > zentool.MAX_FAVICON_BYTES
 
 
 def test_build_placeholder_tab_creates_empty_folder_sentinel(

@@ -895,6 +895,7 @@ def test_resolve_profile_dir_auto_detects_install_default(
     monkeypatch.setattr(ZENTOOL, "ZEN_APPLICATION_SUPPORT", app_support)
     monkeypatch.setattr(ZENTOOL, "ZEN_PROFILES", profiles_dir)
     monkeypatch.setattr(ZENTOOL, "PROFILES_INI", profiles_ini)
+    monkeypatch.setattr(ZENTOOL, "zen_running_profile_dirs", list)
 
     assert ZENTOOL.resolve_profile_dir(None) == twilight_dir
 

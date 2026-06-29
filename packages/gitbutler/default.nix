@@ -117,7 +117,7 @@ let
       cp -r ${src} "$out"
       chmod -R u+w "$out"
 
-      ${python3}/bin/python3 ${./patch_sources.py} "$out"
+      PYTHONPATH=${../..} ${python3}/bin/python3 ${./patch_sources.py} "$out"
 
       rm -rf "$out/crates/gitbutler-tauri/frontend-dist"
       mkdir -p "$out/crates/gitbutler-tauri/frontend-dist"

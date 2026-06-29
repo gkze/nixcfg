@@ -10,7 +10,7 @@ from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.nix import _build_fetch_from_github_call
+from lib.update.nix import _build_fetch_from_github_call, _build_overlay_expr
 from lib.update.updaters.base import VersionInfo, source_override_env
 
 if TYPE_CHECKING:
@@ -145,7 +145,7 @@ def test_tsgolint_fetch_hashes_computes_src_and_vendor_hashes(
     )
     assert_nix_ast_equal(
         str(calls[1]["expr"]),
-        module._build_overlay_expr("tsgolint"),
+        _build_overlay_expr("tsgolint"),
     )
     assert calls[1]["env"] == source_override_env(
         "tsgolint",

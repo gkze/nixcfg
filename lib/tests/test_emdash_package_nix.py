@@ -64,7 +64,10 @@ def test_emdash_darwin_build_loads_upstream_app_identity_config() -> None:
         assert entrypoint in build_phase.value
 
     for required_contract in (
+        "ln -s ../../node_modules ${appDir}/node_modules",
+        "pushd ${appDir}",
         "pnpm exec electron-builder",
+        "install -Dm644 ${msShim} ../../out/main/ms-shim.cjs",
         "--config electron-builder.config.ts",
         "-c.directories.output=dist",
         "pnpm exec esbuild",
@@ -77,6 +80,59 @@ def test_emdash_darwin_build_loads_upstream_app_identity_config() -> None:
         "set-info-plist-hash",
     ):
         assert required_contract in build_phase.value
+
+    electron_builder_start = build_phase.value.index("    pnpm exec electron-builder")
+    electron_builder_end = build_phase.value.index(
+        "\n\n    ${lib.optionalString stdenv.hostPlatform.isDarwin",
+        electron_builder_start,
+    )
+    electron_builder_shell = parse_shell(
+        build_phase.value[electron_builder_start:electron_builder_end]
+    )
+    electron_builder_commands = command_texts(electron_builder_shell, "pnpm")
+    assert len(electron_builder_commands) == 1
+    assert "-c.npmRebuild=false" in electron_builder_commands[0]
+
+
+def test_emdash_build_materializes_workspace_packages() -> None:
+    """The desktop build must resolve and package local @emdash workspaces."""
+    build_phase = expect_instance(
+        expect_binding(_derivation_args().values, "buildPhase").value,
+        IndentedString,
+    )
+
+    workspace_build_start = build_phase.value.index(
+        "    pnpm --filter @emdash/shared run build"
+    )
+    workspace_build_end = build_phase.value.index(
+        "\n\n    for workspace_package", workspace_build_start
+    )
+    shell = parse_shell(build_phase.value[workspace_build_start:workspace_build_end])
+    workspace_builds = command_texts(shell, "pnpm")
+    assert workspace_builds == [
+        "pnpm --filter @emdash/shared run build",
+        "pnpm --filter @emdash/core run build",
+        "pnpm --filter @emdash/plugins run build",
+        "pnpm --filter @emdash/chat-ui run build",
+        "pnpm --filter @emdash/ui run build",
+    ]
+
+    for required_contract in (
+        "mkdir -p node_modules/@emdash",
+        'ln -sfn "../../packages/$workspace_package"',
+        'cp -R "packages/$workspace_package"',
+    ):
+        assert required_contract in build_phase.value
+
+
+def test_emdash_post_patch_tracks_app_source_layout() -> None:
+    """The login-shell environment patch should follow the app workspace path."""
+    post_patch = expect_instance(
+        expect_binding(_derivation_args().values, "postPatch").value,
+        IndentedString,
+    )
+
+    assert "substituteInPlace ${appDir}/src/main/utils/userEnv.ts" in post_patch.value
 
 
 def test_emdash_install_check_exercises_octokit_request_entrypoint() -> None:
@@ -139,6 +195,8 @@ def test_emdash_launchers_are_installed_from_repo_scripts() -> None:
         'install -d "$out/bin"',
         'install -m755 __NIX_INTERP__ "$out/bin/emdash"',
     ]
+    assert 'distDir="$PWD/${appDir}/dist"' in darwin_install.value
+    assert 'distDir="$PWD/${appDir}/dist"' in linux_install.value
     assert command_texts(linux_shell, "install") == [
         'install -d "$out/share/emdash"',
         'install -d "$out/bin"',

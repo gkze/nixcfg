@@ -90,6 +90,13 @@ let
         lib,
         gitHooks,
         lintFiles ? self.lintFiles,
+        mkNixcfgPackage ? (
+          pkgs:
+          pkgs.callPackage (src + "/packages/nixcfg.nix") {
+            inherit inputs;
+            outputs = self;
+          }
+        ),
         src ? repoSrc,
       }:
       import (nixcfgPath "dev-shell.nix") {
@@ -98,6 +105,7 @@ let
           gitHooks
           lib
           lintFiles
+          mkNixcfgPackage
           ;
       };
 

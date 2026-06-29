@@ -18,8 +18,10 @@ from lib.tests._updater_helpers import install_fixed_hash_stream
 from lib.tests._updater_helpers import load_repo_module as _load_updater
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEventKind
+from lib.update.updaters import factories as updater_factories
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.metadata import GranolaFeedMetadata
+from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
 
 def test_granola_fetch_latest_and_download_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -232,21 +234,19 @@ def test_netnewswire_fetch_latest_and_download_url(
         "packages/netnewswire/updater.py", "netnewswire_updater_test"
     )
     updater = module.NetNewsWireUpdater()
-    xml = (
-        '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
-        "<channel><item><enclosure "
-        'url="https://example.invalid/NetNewsWire.zip" '
-        'sparkle:shortVersionString="6.2.1"/>'
-        "</item></channel></rss>"
-    )
 
-    async def _fetch_url(_session: object, url: str, **kwargs: object) -> bytes:
+    async def _fetch_items(_session: object, url: str, *, config: object):
         assert url == updater.APPCAST_URL
-        assert kwargs["user_agent"] == "Sparkle/2.0"
-        assert kwargs["timeout"] == updater.config.default_timeout
-        return xml.encode()
+        assert config == updater.config
+        return (
+            SparkleAppcastItem(
+                "100",
+                "6.2.1",
+                "https://example.invalid/NetNewsWire.zip",
+            ),
+        )
 
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(updater_factories, "fetch_sparkle_appcast_items", _fetch_items)
 
     latest = _run(updater.fetch_latest(object()))
 
@@ -259,24 +259,21 @@ def test_netnewswire_fetch_latest_and_download_url(
 
 
 @pytest.mark.parametrize(
-    ("xml", "match"),
+    ("item", "match"),
     [
-        ("<", "Invalid appcast XML"),
-        ("<rss><channel /></rss>", "No items found in appcast"),
-        ("<rss><channel><item /></channel></rss>", "No enclosure found in appcast"),
         (
-            '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item><enclosure url="https://example.invalid"/></item></channel></rss>',
-            "No version found in appcast enclosure",
+            SparkleAppcastItem("100", None, "https://example.invalid/app.zip"),
+            "Missing version",
         ),
         (
-            '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item><enclosure sparkle:shortVersionString="6.2.1"/></item></channel></rss>',
-            "No URL found in enclosure",
+            SparkleAppcastItem("100", "6.2.1", None),
+            "Missing download URL",
         ),
     ],
 )
 def test_netnewswire_rejects_invalid_appcast_shapes(
     monkeypatch: pytest.MonkeyPatch,
-    xml: str,
+    item: SparkleAppcastItem,
     match: str,
 ) -> None:
     """Surface targeted appcast parsing errors."""
@@ -284,10 +281,14 @@ def test_netnewswire_rejects_invalid_appcast_shapes(
         "packages/netnewswire/updater.py", "netnewswire_updater_test_errors"
     )
     updater = module.NetNewsWireUpdater()
+
+    async def _fetch_items(*_args: object, **_kwargs: object):
+        return (item,)
+
     monkeypatch.setattr(
-        module,
-        "fetch_url",
-        lambda *_a, **_k: asyncio.sleep(0, result=xml.encode()),
+        updater_factories,
+        "fetch_sparkle_appcast_items",
+        _fetch_items,
     )
 
     with pytest.raises(RuntimeError, match=match):
@@ -301,7 +302,7 @@ def test_netnewswire_requires_download_url_metadata() -> None:
     )
     updater = module.NetNewsWireUpdater()
 
-    with pytest.raises(RuntimeError, match="Missing NetNewsWire download URL"):
+    with pytest.raises(TypeError, match="Expected string field 'url'"):
         updater.get_download_url("aarch64-darwin", VersionInfo(version="6.2.1"))
 
 

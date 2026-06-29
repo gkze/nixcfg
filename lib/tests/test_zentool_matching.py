@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._zen_tooling import load_zen_script_module
+from lib.tests._zen_tooling import load_zentool_module
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 @pytest.fixture(scope="module")
 def zentool() -> ModuleType:
     """Load the zentool script for compilation and matching tests."""
-    return load_zen_script_module("zentool", "zentool_matching_helpers")
+    return load_zentool_module("zentool_matching_helpers")
 
 
 def make_entry(zentool: ModuleType, *, url: str, title: str = "") -> object:

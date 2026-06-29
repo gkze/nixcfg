@@ -11,6 +11,7 @@ from functools import cache
 from pathlib import Path
 
 from nix_manipulator.expressions.assertion import Assertion
+from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.if_expression import IfExpression
@@ -25,6 +26,7 @@ from lib.tests._nix_ast import (
     expect_scope_binding,
     parse_nix_expr,
 )
+from lib.tests._shell_ast import command_texts, parse_shell
 from lib.update.paths import REPO_ROOT
 
 _SUPPORTED_PLATFORMS = [
@@ -122,16 +124,20 @@ def test_opencode_desktop_uses_exact_nixcfg_electron_runtime() -> None:
     package = _package_assertion()
 
     assert_nix_ast_equal(
+        expect_scope_binding(package, "electronBuild").value,
+        "nixcfgElectron.sourceBuildFor electronVersion",
+    )
+    assert_nix_ast_equal(
         expect_scope_binding(package, "electronRuntime").value,
-        "nixcfgElectron.runtimeFor electronVersion",
+        "electronBuild.runtime",
     )
     assert_nix_ast_equal(
         expect_scope_binding(package, "electronRuntimeVersion").value,
-        "electronRuntime.version",
+        "electronBuild.runtimeVersion",
     )
     assert_nix_ast_equal(
         expect_scope_binding(package, "electronDist").value,
-        "electronRuntime.passthru.dist",
+        "electronBuild.dist",
     )
 
 
@@ -172,6 +178,7 @@ def test_opencode_desktop_tracks_workspace_install_scope() -> None:
           desktopPackagePath
           "packages/app"
           "packages/core"
+          "packages/server"
           "packages/effect-drizzle-sqlite"
           "packages/effect-sqlite-node"
           "packages/shared"
@@ -285,6 +292,24 @@ def test_opencode_desktop_derivation_keeps_platform_branches() -> None:
         assert isinstance(phase.consequence, IndentedString)
         assert isinstance(phase.alternative, IndentedString)
 
+    build_phase = expect_instance(
+        expect_binding(derivation_args.values, "buildPhase").value,
+        IfExpression,
+    )
+    darwin_build = expect_instance(build_phase.consequence, IndentedString)
+    electron_builder_start = darwin_build.value.index(
+        "          bun x electron-builder"
+    )
+    electron_builder_end = darwin_build.value.index(
+        "\n        )", electron_builder_start
+    )
+    electron_builder_commands = command_texts(
+        parse_shell(darwin_build.value[electron_builder_start:electron_builder_end]),
+        "bun",
+    )
+    assert len(electron_builder_commands) == 1
+    assert "-c.npmRebuild=false" in electron_builder_commands[0]
+
 
 def test_opencode_desktop_darwin_bundle_is_resigned_after_copy() -> None:
     """The final copied .app should have a valid ad-hoc bundle signature."""
@@ -367,9 +392,12 @@ def test_opencode_desktop_sources_platforms_match_supported_matrix() -> None:
 
 def test_opencode_desktop_env_exports_runtime_identity_overrides() -> None:
     """The derivation should export the runtime identity overrides used by the Electron patch."""
-    env = expect_instance(
-        expect_binding(_derivation_args().values, "env").value, AttributeSet
+    env_merge = expect_instance(
+        expect_binding(_derivation_args().values, "env").value, BinaryExpression
     )
+    assert_nix_ast_equal(env_merge.left, "electronBuild.commonEnv")
+    assert env_merge.operator.name == "//"
+    env = expect_instance(env_merge.right, AttributeSet)
 
     assert_nix_ast_equal(expect_binding(env.values, "OPENCODE_APP_ID").value, "appId")
     assert_nix_ast_equal(

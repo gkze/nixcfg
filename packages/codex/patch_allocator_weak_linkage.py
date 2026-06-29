@@ -4,14 +4,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from lib.codemods.text import replace_file_exactly
+
 _EXPECTED_ARGC = 1
 _WEAK_LINKAGE_ATTR = '#[linkage = "weak"]\n'
+_EXPECTED_WEAK_LINKAGE_ATTRS = 5
 
 
 def patch_allocator(allocator_lib: Path) -> None:
     """Remove weak linkage attributes from the allocator source in place."""
-    text = allocator_lib.read_text(encoding="utf-8")
-    allocator_lib.write_text(text.replace(_WEAK_LINKAGE_ATTR, ""), encoding="utf-8")
+    replace_file_exactly(
+        allocator_lib,
+        _WEAK_LINKAGE_ATTR,
+        "",
+        expected_count=_EXPECTED_WEAK_LINKAGE_ATTRS,
+        context="Codex allocator weak linkage attributes",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

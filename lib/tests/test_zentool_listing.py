@@ -7,7 +7,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._zen_tooling import load_zen_script_module
+from lib.tests._zen_tooling import (
+    load_zentool_module,
+    make_session_entry,
+    make_session_folder,
+    make_session_tab,
+)
+from lib.tests._zen_tooling import make_session_group as make_group
+from lib.tests._zen_tooling import make_session_space as make_space
+from lib.tests._zen_tooling import make_session_state as make_session
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -16,12 +24,7 @@ if TYPE_CHECKING:
 @pytest.fixture(scope="module")
 def zentool() -> ModuleType:
     """Load the zentool script for listing/check helper tests."""
-    return load_zen_script_module("zentool", "zentool_listing_helpers")
-
-
-def make_entry(zentool: ModuleType, *, url: str, title: str = "") -> object:
-    """Build one compact session history entry."""
-    return zentool.SessionEntry(url=url, title=title)
+    return load_zentool_module("zentool_listing_helpers")
 
 
 def make_tab(
@@ -38,14 +41,16 @@ def make_tab(
     empty: bool = False,
 ) -> object:
     """Build one compact session tab."""
-    return zentool.SessionTab(
-        entries=[] if empty else [make_entry(zentool, url=url, title=title)],
-        zenSyncId=sync_id,
+    return make_session_tab(
+        zentool,
+        entries=[] if empty else [make_session_entry(zentool, url=url, title=title)],
+        sync_id=sync_id,
         pinned=pinned,
-        zenEssential=essential,
-        zenWorkspace=workspace,
-        groupId=folder_id,
-        zenStaticLabel=static_label,
+        essential=essential,
+        workspace=workspace,
+        folder_id=folder_id,
+        static_label=static_label,
+        hidden=False,
         zenIsEmpty=empty,
     )
 
@@ -59,40 +64,14 @@ def make_folder(
     parent_id: str | None = None,
     collapsed: bool = True,
 ) -> object:
-    """Build one compact folder record."""
-    return zentool.SessionFolder(
-        id=folder_id,
+    """Build one compact folder record with listing-test defaults."""
+    return make_session_folder(
+        zentool,
+        folder_id=folder_id,
         name=name,
-        workspaceId=workspace_id,
-        parentId=parent_id,
+        workspace_id=workspace_id,
+        parent_id=parent_id,
         collapsed=collapsed,
-    )
-
-
-def make_group(zentool: ModuleType, *, group_id: str, name: str = "") -> object:
-    """Build one compact matching folder group record."""
-    return zentool.SessionGroup(id=group_id, name=name or group_id)
-
-
-def make_space(zentool: ModuleType, *, uuid: str, name: str) -> object:
-    """Build one compact workspace record."""
-    return zentool.SessionSpace(uuid=uuid, name=name)
-
-
-def make_session(
-    zentool: ModuleType,
-    *,
-    tabs: list[object] | None = None,
-    groups: list[object] | None = None,
-    folders: list[object] | None = None,
-    spaces: list[object] | None = None,
-) -> object:
-    """Build one compact session state fixture."""
-    return zentool.SessionState(
-        tabs=list(tabs or []),
-        groups=list(groups or []),
-        folders=list(folders or []),
-        spaces=list(spaces or []),
     )
 
 

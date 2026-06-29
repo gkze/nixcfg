@@ -90,8 +90,6 @@ def test_superset_darwin_build_phase_uses_explicit_unsigned_packaging_flags() ->
 
     for snippet in (
         "export CSC_IDENTITY_AUTO_DISCOVERY=false",
-        "export ELECTRON_SKIP_BINARY_DOWNLOAD=1",
-        "export npm_config_nodedir=${lib.escapeShellArg (toString electronHeaders)}",
         "bun run --cwd apps/desktop install:deps",
         (
             "hostServiceXtermHeadless=apps/desktop/node_modules/"
@@ -104,11 +102,19 @@ def test_superset_darwin_build_phase_uses_explicit_unsigned_packaging_flags() ->
         "--mac",
         "--dir",
         "--publish never",
-        'cp -R ${electronDist}/. "$electronDistDir"/',
-        '-c.electronDist="$electronDistDir"',
-        "-c.electronVersion=${lib.escapeShellArg electronRuntimeVersion}",
+        "${electronBuild.copyDist}",
+        "${electronBuild.electronBuilderConfigFlags}",
         "-c.mac.identity=null",
         "-c.mac.hardenedRuntime=false",
         "-c.mac.notarize=false",
     ):
         assert snippet in build_phase.value
+
+    electron_builder_start = build_phase.value.index("        bun x electron-builder")
+    electron_builder_end = build_phase.value.index("\n      )", electron_builder_start)
+    electron_builder_commands = command_texts(
+        parse_shell(build_phase.value[electron_builder_start:electron_builder_end]),
+        "bun",
+    )
+    assert len(electron_builder_commands) == 1
+    assert "-c.mac.identity=null" in electron_builder_commands[0]

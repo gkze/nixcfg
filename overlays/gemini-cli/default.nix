@@ -14,10 +14,24 @@
         tag = "v${version}";
         hash = slib.sourceHash "gemini-cli" "srcHash";
       };
+      patchNpmMetadata = ''
+        substituteInPlace \
+          packages/a2a-server/package.json \
+          packages/cli/package.json \
+          package-lock.json \
+          --replace-fail '"tar": "7.5.8"' '"tar": "7.5.11"'
+        substituteInPlace \
+          packages/cli/package.json \
+          package-lock.json \
+          --replace-fail '"clipboardy": "5.2.0"' '"clipboardy": "5.2.1"'
+      '';
       npmDepsHash = slib.sourceHash "gemini-cli" "npmDepsHash";
+      npmDepsFetcherVersion = 2;
       npmDeps = prev.fetchNpmDeps {
         inherit src;
         hash = npmDepsHash;
+        fetcherVersion = npmDepsFetcherVersion;
+        postPatch = patchNpmMetadata;
       };
     in
     prev.gemini-cli.overrideAttrs (oldAttrs: {
@@ -25,8 +39,13 @@
         version
         src
         npmDepsHash
+        npmDepsFetcherVersion
         npmDeps
         ;
+      env = (oldAttrs.env or { }) // {
+        NIX_NPM_FETCHER_VERSION = npmDepsFetcherVersion;
+      };
+      npmFlags = (oldAttrs.npmFlags or [ ]) ++ [ "--legacy-peer-deps" ];
       disallowedReferences = [
         npmDeps
         prev.nodejs_22.python
@@ -41,7 +60,8 @@
           # Sed pattern to change default: true -> false within a block
           disableDefault = "s/default: true/default: false/";
         in
-        ''
+        patchNpmMetadata
+        + ''
           # Remove node-pty dependency from package.json
           ${jq} '${rmNodePty}' package.json > package.json.tmp
           mv package.json.tmp package.json

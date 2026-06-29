@@ -155,7 +155,7 @@ def test_ghostty_tip_requires_commit_url(monkeypatch: pytest.MonkeyPatch) -> Non
             ),
         )
 
-    monkeypatch.setattr(module, "fetch_sparkle_appcast_items", fake_fetch)
+    _patch_dependency(monkeypatch, module, "fetch_sparkle_appcast_items", fake_fetch)
     with pytest.raises(RuntimeError, match="Could not parse Ghostty tip commit"):
         run_async(_updater(module).fetch_latest(object()))
 
@@ -241,11 +241,6 @@ def test_onepassword_rechecks_same_version_download_hashes() -> None:
             "packages/comet/updater.py",
             {"body": {"browser_version": " 1.2.3 "}},
             "1.2.3",
-        ),
-        (
-            "packages/lm-studio/updater.py",
-            {"version": "0.3.29", "build": "11"},
-            "0.3.29-11",
         ),
         (
             "packages/warp-preview/updater.py",
@@ -426,12 +421,11 @@ def test_head_artifact_package_updaters(
     ("path", "platform", "version", "expected"),
     [
         (
-            "packages/lm-studio/updater.py",
+            "packages/nordvpn/updater.py",
             "aarch64-darwin",
-            "0.3.29-11",
-            "LM-Studio-0.3.29-11-arm64.dmg",
+            "9.1.0",
+            "NordVPN.pkg",
         ),
-        ("packages/nordvpn/updater.py", "aarch64-darwin", "9.1.0", "NordVPN.pkg"),
         (
             "packages/tailscale-app/updater.py",
             "aarch64-darwin",
@@ -649,7 +643,9 @@ def test_leaf_updaters_reject_invalid_vendor_payloads(
         ) -> tuple[SparkleAppcastItem, ...]:
             return (SparkleAppcastItem("not-a-semver", None, ""),)
 
-        monkeypatch.setattr(module, "fetch_sparkle_appcast_items", fake_sparkle)
+        monkeypatch.setattr(
+            updater_factories, "fetch_sparkle_appcast_items", fake_sparkle
+        )
     elif isinstance(payload, bytes):
 
         async def fake_fetch_url(*_args: object, **_kwargs: object) -> bytes:

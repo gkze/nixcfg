@@ -28,6 +28,7 @@ FlakeInputHashUpdater = _updaters_base.FlakeInputHashUpdater
 FlakeInputMetadataUpdater = _updaters_base.FlakeInputMetadataUpdater
 FlakeInputUpdater = _updaters_base.FlakeInputUpdater
 HashEntryUpdater = _updaters_base.HashEntryUpdater
+SourceThenOverlayHashMixin = _updaters_base.SourceThenOverlayHashMixin
 MaterializesArtifactsMixin = _updaters_base.MaterializesArtifactsMixin
 Crate2NixArtifactsMixin = _updaters_base.Crate2NixArtifactsMixin
 Crate2NixMetadataUpdater = _updaters_base.Crate2NixMetadataUpdater
@@ -58,6 +59,30 @@ if TYPE_CHECKING:
 
 _DISCOVERY_LOCK = Lock()
 _DISCOVERY_STATE = {"complete": False}
+_GO_VENDOR_UPDATERS = (
+    "anthropic-cli",
+    "axiom-cli",
+    "gogcli",
+    "openai-cli",
+)
+
+
+def _register_factory_updaters() -> None:
+    """Register declarative updater factory entries."""
+    for name in _GO_VENDOR_UPDATERS:
+        if name not in UPDATERS:
+            go_vendor_updater(name, module=__name__)
+
+    if "emdash" not in UPDATERS:
+        flake_input_hash_updater(
+            "emdash",
+            "npmDepsHash",
+            module=__name__,
+            platform_specific=True,
+        )
+
+    if "opencode" not in UPDATERS:
+        bun_node_modules_updater("opencode", module=__name__)
 
 
 def _updater_module_paths() -> dict[str, Path]:
@@ -94,6 +119,7 @@ def _prefer_repo_lib_paths() -> None:
 def _discover_updaters() -> None:
     """Import every discovered updater module to trigger registration."""
     _prefer_repo_lib_paths()
+    _register_factory_updaters()
     for name, updater_file in sorted(_updater_module_paths().items()):
         # Use a stable module name so re-imports are safe.
         mod_name = f"_updater_pkg.{name}"
@@ -153,6 +179,7 @@ __all__ = [
     "MaterializesArtifactsMixin",
     "PlatformAPIUpdater",
     "SingleURLHashEntryUpdater",
+    "SourceThenOverlayHashMixin",
     "UpdateContext",
     "Updater",
     "UpdaterClass",

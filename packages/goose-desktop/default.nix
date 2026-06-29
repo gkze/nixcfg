@@ -30,9 +30,10 @@ let
   desktopPackageJson = builtins.fromJSON (builtins.readFile "${src}/ui/desktop/package.json");
   desktopPackageVersion = desktopPackageJson.version;
   electronVersion = desktopPackageJson.devDependencies.electron;
-  electronRuntime = nixcfgElectron.runtimeFor electronVersion;
-  electronRuntimeVersion = electronRuntime.version;
-  electronDist = electronRuntime.passthru.dist;
+  electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
+  electronRuntime = electronBuild.runtime;
+  electronRuntimeVersion = electronBuild.runtimeVersion;
+  electronDist = electronBuild.dist;
   electronZip = electronRuntime.src;
   electronPlatform =
     if stdenv.hostPlatform.isDarwin then
@@ -104,10 +105,9 @@ stdenv.mkDerivation {
 
   strictDeps = true;
 
-  env = {
+  env = electronBuild.commonEnv // {
     CI = "1";
     CSC_IDENTITY_AUTO_DISCOVERY = "false";
-    ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
     GOOSE_BUNDLE_NAME = appName;
     NODE_OPTIONS = "--max-old-space-size=6144";
     npm_config_manage_package_manager_versions = "false";
@@ -142,10 +142,7 @@ stdenv.mkDerivation {
 
     install -m755 ${goose-cli.passthru.gooseServerDrv}/bin/goosed desktop/src/bin/goosed
 
-    electronDistDir="$PWD/electron-dist"
-    mkdir -p "$electronDistDir"
-    cp -R ${electronDist}/. "$electronDistDir"/
-    chmod -R u+w "$electronDistDir"
+    ${electronBuild.copyDist}
     export ELECTRON_OVERRIDE_DIST_PATH="$electronDistDir"
     export ELECTRON_VERSION="${electronVersion}"
 

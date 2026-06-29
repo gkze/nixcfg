@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Protocol, cast
 
@@ -22,8 +21,10 @@ from lib.tests._nix_ast import (
 )
 from lib.tests._updater_helpers import load_repo_module, run_async
 from lib.update.paths import REPO_ROOT
+from lib.update.updaters import factories as updater_factories
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.metadata import DownloadUrlMetadata
+from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
 
 class _UpdateConfig(Protocol):
@@ -103,23 +104,19 @@ def test_town_assistant_nightly_fetch_latest_and_download_url(
     """Parse the nightly Sparkle appcast and return the immutable DMG URL."""
     module = _load_updater()
     updater = module.TownAssistantNightlyUpdater()
-    xml = (
-        '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
-        "<channel><item>"
-        "<sparkle:version>32</sparkle:version>"
-        "<sparkle:shortVersionString>1.8</sparkle:shortVersionString>"
-        '<enclosure url="https://example.invalid/Town%20Assistant-1.8-32.dmg"/>'
-        "</item></channel></rss>"
-    )
 
-    async def _fetch_url(_session: object, url: str, **kwargs: object) -> bytes:
+    async def _fetch_items(_session: object, url: str, *, config: object):
         assert url == updater.APPCAST_URL
-        assert kwargs["user_agent"] == "Sparkle/2.0"
-        assert kwargs["request_timeout"] == updater.config.default_timeout
-        assert kwargs["config"] == updater.config
-        return xml.encode()
+        assert config == updater.config
+        return (
+            SparkleAppcastItem(
+                "32",
+                "1.8",
+                "https://example.invalid/Town%20Assistant-1.8-32.dmg",
+            ),
+        )
 
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(updater_factories, "fetch_sparkle_appcast_items", _fetch_items)
 
     latest = run_async(updater.fetch_latest(object()))
 
@@ -136,48 +133,42 @@ def test_town_assistant_nightly_fetch_latest_and_download_url(
 
 
 @pytest.mark.parametrize(
-    ("xml", "match"),
+    ("item", "match"),
     [
-        ("<", "Invalid Town Assistant appcast XML"),
-        ("<rss><channel /></rss>", "No items found in Town Assistant appcast"),
         (
-            "<rss><channel><item /></channel></rss>",
-            "No enclosure found in Town Assistant appcast",
+            SparkleAppcastItem("32", None, "https://example.invalid/app.dmg"),
+            "Missing version",
         ),
         (
-            '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item><sparkle:version>32</sparkle:version><enclosure url="https://example.invalid/app.dmg"/></item></channel></rss>',
-            "No short version found in Town Assistant appcast",
+            SparkleAppcastItem(" ", "1.8", "https://example.invalid/app.dmg"),
+            "Missing version",
         ),
         (
-            '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item><sparkle:shortVersionString>1.8</sparkle:shortVersionString><sparkle:version /><enclosure url="https://example.invalid/app.dmg"/></item></channel></rss>',
-            "Empty build version in Town Assistant appcast",
+            SparkleAppcastItem("32", "1.8", None),
+            "Missing download URL",
         ),
         (
-            '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item><sparkle:shortVersionString>1.8</sparkle:shortVersionString><sparkle:version> </sparkle:version><enclosure url="https://example.invalid/app.dmg"/></item></channel></rss>',
-            "Blank build version in Town Assistant appcast",
-        ),
-        (
-            '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item><sparkle:shortVersionString>1.8</sparkle:shortVersionString><sparkle:version>32</sparkle:version><enclosure /></item></channel></rss>',
-            "No URL found in Town Assistant appcast enclosure",
-        ),
-        (
-            '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item><sparkle:shortVersionString>1.8</sparkle:shortVersionString><sparkle:version>32</sparkle:version><enclosure url=" "/></item></channel></rss>',
-            "Blank URL found in Town Assistant appcast enclosure",
+            SparkleAppcastItem("32", "1.8", " "),
+            "Missing download URL",
         ),
     ],
 )
 def test_town_assistant_nightly_rejects_invalid_appcast_shapes(
     monkeypatch: pytest.MonkeyPatch,
-    xml: str,
+    item: SparkleAppcastItem,
     match: str,
 ) -> None:
     """Surface targeted appcast parsing errors."""
     module = _load_updater()
     updater = module.TownAssistantNightlyUpdater()
+
+    async def _fetch_items(*_args: object, **_kwargs: object):
+        return (item,)
+
     monkeypatch.setattr(
-        module,
-        "fetch_url",
-        lambda *_a, **_k: asyncio.sleep(0, result=xml.encode()),
+        updater_factories,
+        "fetch_sparkle_appcast_items",
+        _fetch_items,
     )
 
     with pytest.raises(RuntimeError, match=match):

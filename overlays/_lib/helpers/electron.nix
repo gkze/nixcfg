@@ -13,6 +13,7 @@ let
     "41.0.0"
     "41.2.1"
     "41.5.0"
+    "42.3.3"
   ];
 
   hashes = {
@@ -72,17 +73,64 @@ let
       x86_64-darwin = "sha256-MIW1L8kOgcDD7X9Zt1n3ELF2xaiYnO1kpRYY6P0+ii4=";
       x86_64-linux = "sha256-HVNkeU3/4kk9dKl1XUm6N+zf09Gajio4NJzZN0rbGdQ=";
     };
+    "42.3.3" = {
+      headers = "sha256-KFq3NzNYvHuBHehFAbRtrbiFPaqQi/G2+5y92T/1tbI=";
+      aarch64-darwin = "sha256-E4RNm1DHLR+K61MVOYEZeYvbW9P6ni2J9DBv1QHEjI0=";
+      aarch64-linux = "sha256-xetOrFgjapPJwHuz01Nvi8lorvd49hc0gLTzGmPBlOI=";
+      x86_64-darwin = "sha256-6vHhsvKs42nNxczZVqq/pRAI6cNEQpuqDju1KBBJQc8=";
+      x86_64-linux = "sha256-vMIhN3WGByFtdk3EU+L+pFTICHk8PWqC3fhqNvne+iw=";
+    };
   };
 
   runtimes = builtins.mapAttrs mkElectron hashes;
+
+  runtimeFor =
+    version:
+    runtimes.${version} or (throw "nixcfgElectron: missing packaged Electron runtime for ${version}");
+
+  sourceBuildFor =
+    version:
+    let
+      runtime = runtimeFor version;
+      exactRuntime =
+        if runtime.version == version then
+          runtime
+        else
+          throw "nixcfgElectron: runtime ${version} resolved Electron ${runtime.version}";
+    in
+    {
+      inherit version;
+      runtime = exactRuntime;
+      runtimeVersion = exactRuntime.version;
+      inherit (exactRuntime.passthru) headers;
+      inherit (exactRuntime.passthru) dist;
+      commonEnv = {
+        ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
+        npm_config_runtime = "electron";
+        npm_config_target = version;
+        npm_config_nodedir = toString exactRuntime.passthru.headers;
+      };
+      copyDist = ''
+        electronDistDir="$PWD/electron-dist"
+        mkdir -p "$electronDistDir"
+        cp -R ${exactRuntime.passthru.dist}/. "$electronDistDir"/
+        chmod -R u+w "$electronDistDir"
+      '';
+      electronBuilderConfigFlags = ''
+        -c.electronDist="$electronDistDir" \
+        -c.electronVersion=${final.lib.escapeShellArg exactRuntime.version} \
+      '';
+    };
 in
 {
   nixcfgElectron = {
-    inherit allVersions hashes runtimes;
-
-    runtimeFor =
-      version:
-      runtimes.${version} or (throw "nixcfgElectron: missing packaged Electron runtime for ${version}");
+    inherit
+      allVersions
+      hashes
+      runtimeFor
+      runtimes
+      sourceBuildFor
+      ;
 
     versionsForSystem = _system: allVersions;
   };

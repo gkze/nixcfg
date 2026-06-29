@@ -2,92 +2,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from lib.update.updaters.base import sparkle_appcast_updater
 
-from defusedxml import ElementTree
-
-if TYPE_CHECKING:
-    from xml.etree.ElementTree import Element
-
-    import aiohttp
-
-from lib.update.net import fetch_url
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
-from lib.update.updaters.metadata import DownloadUrlMetadata
-
-_SPARKLE_NS = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
-
-
-@register_updater
-class ChatGPTUpdater(DownloadHashUpdater):
-    """Resolve latest ChatGPT appcast version and artifact URL."""
-
-    name = "chatgpt"
-
-    APPCAST_URL = (
+ChatGPTUpdater = sparkle_appcast_updater(
+    "chatgpt",
+    appcast_url=(
         "https://persistent.oaistatic.com/sidekick/public/sparkle_public_appcast.xml"
-    )
-
-    PLATFORMS: ClassVar[dict[str, str]] = {
+    ),
+    platforms={
         "aarch64-darwin": "darwin",
         "x86_64-darwin": "darwin",
-    }
-
-    def _parse_appcast(self, xml_data: str) -> Element:
-        try:
-            return ElementTree.fromstring(xml_data)
-        except ElementTree.ParseError as exc:
-            snippet = xml_data[:200].replace("\n", " ").strip()
-            msg = f"Invalid appcast XML from {self.APPCAST_URL}; snippet: {snippet}"
-            raise RuntimeError(msg) from exc
-
-    def _extract_item(self, root: Element) -> Element:
-        item = root.find("./channel/item")
-        if item is None:
-            msg = "No items found in appcast"
-            raise RuntimeError(msg)
-        return item
-
-    def _extract_version(self, item: Element) -> str:
-        version = item.findtext("sparkle:shortVersionString", namespaces=_SPARKLE_NS)
-        if version is None or not version.strip():
-            msg = "No version found in appcast"
-            raise RuntimeError(msg)
-        return version.strip()
-
-    def _extract_download_url(self, item: Element) -> str:
-        enclosure = item.find("enclosure")
-        if enclosure is None:
-            msg = "No enclosure found in appcast"
-            raise RuntimeError(msg)
-
-        url = enclosure.get("url")
-        if url is None or not url.strip():
-            msg = "No URL found in enclosure"
-            raise RuntimeError(msg)
-        return url.strip()
-
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Fetch latest appcast entry and return version + download URL."""
-        xml_payload = await fetch_url(
-            session,
-            self.APPCAST_URL,
-            user_agent="Sparkle/2.0",
-            timeout=self.config.default_timeout,
-            config=self.config,
-        )
-        xml_data = xml_payload.decode()
-        root = self._parse_appcast(xml_data)
-        item = self._extract_item(root)
-        version = self._extract_version(item)
-        url = self._extract_download_url(item)
-        return VersionInfo(version=version, metadata=DownloadUrlMetadata(url=url))
-
-    def get_download_url(self, platform: str, info: VersionInfo) -> str:
-        """Return the appcast-provided download URL for Darwin builds."""
-        _ = platform
-        metadata = info.metadata
-        if isinstance(metadata, DownloadUrlMetadata):
-            return metadata.url
-        msg = f"Missing ChatGPT download URL in metadata: {metadata!r}"
-        raise RuntimeError(msg)
+    },
+    version_field="short_version",
+    appcast_url_metadata=True,
+    url_metadata_context="ChatGPT metadata",
+    module=__name__,
+)

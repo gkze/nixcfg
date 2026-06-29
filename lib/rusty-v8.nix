@@ -117,6 +117,10 @@
               $out/build/config/compiler/compiler.gni
             python ${patchScriptsDir}/patch_compiler_gni.py \
               $out/build/config/compiler/BUILD.gn
+            python ${patchScriptsDir}/patch_compiler_gni.py \
+              $out/build/config/sanitizers/sanitizers.gni
+            python ${patchScriptsDir}/patch_stdlib_adler.py \
+              $out/build/rust/std/BUILD.gn
             python ${patchScriptsDir}/patch_allocator_build.py \
               $out/build/rust/allocator/BUILD.gn
             python ${patchScriptsDir}/patch_whole_archive.py \

@@ -5,29 +5,27 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import aiohttp
-
     from lib.nix.models.sources import SourceEntry
-    from lib.update.events import EventStream
 
 from lib.nix.models.sources import HashCollection
-from lib.update.nix import _build_fetch_from_github_expr, _build_overlay_expr
+from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters.base import (
+    SourceThenOverlayHashMixin,
     UpdateContext,
     VersionInfo,
     register_updater,
-    stream_source_then_overlay_hashes,
 )
 from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 
 @register_updater
-class TsgolintUpdater(GitHubReleaseUpdater):
+class TsgolintUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     """Resolve tsgolint releases and refresh the checked-in Nix source hashes."""
 
     name = "tsgolint"
     GITHUB_OWNER = "oxc-project"
     GITHUB_REPO = "tsgolint"
+    dependency_hash_type = "vendorHash"
 
     @staticmethod
     def _src_expr(version: str) -> str:
@@ -72,23 +70,3 @@ class TsgolintUpdater(GitHubReleaseUpdater):
             )
 
         return False
-
-    async def fetch_hashes(
-        self,
-        info: VersionInfo,
-        session: aiohttp.ClientSession,
-        *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
-        """Compute source and vendor hashes for the latest released backend."""
-        _ = (session, context)
-
-        async for event in stream_source_then_overlay_hashes(
-            self.name,
-            version=info.version,
-            src_expr=self._src_expr(info.version),
-            overlay_expr=_build_overlay_expr(self.name),
-            dependency_hash_type="vendorHash",
-            config=self.config,
-        ):
-            yield event

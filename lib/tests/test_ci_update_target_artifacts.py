@@ -23,6 +23,12 @@ def _inventory_payload() -> dict[str, object]:
                 ],
             },
             {
+                "name": "t3code",
+                "handles": {"sourceUpdate": True},
+                "sourceTarget": {"path": "packages/t3code/sources.json"},
+                "generatedArtifacts": [],
+            },
+            {
                 "name": "t3code-desktop",
                 "handles": {"sourceUpdate": True},
                 "sourceTarget": {"path": "packages/t3code-desktop/sources.json"},
@@ -43,7 +49,7 @@ def test_build_matrix_slices_source_targets_and_platform_artifacts() -> None:
     matrix = artifacts.build_matrix(inventory=_inventory_payload())
     by_target = {entry["target"]: entry for entry in matrix["include"]}
 
-    assert set(by_target) == {"codex", "t3code-desktop"}
+    assert set(by_target) == {"codex", "t3code", "t3code-desktop"}
     assert by_target["codex"]["artifact_paths_aarch64_linux"] == [
         "packages/codex/sources.json"
     ]
@@ -52,6 +58,12 @@ def test_build_matrix_slices_source_targets_and_platform_artifacts() -> None:
         "packages/codex/Cargo.nix",
         "packages/codex/crate-hashes.json",
     ]
+    assert by_target["t3code"]["artifact_paths_aarch64_darwin"] == [
+        "packages/t3code/sources.json",
+        "packages/t3code/bun.lock",
+        "packages/t3code-desktop/bun.lock",
+    ]
+    assert by_target["t3code"]["regenerate_runtime_locks"] is True
     assert by_target["t3code-desktop"]["artifact_paths_aarch64_darwin"] == [
         "packages/t3code-desktop/sources.json",
         "packages/t3code/bun.lock",
@@ -124,7 +136,7 @@ def test_main_matrix_writes_stdout_and_output(
         == 0
     )
     written = json.loads(output.read_text(encoding="utf-8"))
-    assert written["include"][1]["target"] == "t3code-desktop"
+    assert written["include"][1]["target"] == "t3code"
 
 
 def test_main_matrix_rejects_non_object_json(

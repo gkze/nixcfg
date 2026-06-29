@@ -9,6 +9,6 @@
   "git+https://github.com/juberti-oai/rust-sdks.git?rev=e2d1d1d230c6fc9df171ccb181423f957bb3c1f0#webrtc-sys@0.3.24": "1nhgk4rdqar6clarzww47kyfxq0abfzwyypsz239palwl70ywwyh",
   "git+https://github.com/nornagon/crossterm?rev=87db8bfa6dc99427fd3b071681b07fc31c6ce995#0.28.1": "0vzgpvbri4m4qydkj50ch468az7myy04qh5z2n500p1f4dysv87a",
   "git+https://github.com/nornagon/ratatui?rev=9b2ad1298408c45918ee9f8241a6f95498cdbed2#0.29.0": "06jyq7m4ch7d5y2cmsf0pqdyyycqif8qrkgp66qj1ch6rzjx66qw",
-  "git+https://github.com/openai-oss-forks/tokio-tungstenite?rev=132f5b39c862e3a970f731d709608b3e6276d5f6#0.28.0": "0p7fi05bf4xmjinfjwd4yy7yc52sl739x6kayi01z323djyj9444",
-  "git+https://github.com/openai-oss-forks/tungstenite-rs?rev=9200079d3b54a1ff51072e24d81fd354f085156f#tungstenite@0.27.0": "0pfk24qw4dzc9xk6pl5qwqk39p4ccld0yrxr8dkj5nwpbnm71ph0"
+  "git+https://github.com/openai-oss-forks/tokio-tungstenite?rev=0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186#0.28.0": "00i879a84zqfak3jgh4s7lrg5yz2028ra7l8cqcyfn6inyg6cp2p",
+  "git+https://github.com/openai-oss-forks/tungstenite-rs?rev=4fffad30fe373adbdcffab9545e9e9bf4f2fc19f#tungstenite@0.27.0": "1z1jvg5wp4p9pswnmcn6wxzkgi7yjm5zvskdk02gn9vxp69y2lam"
 }

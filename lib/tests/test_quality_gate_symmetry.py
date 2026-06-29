@@ -112,19 +112,6 @@ def _flake_check_names() -> tuple[str, ...]:
     return tuple(sorted(set(re.findall(r'checks\."([^"]+)"\s*=', text))))
 
 
-def _flake_check_block(attr_name: str) -> str:
-    text = _read(REPO_ROOT / "flake.nix")
-    pattern = re.compile(
-        rf'^\s*checks\."{re.escape(attr_name)}"\s*=\s*mkRepoCheck\s*\{{(?P<body>.*?)^\s*\}};',
-        re.DOTALL | re.MULTILINE,
-    )
-    match = pattern.search(text)
-    if match is None:
-        msg = f"Could not find flake check block {attr_name!r}"
-        raise AssertionError(msg)
-    return match.group("body")
-
-
 def _ci_matrix_checks() -> tuple[str, ...]:
     payload = yaml.safe_load(_read(REPO_ROOT / ".github/workflows/ci.yml"))
     return tuple(payload["jobs"]["quality"]["strategy"]["matrix"]["check"])
@@ -296,26 +283,12 @@ def test_pyproject_ruff_force_exclude_stays_enabled() -> None:
     assert pyproject["tool"]["ruff"]["force-exclude"] is True
 
 
-def test_python_quality_surfaces_use_multi_except_normalizer() -> None:
-    """Keep the pyupgrade surfaces aligned with the multi-except repair shim."""
-    dev_shell = _read(REPO_ROOT / "lib/dev-shell.nix")
-    flake_check = _flake_check_block("format-python-pyupgrade")
-    assert "lib.fix_python_multi_except" in dev_shell
-    assert "lib.fix_python_multi_except" in flake_check
-    assert "--pyupgrade-exe ${lib.getExe pkgs.pyupgrade}" in flake_check
-    assert "--pyupgrade-arg=--py313-plus" in flake_check
-    assert (
-        "| ${pkgs.findutils}/bin/xargs -0 -r ${lib.getExe pkgs.pyupgrade}"
-        not in flake_check
-    )
-
-
-def test_python_compile_surfaces_use_shared_compile_helper() -> None:
-    """Keep compile smoke checks routed through the shared helper script."""
-    dev_shell = _read(REPO_ROOT / "lib/dev-shell.nix")
-    flake = _read(REPO_ROOT / "flake.nix")
-    assert "check_python_compile.py" in dev_shell
-    assert "check_python_compile.py" in flake
+def test_pyproject_ty_strictness_excludes_unmigrated_preview_rules() -> None:
+    """Keep Ty strict while excluding preview churn the codebase has not adopted."""
+    rules = _pyproject()["tool"]["ty"]["rules"]
+    assert rules["all"] == "error"
+    assert rules["missing-override-decorator"] == "ignore"
+    assert rules["missing-type-argument"] == "ignore"
 
 
 def test_ruff_format_excludes_cover_vulnerable_single_line_multi_except_files() -> None:

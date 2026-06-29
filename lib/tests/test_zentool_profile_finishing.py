@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._zen_tooling import load_zen_script_module
+from lib.tests._zen_tooling import load_zentool_module
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 @pytest.fixture(scope="module")
 def zentool() -> ModuleType:
     """Load the zentool script for profile/config finishing tests."""
-    return load_zen_script_module("zentool", "zentool_profile_finishing")
+    return load_zentool_module("zentool_profile_finishing")
 
 
 def test_load_config_returns_valid_workspace_spec(
@@ -60,6 +60,7 @@ def test_default_profile_dir_skips_non_install_and_blank_install_before_default_
     parser.add_section("Other")
 
     fallback = tmp_path / "Profiles/default-profile"
+    monkeypatch.setattr(zentool, "zen_running_profile_dirs", list)
     monkeypatch.setattr(zentool, "_load_profiles_ini", lambda: parser)
     monkeypatch.setattr(
         zentool,

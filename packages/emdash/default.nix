@@ -28,6 +28,7 @@
 }:
 let
   pname = "emdash";
+  appDir = "apps/emdash-desktop";
   slib = outputs.lib;
   version = slib.getFlakeVersion pname;
   src = inputs.emdash;
@@ -41,10 +42,11 @@ let
     if perPlatformHash.success then perPlatformHash.value else slib.sourceHash pname "npmDepsHash";
 
   electronVersion = "40.7.0";
-  electronRuntime = nixcfgElectron.runtimeFor electronVersion;
-  electronRuntimeVersion = electronRuntime.version;
-  electronHeaders = electronRuntime.passthru.headers;
-  electronDist = electronRuntime.passthru.dist;
+  electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
+  electronRuntime = electronBuild.runtime;
+  electronRuntimeVersion = electronBuild.runtimeVersion;
+  electronHeaders = electronBuild.headers;
+  electronDist = electronBuild.dist;
   supportedSystems = [
     "aarch64-darwin"
     "aarch64-linux"
@@ -119,17 +121,16 @@ stdenv.mkDerivation {
 
   strictDeps = true;
 
-  env = {
+  env = electronBuild.commonEnv // {
     CI = "1";
     EMDASH_NIXCFG_BUILD_REV = "3";
-    ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
     npm_config_build_from_source = "true";
     npm_config_manage_package_manager_versions = "false";
     npm_config_node_linker = "hoisted";
   };
 
   postPatch = ''
-    substituteInPlace src/main/utils/userEnv.ts \
+    substituteInPlace ${appDir}/src/main/utils/userEnv.ts \
       --replace-fail " -ilc 'env'" " -lc 'env'"
   '';
 
@@ -140,13 +141,41 @@ stdenv.mkDerivation {
     mkdir -p "$HOME"
     pnpm config set manage-package-manager-versions false
 
-    export npm_config_runtime=electron
-    export npm_config_target=${electronVersion}
-    export npm_config_nodedir=${lib.escapeShellArg (toString electronHeaders)}
+    rm -rf ${appDir}/node_modules
+    ln -s ../../node_modules ${appDir}/node_modules
+
+    mkdir -p node_modules/@emdash
+    workspace_packages=(
+      chat-ui
+      core
+      plugins
+      shared
+      ui
+    )
+    for workspace_package in "''${workspace_packages[@]}"
+    do
+      ln -sfn "../../packages/$workspace_package" \
+        "node_modules/@emdash/$workspace_package"
+    done
+
+    pnpm --filter @emdash/shared run build
+    pnpm --filter @emdash/core run build
+    pnpm --filter @emdash/plugins run build
+    pnpm --filter @emdash/chat-ui run build
+    pnpm --filter @emdash/ui run build
+
+    for workspace_package in "''${workspace_packages[@]}"
+    do
+      rm "node_modules/@emdash/$workspace_package"
+      cp -R "packages/$workspace_package" \
+        "node_modules/@emdash/$workspace_package"
+    done
+
+    pushd ${appDir}
 
     # Work around keytar's bundled node-addon-api constant-expression issue
     # with the Apple toolchain in this build environment.
-    ${lib.getExe python3} ${patchNodeAddonApi}
+    PYTHONPATH=${../..} ${lib.getExe python3} ${patchNodeAddonApi}
 
     # pnpmConfigHook installs dependencies without relying on upstream
     # postinstall scripts, so rebuild native Electron modules explicitly.
@@ -155,6 +184,7 @@ stdenv.mkDerivation {
     pnpm run build
 
     install -Dm644 ${msShim} out/main/ms-shim.cjs
+    install -Dm644 ${msShim} ../../out/main/ms-shim.cjs
 
     substituteInPlace node_modules/debug/src/common.js \
       --replace-fail "require('ms')" \
@@ -183,10 +213,7 @@ stdenv.mkDerivation {
       mv "$bundled_entrypoint.nixcfg-bundled" "$bundled_entrypoint"
     done
 
-    electronDistDir="$PWD/electron-dist"
-    mkdir -p "$electronDistDir"
-    cp -R ${electronDist}/. "$electronDistDir"/
-    chmod -R u+w "$electronDistDir"
+    ${electronBuild.copyDist}
 
     extra_electron_builder_flags=()
     ${lib.optionalString stdenv.hostPlatform.isDarwin ''
@@ -201,8 +228,7 @@ stdenv.mkDerivation {
       --${electronBuilderTarget} \
       --dir \
       --publish never \
-      -c.electronDist="$electronDistDir" \
-      -c.electronVersion=${lib.escapeShellArg electronRuntimeVersion} \
+      ${electronBuild.electronBuilderConfigFlags} \
       -c.npmRebuild=false \
       "''${extra_electron_builder_flags[@]}"
 
@@ -226,6 +252,7 @@ stdenv.mkDerivation {
       rm -rf "$asar_dir"
     ''}
 
+    popd
     runHook postBuild
   '';
 
@@ -234,7 +261,7 @@ stdenv.mkDerivation {
       ''
         runHook preInstall
 
-        distDir="$PWD/dist"
+        distDir="$PWD/${appDir}/dist"
         appDir="$distDir/mac-arm64/Emdash.app"
 
         if [ ! -d "$appDir" ]; then
@@ -259,7 +286,7 @@ stdenv.mkDerivation {
       ''
         runHook preInstall
 
-        distDir="$PWD/dist"
+        distDir="$PWD/${appDir}/dist"
         shopt -s nullglob
         unpackedDirs=("$distDir"/linux*-unpacked)
         if [ "''${#unpackedDirs[@]}" -ne 1 ]; then

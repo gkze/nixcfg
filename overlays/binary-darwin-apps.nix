@@ -32,7 +32,6 @@ in
   jacq = callDarwinAppPackage "jacq";
   keepingyouawake = callDarwinAppPackage "keepingyouawake";
   linear = callDarwinAppPackage "linear";
-  lm-studio = callDarwinAppPackage "lm-studio";
   logi-options-plus = callDarwinAppPackage "logi-options-plus";
   loom = callDarwinAppPackage "loom";
   macai = callDarwinAppPackage "macai";

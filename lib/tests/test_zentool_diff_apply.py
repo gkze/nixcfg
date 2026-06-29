@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._zen_tooling import load_zen_script_module
+from lib.tests._zen_tooling import load_zentool_module
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 @pytest.fixture(scope="module")
 def zentool() -> ModuleType:
     """Load the zentool script for focused diff/apply tests."""
-    return load_zen_script_module("zentool", "zentool_diff_apply")
+    return load_zentool_module("zentool_diff_apply")
 
 
 def make_args(**overrides: object) -> SimpleNamespace:
@@ -713,6 +713,73 @@ def test_cmd_apply_applies_state_and_assets_after_showing_both_diffs(
         "Applied state successfully.",
         "Applied assets successfully.",
     ]
+
+
+def test_build_state_apply_plan_reports_favicon_only_updates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    zentool: ModuleType,
+) -> None:
+    """Apply should write when runtime-only tab images are resolved."""
+    session = zentool.SessionState()
+    desired_state = zentool.SessionState(
+        tabs=[
+            zentool.SessionTab(
+                entries=[
+                    zentool.SessionEntry(
+                        url="https://example.com",
+                        title="Example",
+                    )
+                ],
+                zenSyncId="sync-example",
+            )
+        ]
+    )
+    container_state = zentool.ContainerState()
+    container_plan = zentool.ContainerPlan(
+        state=container_state,
+        context_ids_by_key={},
+    )
+
+    monkeypatch.setattr(zentool, "require_zen_closed", lambda _profile: object())
+    monkeypatch.setattr(zentool, "_print_runtime_warnings", lambda _runtime: None)
+    monkeypatch.setattr(
+        zentool,
+        "load_session",
+        lambda _profile: (tmp_path / zentool.SESSION_FILENAME, session),
+    )
+    monkeypatch.setattr(
+        zentool,
+        "load_containers",
+        lambda _profile: (tmp_path / zentool.CONTAINERS_FILENAME, container_state),
+    )
+    monkeypatch.setattr(zentool, "load_config", lambda _path: zentool.ZenConfig())
+    monkeypatch.setattr(
+        zentool,
+        "build_desired_containers",
+        lambda _containers, _config, _session: container_plan,
+    )
+    monkeypatch.setattr(
+        zentool,
+        "build_desired_state",
+        lambda _session, _config, _plan: desired_state,
+    )
+    monkeypatch.setattr(zentool, "snapshot", lambda *_args, **_kwargs: {"same": True})
+    monkeypatch.setattr(
+        zentool,
+        "DeepDiff",
+        lambda *_args, **_kwargs: FakeDiff("", truthy=False),
+    )
+    monkeypatch.setattr(
+        zentool,
+        "FaviconResolver",
+        lambda: lambda _url: "data:image/png;base64,icon",
+    )
+
+    plan = zentool.build_state_apply_plan(make_args(state=True))
+
+    assert plan.diff_text == "Resolved favicon images for 1 tab(s)."
+    assert desired_state.tabs[0].model_extra["image"] == "data:image/png;base64,icon"
 
 
 def test_cmd_apply_accepts_combined_prompt_before_applying_changes(

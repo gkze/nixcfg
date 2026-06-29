@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-uFnwBVZn5iUTIHNYG2WqiULA8siGWJaqY0BcRCoU6gg=",
-    "x86_64-darwin": "sha256-ZeTgrqkpYumSGlbv/O8/GKALns4bNaFJR3CgV4Mswb4="
+    "aarch64-darwin": "sha256-HReyDktQ+EiHM857kgvzQD8tSHtSFYrAfv1YSTVFCLw=",
+    "x86_64-darwin": "sha256-F7v+j4M6pQ3sIBW5rWoIQ0gdtgtTPlUiUe2ffcc5sd8="
   },
   "urls": {
-    "aarch64-darwin": "https://zoom.us/client/7.0.5.81138/zoomusInstallerFull.pkg?archType=arm64",
-    "x86_64-darwin": "https://zoom.us/client/7.0.5.81138/zoomusInstallerFull.pkg"
+    "aarch64-darwin": "https://zoom.us/client/7.1.0.83064/zoomusInstallerFull.pkg?archType=arm64",
+    "x86_64-darwin": "https://zoom.us/client/7.1.0.83064/zoomusInstallerFull.pkg"
   },
-  "version": "7.0.5.81138"
+  "version": "7.1.0.83064"
 }

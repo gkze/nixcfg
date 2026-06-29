@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING
 import lz4.block
 import pytest
 
-from lib.tests._zen_tooling import load_zen_script_module
+from lib.tests._zen_tooling import (
+    load_zentool_module,
+    make_session_space,
+    make_session_state,
+)
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -19,15 +23,13 @@ if TYPE_CHECKING:
 @pytest.fixture(scope="module")
 def zentool() -> ModuleType:
     """Load zentool for isolated I/O and asset helper testing."""
-    return load_zen_script_module("zentool", "zentool_io_assets")
+    return load_zentool_module("zentool_io_assets")
 
 
 def _minimal_session(zentool: ModuleType) -> object:
-    return zentool.SessionState(
-        tabs=[],
-        groups=[],
-        folders=[],
-        spaces=[zentool.SessionSpace(uuid="ws-1", name="Work")],
+    return make_session_state(
+        zentool,
+        spaces=[make_session_space(zentool, uuid="ws-1", name="Work")],
     )
 
 

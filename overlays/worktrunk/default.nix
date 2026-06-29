@@ -30,11 +30,6 @@ let
       || (baseNameOf (dirOf path) == "dev");
   };
 
-  vendorSrc = lib.cleanSourceWith {
-    inherit src;
-    filter = path: _type: lib.hasInfix "/vendor/" path || lib.hasSuffix "/vendor" path;
-  };
-
   commonArgs = {
     src = filteredSrc;
     strictDeps = true;
@@ -53,19 +48,7 @@ let
       src.shortRev or (src.dirtyShortRev or "nix-${src.lastModifiedDate or "unknown"}");
   };
 
-  cargoArtifacts = craneLib.buildDepsOnly (
-    builtins.removeAttrs commonArgs [ "src" ]
-    // {
-      dummySrc = craneLib.mkDummySrc {
-        inherit (commonArgs) src;
-        extraDummyScript = ''
-          rm -rf $out/vendor
-          cp -r ${vendorSrc}/vendor $out/vendor
-          chmod -R u+w $out/vendor
-        '';
-      };
-    }
-  );
+  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 in
 {
   worktrunk = craneLib.buildPackage (

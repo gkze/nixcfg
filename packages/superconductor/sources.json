@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-q1AyZwfA9SB6WvsBxT7Sg1LzfUqhkANxRS1Y0xSzpNo="
+    "aarch64-darwin": "sha256-FBQlbSYaZDaxuPeMf7P75iZ/xIPKw5VKZevAhwmQhWY="
   },
   "urls": {
-    "aarch64-darwin": "https://releases.superconductor.so/nightly/Superconductor-nightly-2ec766bb-arm64.dmg"
+    "aarch64-darwin": "https://releases.superconductor.so/nightly/Superconductor-nightly-dcd0f4f7-arm64.dmg"
   },
-  "version": "2026-06-01-2ec766bb"
+  "version": "2026-06-28-dcd0f4f7"
 }

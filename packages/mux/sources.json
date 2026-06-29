@@ -1,5 +1,5 @@
 {
-  "drvHash": "ql6damy6nfj0vy5hiy6vgvxl7kx7vwl2",
+  "drvHash": "l110cgw82d3wafjx4mwg08r0vmhm6ixa",
   "hashes": [
     {
       "hash": "sha256-Iv2eJ7qi1zJ/xGjXAcnjtKuWsoz4Ji0uAidByQQJE/g=",
@@ -18,5 +18,5 @@
     }
   ],
   "input": "mux",
-  "version": "v0.26.1"
+  "version": "v0.27.0"
 }

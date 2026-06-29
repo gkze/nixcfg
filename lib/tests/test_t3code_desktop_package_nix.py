@@ -51,20 +51,24 @@ def test_t3code_desktop_package_keeps_staged_runtime_and_electron_dist() -> None
         '"T3 Code (Alpha)"',
     )
     assert_nix_ast_equal(
+        expect_scope_binding(_desktop_assertion(), "electronBuild").value,
+        "nixcfgElectron.sourceBuildFor electronVersion",
+    )
+    assert_nix_ast_equal(
         expect_scope_binding(_desktop_assertion(), "electronRuntime").value,
-        "nixcfgElectron.runtimeFor electronVersion",
+        "electronBuild.runtime",
     )
     assert_nix_ast_equal(
         expect_scope_binding(_desktop_assertion(), "electronRuntimeVersion").value,
-        "electronRuntime.version",
+        "electronBuild.runtimeVersion",
     )
     assert_nix_ast_equal(
         expect_scope_binding(_desktop_assertion(), "electronHeaders").value,
-        "electronRuntime.passthru.headers",
+        "electronBuild.headers",
     )
     assert_nix_ast_equal(
         expect_scope_binding(_desktop_assertion(), "electronDist").value,
-        "electronRuntime.passthru.dist",
+        "electronBuild.dist",
     )
 
     node_modules = expect_instance(
@@ -112,6 +116,8 @@ def test_t3code_desktop_package_keeps_staged_runtime_and_electron_dist() -> None
     )
     assert len(electron_builder) == 1
     assert "-c.npmRebuild=false" in electron_builder[0]
+    assert "${electronBuild.electronBuilderConfigFlags}" in build_phase.value
+    assert "-c.npmRebuild=false" in build_phase.value
 
     for required_contract in (
         'T3CODE_APP_ASAR="$appAsar"',

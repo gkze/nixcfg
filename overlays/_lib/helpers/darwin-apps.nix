@@ -169,6 +169,12 @@ in
       createBin ? true,
       postInstallApp ? "",
       macApp ? { },
+      description,
+      homepage,
+      mainProgram ? pname,
+      license ? prev.lib.licenses.unfree,
+      platforms ? prev.lib.platforms.darwin,
+      sourceProvenance ? with prev.lib.sourceTypes; [ binaryNativeCode ],
       meta ? { },
     }:
     let
@@ -185,8 +191,19 @@ in
           '';
     in
     prev.stdenvNoCC.mkDerivation {
-      inherit pname meta;
+      inherit pname;
       inherit (info) version;
+      meta = {
+        inherit
+          description
+          homepage
+          license
+          mainProgram
+          platforms
+          sourceProvenance
+          ;
+      }
+      // meta;
 
       passthru.macApp = {
         inherit bundleName;

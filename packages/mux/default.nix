@@ -23,10 +23,11 @@ let
   # We validate it against node_modules/electron/package.json during configurePhase
   # so lockfile bumps fail loudly until the matching headers hash is updated.
   electronVersion = "40.9.3";
-  electronRuntime = nixcfgElectron.runtimeFor electronVersion;
-  electronRuntimeVersion = electronRuntime.version;
-  electronHeaders = electronRuntime.passthru.headers;
-  electronDist = electronRuntime.passthru.dist;
+  electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
+  electronRuntime = electronBuild.runtime;
+  electronRuntimeVersion = electronBuild.runtimeVersion;
+  electronHeaders = electronBuild.headers;
+  electronDist = electronBuild.dist;
   linuxDesktopItem = makeDesktopItem {
     name = pname;
     desktopName = "Mux";
@@ -108,6 +109,8 @@ stdenv.mkDerivation {
     stdenv.cc.cc.lib
   ];
 
+  env = electronBuild.commonEnv;
+
   configurePhase = ''
     export HOME="$TMPDIR/home"
     mkdir -p "$HOME"
@@ -143,10 +146,7 @@ stdenv.mkDerivation {
         export CSC_IDENTITY_AUTO_DISCOVERY=false
         export NODE_OPTIONS="--max-old-space-size=6144''${NODE_OPTIONS:+ $NODE_OPTIONS}"
 
-        electronDistDir="$PWD/electron-dist"
-        mkdir -p "$electronDistDir"
-        cp -R ${electronDist}/. "$electronDistDir"/
-        chmod -R u+w "$electronDistDir"
+        ${electronBuild.copyDist}
 
         # Generate app icons once up front to avoid parallel make races inside
         # scripts/generate-icons.ts writing build/icon.iconset.
@@ -157,8 +157,7 @@ stdenv.mkDerivation {
           --mac \
           --dir \
           --publish never \
-          -c.electronDist="$electronDistDir" \
-          -c.electronVersion=${lib.escapeShellArg electronRuntimeVersion} \
+          ${electronBuild.electronBuilderConfigFlags} \
           -c.mac.identity=null
 
         runHook postBuild

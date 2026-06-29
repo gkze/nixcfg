@@ -234,6 +234,78 @@ __all__ = (
 _SourceTaskContext = update_source_runner.SourceTaskContext
 _SourcesPhaseContext = update_source_runner.SourcesPhaseContext
 _SourceTaskResult = update_source_runner.SourceTaskResult
+_REEXEC_ENV = "NIXCFG_UPDATE_REEXECED_FROM_CHECKOUT"
+_UPDATE_LIBRARY_RELATIVE_ROOT = Path("lib/update")
+
+
+def _python_file_relpaths(root: Path) -> set[Path]:
+    return {path.relative_to(root) for path in root.rglob("*.py")}
+
+
+def _same_file_bytes(left: Path, right: Path) -> bool:
+    return left.read_bytes() == right.read_bytes()
+
+
+def _update_library_matches_checkout(
+    repo_root: Path,
+    *,
+    runtime_update_root: Path | None = None,
+) -> bool:
+    """Return whether the running update library matches the checkout copy."""
+    repo_update_root = repo_root / _UPDATE_LIBRARY_RELATIVE_ROOT
+    runtime_root = (
+        Path(__file__).resolve().parent
+        if runtime_update_root is None
+        else runtime_update_root
+    )
+    try:
+        if runtime_root.samefile(repo_update_root):
+            return True
+    except FileNotFoundError:
+        return False
+
+    repo_files = _python_file_relpaths(repo_update_root)
+    runtime_files = _python_file_relpaths(runtime_root)
+    return repo_files == runtime_files and all(
+        _same_file_bytes(repo_update_root / relpath, runtime_root / relpath)
+        for relpath in repo_files
+    )
+
+
+def _argv_runs_top_level_update(argv: list[str]) -> bool:
+    return len(argv) > 1 and argv[1] == "update"
+
+
+def _maybe_reexec_checkout_update() -> int | None:
+    """Run update commands with checkout-matching update code when needed."""
+    if not _argv_runs_top_level_update(sys.argv):
+        return None
+
+    repo_root = get_repo_root()
+    if _update_library_matches_checkout(repo_root):
+        return None
+
+    if os.environ.get(_REEXEC_ENV):
+        sys.stderr.write(
+            "Error: running nixcfg update code still differs from this checkout "
+            "after re-exec. Run `nix run .#nixcfg -- update ...` directly.\n"
+        )
+        return 1
+
+    nix = shutil.which("nix")
+    if nix is None:
+        sys.stderr.write(
+            "Error: installed nixcfg update code differs from this checkout, "
+            "but `nix` was not found for `nix run .#nixcfg -- update ...`.\n"
+        )
+        return 1
+
+    env = dict(os.environ)
+    env[_REEXEC_ENV] = "1"
+    os.chdir(repo_root)
+    os.execvpe(nix, [nix, "run", ".#nixcfg", "--", *sys.argv[1:]], env)  # noqa: S606
+    msg = "unreachable"
+    raise AssertionError(msg)
 
 
 def _get_updaters() -> dict[str, UpdaterClass]:
@@ -1009,6 +1081,7 @@ async def _execute_run_plan(
                 native_only=plan.resolved.native_only,
                 config=config,
                 pinned=pinned,
+                dry_run=plan.resolved.dry_run,
             ),
         )
 
@@ -1055,6 +1128,10 @@ def run_update_command(
     **overrides: Unpack[UpdateOptionsKwargs],
 ) -> int:
     """Run the update workflow from one options object or keyword overrides."""
+    reexec_result = _maybe_reexec_checkout_update()
+    if reexec_result is not None:
+        return reexec_result
+
     if options is not None and overrides:
         msg = "run_update_command accepts either UpdateOptions or keyword overrides"
         raise TypeError(msg)

@@ -39,6 +39,12 @@ let
     enabled = false;
     inherit url;
   };
+
+  extensionMcp = enabled: {
+    inherit enabled;
+    remote = false;
+    settings = { };
+  };
 in
 {
   programs.zed-editor = {
@@ -46,24 +52,60 @@ in
     package = null;
     userSettings = {
       agent_servers = {
-        qwen-code.type = "registry";
-        mistral-vibe.type = "registry";
-        factory-droid.type = "registry";
-        github-copilot.type = "registry";
+        amp-acp.type = "registry";
         auggie.type = "registry";
+        claude-acp.type = "registry";
+        codex-acp.type = "registry";
+        cursor.type = "registry";
+        factory-droid.type = "registry";
+        gemini.type = "registry";
+        github-copilot.type = "registry";
+        github-copilot-cli.type = "registry";
+        goose.type = "registry";
+        kimi.type = "registry";
+        mistral-vibe.type = "registry";
         opencode.type = "registry";
+        pi-acp.type = "registry";
+        qwen-code.type = "registry";
       };
       agent = {
+        button = true;
         default_model = {
+          effort = "medium";
+          enable_thinking = true;
           model = "gpt-5.5";
-          provider = "openai";
+          provider = "zed.dev";
         };
         dock = "left";
+        expand_edit_card = false;
+        expand_terminal_card = false;
+        inline_assistant_model = {
+          model = "claude-opus-4-5-20251101";
+          provider = "anthropic";
+        };
         model_parameters = [ ];
         sidebar_side = "left";
+        thinking_display = "always_expanded";
+        tool_permissions = {
+          default = "confirm";
+          tools = {
+            edit_file = {
+              always_allow = [
+                {
+                  pattern = "^town/\\.zed/";
+                }
+              ];
+              default = "allow";
+            };
+            fetch.default = "allow";
+            search_web.default = "allow";
+            terminal.default = "allow";
+          };
+        };
       };
       buffer_font_family = config.fonts.monospace.name;
       buffer_font_size = 12.0;
+      collaboration_panel.dock = "left";
       font_family = config.fonts.monospace.name;
       context_servers = {
         aws-knowledge = disabledRemoteMcp "https://knowledge-mcp.global.api.aws";
@@ -78,6 +120,7 @@ in
           "--autoConnect"
           "--channel=stable"
         ];
+        browser-tools-context-server = extensionMcp true;
         clerk = disabledRemoteMcp "https://mcp.clerk.com/mcp";
         convex = disabledLocalMcp "bunx" [
           "--bun"
@@ -101,6 +144,7 @@ in
         markitdown = disabledLocalMcp "uvx" [
           "markitdown-mcp@0.0.1a4"
         ];
+        mcp-server-exa-search = extensionMcp false;
         next-devtools = disabledLocalMcp "bunx" [
           "--bun"
           "next-devtools-mcp@latest"
@@ -108,6 +152,7 @@ in
         notion = disabledRemoteMcp "https://mcp.notion.com/mcp";
         phone = disabledLocalMcp "${phoneMcpWrapper}" [ ];
         planetscale = disabledRemoteMcp "https://mcp.pscale.dev/mcp/planetscale";
+        planetscale-context-server = extensionMcp false;
         render = disabledLocalMcp "${renderMcpWrapper}" [ ];
         sentry = disabledRemoteMcp "https://mcp.sentry.dev/mcp";
         slack = disabledLocalMcp "${config.home.homeDirectory}/.local/bin/slack-mcp-wrapper" [ ];
@@ -122,6 +167,8 @@ in
           };
         vercel = disabledRemoteMcp "https://mcp.vercel.com";
       };
+      diff_view_style = "split";
+      disable_ai = false;
       language_models.openai.available_models = [
         {
           name = "gpt-5.5";
@@ -145,6 +192,7 @@ in
       minimap.show = "always";
       outline_panel.dock = "right";
       project_panel.dock = "right";
+      session.trust_all_worktrees = true;
       show_whitespaces = "all";
       theme = {
         dark = config.theme.displayNameAccented;
@@ -153,6 +201,7 @@ in
       };
       ui_font_family = config.fonts.sansSerif.name;
       ui_font_size = 15.0;
+      ui_font_weight = 400.0;
       vim_mode = true;
       wrap_guides = [
         80
@@ -161,17 +210,17 @@ in
     };
     userKeymaps = [
       {
+        bindings = {
+          "alt-~" = "terminal_panel::ToggleFocus";
+        };
+      }
+      {
         context = "Terminal";
         bindings = {
           "shift-enter" = [
             "terminal::SendText"
             "\u001b\r"
           ];
-        };
-      }
-      {
-        bindings = {
-          "alt-~" = "terminal_panel::ToggleFocus";
         };
       }
     ];

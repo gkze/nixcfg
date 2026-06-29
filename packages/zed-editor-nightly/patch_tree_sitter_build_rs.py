@@ -1,35 +1,45 @@
-"""Patch tree-sitter build.rs to accept multiple include paths."""
+"""Patch tree-sitter build.rs with an exact-count source codemod."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+from lib.codemods.text import regex_replace_file_exactly
+
 _EXPECTED_ARGC = 1
-_OLD = (
-    "        config\n"
-    '            .define("TREE_SITTER_FEATURE_WASM", "")\n'
-    '            .define("static_assert(...)", "")\n'
-    '            .include(env::var("DEP_WASMTIME_C_API_INCLUDE").unwrap());\n'
+_PATTERN = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<config>[^\n]+)\n"
+    r'(?P=indent)    \.define\("TREE_SITTER_FEATURE_WASM", ""\)\n'
+    r'(?P=indent)    \.define\("static_assert\(\.\.\.\)", ""\)\n'
+    r'(?P=indent)    \.include\(env::var\("DEP_WASMTIME_C_API_INCLUDE"\)\.unwrap\(\)\);',
+    flags=re.MULTILINE,
 )
-_NEW = (
-    "        config\n"
-    '            .define("TREE_SITTER_FEATURE_WASM", "")\n'
-    '            .define("static_assert(...)", "");\n'
-    '        if let Ok(include) = env::var("DEP_WASMTIME_C_API_INCLUDE") {\n'
-    "            for include in include.split_whitespace() {\n"
-    "                config.include(include);\n"
-    "            }\n"
-    "        }\n"
-)
+
+
+def _replacement(match: re.Match[str]) -> str:
+    statement_indent = match["indent"]
+    child_indent = f"{statement_indent}    "
+    grandchild_indent = f"{child_indent}    "
+    return f"""{statement_indent}{match["config"]}
+{child_indent}.define("TREE_SITTER_FEATURE_WASM", "")
+{child_indent}.define("static_assert(...)", "");
+{statement_indent}if let Ok(include) = env::var("DEP_WASMTIME_C_API_INCLUDE") {{
+{child_indent}for include in include.split_whitespace() {{
+{grandchild_indent}config.include(include);
+{child_indent}}}
+{statement_indent}}}"""
 
 
 def patch_file(path: Path) -> None:
     """Patch one tree-sitter build.rs file in place."""
-    text = path.read_text()
-    if _OLD not in text:
-        msg = "tree-sitter patch target not found"
-        raise SystemExit(msg)
-    path.write_text(text.replace(_OLD, _NEW, 1))
+    regex_replace_file_exactly(
+        path,
+        pattern=_PATTERN,
+        replacement=_replacement,
+        expected_count=1,
+        context="tree-sitter build.rs patch",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

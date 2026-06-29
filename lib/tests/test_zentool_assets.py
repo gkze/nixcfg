@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.tests._zen_tooling import load_zen_script_module, resolve_zen_script_path
+from lib.tests._zen_tooling import load_zentool_module, resolve_zen_script_path
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -20,7 +20,7 @@ ZENTOOL_PATH = resolve_zen_script_path("zentool")
 @pytest.fixture(scope="module")
 def zentool() -> ModuleType:
     """Load the zentool script as a module for direct function testing."""
-    return load_zen_script_module("zentool", "zentool_script")
+    return load_zentool_module("zentool_script")
 
 
 def test_apply_assets_uses_default_managed_files(

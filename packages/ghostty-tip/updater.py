@@ -3,50 +3,33 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, ClassVar
 
-from lib.update.updaters.base import (
-    DownloadUrlMetadataUpdater,
-    VersionInfo,
-    register_updater,
-)
-from lib.update.updaters.metadata import DownloadUrlMetadata
+from lib.update.updaters.base import sparkle_appcast_updater
 from lib.update.updaters.vendor_feeds import (
-    fetch_sparkle_appcast_items,
+    SparkleAppcastItem,
     require_url,
     require_version,
 )
 
-if TYPE_CHECKING:
-    import aiohttp
+_APPCAST_URL = "https://tip.files.ghostty.org/appcast.xml"
 
 
-@register_updater
-class GhosttyTipUpdater(DownloadUrlMetadataUpdater):
-    """Resolve Ghostty's nightly tip build from the upstream appcast."""
+def _ghostty_tip_version(item: SparkleAppcastItem) -> str:
+    build = require_version(item.version, context=_APPCAST_URL)
+    url = require_url(item.url, context=_APPCAST_URL)
+    match = re.search(r"/([0-9a-f]{40})/Ghostty\.dmg$", url)
+    if match is None:
+        msg = f"Could not parse Ghostty tip commit from URL: {url}"
+        raise RuntimeError(msg)
+    return f"{build}-{match.group(1)}"
 
-    name = "ghostty-tip"
-    APPCAST_URL = "https://tip.files.ghostty.org/appcast.xml"
-    PLATFORMS: ClassVar[dict[str, str]] = {
-        "aarch64-darwin": "darwin",
-    }
-    URL_METADATA_CONTEXT = "Ghostty tip metadata"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Fetch the latest Ghostty tip build and immutable DMG URL."""
-        items = await fetch_sparkle_appcast_items(
-            session,
-            self.APPCAST_URL,
-            config=self.config,
-        )
-        item = items[0]
-        build = require_version(item.version, context=self.APPCAST_URL)
-        url = require_url(item.url, context=self.APPCAST_URL)
-        match = re.search(r"/([0-9a-f]{40})/Ghostty\.dmg$", url)
-        if match is None:
-            msg = f"Could not parse Ghostty tip commit from URL: {url}"
-            raise RuntimeError(msg)
-        return VersionInfo(
-            version=f"{build}-{match.group(1)}",
-            metadata=DownloadUrlMetadata(url=url),
-        )
+GhosttyTipUpdater = sparkle_appcast_updater(
+    "ghostty-tip",
+    appcast_url=_APPCAST_URL,
+    platforms={"aarch64-darwin": "darwin"},
+    version_transform=_ghostty_tip_version,
+    appcast_url_metadata=True,
+    url_metadata_context="Ghostty tip metadata",
+    module=__name__,
+)

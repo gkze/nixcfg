@@ -139,14 +139,24 @@ def test_patch_allocator_removes_weak_linkage_attrs(tmp_path: Path) -> None:
         '#[linkage = "weak"]\n'
         'pub extern "C" fn __rust_alloc() {}\n'
         '#[linkage = "weak"]\n'
-        'pub extern "C" fn __rust_dealloc() {}\n',
+        'pub extern "C" fn __rust_dealloc() {}\n'
+        '#[linkage = "weak"]\n'
+        'pub extern "C" fn __rust_realloc() {}\n'
+        '#[linkage = "weak"]\n'
+        'pub extern "C" fn __rust_alloc_zeroed() {}\n'
+        '#[linkage = "weak"]\n'
+        'pub extern "C" fn __rust_dealloc_zeroed() {}\n',
         encoding="utf-8",
     )
 
     helper.patch_allocator(allocator)
 
     assert allocator.read_text(encoding="utf-8") == (
-        'pub extern "C" fn __rust_alloc() {}\npub extern "C" fn __rust_dealloc() {}\n'
+        'pub extern "C" fn __rust_alloc() {}\n'
+        'pub extern "C" fn __rust_dealloc() {}\n'
+        'pub extern "C" fn __rust_realloc() {}\n'
+        'pub extern "C" fn __rust_alloc_zeroed() {}\n'
+        'pub extern "C" fn __rust_dealloc_zeroed() {}\n'
     )
 
 
@@ -164,7 +174,7 @@ def test_patch_allocator_main_guard_exits_with_main_result(
 ) -> None:
     """Executing the allocator helper as __main__ should raise SystemExit(main())."""
     allocator = tmp_path / "lib.rs"
-    allocator.write_text('#[linkage = "weak"]\nfn shim() {}\n', encoding="utf-8")
+    allocator.write_text('#[linkage = "weak"]\nfn shim() {}\n' * 5, encoding="utf-8")
     script_path = REPO_ROOT / "packages/codex/patch_allocator_weak_linkage.py"
     monkeypatch.setattr("sys.argv", [str(script_path), str(allocator)])
 
@@ -172,4 +182,4 @@ def test_patch_allocator_main_guard_exits_with_main_result(
         runpy.run_path(str(script_path), run_name="__main__")
 
     assert excinfo.value.code == 0
-    assert allocator.read_text(encoding="utf-8") == "fn shim() {}\n"
+    assert allocator.read_text(encoding="utf-8") == "fn shim() {}\n" * 5

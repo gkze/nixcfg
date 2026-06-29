@@ -1,4 +1,4 @@
-"""Tests for the extracted Zed tree-sitter patch helper."""
+"""Tests for Zed tree-sitter source patching."""
 
 from __future__ import annotations
 
@@ -8,8 +8,48 @@ from types import ModuleType
 
 import pytest
 
+from lib.codemods.errors import CodemodError
 from lib.import_utils import load_module_from_path
 from lib.update.paths import REPO_ROOT
+
+_OLD = """fn main() {
+    let mut config = cc::Build::new();
+        config
+            .define("TREE_SITTER_FEATURE_WASM", "")
+            .define("static_assert(...)", "")
+            .include(env::var("DEP_WASMTIME_C_API_INCLUDE").unwrap());
+}
+"""
+_NEW = """fn main() {
+    let mut config = cc::Build::new();
+        config
+            .define("TREE_SITTER_FEATURE_WASM", "")
+            .define("static_assert(...)", "");
+        if let Ok(include) = env::var("DEP_WASMTIME_C_API_INCLUDE") {
+            for include in include.split_whitespace() {
+                config.include(include);
+            }
+        }
+}
+"""
+_OLD_INDENTED_FOUR = """fn main() {
+    config
+        .define("TREE_SITTER_FEATURE_WASM", "")
+        .define("static_assert(...)", "")
+        .include(env::var("DEP_WASMTIME_C_API_INCLUDE").unwrap());
+}
+"""
+_NEW_INDENTED_FOUR = """fn main() {
+    config
+        .define("TREE_SITTER_FEATURE_WASM", "")
+        .define("static_assert(...)", "");
+    if let Ok(include) = env::var("DEP_WASMTIME_C_API_INCLUDE") {
+        for include in include.split_whitespace() {
+            config.include(include);
+        }
+    }
+}
+"""
 
 
 def _load_helper() -> ModuleType:
@@ -20,24 +60,34 @@ def _load_helper() -> ModuleType:
 
 
 def test_patch_file_expands_tree_sitter_include_iteration(tmp_path: Path) -> None:
-    """The helper should replace the single include with split_whitespace iteration."""
+    """The helper should replace the include call through exact matching."""
     helper = _load_helper()
     build_rs = tmp_path / "build.rs"
-    build_rs.write_text(helper._OLD, encoding="utf-8")
+    build_rs.write_text(_OLD, encoding="utf-8")
 
     helper.patch_file(build_rs)
-    patched = build_rs.read_text(encoding="utf-8")
 
-    assert patched == helper._NEW
+    assert build_rs.read_text(encoding="utf-8") == _NEW
 
 
-def test_patch_file_errors_when_expected_snippet_is_missing(tmp_path: Path) -> None:
-    """The helper should fail clearly when the patch target is absent."""
+def test_patch_file_preserves_statement_indentation(tmp_path: Path) -> None:
+    """The replacement should use the matched Rust statement indentation."""
+    helper = _load_helper()
+    build_rs = tmp_path / "build.rs"
+    build_rs.write_text(_OLD_INDENTED_FOUR, encoding="utf-8")
+
+    helper.patch_file(build_rs)
+
+    assert build_rs.read_text(encoding="utf-8") == _NEW_INDENTED_FOUR
+
+
+def test_patch_file_errors_when_expected_shape_is_missing(tmp_path: Path) -> None:
+    """The helper should fail clearly when upstream changes shape."""
     helper = _load_helper()
     build_rs = tmp_path / "build.rs"
     build_rs.write_text("fn main() {}\n", encoding="utf-8")
 
-    with pytest.raises(SystemExit, match="tree-sitter patch target not found"):
+    with pytest.raises(CodemodError, match="expected 1 match"):
         helper.patch_file(build_rs)
 
 
@@ -45,10 +95,10 @@ def test_main_patches_requested_file(tmp_path: Path) -> None:
     """The CLI wrapper should patch the requested build.rs file in place."""
     helper = _load_helper()
     build_rs = tmp_path / "build.rs"
-    build_rs.write_text(helper._OLD, encoding="utf-8")
+    build_rs.write_text(_OLD, encoding="utf-8")
 
     assert helper.main([str(build_rs)]) == 0
-    assert build_rs.read_text(encoding="utf-8") == helper._NEW
+    assert build_rs.read_text(encoding="utf-8") == _NEW
 
 
 def test_main_rejects_invalid_argument_count() -> None:
@@ -65,7 +115,7 @@ def test_main_guard_exits_with_main_result(
 ) -> None:
     """Executing the helper as __main__ should raise SystemExit(main())."""
     build_rs = tmp_path / "build.rs"
-    build_rs.write_text(_load_helper()._OLD, encoding="utf-8")
+    build_rs.write_text(_OLD, encoding="utf-8")
     script_path = (
         REPO_ROOT / "packages/zed-editor-nightly/patch_tree_sitter_build_rs.py"
     )
@@ -75,4 +125,4 @@ def test_main_guard_exits_with_main_result(
         runpy.run_path(str(script_path), run_name="__main__")
 
     assert excinfo.value.code == 0
-    assert build_rs.read_text(encoding="utf-8") == _load_helper()._NEW
+    assert build_rs.read_text(encoding="utf-8") == _NEW

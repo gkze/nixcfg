@@ -12,6 +12,90 @@ import pytest
 from lib.import_utils import load_module_from_path
 from lib.update.paths import REPO_ROOT
 
+_BUT_ID_SOURCE = """impl<'a> Node<'a> for &'a UncommittedFile {
+    fn parse(
+        self: Box<Self>,
+        element: &str,
+        _id_map: &'a IdMap,
+        _changes_in_commit_fn: &mut ChangesInCommitFn<'a>,
+    ) -> anyhow::Result<Vec<Box<dyn Node<'a> + 'a>>> {
+        match element.strip_prefix(INDEX_SEPARATOR) {
+            Some(maybe_index) if let Ok(index) = usize::from_str(maybe_index) => {
+                if let Some((hunk_id, hunk_assignment)) = self.short_id_hunk_assignments.get(index)
+                {
+                    let cli_id = CliId::UncommittedHunkOrFile(UncommittedHunkOrFile {
+                        id: format!("{}:{}", self.short_id, hunk_id.short_id()),
+                        hunk_assignments: NonEmpty::new(hunk_assignment.to_owned()),
+                        is_entire_file: false,
+                    });
+                    Ok(vec![Box::new(Leaf { cli_id })])
+                } else {
+                    Ok(vec![])
+                }
+            }
+            _ => {
+                let matches = self
+                    .short_id_hunk_assignments
+                    .iter()
+                    .filter(|(hunk_id, _)| hunk_id.matches_prefix(element))
+                    .map(|(hunk_id, hunk_assignment)| {
+                        let cli_id = CliId::UncommittedHunkOrFile(UncommittedHunkOrFile {
+                            id: format!("{}:{}", self.short_id, hunk_id.short_id()),
+                            hunk_assignments: NonEmpty::new(hunk_assignment.to_owned()),
+                            is_entire_file: false,
+                        });
+                        Box::new(Leaf { cli_id }) as Box<dyn Node<'a> + 'a>
+                    });
+
+                Ok(matches.collect())
+            }
+        }
+    }
+}
+"""
+
+_PATCHED_BUT_ID_SOURCE = """impl<'a> Node<'a> for &'a UncommittedFile {
+    fn parse(
+        self: Box<Self>,
+        element: &str,
+        _id_map: &'a IdMap,
+        _changes_in_commit_fn: &mut ChangesInCommitFn<'a>,
+    ) -> anyhow::Result<Vec<Box<dyn Node<'a> + 'a>>> {
+        if let Some(maybe_index) = element.strip_prefix(INDEX_SEPARATOR) {
+            if let Ok(index) = usize::from_str(maybe_index) {
+                return if let Some((hunk_id, hunk_assignment)) =
+                    self.short_id_hunk_assignments.get(index)
+                {
+                    let cli_id = CliId::UncommittedHunkOrFile(UncommittedHunkOrFile {
+                        id: format!("{}:{}", self.short_id, hunk_id.short_id()),
+                        hunk_assignments: NonEmpty::new(hunk_assignment.to_owned()),
+                        is_entire_file: false,
+                    });
+                    Ok(vec![Box::new(Leaf { cli_id })])
+                } else {
+                    Ok(vec![])
+                };
+            }
+        }
+
+        let matches = self
+            .short_id_hunk_assignments
+            .iter()
+            .filter(|(hunk_id, _)| hunk_id.matches_prefix(element))
+            .map(|(hunk_id, hunk_assignment)| {
+                let cli_id = CliId::UncommittedHunkOrFile(UncommittedHunkOrFile {
+                    id: format!("{}:{}", self.short_id, hunk_id.short_id()),
+                    hunk_assignments: NonEmpty::new(hunk_assignment.to_owned()),
+                    is_entire_file: false,
+                });
+                Box::new(Leaf { cli_id }) as Box<dyn Node<'a> + 'a>
+            });
+
+        Ok(matches.collect())
+    }
+}
+"""
+
 
 def _load_patch_module() -> ModuleType:
     module_path = REPO_ROOT / "packages" / "gitbutler" / "patch_sources.py"
@@ -58,6 +142,9 @@ def _write_but_source(root: Path, lib_rs: str | None = None) -> Path:
 }
 """
     (but_root / "lib.rs").write_text(lib_rs, encoding="utf-8")
+    id_root = but_root / "id"
+    id_root.mkdir()
+    (id_root / "mod.rs").write_text(_BUT_ID_SOURCE, encoding="utf-8")
     return but_root
 
 
@@ -123,6 +210,20 @@ def test_patch_sources_rewrites_but_alias_guard(tmp_path: Path) -> None:
     )
 
 
+def test_patch_sources_rewrites_but_uncommitted_file_index_guard(
+    tmp_path: Path,
+) -> None:
+    """Patched sources should avoid another Rust experimental if-let guard."""
+    module = _load_patch_module()
+    but_root = _write_but_source(tmp_path)
+
+    module._patch_but_uncommitted_file_index_guard(tmp_path)
+
+    assert (but_root / "id" / "mod.rs").read_text(encoding="utf-8") == (
+        _PATCHED_BUT_ID_SOURCE
+    )
+
+
 def test_patch_build_rs_errors_when_frontend_dist_snippet_is_missing(
     tmp_path: Path,
 ) -> None:
@@ -143,6 +244,18 @@ def test_patch_but_cli_alias_guard_errors_when_snippet_is_missing(
 
     with pytest.raises(SystemExit, match="but alias guard snippet not found"):
         module._patch_but_cli_alias_guard(tmp_path)
+
+
+def test_patch_but_uncommitted_file_index_guard_errors_when_snippet_is_missing(
+    tmp_path: Path,
+) -> None:
+    """Unexpected upstream but ID parser shape should fail loudly."""
+    module = _load_patch_module()
+    but_root = _write_but_source(tmp_path)
+    (but_root / "id" / "mod.rs").write_text("impl Parser {}\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="uncommitted file index guard snippet"):
+        module._patch_but_uncommitted_file_index_guard(tmp_path)
 
 
 def test_main_validates_argv_and_patches_sources(
