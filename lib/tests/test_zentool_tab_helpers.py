@@ -434,23 +434,30 @@ def test_resolve_missing_tab_images_uses_worker_pool_and_logs(
 
     count = zentool.resolve_missing_tab_images(
         session,
-        lambda url: seen.append(url) or f"data:image/png;base64,{url}",
+        lambda url: (
+            seen.append(url)
+            or (
+                f"data:image/png;base64,{url}"
+                if url == "https://same.example"
+                else None
+            )
+        ),
         log=logs.append,
         verbose=True,
     )
 
-    assert count == 3
+    assert count == 2
     assert worker_counts == [2]
     assert seen == ["https://same.example", "https://other.example"]
     assert logs == [
         "Resolving favicons for 3 tab(s) across 2 URL(s)...",
         "Resolved favicon for https://same.example",
-        "Resolved favicon for https://other.example",
-        "Resolved favicon images for 3 of 3 tab(s).",
+        "No favicon found for https://other.example",
+        "Resolved favicon images for 2 of 3 tab(s).",
     ]
     assert first.model_extra["image"] == "data:image/png;base64,https://same.example"
     assert second.model_extra["image"] == "data:image/png;base64,https://same.example"
-    assert third.model_extra["image"] == "data:image/png;base64,https://other.example"
+    assert zentool.tab_image(third) is None
 
 
 def test_resolve_favicon_data_url_uses_discovered_icons_before_fallback(

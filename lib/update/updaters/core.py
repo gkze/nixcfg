@@ -261,7 +261,7 @@ class SourceThenOverlayHashMixin:
     @abstractmethod
     def _src_expr(version: str) -> str:
         """Build the fixed-output source expression for version."""
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     async def fetch_hashes(
         self,
