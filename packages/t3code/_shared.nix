@@ -26,7 +26,6 @@ let
     path: builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir path));
   workspaceParentNames = [
     "apps"
-    "infra"
     "packages"
   ];
   workspaceParentDirs = builtins.filter (
@@ -67,7 +66,7 @@ let
   ++ lib.optional (builtins.pathExists (src + "/${mobileModuleRoot}")) mobileModuleRoot
   ++ mobileModulePackageDirs
   ++ lib.optional (builtins.pathExists (src + "/patches")) "patches";
-  dependencySource = builtins.path {
+  dependencySourceFiltered = builtins.path {
     name = "${pname}-dependency-source";
     path = src;
     filter =
@@ -88,6 +87,26 @@ let
         ++ map (dir: "${dir}/package.json") workspaceDirs
         ++ map (dir: "${dir}/package.json") mobileModulePackageDirs
       );
+  };
+  dependencySource = stdenv.mkDerivation {
+    name = "${pname}-dependency-source";
+    src = dependencySourceFiltered;
+
+    dontConfigure = true;
+    dontBuild = true;
+    dontFixup = true;
+
+    installPhase = ''
+      runHook preInstall
+
+      mkdir -p "$out"
+      cp -R . "$out/"
+      chmod -R u+w "$out"
+      substituteInPlace "$out/pnpm-workspace.yaml" \
+        --replace-fail "  - infra/*" ""
+
+      runHook postInstall
+    '';
   };
 
   node_modules =
