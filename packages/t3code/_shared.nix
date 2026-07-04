@@ -26,7 +26,6 @@ let
     path: builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir path));
   workspaceParentNames = [
     "apps"
-    "infra"
     "packages"
   ];
   workspaceParentDirs = builtins.filter (
@@ -89,6 +88,10 @@ let
         ++ map (dir: "${dir}/package.json") mobileModulePackageDirs
       );
   };
+  pruneInfrastructureWorkspace = ''
+    substituteInPlace pnpm-workspace.yaml \
+      --replace-fail "  - infra/*" ""
+  '';
 
   node_modules =
     let
@@ -99,6 +102,7 @@ let
         inherit pnpm;
         fetcherVersion = 3;
         hash = outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
+        postPatch = pruneInfrastructureWorkspace;
       };
     in
     if fetchPnpmDeps != null then fetchPnpmDeps args else pnpm.fetchDeps args;
@@ -126,6 +130,8 @@ let
     postUnpack = ''
       chmod -R u+w source
     '';
+
+    postPatch = pruneInfrastructureWorkspace;
 
     buildPhase = ''
       runHook preBuild

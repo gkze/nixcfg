@@ -160,6 +160,11 @@ _ALLOWED_NIX_SUBSTITUTE_SITES: Final[tuple[NixSubstituteSite, ...]] = (
         "'CARGO_TARGET_${rustTargetEnv}_LINKER'",
     ),
     (
+        "packages/t3code/_shared.nix",
+        92,
+        'substituteInPlace pnpm-workspace.yaml --replace-fail "  - infra/*" ""',
+    ),
+    (
         "packages/superset/default.nix",
         278,
         'substituteInPlace package.json --replace-fail \'"postinstall": '
