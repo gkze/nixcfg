@@ -24,9 +24,11 @@ let
   pnpm = pnpm_10.override { inherit nodejs; };
   childDirectoryNames =
     path: builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir path));
+  # The packaged desktop/server build does not use upstream infra workspaces.
+  # Keep them out of the pnpm install scope so unrelated infra-only tarballs do
+  # not break the package dependency cache.
   workspaceParentNames = [
     "apps"
-    "infra"
     "packages"
   ];
   workspaceParentDirs = builtins.filter (
@@ -67,7 +69,7 @@ let
   ++ lib.optional (builtins.pathExists (src + "/${mobileModuleRoot}")) mobileModuleRoot
   ++ mobileModulePackageDirs
   ++ lib.optional (builtins.pathExists (src + "/patches")) "patches";
-  dependencySource = builtins.path {
+  rawDependencySource = builtins.path {
     name = "${pname}-dependency-source";
     path = src;
     filter =
@@ -88,6 +90,26 @@ let
         ++ map (dir: "${dir}/package.json") workspaceDirs
         ++ map (dir: "${dir}/package.json") mobileModulePackageDirs
       );
+  };
+  dependencySource = stdenv.mkDerivation {
+    name = "${pname}-dependency-source";
+    src = rawDependencySource;
+
+    dontConfigure = true;
+    dontBuild = true;
+    dontFixup = true;
+
+    installPhase = ''
+      runHook preInstall
+
+      mkdir -p "$out"
+      cp -R . "$out"/
+      chmod -R u+w "$out"
+      substituteInPlace "$out/pnpm-workspace.yaml" \
+        --replace-fail "  - infra/*" ""
+
+      runHook postInstall
+    '';
   };
 
   node_modules =
@@ -125,6 +147,11 @@ let
 
     postUnpack = ''
       chmod -R u+w source
+    '';
+
+    postPatch = ''
+      substituteInPlace pnpm-workspace.yaml \
+        --replace-fail "  - infra/*" ""
     '';
 
     buildPhase = ''
