@@ -26,7 +26,6 @@ let
     path: builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir path));
   workspaceParentNames = [
     "apps"
-    "infra"
     "packages"
   ];
   workspaceParentDirs = builtins.filter (
