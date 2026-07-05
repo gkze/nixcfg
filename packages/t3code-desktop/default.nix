@@ -26,6 +26,7 @@ let
 
   shared = import ../t3code/_shared.nix {
     inherit
+      bun
       cacert
       fetchPnpmDeps
       inputs

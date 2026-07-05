@@ -1,4 +1,5 @@
 {
+  bun,
   cacert,
   fetchPnpmDeps ? null,
   inputs,
@@ -21,6 +22,7 @@ let
   revSuffix = builtins.substring 0 7 (outputs.lib.flakeLock.t3code.locked.rev or "unknown");
   version = "${baseVersion}-main-${revSuffix}";
   nodeModulesVersion = "deps";
+  hasBunLock = builtins.pathExists (src + "/bun.lock");
   pnpm = pnpm_10.override { inherit nodejs; };
   childDirectoryNames =
     path: builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir path));
@@ -82,6 +84,12 @@ let
       || builtins.elem relativePath (
         [
           "package.json"
+        ]
+        ++ lib.optionals hasBunLock [
+          "bun.lock"
+          "bunfig.toml"
+        ]
+        ++ lib.optionals (!hasBunLock) [
           "pnpm-lock.yaml"
           "pnpm-workspace.yaml"
         ]
@@ -90,7 +98,28 @@ let
       );
   };
 
-  node_modules =
+  bunTarget =
+    {
+      aarch64-darwin = {
+        cpu = "arm64";
+        os = "darwin";
+      };
+      x86_64-darwin = {
+        cpu = "x64";
+        os = "darwin";
+      };
+      aarch64-linux = {
+        cpu = "arm64";
+        os = "linux";
+      };
+      x86_64-linux = {
+        cpu = "x64";
+        os = "linux";
+      };
+    }
+    .${system} or (throw "Unsupported system ${system} for ${pname}");
+
+  pnpm_node_modules =
     let
       args = {
         pname = "${sourceHashPackageName}-node_modules";
@@ -103,14 +132,64 @@ let
     in
     if fetchPnpmDeps != null then fetchPnpmDeps args else pnpm.fetchDeps args;
 
-  workspaceBuild = stdenv.mkDerivation {
-    pname = "${pname}-workspace-build";
-    inherit version src;
-    pnpmDeps = node_modules;
+  bun_node_modules = stdenv.mkDerivation {
+    pname = "${sourceHashPackageName}-node_modules";
+    version = nodeModulesVersion;
+    src = dependencySource;
 
     nativeBuildInputs = [
+      bun
+      cacert
+    ];
+
+    dontPatchShebangs = true;
+    dontFixup = true;
+
+    buildPhase = ''
+      runHook preBuild
+
+      export HOME="$TMPDIR/home"
+      mkdir -p "$HOME"
+      export SSL_CERT_FILE="${cacert}/etc/ssl/certs/ca-bundle.crt"
+      export NODE_EXTRA_CA_CERTS="$SSL_CERT_FILE"
+      export BUN_INSTALL_CACHE_DIR="$TMPDIR/.bun-cache"
+
+      bun install \
+        --cpu="${bunTarget.cpu}" \
+        --os="${bunTarget.os}" \
+        --frozen-lockfile \
+        --ignore-scripts \
+        --no-progress
+
+      runHook postBuild
+    '';
+
+    installPhase = ''
+      runHook preInstall
+
+      mkdir -p "$out"
+      find . -type d -name node_modules -prune -exec cp -R --parents {} "$out" \;
+
+      runHook postInstall
+    '';
+
+    outputHashMode = "recursive";
+    outputHashAlgo = "sha256";
+    outputHash = outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
+  };
+
+  node_modules = if hasBunLock then bun_node_modules else pnpm_node_modules;
+
+  workspaceBuild = stdenv.mkDerivation ({
+    pname = "${pname}-workspace-build";
+    inherit version src;
+
+    nativeBuildInputs = [
+      bun
       cacert
       nodejs
+    ]
+    ++ lib.optionals (!hasBunLock) [
       pnpm
       pnpmConfigHook
     ];
@@ -142,8 +221,9 @@ let
       export XDG_STATE_HOME="$TMPDIR/xdg-state"
       export npm_config_manage_package_manager_versions=false
       mkdir -p "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME"
-      pnpm config set manage-package-manager-versions false
+      ${lib.optionalString (!hasBunLock) "pnpm config set manage-package-manager-versions false"}
 
+      ${lib.optionalString hasBunLock "cp -a ${node_modules}/. ."}
       chmod -R u+w node_modules ${workspaceBuildShellDirs}
 
       patchShebangs node_modules
@@ -151,7 +231,7 @@ let
         patchShebangs "$nested_node_modules"
       done
 
-      pnpm run build:desktop
+      ${if hasBunLock then "bun run build:desktop" else "pnpm run build:desktop"}
 
       runHook postBuild
     '';
@@ -167,10 +247,13 @@ let
 
       runHook postInstall
     '';
-  };
+  } // lib.optionalAttrs (!hasBunLock) {
+    pnpmDeps = node_modules;
+  });
 in
 {
   inherit
+    bunTarget
     node_modules
     pname
     pnpm

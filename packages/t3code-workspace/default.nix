@@ -1,4 +1,5 @@
 {
+  bun,
   cacert,
   fetchPnpmDeps ? null,
   inputs,
@@ -12,6 +13,7 @@
 }:
 (import ../t3code/_shared.nix {
   inherit
+    bun
     cacert
     fetchPnpmDeps
     inputs

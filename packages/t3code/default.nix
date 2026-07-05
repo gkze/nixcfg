@@ -17,6 +17,7 @@
 let
   shared = import ./_shared.nix {
     inherit
+      bun
       cacert
       fetchPnpmDeps
       inputs
