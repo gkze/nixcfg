@@ -97,6 +97,10 @@ let
         version = nodeModulesVersion;
         src = dependencySource;
         inherit pnpm;
+        pnpmWorkspaces = [
+          "@t3tools/desktop"
+          "t3"
+        ];
         fetcherVersion = 3;
         hash = outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
       };
