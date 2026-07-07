@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-6mCv+YbIXqp57t/E/3Xv+lsWDjlUmoOHQS/hh+ma0WY="
+    "aarch64-darwin": "sha256-bZD8LCLTGXRpNF/FqoSHvI69pquAcQGa1mdagWypgDU="
   },
   "urls": {
-    "aarch64-darwin": "https://c.1password.com/dist/1P/mac8/1Password-8.12.24-aarch64.zip"
+    "aarch64-darwin": "https://c.1password.com/dist/1P/mac8/1Password-8.12.26-aarch64.zip"
   },
-  "version": "8.12.24"
+  "version": "8.12.26"
 }

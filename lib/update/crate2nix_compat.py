@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
-from lib.update.paths import get_repo_file
+from lib.update import paths as update_paths
 
 if TYPE_CHECKING:
     from collections.abc import Callable, MutableMapping
@@ -62,6 +62,11 @@ class _Crate2NixModule(Protocol):
     def _normalize_json_text(self, text: str) -> str: ...
 
 
+def _local_flake_installable(attr: str) -> str:
+    repo_root = update_paths.get_repo_file("")
+    return f"{update_paths.local_flake_url(repo_root)}#{attr}"
+
+
 def patch_installed_crate2nix_target(crate2nix: object, name: str) -> bool:
     """Rewrite path installables when an older installed CLI loads this worktree."""
     crate2nix = cast("_Crate2NixModule", crate2nix)
@@ -73,7 +78,7 @@ def patch_installed_crate2nix_target(crate2nix: object, name: str) -> bool:
     attr = target.patched_src_installable.removeprefix("path:.#")
     crate2nix.TARGETS[name] = replace(
         target,
-        patched_src_installable=f"git+file://{get_repo_file('.').resolve()}?dirty=1#{attr}",
+        patched_src_installable=_local_flake_installable(attr),
     )
     return True
 

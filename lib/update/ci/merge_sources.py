@@ -6,13 +6,14 @@ from typing import Annotated
 
 import typer
 
-from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.nix.models.sources import SourceEntry
 from lib.update import io as update_io
 from lib.update.ci._cli import (
     make_dual_typer_apps,
     make_main,
     register_dual_entrypoint,
 )
+from lib.update.ci.update_target_artifacts import STATUS_FILE_NAME
 from lib.update.paths import (
     SOURCES_FILE_NAME,
     package_dir_for_in,
@@ -20,7 +21,6 @@ from lib.update.paths import (
 )
 
 DEFAULT_OUTPUT_ROOT = Path()
-_UPDATE_TARGET_STATUS_FILE_NAME = "nixcfg-update-target-status.json"
 
 
 def _load_entry(path: Path) -> SourceEntry:
@@ -50,247 +50,6 @@ def _parse_root_spec(root_spec: str) -> tuple[str | None, Path]:
     return _infer_platform_from_root_path(root), root
 
 
-def _hash_entry_key(
-    entry: HashEntry,
-) -> tuple[
-    str,
-    str | None,
-    str | None,
-    str | None,
-    tuple[tuple[str, str], ...] | None,
-]:
-    urls_key = tuple(sorted(entry.urls.items())) if entry.urls is not None else None
-    return (
-        entry.hash_type,
-        entry.platform,
-        entry.git_dep,
-        entry.url,
-        urls_key,
-    )
-
-
-def _merge_hash_entries(
-    base: list[HashEntry],
-    incoming: list[HashEntry],
-    *,
-    platform: str | None,
-    baseline: list[HashEntry] | None = None,
-) -> list[HashEntry]:
-    by_key: dict[
-        tuple[
-            str,
-            str | None,
-            str | None,
-            str | None,
-            tuple[tuple[str, str], ...] | None,
-        ],
-        HashEntry,
-    ] = {_hash_entry_key(entry): entry for entry in base}
-    baseline_by_key = (
-        {_hash_entry_key(entry): entry for entry in baseline}
-        if baseline is not None
-        else {}
-    )
-
-    for entry in incoming:
-        if entry.hash.startswith(HashCollection.FAKE_HASH_PREFIX):
-            continue
-        key = _hash_entry_key(entry)
-
-        if entry.platform is None:
-            existing = by_key.get(key)
-            if existing is not None and existing.hash != entry.hash:
-                baseline_entry = baseline_by_key.get(key)
-                if baseline_entry is not None:
-                    if existing.hash == baseline_entry.hash:
-                        by_key[key] = entry
-                        continue
-                    if entry.hash == baseline_entry.hash:
-                        continue
-                msg = (
-                    "Conflicting non-platform hash entry for "
-                    f"{entry.hash_type}: {existing.hash} vs {entry.hash}"
-                )
-                raise RuntimeError(msg)
-            by_key[key] = entry
-            continue
-
-        if platform is None:
-            by_key[key] = entry
-            continue
-
-        if entry.platform == platform:
-            by_key[key] = entry
-
-    return list(by_key.values())
-
-
-def _merge_hash_mapping(
-    base: dict[str, str],
-    incoming: dict[str, str],
-    *,
-    platform: str | None,
-    baseline: dict[str, str] | None = None,
-) -> dict[str, str]:
-    merged = dict(base)
-    for incoming_platform, hash_value in incoming.items():
-        if hash_value.startswith(HashCollection.FAKE_HASH_PREFIX):
-            continue
-        if platform is not None and incoming_platform != platform:
-            continue
-        existing = merged.get(incoming_platform)
-        if (
-            existing is not None
-            and incoming_platform != platform
-            and existing != hash_value
-        ):
-            baseline_value = (
-                None if baseline is None else baseline.get(incoming_platform)
-            )
-            if baseline_value is not None:
-                if existing == baseline_value:
-                    merged[incoming_platform] = hash_value
-                    continue
-                if hash_value == baseline_value:
-                    continue
-            msg = (
-                "Conflicting non-platform hash mapping for "
-                f"{incoming_platform}: {existing} vs {hash_value}"
-            )
-            raise RuntimeError(msg)
-        merged[incoming_platform] = hash_value
-    return merged
-
-
-def _merge_optional_scalar(
-    field_name: str,
-    existing: str | None,
-    incoming: str | None,
-    *,
-    baseline: str | None = None,
-) -> str | None:
-    if existing and incoming and existing != incoming:
-        if baseline is not None:
-            if existing == baseline:
-                return incoming
-            if incoming == baseline:
-                return existing
-        msg = f"Conflicting {field_name}: {existing!r} vs {incoming!r}"
-        raise RuntimeError(msg)
-    return incoming or existing
-
-
-def _merge_drv_hash(
-    existing: str | None,
-    incoming: str | None,
-    *,
-    baseline: str | None = None,
-) -> str | None:
-    """Keep drvHash only when it is stable across merged roots.
-
-    `drvHash` is provenance metadata. A disagreement between platform
-    artifacts should not fail the merge, but the merged file should not
-    manufacture a fake canonical value either.
-    """
-    if existing is None and incoming is None:
-        return baseline
-    if existing is None:
-        return incoming if baseline is None or incoming == baseline else None
-    if incoming is None:
-        return existing if baseline is None or existing == baseline else None
-    if existing == incoming or (baseline is not None and existing == baseline):
-        return incoming
-    if baseline is not None and incoming == baseline:
-        return existing
-    return None
-
-
-def _merge_urls(
-    existing: dict[str, str] | None,
-    incoming: dict[str, str] | None,
-    *,
-    baseline: dict[str, str] | None = None,
-) -> dict[str, str] | None:
-    if existing is None and incoming is None:
-        return None
-    merged: dict[str, str] = dict(existing or {})
-    for url_key, url_value in (incoming or {}).items():
-        existing_value = merged.get(url_key)
-        if existing_value is not None and existing_value != url_value:
-            baseline_value = None if baseline is None else baseline.get(url_key)
-            if baseline_value is not None:
-                if existing_value == baseline_value:
-                    merged[url_key] = url_value
-                    continue
-                if url_value == baseline_value:
-                    continue
-            msg = f"Conflicting urls entry for {url_key!r}: {existing_value!r} vs {url_value!r}"
-            raise RuntimeError(msg)
-        merged[url_key] = url_value
-    return merged
-
-
-def _merge_entry(
-    existing: SourceEntry,
-    incoming: SourceEntry,
-    *,
-    platform: str | None,
-    baseline: SourceEntry | None = None,
-) -> SourceEntry:
-    if existing.hashes.entries is not None and incoming.hashes.entries is not None:
-        merged_hashes = HashCollection(
-            entries=_merge_hash_entries(
-                existing.hashes.entries,
-                incoming.hashes.entries,
-                platform=platform,
-                baseline=None if baseline is None else baseline.hashes.entries,
-            ),
-        )
-    elif existing.hashes.mapping is not None and incoming.hashes.mapping is not None:
-        merged_hashes = HashCollection(
-            mapping=_merge_hash_mapping(
-                existing.hashes.mapping,
-                incoming.hashes.mapping,
-                platform=platform,
-                baseline=None if baseline is None else baseline.hashes.mapping,
-            ),
-        )
-    else:
-        merged_hashes = existing.hashes.merge(incoming.hashes)
-
-    return SourceEntry.model_validate({
-        "hashes": merged_hashes,
-        "version": _merge_optional_scalar(
-            "version",
-            existing.version,
-            incoming.version,
-            baseline=None if baseline is None else baseline.version,
-        ),
-        "input": _merge_optional_scalar(
-            "input",
-            existing.input,
-            incoming.input,
-            baseline=None if baseline is None else baseline.input,
-        ),
-        "commit": _merge_optional_scalar(
-            "commit",
-            existing.commit,
-            incoming.commit,
-            baseline=None if baseline is None else baseline.commit,
-        ),
-        "drvHash": _merge_drv_hash(
-            existing.drv_hash,
-            incoming.drv_hash,
-            baseline=None if baseline is None else baseline.drv_hash,
-        ),
-        "urls": _merge_urls(
-            existing.urls,
-            incoming.urls,
-            baseline=None if baseline is None else baseline.urls,
-        ),
-    })
-
-
 def _collect_merged_entries(
     roots: list[str],
     *,
@@ -309,7 +68,7 @@ def _collect_merged_entries(
 
         source_files = package_file_map_in(root, SOURCES_FILE_NAME)
         if not source_files:
-            if (root / _UPDATE_TARGET_STATUS_FILE_NAME).is_file():
+            if (root / STATUS_FILE_NAME).is_file():
                 continue
             empty_roots.append(root_arg)
             continue
@@ -322,11 +81,8 @@ def _collect_merged_entries(
                 merged[name] = (
                     entry
                     if existing is None
-                    else _merge_entry(
-                        existing,
-                        entry,
-                        platform=platform,
-                        baseline=baseline_entry,
+                    else existing.merge_artifact(
+                        entry, platform=platform, baseline=baseline_entry
                     )
                 )
             except RuntimeError as exc:

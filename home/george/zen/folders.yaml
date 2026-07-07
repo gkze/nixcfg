@@ -55,14 +55,17 @@ workspaces:
       - CRM & Marketing:
           - HubSpot: https://hubspot.com
           - NewsData: https://newsdata.io
+          - Pylon: https://app.usepylon.com
       - Data & Backend:
           - Convex: https://dashboard.convex.dev
           - PlanetScale: https://app.planetscale.com
           - Supabase: https://supabase.com
       - Finance & HR:
           - Branch: https://app.link.com
+          - Metronome: https://app.metronome.com
           - Ramp: https://app.ramp.com
           - Rippling: https://app.rippling.com
+          - Stripe: https://dashboard.stripe.com
       - Email:
           - Resend: https://resend.com
           - SendGrid: https://sendgrid.com

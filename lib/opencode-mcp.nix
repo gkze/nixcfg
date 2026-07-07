@@ -2,6 +2,9 @@
 let
   inherit (lib)
     mapAttrs
+    mapAttrsToList
+    mkEnableOption
+    mkOption
     optionalAttrs
     recursiveUpdate
     types
@@ -46,6 +49,45 @@ let
 
   sparseMcpServerOverrideMapType = types.attrsOf sparseMcpServerOverrideType;
 
+  mcpServerType = types.submodule {
+    freeformType = types.attrsOf types.anything;
+
+    options = {
+      enable = mkEnableOption "MCP server" // {
+        default = false;
+      };
+
+      type = mkOption {
+        type = types.enum [
+          "local"
+          "remote"
+        ];
+        default = "local";
+        description = "MCP server transport type.";
+      };
+
+      command = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        description = "Command argv for local MCP servers.";
+      };
+
+      url = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Endpoint URL for remote MCP servers.";
+      };
+
+      environment = mkOption {
+        type = types.attrsOf types.str;
+        default = { };
+        description = "Environment variables for local MCP server processes.";
+      };
+    };
+  };
+
+  mcpServerMapType = types.attrsOf mcpServerType;
+
   mkSparseServerOverride =
     baseServers: name: server:
     let
@@ -61,6 +103,54 @@ let
   renderSparseMcpServerOverrides =
     baseServers: servers: mapAttrs (mkSparseServerOverride baseServers) servers;
 
+  mkServerConfig =
+    server:
+    let
+      enabled = server.enabled or (server.enable or false);
+      serverType = server.type or "local";
+      command = server.command or [ ];
+      url = server.url or null;
+      environment = server.environment or { };
+      extras = removeAttrs server [
+        "command"
+        "enable"
+        "enabled"
+        "environment"
+        "type"
+        "url"
+      ];
+    in
+    extras
+    // {
+      inherit enabled;
+      type = serverType;
+    }
+    // optionalAttrs (command != [ ]) { inherit command; }
+    // optionalAttrs (url != null) { inherit url; }
+    // optionalAttrs (environment != { }) { inherit environment; };
+
+  renderMcpServers = servers: mapAttrs (_: mkServerConfig) servers;
+
+  mkServerAssertions =
+    optionPath: servers:
+    mapAttrsToList (
+      name: server:
+      let
+        isLocal = (server.type or "local") == "local";
+        command = server.command or [ ];
+        url = server.url or null;
+        isValid = if isLocal then command != [ ] else url != null;
+      in
+      {
+        assertion = isValid;
+        message =
+          if isLocal then
+            "${optionPath}.${name}: local servers require a non-empty command."
+          else
+            "${optionPath}.${name}: remote servers require a non-null url.";
+      }
+    ) servers;
+
   mkProfileOverlayConfig =
     baseServers: profile:
     profile.settings
@@ -74,6 +164,10 @@ in
 {
   inherit
     mkProfileOverlayConfig
+    mkServerAssertions
+    mcpServerMapType
+    mcpServerType
+    renderMcpServers
     renderSparseMcpServerOverrides
     sparseMcpServerOverrideMapType
     sparseMcpServerOverrideType

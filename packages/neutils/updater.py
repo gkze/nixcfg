@@ -33,7 +33,7 @@ from lib.update.nix import (
     compute_fixed_output_hash,
     get_current_nix_platform,
 )
-from lib.update.paths import get_repo_file
+from lib.update.paths import get_repo_file, local_flake_url
 from lib.update.process import RunCommandOptions, run_command
 from lib.update.updaters.base import (
     UpdateContext,
@@ -45,8 +45,7 @@ from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 
 def _local_flake_url(root: Path) -> str:
-    """Return a local flake URL compatible with installed nixcfg CLIs."""
-    return f"git+file://{root.resolve()}?dirty=1"
+    return local_flake_url(root)
 
 
 @register_updater
@@ -62,6 +61,7 @@ class NeutilsUpdater(GitHubReleaseUpdater):
     _ZON2NIX_COMMIT = "0ece5ed15107ecafbb121ad46aa85413dd40ff03"
     _ZON2NIX_FLAKE = f"github:jcollie/zon2nix/{_ZON2NIX_COMMIT}#zon2nix"
     _ZON2NIX_MAX_ATTEMPTS = 3
+    _ZON2NIX_TIMEOUT_SECONDS = 180
     _ZON2NIX_TRANSIENT_MARKERS: ClassVar[tuple[str, ...]] = (
         "502 Bad Gateway",
         "Could not resolve host",
@@ -132,11 +132,21 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         yield UpdateEvent.value(self.name, out_paths[-1])
 
     @classmethod
-    def _is_transient_zon2nix_failure(cls, result: CommandResult) -> bool:
-        output = f"{result.stderr}\n{result.stdout}".casefold()
+    def _is_transient_zon2nix_text(cls, output: str) -> bool:
+        output = output.casefold()
         return any(
             marker.casefold() in output for marker in cls._ZON2NIX_TRANSIENT_MARKERS
         )
+
+    @classmethod
+    def _is_transient_zon2nix_failure(cls, result: CommandResult) -> bool:
+        return cls._is_transient_zon2nix_text(f"{result.stderr}\n{result.stdout}")
+
+    @staticmethod
+    def _current_context_source(
+        context: UpdateContext | SourceEntry | None,
+    ) -> SourceEntry | None:
+        return context.current if isinstance(context, UpdateContext) else context
 
     async def _run_zon2nix(
         self,
@@ -155,20 +165,37 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         while True:
             await asyncio.to_thread(output_path.unlink, missing_ok=True)
             zon2nix_result_drain = ValueDrain()
-            async for event in drain_value_events(
-                run_command(
-                    command,
-                    options=RunCommandOptions(
-                        source=self.name,
-                        error="zon2nix did not return output",
-                        env=env,
-                        config=self.config,
+            try:
+                async for event in drain_value_events(
+                    run_command(
+                        command,
+                        options=RunCommandOptions(
+                            source=self.name,
+                            error="zon2nix did not return output",
+                            command_timeout=self._ZON2NIX_TIMEOUT_SECONDS,
+                            env=env,
+                            config=self.config,
+                        ),
                     ),
-                ),
-                zon2nix_result_drain,
-                parse=expect_command_result,
-            ):
-                yield event
+                    zon2nix_result_drain,
+                    parse=expect_command_result,
+                ):
+                    yield event
+            except RuntimeError as exc:
+                if (
+                    attempt < self._ZON2NIX_MAX_ATTEMPTS
+                    and self._is_transient_zon2nix_text(str(exc))
+                ):
+                    attempt += 1
+                    yield UpdateEvent.status(
+                        self.name,
+                        "zon2nix hit a transient fetch failure; retrying...",
+                        operation="compute_hash",
+                        detail=f"attempt {attempt}/{self._ZON2NIX_MAX_ATTEMPTS}",
+                    )
+                    await asyncio.sleep(max(0.0, self.config.default_retry_backoff))
+                    continue
+                raise
             zon2nix_result = require_value(
                 zon2nix_result_drain,
                 "Missing zon2nix command result",
@@ -273,8 +300,6 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Generate ``build.zig.zon.nix`` and compute the pinned source hash."""
-        _ = context
-
         pkg_dir = package_dir_for(self.name)
         if pkg_dir is None:
             msg = f"Package directory not found for {self.name}"
@@ -289,16 +314,38 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         )
 
         artifact_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            self._render_build_zig_zon_nix(info, session),
-            artifact_drain,
-            parse=expect_str,
-        ):
-            yield event
-        artifact_content = require_value(
-            artifact_drain,
-            f"Missing generated {artifact_path.name} content",
-        )
+        try:
+            async for event in drain_value_events(
+                self._render_build_zig_zon_nix(info, session),
+                artifact_drain,
+                parse=expect_str,
+            ):
+                yield event
+            artifact_content = require_value(
+                artifact_drain,
+                f"Missing generated {artifact_path.name} content",
+            )
+        except RuntimeError as exc:
+            current = self._current_context_source(context)
+            if (
+                current is not None
+                and current.version == info.version
+                and self._is_transient_zon2nix_text(str(exc))
+                and artifact_path.exists()
+            ):
+                yield UpdateEvent.status(
+                    self.name,
+                    f"Preserving existing {artifact_path.name} after transient zon2nix failure.",
+                    operation="compute_hash",
+                    status="preserved_artifact",
+                    detail=str(artifact_path),
+                )
+                artifact_content = await asyncio.to_thread(
+                    artifact_path.read_text,
+                    encoding="utf-8",
+                )
+            else:
+                raise
         yield UpdateEvent.artifact(
             self.name,
             GeneratedArtifact.text(artifact_path, artifact_content),

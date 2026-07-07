@@ -160,6 +160,19 @@ def test_patch_allocator_removes_weak_linkage_attrs(tmp_path: Path) -> None:
     )
 
 
+def test_patch_allocator_rejects_unexpected_match_count(tmp_path: Path) -> None:
+    """The allocator helper should fail before silently under-patching."""
+    helper = _load_allocator_helper()
+    allocator = tmp_path / "lib.rs"
+    allocator.write_text('#[linkage = "weak"]\nfn shim() {}\n', encoding="utf-8")
+
+    with pytest.raises(
+        RuntimeError,
+        match="expected 5 matches for Codex allocator weak linkage attributes, found 1",
+    ):
+        helper.patch_allocator(allocator)
+
+
 def test_patch_allocator_main_rejects_invalid_argument_count() -> None:
     """The allocator CLI should require exactly one path argument."""
     helper = _load_allocator_helper()

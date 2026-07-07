@@ -44,6 +44,30 @@ def load_repo_module(path: str | Path, module_name: str) -> ModuleType:
     return load_module_from_path(module_path, module_name)
 
 
+def module_name_for_path(path: str | Path, *, prefix: str) -> str:
+    """Build a stable throwaway module name from a repo-relative path."""
+    safe_path = str(path).replace("/", "_").replace("-", "_").replace(".", "_")
+    return f"{prefix}_{safe_path}"
+
+
+def load_repo_module_for_test(path: str | Path, *, prefix: str) -> ModuleType:
+    """Load a repo module with a path-derived test module name."""
+    return load_repo_module(path, module_name_for_path(path, prefix=prefix))
+
+
+def updater_from_module(module: ModuleType) -> object:
+    """Instantiate the updater class defined by a loaded updater module."""
+    for value in vars(module).values():
+        if (
+            isinstance(value, type)
+            and value.__name__.endswith("Updater")
+            and value.__module__ == module.__name__
+        ):
+            return value()
+    msg = f"No updater class found in {module.__name__}"
+    raise AssertionError(msg)
+
+
 def install_fixed_hash_stream(
     monkeypatch: _MonkeyPatch,
     outputs: Sequence[tuple[str | None, object]],

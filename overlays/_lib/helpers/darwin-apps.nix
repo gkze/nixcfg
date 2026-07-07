@@ -17,6 +17,52 @@ let
       inherit resolvedBundleName;
       resolvedExecutableName = if executableName == null then capitalizedAppName else executableName;
     };
+  mkMacAppPassthru =
+    {
+      bundleName,
+      macApp ? { },
+    }:
+    {
+      macApp = {
+        inherit bundleName;
+        bundleRelPath = "Applications/${bundleName}";
+        installMode = "copy";
+      }
+      // macApp;
+    };
+  mkInfoFetchurl =
+    {
+      info,
+      name ? null,
+    }:
+    prev.fetchurl (
+      {
+        url = info.urls.${system};
+        hash = info.hashes.${system};
+      }
+      // prev.lib.optionalAttrs (name != null) { inherit name; }
+    );
+  mkDescribedMeta =
+    {
+      description,
+      homepage,
+      mainProgram,
+      license,
+      platforms,
+      sourceProvenance,
+      meta ? { },
+    }:
+    {
+      inherit
+        description
+        homepage
+        license
+        mainProgram
+        platforms
+        sourceProvenance
+        ;
+    }
+    // meta;
 in
 {
   mkSimpleDarwinApp =
@@ -113,17 +159,14 @@ in
       inherit (info) version;
       inherit meta;
 
-      passthru.macApp = {
+      passthru = mkMacAppPassthru {
         bundleName = resolvedBundleName;
-        bundleRelPath = "Applications/${resolvedBundleName}";
-        installMode = "copy";
-      }
-      // macApp;
+        inherit macApp;
+      };
 
-      src = prev.fetchurl {
+      src = mkInfoFetchurl {
+        inherit info;
         name = "${capitalizedAppName}_${info.version}_${arch}.dmg";
-        url = info.urls.${system};
-        hash = info.hashes.${system};
       };
 
       nativeBuildInputs = [
@@ -193,7 +236,7 @@ in
     prev.stdenvNoCC.mkDerivation {
       inherit pname;
       inherit (info) version;
-      meta = {
+      meta = mkDescribedMeta {
         inherit
           description
           homepage
@@ -201,26 +244,19 @@ in
           mainProgram
           platforms
           sourceProvenance
+          meta
           ;
-      }
-      // meta;
+      };
 
-      passthru.macApp = {
+      passthru = mkMacAppPassthru {
         inherit bundleName;
-        bundleRelPath = "Applications/${bundleName}";
-        installMode = "copy";
-      }
-      // macApp;
+        inherit macApp;
+      };
 
-      src = prev.fetchurl (
-        {
-          url = info.urls.${system};
-          hash = info.hashes.${system};
-        }
-        // prev.lib.optionalAttrs (sourceName != null) {
-          name = sourceName;
-        }
-      );
+      src = mkInfoFetchurl {
+        inherit info;
+        name = sourceName;
+      };
 
       nativeBuildInputs = [
         prev._7zz
@@ -293,22 +329,15 @@ in
       inherit pname dontFixup meta;
       inherit (info) version;
 
-      passthru.macApp = {
+      passthru = mkMacAppPassthru {
         bundleName = resolvedBundleName;
-        bundleRelPath = "Applications/${resolvedBundleName}";
-        installMode = "copy";
-      }
-      // macApp;
+        inherit macApp;
+      };
 
-      src = prev.fetchurl (
-        {
-          url = info.urls.${system};
-          hash = info.hashes.${system};
-        }
-        // prev.lib.optionalAttrs (sourceName != null) {
-          name = sourceName;
-        }
-      );
+      src = mkInfoFetchurl {
+        inherit info;
+        name = sourceName;
+      };
 
       nativeBuildInputs = [
         prev.darwin.xattr
@@ -348,6 +377,121 @@ in
       '';
     };
 
+  mkPkgApp =
+    {
+      pname,
+      info,
+      bundleName,
+      executableName ? null,
+      binaryName ? pname,
+      copyContents ? false,
+      createBin ? true,
+      sourceName ? null,
+      sourcePath ? null,
+      postInstallApp ? "",
+      macApp ? { },
+      description,
+      homepage,
+      mainProgram ? pname,
+      license ? prev.lib.licenses.unfree,
+      platforms ? prev.lib.platforms.darwin,
+      sourceProvenance ? with prev.lib.sourceTypes; [ binaryNativeCode ],
+      meta ? { },
+    }:
+    let
+      resolvedExecutableName =
+        if executableName == null then prev.lib.removeSuffix ".app" bundleName else executableName;
+      sourcePayloadPath = sourcePath;
+      findPayload =
+        if copyContents then
+          if sourcePayloadPath == null then
+            ''
+              payload_path="$(find "$pkg_dir" -maxdepth 4 -type d -path "*/Payload/Contents" -print -quit)"
+            ''
+          else
+            ''
+              payload_path="$pkg_dir/${sourcePayloadPath}"
+            ''
+        else if sourcePayloadPath == null then
+          ''
+            payload_path="$(find "$pkg_dir" -maxdepth 4 -type d -name "${bundleName}" -print -quit)"
+          ''
+        else
+          ''
+            payload_path="$pkg_dir/${sourcePayloadPath}"
+          '';
+      copyPayload =
+        if copyContents then
+          ''
+            mkdir -p "$out/Applications/${bundleName}"
+            cp -R "$payload_path" "$out/Applications/${bundleName}/Contents"
+          ''
+        else
+          ''
+            cp -R "$payload_path" "$out/Applications/${bundleName}"
+          '';
+    in
+    prev.stdenvNoCC.mkDerivation {
+      inherit pname;
+      inherit (info) version;
+      meta = mkDescribedMeta {
+        inherit
+          description
+          homepage
+          license
+          mainProgram
+          platforms
+          sourceProvenance
+          meta
+          ;
+      };
+
+      passthru = mkMacAppPassthru {
+        inherit bundleName;
+        inherit macApp;
+      };
+
+      src = mkInfoFetchurl {
+        inherit info;
+        name = sourceName;
+      };
+
+      nativeBuildInputs = [ prev.darwin.xattr ];
+
+      dontFixup = true;
+      dontUnpack = true;
+
+      installPhase = ''
+        runHook preInstall
+
+        pkg_dir="$TMPDIR/${pname}-pkg"
+        rm -rf "$pkg_dir"
+        mkdir -p "$out/Applications"
+        ${prev.lib.optionalString createBin ''mkdir -p "$out/bin"''}
+        /usr/sbin/pkgutil --expand-full "$src" "$pkg_dir"
+        ${findPayload}
+        if [ -z "''${payload_path:-}" ] || [ ! -d "$payload_path" ]; then
+          echo "Expected ${if copyContents then "Contents payload" else bundleName} in ${pname} pkg" >&2
+          find "$pkg_dir" -maxdepth 4 -type d >&2
+          exit 1
+        fi
+
+        ${copyPayload}
+        ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${bundleName}"
+        ${postInstallApp}
+        ${prev.lib.optionalString createBin ''
+          if [ ! -e "$out/Applications/${bundleName}/Contents/MacOS/${resolvedExecutableName}" ]; then
+            echo "Expected executable ${resolvedExecutableName} in ${bundleName}" >&2
+            find "$out/Applications/${bundleName}/Contents/MacOS" -maxdepth 1 -type f >&2
+            exit 1
+          fi
+          ln -s "$out/Applications/${bundleName}/Contents/MacOS/${resolvedExecutableName}" "$out/bin/${binaryName}"
+        ''}
+
+        runHook postInstall
+      '';
+    };
+
   mkTgzApp =
     {
       pname,
@@ -367,17 +511,14 @@ in
       inherit pname meta;
       inherit (info) version;
 
-      passthru.macApp = {
+      passthru = mkMacAppPassthru {
         inherit bundleName;
-        bundleRelPath = "Applications/${bundleName}";
-        installMode = "copy";
-      }
-      // macApp;
+        inherit macApp;
+      };
 
-      src = prev.fetchurl {
+      src = mkInfoFetchurl {
+        inherit info;
         name = "${pname}-${info.version}-${system}.tar.gz";
-        url = info.urls.${system};
-        hash = info.hashes.${system};
       };
 
       nativeBuildInputs = [ prev.darwin.xattr ];

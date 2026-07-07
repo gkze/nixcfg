@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 import lib.update.ci._workflow_yaml as workflow_yaml
-from lib.github_actions.models import GitHubWorkflow
 from lib.update.paths import REPO_ROOT
 
 
@@ -133,10 +132,10 @@ def test_load_workflow_jobs_supports_default_and_custom_messages(
     }
 
 
-def test_workflow_yaml_helpers_support_typed_and_raw_loading(
+def test_workflow_yaml_helpers_support_raw_loading(
     tmp_path: Path,
 ) -> None:
-    """Support both typed model loading and raw normalized workflow mappings."""
+    """Load workflows as raw normalized mappings."""
     workflow_path = tmp_path / "workflow.yml"
     workflow_path.write_text(
         """
@@ -163,9 +162,6 @@ jobs:
     assert "on" in raw_loaded
     assert True not in raw_loaded
 
-    loaded_model = workflow_yaml.load_workflow_model(workflow_path)
-    assert isinstance(loaded_model, GitHubWorkflow)
-
     loaded = workflow_yaml.load_workflow_yaml(workflow_path)
     assert loaded == {
         "name": "demo",
@@ -188,33 +184,6 @@ jobs:
             }
         },
     }
-
-
-def test_load_workflow_model_rejects_schema_invalid_workflow(tmp_path: Path) -> None:
-    """Generated-model loading should still reject schema-invalid workflows."""
-    workflow_path = tmp_path / "workflow.yml"
-    workflow_path.write_text(
-        """
-name: demo
-on: workflow_dispatch
-jobs: []
-""",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(TypeError, match="failed GitHub Actions schema validation"):
-        workflow_yaml.load_workflow_model(workflow_path)
-
-
-def test_checked_in_update_workflows_validate_against_generated_model() -> None:
-    """Schema-compatible checked-in update workflows should support typed loading."""
-    for workflow_path in (
-        REPO_ROOT / ".github/workflows/update.yml",
-        REPO_ROOT / ".github/workflows/update-certify.yml",
-    ):
-        loaded_model = workflow_yaml.load_workflow_model(workflow_path)
-        assert isinstance(loaded_model, GitHubWorkflow)
-        assert loaded_model.jobs is not None
 
 
 def test_repo_workflows_load_as_raw_mappings_even_without_schema_validation() -> None:

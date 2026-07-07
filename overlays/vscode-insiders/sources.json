@@ -1,16 +1,16 @@
 {
-  "commit": "628f6de50e89b20c7688c66ac2923cce2862c1b0",
+  "commit": "86df0e5dc86a78298b5ffce1c6f6793ad79c3e93",
   "hashes": {
-    "aarch64-darwin": "sha256-s7tVRpLX+iwXm02vRnMLM6m1jxR5F2jtW2c5j7FO7hg=",
-    "aarch64-linux": "sha256-2glCM2gXEO0eY4dZt6iPCxiivfEwJi1Pr5nyUu/RF88=",
-    "x86_64-darwin": "sha256-n/BzcUZBslsVwwNeGUAx1RZBOdszbeY5mJMlVAtrik4=",
-    "x86_64-linux": "sha256-UHpKF4VLEn/YOH/f+loY/GQeyrv2trbKhiSVth5M/to="
+    "aarch64-darwin": "sha256-i2l/nz72pQ1uXOAB1H22GWMWWkA6wqhRkvU3r6QlMWA=",
+    "aarch64-linux": "sha256-D13nGR12+zGFxJ0I+YymugV3hEChgxxbX7MYURnEFPg=",
+    "x86_64-darwin": "sha256-IgHz9vNb5TrobjkFhp7n5mxnOPOAyJb4PB7WTLAbn4E=",
+    "x86_64-linux": "sha256-v2IAVGGA+xHimtcqq1Giy75nxPz66aG6kZxFqQ2XvCk="
   },
   "urls": {
-    "aarch64-darwin": "https://update.code.visualstudio.com/1.127.0-insider/darwin-arm64/insider",
-    "aarch64-linux": "https://update.code.visualstudio.com/1.127.0-insider/linux-arm64/insider",
-    "x86_64-darwin": "https://update.code.visualstudio.com/1.127.0-insider/darwin/insider",
-    "x86_64-linux": "https://update.code.visualstudio.com/1.127.0-insider/linux-x64/insider"
+    "aarch64-darwin": "https://update.code.visualstudio.com/1.128.0-insider/darwin-arm64/insider",
+    "aarch64-linux": "https://update.code.visualstudio.com/1.128.0-insider/linux-arm64/insider",
+    "x86_64-darwin": "https://update.code.visualstudio.com/1.128.0-insider/darwin/insider",
+    "x86_64-linux": "https://update.code.visualstudio.com/1.128.0-insider/linux-x64/insider"
   },
-  "version": "1.127.0-insider"
+  "version": "1.128.0-insider"
 }

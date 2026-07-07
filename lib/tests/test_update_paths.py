@@ -12,6 +12,7 @@ from lib.update.paths import (
     local_flake_url,
     package_dir_for_in,
     package_file_map_in,
+    package_file_names_in,
 )
 
 if TYPE_CHECKING:
@@ -47,6 +48,19 @@ def test_package_file_map_in_rejects_duplicate_names(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="demo"):
         package_file_map_in(tmp_path, "sources.json")
+
+
+def test_package_file_names_in_allows_duplicate_names(tmp_path: Path) -> None:
+    """Return logical names when duplicate package locations are acceptable."""
+    dir_file = tmp_path / "packages" / "demo" / "default.nix"
+    dir_file.parent.mkdir(parents=True, exist_ok=True)
+    dir_file.write_text("{}\n", encoding="utf-8")
+
+    overlay_file = tmp_path / "overlays" / "demo" / "default.nix"
+    overlay_file.parent.mkdir(parents=True, exist_ok=True)
+    overlay_file.write_text("{}\n", encoding="utf-8")
+
+    assert package_file_names_in(tmp_path, "default.nix") == {"demo"}
 
 
 def test_sources_git_pathspecs_cover_directory_and_flat_layouts() -> None:

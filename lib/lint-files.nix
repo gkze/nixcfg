@@ -155,8 +155,6 @@ in
       "*.bash"
       "*.zsh"
     ];
-    excludeRegex = [ "misc/zsh-plugins/go\\.plugin\\.zsh" ];
-    excludeGlobs = [ "misc/zsh-plugins/go.plugin.zsh" ];
   };
 
   twilightAutoconfig = {

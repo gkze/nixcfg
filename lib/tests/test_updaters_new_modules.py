@@ -11,7 +11,7 @@ import pytest
 from lib.nix.models.sources import HashEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._updater_helpers import collect_events as _collect
-from lib.tests._updater_helpers import load_repo_module as _load_module
+from lib.tests._updater_helpers import load_repo_module_for_test as _load_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
@@ -24,53 +24,49 @@ from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
 @pytest.fixture(scope="module")
 def commander_module() -> ModuleType:
     """Load the commander updater module."""
-    return _load_module("packages/commander/updater.py", "commander_updater_test")
+    return _load_module("packages/commander/updater.py", prefix="commander")
 
 
 @pytest.fixture(scope="module")
 def codex_desktop_module() -> ModuleType:
     """Load the codex-desktop updater module."""
-    return _load_module(
-        "packages/codex-desktop/updater.py", "codex_desktop_updater_test"
-    )
+    return _load_module("packages/codex-desktop/updater.py", prefix="codex_desktop")
 
 
 @pytest.fixture(scope="module")
 def codex_module() -> ModuleType:
     """Load the codex updater module."""
-    return _load_module("packages/codex/updater.py", "codex_updater_test")
+    return _load_module("packages/codex/updater.py", prefix="codex")
 
 
 @pytest.fixture(scope="module")
 def goose_cli_module() -> ModuleType:
     """Load the goose-cli updater module."""
-    return _load_module("overlays/goose-cli/updater.py", "goose_cli_updater_test")
+    return _load_module("overlays/goose-cli/updater.py", prefix="goose_cli")
 
 
 @pytest.fixture(scope="module")
 def element_desktop_module() -> ModuleType:
     """Load the element-desktop updater module."""
-    return _load_module(
-        "overlays/element-desktop/updater.py", "element_desktop_updater_test"
-    )
+    return _load_module("overlays/element-desktop/updater.py", prefix="element_desktop")
 
 
 @pytest.fixture(scope="module")
 def superset_module() -> ModuleType:
     """Load the superset updater module."""
-    return _load_module("packages/superset/updater.py", "superset_updater_test")
+    return _load_module("packages/superset/updater.py", prefix="superset")
 
 
 @pytest.fixture(scope="module")
 def crush_module() -> ModuleType:
     """Load the crush updater module."""
-    return _load_module("overlays/crush/updater.py", "crush_updater_test")
+    return _load_module("overlays/crush/updater.py", prefix="crush")
 
 
 @pytest.fixture(scope="module")
 def mux_module() -> ModuleType:
     """Load the mux updater module."""
-    return _load_module("packages/mux/updater.py", "mux_updater_test")
+    return _load_module("packages/mux/updater.py", prefix="mux")
 
 
 def test_mux_uses_platform_specific_node_modules_hashes(

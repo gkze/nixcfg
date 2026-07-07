@@ -11,7 +11,7 @@ from lib.update.nix import (
     _build_flake_attr_expr,
     get_current_nix_platform,
 )
-from lib.update.paths import get_repo_file
+from lib.update.paths import local_flake_url
 from lib.update.updaters.base import (
     SourceThenOverlayHashMixin,
     VersionInfo,
@@ -23,12 +23,6 @@ from lib.update.updaters.metadata import GitHubReleaseMetadata
 
 if TYPE_CHECKING:
     import aiohttp
-
-
-def _local_flake_url() -> str:
-    """Return a local flake URL compatible with installed nixcfg CLIs."""
-    return f"git+file://{get_repo_file('.').resolve()}?dirty=1"
-
 
 _MIN_VERSION_PARTS = 2
 _PATCHED_VERSION_PARTS = 3
@@ -74,7 +68,7 @@ class CrushUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     def _go_version_expr(platform: str, go_attr: str) -> str:
         """Build a flake expression that returns the active Go toolchain version."""
         return _build_flake_attr_expr(
-            _local_flake_url(),
+            local_flake_url(),
             "pkgs",
             platform,
             go_attr,

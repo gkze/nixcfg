@@ -21,7 +21,12 @@ from lib.nix.commands.base import CommandResult, run_nix
 from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update.io import atomic_write_json
 from lib.update.nix_expr import identifier_attr_path
-from lib.update.paths import REPO_ROOT, package_dir_for, package_file_map
+from lib.update.paths import (
+    REPO_ROOT,
+    local_flake_url,
+    package_dir_for,
+    package_file_map,
+)
 from lib.update.surfaces import validate_repo_update_surface_coverage
 
 
@@ -78,7 +83,7 @@ def python_source_names() -> set[str]:
 
 def nix_source_names() -> set[str]:
     """Return the set of source names discovered by ``outputs.lib.sources``."""
-    flake_url = f"git+file://{REPO_ROOT}?dirty=1"
+    flake_url = local_flake_url(REPO_ROOT)
     expression = LetExpression(
         local_variables=[
             Binding(

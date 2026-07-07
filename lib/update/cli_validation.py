@@ -42,8 +42,7 @@ def handle_validate_request(
             )
         else:
             out.print(
-                ":heavy_check_mark: Validated sources.json entries: "
-                f"{len(sources.entries)} sources OK",
+                f"Validated sources.json entries: {len(sources.entries)} sources OK",
                 style="green",
             )
     except (RuntimeError, ValueError, TypeError, OSError) as exc:
@@ -52,7 +51,7 @@ def handle_validate_request(
                 f"{json.dumps({'valid': False, 'error': str(exc)})}\n",
             )
         else:
-            out.print_error(f":x: Validation failed: {exc}")
+            out.print_error(f"Validation failed: {exc}")
         return 1
     return 0
 

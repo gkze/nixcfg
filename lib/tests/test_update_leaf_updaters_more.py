@@ -9,7 +9,11 @@ from typing import Protocol, cast
 
 import pytest
 
-from lib.tests._updater_helpers import load_repo_module, run_async
+from lib.tests._updater_helpers import (
+    load_repo_module_for_test,
+    run_async,
+    updater_from_module,
+)
 from lib.update.updaters import factories as updater_factories
 from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata, DownloadUrlMetadata
@@ -17,9 +21,7 @@ from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
 
 def _load(path: str) -> ModuleType:
-    return load_repo_module(
-        path, f"test_leaf_{path.replace('/', '_').replace('-', '_')}"
-    )
+    return load_repo_module_for_test(path, prefix="test_leaf")
 
 
 class _PackageUpdater(Protocol):
@@ -37,15 +39,7 @@ class _PlatformUpdater(_PackageUpdater, Protocol):
 
 
 def _updater(module: ModuleType) -> _PackageUpdater:
-    for value in vars(module).values():
-        if (
-            isinstance(value, type)
-            and value.__name__.endswith("Updater")
-            and value.__module__ == module.__name__
-        ):
-            return cast("_PackageUpdater", value())
-    msg = f"No updater class found in {module.__name__}"
-    raise AssertionError(msg)
+    return cast("_PackageUpdater", updater_from_module(module))
 
 
 def _download_url(info: VersionInfo) -> str:

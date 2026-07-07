@@ -13,7 +13,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 STATUS_FILE_NAME = "nixcfg-update-target-status.json"
 STATUS_COLLECTION_KIND = "nixcfg-update-target-status-collection"
@@ -25,6 +25,32 @@ _RUNTIME_LOCK_PATHS = (
     "packages/t3code-desktop/bun.lock",
 )
 _REQUIRED_PLATFORMS = ("aarch64-darwin", "x86_64-linux", "aarch64-linux")
+UPDATE_TARGET_AGGREGATE_RELATIVE_SPECS = (
+    "packages/**/sources.json",
+    "overlays/**/sources.json",
+    "packages/**/uv.lock",
+    "packages/**/deno-deps.json",
+    "packages/**/build.zig.zon.nix",
+    *_RUNTIME_LOCK_PATHS,
+    STATUS_FILE_NAME,
+)
+REFRESH_FINAL_ARTIFACT_NAME = "merged-generated-formatted"
+REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS = (
+    "flake.lock",
+    "packages/superset/bun.nix",
+    "packages/superset/bun.lock",
+    *_RUNTIME_LOCK_PATHS,
+    "packages/**/sources.json",
+    "packages/**/uv.lock",
+    "packages/**/deno-deps.json",
+    "packages/**/build.zig.zon.nix",
+    "overlays/**/sources.json",
+    "packages/**/Cargo.nix",
+    "packages/**/crate-hashes.json",
+    "overlays/**/Cargo.nix",
+    "overlays/**/crate-hashes.json",
+)
+REFRESH_FINAL_ARTIFACT_REQUIRED_SPECS = REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS
 _SLUG_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -51,6 +77,38 @@ def _repo_path(value: object) -> str | None:
     return stripped
 
 
+def _require_object(value: object, *, context: str) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return cast("dict[str, Any]", value)
+    msg = f"Expected object for {context}"
+    raise TypeError(msg)
+
+
+def _require_string(value: object, *, context: str) -> str:
+    if isinstance(value, str) and value:
+        return value
+    msg = f"Expected string for {context}"
+    raise TypeError(msg)
+
+
+def _require_repo_path(value: object, *, context: str) -> str:
+    path = _repo_path(value)
+    if path is not None:
+        return path
+    msg = f"Expected safe repo-relative path for {context}"
+    raise TypeError(msg)
+
+
+def _require_repo_path_list(value: object, *, context: str) -> list[str]:
+    if not isinstance(value, list):
+        msg = f"Expected JSON list of artifact paths for {context}"
+        raise TypeError(msg)
+    return [
+        _require_repo_path(item, context=f"{context}[{index}]")
+        for index, item in enumerate(value)
+    ]
+
+
 def _ordered_paths(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
@@ -63,18 +121,16 @@ def _artifact_slug(name: str) -> str:
 def _artifact_paths_for_target(target: dict[str, Any], *, platform: str) -> list[str]:
     paths: list[str] = []
     source_target = target.get("sourceTarget")
-    source_path = (
-        _repo_path(source_target.get("path"))
-        if isinstance(source_target, dict)
-        else None
-    )
-    if source_path is not None:
+    if source_target is not None:
+        source_path = _require_repo_path(
+            _require_object(source_target, context="sourceTarget").get("path"),
+            context="sourceTarget.path",
+        )
         paths.append(source_path)
 
     if platform == "x86_64-linux":
-        generated = target.get("generatedArtifacts")
-        if isinstance(generated, list):
-            paths.extend(path for item in generated if (path := _repo_path(item)))
+        generated = target.get("generatedArtifacts", [])
+        paths.extend(_require_repo_path_list(generated, context="generatedArtifacts"))
 
     if platform == "aarch64-darwin" and target.get("name") in _RUNTIME_LOCK_TARGETS:
         paths.extend(_RUNTIME_LOCK_PATHS)
@@ -90,13 +146,13 @@ def build_matrix(*, inventory: dict[str, Any]) -> dict[str, list[dict[str, Any]]
         raise TypeError(msg)
 
     include: list[dict[str, Any]] = []
-    for target in targets:
-        if not isinstance(target, dict):
-            continue
-        name = target.get("name")
-        handles = target.get("handles")
-        if not isinstance(name, str) or not isinstance(handles, dict):
-            continue
+    for index, value in enumerate(targets):
+        target = _require_object(value, context=f"targets[{index}]")
+        name = _require_string(target.get("name"), context=f"targets[{index}].name")
+        handles = _require_object(
+            target.get("handles"),
+            context=f"targets[{index}].handles",
+        )
         if handles.get("sourceUpdate") is not True:
             continue
         artifact_slug = _artifact_slug(name)
@@ -133,6 +189,8 @@ def stage_artifact(
     """Copy target-owned files into an artifact root and write status metadata."""
     copied: list[str] = []
     missing: list[str] = []
+    for index, value in enumerate(paths):
+        _require_repo_path(value, context=f"paths[{index}]")
     for path in _ordered_paths(paths):
         source = root / path
         if not source.is_file():
@@ -161,6 +219,29 @@ def _iter_status_files(artifacts_dir: Path) -> list[Path]:
     return sorted(artifacts_dir.glob(f"*/{STATUS_FILE_NAME}"))
 
 
+def _load_status(path: Path) -> dict[str, Any]:
+    status = _load_json(path)
+    target = _require_string(status.get("target"), context=f"{path}: target")
+    platform = _require_string(status.get("platform"), context=f"{path}: platform")
+    conclusion = _require_string(
+        status.get("conclusion"),
+        context=f"{path}: conclusion",
+    )
+    if conclusion not in {"baseline", "success", "failure"}:
+        msg = f"Unexpected conclusion in {path}: {conclusion!r}"
+        raise TypeError(msg)
+    status["target"] = target
+    status["platform"] = platform
+    status["conclusion"] = conclusion
+    status["copiedPaths"] = _ordered_paths(
+        _require_repo_path_list(
+            status.get("copiedPaths"),
+            context=f"{path}: copiedPaths",
+        )
+    )
+    return status
+
+
 def aggregate_artifacts(
     *,
     artifacts_dir: Path,
@@ -171,7 +252,7 @@ def aggregate_artifacts(
 ) -> dict[str, Any]:
     """Apply successful target artifacts to output_root and collect status."""
     all_statuses = [
-        (status_path, _load_json(status_path))
+        (status_path, _load_status(status_path))
         for status_path in _iter_status_files(artifacts_dir)
     ]
     statuses = [
@@ -183,10 +264,8 @@ def aggregate_artifacts(
     for _status_path, status in all_statuses:
         if status.get("conclusion") != "success":
             continue
-        target = status.get("target")
-        status_platform = status.get("platform")
-        if not isinstance(target, str) or not isinstance(status_platform, str):
-            continue
+        target = status["target"]
+        status_platform = status["platform"]
         target_platforms.setdefault(target, set()).add(status_platform)
     eligible_targets = {
         target
@@ -203,12 +282,11 @@ def aggregate_artifacts(
             continue
         artifact_root = status_path.parent
         for path in status.get("copiedPaths", []):
-            repo_path = _repo_path(path)
-            if repo_path is None:
-                continue
+            repo_path = _require_repo_path(path, context=f"{status_path}: copiedPaths")
             source = artifact_root / repo_path
             if not source.is_file():
-                continue
+                msg = f"Artifact status references missing copied path: {repo_path}"
+                raise RuntimeError(msg)
             destination = output_root / repo_path
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
@@ -230,7 +308,7 @@ def _json_list(value: str) -> list[str]:
     if not isinstance(payload, list):
         msg = "Expected a JSON list of artifact paths"
         raise TypeError(msg)
-    return [path for item in payload if (path := _repo_path(item))]
+    return _require_repo_path_list(payload, context="artifact paths")
 
 
 def _cmd_matrix(args: argparse.Namespace) -> int:

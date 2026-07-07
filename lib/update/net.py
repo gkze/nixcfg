@@ -257,6 +257,11 @@ async def _request(
     **kwargs: object,
 ) -> tuple[bytes, dict[str, str]]:
     options = _parse_request_options(kwargs)
+    http_utils.validate_request_target(
+        url,
+        allowed_schemes=frozenset({"https"}),
+        attempts=options.attempts,
+    )
     headers = _build_request_headers(url, options.user_agent)
     timeout_config = aiohttp.ClientTimeout(
         total=options.request_timeout,

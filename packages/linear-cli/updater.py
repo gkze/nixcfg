@@ -17,7 +17,7 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.nix import _build_flake_attr_expr, get_current_nix_platform
-from lib.update.paths import get_repo_file
+from lib.update.paths import local_flake_url
 from lib.update.updaters.base import (
     DenoManifestUpdater,
     UpdateContext,
@@ -31,11 +31,6 @@ if TYPE_CHECKING:
 
 
 DENO_MANIFEST_ATTEMPTS = 3
-
-
-def _local_flake_url() -> str:
-    """Return a local flake URL compatible with installed nixcfg CLIs."""
-    return f"git+file://{get_repo_file('.').resolve()}?dirty=1"
 
 
 def _is_transient_deno_manifest_error(exc: BaseException) -> bool:
@@ -76,7 +71,7 @@ class LinearCliUpdater(DenoManifestUpdater):
     @staticmethod
     def _deno_version_expr(platform: str) -> str:
         return _build_flake_attr_expr(
-            _local_flake_url(),
+            local_flake_url(),
             "pkgs",
             platform,
             "deno",
@@ -174,6 +169,9 @@ class LinearCliUpdater(DenoManifestUpdater):
         yield UpdateEvent.status(
             self.name,
             f"Fetching denort runtime hashes for Deno v{deno_version}...",
+            operation="compute_hash",
+            status="computing_hash",
+            detail=f"denort Deno v{deno_version}",
         )
 
         hash_drain = ValueDrain()

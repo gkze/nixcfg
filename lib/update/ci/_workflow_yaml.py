@@ -9,10 +9,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 import yaml
-from pydantic import ValidationError
 
 from lib import json_utils
-from lib.github_actions.models import GitHubWorkflow
 
 type WorkflowValue = json_utils.JsonValue
 type WorkflowObject = json_utils.JsonObject
@@ -155,37 +153,12 @@ def load_raw_workflow_yaml(workflow_path: Path) -> object:
     )
 
 
-def workflow_model(value: object, *, context: str) -> GitHubWorkflow:
-    """Validate a workflow payload with the generated GitHub Actions model.
-
-    This is intentionally optional/best-effort. The generated model comes from
-    SchemaStore's workflow schema, which is useful for typed access but is not
-    authoritative enough to reject every real GitHub workflow we may want to
-    inspect in-repo.
-    """
-    payload = workflow_object(value, context=context)
-    try:
-        return GitHubWorkflow.model_validate(payload)
-    except ValidationError as exc:
-        msg = f"{context} failed GitHub Actions schema validation: {exc}"
-        raise TypeError(msg) from exc
-
-
-def load_workflow_model(workflow_path: Path) -> GitHubWorkflow:
-    """Load and validate one workflow file into the generated workflow model."""
-    return workflow_model(
-        load_raw_workflow_yaml(workflow_path),
-        context=f"workflow {workflow_path}",
-    )
-
-
 def load_workflow_yaml(workflow_path: Path) -> WorkflowObject:
     """Load one workflow file into a normalized raw mapping.
 
-    We deliberately do not hard-require generated-model validation here. The
-    generated SchemaStore-backed model is available via ``load_workflow_model``
-    for typed access, but some valid GitHub workflow constructs used in this
-    repo are broader than that schema currently accepts.
+    We deliberately do not use SchemaStore-backed model validation here. Some
+    valid GitHub workflow constructs used in this repo are broader than that
+    schema currently accepts.
     """
     context = f"workflow {workflow_path}"
     return workflow_object(load_raw_workflow_yaml(workflow_path), context=context)
@@ -220,13 +193,11 @@ __all__ = [
     "WorkflowValue",
     "load_raw_workflow_yaml",
     "load_workflow_jobs",
-    "load_workflow_model",
     "load_workflow_yaml",
     "stringify_yaml_keys",
     "workflow_job_map",
     "workflow_job_needs",
     "workflow_job_run_strings",
     "workflow_job_steps",
-    "workflow_model",
     "workflow_object",
 ]

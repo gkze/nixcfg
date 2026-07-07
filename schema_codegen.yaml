@@ -18,10 +18,6 @@ defaults:
       - ruff-format
       - ruff-check
 sources:
-  github-workflow-schema:
-    kind: url
-    uri: https://json.schemastore.org/github-workflow.json
-    format: json
   codegen-manifest-schemas:
     kind: directory
     path: schemas/codegen
@@ -30,18 +26,8 @@ sources:
     format: json
 # Nix's vendored JSON schemas are intentionally generated through
 # nixcfg schema codegen / lib.nix.schemas._codegen; keep this declarative
-# config focused on the schema_codegen and GitHub Actions generated models.
+# config focused on the schema_codegen models.
 registry_profiles:
-  autodetect:
-    resource:
-      mode: from-contents
-    aliases:
-      - source-uri
-      - internal-id
-    registry:
-      crawl: true
-      retrieve:
-        kind: none
   local-relative:
     resource:
       mode: from-contents
@@ -66,18 +52,3 @@ targets:
       merge_ref_siblings: false
     generator:
       output: lib/schema_codegen/models/_generated.py
-  github-actions:
-    sources:
-      - github-workflow-schema
-    registry_profile: autodetect
-    entrypoints:
-      - https://json.schemastore.org/github-workflow.json
-    prepare:
-      dereference: none
-      merge_ref_siblings: false
-    generator:
-      output: lib/github_actions/models/_generated.py
-      class_name: GitHubWorkflow
-      reuse_model: true
-      collapse_reuse_models: true
-      use_type_alias: true

@@ -25,7 +25,7 @@ from lib.update.nix import (
     compute_expr_drv_fingerprint,
 )
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
-from lib.update.paths import REPO_ROOT
+from lib.update.paths import REPO_ROOT, local_flake_url
 from lib.update.updaters.base import UpdateContext, VersionInfo, register_updater
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
 
@@ -114,9 +114,7 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
                     name="flake",
                     value=FunctionCall(
                         name=identifier_attr_path("builtins", "getFlake"),
-                        argument=StringPrimitive(
-                            value=f"git+file://{REPO_ROOT}?dirty=1"
-                        ),
+                        argument=StringPrimitive(value=local_flake_url(REPO_ROOT)),
                     ),
                 ),
                 Binding(

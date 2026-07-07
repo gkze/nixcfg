@@ -171,6 +171,25 @@ class HashEntry(BaseModel):
             self.hash,
         )
 
+    def merge_key(
+        self,
+    ) -> tuple[
+        str,
+        str | None,
+        str | None,
+        str | None,
+        tuple[tuple[str, str], ...] | None,
+    ]:
+        """Return this entry's identity for artifact merge conflict checks."""
+        urls_key = tuple(sorted(self.urls.items())) if self.urls is not None else None
+        return (
+            self.hash_type,
+            self.platform,
+            self.git_dep,
+            self.url,
+            urls_key,
+        )
+
     def normalized_dict(self) -> JsonObject:
         """Return this entry in canonical form for semantic equality."""
         return self.to_dict()
@@ -265,32 +284,11 @@ class HashCollection(BaseModel):
     def merge(self, other: HashCollection) -> HashCollection:
         """Merge *other* into this collection (last-wins, skips fake hashes)."""
         if self.entries is not None and other.entries is not None:
-            by_key: dict[
-                tuple[
-                    str | None,
-                    str | None,
-                    str | None,
-                    str | None,
-                    tuple[tuple[str, str], ...] | None,
-                ],
-                HashEntry,
-            ] = {}
+            by_key: dict[HashEntryMergeKey, HashEntry] = {}
             for entry in [*self.entries, *other.entries]:
                 if entry.hash.startswith(self.FAKE_HASH_PREFIX):
                     continue
-                urls_key = (
-                    tuple(sorted(entry.urls.items()))
-                    if entry.urls is not None
-                    else None
-                )
-                key = (
-                    entry.hash_type,
-                    entry.platform,
-                    entry.git_dep,
-                    entry.url,
-                    urls_key,
-                )
-                by_key[key] = entry  # last wins
+                by_key[entry.merge_key()] = entry  # last wins
             return HashCollection(entries=list(by_key.values()))
         if self.mapping is not None and other.mapping is not None:
             merged: dict[str, str] = {}
@@ -307,6 +305,34 @@ class HashCollection(BaseModel):
             msg = "Cannot merge hash mapping with hash entries"
             raise ValueError(msg)
         return other
+
+    def merge_artifact(
+        self,
+        other: HashCollection,
+        *,
+        platform: str | None,
+        baseline: HashCollection | None = None,
+    ) -> HashCollection:
+        """Merge one CI artifact's hashes, filtering platform-scoped updates."""
+        if self.entries is not None and other.entries is not None:
+            return HashCollection(
+                entries=_merge_hash_entries_for_artifact(
+                    self.entries,
+                    other.entries,
+                    platform=platform,
+                    baseline=None if baseline is None else baseline.entries,
+                ),
+            )
+        if self.mapping is not None and other.mapping is not None:
+            return HashCollection(
+                mapping=_merge_hash_mapping_for_artifact(
+                    self.mapping,
+                    other.mapping,
+                    platform=platform,
+                    baseline=None if baseline is None else baseline.mapping,
+                ),
+            )
+        return self.merge(other)
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +392,206 @@ class SourceEntry(BaseModel):
                 "drvHash": other.drv_hash or self.drv_hash,
             },
         )
+
+    def merge_artifact(
+        self,
+        other: SourceEntry,
+        *,
+        platform: str | None,
+        baseline: SourceEntry | None = None,
+    ) -> SourceEntry:
+        """Merge one platform artifact into this source entry."""
+        return SourceEntry.model_validate({
+            "hashes": self.hashes.merge_artifact(
+                other.hashes,
+                platform=platform,
+                baseline=None if baseline is None else baseline.hashes,
+            ),
+            "version": _merge_optional_scalar(
+                "version",
+                self.version,
+                other.version,
+                baseline=None if baseline is None else baseline.version,
+            ),
+            "input": _merge_optional_scalar(
+                "input",
+                self.input,
+                other.input,
+                baseline=None if baseline is None else baseline.input,
+            ),
+            "commit": _merge_optional_scalar(
+                "commit",
+                self.commit,
+                other.commit,
+                baseline=None if baseline is None else baseline.commit,
+            ),
+            "drvHash": _merge_drv_hash(
+                self.drv_hash,
+                other.drv_hash,
+                baseline=None if baseline is None else baseline.drv_hash,
+            ),
+            "urls": _merge_urls(
+                self.urls,
+                other.urls,
+                baseline=None if baseline is None else baseline.urls,
+            ),
+        })
+
+
+type HashEntryMergeKey = tuple[
+    str,
+    str | None,
+    str | None,
+    str | None,
+    tuple[tuple[str, str], ...] | None,
+]
+
+
+def _merge_hash_entries_for_artifact(
+    base: list[HashEntry],
+    incoming: list[HashEntry],
+    *,
+    platform: str | None,
+    baseline: list[HashEntry] | None = None,
+) -> list[HashEntry]:
+    by_key: dict[HashEntryMergeKey, HashEntry] = {
+        entry.merge_key(): entry for entry in base
+    }
+    baseline_by_key = (
+        {entry.merge_key(): entry for entry in baseline} if baseline is not None else {}
+    )
+
+    for entry in incoming:
+        if entry.hash.startswith(HashCollection.FAKE_HASH_PREFIX):
+            continue
+        key = entry.merge_key()
+
+        if entry.platform is None:
+            existing = by_key.get(key)
+            if existing is not None and existing.hash != entry.hash:
+                baseline_entry = baseline_by_key.get(key)
+                if baseline_entry is not None:
+                    if existing.hash == baseline_entry.hash:
+                        by_key[key] = entry
+                        continue
+                    if entry.hash == baseline_entry.hash:
+                        continue
+                msg = (
+                    "Conflicting non-platform hash entry for "
+                    f"{entry.hash_type}: {existing.hash} vs {entry.hash}"
+                )
+                raise RuntimeError(msg)
+            by_key[key] = entry
+            continue
+
+        if platform is None:
+            by_key[key] = entry
+            continue
+
+        if entry.platform == platform:
+            by_key[key] = entry
+
+    return list(by_key.values())
+
+
+def _merge_hash_mapping_for_artifact(
+    base: dict[str, str],
+    incoming: dict[str, str],
+    *,
+    platform: str | None,
+    baseline: dict[str, str] | None = None,
+) -> dict[str, str]:
+    merged = dict(base)
+    for incoming_platform, hash_value in incoming.items():
+        if hash_value.startswith(HashCollection.FAKE_HASH_PREFIX):
+            continue
+        if platform is not None and incoming_platform != platform:
+            continue
+        existing = merged.get(incoming_platform)
+        if (
+            existing is not None
+            and incoming_platform != platform
+            and existing != hash_value
+        ):
+            baseline_value = (
+                None if baseline is None else baseline.get(incoming_platform)
+            )
+            if baseline_value is not None:
+                if existing == baseline_value:
+                    merged[incoming_platform] = hash_value
+                    continue
+                if hash_value == baseline_value:
+                    continue
+            msg = (
+                "Conflicting non-platform hash mapping for "
+                f"{incoming_platform}: {existing} vs {hash_value}"
+            )
+            raise RuntimeError(msg)
+        merged[incoming_platform] = hash_value
+    return merged
+
+
+def _merge_optional_scalar(
+    field_name: str,
+    existing: str | None,
+    incoming: str | None,
+    *,
+    baseline: str | None = None,
+) -> str | None:
+    if existing and incoming and existing != incoming:
+        if baseline is not None:
+            if existing == baseline:
+                return incoming
+            if incoming == baseline:
+                return existing
+        msg = f"Conflicting {field_name}: {existing!r} vs {incoming!r}"
+        raise RuntimeError(msg)
+    return incoming or existing
+
+
+def _merge_drv_hash(
+    existing: str | None,
+    incoming: str | None,
+    *,
+    baseline: str | None = None,
+) -> str | None:
+    """Keep drvHash only when it is stable across merged roots."""
+    if existing is None and incoming is None:
+        return baseline
+    if existing is None:
+        return incoming if baseline is None or incoming == baseline else None
+    if incoming is None:
+        return existing if baseline is None or existing == baseline else None
+    if existing == incoming or (baseline is not None and existing == baseline):
+        return incoming
+    if baseline is not None and incoming == baseline:
+        return existing
+    return None
+
+
+def _merge_urls(
+    existing: dict[str, str] | None,
+    incoming: dict[str, str] | None,
+    *,
+    baseline: dict[str, str] | None = None,
+) -> dict[str, str] | None:
+    if existing is None and incoming is None:
+        return None
+    merged: dict[str, str] = dict(existing or {})
+    for url_key, url_value in (incoming or {}).items():
+        existing_value = merged.get(url_key)
+        if existing_value is not None and existing_value != url_value:
+            baseline_value = None if baseline is None else baseline.get(url_key)
+            if baseline_value is not None:
+                if existing_value == baseline_value:
+                    merged[url_key] = url_value
+                    continue
+                if url_value == baseline_value:
+                    continue
+            msg = f"Conflicting urls entry for {url_key!r}: {existing_value!r} vs {url_value!r}"
+            raise RuntimeError(msg)
+        merged[url_key] = url_value
+    return merged
 
 
 # ---------------------------------------------------------------------------

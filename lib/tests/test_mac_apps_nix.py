@@ -388,20 +388,71 @@ def test_mac_app_entry_defaults_to_copy_mode() -> None:
 
 def test_shared_darwin_app_helpers_default_to_copy_mode_metadata() -> None:
     """Shared macOS app helpers should advertise copy mode for dockable bundles."""
-    for occurrence in range(3):
-        mac_app = expect_instance(
-            nix_source_fragment_expr(
-                "overlays/_lib/helpers/darwin-apps.nix",
-                "      passthru.macApp = ",
-                "\n      // macApp;",
-                occurrence=occurrence,
-            ),
-            AttributeSet,
+    mac_app = expect_instance(
+        nix_source_fragment_expr(
+            "overlays/_lib/helpers/darwin-apps.nix",
+            "      macApp = ",
+            "\n      // macApp;",
+        ),
+        AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(mac_app.values, "installMode").value,
+        StringPrimitive(value="copy"),
+    )
+
+
+def test_pkg_app_packages_use_shared_helper() -> None:
+    """Direct macOS pkg app packages should use the shared helper."""
+    cases: tuple[tuple[str, str, str, bool | None], ...] = (
+        ("packages/nordvpn/default.nix", "nordvpn", "NordVPN.app", None),
+        ("packages/tailscale-app/default.nix", "tailscale-app", "Tailscale.app", True),
+    )
+
+    for relative_path, pname, bundle_name, copy_contents in cases:
+        package_source = Path(REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        package = expect_instance(parse_nix_expr(package_source), FunctionDefinition)
+        derivation = expect_instance(package.output, FunctionCall)
+        derivation_args = expect_instance(derivation.argument, AttributeSet)
+
+        assert_nix_ast_equal(derivation.name, Identifier(name="mkPkgApp"))
+        assert_nix_ast_equal(
+            expect_binding(derivation_args.values, "pname").value,
+            StringPrimitive(value=pname),
         )
         assert_nix_ast_equal(
-            expect_binding(mac_app.values, "installMode").value,
-            StringPrimitive(value="copy"),
+            expect_binding(derivation_args.values, "bundleName").value,
+            StringPrimitive(value=bundle_name),
         )
+        if copy_contents is not None:
+            assert_nix_ast_equal(
+                expect_binding(derivation_args.values, "copyContents").value,
+                Primitive(value=copy_contents),
+            )
+
+
+def test_pkg_app_helper_expands_pkg_into_fresh_destination() -> None:
+    """Pkgutil --expand-full expects to create its destination directory."""
+    install_phase = expect_instance(
+        nix_source_fragment_expr(
+            "overlays/_lib/helpers/darwin-apps.nix",
+            "      installPhase = ",
+            ";\n    };",
+            occurrence=3,
+        ),
+        IndentedString,
+    )
+    install_shell = parse_shell(indented_string_body(install_phase.rebuild()))
+
+    assert command_texts(install_shell, "rm") == ['rm -rf "$pkg_dir"']
+    assert 'mkdir -p "$pkg_dir" "$out/Applications"' not in command_texts(
+        install_shell,
+        "mkdir",
+    )
+    assert 'mkdir -p "$out/Applications"' in command_texts(install_shell, "mkdir")
+    assert command_texts(install_shell, "/usr/sbin/pkgutil") == [
+        '/usr/sbin/pkgutil --expand-full "$src" "$pkg_dir"'
+    ]
 
 
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")

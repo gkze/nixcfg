@@ -446,6 +446,38 @@ def test_render_runtime_package_json_can_omit_desktop_runtime_dependencies(
     assert "workspaces" not in payload
 
 
+def test_render_runtime_package_json_filters_unrelated_runtime_overrides(
+    tmp_path: Path,
+) -> None:
+    """Irrelevant workspace overrides should not affect the runtime lock refresh."""
+    module = _runtime_manifest_module()
+
+    source_root = _runtime_source(
+        tmp_path,
+        root_package={
+            "workspaces": {"catalog": {"effect": "4.0.0"}},
+            "overrides": {
+                "effect": "catalog:",
+                "@clerk/clerk-js": "catalog:",
+                "@clerk/clerk-js>@base-org/account": "-",
+            },
+        },
+        server_package={
+            "version": "0.0.23",
+            "dependencies": {"effect": "catalog:"},
+        },
+        desktop_package={"dependencies": {"electron": "41.5.0"}},
+    )
+
+    payload = module.build_runtime_manifest(
+        source_root,
+        include_desktop_runtime=False,
+    )
+
+    assert payload["dependencies"] == {"effect": "4.0.0"}
+    assert payload["overrides"] == {"effect": "4.0.0"}
+
+
 def test_render_runtime_package_json_rejects_unresolved_workspace_dependency(
     tmp_path: Path,
 ) -> None:

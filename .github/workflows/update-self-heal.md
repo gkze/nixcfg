@@ -75,7 +75,6 @@ network:
     - linux-distros
     - "cache.nixos.org"
     - "*.cachix.org"
-    - "cache.garnix.io"
 
 steps:
   - name: Fail closed when required secrets are absent

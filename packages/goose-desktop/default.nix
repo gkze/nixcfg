@@ -140,7 +140,7 @@ stdenv.mkDerivation {
     mkdir -p "$HOME"
     pnpm config set manage-package-manager-versions false
 
-    install -m755 ${goose-cli.passthru.gooseServerDrv}/bin/goosed desktop/src/bin/goosed
+    install -m755 ${goose-cli}/bin/goose desktop/src/bin/goose
 
     ${electronBuild.copyDist}
     export ELECTRON_OVERRIDE_DIST_PATH="$electronDistDir"
@@ -220,7 +220,7 @@ stdenv.mkDerivation {
     for path in \
       "$out/Applications/${appBundleName}" \
       "$out/Applications/${appBundleName}/Contents/MacOS/${appExecutableName}" \
-      "$out/Applications/${appBundleName}/Contents/Resources/bin/goosed" \
+      "$out/Applications/${appBundleName}/Contents/Resources/bin/goose" \
       "$out/bin/${pname}"
     do
       if [ ! -e "$path" ]; then

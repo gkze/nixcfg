@@ -312,9 +312,9 @@ def test_text_codemod_noop_write(tmp_path: Path) -> None:
 
 def test_small_module_helper_edges() -> None:
     """Cover tiny URL and assignment helper branches."""
+    from lib.nix.models.sources import _merge_drv_hash
     from lib.tests._updater_helpers import load_repo_module
     from lib.update import crate2nix
-    from lib.update.ci import merge_sources
     from lib.update.updaters import factories
     from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
@@ -325,11 +325,10 @@ def test_small_module_helper_edges() -> None:
     assert patch_compiler._assignment_indent("use_lld_extra = true", "use_lld") is None
     assert patch_compiler._assignment_indent("use_lld true", "use_lld") is None
 
-    assert merge_sources._merge_drv_hash(None, "drv-new", baseline="drv-old") is None
-    assert merge_sources._merge_drv_hash("drv-old", None, baseline="drv-new") is None
+    assert _merge_drv_hash(None, "drv-new", baseline="drv-old") is None
+    assert _merge_drv_hash("drv-old", None, baseline="drv-new") is None
     assert (
-        merge_sources._merge_drv_hash("drv-current", "drv-old", baseline="drv-old")
-        == "drv-current"
+        _merge_drv_hash("drv-current", "drv-old", baseline="drv-old") == "drv-current"
     )
 
     repo_installable = f"path:{Path(crate2nix.REPO_ROOT).resolve()}#demo"

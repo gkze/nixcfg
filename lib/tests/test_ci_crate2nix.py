@@ -1078,6 +1078,32 @@ def test_run_crate2nix_generate_retries_transient_prefetch_cleanup_failure(
     assert sleeps == [2.0]
 
 
+def test_run_crate2nix_generate_holds_shared_cargo_home_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """crate2nix refreshes share one Cargo cache, so generation is serialized."""
+
+    def _run(
+        args: list[str],
+        *,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        del env
+        assert crate2nix._CRATE2NIX_GENERATE_LOCK.locked()
+        return subprocess.CompletedProcess(args, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+
+    result = crate2nix._run_crate2nix_generate(
+        ["nix", "run", "nixpkgs#crate2nix"],
+        env={},
+        generated_outputs=(tmp_path / "Cargo.nix",),
+    )
+
+    assert result.stdout == "ok\n"
+
+
 def test_run_crate2nix_generate_does_not_retry_permanent_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1155,6 +1181,15 @@ def test_retryable_crate2nix_generate_failure_requires_prefetch_context() -> Non
         "cargo metadata\n"
         "failed to download from https://index.crates.io/config.json\n"
         "[28] Timeout was reached (Operation too slow)"
+    )
+    assert crate2nix._is_retryable_crate2nix_generate_failure(
+        "cargo metadata\n"
+        "error: cannot create the lock file /nix/store/source/Cargo.lock"
+    )
+    assert crate2nix._is_retryable_crate2nix_generate_failure(
+        "git fetch\n"
+        "fatal: could not open '/tmp/git/db/repo/objects/pack/tmp_pack' "
+        "for reading: No such file or directory"
     )
     assert not crate2nix._is_retryable_crate2nix_generate_failure("RPC failed")
     assert not crate2nix._is_retryable_crate2nix_generate_failure(

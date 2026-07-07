@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.1.35";
+      url = "github:generalaction/emdash/v1.1.37";
       flake = false;
     };
     flake-edit = {
@@ -52,7 +52,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gitbutler = {
-      url = "github:gitbutlerapp/gitbutler/release/0.20.4";
+      url = "github:gitbutlerapp/gitbutler/release/0.21.0";
       flake = false;
     };
     home-manager = {
@@ -87,7 +87,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.6.19";
+      url = "github:NousResearch/hermes-agent/v2026.7.1";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -141,7 +141,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.62.0";
+      url = "github:max-sixty/worktrunk/v0.65.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -149,7 +149,7 @@
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.12.2";
+      url = "github:anthropics/anthropic-cli/v1.16.0";
       flake = false;
     };
     catppuccin = {
@@ -166,7 +166,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.142.3";
+      url = "github:openai/codex/rust-v0.142.5";
       flake = false;
     };
     curator = {
@@ -174,7 +174,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.31.1";
+      url = "github:steipete/gogcli/v0.32.0";
       flake = false;
     };
     openai-cli = {
@@ -184,7 +184,7 @@
     github-desktop = {
       type = "git";
       url = "https://github.com/desktop/desktop.git";
-      ref = "refs/tags/release-3.6.1";
+      ref = "refs/tags/release-3.6.2";
       submodules = true;
       flake = false;
     };

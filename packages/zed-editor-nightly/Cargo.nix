@@ -1314,6 +1314,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "llama_cpp" = rec {
+      packageId = "llama_cpp";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "llama_cpp";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "lmstudio" = rec {
       packageId = "lmstudio";
       build = internal.buildRustCrateWithFeatures {
@@ -1578,6 +1588,16 @@ rec {
       packageId = "picker";
       build = internal.buildRustCrateWithFeatures {
         packageId = "picker";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "picker_preview" = rec {
+      packageId = "picker_preview";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "picker_preview";
       };
 
       # Debug support which might change between releases.
@@ -3526,6 +3546,11 @@ rec {
             packageId = "regex";
           }
           {
+            name = "release_channel";
+            packageId = "release_channel";
+            target = { target, features }: ("windows" == target."os" or null);
+          }
+          {
             name = "rust-embed";
             packageId = "rust-embed";
             features = [ "include-exclude" ];
@@ -3767,9 +3792,9 @@ rec {
       };
       "agent-client-protocol" = rec {
         crateName = "agent-client-protocol";
-        version = "1.0.0";
+        version = "1.0.1";
         edition = "2024";
-        sha256 = "07aj4h07r2cq6wba6rrdazm1sq66x02grahggnv9w3ks438ag0g9";
+        sha256 = "136dyhbvnmim1kc7vajk8q6dp5w2ik1rjgar2vdma4skqwb2sc0n";
         libName = "agent_client_protocol";
         authors = [
           "Zed <hi@zed.dev>"
@@ -3854,9 +3879,9 @@ rec {
       };
       "agent-client-protocol-derive" = rec {
         crateName = "agent-client-protocol-derive";
-        version = "1.0.0";
+        version = "1.0.1";
         edition = "2024";
-        sha256 = "0hr1l7zxj9bpf430h4jxy3i5wd88ph2c6k3iz1v8r5z2rcl9qn0d";
+        sha256 = "15bh82fc2yb2sz178n86rmw3cwpwf5mxmswz22h82sgb5xapvcw8";
         procMacro = true;
         libName = "agent_client_protocol_derive";
         authors = [
@@ -4833,6 +4858,10 @@ rec {
             name = "semver";
             packageId = "semver";
             features = [ "serde" ];
+          }
+          {
+            name = "shlex";
+            packageId = "shlex";
           }
           {
             name = "tempfile";
@@ -25776,6 +25805,10 @@ rec {
             packageId = "picker";
           }
           {
+            name = "picker_preview";
+            packageId = "picker_preview";
+          }
+          {
             name = "project";
             packageId = "project";
           }
@@ -37134,6 +37167,11 @@ rec {
             packageId = "language_models_cloud";
           }
           {
+            name = "llama_cpp";
+            packageId = "llama_cpp";
+            features = [ "schemars" ];
+          }
+          {
             name = "lmstudio";
             packageId = "lmstudio";
             features = [ "schemars" ];
@@ -39071,6 +39109,51 @@ rec {
         };
         resolvedDefaultFeatures = [ "test-support" ];
       };
+      "llama_cpp" = rec {
+        crateName = "llama_cpp";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/llama_cpp"; };
+        libPath = "src/llama_cpp.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "http_client";
+            packageId = "http_client";
+          }
+          {
+            name = "schemars";
+            packageId = "schemars 1.0.4";
+            optional = true;
+            features = [ "indexmap2" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+          {
+            name = "url";
+            packageId = "url";
+          }
+        ];
+        features = {
+          "schemars" = [ "dep:schemars" ];
+        };
+        resolvedDefaultFeatures = [ "default" "schemars" ];
+      };
       "lmdb-master-sys" = rec {
         crateName = "lmdb-master-sys";
         version = "0.2.5";
@@ -39979,6 +40062,10 @@ rec {
             packageId = "gpui_platform";
             usesDefaultFeatures = false;
             features = [ "wayland" "x11" ];
+          }
+          {
+            name = "image";
+            packageId = "image";
           }
           {
             name = "language";
@@ -41950,14 +42037,9 @@ rec {
       };
       "naga" = rec {
         crateName = "naga";
-        version = "29.0.3";
+        version = "29.0.4";
         edition = "2021";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/zed-industries/wgpu.git";
-          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
-          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
-        };
+        sha256 = "1py81ph72a97ws2nwi70r12hsglrzgibm0fq4z5mm5z746b93gxj";
         authors = [
           "gfx-rs developers"
         ];
@@ -42685,6 +42767,11 @@ rec {
             packageId = "libc";
             features = [ "extra_traits" ];
           }
+          {
+            name = "memoffset";
+            packageId = "memoffset";
+            optional = true;
+          }
         ];
         buildDependencies = [
           {
@@ -42708,7 +42795,7 @@ rec {
           "user" = [ "feature" ];
           "zerocopy" = [ "fs" "uio" ];
         };
-        resolvedDefaultFeatures = [ "default" "feature" "mman" "process" "ptrace" "signal" "uio" "user" ];
+        resolvedDefaultFeatures = [ "default" "feature" "fs" "memoffset" "mman" "process" "ptrace" "signal" "socket" "uio" "user" ];
       };
       "nix 0.30.1" = rec {
         crateName = "nix";
@@ -50329,10 +50416,6 @@ rec {
             packageId = "db";
           }
           {
-            name = "editor";
-            packageId = "editor";
-          }
-          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
@@ -50346,16 +50429,8 @@ rec {
             packageId = "menu";
           }
           {
-            name = "multi_buffer";
-            packageId = "multi_buffer";
-          }
-          {
             name = "project";
             packageId = "project";
-          }
-          {
-            name = "rope";
-            packageId = "rope";
           }
           {
             name = "schemars";
@@ -50425,6 +50500,61 @@ rec {
         features = {
         };
         resolvedDefaultFeatures = [ "test-support" ];
+      };
+      "picker_preview" = rec {
+        crateName = "picker_preview";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/picker_preview"; };
+        libPath = "src/picker_preview.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "editor";
+            packageId = "editor";
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "language";
+            packageId = "language";
+          }
+          {
+            name = "multi_buffer";
+            packageId = "multi_buffer";
+          }
+          {
+            name = "picker";
+            packageId = "picker";
+          }
+          {
+            name = "project";
+            packageId = "project";
+          }
+          {
+            name = "rope";
+            packageId = "rope";
+          }
+          {
+            name = "settings";
+            packageId = "settings";
+          }
+          {
+            name = "ui";
+            packageId = "ui";
+          }
+          {
+            name = "util";
+            packageId = "util";
+          }
+        ];
+
       };
       "pico-args" = rec {
         crateName = "pico-args";
@@ -52371,6 +52501,11 @@ rec {
           {
             name = "language";
             packageId = "language";
+          }
+          {
+            name = "log";
+            packageId = "log";
+            features = [ "kv_unstable_serde" "serde" ];
           }
           {
             name = "markdown_preview";
@@ -59373,6 +59508,12 @@ rec {
             features = [ "kv_unstable_serde" "serde" ];
           }
           {
+            name = "nix";
+            packageId = "nix 0.29.0";
+            target = { target, features }: ("linux" == target."os" or null);
+            features = [ "fs" "socket" "uio" ];
+          }
+          {
             name = "smol";
             packageId = "smol";
             target = { target, features }: ("windows" == target."os" or null);
@@ -60389,6 +60530,10 @@ rec {
             packageId = "collections";
           }
           {
+            name = "db";
+            packageId = "db";
+          }
+          {
             name = "editor";
             packageId = "editor";
           }
@@ -60428,6 +60573,10 @@ rec {
           {
             name = "picker";
             packageId = "picker";
+          }
+          {
+            name = "picker_preview";
+            packageId = "picker_preview";
           }
           {
             name = "project";
@@ -67730,6 +67879,10 @@ rec {
           {
             name = "shellexpand";
             packageId = "shellexpand";
+          }
+          {
+            name = "shlex";
+            packageId = "shlex";
           }
           {
             name = "task";
@@ -77113,14 +77266,9 @@ rec {
       };
       "wgpu" = rec {
         crateName = "wgpu";
-        version = "29.0.3";
+        version = "29.0.4";
         edition = "2021";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/zed-industries/wgpu.git";
-          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
-          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
-        };
+        sha256 = "01sx6b31110cxc0h8k06zwkg8sm54xv19lhqpd61v2523c789s3n";
         authors = [
           "gfx-rs developers"
         ];
@@ -77320,14 +77468,9 @@ rec {
       };
       "wgpu-core" = rec {
         crateName = "wgpu-core";
-        version = "29.0.3";
+        version = "29.0.4";
         edition = "2021";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/zed-industries/wgpu.git";
-          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
-          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
-        };
+        sha256 = "1mx48dc3k1gnfaqs193gdwmp0pxpvibszi20k5d9cmjf4lr9hl9g";
         libName = "wgpu_core";
         authors = [
           "gfx-rs developers"
@@ -77490,14 +77633,9 @@ rec {
       };
       "wgpu-core-deps-apple" = rec {
         crateName = "wgpu-core-deps-apple";
-        version = "29.0.3";
+        version = "29.0.4";
         edition = "2021";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/zed-industries/wgpu.git";
-          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
-          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
-        };
+        sha256 = "1ws70f53b4yj9p52ziwzcn1m7x4zyxn5863xws4pbq60qhk9xqzm";
         libName = "wgpu_core_deps_apple";
         authors = [
           "gfx-rs developers"
@@ -77518,14 +77656,9 @@ rec {
       };
       "wgpu-core-deps-emscripten" = rec {
         crateName = "wgpu-core-deps-emscripten";
-        version = "29.0.3";
+        version = "29.0.4";
         edition = "2021";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/zed-industries/wgpu.git";
-          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
-          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
-        };
+        sha256 = "1bzhr47sh1c6l1km50i5mmfjgasmdv3b5xnmpnc994ywa7jrpq01";
         libName = "wgpu_core_deps_emscripten";
         authors = [
           "gfx-rs developers"
@@ -77544,14 +77677,9 @@ rec {
       };
       "wgpu-core-deps-windows-linux-android" = rec {
         crateName = "wgpu-core-deps-windows-linux-android";
-        version = "29.0.3";
+        version = "29.0.4";
         edition = "2021";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/zed-industries/wgpu.git";
-          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
-          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
-        };
+        sha256 = "0mq24drvyv691rqdji25pcr7mvlcpmp6cvmf8xv09bgnpqdjqnaf";
         libName = "wgpu_core_deps_windows_linux_android";
         authors = [
           "gfx-rs developers"
@@ -77573,14 +77701,9 @@ rec {
       };
       "wgpu-hal" = rec {
         crateName = "wgpu-hal";
-        version = "29.0.3";
+        version = "29.0.4";
         edition = "2021";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/zed-industries/wgpu.git";
-          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
-          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
-        };
+        sha256 = "13a49nwmfj5mvydq7k4xz4dfhvgaaspkykkflhi1qc97fz0y3b4p";
         libName = "wgpu_hal";
         authors = [
           "gfx-rs developers"
@@ -77914,14 +78037,9 @@ rec {
       };
       "wgpu-naga-bridge" = rec {
         crateName = "wgpu-naga-bridge";
-        version = "29.0.3";
+        version = "29.0.4";
         edition = "2021";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/zed-industries/wgpu.git";
-          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
-          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
-        };
+        sha256 = "0qf1pgzp6k5fzahbvbb2npfak6jlzfj1dkc168i4nm27yl9n08lm";
         libName = "wgpu_naga_bridge";
         authors = [
           "gfx-rs developers"
@@ -77941,14 +78059,9 @@ rec {
       };
       "wgpu-types" = rec {
         crateName = "wgpu-types";
-        version = "29.0.3";
+        version = "29.0.4";
         edition = "2021";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/zed-industries/wgpu.git";
-          rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88";
-          sha256 = "1rc7vlljh2c7b36lbpalca3wrqplywgvabnifnwz4blpvnnxs0wg";
-        };
+        sha256 = "1xgqmpyl0zpffqp23b5fcq6gr6yz3a7qd8r3nbi4bjm8kk6q9gw4";
         libName = "wgpu_types";
         authors = [
           "gfx-rs developers"
@@ -88102,7 +88215,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "1.10.0";
+        version = "1.11.0";
         edition = "2024";
         crateBin = [
           {

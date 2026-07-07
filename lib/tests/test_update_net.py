@@ -241,6 +241,17 @@ def test_request_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(requests) == expected_attempts
 
 
+def test_request_rejects_non_https_targets() -> None:
+    """Reject update fetch targets before opening a request."""
+    with pytest.raises(ValueError, match="Only absolute HTTPS URLs are allowed"):
+        _run_with_session(
+            lambda session: object.__getattribute__(net, "_request")(
+                session,
+                "file:///tmp/source.json",
+            )
+        )
+
+
 def test_request_does_not_close_callers_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

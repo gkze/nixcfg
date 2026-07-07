@@ -7,7 +7,6 @@ let
   inherit (lib)
     attrByPath
     concatLists
-    mapAttrs
     mapAttrsToList
     mkEnableOption
     mkIf
@@ -26,43 +25,6 @@ let
     "path"
   ] "/Applications/Twilight.app" config;
 
-  mcpServerType = types.submodule {
-    freeformType = types.attrsOf types.anything;
-
-    options = {
-      enable = mkEnableOption "MCP server" // {
-        default = false;
-      };
-
-      type = mkOption {
-        type = types.enum [
-          "local"
-          "remote"
-        ];
-        default = "local";
-        description = "MCP server transport type.";
-      };
-
-      command = mkOption {
-        type = types.listOf types.str;
-        default = [ ];
-        description = "Command argv for local MCP servers.";
-      };
-
-      url = mkOption {
-        type = types.nullOr types.str;
-        default = null;
-        description = "Endpoint URL for remote MCP servers.";
-      };
-
-      environment = mkOption {
-        type = types.attrsOf types.str;
-        default = { };
-        description = "Environment variables for local MCP server processes.";
-      };
-    };
-  };
-
   profileType = types.submodule {
     options = {
       mcpServers = mkOption {
@@ -79,56 +41,8 @@ let
     };
   };
 
-  mkServerConfig =
-    server:
-    let
-      enabled = server.enabled or (server.enable or false);
-      serverType = server.type or "local";
-      command = server.command or [ ];
-      url = server.url or null;
-      environment = server.environment or { };
-      extras = removeAttrs server [
-        "command"
-        "enable"
-        "enabled"
-        "environment"
-        "type"
-        "url"
-      ];
-    in
-    extras
-    // {
-      inherit enabled;
-      type = serverType;
-    }
-    // optionalAttrs (command != [ ]) { inherit command; }
-    // optionalAttrs (url != null) { inherit url; }
-    // optionalAttrs (environment != { }) { inherit environment; };
-
-  renderMcpServers = servers: mapAttrs (_: mkServerConfig) servers;
-
   mergeProfileMcpServers =
     profileMcpServers: opencodeMcpLib.resolveSparseMcpServerOverrides cfg.mcpServers profileMcpServers;
-
-  mkServerAssertions =
-    optionPath: servers:
-    mapAttrsToList (
-      name: server:
-      let
-        isLocal = (server.type or "local") == "local";
-        command = server.command or [ ];
-        url = server.url or null;
-        isValid = if isLocal then command != [ ] else url != null;
-      in
-      {
-        assertion = isValid;
-        message =
-          if isLocal then
-            "${optionPath}.${name}: local servers require a non-empty command."
-          else
-            "${optionPath}.${name}: remote servers require a non-null url.";
-      }
-    ) servers;
 
   baseOpencodeTui = {
     theme = config.theme.slug;
@@ -178,7 +92,7 @@ in
     };
 
     mcpServers = mkOption {
-      type = types.attrsOf mcpServerType;
+      type = opencodeMcpLib.mcpServerMapType;
       default = {
         aws-knowledge = {
           type = "remote";
@@ -271,11 +185,11 @@ in
         message = "nixcfg.opencode.activeProfile must match a key in nixcfg.opencode.profiles.";
       }
     ]
-    ++ mkServerAssertions "nixcfg.opencode.mcpServers" cfg.mcpServers
+    ++ opencodeMcpLib.mkServerAssertions "nixcfg.opencode.mcpServers" cfg.mcpServers
     ++ concatLists (
       mapAttrsToList (
         profileName: profile:
-        mkServerAssertions "nixcfg.opencode.profiles.${profileName}.mcpServers" (
+        opencodeMcpLib.mkServerAssertions "nixcfg.opencode.profiles.${profileName}.mcpServers" (
           mergeProfileMcpServers profile.mcpServers
         )
       ) cfg.profiles
@@ -293,7 +207,7 @@ in
     programs.opencode = {
       enable = true;
       settings = baseOpencodeSettings // {
-        mcp = renderMcpServers cfg.mcpServers;
+        mcp = opencodeMcpLib.renderMcpServers cfg.mcpServers;
       };
       tui = baseOpencodeTui;
     };

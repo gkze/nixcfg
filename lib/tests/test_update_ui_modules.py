@@ -128,8 +128,8 @@ def _item(
 
 def test_ui_state_terminal_status_and_visibility() -> None:
     """Run this test case."""
-    assert is_terminal_status("Updated: 1.0 -> 1.1")
-    assert is_terminal_status("Up to date")
+    assert not is_terminal_status("Updated: 1.0 -> 1.1")
+    assert not is_terminal_status("Up to date")
     assert is_terminal_status("still running", {"status": "updated"})
     assert not is_terminal_status("Checking demo (current: 1.0)")
 
@@ -167,27 +167,20 @@ def test_ui_state_from_meta_and_command_mappers() -> None:
 
 
 @pytest.mark.parametrize(
-    ("message", "kind"),
+    ("payload", "kind"),
     [
-        ("Checking demo (current: 1.0)", OperationKind.CHECK_VERSION),
-        ("Update available: 1.0 -> 2.0", OperationKind.CHECK_VERSION),
-        ("Up to date (version: 1.0)", OperationKind.CHECK_VERSION),
-        ("Up to date (ref: main)", OperationKind.CHECK_VERSION),
-        ("Updating ref: v1 -> v2", OperationKind.UPDATE_REF),
-        ("Updating flake input 'demo'...", OperationKind.REFRESH_LOCK),
-        ("Fetching hashes for all platforms", OperationKind.COMPUTE_HASH),
-        ("Computing hash for demo.", OperationKind.COMPUTE_HASH),
-        ("Build failed with exit status 1", OperationKind.COMPUTE_HASH),
-        ("warning: retrying", OperationKind.COMPUTE_HASH),
-        ("Up to date", OperationKind.COMPUTE_HASH),
+        ({"operation": OperationKind.CHECK_VERSION.value}, OperationKind.CHECK_VERSION),
+        ({"operation": OperationKind.UPDATE_REF.value}, OperationKind.UPDATE_REF),
+        ({"operation": OperationKind.REFRESH_LOCK.value}, OperationKind.REFRESH_LOCK),
+        ({"operation": OperationKind.COMPUTE_HASH.value}, OperationKind.COMPUTE_HASH),
     ],
 )
 def test_operation_for_status_matches_expected_kind(
-    message: str,
+    payload: dict[str, str],
     kind: OperationKind,
 ) -> None:
     """Run this test case."""
-    assert operation_for_status(message) == kind
+    assert operation_for_status("status message", payload) == kind
 
 
 def test_operation_for_status_unknown_message_returns_none() -> None:
@@ -207,16 +200,32 @@ def test_operation_for_status_prefers_typed_payload() -> None:
 
 
 def test_operation_for_status_invalid_typed_payload_falls_back_or_none() -> None:
-    """Ignore malformed typed payloads and fall back to message parsing."""
-    assert (
-        operation_for_status("Update available: 1 -> 2", [])
-        == OperationKind.CHECK_VERSION
-    )
-    assert (
-        operation_for_status("Update available: 1 -> 2", {"operation": 1})
-        == OperationKind.CHECK_VERSION
-    )
+    """Ignore malformed typed payloads instead of parsing message text."""
+    assert operation_for_status("Update available: 1 -> 2", []) is None
+    assert operation_for_status("Update available: 1 -> 2", {"operation": 1}) is None
     assert operation_for_status("custom status", {"operation": "not-real"}) is None
+
+
+def test_payload_status_update_ignores_non_mapping_payload() -> None:
+    """Payload status updates require a structured mapping payload."""
+    assert ui_state_module._payload_status_update(None) is None
+
+
+def test_apply_status_ignores_unrenderable_structured_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recognized operation with no renderable status leaves state unchanged."""
+    item = _item()
+    monkeypatch.setattr(ui_state_module, "_payload_status_update", lambda *_args: None)
+
+    apply_status(
+        item,
+        "status message",
+        {"operation": OperationKind.CHECK_VERSION.value},
+    )
+
+    assert item.last_operation == OperationKind.CHECK_VERSION
+    assert item.operations[OperationKind.CHECK_VERSION].status == "pending"
 
 
 @pytest.mark.parametrize(
@@ -317,20 +326,11 @@ def test_apply_status_handles_artifact_materialization_payloads() -> None:
     assert same_op.message == "crate2nix artifacts (up to date)"
 
 
-def test_apply_status_legacy_fallbacks_cover_remaining_message_patterns() -> None:
-    """Keep legacy message parsing behavior for unsupported payloads."""
+def test_apply_status_requires_structured_operation_payloads() -> None:
+    """Message-only status lines should not mutate UI operation state."""
     item = _item()
     apply_status(item, "Checking demo (current: 1.0)")
-    assert item.operations[OperationKind.CHECK_VERSION].message == "current 1.0"
-
-    apply_status(item, "Updating ref: old -> new")
-    assert item.operations[OperationKind.UPDATE_REF].message == "old -> new"
-
-    apply_status(item, "Updating flake input 'demo'...")
-    assert item.operations[OperationKind.REFRESH_LOCK].message == "demo"
-
-    apply_status(item, "Computing hash for linux...")
-    assert item.operations[OperationKind.COMPUTE_HASH].message == "linux"
+    assert item.operations[OperationKind.CHECK_VERSION].status == "pending"
 
     apply_status(
         item,
@@ -338,15 +338,6 @@ def test_apply_status_legacy_fallbacks_cover_remaining_message_patterns() -> Non
         {"operation": OperationKind.COMPUTE_HASH.value},
     )
     assert item.operations[OperationKind.COMPUTE_HASH].message == "custom hash note"
-
-    apply_status(item, "Up to date (version: 2.0)")
-    assert item.operations[OperationKind.CHECK_VERSION].message == "2.0 (up to date)"
-
-    apply_status(item, "Up to date (ref: main)")
-    assert item.operations[OperationKind.CHECK_VERSION].message == "main (up to date)"
-
-    apply_status(item, "Computing hash for archive.")
-    assert item.operations[OperationKind.COMPUTE_HASH].message == "archive"
 
     item2 = _item()
     apply_status(
@@ -356,37 +347,82 @@ def test_apply_status_legacy_fallbacks_cover_remaining_message_patterns() -> Non
     )
     assert item2.operations[OperationKind.CHECK_VERSION].status == "running"
 
+    apply_status(item2, "not structured")
+    assert item2.operations[OperationKind.COMPUTE_HASH].status == "pending"
+
 
 def test_apply_status_rules_and_status_priority() -> None:
     """Run this test case."""
     item = _item()
-
-    apply_status(item, "Latest version: 1.0.0")
     check_op = item.operations[OperationKind.CHECK_VERSION]
+    apply_status(
+        item,
+        "Latest version: 1.0.0",
+        {
+            "operation": OperationKind.CHECK_VERSION.value,
+            "status": "latest_version",
+            "detail": "1.0.0",
+        },
+    )
     assert check_op.status == "running"
     assert check_op.message == "1.0.0"
 
-    apply_status(item, "Update available: 1.0.0 -> 1.1.0")
+    apply_status(
+        item,
+        "Update available: 1.0.0 -> 1.1.0",
+        {
+            "operation": OperationKind.CHECK_VERSION.value,
+            "status": "update_available",
+            "detail": {"current": "1.0.0", "latest": "1.1.0"},
+        },
+    )
     assert check_op.status == "success"
     assert check_op.message == "1.0.0 -> 1.1.0"
 
     # Lower-priority running statuses should not overwrite terminal success.
-    apply_status(item, "Latest version: 1.1.0")
+    apply_status(
+        item,
+        "Latest version: 1.1.0",
+        {
+            "operation": OperationKind.CHECK_VERSION.value,
+            "status": "latest_version",
+            "detail": "1.1.0",
+        },
+    )
     assert check_op.status == "success"
     assert check_op.message == "1.0.0 -> 1.1.0"
 
-    apply_status(item, "Fetching hashes for all platforms")
+    apply_status(
+        item,
+        "Fetching hashes for all platforms",
+        {
+            "operation": OperationKind.COMPUTE_HASH.value,
+            "status": "fetching_hashes",
+        },
+    )
     hash_op = item.operations[OperationKind.COMPUTE_HASH]
     assert hash_op.status == "running"
     assert hash_op.message == "all platforms"
 
-    apply_status(item, "Up to date")
+    apply_status(
+        item,
+        "Up to date",
+        {
+            "operation": OperationKind.COMPUTE_HASH.value,
+            "status": "up_to_date",
+            "detail": {"scope": "hash"},
+        },
+    )
     assert hash_op.status == "no_change"
     assert hash_op.message is None
 
-    # Default message pass-through for unmatched compute-hash messages.
+    # Default message pass-through for structured compute-hash messages.
     item2 = _item()
-    apply_status(item2, "warning: cache miss")
+    apply_status(
+        item2,
+        "warning: cache miss",
+        {"operation": OperationKind.COMPUTE_HASH.value},
+    )
     hash_op2 = item2.operations[OperationKind.COMPUTE_HASH]
     assert hash_op2.status == "running"
     assert hash_op2.message == "warning: cache miss"
@@ -440,7 +476,15 @@ def test_apply_status_ignores_unknown_or_missing_operations() -> None:
     item = _item(op_order=(OperationKind.CHECK_VERSION,))
     check_op = item.operations[OperationKind.CHECK_VERSION]
 
-    apply_status(item, "Computing hash for demo.")
+    apply_status(
+        item,
+        "Computing hash for demo.",
+        {
+            "operation": OperationKind.COMPUTE_HASH.value,
+            "status": "computing_hash",
+            "detail": "demo",
+        },
+    )
     assert check_op.status == "pending"
 
     apply_status(item, "unrelated status")
@@ -1079,10 +1123,24 @@ def test_event_consumer_detail_priority_and_status_handlers(
     assert consumer.updated
 
     object.__getattribute__(consumer, "_handle_status")(
-        UpdateEvent.status("demo", "Latest version: 1.0.0"), item
+        UpdateEvent.status(
+            "demo",
+            "Latest version: 1.0.0",
+            operation=OperationKind.CHECK_VERSION.value,
+            status="latest_version",
+            detail="1.0.0",
+        ),
+        item,
     )
     object.__getattribute__(consumer, "_handle_status")(
-        UpdateEvent.status("demo", "Updated: 1.0 -> 1.1"), item
+        UpdateEvent.status(
+            "demo",
+            "Updated: 1.0 -> 1.1",
+            operation=OperationKind.CHECK_VERSION.value,
+            status="updated",
+            detail="1.0 -> 1.1",
+        ),
+        item,
     )
     object.__getattribute__(consumer, "_handle_status")(
         UpdateEvent(source="demo", kind=UpdateEventKind.STATUS, message=None),
@@ -1096,7 +1154,13 @@ def test_event_consumer_detail_priority_and_status_handlers(
     consumer_non_tty, _queue = _consumer(monkeypatch, is_tty=False, verbose=True)
     item_non_tty = consumer_non_tty.items["demo"]
     object.__getattribute__(consumer_non_tty, "_handle_status")(
-        UpdateEvent.status("demo", "Updated: 1.0 -> 1.1"),
+        UpdateEvent.status(
+            "demo",
+            "Updated: 1.0 -> 1.1",
+            operation=OperationKind.CHECK_VERSION.value,
+            status="updated",
+            detail="1.0 -> 1.1",
+        ),
         item_non_tty,
     )
     non_tty_renderer = _renderer(consumer_non_tty)

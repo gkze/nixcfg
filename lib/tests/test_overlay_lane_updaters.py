@@ -120,8 +120,9 @@ def test_code_cursor_fetch_checksums_and_download_url_validation(
     """Cursor should hash resolved artifact URLs and validate typed per-platform payloads."""
     module = _load_module("overlays/code-cursor/updater.py", "code_cursor_lane_test")
     updater = module.CodeCursorUpdater()
-    assert updater._api_url("darwin-arm64").endswith(
-        "platform=darwin-arm64&releaseTrack=stable"
+    assert (
+        updater._api_url("darwin-arm64")
+        == "https://api2.cursor.sh/updates/download/golden/darwin-arm64/cursor/3.9"
     )
     info = VersionInfo(
         version="1.99.0",

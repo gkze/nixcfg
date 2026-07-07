@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 from lib.nix.models.sources import HashCollection, SourceEntry, SourceHashes
 from lib.update.flake import nixpkgs_expression
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
-from lib.update.paths import REPO_ROOT
+from lib.update.paths import REPO_ROOT, local_flake_url
 from lib.update.updaters.base import (
     FixedOutputHashStep,
     FlakeInputUpdater,
@@ -42,7 +42,7 @@ class ScratchUpdater(FlakeInputUpdater):
 
     @staticmethod
     def _wrap_expr_with_flake_and_pkgs(body_expr: NixExpression) -> str:
-        repo_url = f"git+file://{REPO_ROOT}?dirty=1"
+        repo_url = local_flake_url(REPO_ROOT)
         expression = LetExpression(
             local_variables=[
                 Binding(

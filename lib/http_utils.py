@@ -168,6 +168,20 @@ def _validate_request_target(
         raise RuntimeError(msg)
 
 
+def validate_request_target(
+    url: str,
+    *,
+    allowed_schemes: frozenset[str],
+    attempts: int,
+) -> None:
+    """Validate a URL before sending a retrying HTTP request."""
+    _validate_request_target(
+        url,
+        allowed_schemes=allowed_schemes,
+        attempts=attempts,
+    )
+
+
 def _retry_wait(
     *,
     backoff: float,

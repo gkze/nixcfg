@@ -88,6 +88,12 @@ def _coerce_workflow_analysis(
     )
 
 
+def _require_needs(job: WorkflowJobAnalysis, *needs: str) -> None:
+    """Require several direct workflow dependencies."""
+    for need in needs:
+        job.require_need(need)
+
+
 def _darwin_heavy_targets(
     job_data: WorkflowObject | WorkflowJobAnalysis, *, job_id: str
 ) -> tuple[str, ...]:
@@ -180,64 +186,33 @@ def _validate_refresh_workflow_structure_contracts(workflow: WorkflowAnalysis) -
 
     darwin_lock_smoke.require_run_marker(_DARWIN_LOCK_SMOKE_MARKER)
     darwin_lock_smoke.forbid_run_marker(_DARWIN_FULL_SMOKE_MARKER)
-    darwin_lock_smoke.require_need(
-        "update-lock",
-        missing_need_message="darwin-lock-smoke must depend on update-lock",
-    )
+    _require_needs(darwin_lock_smoke, "update-lock")
     darwin_lock_smoke.forbid_need(
         "merge-generated",
         forbidden_need_message="darwin-lock-smoke must stay in the lock-only phase",
     )
-    discover_update_targets.require_need(
+    _require_needs(
+        discover_update_targets,
         "update-lock",
-        missing_need_message="discover-update-targets must depend on update-lock",
-    )
-    discover_update_targets.require_need(
         "resolve-versions",
-        missing_need_message="discover-update-targets must depend on resolve-versions",
     )
     for compute_hashes in (
         compute_hashes_darwin,
         compute_hashes_x86_64_linux,
         compute_hashes_aarch64_linux,
     ):
-        compute_hashes.require_need(
+        _require_needs(
+            compute_hashes,
             "discover-update-targets",
-            missing_need_message=("{job_id} must depend on discover-update-targets"),
-        )
-        compute_hashes.require_need(
             "resolve-versions",
-            missing_need_message="{job_id} must depend on resolve-versions",
         )
-    compute_hashes_darwin.require_need(
-        "darwin-lock-smoke",
-        missing_need_message=(
-            "compute-hashes-aarch64-darwin must depend on darwin-lock-smoke"
-        ),
-    )
-    aggregate_platform_updates.require_need(
+    _require_needs(compute_hashes_darwin, "darwin-lock-smoke")
+    _require_needs(
+        aggregate_platform_updates,
         "discover-update-targets",
-        missing_need_message=(
-            "aggregate-platform-updates must depend on discover-update-targets"
-        ),
-    )
-    aggregate_platform_updates.require_need(
         "compute-hashes-aarch64-darwin",
-        missing_need_message=(
-            "aggregate-platform-updates must depend on compute-hashes-aarch64-darwin"
-        ),
-    )
-    aggregate_platform_updates.require_need(
         "compute-hashes-x86_64-linux",
-        missing_need_message=(
-            "aggregate-platform-updates must depend on compute-hashes-x86_64-linux"
-        ),
-    )
-    aggregate_platform_updates.require_need(
         "compute-hashes-aarch64-linux",
-        missing_need_message=(
-            "aggregate-platform-updates must depend on compute-hashes-aarch64-linux"
-        ),
     )
     aggregate_if = aggregate_platform_updates.data.get("if")
     if (
@@ -363,7 +338,7 @@ def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -
     darwin_full_smoke.require_run_marker(_DARWIN_FULL_SMOKE_MARKER)
 
     for job in (darwin_priority_heavy, darwin_extra_heavy, darwin_shared):
-        job.require_need("darwin-full-smoke")
+        _require_needs(job, "darwin-full-smoke")
         job.forbid_need(
             "warm-fod-cache-darwin",
             forbidden_need_message=(
@@ -391,8 +366,7 @@ def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -
         job.forbid_need("quality-gates")
 
     for job in (darwin_argus, darwin_rocinante):
-        job.require_need("darwin-shared")
-        job.require_need("darwin-priority-heavy")
+        _require_needs(job, "darwin-shared", "darwin-priority-heavy")
         job.forbid_need("darwin-extra-heavy")
 
     heavy_targets = set(
@@ -414,7 +388,8 @@ def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -
         msg = "Darwin heavy-target split drift detected (" + "; ".join(problems) + ")"
         raise RuntimeError(msg)
 
-    for need in (
+    _require_needs(
+        publish_pr_certification,
         "select-ref",
         "quality-gates",
         "darwin-priority-heavy",
@@ -423,8 +398,7 @@ def _validate_certify_workflow_structure_contracts(workflow: WorkflowAnalysis) -
         "darwin-argus",
         "darwin-rocinante",
         "linux-x86_64",
-    ):
-        publish_pr_certification.require_need(need)
+    )
 
     publish_if = publish_pr_certification.data.get("if")
     if not isinstance(publish_if, str) or not all(

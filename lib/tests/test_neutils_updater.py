@@ -9,7 +9,7 @@ from types import ModuleType
 
 import pytest
 
-from lib.nix.models.sources import HashEntry
+from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
@@ -44,6 +44,10 @@ def _build_archive(*, include_build_zig_zon: bool = True) -> bytes:
         file_info.size = len(payload)
         archive.addfile(file_info, io.BytesIO(payload))
     return buffer.getvalue()
+
+
+def _source_entry(version: str) -> SourceEntry:
+    return SourceEntry.model_validate({"version": version, "hashes": []})
 
 
 def test_extract_archive_returns_build_zig_zon_path(tmp_path: Path) -> None:
@@ -215,6 +219,7 @@ def test_render_build_zig_zon_nix_renders_artifact_with_resolved_tools(
     ]
     assert command_calls[0][0][0] == "/nix/store/zon2nix-tool/bin/zon2nix"
     assert command_calls[0][0][2].endswith("/build.zig.zon")
+    assert command_calls[0][1].command_timeout == updater._ZON2NIX_TIMEOUT_SECONDS
     assert command_calls[0][1].env["PATH"].startswith("/nix/store/zig-tool/bin:")
     assert command_calls[0][1].env["HOME"].endswith("/.home")
     assert command_calls[0][1].env["XDG_CACHE_HOME"].endswith("/.cache")
@@ -277,7 +282,7 @@ def test_render_build_zig_zon_nix_retries_transient_zon2nix_failure(
     """Retry transient Zig package fetch failures before surfacing the artifact."""
     module = _load_module("neutils_updater_test_render_retry")
     updater = module.NeutilsUpdater()
-    command_calls: list[list[str]] = []
+    command_calls: list[tuple[list[str], object]] = []
     sleep_delays: list[float] = []
 
     async def _fetch_url(*_args, **_kwargs):
@@ -287,8 +292,7 @@ def test_render_build_zig_zon_nix_retries_transient_zon2nix_failure(
         yield UpdateEvent.value(updater.name, "/nix/store/tool")
 
     async def _run_command(args: list[str], *, options):
-        _ = options
-        command_calls.append(args)
+        command_calls.append((args, options))
         if len(command_calls) == 1:
             yield UpdateEvent.value(
                 updater.name,
@@ -327,10 +331,70 @@ def test_render_build_zig_zon_nix_retries_transient_zon2nix_failure(
 
     assert len(command_calls) == 2
     assert sleep_delays == [updater.config.default_retry_backoff]
+    assert all(
+        call_options.command_timeout == updater._ZON2NIX_TIMEOUT_SECONDS
+        for _call_args, call_options in command_calls
+    )
     assert [
         event.message for event in events if event.kind is UpdateEventKind.STATUS
     ] == ["zon2nix hit a transient fetch failure; retrying..."]
     assert events[-1].payload == "# rendered after retry\n"
+
+
+def test_render_build_zig_zon_nix_retries_transient_zon2nix_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry transient zon2nix timeout exceptions before surfacing the artifact."""
+    module = _load_module("neutils_updater_test_render_timeout_retry")
+    updater = module.NeutilsUpdater()
+    command_calls: list[tuple[list[str], object]] = []
+    sleep_delays: list[float] = []
+
+    async def _fetch_url(*_args, **_kwargs):
+        return _build_archive()
+
+    async def _resolve(_installable: str):
+        yield UpdateEvent.value(updater.name, "/nix/store/tool")
+
+    async def _run_command(args: list[str], *, options):
+        command_calls.append((args, options))
+        if len(command_calls) == 1:
+            raise RuntimeError("Command timed out after 180s: zon2nix")
+        output_arg = next(arg for arg in args if arg.startswith("--nix="))
+        Path(output_arg.removeprefix("--nix=")).write_text(
+            "# rendered after timeout retry\n", encoding="utf-8"
+        )
+        yield UpdateEvent.value(
+            updater.name,
+            CommandResult(args=args, returncode=0, stdout="ok", stderr=""),
+        )
+
+    async def _sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(module, "get_current_nix_platform", lambda: "aarch64-darwin")
+    monkeypatch.setattr(module, "get_repo_file", lambda _path: Path("/repo/root"))
+    monkeypatch.setattr(updater, "_resolve_installable_path", _resolve)
+    monkeypatch.setattr(module, "run_command", _run_command)
+    monkeypatch.setattr(module.asyncio, "sleep", _sleep)
+
+    events = _run(
+        _collect_events(
+            updater._render_build_zig_zon_nix(VersionInfo(version="0.7.2"), object())
+        )
+    )
+
+    assert len(command_calls) == 2
+    assert sleep_delays == [updater.config.default_retry_backoff]
+    assert all(
+        call_options.command_timeout == updater._ZON2NIX_TIMEOUT_SECONDS
+        for _call_args, call_options in command_calls
+    )
+    assert [
+        event.message for event in events if event.kind is UpdateEventKind.STATUS
+    ] == ["zon2nix hit a transient fetch failure; retrying..."]
+    assert events[-1].payload == "# rendered after timeout retry\n"
 
 
 def test_render_build_zig_zon_nix_yields_tool_resolution_events(
@@ -440,3 +504,104 @@ def test_fetch_hashes_emits_generated_artifact_and_src_hash(
     assert artifacts[0].path == REPO_ROOT / "packages" / "neutils" / "build.zig.zon.nix"
     assert artifacts[0].content == "# generated\n"
     assert events[-1].payload == [HashEntry.create("srcHash", "sha256-src")]
+
+
+def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Keep the checked-in artifact when current-version zon2nix refresh times out."""
+    module = _load_module("neutils_updater_test_fetch_hashes_preserve_current")
+    updater = module.NeutilsUpdater()
+    pkg_dir = tmp_path / "neutils"
+    pkg_dir.mkdir()
+    artifact_path = pkg_dir / "build.zig.zon.nix"
+    artifact_path.write_text("# existing artifact\n", encoding="utf-8")
+
+    async def _render(_info: object, _session: object):
+        yield UpdateEvent.status(updater.name, "resolving tools")
+        raise RuntimeError("Command timed out after 180s: zon2nix")
+
+    async def _fixed_hash(name: str, expr: str, *, config=None):
+        assert name == updater.name
+        assert_nix_ast_equal(expr, updater._src_expr("0.7.2"))
+        assert config == updater.config
+        yield UpdateEvent.value(name, "sha256-src")
+
+    monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
+    monkeypatch.setattr(module, "package_dir_for", lambda _name: pkg_dir)
+    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+
+    events = _run(
+        _collect_events(
+            updater.fetch_hashes(
+                VersionInfo(version="0.7.2"),
+                object(),
+                context=_source_entry("0.7.2"),
+            )
+        )
+    )
+
+    assert [event.kind for event in events] == [
+        UpdateEventKind.STATUS,
+        UpdateEventKind.STATUS,
+        UpdateEventKind.STATUS,
+        UpdateEventKind.ARTIFACT,
+        UpdateEventKind.VALUE,
+    ]
+    assert events[2].message == (
+        "Preserving existing build.zig.zon.nix after transient zon2nix failure."
+    )
+    artifacts = expect_artifact_updates(events[3].payload)
+    assert len(artifacts) == 1
+    assert artifacts[0].path == artifact_path
+    assert artifacts[0].content == "# existing artifact\n"
+    assert events[-1].payload == [HashEntry.create("srcHash", "sha256-src")]
+
+
+@pytest.mark.parametrize(
+    ("context_version", "write_artifact"),
+    [
+        ("0.7.1", True),
+        ("0.7.2", False),
+    ],
+)
+def test_fetch_hashes_rejects_preserve_when_artifact_is_not_current(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    context_version: str,
+    write_artifact: bool,
+) -> None:
+    """Do not preserve old or missing generated artifacts after zon2nix failures."""
+    module = _load_module("neutils_updater_test_fetch_hashes_preserve_reject")
+    updater = module.NeutilsUpdater()
+    pkg_dir = tmp_path / "neutils"
+    pkg_dir.mkdir()
+    artifact_path = pkg_dir / "build.zig.zon.nix"
+    if write_artifact:
+        artifact_path.write_text("# stale artifact\n", encoding="utf-8")
+
+    async def _render(_info: object, _session: object):
+        if False:
+            yield UpdateEvent.value(updater.name, "# unreachable\n")
+        raise RuntimeError("Command timed out after 180s: zon2nix")
+
+    async def _fixed_hash(name: str, expr: str, *, config=None):
+        _ = (name, expr, config)
+        raise AssertionError("srcHash computation should not run")
+        yield UpdateEvent.value(updater.name, "sha256-src")
+
+    monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
+    monkeypatch.setattr(module, "package_dir_for", lambda _name: pkg_dir)
+    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+
+    with pytest.raises(RuntimeError, match="Command timed out after 180s"):
+        _run(
+            _collect_events(
+                updater.fetch_hashes(
+                    VersionInfo(version="0.7.2"),
+                    object(),
+                    context=_source_entry(context_version),
+                )
+            )
+        )

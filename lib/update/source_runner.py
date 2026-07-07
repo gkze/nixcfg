@@ -22,6 +22,8 @@ from lib.update.updaters.base import (
     _call_with_optional_context,
 )
 
+_AIOHTTP_MAX_FIELD_SIZE = 64 * 1024
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
     from pathlib import Path
@@ -193,7 +195,13 @@ async def update_source_task(
             generated_artifacts=context.generated_artifacts,
         )
 
-        await put(UpdateEvent.status(name, "Starting update"))
+        await put(
+            UpdateEvent.status(
+                name,
+                "Starting update",
+                operation="check_version",
+            )
+        )
         if context.update_input and input_name:
             await _ensure_input_refreshed(
                 name,
@@ -238,7 +246,9 @@ async def run_ref_phase(
     update_refs_task: UpdateRefsTask,
 ) -> None:
     """Run the flake ref update phase."""
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(
+        max_field_size=_AIOHTTP_MAX_FIELD_SIZE,
+    ) as session:
         flake_edit_lock = asyncio.Lock()
         async with asyncio.TaskGroup() as group:
             for inp in ref_inputs:
@@ -266,7 +276,9 @@ async def run_sources_phase(
     update_source_task: SourceUpdateTask,
 ) -> None:
     """Run source update tasks in dependency-respecting waves."""
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(
+        max_field_size=_AIOHTTP_MAX_FIELD_SIZE,
+    ) as session:
         update_input_lock = asyncio.Lock()
         update_input_tasks: dict[str, asyncio.Task[None]] = {}
         generated_artifacts: dict[Path, str] = {}

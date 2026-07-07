@@ -1,22 +1,22 @@
 {
-  "drvHash": "a6m6gw4hrqjzbj7js7158l5ip4w1iys9",
+  "drvHash": "ggvw10p6spi2z6k78dm9jgd7zjk5kn5a",
   "hashes": [
     {
-      "hash": "sha256-RFB9XrzMQjJ2rqOD8R6yXNk1esEeX6HixI9vzeUHucc=",
+      "hash": "sha256-I+3NKMNN57+nePHZz7ktUIdtNvM+/q9Yfb49gnsIerY=",
       "hashType": "npmDepsHash",
       "platform": "aarch64-darwin"
     },
     {
-      "hash": "sha256-RFB9XrzMQjJ2rqOD8R6yXNk1esEeX6HixI9vzeUHucc=",
+      "hash": "sha256-I+3NKMNN57+nePHZz7ktUIdtNvM+/q9Yfb49gnsIerY=",
       "hashType": "npmDepsHash",
       "platform": "aarch64-linux"
     },
     {
-      "hash": "sha256-RFB9XrzMQjJ2rqOD8R6yXNk1esEeX6HixI9vzeUHucc=",
+      "hash": "sha256-I+3NKMNN57+nePHZz7ktUIdtNvM+/q9Yfb49gnsIerY=",
       "hashType": "npmDepsHash",
       "platform": "x86_64-linux"
     }
   ],
   "input": "emdash",
-  "version": "v1.1.35"
+  "version": "v1.1.37"
 }

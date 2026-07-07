@@ -14,6 +14,12 @@ from lib.update.ci._workflow_analysis import (
     load_workflow_analysis,
 )
 from lib.update.ci._workflow_yaml import WorkflowObject, WorkflowValue, workflow_object
+from lib.update.ci.update_target_artifacts import (
+    REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS,
+    REFRESH_FINAL_ARTIFACT_NAME,
+    REFRESH_FINAL_ARTIFACT_REQUIRED_SPECS,
+    UPDATE_TARGET_AGGREGATE_RELATIVE_SPECS,
+)
 from lib.update.paths import REPO_ROOT
 
 _DOWNLOAD_ACTION_PREFIX = "actions/download-artifact@"
@@ -26,37 +32,7 @@ _SOURCES_MATERIALIZER_MARKERS = (
     "nix run path:.#nixcfg -- ci pipeline sources",
 )
 _UPDATE_TARGET_AGGREGATE_MARKER = "lib/update/ci/update_target_artifacts.py aggregate"
-_UPDATE_TARGET_AGGREGATE_RELATIVE_SPECS = (
-    "packages/**/sources.json",
-    "overlays/**/sources.json",
-    "packages/**/uv.lock",
-    "packages/**/deno-deps.json",
-    "packages/**/build.zig.zon.nix",
-    "packages/t3code/bun.lock",
-    "packages/t3code-desktop/bun.lock",
-    "nixcfg-update-target-status.json",
-)
 _UPLOAD_ACTION_PREFIX = "actions/upload-artifact@"
-_REFRESH_FINAL_ARTIFACT_NAME = "merged-generated-formatted"
-_REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS = (
-    "flake.lock",
-    "packages/superset/bun.nix",
-    "packages/superset/bun.lock",
-    "packages/t3code/bun.lock",
-    "packages/t3code-desktop/bun.lock",
-    "packages/**/sources.json",
-    "packages/**/uv.lock",
-    "packages/**/deno-deps.json",
-    "packages/**/build.zig.zon.nix",
-    "overlays/**/sources.json",
-    "packages/codex/Cargo.nix",
-    "packages/codex/crate-hashes.json",
-    "overlays/goose-cli/Cargo.nix",
-    "overlays/goose-cli/crate-hashes.json",
-    "packages/zed-editor-nightly/Cargo.nix",
-    "packages/zed-editor-nightly/crate-hashes.json",
-)
-_REFRESH_FINAL_ARTIFACT_REQUIRED_SPECS = _REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS
 
 
 @dataclass(frozen=True)
@@ -519,7 +495,7 @@ def _materialized_paths_from_run_step(
 
     if _UPDATE_TARGET_AGGREGATE_MARKER in run_value:
         for output_path in output_paths:
-            for spec in _UPDATE_TARGET_AGGREGATE_RELATIVE_SPECS:
+            for spec in UPDATE_TARGET_AGGREGATE_RELATIVE_SPECS:
                 materialized_paths[_join_relpath(output_path, spec)] = None
 
     return tuple(materialized_paths)
@@ -736,7 +712,7 @@ def _validate_refresh_final_artifact_scope(
     repo_root: Path,
 ) -> list[str]:
     """Ensure the PR artifact contains only generated update outputs."""
-    upload = uploads.get(_REFRESH_FINAL_ARTIFACT_NAME)
+    upload = uploads.get(REFRESH_FINAL_ARTIFACT_NAME)
     if upload is None:
         return []
 
@@ -745,19 +721,19 @@ def _validate_refresh_final_artifact_scope(
     unexpected_paths = sorted(
         path
         for path in source_paths
-        if not _path_matches_any(path, _REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS)
+        if not _path_matches_any(path, REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS)
     )
     if unexpected_paths:
         preview = ", ".join(f"`{path}`" for path in unexpected_paths[:4])
         errors.append(
-            f"Artifact `{_REFRESH_FINAL_ARTIFACT_NAME}` includes non-update "
+            f"Artifact `{REFRESH_FINAL_ARTIFACT_NAME}` includes non-update "
             f"path(s): {preview}"
         )
 
     required_paths = set(
         _resolve_existing_specs(
             repo_root,
-            _REFRESH_FINAL_ARTIFACT_REQUIRED_SPECS,
+            REFRESH_FINAL_ARTIFACT_REQUIRED_SPECS,
             available_paths=frozenset(source_paths),
         )
     )
@@ -765,7 +741,7 @@ def _validate_refresh_final_artifact_scope(
     if missing_paths:
         preview = ", ".join(f"`{path}`" for path in missing_paths[:4])
         errors.append(
-            f"Artifact `{_REFRESH_FINAL_ARTIFACT_NAME}` is missing update "
+            f"Artifact `{REFRESH_FINAL_ARTIFACT_NAME}` is missing update "
             f"path(s): {preview}"
         )
 

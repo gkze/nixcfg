@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING
 
-from lib.update.paths import REPO_ROOT
+from lib.update.paths import REPO_ROOT, package_file_names_in
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -20,35 +20,16 @@ UPDATE_SURFACE_EXEMPTIONS = frozenset({
 })
 
 _SURFACE_FILES = ("default.nix", "sources.json", "updater.py")
-_SURFACE_ROOTS = ("packages", "overlays")
 
 
 def discover_update_surface_names(root: Path = REPO_ROOT) -> set[str]:
     """Return logical package/overlay names that participate in update flows."""
     names: set[str] = set()
-    for base in _SURFACE_ROOTS:
-        base_dir = root / base
-        if not base_dir.is_dir():
-            continue
-        for child in base_dir.iterdir():
-            if child.is_dir():
-                if child.name.startswith(("_", ".")):
-                    continue
-                if any((child / filename).is_file() for filename in _SURFACE_FILES):
-                    names.add(child.name)
+    for filename in _SURFACE_FILES:
+        for name in package_file_names_in(root, filename):
+            if name.startswith(("_", ".")):
                 continue
-
-            if not child.is_file():
-                continue
-
-            for filename in _SURFACE_FILES:
-                suffix = f".{filename}"
-                if not child.name.endswith(suffix):
-                    continue
-                flat_name = child.name[: -len(suffix)]
-                if flat_name and not flat_name.startswith(("_", ".")):
-                    names.add(flat_name)
-                break
+            names.add(name)
     return names
 
 

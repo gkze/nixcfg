@@ -195,7 +195,12 @@ def _flat_package_file_name(name: str, filename: str) -> str | None:
     return package_name
 
 
-def _package_file_map(root: Path, filename: str) -> dict[str, Path]:
+def _package_file_map(
+    root: Path,
+    filename: str,
+    *,
+    allow_duplicate_names: bool = False,
+) -> dict[str, Path]:
     """Return ``{name: path}`` for per-package sidecar files.
 
     Supports two layouts under ``packages/`` and ``overlays/``:
@@ -207,6 +212,8 @@ def _package_file_map(root: Path, filename: str) -> dict[str, Path]:
 
     def _record(name: str, path: Path) -> None:
         if name in result:
+            if allow_duplicate_names:
+                return
             duplicates.setdefault(name, [result[name]]).append(path)
             return
         result[name] = path
@@ -244,6 +251,17 @@ def _package_file_map(root: Path, filename: str) -> dict[str, Path]:
 def package_file_map_in(root: Path, filename: str) -> dict[str, Path]:
     """Return ``{name: path}`` for package files under an arbitrary root."""
     return _package_file_map(root.resolve(), filename)
+
+
+def package_file_names_in(root: Path, filename: str) -> set[str]:
+    """Return package names for a sidecar file, ignoring duplicate locations."""
+    return set(
+        _package_file_map(
+            root.resolve(),
+            filename,
+            allow_duplicate_names=True,
+        )
+    )
 
 
 def package_file_map(filename: str) -> dict[str, Path]:

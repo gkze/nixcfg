@@ -163,11 +163,14 @@ def test_run_command_and_run_nix_build(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     # use a real CommandResult payload on second event to set drain.value
+    stream_options: list[StreamCommandOptions] = []
+
     async def _fake_stream_real(
         _args: list[str],
         *,
         options: StreamCommandOptions,
     ) -> AsyncIterator[UpdateEvent]:
+        stream_options.append(options)
         yield UpdateEvent(
             source=options.source,
             kind=UpdateEventKind.COMMAND_END,
@@ -185,10 +188,15 @@ def test_run_command_and_run_nix_build(monkeypatch: pytest.MonkeyPatch) -> None:
     out_events = _collect_stream(
         run_command(
             ["echo", "x"],
-            options=RunCommandOptions(source="demo", error="failed"),
+            options=RunCommandOptions(
+                source="demo",
+                error="failed",
+                command_timeout=12.5,
+            ),
         )
     )
     assert out_events[-1].kind == UpdateEventKind.VALUE
+    assert stream_options[0].command_timeout == 12.5
 
     async def _fake_stream_missing(
         _args: list[str],

@@ -1,10 +1,10 @@
 {
   "hashes": [
     {
-      "hash": "sha256-koxRQBUtFeZR9RlqMOv8FX+31DB+xiomxOShpHP55WQ=",
+      "hash": "sha256-1pvq4FdjqPFXbmTBrUiPvKiELiYp1XlFUrA8pvuvX5w=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     }
   ],
-  "version": "1.39.0"
+  "version": "1.41.0"
 }

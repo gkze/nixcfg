@@ -84,6 +84,7 @@ class RunCommandOptions:
 
     source: str
     error: str
+    command_timeout: float | None = None
     env: Mapping[str, str] | None = None
     allow_failure: bool = False
     suppress_patterns: tuple[str, ...] | None = None
@@ -233,6 +234,7 @@ async def run_command(
     result_drain = ValueDrain[CommandResult]()
     stream_options = StreamCommandOptions(
         source=options.source,
+        command_timeout=options.command_timeout,
         env=options.env,
         allow_failure=options.allow_failure,
         suppress_patterns=options.suppress_patterns,

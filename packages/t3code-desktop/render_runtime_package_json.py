@@ -213,6 +213,18 @@ def _runtime_workspace_external_dependencies(
     return dependencies
 
 
+def _runtime_overrides(
+    overrides: JsonStringMap,
+    dependencies: JsonStringMap,
+) -> JsonStringMap:
+    runtime_dependency_names = set(dependencies)
+    return {
+        name: spec
+        for name, spec in overrides.items()
+        if name.split(">", maxsplit=1)[0] in runtime_dependency_names
+    }
+
+
 def resolve_catalog_dependencies(
     dependencies: JsonStringMap,
     catalog: JsonStringMap,
@@ -293,7 +305,7 @@ def build_runtime_manifest(
         catalog,
     )
     overrides = resolve_catalog_dependencies(
-        workspace_overrides,
+        _runtime_overrides(workspace_overrides, runtime_dependencies),
         catalog,
         label="workspace overrides",
     )

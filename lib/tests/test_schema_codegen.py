@@ -11,7 +11,6 @@ import pytest
 from lib.import_utils import load_module_from_path
 from lib.schema_codegen import runner as codegen_runner
 from lib.schema_codegen.config import (
-    DereferenceMode,
     DirectorySource,
     SchemaFormat,
     URLSource,
@@ -87,10 +86,8 @@ def test_list_schema_codegen_targets_reads_repo_config() -> None:
 
     assert [summary.name for summary in summaries] == [
         "codegen-manifest-models",
-        "github-actions",
     ]
     assert str(summaries[0].output).endswith("lib/schema_codegen/models/_generated.py")
-    assert str(summaries[1].output).endswith("lib/github_actions/models/_generated.py")
     assert all(
         not str(summary.output).endswith("lib/nix/models/_generated.py")
         for summary in summaries
@@ -561,20 +558,6 @@ targets:
     assert hasattr(module, beta_shared_name)
     assert beta.shared.__class__ is getattr(module, beta_shared_name)
     assert beta.shared.value == "ready"
-
-
-def test_repo_github_actions_target_uses_safe_recursive_codegen_settings() -> None:
-    """Keep the checked-in GitHub Actions target on recursive-safe settings."""
-    loaded = load_schema_codegen_config(config_path=default_config_path())
-    target = loaded.config.targets["github-actions"]
-    generator = target.generator.model_dump()
-
-    assert target.prepare.dereference is DereferenceMode.NONE
-    assert target.prepare.python_transforms == ()
-    assert generator.get("class_name") == "GitHubWorkflow"
-    assert generator.get("reuse_model") is True
-    assert generator.get("collapse_reuse_models") is True
-    assert generator.get("use_type_alias") is True
 
 
 def test_prepare_repo_codegen_manifest_entrypoints_from_default_config() -> None:

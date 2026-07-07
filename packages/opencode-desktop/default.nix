@@ -63,7 +63,13 @@ let
     "packages/server"
     "packages/effect-drizzle-sqlite"
     "packages/effect-sqlite-node"
+    "packages/http-recorder"
+    "packages/plugin"
+    "packages/protocol"
+    "packages/schema"
     "packages/shared"
+    "packages/session-ui"
+    "packages/tui"
     "packages/ui"
     "packages/sdk/js"
     "packages/script"
@@ -493,6 +499,7 @@ stdenv.mkDerivation {
       electronRuntime
       electronRuntimeVersion
       electronVersion
+      desktopWorkspacePaths
       canonicalSessionDatabaseEnv
       node_modules
       opencodeChannel

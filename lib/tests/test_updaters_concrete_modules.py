@@ -13,7 +13,7 @@ from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance, expect_not_none
 from lib.tests._nix_ast import assert_nix_ast_equal, parse_nix_expr
 from lib.tests._updater_helpers import collect_events as _collect
-from lib.tests._updater_helpers import load_repo_module as _load_module
+from lib.tests._updater_helpers import load_repo_module_for_test as _load_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
@@ -37,8 +37,7 @@ def _require_hash_entries(payload: object) -> list[HashEntry]:
 def _module_fixture(path: str, fixture_name: str) -> object:
     @pytest.fixture(scope="module", name=fixture_name)
     def _fixture() -> ModuleType:
-        load_name = f"{fixture_name.removesuffix('_module')}_updater_test"
-        return _load_module(path, load_name)
+        return _load_module(path, prefix=fixture_name.removesuffix("_module"))
 
     return _fixture
 
@@ -330,8 +329,9 @@ def test_code_cursor_updater_paths(
 ) -> None:
     """Exercise Code Cursor platform URL and checksum helpers."""
     updater = code_cursor_module.CodeCursorUpdater()
-    assert object.__getattribute__(updater, "_api_url")("darwin-arm64").endswith(
-        "platform=darwin-arm64&releaseTrack=stable"
+    assert (
+        object.__getattribute__(updater, "_api_url")("darwin-arm64")
+        == "https://api2.cursor.sh/updates/download/golden/darwin-arm64/cursor/3.9"
     )
     platform_info = {
         nix_plat: {"downloadUrl": f"https://example.com/{api_plat}.zip"}
@@ -353,6 +353,61 @@ def test_code_cursor_updater_paths(
     checksums = _run(updater.fetch_checksums(info, object()))
     assert set(checksums) == set(updater.PLATFORMS)
     assert all(v == HASH_A for v in checksums.values())
+
+
+def test_code_cursor_fetch_latest_from_download_page(
+    code_cursor_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cursor should derive the full version and commit from redirect targets."""
+    updater = code_cursor_module.CodeCursorUpdater()
+    api_urls = {
+        api_platform: updater._api_url(api_platform)
+        for api_platform in updater.PLATFORMS.values()
+    }
+    page = "".join(
+        f'{{\\"downloadUrl\\":\\"{api_url}\\"}}' for api_url in api_urls.values()
+    )
+    commit = "042b3c1a4c53f2c3808067f519fbfc67b72cad8b"
+    resolved_urls = {
+        "darwin-arm64": (
+            f"https://downloads.cursor.com/production/{commit}/darwin/arm64/"
+            "Cursor-darwin-arm64.dmg"
+        ),
+        "darwin-x64": (
+            f"https://downloads.cursor.com/production/{commit}/darwin/x64/"
+            "Cursor-darwin-x64.dmg"
+        ),
+        "linux-arm64": (
+            f"https://downloads.cursor.com/production/{commit}/linux/arm64/"
+            "Cursor-3.9.16-aarch64.AppImage"
+        ),
+        "linux-x64": (
+            f"https://downloads.cursor.com/production/{commit}/linux/x64/"
+            "Cursor-3.9.16-x86_64.AppImage"
+        ),
+    }
+
+    async def _fetch_url(_session: object, url: str, **_kwargs: object) -> bytes:
+        assert url == updater.DOWNLOAD_PAGE
+        return page.encode()
+
+    async def _resolve_download_url(_session: object, api_url: str) -> str:
+        api_platform = api_url.rsplit("/cursor/", maxsplit=1)[0].rsplit("/", 1)[1]
+        return resolved_urls[api_platform]
+
+    monkeypatch.setattr(code_cursor_module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(updater, "_resolve_download_url", _resolve_download_url)
+
+    latest = _run(updater.fetch_latest(object()))
+
+    assert latest.version == "3.9.16"
+    assert latest.commit == commit
+    assert latest.metadata["commitSha"] == commit
+    assert (
+        latest.metadata["platform_info"]["aarch64-linux"]["downloadUrl"]
+        == (resolved_urls["linux-arm64"])
+    )
 
 
 def test_datagrip_updater_paths(

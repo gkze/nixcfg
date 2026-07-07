@@ -18,22 +18,13 @@ SummaryStatus = Literal["updated", "error", "no_change"]
 
 def is_terminal_status(message: str, payload: object | None = None) -> bool:
     """Return whether a status line represents terminal completion."""
+    _ = message
     status_payload = _status_payload(payload)
-    if status_payload is not None and status_payload.get("status") in {
+    return status_payload is not None and status_payload.get("status") in {
         "no_change",
         "update_available",
         "updated",
-    }:
-        return True
-    return message.startswith(
-        (
-            "Up to date",
-            "Updated",
-            "Update available",
-            "Already at latest",
-            "No updates needed",
-        ),
-    )
+    }
 
 
 class OperationKind(StrEnum):
@@ -177,6 +168,7 @@ def _updated_status_update(detail: object) -> StatusUpdate:
 
 def _payload_status_update(  # noqa: PLR0911
     payload: object | None,
+    message: str | None = None,
 ) -> StatusUpdate | None:
     status_payload = _status_payload(payload)
     if status_payload is None:
@@ -210,51 +202,9 @@ def _payload_status_update(  # noqa: PLR0911
         return StatusUpdate("running", "all platforms")
     if status_name == "computing_hash" and isinstance(detail, str):
         return StatusUpdate("running", detail)
-    return None
-
-
-def _legacy_status_update(  # noqa: PLR0911
-    kind: OperationKind,
-    message: str,
-) -> StatusUpdate:
-    if kind == OperationKind.CHECK_VERSION:
-        if message.startswith("Latest version: "):
-            return StatusUpdate("running", message.removeprefix("Latest version: "))
-        if message.startswith("Update available: "):
-            return StatusUpdate("success", message.removeprefix("Update available: "))
-        if message.startswith("Up to date (version: ") and message.endswith(")"):
-            value = message.removeprefix("Up to date (version: ")[:-1]
-            return StatusUpdate("no_change", f"{value} (up to date)")
-        if message.startswith("Up to date (ref: ") and message.endswith(")"):
-            value = message.removeprefix("Up to date (ref: ")[:-1]
-            return StatusUpdate("no_change", f"{value} (up to date)")
-        if "(current: " in message and message.endswith(")"):
-            current = message.rsplit("(current: ", 1)[1][:-1]
-            return StatusUpdate("running", f"current {current}")
-    if kind == OperationKind.UPDATE_REF and message.startswith("Updating ref: "):
-        return StatusUpdate("running", message.removeprefix("Updating ref: "))
-    if kind == OperationKind.REFRESH_LOCK and message.startswith(
-        "Updating flake input '"
-    ):
-        return StatusUpdate(
-            "running",
-            message.removeprefix("Updating flake input '").split("'", 1)[0],
-        )
-    if kind == OperationKind.COMPUTE_HASH:
-        if message == "Up to date":
-            return StatusUpdate("no_change", clear_message=True)
-        if message.startswith("Fetching hashes"):
-            return StatusUpdate("running", "all platforms")
-        if message.startswith("Computing hash for ") and message.endswith("..."):
-            return StatusUpdate(
-                "running", message.removeprefix("Computing hash for ")[:-3]
-            )
-        if message.startswith("Computing hash for ") and message.endswith("."):
-            return StatusUpdate(
-                "running", message.removeprefix("Computing hash for ")[:-1]
-            )
+    if isinstance(status_payload.get("operation"), str):
         return StatusUpdate("running", message)
-    return StatusUpdate("running")
+    return None
 
 
 def command_args_from_payload(payload: object) -> CommandArgs | None:
@@ -285,39 +235,8 @@ def operation_for_status(
     payload: object | None = None,
 ) -> OperationKind | None:
     """Map a status message to its UI operation group."""
-    if payload is not None:
-        operation = _operation_from_status_payload(payload)
-        if operation is not None:
-            return operation
-    lowered = message.lower()
-    if lowered.startswith(
-        (
-            "checking ",
-            "fetching latest",
-            "latest version",
-            "update available",
-            "up to date (version",
-            "up to date (ref",
-        ),
-    ):
-        return OperationKind.CHECK_VERSION
-    if lowered.startswith("updating ref"):
-        return OperationKind.UPDATE_REF
-    if lowered.startswith("updating flake input"):
-        return OperationKind.REFRESH_LOCK
-    if (
-        lowered.startswith(
-            (
-                "fetching hashes",
-                "computing hash",
-                "build failed",
-                "warning:",
-            ),
-        )
-        or message == "Up to date"
-    ):
-        return OperationKind.COMPUTE_HASH
-    return None
+    _ = message
+    return _operation_from_status_payload(payload)
 
 
 def operation_for_command(args: list[str] | None) -> OperationKind:
@@ -370,9 +289,9 @@ def apply_status(item: ItemState, message: str, payload: object | None = None) -
     if operation is None:
         return
     item.last_operation = kind
-    update = _payload_status_update(payload)
+    update = _payload_status_update(payload, message)
     if update is None:
-        update = _legacy_status_update(kind, message)
+        return
     _apply_status_rules(operation, update)
 
 

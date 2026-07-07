@@ -29,6 +29,15 @@ let
     appProtocolScheme = "opencode";
   };
 
+  requiredDesktopWorkspacePaths = [
+    "packages/http-recorder"
+    "packages/plugin"
+    "packages/protocol"
+    "packages/schema"
+    "packages/session-ui"
+    "packages/tui"
+  ];
+
   packageFor = system: name: builtins.getAttr name (builtins.getAttr system self.packages);
 
   assertEq =
@@ -44,6 +53,16 @@ let
       true
     else
       throw "${label}: expected a /nix/store path, got ${builtins.toJSON value}";
+
+  assertContainsAll =
+    label: required: actual:
+    let
+      missing = builtins.filter (item: !(builtins.elem item actual)) required;
+    in
+    if missing == [ ] then
+      true
+    else
+      throw "${label}: missing ${builtins.toJSON missing}";
 
   perSystemChecks = builtins.concatLists (
     builtins.map (
@@ -89,6 +108,10 @@ let
     )
     (assertEq "dev meta.platforms" supportedPlatforms
       (packageFor "aarch64-darwin" "opencode-desktop-dev").meta.platforms
+    )
+    (assertContainsAll "desktop workspace filters include transitive workspaces"
+      requiredDesktopWorkspacePaths
+      (packageFor "aarch64-darwin" "opencode-desktop").passthru.desktopWorkspacePaths
     )
   ]
   ++ perSystemChecks;

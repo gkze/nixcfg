@@ -34,9 +34,6 @@ jobs:
           # Nix uses this token for external api.github.com flake fetches.
           # The default github.token produces HTTP 401 "Bad credentials" there.
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
-          extra-conf: |
-            extra-substituters = https://cache.garnix.io
-            extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
       - &cachix
         uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
@@ -637,10 +634,10 @@ jobs:
           name: crate2nix-linux
           if-no-files-found: error
           path: |
-            packages/codex/Cargo.nix
-            packages/codex/crate-hashes.json
-            overlays/goose-cli/Cargo.nix
-            overlays/goose-cli/crate-hashes.json
+            packages/**/Cargo.nix
+            packages/**/crate-hashes.json
+            overlays/**/Cargo.nix
+            overlays/**/crate-hashes.json
 
   crate2nix-darwin:
     needs: merge-hashes
@@ -707,12 +704,10 @@ jobs:
             packages/**/deno-deps.json
             packages/**/build.zig.zon.nix
             overlays/**/sources.json
-            packages/codex/Cargo.nix
-            packages/codex/crate-hashes.json
-            overlays/goose-cli/Cargo.nix
-            overlays/goose-cli/crate-hashes.json
-            packages/zed-editor-nightly/Cargo.nix
-            packages/zed-editor-nightly/crate-hashes.json
+            packages/**/Cargo.nix
+            packages/**/crate-hashes.json
+            overlays/**/Cargo.nix
+            overlays/**/crate-hashes.json
 
   # Phase 8: Refresh sanity checks required before opening the PR
   refresh-sanity:
@@ -749,12 +744,10 @@ jobs:
             packages/**/deno-deps.json
             packages/**/build.zig.zon.nix
             overlays/**/sources.json
-            packages/codex/Cargo.nix
-            packages/codex/crate-hashes.json
-            overlays/goose-cli/Cargo.nix
-            overlays/goose-cli/crate-hashes.json
-            packages/zed-editor-nightly/Cargo.nix
-            packages/zed-editor-nightly/crate-hashes.json
+            packages/**/Cargo.nix
+            packages/**/crate-hashes.json
+            overlays/**/Cargo.nix
+            overlays/**/crate-hashes.json
 
   # Phase 9: Create PR with updates
   create-pr:

@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.nix.models.sources import (
+    HashCollection,
+    HashEntry,
+    SourceEntry,
+    _merge_optional_scalar,
+    _merge_urls,
+)
 from lib.update.ci import merge_sources as ms
 
 
@@ -31,6 +37,36 @@ def test_parse_root_spec_and_platform_inference() -> None:
     assert inferred_root == Path("sources-aarch64-linux")
 
 
+def _merge_hash_entries(
+    base: list[HashEntry],
+    incoming: list[HashEntry],
+    *,
+    platform: str | None,
+    baseline: list[HashEntry] | None = None,
+) -> list[HashEntry]:
+    merged = HashCollection(entries=base).merge_artifact(
+        HashCollection(entries=incoming),
+        platform=platform,
+        baseline=None if baseline is None else HashCollection(entries=baseline),
+    )
+    return merged.entries or []
+
+
+def _merge_hash_mapping(
+    base: dict[str, str],
+    incoming: dict[str, str],
+    *,
+    platform: str | None,
+    baseline: dict[str, str] | None = None,
+) -> dict[str, str]:
+    merged = HashCollection(mapping=base).merge_artifact(
+        HashCollection(mapping=incoming),
+        platform=platform,
+        baseline=None if baseline is None else HashCollection(mapping=baseline),
+    )
+    return merged.mapping or {}
+
+
 def test_merge_hash_entries_platform_filter_and_conflict() -> None:
     """Filter platform entries and reject conflicting global entries."""
     base = [
@@ -53,21 +89,21 @@ def test_merge_hash_entries_platform_filter_and_conflict() -> None:
         ),
     ]
 
-    merged = ms._merge_hash_entries(base, incoming, platform="aarch64-darwin")
+    merged = _merge_hash_entries(base, incoming, platform="aarch64-darwin")
     assert len(merged) == 1
     assert merged[0].platform == "aarch64-darwin"
 
-    merged_without_platform = ms._merge_hash_entries(base, incoming, platform=None)
+    merged_without_platform = _merge_hash_entries(base, incoming, platform=None)
     assert any(item.platform == "x86_64-linux" for item in merged_without_platform)
 
     with pytest.raises(RuntimeError, match="Conflicting non-platform hash entry"):
-        ms._merge_hash_entries(
+        _merge_hash_entries(
             [HashEntry(hash_type="sha256", hash="sha256-old")],
             [HashEntry(hash_type="sha256", hash="sha256-new")],
             platform=None,
         )
 
-    preserved = ms._merge_hash_entries(
+    preserved = _merge_hash_entries(
         [HashEntry(hash_type="sha256", hash="sha256-same")],
         [HashEntry(hash_type="sha256", hash="sha256-same")],
         platform=None,
@@ -75,7 +111,7 @@ def test_merge_hash_entries_platform_filter_and_conflict() -> None:
     assert len(preserved) == 1
 
     baseline = [HashEntry(hash_type="sha256", hash="sha256-old")]
-    preferred_incoming = ms._merge_hash_entries(
+    preferred_incoming = _merge_hash_entries(
         [HashEntry(hash_type="sha256", hash="sha256-old")],
         [HashEntry(hash_type="sha256", hash="sha256-new")],
         platform=None,
@@ -83,7 +119,7 @@ def test_merge_hash_entries_platform_filter_and_conflict() -> None:
     )
     assert preferred_incoming == [HashEntry(hash_type="sha256", hash="sha256-new")]
 
-    preferred_existing = ms._merge_hash_entries(
+    preferred_existing = _merge_hash_entries(
         [HashEntry(hash_type="sha256", hash="sha256-new")],
         [HashEntry(hash_type="sha256", hash="sha256-old")],
         platform=None,
@@ -94,7 +130,7 @@ def test_merge_hash_entries_platform_filter_and_conflict() -> None:
 
 def test_merge_hash_mapping_filters_and_conflicts() -> None:
     """Merge hash mapping with platform filtering and conflict detection."""
-    merged = ms._merge_hash_mapping(
+    merged = _merge_hash_mapping(
         {"aarch64-darwin": "sha256-a"},
         {
             "aarch64-darwin": "sha256-updated",
@@ -104,7 +140,7 @@ def test_merge_hash_mapping_filters_and_conflicts() -> None:
     )
     assert merged == {"aarch64-darwin": "sha256-updated"}
 
-    merged_all = ms._merge_hash_mapping(
+    merged_all = _merge_hash_mapping(
         {"aarch64-darwin": "sha256-a"},
         {"x86_64-linux": "sha256-b"},
         platform=None,
@@ -112,20 +148,20 @@ def test_merge_hash_mapping_filters_and_conflicts() -> None:
     assert merged_all == {"aarch64-darwin": "sha256-a", "x86_64-linux": "sha256-b"}
 
     with pytest.raises(RuntimeError, match="Conflicting non-platform hash mapping"):
-        ms._merge_hash_mapping(
+        _merge_hash_mapping(
             {"x86_64-linux": "sha256-old"},
             {"x86_64-linux": "sha256-new"},
             platform=None,
         )
 
-    filtered = ms._merge_hash_mapping(
+    filtered = _merge_hash_mapping(
         {"aarch64-darwin": "sha256-a"},
         {"x86_64-linux": "sha256-b"},
         platform="aarch64-darwin",
     )
     assert filtered == {"aarch64-darwin": "sha256-a"}
 
-    preferred_mapping = ms._merge_hash_mapping(
+    preferred_mapping = _merge_hash_mapping(
         {"shared": "sha256-old"},
         {"shared": "sha256-new"},
         platform=None,
@@ -133,7 +169,7 @@ def test_merge_hash_mapping_filters_and_conflicts() -> None:
     )
     assert preferred_mapping == {"shared": "sha256-new"}
 
-    preserved_existing = ms._merge_hash_mapping(
+    preserved_existing = _merge_hash_mapping(
         {"shared": "sha256-new"},
         {"shared": "sha256-old"},
         platform=None,
@@ -142,7 +178,7 @@ def test_merge_hash_mapping_filters_and_conflicts() -> None:
     assert preserved_existing == {"shared": "sha256-new"}
 
     with pytest.raises(RuntimeError, match="Conflicting non-platform hash mapping"):
-        ms._merge_hash_mapping(
+        _merge_hash_mapping(
             {"shared": "sha256-new"},
             {"shared": "sha256-newer"},
             platform=None,
@@ -153,7 +189,7 @@ def test_merge_hash_mapping_filters_and_conflicts() -> None:
 def test_merge_optional_scalar_prefers_changed_value_over_baseline() -> None:
     """Prefer the changed scalar when the other side still matches baseline."""
     assert (
-        ms._merge_optional_scalar(
+        _merge_optional_scalar(
             "version",
             "1.0.0",
             "2.0.0",
@@ -162,7 +198,7 @@ def test_merge_optional_scalar_prefers_changed_value_over_baseline() -> None:
         == "2.0.0"
     )
     assert (
-        ms._merge_optional_scalar(
+        _merge_optional_scalar(
             "version",
             "2.0.0",
             "1.0.0",
@@ -174,14 +210,14 @@ def test_merge_optional_scalar_prefers_changed_value_over_baseline() -> None:
 
 def test_merge_urls_prefers_changed_value_over_baseline() -> None:
     """Prefer updated URLs when the other root still matches the baseline."""
-    merged = ms._merge_urls(
+    merged = _merge_urls(
         {"aarch64-darwin": "https://example.invalid/old"},
         {"aarch64-darwin": "https://example.invalid/new"},
         baseline={"aarch64-darwin": "https://example.invalid/old"},
     )
     assert merged == {"aarch64-darwin": "https://example.invalid/new"}
 
-    preserved = ms._merge_urls(
+    preserved = _merge_urls(
         {"aarch64-darwin": "https://example.invalid/new"},
         {"aarch64-darwin": "https://example.invalid/old"},
         baseline={"aarch64-darwin": "https://example.invalid/old"},
@@ -191,18 +227,18 @@ def test_merge_urls_prefers_changed_value_over_baseline() -> None:
 
 def test_merge_optional_scalar_and_urls_conflicts() -> None:
     """Reject conflicting scalar and URL fields."""
-    assert ms._merge_optional_scalar("version", "1.0.0", None) == "1.0.0"
-    assert ms._merge_urls(None, None) is None
-    assert ms._merge_urls({"linux": "a"}, {"darwin": "b"}) == {
+    assert _merge_optional_scalar("version", "1.0.0", None) == "1.0.0"
+    assert _merge_urls(None, None) is None
+    assert _merge_urls({"linux": "a"}, {"darwin": "b"}) == {
         "linux": "a",
         "darwin": "b",
     }
 
     with pytest.raises(RuntimeError, match="Conflicting version"):
-        ms._merge_optional_scalar("version", "1.0.0", "2.0.0")
+        _merge_optional_scalar("version", "1.0.0", "2.0.0")
 
     with pytest.raises(RuntimeError, match="Conflicting version"):
-        ms._merge_optional_scalar(
+        _merge_optional_scalar(
             "version",
             "2.0.0",
             "3.0.0",
@@ -210,10 +246,10 @@ def test_merge_optional_scalar_and_urls_conflicts() -> None:
         )
 
     with pytest.raises(RuntimeError, match="Conflicting urls entry"):
-        ms._merge_urls({"linux": "a"}, {"linux": "b"})
+        _merge_urls({"linux": "a"}, {"linux": "b"})
 
     with pytest.raises(RuntimeError, match="Conflicting urls entry"):
-        ms._merge_urls(
+        _merge_urls(
             {"linux": "https://example.invalid/newer"},
             {"linux": "https://example.invalid/newest"},
             baseline={"linux": "https://example.invalid/old"},
@@ -244,7 +280,7 @@ def test_merge_drv_hash_drops_unstable_value_without_conflict() -> None:
         },
     )
 
-    merged = ms._merge_entry(existing, incoming, platform=None, baseline=baseline)
+    merged = existing.merge_artifact(incoming, platform=None, baseline=baseline)
 
     assert merged.drv_hash is None
 
@@ -283,7 +319,7 @@ def test_merge_entry_hash_mapping_branch() -> None:
         },
     })
 
-    merged = ms._merge_entry(existing, incoming, platform=None)
+    merged = existing.merge_artifact(incoming, platform=None)
     assert merged.hashes.mapping is not None
     assert merged.hashes.mapping["x86_64-linux"] == "sha256-a"
     assert merged.hashes.mapping["aarch64-darwin"] == "sha256-b"
@@ -307,7 +343,7 @@ def test_merge_entry_preserves_changed_drv_hash() -> None:
         "hashes": [{"hashType": "sha256", "hash": "sha256-new"}],
     })
 
-    merged = ms._merge_entry(existing, incoming, platform=None, baseline=baseline)
+    merged = existing.merge_artifact(incoming, platform=None, baseline=baseline)
 
     assert merged.drv_hash == "drv-new"
 
@@ -323,7 +359,7 @@ def test_merge_entry_fallback_to_hash_collection_merge() -> None:
         "hashes": [{"hashType": "sha256", "hash": "sha256-b"}],
     })
     with pytest.raises(ValueError, match="Cannot merge hash mapping with hash entries"):
-        ms._merge_entry(existing, incoming, platform=None)
+        existing.merge_artifact(incoming, platform=None)
 
 
 def test_collect_and_run_exit_paths(

@@ -438,7 +438,11 @@ class OutputOptions:
         """Lazily create stdout console on first access."""
         if self._console is None:
             no_color = not sys.stdout.isatty()
-            self._console = Console(no_color=no_color, highlight=not no_color)
+            self._console = Console(
+                no_color=no_color,
+                highlight=not no_color,
+                emoji=False,
+            )
         return self._console
 
     @property
@@ -447,7 +451,10 @@ class OutputOptions:
         if self._err_console is None:
             no_color = not sys.stderr.isatty()
             self._err_console = Console(
-                stderr=True, no_color=no_color, highlight=not no_color
+                stderr=True,
+                no_color=no_color,
+                highlight=not no_color,
+                emoji=False,
             )
         return self._err_console
 
@@ -698,7 +705,7 @@ def _emit_summary(
             out.print("\nNo updates available.", style="dim")
     elif summary.updated:
         out.print(
-            f"\n:heavy_check_mark: Updated: {', '.join(summary.updated)}",
+            f"\nUpdated: {', '.join(summary.updated)}",
             style="green",
         )
     else:

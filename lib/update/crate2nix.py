@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,7 @@ _CRATE2NIX_COMMAND_TIMEOUT_SECONDS = 2400
 _CRATE2NIX_CARGO_HOME_ENV = "NIXCFG_CRATE2NIX_CARGO_HOME"
 _CRATE2NIX_GENERATE_ATTEMPTS = 3
 _CRATE2NIX_GENERATE_RETRY_DELAY_SECONDS = 2.0
+_CRATE2NIX_GENERATE_LOCK = threading.Lock()
 _RETRYABLE_CRATE2NIX_NETWORK_CONTEXT_MARKERS = (
     "cargo metadata",
     "crates.io",
@@ -36,9 +38,11 @@ _RETRYABLE_CRATE2NIX_NETWORK_CONTEXT_MARKERS = (
 )
 _RETRYABLE_CRATE2NIX_TRANSIENT_MARKERS = (
     "Directory not empty",
+    "No such file or directory",
     "Operation timed out",
     "Operation too slow",
     "Timeout was reached",
+    "cannot create the lock file",
     "Connection timed out",
     "Could not resolve host",
     "Failed to connect",
@@ -317,23 +321,24 @@ def _run_crate2nix_generate(
     attempts: int = _CRATE2NIX_GENERATE_ATTEMPTS,
 ) -> subprocess.CompletedProcess[str]:
     """Run crate2nix generation with bounded retries for transient prefetch flakes."""
-    attempt = 1
-    while True:
-        try:
-            return _run(args, env=env)
-        except RuntimeError as exc:
-            if attempt >= attempts or not _is_retryable_crate2nix_generate_failure(
-                str(exc)
-            ):
-                raise
-            for path in generated_outputs:
-                path.unlink(missing_ok=True)
-            sys.stderr.write(
-                "Retrying crate2nix generation after transient network failure "
-                f"({attempt}/{attempts})...\n"
-            )
-            time.sleep(_CRATE2NIX_GENERATE_RETRY_DELAY_SECONDS * attempt)
-            attempt += 1
+    with _CRATE2NIX_GENERATE_LOCK:
+        attempt = 1
+        while True:
+            try:
+                return _run(args, env=env)
+            except RuntimeError as exc:
+                if attempt >= attempts or not _is_retryable_crate2nix_generate_failure(
+                    str(exc)
+                ):
+                    raise
+                for path in generated_outputs:
+                    path.unlink(missing_ok=True)
+                sys.stderr.write(
+                    "Retrying crate2nix generation after transient network failure "
+                    f"({attempt}/{attempts})...\n"
+                )
+                time.sleep(_CRATE2NIX_GENERATE_RETRY_DELAY_SECONDS * attempt)
+                attempt += 1
 
 
 def _build_patched_src(target: Crate2NixTarget) -> Path:

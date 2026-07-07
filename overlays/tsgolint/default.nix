@@ -31,6 +31,13 @@ let
           'github.com/dlclark/regexp2/v2 v2.0.3/go.mod h1:Bz5TMy5d8fPK0ximH0Yi9KvsRHNnvXqUx9XG6a4wB+I=' \
           >> go.sum
       fi
+      if grep -Fq 'github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68' go.mod \
+        && ! grep -Fq 'github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 ' go.sum; then
+        printf '%s\n' \
+          'github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 h1:KZaTBSyshWX3MP5jukJcNSuXDQTO+rNpt0J564dX/eg=' \
+          'github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68/go.mod h1:tphK2c80bpPhMOI4v6bIc2xWywPfbqi1Z06+RcrMkDg=' \
+          >> go.sum
+      fi
     '';
 
     preBuild = ''
