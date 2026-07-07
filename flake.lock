@@ -1135,16 +1135,16 @@
     "gogcli": {
       "flake": false,
       "locked": {
-        "lastModified": 1783104244,
-        "narHash": "sha256-Cg2UAS2qPhMT1MklLGIXk4x+6dIwIeKypFtpZsj+ddw=",
+        "lastModified": 1783352996,
+        "narHash": "sha256-TpIqsXKnBQ1XrscXWLOxbjO1woqBqZQf0vsVtRaqK94=",
         "owner": "steipete",
         "repo": "gogcli",
-        "rev": "f20a26cd9e26055e96aae7ded6a3ae21fdfc9541",
+        "rev": "f2996b824a4263cfc7b06da00d720626528f39cb",
         "type": "github"
       },
       "original": {
         "owner": "steipete",
-        "ref": "v0.32.0",
+        "ref": "v0.33.0",
         "repo": "gogcli",
         "type": "github"
       }
@@ -2429,11 +2429,11 @@
     "t3code": {
       "flake": false,
       "locked": {
-        "lastModified": 1783317033,
-        "narHash": "sha256-+N47oKxJ53p5TM0ivFkAbYNd7RyoyR+cSR5kATbM9JE=",
+        "lastModified": 1783440772,
+        "narHash": "sha256-r8CMLJxM2PhOfo3V9geggfz1bzzLIjuP2ITHeUXUicw=",
         "owner": "pingdotgg",
         "repo": "t3code",
-        "rev": "32e7844837b35ca0a0ff038997a45ea75cb7103f",
+        "rev": "4eb1b5793340f8a197f9f995aa396c9a306dbabf",
         "type": "github"
       },
       "original": {
@@ -2778,11 +2778,11 @@
         "rust-overlay": "rust-overlay_5"
       },
       "locked": {
-        "lastModified": 1783020274,
-        "narHash": "sha256-za+NeoeQZBOyFV00m5aOMYYU3tEpGGm+OIfH2JUOIcE=",
+        "lastModified": 1783444477,
+        "narHash": "sha256-WlFFLinLKUta6YCNnblzCUmZsT0U4M95yh4Wo+nbPqc=",
         "owner": "zed-industries",
         "repo": "zed",
-        "rev": "bb48a42983f2a4bb9ac9d31c63abe02497088f67",
+        "rev": "8d932b0e0671645500b567cd474cb113085638fd",
         "type": "github"
       },
       "original": {

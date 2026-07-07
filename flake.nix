@@ -174,7 +174,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.32.0";
+      url = "github:steipete/gogcli/v0.33.0";
       flake = false;
     };
     openai-cli = {

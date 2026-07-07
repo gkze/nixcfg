@@ -58,7 +58,7 @@ _ALLOWED_NIX_SUBSTITUTE_SITES: Final[tuple[NixSubstituteSite, ...]] = (
     (
         "overlays/gogcli/default.nix",
         10,
-        'substituteInPlace go.mod --replace-fail "go 1.26.2" "go ${final.go.version}"',
+        'substituteInPlace go.mod --replace-fail "go 1.26.4" "go ${final.go.version}"',
     ),
     (
         "overlays/vim-plugin-overrides.nix",

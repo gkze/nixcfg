@@ -3792,9 +3792,9 @@ rec {
       };
       "agent-client-protocol" = rec {
         crateName = "agent-client-protocol";
-        version = "1.0.1";
+        version = "1.1.0";
         edition = "2024";
-        sha256 = "136dyhbvnmim1kc7vajk8q6dp5w2ik1rjgar2vdma4skqwb2sc0n";
+        sha256 = "162s7vv6q9hgv1lv9pqzspf9zij51wvscfs9qygxkjbjg8lwhd7d";
         libName = "agent_client_protocol";
         authors = [
           "Zed <hi@zed.dev>"
@@ -3865,23 +3865,21 @@ rec {
           }
         ];
         features = {
-          "unstable" = [ "unstable_auth_methods" "unstable_boolean_config" "unstable_cancel_request" "unstable_elicitation" "unstable_end_turn_token_usage" "unstable_mcp_over_acp" "unstable_session_fork" ];
+          "unstable" = [ "unstable_auth_methods" "unstable_elicitation" "unstable_end_turn_token_usage" "unstable_mcp_over_acp" "unstable_session_fork" ];
           "unstable_auth_methods" = [ "agent-client-protocol-schema/unstable_auth_methods" ];
-          "unstable_boolean_config" = [ "agent-client-protocol-schema/unstable_boolean_config" ];
-          "unstable_cancel_request" = [ "agent-client-protocol-schema/unstable_cancel_request" ];
           "unstable_elicitation" = [ "agent-client-protocol-schema/unstable_elicitation" ];
           "unstable_end_turn_token_usage" = [ "agent-client-protocol-schema/unstable_end_turn_token_usage" ];
           "unstable_mcp_over_acp" = [ "agent-client-protocol-schema/unstable_mcp_over_acp" ];
           "unstable_protocol_v2" = [ "agent-client-protocol-schema/unstable_protocol_v2" ];
           "unstable_session_fork" = [ "agent-client-protocol-schema/unstable_session_fork" ];
         };
-        resolvedDefaultFeatures = [ "default" "unstable" "unstable_auth_methods" "unstable_boolean_config" "unstable_cancel_request" "unstable_elicitation" "unstable_end_turn_token_usage" "unstable_mcp_over_acp" "unstable_session_fork" ];
+        resolvedDefaultFeatures = [ "default" "unstable" "unstable_auth_methods" "unstable_elicitation" "unstable_end_turn_token_usage" "unstable_mcp_over_acp" "unstable_session_fork" ];
       };
       "agent-client-protocol-derive" = rec {
         crateName = "agent-client-protocol-derive";
-        version = "1.0.1";
+        version = "1.1.0";
         edition = "2024";
-        sha256 = "15bh82fc2yb2sz178n86rmw3cwpwf5mxmswz22h82sgb5xapvcw8";
+        sha256 = "0f77m9izsc92rx4izqfx1b3qhbnhy0nrgnsf285glwqhsiy8gq0d";
         procMacro = true;
         libName = "agent_client_protocol_derive";
         authors = [
@@ -3902,9 +3900,9 @@ rec {
       };
       "agent-client-protocol-schema" = rec {
         crateName = "agent-client-protocol-schema";
-        version = "1.1.0";
+        version = "1.4.0";
         edition = "2024";
-        sha256 = "0a2pxskipqxxjqrd8drhzhzgw505gjj8cwnf39cv2d024fx2lm5c";
+        sha256 = "0k13g2qgpxkf8h2j3pkhmzv3fkxn71iv3kqcaps42qrm88arwrq6";
         libName = "agent_client_protocol_schema";
         authors = [
           "Zed <hi@zed.dev>"
@@ -3952,9 +3950,10 @@ rec {
         ];
         features = {
           "tracing" = [ "dep:tracing" ];
-          "unstable" = [ "unstable_auth_methods" "unstable_cancel_request" "unstable_elicitation" "unstable_llm_providers" "unstable_mcp_over_acp" "unstable_nes" "unstable_plan_operations" "unstable_session_fork" "unstable_end_turn_token_usage" "unstable_boolean_config" ];
+          "unstable" = [ "unstable_auth_methods" "unstable_elicitation" "unstable_llm_providers" "unstable_mcp_over_acp" "unstable_nes" "unstable_plan_operations" "unstable_session_fork" "unstable_end_turn_token_usage" ];
+          "unstable_protocol_v2" = [ "dep:diffy" ];
         };
-        resolvedDefaultFeatures = [ "tracing" "unstable_auth_methods" "unstable_boolean_config" "unstable_cancel_request" "unstable_elicitation" "unstable_end_turn_token_usage" "unstable_mcp_over_acp" "unstable_session_fork" ];
+        resolvedDefaultFeatures = [ "tracing" "unstable_auth_methods" "unstable_elicitation" "unstable_end_turn_token_usage" "unstable_mcp_over_acp" "unstable_session_fork" ];
       };
       "agent_servers" = rec {
         crateName = "agent_servers";
@@ -12821,7 +12820,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "log";
@@ -15259,7 +15258,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "serde" ];
           }
           {
@@ -16573,6 +16572,10 @@ rec {
             packageId = "project";
           }
           {
+            name = "release_channel";
+            packageId = "release_channel";
+          }
+          {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
@@ -17479,10 +17482,10 @@ rec {
       };
       "cranelift-assembler-x64" = rec {
         crateName = "cranelift-assembler-x64";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
         crateBin = [];
-        sha256 = "1yllnj604awai64z65h3vqk4jilznn8rns3v0l31fcarwgniry24";
+        sha256 = "0w15biyyxwdrwqvi80az9ps74mcg846lllv4mnxpai1hlvc91n9w";
         libName = "cranelift_assembler_x64";
         buildDependencies = [
           {
@@ -17496,10 +17499,10 @@ rec {
       };
       "cranelift-assembler-x64-meta" = rec {
         crateName = "cranelift-assembler-x64-meta";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
         crateBin = [];
-        sha256 = "1p5z4vi131727h3c1cskaa3q66my7s8pn2c4i2h5whny0l9s2v7s";
+        sha256 = "1ii2a7f4djrg83vzdqy4iriijhvdnkddf0hf10hnfa87c1iy9ayc";
         libName = "cranelift_assembler_x64_meta";
         dependencies = [
           {
@@ -17511,9 +17514,9 @@ rec {
       };
       "cranelift-bforest" = rec {
         crateName = "cranelift-bforest";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
-        sha256 = "09wzc28av75gczarfrdbi8qz4jr5wwryfywj84hq3aabk8d38dvm";
+        sha256 = "19whpynai0z3bkipdw4dm0la01b92n00i0x90aiaxh3hr1rx2zns";
         libName = "cranelift_bforest";
         authors = [
           "The Cranelift Project Developers"
@@ -17528,9 +17531,9 @@ rec {
       };
       "cranelift-bitset" = rec {
         crateName = "cranelift-bitset";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
-        sha256 = "11jhlqgr8bc613k0dfvikxg51vzzd1pg4s67zhhzhpzjzajlr2nj";
+        sha256 = "0c8yfbshbfilm9da3si2afd64h2yasb7qw3n5r82rccqvy3ca340";
         libName = "cranelift_bitset";
         authors = [
           "The Cranelift Project Developers"
@@ -17557,9 +17560,9 @@ rec {
       };
       "cranelift-codegen" = rec {
         crateName = "cranelift-codegen";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
-        sha256 = "12kz93ascapplrgjp535rqphjm44z9q2mcvk3v210fdpw5zhb4fq";
+        sha256 = "1gcfhscb2y6xaj1mk1mj519d6h9cmsqfvyb74m6y6jh9z5izi4xf";
         libName = "cranelift_codegen";
         authors = [
           "The Cranelift Project Developers"
@@ -17699,9 +17702,9 @@ rec {
       };
       "cranelift-codegen-meta" = rec {
         crateName = "cranelift-codegen-meta";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
-        sha256 = "0jxa9xhzsjmj3gjayf4hn3vf3d5fzgmyb51s9d9xrvkqi816d6n2";
+        sha256 = "1bm8wcqj0wz70vxj8r1jrz1pz4d1asn3wnwhb6wdqxyg5cb0bi9q";
         libName = "cranelift_codegen_meta";
         authors = [
           "The Cranelift Project Developers"
@@ -17736,9 +17739,9 @@ rec {
       };
       "cranelift-codegen-shared" = rec {
         crateName = "cranelift-codegen-shared";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
-        sha256 = "1b69xl5ymyiwz4si7vjdykpvcsjdb0gdcwjagc42557ya799m04m";
+        sha256 = "1ng6qylvasva3ycmqiswi7bsfb8cizsml2dfzfsvsyfbifaqddz3";
         libName = "cranelift_codegen_shared";
         authors = [
           "The Cranelift Project Developers"
@@ -17747,9 +17750,9 @@ rec {
       };
       "cranelift-control" = rec {
         crateName = "cranelift-control";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
-        sha256 = "1hkk6svsgrw4nb8m5qj8sbv8f6xlanrkrdymx3jrghk3y2n0r7gp";
+        sha256 = "1dfywvs7dyc4gnmf1rrkz5marsw3926a1xrarqjzgrxw1589mbrg";
         libName = "cranelift_control";
         authors = [
           "The Cranelift Project Developers"
@@ -17770,9 +17773,9 @@ rec {
       };
       "cranelift-entity" = rec {
         crateName = "cranelift-entity";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
-        sha256 = "0aii9q14950pl3m8rwf2s26ybcf489qk1ilpb7jkpklml6bk5mxj";
+        sha256 = "0nxn410fd7zi2p8g980vim343lzgcxkhs3an4vb03qd59ccp2wh1";
         libName = "cranelift_entity";
         authors = [
           "The Cranelift Project Developers"
@@ -17804,9 +17807,9 @@ rec {
       };
       "cranelift-frontend" = rec {
         crateName = "cranelift-frontend";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
-        sha256 = "0n28sgagizn05q8smp2j86j4rp4qysabcv7w27bcbxwyw8d8vqrv";
+        sha256 = "1n0g2dd7n4123y4ha139cc00y7lhnd1hb7igr37g0rwrjbq4f27q";
         libName = "cranelift_frontend";
         authors = [
           "The Cranelift Project Developers"
@@ -17851,9 +17854,9 @@ rec {
       };
       "cranelift-isle" = rec {
         crateName = "cranelift-isle";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
-        sha256 = "0yk3w6kyg8g04abmndv12wcg5438425y52snmkkrs81ncrpr4qb7";
+        sha256 = "01nmjmi5cg3jkj49jfr5nh6iqj54r1181754ywh6vd77q2xlm43m";
         libName = "cranelift_isle";
         authors = [
           "The Cranelift Project Developers"
@@ -17868,9 +17871,9 @@ rec {
       };
       "cranelift-native" = rec {
         crateName = "cranelift-native";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
-        sha256 = "0c0qpmkwj6h62zz4swxnkdjvk4qzdpd3lmwsisi31mghfcplg4q8";
+        sha256 = "0fngwryp3fj163zkj44r80w2cr06010by0bgw5i46ms06n93a0bf";
         libName = "cranelift_native";
         authors = [
           "The Cranelift Project Developers"
@@ -17901,9 +17904,9 @@ rec {
       };
       "cranelift-srcgen" = rec {
         crateName = "cranelift-srcgen";
-        version = "0.123.9";
+        version = "0.123.12";
         edition = "2024";
-        sha256 = "0h1fasrnqm534zm9v4n7rhy7vwiafb0aq3mbvcsd1k5imgmwrnn1";
+        sha256 = "16xrzbwlk9ikdp9xh5c210pi2x2fj4y89ymydr7h6bj8dkvi5ywk";
         libName = "cranelift_srcgen";
         authors = [
           "The Wasmtime Project Developers"
@@ -18890,7 +18893,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "proc-macro2";
@@ -18944,7 +18947,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "proc-macro2";
@@ -24801,11 +24804,11 @@ rec {
           }
           {
             name = "wasm-encoder";
-            packageId = "wasm-encoder 0.221.3";
+            packageId = "wasm-encoder 0.252.0";
           }
           {
             name = "wasmparser";
-            packageId = "wasmparser 0.221.3";
+            packageId = "wasmparser 0.252.0";
           }
           {
             name = "ztracing";
@@ -25115,7 +25118,7 @@ rec {
           }
           {
             name = "wasmparser";
-            packageId = "wasmparser 0.221.3";
+            packageId = "wasmparser 0.252.0";
           }
           {
             name = "wasmtime";
@@ -27795,7 +27798,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "serde" ];
           }
           {
@@ -27889,7 +27892,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             optional = true;
           }
           {
@@ -28250,6 +28253,10 @@ rec {
             name = "call";
             packageId = "call";
             optional = true;
+          }
+          {
+            name = "client";
+            packageId = "client";
           }
           {
             name = "collections";
@@ -31455,7 +31462,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "std" ];
           }
           {
@@ -31527,7 +31534,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "std" ];
           }
           {
@@ -31922,6 +31929,46 @@ rec {
           "serde" = [ "dep:serde_core" "dep:serde" ];
         };
         resolvedDefaultFeatures = [ "allocator-api2" "default" "default-hasher" "equivalent" "inline-more" "raw-entry" ];
+      };
+      "hashbrown 0.17.1" = rec {
+        crateName = "hashbrown";
+        version = "0.17.1";
+        edition = "2024";
+        sha256 = "0jmqz7i4yl6cm7rbn0i2ffkfrmwi6xkmzkaldr2v8bcsx2v0jngd";
+        dependencies = [
+          {
+            name = "foldhash";
+            packageId = "foldhash 0.2.0";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: false;
+          }
+          {
+            name = "serde_core";
+            packageId = "serde_core";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "alloc" = [ "dep:alloc" ];
+          "allocator-api2" = [ "dep:allocator-api2" ];
+          "core" = [ "dep:core" ];
+          "default" = [ "default-hasher" "inline-more" "allocator-api2" "equivalent" "raw-entry" ];
+          "default-hasher" = [ "dep:foldhash" ];
+          "equivalent" = [ "dep:equivalent" ];
+          "nightly" = [ "foldhash?/nightly" "bumpalo/allocator_api" ];
+          "rayon" = [ "dep:rayon" ];
+          "rustc-dep-of-std" = [ "nightly" "core" "alloc" "rustc-internal-api" ];
+          "serde" = [ "dep:serde_core" "dep:serde" ];
+        };
+        resolvedDefaultFeatures = [ "default-hasher" "serde" ];
       };
       "hashlink 0.10.0" = rec {
         crateName = "hashlink";
@@ -34376,11 +34423,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "serde" "serde-1" "std" ];
       };
-      "indexmap 2.11.4" = rec {
+      "indexmap 2.14.0" = rec {
         crateName = "indexmap";
-        version = "2.11.4";
-        edition = "2021";
-        sha256 = "1rc8bgcjzfcskz1zipjjm7s3m1jskzhnhr9jxmsafhdk1xv863sb";
+        version = "2.14.0";
+        edition = "2024";
+        sha256 = "1na9z6f0d5pkjr1lgsni470v98gv2r7c41j8w48skr089x2yjrnl";
         dependencies = [
           {
             name = "equivalent";
@@ -34389,7 +34436,7 @@ rec {
           }
           {
             name = "hashbrown";
-            packageId = "hashbrown 0.16.1";
+            packageId = "hashbrown 0.17.1";
             usesDefaultFeatures = false;
           }
           {
@@ -37026,6 +37073,13 @@ rec {
             packageId = "thiserror 2.0.17";
           }
         ];
+        devDependencies = [
+          {
+            name = "pretty_assertions";
+            packageId = "pretty_assertions";
+            features = [ "unstable" ];
+          }
+        ];
 
       };
       "language_models" = rec {
@@ -38911,7 +38965,9 @@ rec {
             packageId = "prost-build 0.9.0";
           }
         ];
-
+        features = {
+        };
+        resolvedDefaultFeatures = [ "test-support" ];
       };
       "livekit_client" = rec {
         crateName = "livekit_client";
@@ -39100,12 +39156,17 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "livekit_api";
+            packageId = "livekit_api";
+            features = [ "test-support" ];
+          }
+          {
             name = "simplelog";
             packageId = "simplelog";
           }
         ];
         features = {
-          "test-support" = [ "collections/test-support" "gpui/test-support" ];
+          "test-support" = [ "collections/test-support" "gpui/test-support" "livekit_api/test-support" ];
         };
         resolvedDefaultFeatures = [ "test-support" ];
       };
@@ -39915,7 +39976,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "serde" ];
           }
           {
@@ -40941,7 +41002,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "serde" ];
           }
           {
@@ -41045,7 +41106,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "serde" ];
           }
           {
@@ -42086,7 +42147,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
           }
           {
@@ -46104,7 +46165,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -47061,9 +47122,9 @@ rec {
       };
       "openssl" = rec {
         crateName = "openssl";
-        version = "0.10.79";
+        version = "0.10.81";
         edition = "2021";
-        sha256 = "0hpma19c8qrjwgi6jb4iwv5iifyaw4vh3wdsy3s34a7f8r3l62xz";
+        sha256 = "0ibsv2ppsjrp62jqyzprhay9vczk1bw9xvdr3h4h7fxsy0kkm0kp";
         authors = [
           "Steven Fackler <sfackler@gmail.com>"
         ];
@@ -47151,10 +47212,10 @@ rec {
       };
       "openssl-sys" = rec {
         crateName = "openssl-sys";
-        version = "0.9.115";
+        version = "0.9.117";
         edition = "2021";
         links = "openssl";
-        sha256 = "10cpkh7aswv97k108a2ya10jvdxfal76jzksdsm40r3ljarfb3qm";
+        sha256 = "159nf6jsqnmsynkh6gjzx088q1ifll7v88sss8qdk363n9mpwzml";
         build = "build/main.rs";
         libName = "openssl_sys";
         authors = [
@@ -49968,7 +50029,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
         ];
         features = {
@@ -50509,10 +50570,6 @@ rec {
         libPath = "src/picker_preview.rs";
         dependencies = [
           {
-            name = "anyhow";
-            packageId = "anyhow";
-          }
-          {
             name = "editor";
             packageId = "editor";
           }
@@ -50854,7 +50911,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "quick-xml";
@@ -52055,7 +52112,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "serde" ];
           }
           {
@@ -52678,6 +52735,10 @@ rec {
           {
             name = "picker";
             packageId = "picker";
+          }
+          {
+            name = "picker_preview";
+            packageId = "picker_preview";
           }
           {
             name = "project";
@@ -53749,9 +53810,9 @@ rec {
       };
       "pulley-interpreter" = rec {
         crateName = "pulley-interpreter";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "10z6izz0x316mb12la8y1hyal63xvdvzxz5d3f99nqrbjvngsy4b";
+        sha256 = "1ysjsg5skv4cl0sv32b0qdhlmpsjf04aghyg8m7rix0ddq4q30am";
         libName = "pulley_interpreter";
         authors = [
           "The Pulley Project Developers"
@@ -53788,9 +53849,9 @@ rec {
       };
       "pulley-macros" = rec {
         crateName = "pulley-macros";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "0hixgf9kmfd9y02l6m1hwcdhal4353z2ab8x7f5s1pszrplg867p";
+        sha256 = "1aadab1xp5g8ms29csf6kl8ip2pi3zxxb6xyv9fdfs712hpjxmdm";
         procMacro = true;
         libName = "pulley_macros";
         dependencies = [
@@ -59759,7 +59820,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             rename = "indexmap2";
             optional = true;
             usesDefaultFeatures = false;
@@ -59789,7 +59850,7 @@ rec {
         devDependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             rename = "indexmap2";
             usesDefaultFeatures = false;
             features = [ "serde" ];
@@ -61181,7 +61242,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             optional = true;
           }
           {
@@ -61239,7 +61300,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             optional = true;
           }
           {
@@ -61454,7 +61515,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             rename = "indexmap_2";
             optional = true;
             usesDefaultFeatures = false;
@@ -61586,7 +61647,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "itoa";
@@ -61618,7 +61679,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "itoa";
@@ -64261,7 +64322,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "log";
@@ -68219,7 +68280,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "serde" ];
           }
           {
@@ -69904,7 +69965,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -70006,7 +70067,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "std" ];
           }
           {
@@ -70060,7 +70121,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "std" ];
           }
           {
@@ -71526,9 +71587,9 @@ rec {
         crateBin = [];
         workspace_member = null;
         src = pkgs.fetchgit {
-          url = "https://github.com/tree-sitter-grammars/tree-sitter-markdown";
-          rev = "9a23c1a96c0513d8fc6520972beedd419a973539";
-          sha256 = "1r8l1andd4ccri301m1n8676zm5yfn3b4d153ry91wxp3wkxlvxb";
+          url = "https://github.com/zed-industries/tree-sitter-markdown";
+          rev = "b596e737286780d7bfa9fcddceaeeb754574b352";
+          sha256 = "1v3xdgn3cy3q2nm2mpwxy8g6ncgi7jkdqv1x01d5prkgjf393l3j";
         };
         build = "bindings/rust/build.rs";
         libName = "tree_sitter_md";
@@ -74265,35 +74326,6 @@ rec {
           "wasmparser" = [ "dep:wasmparser" ];
         };
       };
-      "wasm-encoder 0.221.3" = rec {
-        crateName = "wasm-encoder";
-        version = "0.221.3";
-        edition = "2021";
-        sha256 = "1r9jv84kbjf6z18rgf3666vvcn5fybzn9daszsj81pi097z4916w";
-        libName = "wasm_encoder";
-        authors = [
-          "Nick Fitzgerald <fitzgen@gmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "leb128";
-            packageId = "leb128";
-          }
-          {
-            name = "wasmparser";
-            packageId = "wasmparser 0.221.3";
-            optional = true;
-            usesDefaultFeatures = false;
-            features = [ "std" "simd" "simd" ];
-          }
-        ];
-        features = {
-          "component-model" = [ "wasmparser?/component-model" ];
-          "default" = [ "component-model" ];
-          "wasmparser" = [ "dep:wasmparser" ];
-        };
-        resolvedDefaultFeatures = [ "component-model" "default" ];
-      };
       "wasm-encoder 0.227.1" = rec {
         crateName = "wasm-encoder";
         version = "0.227.1";
@@ -74387,6 +74419,37 @@ rec {
         };
         resolvedDefaultFeatures = [ "component-model" "std" "wasmparser" ];
       };
+      "wasm-encoder 0.252.0" = rec {
+        crateName = "wasm-encoder";
+        version = "0.252.0";
+        edition = "2024";
+        sha256 = "0vqrsg2b83l2r4flv46r8firg5q8wx89mzr68q2pqs55bwsax1c1";
+        libName = "wasm_encoder";
+        authors = [
+          "Nick Fitzgerald <fitzgen@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "leb128fmt";
+            packageId = "leb128fmt";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "wasmparser";
+            packageId = "wasmparser 0.252.0";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "simd" "simd" ];
+          }
+        ];
+        features = {
+          "component-model" = [ "wasmparser?/component-model" ];
+          "default" = [ "std" "component-model" ];
+          "std" = [ "wasmparser?/std" ];
+          "wasmparser" = [ "dep:wasmparser" ];
+        };
+        resolvedDefaultFeatures = [ "component-model" "default" "std" ];
+      };
       "wasm-metadata 0.201.0" = rec {
         crateName = "wasm-metadata";
         version = "0.201.0";
@@ -74400,7 +74463,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "serde" ];
           }
           {
@@ -74453,7 +74516,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
             features = [ "serde" ];
           }
@@ -74509,7 +74572,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
             features = [ "serde" ];
           }
@@ -74626,7 +74689,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "semver";
@@ -74634,55 +74697,6 @@ rec {
           }
         ];
 
-      };
-      "wasmparser 0.221.3" = rec {
-        crateName = "wasmparser";
-        version = "0.221.3";
-        edition = "2021";
-        sha256 = "11ficyz79dcypkxxg1c8vl8bm0avg8a80csnxq6vxhismcvglsyh";
-        authors = [
-          "Yury Delendik <ydelendik@mozilla.com>"
-        ];
-        dependencies = [
-          {
-            name = "bitflags";
-            packageId = "bitflags 2.10.0";
-          }
-          {
-            name = "hashbrown";
-            packageId = "hashbrown 0.15.5";
-            optional = true;
-            usesDefaultFeatures = false;
-            features = [ "default-hasher" ];
-          }
-          {
-            name = "indexmap";
-            packageId = "indexmap 2.11.4";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "semver";
-            packageId = "semver";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            optional = true;
-            usesDefaultFeatures = false;
-            features = [ "alloc" ];
-          }
-        ];
-        features = {
-          "component-model" = [ "dep:semver" ];
-          "default" = [ "std" "validate" "serde" "features" "component-model" "hash-collections" "simd" ];
-          "hash-collections" = [ "dep:hashbrown" "dep:indexmap" ];
-          "serde" = [ "dep:serde" "indexmap?/serde" "hashbrown?/serde" ];
-          "std" = [ "indexmap?/std" ];
-        };
-        resolvedDefaultFeatures = [ "component-model" "default" "features" "hash-collections" "serde" "simd" "std" "validate" ];
       };
       "wasmparser 0.227.1" = rec {
         crateName = "wasmparser";
@@ -74706,7 +74720,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -74748,7 +74762,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -74797,7 +74811,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -74816,6 +74830,55 @@ rec {
           "std" = [ "indexmap?/std" ];
         };
         resolvedDefaultFeatures = [ "component-model" "features" "hash-collections" "simd" "std" "validate" ];
+      };
+      "wasmparser 0.252.0" = rec {
+        crateName = "wasmparser";
+        version = "0.252.0";
+        edition = "2024";
+        sha256 = "0z32qvhy9lp4hwj154sc9gjd9vr8f4rklppmxvlmppnwrafhksyk";
+        authors = [
+          "Yury Delendik <ydelendik@mozilla.com>"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.10.0";
+          }
+          {
+            name = "hashbrown";
+            packageId = "hashbrown 0.17.1";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "default-hasher" ];
+          }
+          {
+            name = "indexmap";
+            packageId = "indexmap 2.14.0";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "semver";
+            packageId = "semver";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "alloc" ];
+          }
+        ];
+        features = {
+          "component-model" = [ "dep:semver" ];
+          "default" = [ "std" "validate" "serde" "features" "component-model" "hash-collections" "simd" ];
+          "hash-collections" = [ "dep:hashbrown" "dep:indexmap" ];
+          "serde" = [ "dep:serde" "indexmap?/serde" "hashbrown?/serde" ];
+          "std" = [ "indexmap?/std" ];
+        };
+        resolvedDefaultFeatures = [ "component-model" "default" "features" "hash-collections" "serde" "simd" "std" "validate" ];
       };
       "wasmprinter" = rec {
         crateName = "wasmprinter";
@@ -74850,9 +74913,9 @@ rec {
       };
       "wasmtime" = rec {
         crateName = "wasmtime";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "14lln3rydxa72m3nv0fqmwc5xdirfmxqd6gz8m32rnr1v7m0c0xi";
+        sha256 = "1mnyskg6kgn8pn5r6z2ha8nfb6s85c7hwkrkz3g7695a2bf44i2b";
         authors = [
           "The Wasmtime Project Developers"
         ];
@@ -74898,7 +74961,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
           }
           {
@@ -75187,9 +75250,9 @@ rec {
       };
       "wasmtime-environ" = rec {
         crateName = "wasmtime-environ";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "0prpff6dbdkdvxjq3f1b5dxp1q3x3qig06w76d7l8g96r8vjryz7";
+        sha256 = "173qnd2ngssypmjjv59rvb3x37ivy8bv31y4dhi8m285c8yir22x";
         libName = "wasmtime_environ";
         authors = [
           "The Wasmtime Project Developers"
@@ -75223,7 +75286,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
             features = [ "serde" ];
           }
@@ -75320,9 +75383,9 @@ rec {
       };
       "wasmtime-internal-asm-macros" = rec {
         crateName = "wasmtime-internal-asm-macros";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "14wg8dbs5apxxh41i4g0php3c598zw9x9s7q7955bnyjr39w1ihr";
+        sha256 = "01xfdrrnmxarr3mxsgvqdhqixg1wylrkkhd1vq2nl7d5rxmqgcas";
         libName = "wasmtime_internal_asm_macros";
         authors = [
           "The Wasmtime Project Developers"
@@ -75359,9 +75422,9 @@ rec {
       };
       "wasmtime-internal-component-macro" = rec {
         crateName = "wasmtime-internal-component-macro";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "1w66w5nhws71pss9h2pw43sqzqf02nzm77hljwghxsv64isz7qy3";
+        sha256 = "03qsgpdkmw7r3snfzmyarvn4n4x73aamn2wkfy53mcd08iwl1qca";
         procMacro = true;
         libName = "wasmtime_internal_component_macro";
         authors = [
@@ -75417,9 +75480,9 @@ rec {
       };
       "wasmtime-internal-component-util" = rec {
         crateName = "wasmtime-internal-component-util";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "17hn1cbff6i97vahlf8sd7zh5hphvkm2l7y32v3fkx32my5h2m3z";
+        sha256 = "1nrhiy5pnf9i36vdgg6jlsp42a0gclgsb371jzqgdap6iikm6sk4";
         libName = "wasmtime_internal_component_util";
         authors = [
           "The Wasmtime Project Developers"
@@ -75428,9 +75491,9 @@ rec {
       };
       "wasmtime-internal-cranelift" = rec {
         crateName = "wasmtime-internal-cranelift";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "1jjflav88l0amnbi9x0bm7m0l93y4irzzky198mdp9dhmzr1492s";
+        sha256 = "0wbksmwi8bammvwqwdzqbzyj2rpzbv7566pqadmwmr00hfm9ad5b";
         libName = "wasmtime_internal_cranelift";
         authors = [
           "The Wasmtime Project Developers"
@@ -75545,9 +75608,9 @@ rec {
       };
       "wasmtime-internal-fiber" = rec {
         crateName = "wasmtime-internal-fiber";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "07svs9l10cr8kprx7kyx4ihypzhrw1dgdyhzzy43sd2xvmhc9zgc";
+        sha256 = "1m6pawj95q6c9lnsq74gwx2yniara07mz3rkayhps5kb781f9d99";
         libName = "wasmtime_internal_fiber";
         authors = [
           "The Wasmtime Project Developers"
@@ -75607,9 +75670,9 @@ rec {
       };
       "wasmtime-internal-jit-debug" = rec {
         crateName = "wasmtime-internal-jit-debug";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "01qp0516kq6mfilx7xnxibjwdk43k1s0ci661zwvf9qqlwlb9axm";
+        sha256 = "1k1yvyg7m1ixbk2iq1z8q1ha0p22izwvzdx3agvwcg1yawnix9wx";
         libName = "wasmtime_internal_jit_debug";
         authors = [
           "The Wasmtime Project Developers"
@@ -75641,9 +75704,9 @@ rec {
       };
       "wasmtime-internal-jit-icache-coherence" = rec {
         crateName = "wasmtime-internal-jit-icache-coherence";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "0a50ihprs831nglabhbzpz0pwgz90p3dbcbwhzxq7yy32hzw2v5s";
+        sha256 = "0ylp32hs3f9w3wr0ng9mjmcrvf2lk8i9cyp5vfqrnkwsj1bqyzb2";
         libName = "wasmtime_internal_jit_icache_coherence";
         authors = [
           "The Wasmtime Project Developers"
@@ -75675,9 +75738,9 @@ rec {
       };
       "wasmtime-internal-math" = rec {
         crateName = "wasmtime-internal-math";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "100lni9ilyngxbin18hj1nirs36bin5z3fbvr3cxpx09793hkchw";
+        sha256 = "003znym2426k44y4bbmsy1pnyp8ivc71bc6rbl92g2jsb0ar7fa5";
         libName = "wasmtime_internal_math";
         authors = [
           "The Wasmtime Project Developers"
@@ -75694,9 +75757,9 @@ rec {
       };
       "wasmtime-internal-slab" = rec {
         crateName = "wasmtime-internal-slab";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "10r1a8nqn84vkj1krpfmn0rs13zjbqa417ggxkhhc8bm0iddzd5a";
+        sha256 = "1r1lhws1pwc4qkaw48q5gprk5pg2kzxicv6lqdzf8gyxh5rfkblf";
         libName = "wasmtime_internal_slab";
         authors = [
           "The Wasmtime Project Developers"
@@ -75705,9 +75768,9 @@ rec {
       };
       "wasmtime-internal-unwinder" = rec {
         crateName = "wasmtime-internal-unwinder";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "0fdn8whhcssxs29jiad2isymxlyq2ivib676cmz6znxx55fqfnak";
+        sha256 = "1nag7kfk30ya9qqix95cid7kr4xx0m9fw6gs8imjnja85kw0bh6h";
         libName = "wasmtime_internal_unwinder";
         authors = [
           "The Wasmtime Project Developers"
@@ -75748,9 +75811,9 @@ rec {
       };
       "wasmtime-internal-versioned-export-macros" = rec {
         crateName = "wasmtime-internal-versioned-export-macros";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "0jm0kg9jknqznysnijzr5y8wxlmsdsr37jc6lcxp80cpsv6pn91f";
+        sha256 = "1q3819dpwq3wfv8bpgljps9q7d3jcydsjb4lxyi363hckjd66wvv";
         procMacro = true;
         libName = "wasmtime_internal_versioned_export_macros";
         authors = [
@@ -75775,9 +75838,9 @@ rec {
       };
       "wasmtime-internal-winch" = rec {
         crateName = "wasmtime-internal-winch";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "0m2x23yzrrxxfvqm162i9sniwkw9fpzcybd9nli84n2pkzyqsafh";
+        sha256 = "0498cbdk41sbswbg8d5vph8mym8m8clf2xzg2rk45iw4s0hs0b1r";
         libName = "wasmtime_internal_winch";
         authors = [
           "The Wasmtime Project Developers"
@@ -75844,9 +75907,9 @@ rec {
       };
       "wasmtime-internal-wit-bindgen" = rec {
         crateName = "wasmtime-internal-wit-bindgen";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "0f83zhfyjy09qx0cjs6sy8f459vqpwdpqppml0kfgfmrhcz801hp";
+        sha256 = "15rda9zjc8b53l3m0h29wc49ja0h1pl3295p2pbn4qj7a4rp1m3z";
         libName = "wasmtime_internal_wit_bindgen";
         authors = [
           "The Wasmtime Project Developers"
@@ -75867,7 +75930,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
           }
           {
@@ -75881,9 +75944,9 @@ rec {
       };
       "wasmtime-wasi" = rec {
         crateName = "wasmtime-wasi";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "180hk11xymzvaznvcr0npjfslpl8wp3xilk1pcpy7l2lxh10chqs";
+        sha256 = "1xkprgs4mz3zjz4jdkl2h7nrz038xqx0nfybi2i7dn4firp1p4i1";
         libName = "wasmtime_wasi";
         authors = [
           "The Wasmtime Project Developers"
@@ -76028,9 +76091,9 @@ rec {
       };
       "wasmtime-wasi-io" = rec {
         crateName = "wasmtime-wasi-io";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "0a8h0wzdwmp0v1z1lqzdbildv30kbwcgpiqmryaf6bcnd3fsaawb";
+        sha256 = "0vbwagdjh4pz2av8rjnd2hx41ink72w03ig8n3kn3pnq238v5kic";
         libName = "wasmtime_wasi_io";
         authors = [
           "The Wasmtime Project Developers"
@@ -77512,7 +77575,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
           }
           {
@@ -78275,9 +78338,9 @@ rec {
       };
       "wiggle" = rec {
         crateName = "wiggle";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "14mpdnw8rwh4232iz64jjhigjadicsm6znhqwlw7a0gw7znx6y8r";
+        sha256 = "04s08r3k8qwk43wjf34c906080rshk5a3m22xx8gyhdn0qa7b82m";
         authors = [
           "Pat Hickey <phickey@fastly.com>"
           "Jakub Konka <kubkonk@jakubkonka.com>"
@@ -78335,9 +78398,9 @@ rec {
       };
       "wiggle-generate" = rec {
         crateName = "wiggle-generate";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "17z2nzbrpy7azpvk61cd4ykq2r68aan0zvyclwx59n44l3kjmn95";
+        sha256 = "0pqgsn4wq8nrj3krrzcrhsz9wqpjwiynxi5qc6n0rpgcvhzhhqmb";
         libName = "wiggle_generate";
         authors = [
           "Pat Hickey <phickey@fastly.com>"
@@ -78376,9 +78439,9 @@ rec {
       };
       "wiggle-macro" = rec {
         crateName = "wiggle-macro";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "0d87zx64cx0ypk44b9abq2zwwcv5qpsss7hcnjdmdknr7ywv389n";
+        sha256 = "17hrpngc12ywrlhsjsdivjwa9kda1znh2dggx59jzvjpgx57lsvm";
         procMacro = true;
         libName = "wiggle_macro";
         authors = [
@@ -78476,9 +78539,9 @@ rec {
       };
       "winch-codegen" = rec {
         crateName = "winch-codegen";
-        version = "36.0.9";
+        version = "36.0.12";
         edition = "2024";
-        sha256 = "17nk6pzav50r9infdc9dxp10gflvi6jaab64v522drbv2fi7wb9f";
+        sha256 = "08sk3s96c3dl89sjmq85r3w138dc4bxlrda4b4j75ana405qiv31";
         libName = "winch_codegen";
         authors = [
           "The Winch Project Developers"
@@ -85617,7 +85680,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "wasm-metadata";
@@ -85656,7 +85719,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "prettyplease";
@@ -85704,7 +85767,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "prettyplease";
@@ -85883,7 +85946,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "log";
@@ -85945,7 +86008,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
           }
           {
@@ -86022,7 +86085,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
           }
           {
@@ -86106,7 +86169,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
           }
           {
             name = "log";
@@ -86176,7 +86239,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
             features = [ "std" ];
           }
@@ -86253,7 +86316,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
             features = [ "std" ];
           }
@@ -86330,7 +86393,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
             features = [ "std" ];
           }
@@ -87482,7 +87545,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.11.4";
+            packageId = "indexmap 2.14.0";
             features = [ "serde" ];
           }
           {
