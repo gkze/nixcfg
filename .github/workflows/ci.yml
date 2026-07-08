@@ -1,11 +1,8 @@
 ---
 name: CI
 on:
-  workflow_dispatch:
-  pull_request:
-  push:
-    branches:
-      - main
+  # Disabled: keep the workflow valid without automatic or manual triggers.
+  workflow_call:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true

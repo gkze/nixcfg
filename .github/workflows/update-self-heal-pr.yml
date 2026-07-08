@@ -2,14 +2,8 @@
 name: Agentic Update Repair PR
 
 on:
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - closed
+  # Disabled: keep the workflow valid without automatic or manual triggers.
+  workflow_call:
 
 permissions:
   actions: read

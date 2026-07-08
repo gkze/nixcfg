@@ -6,9 +6,8 @@ env:
   UPDATE_COMMIT_MESSAGE: "chore: update flake.lock, sources, uv.lock, and crate2nix"
 
 on:
-  schedule:
-    - cron: "0 */6 * * *" # Every 6 hours
-  workflow_dispatch:
+  # Disabled: keep the workflow valid without automatic or manual triggers.
+  workflow_call:
 
 concurrency:
   group: flake-update-refresh
