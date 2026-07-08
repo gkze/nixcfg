@@ -2,17 +2,8 @@
 name: Agentic Update Self-Heal
 
 on:
-  workflow_run:
-    workflows:
-      - Update
-      - "Update: Certify"
-      - CI
-    types:
-      - completed
-    branches:
-      - main
-      - "agentic/update-self-heal/**"
-  workflow_dispatch:
+  # Disabled: keep the workflow valid without automatic or manual triggers.
+  workflow_call:
     inputs:
       run-id:
         description: Failed workflow run id to investigate.

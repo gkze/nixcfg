@@ -53,7 +53,8 @@
 
 name: "Agentic Update Self-Heal"
 on:
-  workflow_dispatch:
+  # Disabled: keep the workflow valid without automatic or manual triggers.
+  workflow_call:
     inputs:
       aw_context:
         default: ""
@@ -68,17 +69,6 @@ on:
         description: Failed workflow run id to investigate.
         required: false
         type: string
-  workflow_run:
-    # zizmor: ignore[dangerous-triggers] - workflow_run trigger is secured with role and fork validation
-    branches:
-    - main
-    - agentic/update-self-heal/**
-    types:
-    - completed
-    workflows:
-    - Update
-    - "Update: Certify"
-    - CI
 
 permissions: {}
 

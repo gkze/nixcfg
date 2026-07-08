@@ -6,12 +6,8 @@ env:
   UPDATE_BRANCH: update_flake_lock_action
 
 on:
-  workflow_run:
-    workflows:
-      - Update
-    types:
-      - completed
-  workflow_dispatch:
+  # Disabled: keep the workflow valid without automatic or manual triggers.
+  workflow_call:
     inputs:
       ref:
         description: Branch to certify. Defaults to the update branch from the refresh workflow.
