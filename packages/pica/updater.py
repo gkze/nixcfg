@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import pinned_source_download_updater
+from typing import ClassVar
 
-PicaUpdater = pinned_source_download_updater(
-    "pica",
-    platforms={"aarch64-darwin": "arm64"},
-    download_url=(
+from lib.update.updaters import PinnedSourceDownloadUpdater, register_updater
+
+
+@register_updater
+class PicaUpdater(PinnedSourceDownloadUpdater):
+    """Pinned download updater for the Pica macOS app archive."""
+
+    name = "pica"
+    PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "arm64"}
+    DOWNLOAD_URL_TEMPLATE = (
         "https://f6n9fvfeuhzxxji6.public.blob.vercel-storage.com/Pica-{version}.dmg"
-    ),
-    module=__name__,
-)
+    )

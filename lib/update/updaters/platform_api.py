@@ -21,14 +21,14 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.net import fetch_json
-from lib.update.updaters.base import (
+from lib.update.updaters.core import (
     ChecksumProvidedUpdater,
-    VersionInfo,
     _verify_platform_versions,
     stream_url_hash_mapping,
 )
 from lib.update.updaters.metadata import (
     PlatformAPIMetadata,
+    VersionInfo,
 )
 
 type JsonObject = json_utils.JsonObject

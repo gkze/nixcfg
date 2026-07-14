@@ -10,7 +10,7 @@ import pytest
 
 from lib.tests._assertions import expect_instance
 from lib.update.events import UpdateEvent, UpdateEventKind
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 from lib.update.updaters.metadata import PlatformAPIMetadata
 from lib.update.updaters.platform_api import (
     DownloadingPlatformAPIUpdater,
@@ -178,11 +178,11 @@ def test_downloading_platform_fetch_hashes_forwards_hash_progress(
         yield UpdateEvent.value(name, hash_value)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_url_hashes",
+        "lib.update.process.compute_url_hashes",
         _compute_url_hashes,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.convert_nix_hash_to_sri",
+        "lib.update.process.convert_nix_hash_to_sri",
         _convert_hash,
     )
 

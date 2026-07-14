@@ -59,25 +59,34 @@
         fi
       '') removeOthers;
 
-      addAppCommands = concatMapStringsSep "\n" (app: ''
-        if [ -e ${escapeShellArg app} ]; then
-          if ! "$dockutil" --add ${escapeShellArg app} --replacing ${escapeShellArg (dockLabel app)} --section apps --no-restart >/dev/null; then
-            echo "warning: failed to add Dock app ${app}" >&2
-          fi
-        else
-          echo "warning: skipping missing Dock app ${app}" >&2
-        fi
-      '') apps;
+      positionedApps = lib.imap1 (position: app: { inherit app position; }) apps;
+      positionedOthers = lib.imap1 (position: other: { inherit other position; }) others;
 
-      addOtherCommands = concatMapStringsSep "\n" (other: ''
-        if [ -e ${escapeShellArg other} ]; then
-          if ! "$dockutil" --add ${escapeShellArg other} --replacing ${escapeShellArg (dockLabel other)} --section others --no-restart >/dev/null; then
-            echo "warning: failed to add Dock item ${other}" >&2
+      addAppCommands = concatMapStringsSep "\n" (
+        { app, position }:
+        ''
+          if [ -e ${escapeShellArg app} ]; then
+            if ! "$dockutil" --add ${escapeShellArg app} --replacing ${escapeShellArg (dockLabel app)} --position ${toString position} --section apps --no-restart >/dev/null; then
+              echo "warning: failed to add Dock app ${app}" >&2
+            fi
+          else
+            echo "warning: skipping missing Dock app ${app}" >&2
           fi
-        else
-          echo "warning: skipping missing Dock item ${other}" >&2
-        fi
-      '') others;
+        ''
+      ) positionedApps;
+
+      addOtherCommands = concatMapStringsSep "\n" (
+        { other, position }:
+        ''
+          if [ -e ${escapeShellArg other} ]; then
+            if ! "$dockutil" --add ${escapeShellArg other} --replacing ${escapeShellArg (dockLabel other)} --position ${toString position} --section others --no-restart >/dev/null; then
+              echo "warning: failed to add Dock item ${other}" >&2
+            fi
+          else
+            echo "warning: skipping missing Dock item ${other}" >&2
+          fi
+        ''
+      ) positionedOthers;
     in
     mkMerge [
       (optionalAttrs hasDarwinDock {

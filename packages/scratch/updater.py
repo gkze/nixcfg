@@ -22,7 +22,7 @@ from lib.nix.models.sources import HashCollection, SourceEntry, SourceHashes
 from lib.update.flake import nixpkgs_expression
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import REPO_ROOT, local_flake_url
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     FixedOutputHashStep,
     FlakeInputUpdater,
     UpdateContext,

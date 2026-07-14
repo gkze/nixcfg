@@ -18,14 +18,19 @@ from lib.tests._updater_helpers import empty_event_stream, install_fixed_hash_st
 from lib.update import updaters as updater_module
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import resolve_config
-from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
-from lib.update.updaters import UPDATERS
-from lib.update.updaters import flake_backed as flake_backed_module
-from lib.update.updaters import materialization as materialization_module
-from lib.update.updaters.base import (
+from lib.update.events import (
+    CommandResult,
+    EventStream,
+    StatusInfo,
+    StatusKind,
+    StatusPayload,
+    UpdateEvent,
+    UpdateEventKind,
+)
+from lib.update.updaters import (
+    UPDATERS,
     AssetURLsMetadataUpdater,
     ChecksumProvidedUpdater,
-    CommandResult,
     Crate2NixMetadataUpdater,
     DenoDepsHashUpdater,
     DenoManifestUpdater,
@@ -38,25 +43,30 @@ from lib.update.updaters.base import (
     Updater,
     UvLockUpdater,
     VersionInfo,
-    _verify_platform_versions,
-    bun_node_modules_updater,
-    cargo_vendor_updater,
-    deno_deps_updater,
-    deno_manifest_updater,
-    flake_input_hash_updater,
-    github_release_asset_urls_updater,
-    go_vendor_updater,
-    head_artifact_download_updater,
-    npm_deps_updater,
-    pinned_source_download_updater,
     register_updater,
-    sparkle_appcast_updater,
     stream_fixed_output_hashes,
-    uv_lock_hash_updater,
-    uv_lock_updater,
-    version_endpoint_download_updater,
 )
+from lib.update.updaters import flake_backed as flake_backed_module
+from lib.update.updaters import materialization as materialization_module
+from lib.update.updaters.core import _verify_platform_versions
+from lib.update.updaters.flake_backed import (
+    BunNodeModulesHashUpdater,
+    CargoVendorHashUpdater,
+    GoVendorHashUpdater,
+    NpmDepsHashUpdater,
+)
+from lib.update.updaters.github_release import GitHubReleaseAssetURLsUpdater
 from lib.update.updaters.metadata import AssetURLsMetadata, DownloadUrlMetadata
+from lib.update.updaters.strategies import (
+    ElectronAssetSelector,
+    ElectronBuilderAssetURLsUpdater,
+    HeadArtifactDownloadUpdater,
+    JsonFieldDownloadUpdater,
+    PinnedSourceDownloadUpdater,
+    SparkleAppcastUpdater,
+    SparkleAppcastUrlUpdater,
+    VersionEndpointDownloadUpdater,
+)
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
 if TYPE_CHECKING:
@@ -130,10 +140,9 @@ class _DummyChecksum(ChecksumProvidedUpdater):
 
 class _DummyDownload(DownloadHashUpdater):
     name = "download"
-    BASE_URL = "https://example.com"
     PLATFORMS: ClassVar[dict[str, str]] = {
-        "x86_64-linux": "linux.tar.gz",
-        "aarch64-linux": "arm.tar.gz",
+        "x86_64-linux": "https://example.com/linux.tar.gz",
+        "aarch64-linux": "https://example.com/arm.tar.gz",
     }
 
     async def fetch_latest(self, session: object) -> VersionInfo:
@@ -647,9 +656,7 @@ def test_stream_fixed_output_hashes_emits_entries_in_sequence(
         assert env == {"FROM": HASH_A}
         yield UpdateEvent.value(source, HASH_B)
 
-    monkeypatch.setattr(
-        "lib.update.updaters.base.compute_fixed_output_hash", _fixed_hash
-    )
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     async def _collect() -> list[UpdateEvent]:
         return [
@@ -740,7 +747,7 @@ def test_updater_skips_update_stream_on_unsupported_current_platform(
         supported_platforms = ("aarch64-darwin",)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "x86_64-linux",
     )
 
@@ -776,9 +783,10 @@ def test_updater_skips_update_stream_on_unsupported_current_platform(
         UpdateEventKind.RESULT,
     ]
     status_payload = events[0].payload
-    assert isinstance(status_payload, dict)
-    assert status_payload.get("status") == "unsupported_platform"
-    assert status_payload.get("detail") == "x86_64-linux"
+    assert isinstance(status_payload, StatusPayload)
+    assert status_payload.info is not None
+    assert status_payload.info.kind is StatusKind.UNSUPPORTED_PLATFORM
+    assert status_payload.info.value == "x86_64-linux"
     assert not any(event.kind == UpdateEventKind.VALUE for event in events)
 
 
@@ -791,7 +799,7 @@ def test_updater_supported_platforms_allows_native_platform(
         supported_platforms = ("aarch64-darwin",)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
@@ -799,7 +807,7 @@ def test_updater_supported_platforms_allows_native_platform(
         return "drv-fingerprint"
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         _compute_drv_fingerprint,
     )
 
@@ -815,8 +823,9 @@ def test_updater_supported_platforms_allows_native_platform(
 
     events = asyncio.run(_collect())
     assert not any(
-        isinstance(event.payload, dict)
-        and event.payload.get("status") == "unsupported_platform"
+        isinstance(event.payload, StatusPayload)
+        and event.payload.info is not None
+        and event.payload.info.kind is StatusKind.UNSUPPORTED_PLATFORM
         for event in events
     )
     assert any(
@@ -860,7 +869,7 @@ def test_checksum_provided_fetch_hashes(monkeypatch: pytest.MonkeyPatch) -> None
         yield UpdateEvent.status(name, f"convert {hex_hash}")
         yield UpdateEvent.value(name, HASH_A)
 
-    monkeypatch.setattr("lib.update.updaters.base.convert_nix_hash_to_sri", _convert)
+    monkeypatch.setattr("lib.update.process.convert_nix_hash_to_sri", _convert)
 
     async def _collect() -> list[UpdateEvent]:
         info = VersionInfo(version="1.0.0", metadata={})
@@ -880,7 +889,7 @@ def test_fetch_checksums_from_urls(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _fetch_url(_session: object, url: str, **_kwargs: object) -> bytes:
         return b"sum1" if url.endswith("1") else b"sum2"
 
-    monkeypatch.setattr("lib.update.updaters.base.fetch_url", _fetch_url)
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
 
     checksums = asyncio.run(
         _with_session(
@@ -925,7 +934,7 @@ def test_download_hash_updater(monkeypatch: pytest.MonkeyPatch) -> None:
         mapping = dict.fromkeys(urls, HASH_A)
         yield UpdateEvent.value("download", mapping)
 
-    monkeypatch.setattr("lib.update.updaters.base.compute_url_hashes", _hashes)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _hashes)
 
     async def _collect() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
@@ -1063,11 +1072,11 @@ def test_flake_input_fetch_latest_reads_lock_metadata(
     updater = _DummyFlakeInput()
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node",
+        "lib.update.flake.get_flake_input_node",
         lambda _name: SimpleNamespace(locked=SimpleNamespace(rev="a" * 40)),
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_version", lambda _node: "2.0.0"
+        "lib.update.flake.get_flake_input_version", lambda _node: "2.0.0"
     )
     latest = asyncio.run(_with_session(updater.fetch_latest))
     assert latest.version == "2.0.0"
@@ -1082,7 +1091,7 @@ def test_flake_hash_is_latest_uses_derivation_fingerprint(
     current = _entry(version="1.0.0", drv_hash="drv")
     info = VersionInfo(version="1.0.0", metadata={})
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         lambda *_a, **_k: asyncio.sleep(0, result="drv"),
     )
     assert (
@@ -1118,7 +1127,7 @@ def test_flake_hash_finalize_reports_fingerprint_status(
     info = VersionInfo(version="1.0.0", metadata={})
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         lambda *_a, **_k: asyncio.sleep(0, result="drv"),
     )
     events = asyncio.run(
@@ -1128,7 +1137,7 @@ def test_flake_hash_finalize_reports_fingerprint_status(
     assert any(e.kind == UpdateEventKind.VALUE for e in events)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     assert (
@@ -1168,7 +1177,7 @@ def test_platform_specific_fetch_hashes_computes_configured_targets(
         yield UpdateEvent.value(source_name, value)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_overlay_hash",
+        "lib.update.nix.compute_overlay_hash",
         _compute_overlay_hash,
     )
 
@@ -1176,7 +1185,7 @@ def test_platform_specific_fetch_hashes_computes_configured_targets(
         config=resolve_config(hash_build_platforms=("x86_64-linux", "aarch64-linux"))
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform", lambda: "x86_64-linux"
+        "lib.update.nix.get_current_nix_platform", lambda: "x86_64-linux"
     )
     info = VersionInfo(version="1.0.0", metadata={})
     plat_events = asyncio.run(
@@ -1212,11 +1221,11 @@ def test_platform_specific_fetch_hashes_preserves_existing_on_non_native_failure
         yield UpdateEvent.value(source_name, HASH_A)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_overlay_hash",
+        "lib.update.nix.compute_overlay_hash",
         _compute_overlay_hash,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
@@ -1277,15 +1286,15 @@ def test_platform_specific_update_keeps_drv_hash_when_hashes_are_preserved(
         yield UpdateEvent.value(source_name, HASH_A)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         _compute_drv_fingerprint,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_overlay_hash",
+        "lib.update.nix.compute_overlay_hash",
         _compute_overlay_hash,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
@@ -1337,11 +1346,11 @@ def test_platform_specific_update_rejects_partial_hashes_without_drv_hash(
         yield UpdateEvent.value(source_name, HASH_A)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_overlay_hash",
+        "lib.update.nix.compute_overlay_hash",
         _compute_overlay_hash,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
@@ -1386,15 +1395,15 @@ def test_platform_specific_native_only_update_keeps_drv_hash(
         yield UpdateEvent.value(source_name, HASH_A)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         _compute_drv_fingerprint,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_overlay_hash",
+        "lib.update.nix.compute_overlay_hash",
         _compute_overlay_hash,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
@@ -1445,15 +1454,15 @@ def test_platform_specific_native_only_single_platform_updates_drv_hash(
         yield UpdateEvent.value(source_name, HASH_A)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         _compute_drv_fingerprint,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_overlay_hash",
+        "lib.update.nix.compute_overlay_hash",
         _compute_overlay_hash,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
@@ -1508,15 +1517,15 @@ def test_platform_specific_single_supported_platform_updates_drv_hash(
         yield UpdateEvent.value(source_name, HASH_A)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         _compute_drv_fingerprint,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_overlay_hash",
+        "lib.update.nix.compute_overlay_hash",
         _compute_overlay_hash,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
@@ -1591,11 +1600,11 @@ def test_platform_specific_fetch_hashes_raises_on_native_failure(
         yield UpdateEvent.value("dummy-flake", HASH_A)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_overlay_hash",
+        "lib.update.nix.compute_overlay_hash",
         _compute_overlay_hash,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
@@ -1634,11 +1643,11 @@ def test_platform_specific_fetch_hashes_rejects_missing_non_native_preserve(
         yield UpdateEvent.value(source_name, HASH_A)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_overlay_hash",
+        "lib.update.nix.compute_overlay_hash",
         _compute_overlay_hash,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
@@ -1678,11 +1687,11 @@ def test_supported_platforms_skips_on_unsupported_current_platform(
         yield  # pragma: no cover - keep type as async generator
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_overlay_hash",
+        "lib.update.nix.compute_overlay_hash",
         _compute_overlay_hash,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "x86_64-linux",
     )
 
@@ -1717,7 +1726,9 @@ def test_supported_platforms_skips_on_unsupported_current_platform(
         event.payload for event in events if event.kind == UpdateEventKind.STATUS
     ]
     assert any(
-        isinstance(payload, dict) and payload.get("status") == "unsupported_platform"
+        isinstance(payload, StatusPayload)
+        and payload.info is not None
+        and payload.info.kind is StatusKind.UNSUPPORTED_PLATFORM
         for payload in status_payloads
     )
     value_events = [event for event in events if event.kind == UpdateEventKind.VALUE]
@@ -1803,15 +1814,15 @@ def test_deno_native_only_update_keeps_drv_hash_when_hashes_are_preserved(
         )
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         _compute_drv_fingerprint,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_deno_deps_hash",
+        "lib.update.nix_deno.compute_deno_deps_hash",
         _compute_deno_deps_hash,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
@@ -1874,8 +1885,7 @@ def test_deno_multi_platform_update_keeps_drv_hash_when_hashes_are_preserved(
             "deno-hash",
             "Warning: 1 platform(s) failed, preserved existing hashes for: x86_64-linux",
             operation="compute_hash",
-            status="partial_hashes",
-            detail=("x86_64-linux",),
+            status=StatusInfo(kind=StatusKind.PARTIAL_HASHES, value="x86_64-linux"),
         )
         yield UpdateEvent.value(
             "deno-hash",
@@ -1886,11 +1896,11 @@ def test_deno_multi_platform_update_keeps_drv_hash_when_hashes_are_preserved(
         )
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         _compute_drv_fingerprint,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_deno_deps_hash",
+        "lib.update.nix_deno.compute_deno_deps_hash",
         _compute_deno_deps_hash,
     )
 
@@ -1926,16 +1936,14 @@ def _install_deno_manifest_success(
     manifest = _DummyManifest()
     node = _deno_manifest_node()
 
-    monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node", lambda _name: node
-    )
+    monkeypatch.setattr("lib.update.flake.get_flake_input_node", lambda _name: node)
     monkeypatch.setattr(
         "lib.update.deno_lock.resolve_deno_deps",
         lambda _path: asyncio.sleep(0, result=manifest),
     )
     monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: tmp_path)
     monkeypatch.setattr(
-        "lib.update.updaters.base.fetch_url",
+        "lib.update.net.fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=b"{}"),
     )
     return updater
@@ -1970,7 +1978,7 @@ def test_deno_manifest_updater_rejects_incomplete_lock(
     """Deno manifest updater should fail before IO on incomplete locks."""
     updater = _DummyDenoManifest(config=resolve_config())
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node",
+        "lib.update.flake.get_flake_input_node",
         lambda _name: SimpleNamespace(locked=None),
     )
     with pytest.raises(RuntimeError, match="incomplete lock"):
@@ -1989,12 +1997,12 @@ def test_deno_manifest_updater_requires_package_directory(
     """Deno manifest artifacts need a checked-in package directory."""
     updater = _DummyDenoManifest(config=resolve_config())
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node",
+        "lib.update.flake.get_flake_input_node",
         lambda _name: _deno_manifest_node(),
     )
     monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: None)
     monkeypatch.setattr(
-        "lib.update.updaters.base.fetch_url",
+        "lib.update.net.fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=b"{}"),
     )
     monkeypatch.setattr(
@@ -2036,11 +2044,9 @@ def _install_uv_lock_success(
     )
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node", lambda _name: _uv_lock_node()
+        "lib.update.flake.get_flake_input_node", lambda _name: _uv_lock_node()
     )
-    monkeypatch.setattr(
-        "lib.update.updaters.base.package_dir_for", lambda _name: tmp_path
-    )
+    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: tmp_path)
 
     async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
         _ = options
@@ -2065,9 +2071,7 @@ def _install_uv_lock_success(
         msg = f"Unexpected command: {args}"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(
-        "lib.update.updaters.base.update_process.run_command", _fake_run_command
-    )
+    monkeypatch.setattr("lib.update.process.run_command", _fake_run_command)
     return updater
 
 
@@ -2107,11 +2111,9 @@ def test_uv_lock_updater_rejects_failed_uv_lock_command(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node", lambda _name: _uv_lock_node()
+        "lib.update.flake.get_flake_input_node", lambda _name: _uv_lock_node()
     )
-    monkeypatch.setattr(
-        "lib.update.updaters.base.package_dir_for", lambda _name: tmp_path
-    )
+    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: tmp_path)
 
     async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
         _ = options
@@ -2139,9 +2141,7 @@ def test_uv_lock_updater_rejects_failed_uv_lock_command(
         msg = f"Unexpected command: {args}"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(
-        "lib.update.updaters.base.update_process.run_command", _fake_run_command
-    )
+    monkeypatch.setattr("lib.update.process.run_command", _fake_run_command)
 
     with pytest.raises(RuntimeError, match="uv lock failed"):
         asyncio.run(
@@ -2162,7 +2162,7 @@ def test_uv_lock_updater_rejects_incomplete_lock(
     updater = _DummyUvLockUpdater(config=resolve_config())
     info = VersionInfo(version="1.0.0", metadata={})
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node",
+        "lib.update.flake.get_flake_input_node",
         lambda _name: SimpleNamespace(locked=None),
     )
     with pytest.raises(RuntimeError, match="incomplete lock"):
@@ -2180,9 +2180,9 @@ def test_uv_lock_updater_requires_package_directory(
     updater = _DummyUvLockUpdater(config=resolve_config())
     info = VersionInfo(version="1.0.0", metadata={})
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node", lambda _name: _uv_lock_node()
+        "lib.update.flake.get_flake_input_node", lambda _name: _uv_lock_node()
     )
-    monkeypatch.setattr("lib.update.updaters.base.package_dir_for", lambda _name: None)
+    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: None)
 
     async def _resolve_only(args: list[str], *, options: object) -> EventStream:
         _ = options
@@ -2191,9 +2191,7 @@ def test_uv_lock_updater_requires_package_directory(
             CommandResult(args=args, returncode=0, stdout="/tmp/source\n", stderr=""),
         )
 
-    monkeypatch.setattr(
-        "lib.update.updaters.base.update_process.run_command", _resolve_only
-    )
+    monkeypatch.setattr("lib.update.process.run_command", _resolve_only)
     with pytest.raises(RuntimeError, match="Package directory not found"):
         asyncio.run(
             _with_session(
@@ -2273,12 +2271,8 @@ def test_uv_lock_updater_rejects_empty_source_path(
             nar_hash="sha256-demo",
         ),
     )
-    monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node", lambda _name: node
-    )
-    monkeypatch.setattr(
-        "lib.update.updaters.base.package_dir_for", lambda _name: tmp_path
-    )
+    monkeypatch.setattr("lib.update.flake.get_flake_input_node", lambda _name: node)
+    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: tmp_path)
 
     async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
         _ = options
@@ -2292,9 +2286,7 @@ def test_uv_lock_updater_rejects_empty_source_path(
         msg = f"Unexpected command: {args}"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(
-        "lib.update.updaters.base.update_process.run_command", _fake_run_command
-    )
+    monkeypatch.setattr("lib.update.process.run_command", _fake_run_command)
 
     with pytest.raises(RuntimeError, match="Failed to resolve source path"):
         asyncio.run(
@@ -2314,11 +2306,9 @@ def test_uv_lock_updater_rejects_failed_source_resolution(
     """Do not trust stdout from a failed nix eval source-path command."""
     updater = _DummyUvLockUpdater(config=resolve_config())
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node", lambda _name: _uv_lock_node()
+        "lib.update.flake.get_flake_input_node", lambda _name: _uv_lock_node()
     )
-    monkeypatch.setattr(
-        "lib.update.updaters.base.package_dir_for", lambda _name: tmp_path
-    )
+    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: tmp_path)
 
     async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
         _ = options
@@ -2336,9 +2326,7 @@ def test_uv_lock_updater_rejects_failed_source_resolution(
         msg = f"Unexpected command: {args}"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(
-        "lib.update.updaters.base.update_process.run_command", _fake_run_command
-    )
+    monkeypatch.setattr("lib.update.process.run_command", _fake_run_command)
 
     with pytest.raises(RuntimeError, match="nix eval failed"):
         asyncio.run(
@@ -2365,147 +2353,381 @@ def test_uv_lock_updater_expect_path_payload_validates_string_inputs() -> None:
         updater._expect_path_payload(3, context="workspace")
 
 
-def test_factory_helpers_return_expected_subclasses() -> None:
-    """Factory helpers should create the expected updater subclasses."""
-    assert flake_input_hash_updater("x", "vendorHash").hash_type == "vendorHash"
-    assert go_vendor_updater("x").hash_type == "vendorHash"
-    assert cargo_vendor_updater("x").hash_type == "cargoHash"
-    assert npm_deps_updater("x").hash_type == "npmDepsHash"
-    assert bun_node_modules_updater("x").platform_specific is True
-    assert uv_lock_hash_updater("x").hash_type == "uvLockHash"
-    assert uv_lock_updater("x").__name__.endswith("Updater")
-    assert deno_deps_updater("x").__name__.endswith("Updater")
-    assert deno_manifest_updater("x").__name__.endswith("Updater")
+def test_flake_hash_shorthand_updaters_declare_expected_hash_types() -> None:
+    """Flake shorthand strategy classes should pin their hash type contracts."""
+    assert GoVendorHashUpdater.hash_type == "vendorHash"
+    assert CargoVendorHashUpdater.hash_type == "cargoHash"
+    assert NpmDepsHashUpdater.hash_type == "npmDepsHash"
+    assert BunNodeModulesHashUpdater.hash_type == "nodeModulesHash"
+    assert BunNodeModulesHashUpdater.platform_specific is True
+    for shorthand in (
+        GoVendorHashUpdater,
+        CargoVendorHashUpdater,
+        NpmDepsHashUpdater,
+        BunNodeModulesHashUpdater,
+    ):
+        assert issubclass(shorthand, FlakeInputHashUpdater)
 
-    github_cls = github_release_asset_urls_updater(
-        "factory-github-asset",
-        github_owner="owner",
-        github_repo="repo",
-        platforms={"x86_64-linux": "linux-x64"},
-        asset_name="demo-{version}-{platform_value}.tar.gz",
-        module=__name__,
-    )
-    github_updater = github_cls()
-    assert github_cls.__module__ == __name__
-    assert (
-        github_updater._asset_name("1.2.3", "linux-x64")
-        == "demo-1.2.3-linux-x64.tar.gz"
-    )
 
-    version_cls = version_endpoint_download_updater(
-        "factory-version-endpoint",
-        version_url="https://example.test/version",
-        platforms={"x86_64-linux": "linux-x64"},
-        download_url="https://example.test/{version}/{platform_value}.tgz",
-        module=__name__,
+def test_github_release_asset_urls_updater_renders_asset_names_and_urls() -> None:
+    """Asset-name templates should drive fallback release download URLs."""
+
+    class _GitHubAsset(GitHubReleaseAssetURLsUpdater):
+        name = "strategy-github-asset"
+        GITHUB_OWNER = "owner"
+        GITHUB_REPO = "repo"
+        PLATFORMS: ClassVar[dict[str, str]] = {"x86_64-linux": "linux-x64"}
+        ASSET_NAME_TEMPLATE = "demo-{version}-{platform_value}.tar.gz"
+
+    updater = _GitHubAsset()
+    assert updater._asset_name("1.2.3", "linux-x64") == "demo-1.2.3-linux-x64.tar.gz"
+    assert updater.get_download_url(
+        "x86_64-linux",
+        VersionInfo(version="1.2.3"),
+    ) == (
+        "https://github.com/owner/repo/releases/download/v1.2.3/"
+        "demo-1.2.3-linux-x64.tar.gz"
     )
     assert (
-        version_cls().get_download_url(
+        updater.get_download_url(
             "x86_64-linux",
-            VersionInfo(version="4.5.6"),
+            VersionInfo(
+                version="1.2.3",
+                metadata=AssetURLsMetadata({
+                    "x86_64-linux": "https://cdn.example.test/demo.tar.gz"
+                }),
+            ),
         )
+        == "https://cdn.example.test/demo.tar.gz"
+    )
+    with pytest.raises(RuntimeError, match="Unsupported platform"):
+        updater.get_download_url("aarch64-linux", VersionInfo(version="1.2.3"))
+
+
+def test_version_endpoint_download_updater_resolves_plain_text_versions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Plain-text version endpoints should resolve versions and template URLs."""
+
+    class _VersionEndpoint(VersionEndpointDownloadUpdater):
+        name = "strategy-version-endpoint"
+        VERSION_URL = "https://example.test/version"
+        PLATFORMS: ClassVar[dict[str, str]] = {"x86_64-linux": "linux-x64"}
+        DOWNLOAD_URL_TEMPLATE = "https://example.test/{version}/{platform_value}.tgz"
+
+    payload = b"4.5.6\n"
+
+    async def _fetch_url(_session: object, url: str, **_kwargs: object) -> bytes:
+        assert url == "https://example.test/version"
+        return payload
+
+    monkeypatch.setattr("lib.update.updaters.strategies.fetch_url", _fetch_url)
+    updater = _VersionEndpoint()
+
+    info = asyncio.run(updater.fetch_latest(object()))
+    assert info == VersionInfo(version="4.5.6")
+    assert (
+        updater.get_download_url("x86_64-linux", info)
         == "https://example.test/4.5.6/linux-x64.tgz"
     )
 
-    sparkle_cls = sparkle_appcast_updater(
-        "factory-sparkle",
-        appcast_url="https://example.test/appcast.xml",
-        platforms={"aarch64-darwin": "darwin"},
-        download_url="https://example.test/{version}/{platform_value}.pkg",
-        version_field="short_or_version",
-        module=__name__,
+    payload = b"  \n"
+    with pytest.raises(
+        RuntimeError,
+        match="Missing strategy-version-endpoint version",
+    ):
+        asyncio.run(updater.fetch_latest(object()))
+
+
+def test_json_field_download_updater_reads_flat_and_nested_version_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """JSON endpoints should support flat and nested version field paths."""
+
+    class _FlatJson(JsonFieldDownloadUpdater):
+        name = "strategy-json-flat"
+        JSON_URL = "https://example.test/meta.json"
+        PLATFORMS: ClassVar[dict[str, str]] = {
+            "x86_64-linux": "https://example.test/app.tgz"
+        }
+
+    class _NestedJson(_FlatJson):
+        name = "strategy-json-nested"
+        VERSION_PATH = ("release", "tag")
+
+    payload: dict[str, object] = {
+        "version": " 4.5.6 ",
+        "release": {"tag": "7.8.9"},
+    }
+
+    async def _fetch_json(_session: object, url: str, **_kwargs: object) -> object:
+        assert url == "https://example.test/meta.json"
+        return payload
+
+    monkeypatch.setattr("lib.update.updaters.strategies.fetch_json", _fetch_json)
+
+    assert asyncio.run(_FlatJson().fetch_latest(object())) == VersionInfo(
+        version="4.5.6"
     )
-    assert (
-        sparkle_cls().get_download_url(
-            "aarch64-darwin",
-            VersionInfo(version="7.8.9"),
-        )
-        == "https://example.test/7.8.9/darwin.pkg"
+    assert asyncio.run(_NestedJson().fetch_latest(object())) == VersionInfo(
+        version="7.8.9"
     )
 
-    sparkle_metadata_cls = sparkle_appcast_updater(
-        "factory-sparkle-metadata",
-        appcast_url="https://example.test/appcast.xml",
-        platforms={"aarch64-darwin": "darwin"},
-        appcast_url_metadata=True,
-        url_metadata_context="Factory Sparkle metadata",
-        module=__name__,
-    )
-    assert issubclass(sparkle_metadata_cls, DownloadUrlMetadataUpdater)
-    assert sparkle_metadata_cls.URL_METADATA_CONTEXT == "Factory Sparkle metadata"
-    assert (
-        sparkle_metadata_cls().get_download_url(
-            "aarch64-darwin",
-            VersionInfo(
-                version="7.8.9",
-                metadata=DownloadUrlMetadata("https://example.test/app.pkg"),
-            ),
-        )
-        == "https://example.test/app.pkg"
-    )
+    payload = {"version": "   "}
+    with pytest.raises(RuntimeError, match="Missing strategy-json-flat version"):
+        asyncio.run(_FlatJson().fetch_latest(object()))
 
-    head_cls = head_artifact_download_updater(
-        "factory-head-artifact",
-        download_url="https://example.test/app.dmg",
-        platforms={"aarch64-darwin": "https://example.test/app.dmg"},
-        module=__name__,
+
+def test_json_field_download_updater_applies_version_transform_hook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Subclasses may normalize raw JSON version fields before use."""
+
+    class _TransformedJson(JsonFieldDownloadUpdater):
+        name = "strategy-json-transformed"
+        JSON_URL = "https://example.test/meta.json"
+        PLATFORMS: ClassVar[dict[str, str]] = {
+            "x86_64-linux": "https://example.test/app.tgz"
+        }
+
+        def transform_version(self, raw: str) -> str:
+            return raw.removeprefix("v")
+
+    async def _fetch_json(*_args: object, **_kwargs: object) -> object:
+        return {"version": "v4.5.6"}
+
+    monkeypatch.setattr("lib.update.updaters.strategies.fetch_json", _fetch_json)
+
+    info = asyncio.run(_TransformedJson().fetch_latest(object()))
+    assert info == VersionInfo(version="4.5.6")
+
+
+def test_head_artifact_download_updater_versions_from_response_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Header-versioned artifacts should keep their static download URLs."""
+
+    class _HeadArtifact(HeadArtifactDownloadUpdater):
+        name = "strategy-head-artifact"
+        HEAD_URL = "https://example.test/app.dmg"
+        PLATFORMS: ClassVar[dict[str, str]] = {
+            "aarch64-darwin": "https://example.test/app.dmg"
+        }
+
+    async def _head_version(
+        _session: object,
+        url: str,
+        *,
+        config: object,
+    ) -> str:
+        _ = config
+        assert url == "https://example.test/app.dmg"
+        return "20260101.etag-token"
+
+    monkeypatch.setattr(
+        "lib.update.updaters.strategies.fetch_head_artifact_version",
+        _head_version,
     )
+    updater = _HeadArtifact()
+
+    info = asyncio.run(updater.fetch_latest(object()))
+    assert info == VersionInfo(version="20260101.etag-token")
     assert (
-        head_cls().get_download_url(
-            "aarch64-darwin",
-            VersionInfo(version="2026-01-01"),
-        )
+        updater.get_download_url("aarch64-darwin", info)
         == "https://example.test/app.dmg"
     )
 
-    pinned_cls = pinned_source_download_updater(
-        "factory-pinned-source",
-        platforms={"aarch64-darwin": "darwin-arm64"},
-        download_url="https://example.test/{version}/{platform_value}.tgz",
-        module=__name__,
+
+def test_pinned_source_download_updater_rehashes_the_pinned_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pinned-source downloads reuse sources.json versions and always refresh."""
+
+    class _PinnedSource(PinnedSourceDownloadUpdater):
+        name = "strategy-pinned-source"
+        PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "darwin-arm64"}
+        DOWNLOAD_URL_TEMPLATE = "https://example.test/{version}/{platform_value}.tgz"
+
+    monkeypatch.setattr(
+        "lib.update.updaters.strategies.read_pinned_source_version",
+        lambda name: {"strategy-pinned-source": "1.0.0"}[name],
     )
-    assert pinned_cls.materialize_when_current is True
+    updater = _PinnedSource()
+
+    assert _PinnedSource.materialize_when_current is True
+    info = asyncio.run(updater.fetch_latest(object()))
+    assert info == VersionInfo(version="1.0.0")
     assert (
-        pinned_cls().get_download_url(
-            "aarch64-darwin",
-            VersionInfo(version="1.0.0"),
-        )
+        updater.get_download_url("aarch64-darwin", info)
         == "https://example.test/1.0.0/darwin-arm64.tgz"
     )
 
 
-def test_sparkle_factory_preserves_appcast_metadata_and_transform(
+def _install_sparkle_items(
+    monkeypatch: pytest.MonkeyPatch,
+    items: tuple[SparkleAppcastItem, ...],
+) -> None:
+    async def _fetch_items(*_args: object, **_kwargs: object):
+        return items
+
+    monkeypatch.setattr(
+        "lib.update.updaters.strategies.fetch_sparkle_appcast_items",
+        _fetch_items,
+    )
+
+
+def test_sparkle_appcast_updater_resolves_the_newest_item(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Sparkle factory should support URL metadata and item-level transforms."""
+    """Sparkle updaters should read the first appcast item and template URLs."""
 
-    async def _fetch_items(*_args: object, **_kwargs: object):
-        return (
+    class _Sparkle(SparkleAppcastUpdater):
+        name = "strategy-sparkle"
+        APPCAST_URL = "https://example.test/appcast.xml"
+        VERSION_FIELD = "short_or_version"
+        PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "darwin"}
+        DOWNLOAD_URL_TEMPLATE = "https://example.test/{version}/{platform_value}.pkg"
+
+    _install_sparkle_items(
+        monkeypatch,
+        (
+            SparkleAppcastItem("42", "7.8.9", None),
+            SparkleAppcastItem("41", "7.8.8", None),
+        ),
+    )
+    updater = _Sparkle()
+
+    info = asyncio.run(updater.fetch_latest(object()))
+    assert info == VersionInfo(version="7.8.9")
+    assert (
+        updater.get_download_url("aarch64-darwin", info)
+        == "https://example.test/7.8.9/darwin.pkg"
+    )
+
+    _install_sparkle_items(monkeypatch, (SparkleAppcastItem(None, None, None),))
+    with pytest.raises(
+        RuntimeError,
+        match="Missing version in https://example.test/appcast.xml",
+    ):
+        asyncio.run(updater.fetch_latest(object()))
+
+
+def test_sparkle_appcast_url_updater_captures_enclosure_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Appcast-URL Sparkle updaters should download the enclosure artifact."""
+
+    class _SparkleUrl(SparkleAppcastUrlUpdater):
+        name = "strategy-sparkle-metadata"
+        APPCAST_URL = "https://example.test/appcast.xml"
+        PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "darwin"}
+        URL_METADATA_CONTEXT = "Strategy Sparkle metadata"
+
+    assert issubclass(SparkleAppcastUrlUpdater, DownloadUrlMetadataUpdater)
+    updater = _SparkleUrl()
+
+    _install_sparkle_items(
+        monkeypatch,
+        (SparkleAppcastItem("42", "7.8.9", "https://example.test/app.pkg"),),
+    )
+    info = asyncio.run(updater.fetch_latest(object()))
+    assert info == VersionInfo(
+        version="42",
+        metadata=DownloadUrlMetadata("https://example.test/app.pkg"),
+    )
+    assert (
+        updater.get_download_url("aarch64-darwin", info)
+        == "https://example.test/app.pkg"
+    )
+
+    _install_sparkle_items(monkeypatch, (SparkleAppcastItem("42", "7.8.9", None),))
+    with pytest.raises(
+        RuntimeError,
+        match="Missing download URL in https://example.test/appcast.xml",
+    ):
+        asyncio.run(updater.fetch_latest(object()))
+
+
+def test_sparkle_appcast_url_updater_supports_version_hooks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sparkle strategies should support item-level version hooks with metadata."""
+
+    class _SparkleTransform(SparkleAppcastUrlUpdater):
+        name = "strategy-sparkle-transform"
+        APPCAST_URL = "https://example.test/appcast.xml"
+        PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "darwin"}
+
+        def item_version(self, item: SparkleAppcastItem) -> str | None:
+            return f"{item.short_version}-{item.version}"
+
+    _install_sparkle_items(
+        monkeypatch,
+        (
             SparkleAppcastItem(
                 "42",
                 "1.2.3",
                 "https://example.test/downloads/App.zip",
             ),
-        )
-
-    monkeypatch.setattr(
-        "lib.update.updaters.factories.fetch_sparkle_appcast_items",
-        _fetch_items,
-    )
-    updater_cls = sparkle_appcast_updater(
-        "factory-sparkle-transform",
-        appcast_url="https://example.test/appcast.xml",
-        platforms={"aarch64-darwin": "darwin"},
-        version_transform=lambda item: f"{item.short_version}-{item.version}",
-        appcast_url_metadata=True,
-        module=__name__,
+        ),
     )
 
-    info = asyncio.run(updater_cls().fetch_latest(object()))
+    info = asyncio.run(_SparkleTransform().fetch_latest(object()))
 
     assert info == VersionInfo(
         version="1.2.3-42",
         metadata=DownloadUrlMetadata("https://example.test/downloads/App.zip"),
+    )
+
+
+def test_electron_builder_asset_urls_updater_prefers_feed_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Electron-builder feeds provide asset URLs with a template fallback."""
+
+    class _Electron(ElectronBuilderAssetURLsUpdater):
+        name = "strategy-electron"
+        FEED_URL = "https://example.test/latest-mac.yml"
+        PLATFORMS: ClassVar[dict[str, str]] = {
+            "aarch64-darwin": "arm64",
+            "x86_64-darwin": "x64",
+        }
+        DOWNLOAD_URL_TEMPLATE = "https://example.test/{version}/{platform_value}.dmg"
+        SELECTORS: ClassVar[dict[str, ElectronAssetSelector]] = {
+            "aarch64-darwin": lambda _version, url: "arm64" in url,
+        }
+
+    async def _fetch_asset_urls(
+        _session: object,
+        url: str,
+        selectors: object,
+        *,
+        config: object,
+    ) -> tuple[str, dict[str, str]]:
+        _ = config
+        assert url == "https://example.test/latest-mac.yml"
+        assert selectors is _Electron.SELECTORS
+        return "3.2.1", {"aarch64-darwin": "https://cdn.example.test/app-arm64.dmg"}
+
+    monkeypatch.setattr(
+        "lib.update.updaters.strategies.fetch_electron_builder_asset_urls",
+        _fetch_asset_urls,
+    )
+    updater = _Electron()
+
+    info = asyncio.run(updater.fetch_latest(object()))
+    assert info.version == "3.2.1"
+    assert (
+        updater.get_download_url("aarch64-darwin", info)
+        == "https://cdn.example.test/app-arm64.dmg"
+    )
+    assert (
+        updater.get_download_url("x86_64-darwin", info)
+        == "https://example.test/3.2.1/x64.dmg"
+    )
+    assert (
+        updater.get_download_url("aarch64-darwin", VersionInfo(version="3.2.1"))
+        == "https://example.test/3.2.1/arm64.dmg"
     )
 
 

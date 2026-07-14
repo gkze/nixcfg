@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import pinned_source_download_updater
+from typing import ClassVar
 
-MoleAppUpdater = pinned_source_download_updater(
-    "mole-app",
-    platforms={
+from lib.update.updaters import PinnedSourceDownloadUpdater, register_updater
+
+
+@register_updater
+class MoleAppUpdater(PinnedSourceDownloadUpdater):
+    """Pinned download updater for the Mole helper binary archives."""
+
+    name = "mole-app"
+    PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin-arm64",
         "x86_64-darwin": "darwin-amd64",
-    },
-    download_url=(
+    }
+    DOWNLOAD_URL_TEMPLATE = (
         "https://github.com/tw93/Mole/releases/download/"
         "V{version}/binaries-{platform_value}.tar.gz"
-    ),
-    module=__name__,
-)
+    )

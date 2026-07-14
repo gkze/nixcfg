@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import head_artifact_download_updater
+from typing import ClassVar
+
+from lib.update.updaters import HeadArtifactDownloadUpdater, register_updater
 
 DOWNLOAD_URL = (
     "https://download01.logi.com/web/ftp/pub/techsupport/optionsplus/"
     "logioptionsplus_installer.zip"
 )
 
-LogiOptionsPlusUpdater = head_artifact_download_updater(
-    "logi-options-plus",
-    download_url=DOWNLOAD_URL,
-    platforms={"aarch64-darwin": DOWNLOAD_URL},
-    module=__name__,
-)
+
+@register_updater
+class LogiOptionsPlusUpdater(HeadArtifactDownloadUpdater):
+    """Version Logitech Options+ by the mutable installer's response headers."""
+
+    name = "logi-options-plus"
+    HEAD_URL = DOWNLOAD_URL
+    PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": DOWNLOAD_URL}

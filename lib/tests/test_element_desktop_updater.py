@@ -11,14 +11,14 @@ from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
+from lib.update import sources as update_sources
 from lib.update.events import UpdateEventKind
 from lib.update.nix import (
     _build_fetch_from_github_call,
     _build_fetch_pnpm_deps_expr,
     _build_pnpm_10_nodejs_22_expr,
 )
-from lib.update.updaters import base as updater_base
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 
 
 def _load_module(module_name: str = "element_desktop_updater_test"):
@@ -33,10 +33,10 @@ def test_element_desktop_fetch_latest_reads_pinned_version(
     updater = module.ElementDesktopUpdater()
 
     monkeypatch.setattr(
-        updater_base, "package_dir_for", lambda _name: Path("/tmp/element-desktop")
+        update_sources, "package_dir_for", lambda _name: Path("/tmp/element-desktop")
     )
     monkeypatch.setattr(
-        updater_base.update_sources,
+        update_sources,
         "load_source_entry",
         lambda path: type("Entry", (), {"path": path, "version": "1.11.99"})(),
     )
@@ -65,9 +65,9 @@ def test_element_desktop_fetch_latest_rejects_missing_package_or_version(
     module = _load_module("element_desktop_updater_test_fetch_latest_error")
     updater = module.ElementDesktopUpdater()
 
-    monkeypatch.setattr(updater_base, "package_dir_for", lambda _name: pkg_dir)
+    monkeypatch.setattr(update_sources, "package_dir_for", lambda _name: pkg_dir)
     monkeypatch.setattr(
-        updater_base.update_sources,
+        update_sources,
         "load_source_entry",
         lambda _path: type("Entry", (), {"version": version})(),
     )

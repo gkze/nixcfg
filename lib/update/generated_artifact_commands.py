@@ -11,6 +11,8 @@ from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
     CommandResult,
     EventStream,
+    StatusInfo,
+    StatusKind,
     UpdateEvent,
     ValueDrain,
     drain_value_events,
@@ -124,8 +126,7 @@ async def stream_command_materialized_artifacts(
                 source,
                 f"Refreshing {detail}...",
                 operation=operation,
-                status="computing_hash",
-                detail=detail,
+                status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value=detail),
             )
             result_drain = ValueDrain[CommandResult]()
             async for event in drain_value_events(
@@ -151,8 +152,7 @@ async def stream_command_materialized_artifacts(
                 source,
                 f"Prepared {detail}",
                 operation=operation,
-                status="updated",
-                detail=detail,
+                status=StatusInfo(kind=StatusKind.UPDATED, value=detail),
             )
 
             async for event in inner:

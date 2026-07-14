@@ -924,8 +924,8 @@ def test_command_routing_for_new_and_legacy_aliases(
     monkeypatch.setattr(ws, "_cmd_list_update_targets", lambda: 17)
     monkeypatch.setattr(ws, "_cmd_generate_pr_body", lambda **_kwargs: 18)
     monkeypatch.setattr(ws, "_cmd_render_certification_pr_body", lambda **_kwargs: 27)
-    monkeypatch.setattr(ws, "_cmd_verify_artifacts", lambda *, workflow: 19)
-    monkeypatch.setattr(ws, "_cmd_verify_structure", lambda *, workflow: 23)
+    monkeypatch.setattr(ws, "_cmd_generate_workflows", lambda: 19)
+    monkeypatch.setattr(ws, "_cmd_verify_generated_workflows", lambda: 23)
     monkeypatch.setattr(ws, "_cmd_validate_bun_lock", lambda *, lock_file: 20)
     monkeypatch.setattr(ws, "_cmd_snapshot_flake_input", lambda **_kwargs: 25)
     monkeypatch.setattr(ws, "_cmd_compare_flake_input", lambda **_kwargs: 26)
@@ -993,8 +993,8 @@ def test_command_routing_for_new_and_legacy_aliases(
     assert ws.main(["nix-flake-update"]) == 15
     assert ws.main(["smoke-check-update-app"]) == 16
     assert ws.main(["list-update-targets"]) == 17
-    assert ws.main(["verify-artifacts"]) == 19
-    assert ws.main(["verify-structure"]) == 23
+    assert ws.main(["generate"]) == 19
+    assert ws.main(["verify-generated"]) == 23
     assert ws.main(["validate-bun-lock", "--lock-file", "bun.lock"]) == 20
     assert (
         ws.main([
@@ -1041,8 +1041,8 @@ def test_command_routing_for_new_and_legacy_aliases(
 def test_registered_command_metadata_preserves_cli_surface() -> None:
     """Keep command names, alias help text, and mounted groups stable."""
     assert [(command.name, command.help) for command in ws.app.registered_commands] == [
-        ("verify-artifacts", None),
-        ("verify-structure", None),
+        ("generate", None),
+        ("verify-generated", None),
         ("validate-bun-lock", None),
         ("prepare-bun-lock", None),
         ("build-darwin-config", "Alias for `darwin build`."),
@@ -1117,68 +1117,90 @@ def test_registered_command_metadata_preserves_cli_surface() -> None:
     )
 
 
-def test_cmd_verify_artifacts_reports_validation_failures(
+def test_cmd_generate_workflows_writes_documents(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Render workflow artifact contract failures to stderr."""
+    """Write rendered workflow documents into the resolved repo root."""
+    monkeypatch.setattr(
+        ws,
+        "render_generated_workflows",
+        lambda: {".github/workflows/demo.yml": "name: demo\n"},
+    )
 
-    def _fail(*, workflow_path: Path) -> None:
-        del workflow_path
+    assert ws._cmd_generate_workflows(root=tmp_path) == 0
+    assert (tmp_path / ".github/workflows/demo.yml").read_text() == "name: demo\n"
+    assert "Wrote .github/workflows/demo.yml" in capsys.readouterr().out
+
+
+def test_cmd_generate_workflows_defaults_to_repo_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Resolve the repo root when no explicit root override is provided."""
+    monkeypatch.setattr(ws, "render_generated_workflows", lambda: {"demo.yml": "x\n"})
+    monkeypatch.setattr(ws, "get_repo_root", lambda: tmp_path)
+
+    assert ws._cmd_generate_workflows() == 0
+    assert (tmp_path / "demo.yml").read_text() == "x\n"
+
+
+def test_cmd_verify_generated_workflows_reports_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report unified diffs and a remediation hint when files drifted."""
+    (tmp_path / "demo.yml").write_text("name: stale\n", encoding="utf-8")
+    monkeypatch.setattr(
+        ws,
+        "render_generated_workflows",
+        lambda: {"demo.yml": "name: fresh\n", "missing.yml": "name: new\n"},
+    )
+    monkeypatch.setattr(ws, "get_repo_root", lambda: tmp_path)
+
+    assert ws._cmd_verify_generated_workflows() == 1
+    err = capsys.readouterr().err
+    assert "-name: stale" in err
+    assert "+name: fresh" in err
+    assert "missing.yml: generated workflow file is missing" in err
+    assert "run `nixcfg ci workflow generate`" in err
+
+
+def test_cmd_verify_generated_workflows_reports_success(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report success when committed files match the rendered documents."""
+    (tmp_path / "demo.yml").write_text("name: demo\n", encoding="utf-8")
+    monkeypatch.setattr(
+        ws,
+        "render_generated_workflows",
+        lambda: {"demo.yml": "name: demo\n"},
+    )
+
+    assert ws._cmd_verify_generated_workflows(root=tmp_path) == 0
+    assert "Verified 1 generated workflow files" in capsys.readouterr().out
+
+
+def test_cmd_verify_generated_workflows_reports_render_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Surface model validation errors raised while rendering."""
+
+    def _fail() -> dict[str, str]:
         msg = "artifact contract mismatch"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr(ws, "validate_workflow_artifact_contracts", _fail)
+    monkeypatch.setattr(ws, "render_generated_workflows", _fail)
 
-    assert ws._cmd_verify_artifacts(workflow=Path("workflow.yml")) == 1
+    assert ws._cmd_verify_generated_workflows(root=tmp_path) == 1
+    assert ws._cmd_generate_workflows(root=tmp_path) == 1
     assert "artifact contract mismatch" in capsys.readouterr().err
-
-
-def test_cmd_verify_artifacts_reports_success(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Render successful workflow artifact validation to stdout."""
-
-    def _ok(*, workflow_path: Path) -> None:
-        del workflow_path
-
-    monkeypatch.setattr(ws, "validate_workflow_artifact_contracts", _ok)
-
-    assert ws._cmd_verify_artifacts(workflow=Path("workflow.yml")) == 0
-    assert "Verified workflow artifact contracts" in capsys.readouterr().out
-
-
-def test_cmd_verify_structure_reports_validation_failures(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Render workflow structure contract failures to stderr."""
-
-    def _fail(*, workflow_path: Path) -> None:
-        del workflow_path
-        msg = "structure contract mismatch"
-        raise RuntimeError(msg)
-
-    monkeypatch.setattr(ws, "validate_workflow_structure_contracts", _fail)
-
-    assert ws._cmd_verify_structure(workflow=Path("workflow.yml")) == 1
-    assert "structure contract mismatch" in capsys.readouterr().err
-
-
-def test_cmd_verify_structure_reports_success(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Render successful workflow structure validation to stdout."""
-
-    def _ok(*, workflow_path: Path) -> None:
-        del workflow_path
-
-    monkeypatch.setattr(ws, "validate_workflow_structure_contracts", _ok)
-
-    assert ws._cmd_verify_structure(workflow=Path("workflow.yml")) == 0
-    assert "Verified workflow structure contracts" in capsys.readouterr().out
 
 
 def test_generate_pr_body_skips_no_change_package_diffs(
@@ -1380,6 +1402,33 @@ def test_render_certification_pr_body_appends_section(
     assert "- `.#darwinConfigurations.rocinante.system`" in rendered
     assert "- `.#pkgs.x86_64-linux.nixcfg`" in rendered
     assert ws.extract_pr_body_model(rendered).certification is not None
+
+
+def test_render_certification_pr_body_defaults_to_typed_workflow_model(
+    tmp_path: Path,
+) -> None:
+    """Enumerate certified closures from the typed defs when no path is given."""
+    existing_body = tmp_path / "body.md"
+    output = tmp_path / "updated.md"
+    _write_existing_pr_body(existing_body)
+
+    rc = ws.render_certification_pr_body(
+        existing_body=existing_body,
+        output=output,
+        options=ws.CertificationPRBodyOptions(
+            workflow_url="https://example.test/actions/runs/42",
+            started_at="2026-04-24T12:00:00Z",
+            updated_at="2026-04-24T14:15:00Z",
+            cachix_name="gkze",
+        ),
+    )
+
+    assert rc == 0
+    rendered = output.read_text(encoding="utf-8")
+    assert "- `.#pkgs.aarch64-darwin.zed-editor-nightly`" in rendered
+    assert "- `.#darwinConfigurations.argus.system`" in rendered
+    assert "- `.#darwinConfigurations.rocinante.system`" in rendered
+    assert "- `.#pkgs.x86_64-linux.nixcfg`" in rendered
 
 
 def test_render_certification_pr_body_reports_degraded_jobs(

@@ -1,4 +1,4 @@
-"""Updater factory for hashing files fetched from GitHub raw content."""
+"""Updater base for hashing files fetched from GitHub raw content."""
 
 from __future__ import annotations
 
@@ -21,28 +21,12 @@ from lib.update.net import (
     github_raw_url,
 )
 from lib.update.process import compute_url_hashes
-from lib.update.updaters.base import HashEntryUpdater, UpdateContext, VersionInfo
-from lib.update.updaters.metadata import GitHubRawFileMetadata, require_metadata_str
-from lib.update.updaters.registry import register_updater
-
-
-def github_raw_file_updater(
-    name: str,
-    *,
-    module: str | None = None,
-    owner: str,
-    repo: str,
-    path: str,
-) -> type[GitHubRawFileUpdater]:
-    """Create a ``GitHubRawFileUpdater`` subclass with fixed repo/path settings."""
-    attrs = {
-        "__module__": __name__ if module is None else module,
-        "name": name,
-        "owner": owner,
-        "repo": repo,
-        "path": path,
-    }
-    return register_updater(type(f"{name}Updater", (GitHubRawFileUpdater,), attrs))
+from lib.update.updaters.core import HashEntryUpdater, UpdateContext
+from lib.update.updaters.metadata import (
+    GitHubRawFileMetadata,
+    VersionInfo,
+    require_metadata_str,
+)
 
 
 class GitHubRawFileUpdater(HashEntryUpdater):

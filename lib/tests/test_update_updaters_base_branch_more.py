@@ -13,7 +13,7 @@ from lib.nix.models.sources import SourceEntry
 from lib.tests._updater_helpers import empty_event_stream
 from lib.update.config import resolve_config
 from lib.update.events import UpdateEvent
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     ChecksumProvidedUpdater,
     DenoDepsHashUpdater,
     DownloadHashUpdater,
@@ -21,13 +21,12 @@ from lib.update.updaters.base import (
     UpdateContext,
     Updater,
     VersionInfo,
-    _call_with_optional_context,
-    _compute_url_hashes,
-    _convert_nix_hash_to_sri,
-    _ensure_str_mapping,
-    _updater_sourcefile,
 )
-from lib.update.updaters.dependencies import updater_dependencies
+from lib.update.updaters._sourcefile import resolve_sourcefile
+from lib.update.updaters.core import (
+    _call_with_optional_context,
+    _ensure_str_mapping,
+)
 from lib.update.updaters.metadata import FlakeInputMetadata
 
 if TYPE_CHECKING:
@@ -102,53 +101,15 @@ class _Manifest(DenoDepsHashUpdater):
         return VersionInfo(version="1.0.0", metadata={})
 
 
-def test_helper_aliases_and_type_guard_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute thin wrapper aliases and strict mapping validators."""
-
-    async def _url_hashes(source_name: str, urls: object) -> AsyncIterator[UpdateEvent]:
-        _ = urls
-        yield UpdateEvent.status(source_name, "url-hashes")
-
-    async def _convert(source_name: str, nix_hash: str) -> AsyncIterator[UpdateEvent]:
-        _ = nix_hash
-        yield UpdateEvent.status(source_name, "convert")
-
-    monkeypatch.setattr(
-        "lib.update.updaters.base.update_process.compute_url_hashes", _url_hashes
-    )
-    monkeypatch.setattr(
-        "lib.update.updaters.base.update_process.convert_nix_hash_to_sri", _convert
-    )
-
-    events = _run(_collect(_compute_url_hashes("demo", ["https://x"])))
-    assert events[0].message == "url-hashes"
-    events = _run(_collect(_convert_nix_hash_to_sri("demo", "deadbeef")))
-    assert events[0].message == "convert"
-
+def test_type_guard_errors() -> None:
+    """Exercise strict mapping validators."""
     with pytest.raises(TypeError, match="Expected dict for platform/hash mapping"):
         _ = _ensure_str_mapping("bad")
     with pytest.raises(TypeError, match="Expected platform/hash string mapping"):
         _ = _ensure_str_mapping({"ok": 1})
 
 
-def test_dependency_adapter_uses_public_base_facade(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep adapter calls compatible with monkeypatches on the base facade."""
-
-    async def _url_hashes(source_name: str, urls: object) -> AsyncIterator[UpdateEvent]:
-        _ = urls
-        yield UpdateEvent.status(source_name, "adapter-url-hashes")
-
-    monkeypatch.setattr("lib.update.updaters.base.compute_url_hashes", _url_hashes)
-
-    events = _run(_collect(updater_dependencies().compute_url_hashes("demo", [])))
-    assert events[0].message == "adapter-url-hashes"
-
-
-def test_updater_sourcefile_falls_back_to_module_file(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_updater_sourcefile_falls_back_to_module_file() -> None:
     """Use module __file__ when inspect.getsourcefile is unavailable."""
 
     class _FallbackUpdater(Updater):
@@ -165,15 +126,19 @@ def test_updater_sourcefile_falls_back_to_module_file(
             async for event in empty_event_stream():
                 yield event
 
-    monkeypatch.setattr(
-        "lib.update.updaters.base.inspect.getsourcefile",
-        lambda _cls: (_ for _ in ()).throw(TypeError("no sourcefile")),
+    class _FakeInspect:
+        @staticmethod
+        def getsourcefile(_cls: object) -> str | None:
+            raise TypeError("no sourcefile")
+
+        @staticmethod
+        def getmodule(_cls: object) -> object:
+            return type("_Module", (), {"__file__": "/tmp/fallback.py"})()
+
+    assert (
+        resolve_sourcefile(_FallbackUpdater, inspect_module=_FakeInspect())
+        == "/tmp/fallback.py"
     )
-    monkeypatch.setattr(
-        "lib.update.updaters.base.inspect.getmodule",
-        lambda _cls: type("_Module", (), {"__file__": "/tmp/fallback.py"})(),
-    )
-    assert _updater_sourcefile(_FallbackUpdater) == "/tmp/fallback.py"
 
 
 def test_unbound_abstract_methods_raise() -> None:
@@ -256,7 +221,7 @@ def test_download_and_hash_entry_branch_yields(monkeypatch: pytest.MonkeyPatch) 
         yield UpdateEvent.status("download-no-base", "computing")
         yield UpdateEvent.value("download-no-base", {"https://example.com/a": HASH_A})
 
-    monkeypatch.setattr("lib.update.updaters.base.compute_url_hashes", _hashes)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _hashes)
 
     async def _run_events() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
@@ -282,11 +247,9 @@ def test_flake_updater_default_compute_and_fetch_hash_branches(
         yield UpdateEvent.status(source_name, f"system={system}")
         yield UpdateEvent.value(source_name, HASH_A)
 
+    monkeypatch.setattr("lib.update.nix.compute_overlay_hash", _compute_overlay_hash)
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_overlay_hash", _compute_overlay_hash
-    )
-    monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform", lambda: "x86_64-linux"
+        "lib.update.nix.get_current_nix_platform", lambda: "x86_64-linux"
     )
 
     # _is_latest current=None branch
@@ -352,9 +315,7 @@ def test_deno_deps_default_compute_and_type_enforcement(
         yield UpdateEvent.status(source_name, "deno-hash")
         yield UpdateEvent.value(source_name, {"x86_64-linux": HASH_A})
 
-    monkeypatch.setattr(
-        "lib.update.updaters.base.compute_deno_deps_hash", _compute_deno
-    )
+    monkeypatch.setattr("lib.update.nix_deno.compute_deno_deps_hash", _compute_deno)
 
     # default _compute_hash body
     body_events = _run(
@@ -375,7 +336,7 @@ def test_deno_deps_default_compute_and_type_enforcement(
     assert any(event.message == "deno-hash" for event in hash_events)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.expect_hash_mapping", lambda _payload: ["bad"]
+        "lib.update.updaters.flake_backed.expect_hash_mapping", lambda _payload: ["bad"]
     )
     with pytest.raises(TypeError, match="Expected dict of platform hashes"):
         _run(_run_hashes())
@@ -398,11 +359,9 @@ def test_deno_native_only_single_platform_status_keeps_full_hash_context(
         yield UpdateEvent.status(source_name, "hashing", operation="compute_hash")
         yield UpdateEvent.value(source_name, {"aarch64-darwin": HASH_A})
 
+    monkeypatch.setattr("lib.update.nix_deno.compute_deno_deps_hash", _compute_deno)
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_deno_deps_hash", _compute_deno
-    )
-    monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
@@ -430,7 +389,7 @@ def test_deno_native_only_single_platform_status_keeps_full_hash_context(
 
 def test_manifest_updater_rejects_non_flake_node_metadata() -> None:
     """Fail when metadata carries an unexpected node object type."""
-    from lib.update.updaters.base import DenoManifestUpdater
+    from lib.update.updaters import DenoManifestUpdater
 
     class _ManifestUpdater(DenoManifestUpdater):
         name = "manifest-updater"
@@ -450,7 +409,7 @@ def test_manifest_updater_rejects_non_flake_node_metadata() -> None:
 
 def test_manifest_updater_accepts_flake_node_metadata_and_checks_lock() -> None:
     """Cover metadata path where ``node`` is already a ``FlakeLockNode``."""
-    from lib.update.updaters.base import DenoManifestUpdater
+    from lib.update.updaters import DenoManifestUpdater
 
     class _ManifestUpdater(DenoManifestUpdater):
         name = "manifest-updater-node"
@@ -496,7 +455,7 @@ def test_optional_context_and_flake_helper_branches(
     )
     fallback_node = FlakeLockNode(locked=None)
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node",
+        "lib.update.flake.get_flake_input_node",
         lambda _name: fallback_node,
     )
     assert (
@@ -510,7 +469,7 @@ def test_optional_context_and_flake_helper_branches(
     assert built.input == "default-flake"
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected")),
     )
     finalized = _run(

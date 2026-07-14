@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import HashEntry, HashType, SourceHashes
+from lib.update import nix as update_nix
+from lib.update import process as update_process
 from lib.update.events import (
     CapturedValue,
     EventStream,
@@ -18,16 +20,15 @@ from lib.update.events import (
     expect_str,
     require_value,
 )
-from lib.update.nix import _build_fetchgit_expr, compute_fixed_output_hash
+from lib.update.nix import _build_fetchgit_expr
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     HashEntryUpdater,
     UpdateContext,
     VersionInfo,
-    _coerce_context,
-    compute_url_hashes,
     register_updater,
 )
+from lib.update.updaters.core import _coerce_context
 
 if TYPE_CHECKING:
     import aiohttp
@@ -144,7 +145,7 @@ class CodexV8Updater(HashEntryUpdater):
 
         src_hash_drain = ValueDrain[str]()
         async for event in drain_value_events(
-            compute_fixed_output_hash(
+            update_nix.compute_fixed_output_hash(
                 self.name,
                 self._src_expr(info.version),
                 config=self.config,
@@ -165,7 +166,7 @@ class CodexV8Updater(HashEntryUpdater):
             )
 
         async for item in capture_stream_value(
-            compute_url_hashes(self.name, platform_urls.values()),
+            update_process.compute_url_hashes(self.name, platform_urls.values()),
             error="Missing prebuilt rusty_v8 hash output",
         ):
             if isinstance(item, CapturedValue):

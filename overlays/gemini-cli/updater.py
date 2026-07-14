@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from lib.update.nix import _build_fetch_from_github_expr
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     SourceThenOverlayHashMixin,
     register_updater,
 )

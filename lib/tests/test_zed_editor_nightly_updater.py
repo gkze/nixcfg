@@ -11,8 +11,14 @@ from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
-from lib.update.events import UpdateEvent, UpdateEventKind, expect_artifact_updates
-from lib.update.updaters.base import VersionInfo
+from lib.update.events import (
+    StatusInfo,
+    StatusKind,
+    UpdateEvent,
+    UpdateEventKind,
+    expect_artifact_updates,
+)
+from lib.update.updaters import VersionInfo
 from lib.update.updaters.metadata import FlakeInputMetadata
 
 
@@ -155,8 +161,10 @@ def test_zed_editor_nightly_updater_refreshes_crate2nix_artifacts(
             name,
             "Refreshing crate2nix artifacts...",
             operation="materialize_artifacts",
-            status="computing_hash",
-            detail="crate2nix artifacts",
+            status=StatusInfo(
+                kind=StatusKind.COMPUTING_HASH,
+                value="crate2nix artifacts",
+            ),
         )
         yield UpdateEvent.artifact(
             name,
@@ -169,8 +177,7 @@ def test_zed_editor_nightly_updater_refreshes_crate2nix_artifacts(
             name,
             "Prepared crate2nix artifacts",
             operation="materialize_artifacts",
-            status="updated",
-            detail="crate2nix artifacts",
+            status=StatusInfo(kind=StatusKind.UPDATED, value="crate2nix artifacts"),
         )
 
     monkeypatch.setattr(

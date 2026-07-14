@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from lib.update.updaters.base import register_updater
+from lib.update.updaters import register_updater
 from lib.update.updaters.github_release import GitHubReleaseAssetURLsUpdater
 
 

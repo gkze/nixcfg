@@ -95,7 +95,9 @@ let
         cp -r ${patchedV8Src} $out/vendor/v8-goose-src
         chmod -R u+w $out/vendor/v8-goose-src
 
-        PYTHONPATH=${../..} ${prev.lib.getExe prev.python3} ${./patch_source.py} "$out"
+        PYTHONPATH=${
+          import ../../lib/codemods-pythonpath.nix { inherit (prev) lib; }
+        } ${prev.lib.getExe prev.python3} ${./patch_source.py} "$out"
 
         cp ${./crate-hashes.json} $out/crate-hashes.json
       '';

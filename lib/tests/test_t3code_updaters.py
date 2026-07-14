@@ -22,7 +22,7 @@ from lib.update.events import (
 )
 from lib.update.generated_artifact_commands import stream_command_materialized_artifacts
 from lib.update.nix import _build_overlay_attr_expr
-from lib.update.updaters.base import UpdateContext, VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     from lib.update.process import RunCommandOptions
@@ -130,7 +130,7 @@ def test_t3code_updaters_hash_only_their_node_modules_attr(
         yield UpdateEvent.value(source, HASH)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_fixed_output_hash",
+        "lib.update.nix.compute_fixed_output_hash",
         _fake_compute_fixed_output_hash,
     )
 
@@ -227,11 +227,11 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
         yield UpdateEvent.value(source, NEW_HASH)
 
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         _fake_compute_drv_fingerprint,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_fixed_output_hash",
+        "lib.update.nix.compute_fixed_output_hash",
         _fake_compute_fixed_output_hash,
     )
     monkeypatch.setattr(
@@ -240,7 +240,7 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
         _fake_materialize_runtime_locks,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
@@ -348,11 +348,11 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
         _fake_materialize_runtime_locks,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_fixed_output_hash",
+        "lib.update.nix.compute_fixed_output_hash",
         _fake_compute_fixed_output_hash,
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 

@@ -2532,6 +2532,11 @@ rec {
         ];
         dependencies = [
           {
+            name = "enumn";
+            packageId = "enumn";
+            optional = true;
+          }
+          {
             name = "uuid";
             packageId = "uuid";
             usesDefaultFeatures = false;
@@ -2543,6 +2548,7 @@ rec {
           "schemars" = [ "dep:schemars" "dep:serde_json" "serde" "schemars/uuid1" ];
           "serde" = [ "dep:serde" "enumn" "uuid/serde" ];
         };
+        resolvedDefaultFeatures = [ "enumn" ];
       };
       "accesskit_atspi_common" = rec {
         crateName = "accesskit_atspi_common";
@@ -2837,6 +2843,8 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "itertools";
@@ -4514,8 +4522,14 @@ rec {
             packageId = "http_client";
           }
           {
+            name = "idna";
+            packageId = "idna";
+          }
+          {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "indoc";
@@ -4706,8 +4720,8 @@ rec {
             packageId = "ui";
           }
           {
-            name = "ui_input";
-            packageId = "ui_input";
+            name = "unicode-script";
+            packageId = "unicode-script";
           }
           {
             name = "unicode-segmentation";
@@ -21293,9 +21307,9 @@ rec {
       };
       "dlib" = rec {
         crateName = "dlib";
-        version = "0.5.2";
-        edition = "2015";
-        sha256 = "04m4zzybx804394dnqs1blz241xcy480bdwf3w9p4k6c3l46031k";
+        version = "0.5.3";
+        edition = "2021";
+        sha256 = "0jpr4smrwrv8xj70mz4ixnbc6ljm82f12z2mz1hv89056y3wv3mb";
         authors = [
           "Elinor Berger <elinor@safaradeg.net>"
         ];
@@ -23069,6 +23083,10 @@ rec {
             packageId = "url";
           }
           {
+            name = "urlencoding";
+            packageId = "urlencoding";
+          }
+          {
             name = "util";
             packageId = "util";
           }
@@ -23800,6 +23818,31 @@ rec {
             packageId = "syn 2.0.117";
             usesDefaultFeatures = false;
             features = [ "parsing" "printing" "derive" "proc-macro" ];
+          }
+        ];
+
+      };
+      "enumn" = rec {
+        crateName = "enumn";
+        version = "0.1.14";
+        edition = "2021";
+        sha256 = "0f1gagm6841sih4ipw46c7gn1idjgqfay1f5q6hchdwjg2rxd7ig";
+        procMacro = true;
+        authors = [
+          "David Tolnay <dtolnay@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.117";
           }
         ];
 
@@ -25407,11 +25450,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "perf" "std" "unicode" ];
       };
-      "fancy-regex 0.17.0" = rec {
+      "fancy-regex 0.18.0" = rec {
         crateName = "fancy-regex";
-        version = "0.17.0";
+        version = "0.18.0";
         edition = "2018";
-        sha256 = "1f314z64ilbbnn17ic1hghpq9dm2sqyn8gspvjvjp1jwhqgldkvj";
+        sha256 = "0xvjlhqf3waq02ss4d9j4qmrms5vcvavvi2i2g7xz0i01p6xmqg1";
         libName = "fancy_regex";
         authors = [
           "Raph Levien <raph@google.com>"
@@ -29682,6 +29725,7 @@ rec {
           {
             name = "accesskit";
             packageId = "accesskit";
+            features = [ "enumn" ];
           }
           {
             name = "anyhow";
@@ -29703,7 +29747,6 @@ rec {
           {
             name = "bitflags";
             packageId = "bitflags 2.10.0";
-            optional = true;
           }
           {
             name = "block";
@@ -29821,6 +29864,8 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "inventory";
@@ -30134,7 +30179,6 @@ rec {
         features = {
           "backtrace" = [ "dep:backtrace" ];
           "bench" = [ "test-support" "dep:criterion" "dep:hdrhistogram" ];
-          "bitflags" = [ "dep:bitflags" ];
           "default" = [ "font-kit" "wayland" "x11" "windows-manifest" ];
           "font-kit" = [ "dep:font-kit" ];
           "input-latency-histogram" = [ "dep:hdrhistogram" ];
@@ -30146,11 +30190,10 @@ rec {
           "scap" = [ "dep:scap" ];
           "screen-capture" = [ "scap" ];
           "test-support" = [ "leak-detection" "collections/test-support" "http_client/test-support" "wayland" "x11" "proptest" ];
-          "wayland" = [ "bitflags" ];
           "windows-manifest" = [ "dep:embed-resource" ];
           "x11" = [ "scap?/x11" ];
         };
-        resolvedDefaultFeatures = [ "backtrace" "bench" "bitflags" "default" "font-kit" "input-latency-histogram" "inspector" "leak-detection" "proptest" "scap" "screen-capture" "test-support" "wayland" "windows-manifest" "x11" ];
+        resolvedDefaultFeatures = [ "backtrace" "bench" "default" "font-kit" "input-latency-histogram" "inspector" "leak-detection" "proptest" "scap" "screen-capture" "test-support" "wayland" "windows-manifest" "x11" ];
       };
       "gpui_linux" = rec {
         crateName = "gpui_linux";
@@ -30163,6 +30206,7 @@ rec {
             name = "accesskit";
             packageId = "accesskit";
             target = { target, features }: (("linux" == target."os" or null) || ("freebsd" == target."os" or null));
+            features = [ "enumn" ];
           }
           {
             name = "accesskit_unix";
@@ -30252,7 +30296,9 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
             target = { target, features }: (("linux" == target."os" or null) || ("freebsd" == target."os" or null));
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "itertools";
@@ -30456,6 +30502,7 @@ rec {
             name = "accesskit";
             packageId = "accesskit";
             target = { target, features }: ("macos" == target."os" or null);
+            features = [ "enumn" ];
           }
           {
             name = "accesskit_macos";
@@ -30557,7 +30604,9 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
             target = { target, features }: ("macos" == target."os" or null);
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "itertools";
@@ -30956,7 +31005,7 @@ rec {
             name = "web-sys";
             packageId = "web-sys";
             target = { target, features }: (builtins.elem "wasm" target."family");
-            features = [ "console" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "Document" "DomRect" "DragEvent" "Element" "EventTarget" "File" "FileList" "HtmlCanvasElement" "HtmlElement" "HtmlInputElement" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MouseEvent" "Navigator" "PointerEvent" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverSize" "ResizeObserverOptions" "Screen" "Storage" "VisualViewport" "Headers" "Request" "RequestInit" "RequestRedirect" "Response" "WheelEvent" "Window" ];
+            features = [ "console" "Clipboard" "ClipboardEvent" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "Document" "DomRect" "DragEvent" "Element" "EventTarget" "File" "FileList" "HtmlCanvasElement" "HtmlElement" "HtmlInputElement" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MouseEvent" "Navigator" "PointerEvent" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverSize" "ResizeObserverOptions" "Screen" "Storage" "VisualViewport" "Headers" "Request" "RequestInit" "RequestRedirect" "Response" "WheelEvent" "Window" ];
           }
           {
             name = "web-time";
@@ -31100,6 +31149,7 @@ rec {
             name = "accesskit";
             packageId = "accesskit";
             target = { target, features }: ("windows" == target."os" or null);
+            features = [ "enumn" ];
           }
           {
             name = "accesskit_windows";
@@ -31144,7 +31194,9 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
             target = { target, features }: ("windows" == target."os" or null);
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "itertools";
@@ -34188,12 +34240,6 @@ rec {
             optional = true;
           }
           {
-            name = "rgb";
-            packageId = "rgb";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
             name = "tiff";
             packageId = "tiff";
             optional = true;
@@ -34228,7 +34274,7 @@ rec {
           "tiff" = [ "dep:tiff" ];
           "webp" = [ "dep:image-webp" ];
         };
-        resolvedDefaultFeatures = [ "avif" "bmp" "dds" "default" "default-formats" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
+        resolvedDefaultFeatures = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
       };
       "image-webp" = rec {
         crateName = "image-webp";
@@ -36963,6 +37009,8 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "language_model_core";
@@ -37115,6 +37163,11 @@ rec {
             name = "aws-credential-types";
             packageId = "aws-credential-types";
             features = [ "hardcoded-credentials" "hardcoded-credentials" ];
+          }
+          {
+            name = "aws-sigv4";
+            packageId = "aws-sigv4";
+            features = [ "http1" ];
           }
           {
             name = "aws_http_client";
@@ -39037,6 +39090,8 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "libwebrtc";
@@ -40127,6 +40182,8 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "language";
@@ -52066,7 +52123,7 @@ rec {
           }
           {
             name = "fancy-regex";
-            packageId = "fancy-regex 0.17.0";
+            packageId = "fancy-regex 0.18.0";
           }
           {
             name = "fs";
@@ -52109,6 +52166,8 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "indexmap";
@@ -55317,10 +55376,6 @@ rec {
             packageId = "ui";
           }
           {
-            name = "ui_input";
-            packageId = "ui_input";
-          }
-          {
             name = "util";
             packageId = "util";
           }
@@ -55747,9 +55802,9 @@ rec {
       };
       "regex-automata" = rec {
         crateName = "regex-automata";
-        version = "0.4.13";
+        version = "0.4.14";
         edition = "2021";
-        sha256 = "070z0j23pjfidqz0z89id1fca4p572wxpcr20a0qsv68bbrclxjj";
+        sha256 = "13xf7hhn4qmgfh784llcp2kzrvljd13lb2b1ca0mwnf15w9d87bf";
         libName = "regex_automata";
         authors = [
           "The Rust Project Developers"
@@ -56200,6 +56255,8 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "json_schema_store";
@@ -56580,6 +56637,8 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "jupyter-protocol";
@@ -59575,6 +59634,11 @@ rec {
             features = [ "fs" "socket" "uio" ];
           }
           {
+            name = "seccompiler";
+            packageId = "seccompiler";
+            target = { target, features }: ("linux" == target."os" or null);
+          }
+          {
             name = "smol";
             packageId = "smol";
             target = { target, features }: ("windows" == target."os" or null);
@@ -60805,6 +60869,26 @@ rec {
           "zeroize" = [ "dep:zeroize" ];
         };
         resolvedDefaultFeatures = [ "alloc" "base16ct" "default" "der" "generic-array" "pkcs8" "point" "subtle" "zeroize" ];
+      };
+      "seccompiler" = rec {
+        crateName = "seccompiler";
+        version = "0.5.0";
+        edition = "2021";
+        sha256 = "1168zx8gmcp2shpp21g0ypd5yqv74v0vnnd52b8q2x47avg5bbm4";
+        authors = [
+          "Amazon Firecracker Team <firecracker-maintainers@amazon.com>"
+        ];
+        dependencies = [
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+        ];
+        features = {
+          "json" = [ "serde" "serde_json" ];
+          "serde" = [ "dep:serde" ];
+          "serde_json" = [ "dep:serde_json" ];
+        };
       };
       "secrecy" = rec {
         crateName = "secrecy";
@@ -62195,6 +62279,10 @@ rec {
           {
             name = "audio";
             packageId = "audio";
+          }
+          {
+            name = "client";
+            packageId = "client";
           }
           {
             name = "cloud_api_types";
@@ -71015,8 +71103,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/trash-rs";
-          rev = "3bf27effd4eb8699f2e484d3326b852fe3e53af7";
-          sha256 = "05kb0xwzr2qgjylfbgp80vgm45fm4iir0h65qgw78w9cih25n1ys";
+          rev = "47761739192828a66b11a94ba5420b82d63c03c5";
+          sha256 = "0n79s8h6s3y3v2a0jy986xy8irb1zh2gcws9pqbwprrxmrczd3ad";
         };
         authors = [
           "Artur Kovacs <kovacs.artur.barnabas@gmail.com>"
@@ -76233,9 +76321,9 @@ rec {
       };
       "wayland-backend" = rec {
         crateName = "wayland-backend";
-        version = "0.3.11";
+        version = "0.3.15";
         edition = "2021";
-        sha256 = "0dcvwkhz45gsm7f9dwr31pxijkhpza09a4vb3blsv9a8631k6fk7";
+        sha256 = "0pbm8j3vv6baqz312biwqfi4qzadbi6nng9v4p3nx4afnlhdsmr8";
         libName = "wayland_backend";
         authors = [
           "Elinor Berger <elinor@safaradeg.net>"
@@ -76280,6 +76368,9 @@ rec {
         features = {
           "client_system" = [ "wayland-sys/client" "dep:scoped-tls" ];
           "dlopen" = [ "wayland-sys/dlopen" ];
+          "libwayland_client_1_23" = [ "wayland-sys/libwayland_client_1_23" ];
+          "libwayland_server_1_22" = [ "wayland-sys/libwayland_server_1_22" ];
+          "libwayland_server_1_23" = [ "wayland-sys/libwayland_server_1_23" "libwayland_server_1_22" ];
           "log" = [ "dep:log" ];
           "raw-window-handle" = [ "dep:raw-window-handle" ];
           "rwh_06" = [ "dep:rwh_06" ];
@@ -76489,9 +76580,9 @@ rec {
       };
       "wayland-sys" = rec {
         crateName = "wayland-sys";
-        version = "0.31.7";
+        version = "0.31.11";
         edition = "2021";
-        sha256 = "0hk157yawv9y7aj7fxbldhlvv8p33c65v3nv85mq4m91h919p51l";
+        sha256 = "1gp3hlkxx13i55lyyi794vnw9a780z3skx0xhj71zr69xwzv5snq";
         libName = "wayland_sys";
         authors = [
           "Elinor Berger <elinor@safaradeg.net>"
@@ -76525,6 +76616,7 @@ rec {
           "dlopen" = [ "once_cell" ];
           "egl" = [ "client" ];
           "libc" = [ "dep:libc" ];
+          "libwayland_server_1_23" = [ "libwayland_server_1_22" ];
           "memoffset" = [ "dep:memoffset" ];
           "once_cell" = [ "dep:once_cell" ];
           "server" = [ "libc" "memoffset" "dep:dlib" "dep:log" ];
@@ -77025,7 +77117,7 @@ rec {
           "default" = [ "std" ];
           "std" = [ "wasm-bindgen/std" "js-sys/std" ];
         };
-        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AngleInstancedArrays" "AudioBuffer" "AudioBufferSourceNode" "AudioContext" "AudioContextOptions" "AudioContextState" "AudioDestinationNode" "AudioNode" "AudioScheduledSourceNode" "BaseAudioContext" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "DedicatedWorkerGlobalScope" "Document" "DomRect" "DomRectReadOnly" "DragEvent" "Element" "Event" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "File" "FileList" "FormData" "Headers" "HtmlCanvasElement" "HtmlElement" "HtmlImageElement" "HtmlInputElement" "HtmlMediaElement" "HtmlVideoElement" "ImageBitmap" "ImageData" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MessageEvent" "MouseEvent" "Navigator" "Node" "NodeList" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OvrMultiview2" "PointerEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Response" "RtcDataChannel" "RtcDataChannelEvent" "RtcDataChannelState" "RtcIceCandidate" "RtcPeerConnection" "RtcPeerConnectionIceEvent" "RtcSdpType" "RtcSessionDescriptionInit" "RtcSignalingState" "Screen" "ServiceWorkerGlobalScope" "Storage" "StreamPipeOptions" "TransformStream" "TransformStreamDefaultController" "Transformer" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "VideoFrame" "VisualViewport" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebSocket" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "WorkerOptions" "WorkerType" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
+        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AngleInstancedArrays" "AudioBuffer" "AudioBufferSourceNode" "AudioContext" "AudioContextOptions" "AudioContextState" "AudioDestinationNode" "AudioNode" "AudioScheduledSourceNode" "BaseAudioContext" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "Clipboard" "ClipboardEvent" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "DedicatedWorkerGlobalScope" "Document" "DomRect" "DomRectReadOnly" "DragEvent" "Element" "Event" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "File" "FileList" "FormData" "Headers" "HtmlCanvasElement" "HtmlElement" "HtmlImageElement" "HtmlInputElement" "HtmlMediaElement" "HtmlVideoElement" "ImageBitmap" "ImageData" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MessageEvent" "MouseEvent" "Navigator" "Node" "NodeList" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OvrMultiview2" "PointerEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Response" "RtcDataChannel" "RtcDataChannelEvent" "RtcDataChannelState" "RtcIceCandidate" "RtcPeerConnection" "RtcPeerConnectionIceEvent" "RtcSdpType" "RtcSessionDescriptionInit" "RtcSignalingState" "Screen" "ServiceWorkerGlobalScope" "Storage" "StreamPipeOptions" "TransformStream" "TransformStreamDefaultController" "Transformer" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "VideoFrame" "VisualViewport" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebSocket" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "WorkerOptions" "WorkerType" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
       };
       "web-time" = rec {
         crateName = "web-time";
@@ -88278,7 +88370,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "1.11.0";
+        version = "1.12.0";
         edition = "2024";
         crateBin = [
           {
@@ -88580,11 +88672,15 @@ rec {
             name = "image";
             packageId = "image";
             optional = true;
+            usesDefaultFeatures = false;
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
             target = { target, features }: (("linux" == target."os" or null) || ("freebsd" == target."os" or null));
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "image_viewer";
@@ -88987,7 +89083,9 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
             target = { target, features }: (("linux" == target."os" or null) || ("freebsd" == target."os" or null));
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "pkg-config";
@@ -89024,6 +89122,8 @@ rec {
           {
             name = "image";
             packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
           }
           {
             name = "image_viewer";

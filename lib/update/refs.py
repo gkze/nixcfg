@@ -20,6 +20,8 @@ from lib.update.events import (
     CommandResult,
     EventStream,
     RefUpdatePayload,
+    StatusInfo,
+    StatusKind,
     UpdateEvent,
     UpdateEventKind,
 )
@@ -481,8 +483,11 @@ async def update_flake_ref(
         source,
         f"Updating ref: {input_ref.ref} -> {new_ref}",
         operation="update_ref",
-        status="updating_ref",
-        detail={"current": input_ref.ref, "latest": new_ref},
+        status=StatusInfo(
+            kind=StatusKind.UPDATING_REF,
+            current=input_ref.ref,
+            latest=new_ref,
+        ),
     )
 
     if input_ref.input_type == "github":
@@ -496,8 +501,6 @@ async def update_flake_ref(
             source,
             f"Updated flake.nix input ref: {input_ref.name} -> {ref}",
             operation="update_ref",
-            status="updating_ref",
-            detail={"input": input_ref.name, "latest": ref},
         )
         new_url = None
     else:
@@ -567,8 +570,10 @@ async def update_refs_task(
                 source,
                 f"Checking {input_ref.owner}/{input_ref.repo} (current: {input_ref.ref})",
                 operation="check_version",
-                status="checking_current",
-                detail=input_ref.ref,
+                status=StatusInfo(
+                    kind=StatusKind.CHECKING_CURRENT,
+                    value=input_ref.ref,
+                ),
             ),
         )
         result = await check_flake_ref_update(
@@ -587,8 +592,11 @@ async def update_refs_task(
                     source,
                     f"Up to date (ref: {result.current_ref})",
                     operation="check_version",
-                    status="up_to_date",
-                    detail={"scope": "ref", "value": result.current_ref},
+                    status=StatusInfo(
+                        kind=StatusKind.UP_TO_DATE,
+                        scope="ref",
+                        value=result.current_ref,
+                    ),
                 ),
             )
             await put(UpdateEvent.result(source))
@@ -608,8 +616,11 @@ async def update_refs_task(
                     source,
                     f"Update available: {result.current_ref} -> {result.latest_ref}",
                     operation="check_version",
-                    status="update_available",
-                    detail={"current": result.current_ref, "latest": result.latest_ref},
+                    status=StatusInfo(
+                        kind=StatusKind.UPDATE_AVAILABLE,
+                        current=result.current_ref,
+                        latest=result.latest_ref,
+                    ),
                 ),
             )
             await put(UpdateEvent.result(source, update_payload))

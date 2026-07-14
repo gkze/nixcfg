@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from lib.update import crate2nix as _crate2nix
 from lib.update.crate2nix_compat import patch_installed_crate2nix_target
 from lib.update.net import fetch_url
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     Crate2NixMetadataUpdater,
     VersionInfo,
     register_updater,

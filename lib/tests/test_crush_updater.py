@@ -12,7 +12,8 @@ from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.nix import _build_overlay_expr
-from lib.update.updaters.base import VersionInfo, source_override_env
+from lib.update.updaters import VersionInfo
+from lib.update.updaters.core import source_override_env
 
 
 def _load_module() -> ModuleType:

@@ -9,7 +9,7 @@ import pytest
 
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 

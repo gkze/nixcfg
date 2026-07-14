@@ -10,7 +10,7 @@ from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.nix import _build_fetch_from_github_call
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 
 
 def _load_module(module_name: str):

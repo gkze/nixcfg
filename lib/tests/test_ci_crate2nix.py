@@ -25,7 +25,14 @@ from lib.tests._nix_ast import (
 )
 from lib.tests._updater_helpers import load_repo_module
 from lib.update import crate2nix
-from lib.update.events import UpdateEvent, UpdateEventKind, expect_artifact_updates
+from lib.update.events import (
+    StatusInfo,
+    StatusKind,
+    StatusPayload,
+    UpdateEvent,
+    UpdateEventKind,
+    expect_artifact_updates,
+)
 
 
 @cache
@@ -452,19 +459,17 @@ def test_stream_crate2nix_artifact_updates_skips_unknown_or_unsupported_targets(
 
     missing_events = asyncio.run(_collect("missing-target"))
     assert len(missing_events) == 1
-    assert missing_events[0].payload == {
-        "operation": "materialize_artifacts",
-        "status": "skipped",
-        "detail": "unknown_target",
-    }
+    assert missing_events[0].payload == StatusPayload(
+        operation="materialize_artifacts",
+        info=StatusInfo(kind=StatusKind.SKIPPED, value="unknown_target"),
+    )
 
     skipped_events = asyncio.run(_collect("demo-stream-skip"))
     assert len(skipped_events) == 1
-    assert skipped_events[0].payload == {
-        "operation": "materialize_artifacts",
-        "status": "unsupported_platform",
-        "detail": "darwin",
-    }
+    assert skipped_events[0].payload == StatusPayload(
+        operation="materialize_artifacts",
+        info=StatusInfo(kind=StatusKind.UNSUPPORTED_PLATFORM, value="darwin"),
+    )
 
 
 def test_stream_crate2nix_artifact_updates_reports_up_to_date(
@@ -491,11 +496,14 @@ def test_stream_crate2nix_artifact_updates_reports_up_to_date(
         UpdateEventKind.STATUS,
     ]
     assert events[1].message == "crate2nix artifacts up to date"
-    assert events[1].payload == {
-        "status": "up_to_date",
-        "operation": "materialize_artifacts",
-        "detail": {"scope": "artifacts", "value": "crate2nix artifacts"},
-    }
+    assert events[1].payload == StatusPayload(
+        operation="materialize_artifacts",
+        info=StatusInfo(
+            kind=StatusKind.UP_TO_DATE,
+            scope="artifacts",
+            value="crate2nix artifacts",
+        ),
+    )
 
 
 def test_targets_use_dedicated_source_installables() -> None:

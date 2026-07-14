@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import github_release_asset_urls_updater
+from typing import ClassVar
 
-KeepingYouAwakeUpdater = github_release_asset_urls_updater(
-    "keepingyouawake",
-    github_owner="newmarcel",
-    github_repo="KeepingYouAwake",
-    tag_prefix="",
-    platforms={
+from lib.update.updaters import GitHubReleaseAssetURLsUpdater, register_updater
+
+
+@register_updater
+class KeepingYouAwakeUpdater(GitHubReleaseAssetURLsUpdater):
+    """Track KeepingYouAwake ZIP assets from GitHub latest releases."""
+
+    name = "keepingyouawake"
+    GITHUB_OWNER = "newmarcel"
+    GITHUB_REPO = "KeepingYouAwake"
+    TAG_PREFIX = ""
+    PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin",
         "x86_64-darwin": "darwin",
-    },
-    asset_name="KeepingYouAwake-{version}.zip",
-    module=__name__,
-)
+    }
+    ASSET_NAME_TEMPLATE: ClassVar[str] = "KeepingYouAwake-{version}.zip"

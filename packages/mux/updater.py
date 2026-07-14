@@ -1,5 +1,10 @@
 """Updater for mux's platform-specific Bun offline cache hashes."""
 
-from lib.update.updaters.base import bun_node_modules_updater
+from lib.update.updaters import BunNodeModulesHashUpdater, register_updater
 
-MuxUpdater = bun_node_modules_updater("mux", module=__name__)
+
+@register_updater
+class MuxUpdater(BunNodeModulesHashUpdater):
+    """Bun node_modules hash updater for mux."""
+
+    name = "mux"

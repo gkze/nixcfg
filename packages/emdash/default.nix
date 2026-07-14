@@ -175,7 +175,9 @@ stdenv.mkDerivation {
 
     # Work around keytar's bundled node-addon-api constant-expression issue
     # with the Apple toolchain in this build environment.
-    PYTHONPATH=${../..} ${lib.getExe python3} ${patchNodeAddonApi}
+    PYTHONPATH=${
+      import ../../lib/codemods-pythonpath.nix { inherit lib; }
+    } ${lib.getExe python3} ${patchNodeAddonApi}
 
     # pnpmConfigHook installs dependencies without relying on upstream
     # postinstall scripts, so rebuild native Electron modules explicitly.

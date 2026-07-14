@@ -32,6 +32,8 @@ from lib.update.constants import FIXED_OUTPUT_NOISE
 from lib.update.events import (
     CommandResult,
     EventStream,
+    StatusInfo,
+    StatusKind,
     UpdateEvent,
     ValueDrain,
     drain_value_events,
@@ -393,7 +395,10 @@ def _build_package_path_attr_expr(
     )
     package_expr: NixExpression = FunctionCall(
         name=FunctionCall(
-            name=_select_attrs(Identifier(name="pkgs"), "callPackage"),
+            name=FunctionCall(
+                name=_select_attrs(Identifier(name="pkgs"), "lib", "callPackageWith"),
+                argument=Identifier(name="applied"),
+            ),
             argument=NixPath(path=f"./packages/{package}/default.nix"),
         ),
         argument=AttributeSet(
@@ -405,6 +410,11 @@ def _build_package_path_attr_expr(
                 Binding(name="outputs", value=Identifier(name="flake")),
             ]
         ),
+    )
+    overlay_fn = _select_attrs(Identifier(name="flake"), "overlays", "default")
+    overlay_applied = FunctionCall(
+        name=FunctionCall(name=overlay_fn, argument=Identifier(name="self")),
+        argument=Identifier(name="pkgs"),
     )
     expression = package_expr
     for attribute in attr_path.removeprefix(".").split("."):
@@ -426,6 +436,22 @@ def _build_package_path_attr_expr(
                             Inherit(names=[Identifier(name="system")]),
                             Binding(name="config", value=config_expr),
                         ],
+                    ),
+                ),
+            ),
+            Binding(
+                name="applied",
+                value=FunctionCall(
+                    name=_select_attrs(Identifier(name="pkgs"), "lib", "fix"),
+                    argument=Parenthesis(
+                        value=FunctionDefinition(
+                            argument_set=Identifier(name="self"),
+                            output=BinaryExpression(
+                                operator=Operator(name="//"),
+                                left=Identifier(name="pkgs"),
+                                right=overlay_applied,
+                            ),
+                        ),
                     ),
                 ),
             ),
@@ -614,7 +640,10 @@ async def compute_fixed_output_hash(
                 source,
                 "fixed-output source fetch hit a transient failure; retrying...",
                 operation="compute_hash",
-                detail=f"attempt {attempt}/{_FIXED_OUTPUT_HASH_MAX_ATTEMPTS}",
+                status=StatusInfo(
+                    kind=StatusKind.RETRY,
+                    value=f"attempt {attempt}/{_FIXED_OUTPUT_HASH_MAX_ATTEMPTS}",
+                ),
             )
             await asyncio.sleep(max(0.0, config.default_retry_backoff))
             continue

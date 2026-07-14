@@ -7,18 +7,21 @@ import os
 import subprocess
 from typing import TYPE_CHECKING, Literal
 
+from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.operator import Operator
+from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.commands.base import CommandResult, HashMismatchError
 from lib.nix.models.sources import HashEntry, SourceEntry, SourceHashes
-from lib.update.events import EventStream, UpdateEvent
+from lib.update.events import EventStream, StatusInfo, StatusKind, UpdateEvent
 from lib.update.nix import (
     _build_nix_expr,
     _tail_output_excerpt,
@@ -26,7 +29,7 @@ from lib.update.nix import (
 )
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import REPO_ROOT, local_flake_url
-from lib.update.updaters.base import UpdateContext, VersionInfo, register_updater
+from lib.update.updaters import UpdateContext, VersionInfo, register_updater
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
 
 if TYPE_CHECKING:
@@ -105,8 +108,16 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
             argument=identifier_attr_path("flake", "inputs", "nixpkgs"),
         )
         call_package = FunctionCall(
-            name=identifier_attr_path("pkgs", "callPackage"),
+            name=FunctionCall(
+                name=identifier_attr_path("pkgs", "lib", "callPackageWith"),
+                argument=Identifier(name="applied"),
+            ),
             argument=NixPath(path="./packages/t3code-workspace/default.nix"),
+        )
+        overlay_fn = identifier_attr_path("flake", "overlays", "default")
+        overlay_applied = FunctionCall(
+            name=FunctionCall(name=overlay_fn, argument=Identifier(name="self")),
+            argument=Identifier(name="pkgs"),
         )
         return LetExpression(
             local_variables=[
@@ -134,6 +145,22 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
                                 ),
                             }),
                         }),
+                    ),
+                ),
+                Binding(
+                    name="applied",
+                    value=FunctionCall(
+                        name=identifier_attr_path("pkgs", "lib", "fix"),
+                        argument=Parenthesis(
+                            value=FunctionDefinition(
+                                argument_set=Identifier(name="self"),
+                                output=BinaryExpression(
+                                    left=Identifier(name="pkgs"),
+                                    operator=Operator(name="//"),
+                                    right=overlay_applied,
+                                ),
+                            ),
+                        ),
                     ),
                 ),
             ],
@@ -198,8 +225,10 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
             self.name,
             "Computing derivation fingerprint...",
             operation="compute_hash",
-            status="computing_hash",
-            detail="derivation fingerprint",
+            status=StatusInfo(
+                kind=StatusKind.COMPUTING_HASH,
+                value="derivation fingerprint",
+            ),
         )
         try:
             drv_hash = (

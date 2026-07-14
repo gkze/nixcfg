@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Literal
 
 from lib.nix.models.sources import HashEntry
 from lib.update import crate2nix as _crate2nix
+from lib.update import nix as update_nix
 from lib.update.crate2nix_compat import patch_installed_crate2nix_target
 from lib.update.events import (
     EventStream,
@@ -20,15 +21,14 @@ from lib.update.flake import flake_fetch_expression
 from lib.update.nix import (
     _build_fetch_pnpm_deps_expr,
     _build_pnpm_10_nodejs_22_expr,
-    compute_fixed_output_hash,
 )
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     Crate2NixArtifactsMixin,
     UpdateContext,
     VersionInfo,
-    _coerce_context,
     register_updater,
 )
+from lib.update.updaters.core import _coerce_context
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
 from lib.update.updaters.metadata import FlakeInputMetadata
 
@@ -84,7 +84,7 @@ class GitButlerUpdater(Crate2NixArtifactsMixin, FlakeInputHashUpdater):
             fetcher_version=3,
             pnpm=_build_pnpm_10_nodejs_22_expr(),
         )
-        return compute_fixed_output_hash(
+        return update_nix.compute_fixed_output_hash(
             self.name,
             pnpm_expr,
             config=self.config,

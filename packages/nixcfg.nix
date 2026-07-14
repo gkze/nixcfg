@@ -12,8 +12,20 @@
   ...
 }:
 let
+  # Filter the workspace source to only the files that participate in the
+  # Python build (see [tool.setuptools] in pyproject.toml). Handing uv2nix the
+  # unfiltered repo tree couples this derivation to every file in the repo,
+  # which rebuilds the venv (and the system closure) on every commit.
   workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
-    workspaceRoot = ../.;
+    workspaceRoot = lib.fileset.toSource {
+      root = ../.;
+      fileset = lib.fileset.unions [
+        ../pyproject.toml
+        ../uv.lock
+        ../nixcfg.py
+        (lib.fileset.fileFilter (file: file.hasExt "py" || file.hasExt "pyi") ../lib)
+      ];
+    };
   };
 
   pySet =

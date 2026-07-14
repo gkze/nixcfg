@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from lib.update.updaters.base import VersionInfo, register_updater
+from lib.update.updaters import VersionInfo, register_updater
 from lib.update.updaters.platform_api import DownloadingPlatformAPIUpdater
 
 

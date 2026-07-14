@@ -6,6 +6,9 @@ import tomllib
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import HashEntry, HashType, SourceEntry, SourceHashes
+from lib.update import net as update_net
+from lib.update import nix as update_nix
+from lib.update import process as update_process
 from lib.update.events import (
     CapturedValue,
     EventStream,
@@ -16,14 +19,12 @@ from lib.update.events import (
     expect_hash_mapping,
     require_value,
 )
-from lib.update.nix import _build_fetchgit_expr, compute_fixed_output_hash
-from lib.update.updaters.base import (
+from lib.update.nix import _build_fetchgit_expr
+from lib.update.updaters import (
     FlakeInputUpdater,
     HashEntryUpdater,
     UpdateContext,
     VersionInfo,
-    compute_url_hashes,
-    fetch_url,
     register_updater,
 )
 
@@ -108,7 +109,7 @@ class GooseV8Updater(FlakeInputUpdater, HashEntryUpdater):
 
         src_hash_drain = ValueDrain[object]()
         async for event in drain_value_events(
-            compute_fixed_output_hash(
+            update_nix.compute_fixed_output_hash(
                 self.name,
                 self._src_expr(info.version),
                 config=self.config,
@@ -127,7 +128,7 @@ class GooseV8Updater(FlakeInputUpdater, HashEntryUpdater):
             "https://raw.githubusercontent.com/jh-block/rusty_v8/"
             f"{info.version}/Cargo.toml"
         )
-        cargo_toml = await fetch_url(
+        cargo_toml = await update_net.fetch_url(
             session,
             cargo_toml_url,
             request_timeout=self.config.default_timeout,
@@ -145,7 +146,7 @@ class GooseV8Updater(FlakeInputUpdater, HashEntryUpdater):
             )
 
         async for asset_item in capture_stream_value(
-            compute_url_hashes(self.name, platform_urls.values()),
+            update_process.compute_url_hashes(self.name, platform_urls.values()),
             error="Missing prebuilt rusty_v8 hash output",
         ):
             if isinstance(asset_item, CapturedValue):

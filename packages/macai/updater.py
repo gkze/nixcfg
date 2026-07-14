@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import sparkle_appcast_updater
+from typing import ClassVar
 
-MacAIUpdater = sparkle_appcast_updater(
-    "macai",
-    appcast_url="https://renset.dev/macai/appcast.xml",
-    platforms={
+from lib.update.updaters import SparkleAppcastUrlUpdater, register_updater
+
+
+@register_updater
+class MacAIUpdater(SparkleAppcastUrlUpdater):
+    """Resolve macai versions and download URLs from its Sparkle feed."""
+
+    name = "macai"
+    APPCAST_URL = "https://renset.dev/macai/appcast.xml"
+    VERSION_FIELD = "short_or_version"
+    URL_METADATA_CONTEXT: ClassVar[str | None] = "macai metadata"
+    PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin",
         "x86_64-darwin": "darwin",
-    },
-    version_field="short_or_version",
-    appcast_url_metadata=True,
-    url_metadata_context="macai metadata",
-    module=__name__,
-)
+    }

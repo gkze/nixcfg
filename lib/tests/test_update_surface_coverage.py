@@ -22,13 +22,20 @@ def test_surface_alias_and_exemption_contracts() -> None:
     assert UPDATE_SURFACE_ALIASES == {
         "opencode-desktop-dev": "opencode-desktop",
     }
-    assert {"electron-runtimes", "nix"} == UPDATE_SURFACE_EXEMPTIONS
+    assert {
+        "codex-v8-native",
+        "electron-runtimes",
+        "goose-cli-v8-native",
+        "nix",
+    } == UPDATE_SURFACE_EXEMPTIONS
     assert canonical_update_surface_name("opencode-desktop-dev") == ("opencode-desktop")
 
 
 def test_discover_update_surface_names_finds_repo_surfaces() -> None:
     """Discover logical update surfaces across directory and flat package layouts."""
     surfaces = discover_update_surface_names()
+    assert "codex-desktop" in surfaces
+    assert "chatgpt" not in surfaces
     assert "zed-editor-nightly" in surfaces
     assert "codex-v8" in surfaces
     assert "opencode-desktop-dev" in surfaces

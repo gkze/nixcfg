@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import NotRequired, ReadOnly, TypedDict, TypeIs
+from typing import Literal, ReadOnly, TypedDict, TypeIs
 
 from lib.nix.models.sources import HashEntry, HashMapping, SourceEntry, SourceHashes
 from lib.update.artifacts import GeneratedArtifact
@@ -35,12 +35,53 @@ class RefUpdatePayload(TypedDict):
     latest: ReadOnly[str]
 
 
-class StatusPayload(TypedDict):
-    """Optional typed status metadata for UI/event consumers."""
+class StatusKind(StrEnum):
+    """Typed producer intent carried by status events."""
 
-    operation: NotRequired[str]
-    status: NotRequired[str]
-    detail: NotRequired[object]
+    CHECKING_CURRENT = "checking_current"
+    PINNED_VERSION = "pinned_version"
+    LATEST_VERSION = "latest_version"
+    UPDATE_AVAILABLE = "update_available"
+    UP_TO_DATE = "up_to_date"
+    UPDATED = "updated"
+    UPDATING_REF = "updating_ref"
+    REFRESH_LOCK = "refresh_lock"
+    FETCHING_HASHES = "fetching_hashes"
+    COMPUTING_HASH = "computing_hash"
+    UNSUPPORTED_PLATFORM = "unsupported_platform"
+    SKIPPED = "skipped"
+    PRESERVED_HASH = "preserved_hash"
+    PRESERVED_DRV_HASH = "preserved_drv_hash"
+    PRESERVED_ARTIFACT = "preserved_artifact"
+    PARTIAL_HASHES = "partial_hashes"
+    RETRY = "retry"
+
+
+type StatusScope = Literal["version", "hash", "artifacts", "ref"]
+
+
+@dataclass(frozen=True)
+class StatusInfo:
+    """Structured status metadata describing what a status event reports.
+
+    ``value`` carries the single interesting datum for most kinds (a version,
+    platform, file, or attempt counter).  ``current``/``latest`` describe ref
+    or version transitions, and ``scope`` qualifies ``UP_TO_DATE`` events.
+    """
+
+    kind: StatusKind
+    value: str | None = None
+    current: str | None = None
+    latest: str | None = None
+    scope: StatusScope | None = None
+
+
+@dataclass(frozen=True)
+class StatusPayload:
+    """Typed payload attached to STATUS events."""
+
+    operation: str | None = None
+    info: StatusInfo | None = None
 
 
 type CommandArgs = list[str]
@@ -158,19 +199,12 @@ class UpdateEvent:
         message: str,
         *,
         operation: str | None = None,
-        status: str | None = None,
-        detail: object | None = None,
+        status: StatusInfo | None = None,
     ) -> UpdateEvent:
         """Create a status event."""
         payload: StatusPayload | None = None
-        if operation is not None or status is not None or detail is not None:
-            payload = {}
-            if operation is not None:
-                payload["operation"] = operation
-            if status is not None:
-                payload["status"] = status
-            if detail is not None:
-                payload["detail"] = detail
+        if operation is not None or status is not None:
+            payload = StatusPayload(operation=operation, info=status)
         return cls(
             source=source,
             kind=UpdateEventKind.STATUS,

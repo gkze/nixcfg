@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 from lib import json_utils
 from lib.update.net import fetch_json
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     ChecksumProvidedUpdater,
     VersionInfo,
     register_updater,

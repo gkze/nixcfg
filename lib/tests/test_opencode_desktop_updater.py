@@ -11,7 +11,7 @@ from lib.nix.models.sources import SourceEntry
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 
 
 def _load_updater_module() -> ModuleType:

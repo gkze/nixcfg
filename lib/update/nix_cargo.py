@@ -18,6 +18,8 @@ from lib.update.events import (
     CommandResult,
     EventStream,
     GatheredValues,
+    StatusInfo,
+    StatusKind,
     UpdateEvent,
     ValueDrain,
     drain_value_events,
@@ -32,7 +34,7 @@ from lib.update.nix_expr import identifier_attr_path
 from lib.update.process import RunCommandOptions, run_command
 
 if TYPE_CHECKING:
-    from lib.update.updaters.base import CargoLockGitDep
+    from lib.update.updaters.core import CargoLockGitDep
 
 
 _CARGO_LOCK_GIT_SOURCE_RE = re.compile(
@@ -215,8 +217,10 @@ async def compute_import_cargo_lock_output_hashes(
             source,
             "Fetching upstream Cargo.lock...",
             operation="compute_hash",
-            status="computing_hash",
-            detail="upstream Cargo.lock",
+            status=StatusInfo(
+                kind=StatusKind.COMPUTING_HASH,
+                value="upstream Cargo.lock",
+            ),
         )
         node = get_flake_input_node(input_name)
         locked = node.locked

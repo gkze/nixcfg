@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 from lib.update.nix import _build_nix_expr
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     FixedOutputHashStep,
     UpdateContext,
     VersionInfo,

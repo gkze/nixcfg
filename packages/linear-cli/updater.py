@@ -7,8 +7,12 @@ from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.commands.base import run_nix
 from lib.nix.models.sources import HashEntry, SourceEntry
+from lib.update import nix as update_nix
+from lib.update import process as update_process
 from lib.update.events import (
     EventStream,
+    StatusInfo,
+    StatusKind,
     UpdateEvent,
     ValueDrain,
     drain_value_events,
@@ -16,13 +20,12 @@ from lib.update.events import (
     expect_source_hashes,
     require_value,
 )
-from lib.update.nix import _build_flake_attr_expr, get_current_nix_platform
+from lib.update.nix import _build_flake_attr_expr
 from lib.update.paths import local_flake_url
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     DenoManifestUpdater,
     UpdateContext,
     VersionInfo,
-    compute_url_hashes,
     register_updater,
 )
 
@@ -80,7 +83,7 @@ class LinearCliUpdater(DenoManifestUpdater):
         )
 
     async def _resolve_deno_version(self) -> str:
-        platform = get_current_nix_platform()
+        platform = update_nix.get_current_nix_platform()
         result = await run_nix(
             [
                 "nix",
@@ -156,8 +159,10 @@ class LinearCliUpdater(DenoManifestUpdater):
                     "Retrying Deno manifest resolution after transient "
                     f"{type(exc).__name__} ({attempt}/{DENO_MANIFEST_ATTEMPTS})",
                     operation="compute_hash",
-                    status="retry",
-                    detail=type(exc).__name__,
+                    status=StatusInfo(
+                        kind=StatusKind.RETRY,
+                        value=type(exc).__name__,
+                    ),
                 )
                 await asyncio.sleep(0.5 * attempt)
 
@@ -170,13 +175,15 @@ class LinearCliUpdater(DenoManifestUpdater):
             self.name,
             f"Fetching denort runtime hashes for Deno v{deno_version}...",
             operation="compute_hash",
-            status="computing_hash",
-            detail=f"denort Deno v{deno_version}",
+            status=StatusInfo(
+                kind=StatusKind.COMPUTING_HASH,
+                value=f"denort Deno v{deno_version}",
+            ),
         )
 
         hash_drain = ValueDrain()
         async for event in drain_value_events(
-            compute_url_hashes(self.name, urls.values()),
+            update_process.compute_url_hashes(self.name, urls.values()),
             hash_drain,
             parse=expect_hash_mapping,
         ):

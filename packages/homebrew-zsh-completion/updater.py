@@ -1,11 +1,13 @@
 """Updater for Homebrew zsh completion file."""
 
-from lib.update.updaters.github_raw_file import github_raw_file_updater
+from lib.update.updaters import GitHubRawFileUpdater, register_updater
 
-HomebrewZshCompletionUpdater = github_raw_file_updater(
-    "homebrew-zsh-completion",
-    module=__name__,
-    owner="Homebrew",
-    repo="brew",
-    path="completions/zsh/_brew",
-)
+
+@register_updater
+class HomebrewZshCompletionUpdater(GitHubRawFileUpdater):
+    """Raw-file updater for the Homebrew zsh completion script."""
+
+    name = "homebrew-zsh-completion"
+    owner = "Homebrew"
+    repo = "brew"
+    path = "completions/zsh/_brew"

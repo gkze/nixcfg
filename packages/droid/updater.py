@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry, SourceHashes
 
 from lib.update.net import fetch_url
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     ChecksumProvidedUpdater,
     VersionInfo,
     register_updater,

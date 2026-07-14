@@ -30,6 +30,7 @@ let
   };
 
   requiredDesktopWorkspacePaths = [
+    "packages/codemode"
     "packages/http-recorder"
     "packages/plugin"
     "packages/protocol"
@@ -59,10 +60,48 @@ let
     let
       missing = builtins.filter (item: !(builtins.elem item actual)) required;
     in
+    if missing == [ ] then true else throw "${label}: missing ${builtins.toJSON missing}";
+
+  workspaceDependencyNames =
+    manifest:
+    builtins.concatLists (
+      builtins.map
+        (
+          dependencies:
+          builtins.filter (
+            name:
+            let
+              version = builtins.getAttr name dependencies;
+            in
+            builtins.isString version && builtins.match "^workspace:.*" version != null
+          ) (builtins.attrNames dependencies)
+        )
+        [
+          (manifest.dependencies or { })
+          (manifest.devDependencies or { })
+          (manifest.optionalDependencies or { })
+          (manifest.peerDependencies or { })
+        ]
+    );
+
+  assertWorkspaceDependencyClosure =
+    label: package:
+    let
+      workspacePaths = package.passthru.desktopWorkspacePaths;
+      manifests = builtins.map (
+        workspacePath:
+        builtins.fromJSON (builtins.readFile (package.src + "/${workspacePath}/package.json"))
+      ) workspacePaths;
+      includedNames = builtins.map (
+        manifest: manifest.name or (throw "${label}: workspace manifest has no name")
+      ) manifests;
+      requiredNames = builtins.concatLists (builtins.map workspaceDependencyNames manifests);
+      missing = builtins.filter (name: !(builtins.elem name includedNames)) requiredNames;
+    in
     if missing == [ ] then
       true
     else
-      throw "${label}: missing ${builtins.toJSON missing}";
+      throw "${label}: workspace dependency closure is missing ${builtins.toJSON missing}";
 
   perSystemChecks = builtins.concatLists (
     builtins.map (
@@ -113,6 +152,9 @@ let
       requiredDesktopWorkspacePaths
       (packageFor "aarch64-darwin" "opencode-desktop").passthru.desktopWorkspacePaths
     )
+    (assertWorkspaceDependencyClosure "desktop workspace filters" (
+      packageFor "aarch64-darwin" "opencode-desktop"
+    ))
   ]
   ++ perSystemChecks;
 in

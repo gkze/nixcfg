@@ -423,5 +423,5 @@ def run(
 main = make_main(app, prog_name="pipeline merge-probe")
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":  # pragma: no cover -- CLI entrypoint
     raise SystemExit(main())

@@ -15,7 +15,9 @@ UPDATE_SURFACE_ALIASES: dict[str, str] = {
 }
 
 UPDATE_SURFACE_EXEMPTIONS = frozenset({
+    "codex-v8-native",  # derived cache output owned by the codex/codex-v8 targets
     "electron-runtimes",  # aggregate/cache package, not an external update target
+    "goose-cli-v8-native",  # derived cache output owned by goose-cli/goose-v8
     "nix",
 })
 

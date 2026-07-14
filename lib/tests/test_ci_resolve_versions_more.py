@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from lib.nix.models.flake_lock import FlakeLockNode
 from lib.update.ci import resolve_versions as rv
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 
 if TYPE_CHECKING:
     from pathlib import Path

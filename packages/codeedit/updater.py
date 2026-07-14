@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import github_release_asset_urls_updater
+from typing import ClassVar
 
-CodeEditUpdater = github_release_asset_urls_updater(
-    "codeedit",
-    github_owner="CodeEditApp",
-    github_repo="CodeEdit",
-    platforms={
+from lib.update.updaters import GitHubReleaseAssetURLsUpdater, register_updater
+
+
+@register_updater
+class CodeEditUpdater(GitHubReleaseAssetURLsUpdater):
+    """Track CodeEdit DMG assets from GitHub latest releases."""
+
+    name = "codeedit"
+    GITHUB_OWNER = "CodeEditApp"
+    GITHUB_REPO = "CodeEdit"
+    PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin",
         "x86_64-darwin": "darwin",
-    },
-    asset_name="CodeEdit.dmg",
-    module=__name__,
-)
+    }
+    ASSET_NAME_TEMPLATE: ClassVar[str] = "CodeEdit.dmg"

@@ -5,7 +5,7 @@
   lib,
   nodejs,
   outputs,
-  pnpm_10,
+  pnpm_11,
   pnpmConfigHook,
   stdenv,
   ...
@@ -18,7 +18,7 @@
     lib
     nodejs
     outputs
-    pnpm_10
+    pnpm_11
     pnpmConfigHook
     stdenv
     ;

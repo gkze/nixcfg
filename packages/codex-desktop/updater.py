@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, cast
 from defusedxml import ElementTree
 
 from lib.update.net import fetch_url
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     DownloadHashUpdater,
     VersionInfo,
     register_updater,
@@ -196,7 +196,7 @@ class CodexDesktopUpdater(DownloadHashUpdater):
         if asset_urls is None:
             short_version = info.version.rsplit("-", maxsplit=1)[0]
             arch = self.PLATFORMS[platform]
-            return f"{self.ARCHIVE_BASE_URL}/Codex-darwin-{arch}-{short_version}.zip"
+            return f"{self.ARCHIVE_BASE_URL}/ChatGPT-darwin-{arch}-{short_version}.zip"
         if not isinstance(asset_urls, dict):
             msg = f"Invalid Codex desktop asset URLs in metadata: {info.metadata!r}"
             raise TypeError(msg)

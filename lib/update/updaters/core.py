@@ -17,10 +17,15 @@ from lib.nix.models.sources import (
     SourceEntry,
     SourceHashes,
 )
+from lib.update import net as update_net
+from lib.update import nix as update_nix
+from lib.update import process as update_process
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.events import (
     EventStream,
     GatheredValues,
+    StatusInfo,
+    StatusKind,
     UpdateEvent,
     ValueDrain,
     drain_value_events,
@@ -41,10 +46,6 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.update.updaters.metadata import VersionInfo
-
-from lib.update.updaters.dependencies import updater_dependencies
-
-_dependencies = updater_dependencies()
 
 
 @dataclass(frozen=True)
@@ -149,7 +150,7 @@ async def stream_url_hash_mapping(
     """Hash a keyed URL mapping while forwarding progress events."""
     hash_drain = ValueDrain[HashMapping]()
     async for event in drain_value_events(
-        _dependencies.compute_url_hashes(source_name, urls_by_key.values()),
+        update_process.compute_url_hashes(source_name, urls_by_key.values()),
         hash_drain,
         parse=expect_hash_mapping,
     ):
@@ -176,7 +177,7 @@ async def stream_fixed_output_hashes(
         hash_drain = ValueDrain[str]()
         env = step.env(resolved_hashes, config) if step.env is not None else None
         async for event in drain_value_events(
-            _dependencies.compute_fixed_output_hash(
+            update_nix.compute_fixed_output_hash(
                 source_name,
                 step.expr(resolved_hashes),
                 env=env,
@@ -261,7 +262,7 @@ class SourceThenOverlayHashMixin:
     @abstractmethod
     def _src_expr(version: str) -> str:
         """Build the fixed-output source expression for version."""
-        raise NotImplementedError  # pragma: no cover
+        raise NotImplementedError  # pragma: no cover -- abstract method body
 
     async def fetch_hashes(
         self,
@@ -409,14 +410,16 @@ class Updater(ABC):
     ) -> EventStream:
         """Run fetch/check/hash/update flow and emit update events."""
         if self.supported_platforms is not None:
-            current_platform = _dependencies.get_current_nix_platform()
+            current_platform = update_nix.get_current_nix_platform()
             if current_platform not in self.supported_platforms:
                 yield UpdateEvent.status(
                     self.name,
                     f"Unsupported platform {current_platform}, skipping update",
                     operation="check_version",
-                    status="unsupported_platform",
-                    detail=current_platform,
+                    status=StatusInfo(
+                        kind=StatusKind.UNSUPPORTED_PLATFORM,
+                        value=current_platform,
+                    ),
                 )
                 yield UpdateEvent.result(self.name)
                 return
@@ -427,8 +430,10 @@ class Updater(ABC):
                 self.name,
                 f"Using pinned version: {pinned_version.version}",
                 operation="check_version",
-                status="pinned_version",
-                detail=pinned_version.version,
+                status=StatusInfo(
+                    kind=StatusKind.PINNED_VERSION,
+                    value=pinned_version.version,
+                ),
             )
             info = pinned_version
         else:
@@ -447,8 +452,10 @@ class Updater(ABC):
                 self.name,
                 f"Latest version: {info.version}",
                 operation="check_version",
-                status="latest_version",
-                detail=info.version,
+                status=StatusInfo(
+                    kind=StatusKind.LATEST_VERSION,
+                    value=info.version,
+                ),
             )
         is_latest = await self._is_latest(context, info)
         if is_latest and not self.materialize_when_current:
@@ -456,8 +463,11 @@ class Updater(ABC):
                 self.name,
                 f"Up to date (version: {info.version})",
                 operation="check_version",
-                status="up_to_date",
-                detail={"scope": "version", "value": info.version},
+                status=StatusInfo(
+                    kind=StatusKind.UP_TO_DATE,
+                    scope="version",
+                    value=info.version,
+                ),
             )
             yield UpdateEvent.result(self.name)
             return
@@ -472,7 +482,7 @@ class Updater(ABC):
             self.name,
             "Fetching hashes for all platforms...",
             operation="compute_hash",
-            status="fetching_hashes",
+            status=StatusInfo(kind=StatusKind.FETCHING_HASHES),
         )
         hashes_drain = ValueDrain[SourceHashes]()
         async for event in drain_value_events(
@@ -517,8 +527,7 @@ class Updater(ABC):
                 self.name,
                 unchanged_message,
                 operation="compute_hash",
-                status="up_to_date",
-                detail={"scope": "hash"},
+                status=StatusInfo(kind=StatusKind.UP_TO_DATE, scope="hash"),
             )
             yield UpdateEvent.result(self.name)
             return
@@ -568,7 +577,7 @@ class ChecksumProvidedUpdater(Updater):
             yield event
         checksums = require_value(checksums_drain, "Missing checksum output")
         streams = {
-            platform: _dependencies.convert_nix_hash_to_sri(self.name, hex_hash)
+            platform: update_process.convert_nix_hash_to_sri(self.name, hex_hash)
             for platform, hex_hash in checksums.items()
         }
         async for item in gather_event_streams(streams):
@@ -587,7 +596,7 @@ class ChecksumProvidedUpdater(Updater):
         """Fetch per-platform checksums from sidecar URLs."""
 
         async def _fetch_one(platform: str, checksum_url: str) -> tuple[str, str]:
-            payload = await _dependencies.fetch_url(
+            payload = await update_net.fetch_url(
                 session,
                 checksum_url,
                 request_timeout=self.config.default_timeout,
@@ -613,14 +622,19 @@ class DownloadHashUpdater(Updater):
     """Updater that computes hashes from downloadable platform artifacts."""
 
     PLATFORMS: ClassVar[dict[str, str]]
-    BASE_URL: ClassVar[str] = ""
+    # Optional ``str.format`` template with ``{version}``, ``{platform}``, and
+    # ``{platform_value}`` fields; when unset, ``PLATFORMS`` values are the URLs.
+    DOWNLOAD_URL_TEMPLATE: ClassVar[str] = ""
     required_tools: ClassVar[tuple[str, ...]] = ("nix", "nix-prefetch-url")
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         """Return artifact URL for ``platform``."""
-        _ = info
-        if self.BASE_URL:
-            return f"{self.BASE_URL}/{self.PLATFORMS[platform]}"
+        if self.DOWNLOAD_URL_TEMPLATE:
+            return self.DOWNLOAD_URL_TEMPLATE.format(
+                version=info.version,
+                platform=platform,
+                platform_value=self.PLATFORMS[platform],
+            )
         return self.PLATFORMS[platform]
 
     def _platform_urls(self, info: VersionInfo) -> dict[str, str]:

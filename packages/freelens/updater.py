@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import github_release_asset_urls_updater
+from typing import ClassVar
 
-FreelensUpdater = github_release_asset_urls_updater(
-    "freelens",
-    github_owner="freelensapp",
-    github_repo="freelens",
-    platforms={
+from lib.update.updaters import GitHubReleaseAssetURLsUpdater, register_updater
+
+
+@register_updater
+class FreelensUpdater(GitHubReleaseAssetURLsUpdater):
+    """Track Freelens macOS DMG assets from GitHub latest releases."""
+
+    name = "freelens"
+    GITHUB_OWNER = "freelensapp"
+    GITHUB_REPO = "freelens"
+    PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "arm64",
-    },
-    asset_name="Freelens-{version}-macos-{platform_value}.dmg",
-    module=__name__,
-)
+    }
+    ASSET_NAME_TEMPLATE: ClassVar[str] = "Freelens-{version}-macos-{platform_value}.dmg"

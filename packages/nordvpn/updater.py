@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import sparkle_appcast_updater
+from typing import ClassVar
 
-NordvpnUpdater = sparkle_appcast_updater(
-    "nordvpn",
-    appcast_url=(
+from lib.update.updaters import SparkleAppcastUpdater, register_updater
+
+
+@register_updater
+class NordvpnUpdater(SparkleAppcastUpdater):
+    """Resolve NordVPN versions from its Sparkle feed and versioned pkg URL."""
+
+    name = "nordvpn"
+    APPCAST_URL = (
         "https://downloads.nordcdn.com/apps/macos/generic/NordVPN-OpenVPN/"
         "latest/update_pkg.xml"
-    ),
-    platforms={
+    )
+    VERSION_FIELD = "short_or_version"
+    PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin",
-    },
-    download_url=(
+    }
+    DOWNLOAD_URL_TEMPLATE = (
         "https://downloads.nordcdn.com/apps/macos/generic/NordVPN-OpenVPN/"
         "{version}/NordVPN.pkg"
-    ),
-    version_field="short_or_version",
-    module=__name__,
-)
+    )

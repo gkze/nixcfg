@@ -4,38 +4,23 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from lib.update import sources as update_sources
 
-    from lib.nix.models.sources import SourcesFile
+if TYPE_CHECKING:
     from lib.update.cli import OutputOptions
     from lib.update.cli_options import UpdateOptions
 
 
-@dataclass(frozen=True)
-class ValidationDependencies:
-    """Collaborators required to validate discovered sources."""
-
-    load_sources: Callable[[], SourcesFile]
-    validate_source_discovery_consistency: Callable[[], None]
-
-
-def handle_validate_request(
-    opts: UpdateOptions,
-    out: OutputOptions,
-    *,
-    dependencies: ValidationDependencies,
-) -> int | None:
-    """Handle ``--validate`` using one explicit dependency bundle."""
+def handle_validate_request(opts: UpdateOptions, out: OutputOptions) -> int | None:
+    """Handle ``--validate`` against the discovered sources."""
     if not opts.validate:
         return None
 
     try:
-        sources = dependencies.load_sources()
-        dependencies.validate_source_discovery_consistency()
+        sources = update_sources.load_all_sources()
+        update_sources.validate_source_discovery_consistency()
         if opts.json:
             sys.stdout.write(
                 f"{json.dumps({'valid': True, 'sources': len(sources.entries)})}\n",
@@ -69,7 +54,6 @@ def validate_list_sort_option(opts: UpdateOptions, out: OutputOptions) -> int | 
 
 
 __all__ = [
-    "ValidationDependencies",
     "handle_validate_request",
     "validate_list_sort_option",
 ]

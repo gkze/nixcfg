@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-ARIvUMkkdUK5O6xdplXJ/JkPdezO/16HvO2P21W6y8I="
+    "aarch64-darwin": "sha256-rjPhHV24WNofZK4sT3yjg1eGeAvLKvAuVf51bwiQBBk="
   },
   "urls": {
-    "aarch64-darwin": "https://github.com/freelensapp/freelens/releases/download/v1.10.2/Freelens-1.10.2-macos-arm64.dmg"
+    "aarch64-darwin": "https://github.com/freelensapp/freelens/releases/download/v1.10.3/Freelens-1.10.3-macos-arm64.dmg"
   },
-  "version": "1.10.2"
+  "version": "1.10.3"
 }

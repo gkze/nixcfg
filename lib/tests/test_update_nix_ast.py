@@ -265,10 +265,10 @@ def test_build_nix_expr_wraps_body_with_pkgs_binding() -> None:
 
 def test_build_overlay_expr_supports_explicit_system() -> None:
     """_build_overlay_expr should produce parseable Nix for explicit systems."""
-    expr = _build_overlay_expr("chatgpt", system="x86_64-linux")
+    expr = _build_overlay_expr("code-cursor", system="x86_64-linux")
 
     assert_nix_ast_equal(
-        expr, _build_overlay_expression("chatgpt", system="x86_64-linux")
+        expr, _build_overlay_expression("code-cursor", system="x86_64-linux")
     )
 
 
@@ -628,7 +628,10 @@ def test_build_package_path_attr_expr_calls_package_with_flake_context() -> None
     flake_url = f"git+file://{REPO_ROOT}?dirty=1"
     package_expr = FunctionCall(
         name=FunctionCall(
-            name=identifier_attr_path("pkgs", "callPackage"),
+            name=FunctionCall(
+                name=identifier_attr_path("pkgs", "lib", "callPackageWith"),
+                argument=Identifier(name="applied"),
+            ),
             argument=NixPath(path="./packages/t3code-workspace/default.nix"),
         ),
         argument=AttributeSet(
@@ -637,6 +640,13 @@ def test_build_package_path_attr_expr_calls_package_with_flake_context() -> None
                 Binding(name="outputs", value=Identifier(name="flake")),
             ]
         ),
+    )
+    overlay_applied = FunctionCall(
+        name=FunctionCall(
+            name=identifier_attr_path("flake", "overlays", "default"),
+            argument=Identifier(name="self"),
+        ),
+        argument=Identifier(name="pkgs"),
     )
     expected = LetExpression(
         local_variables=[
@@ -677,6 +687,22 @@ def test_build_package_path_attr_expr_calls_package_with_flake_context() -> None
                                 ),
                             ),
                         ],
+                    ),
+                ),
+            ),
+            Binding(
+                name="applied",
+                value=FunctionCall(
+                    name=identifier_attr_path("pkgs", "lib", "fix"),
+                    argument=Parenthesis(
+                        value=FunctionDefinition(
+                            argument_set=Identifier(name="self"),
+                            output=BinaryExpression(
+                                operator=Operator(name="//"),
+                                left=Identifier(name="pkgs"),
+                                right=overlay_applied,
+                            ),
+                        ),
                     ),
                 ),
             ),

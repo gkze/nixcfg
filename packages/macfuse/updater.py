@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from lib import json_utils
 from lib.update.net import fetch_url
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     DownloadUrlMetadataUpdater,
     VersionInfo,
     register_updater,

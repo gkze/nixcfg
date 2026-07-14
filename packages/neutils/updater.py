@@ -16,10 +16,15 @@ if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry
 
 from lib.nix.models.sources import HashEntry, SourceHashes
+from lib.update import net as update_net
+from lib.update import nix as update_nix
+from lib.update import paths as update_paths
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
     CommandResult,
     EventStream,
+    StatusInfo,
+    StatusKind,
     UpdateEvent,
     ValueDrain,
     drain_value_events,
@@ -27,18 +32,12 @@ from lib.update.events import (
     expect_str,
     require_value,
 )
-from lib.update.net import fetch_url
-from lib.update.nix import (
-    _build_fetch_from_github_expr,
-    compute_fixed_output_hash,
-    get_current_nix_platform,
-)
+from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.paths import get_repo_file, local_flake_url
 from lib.update.process import RunCommandOptions, run_command
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     UpdateContext,
     VersionInfo,
-    package_dir_for,
     register_updater,
 )
 from lib.update.updaters.github_release import GitHubReleaseUpdater
@@ -191,7 +190,10 @@ class NeutilsUpdater(GitHubReleaseUpdater):
                         self.name,
                         "zon2nix hit a transient fetch failure; retrying...",
                         operation="compute_hash",
-                        detail=f"attempt {attempt}/{self._ZON2NIX_MAX_ATTEMPTS}",
+                        status=StatusInfo(
+                            kind=StatusKind.RETRY,
+                            value=f"attempt {attempt}/{self._ZON2NIX_MAX_ATTEMPTS}",
+                        ),
                     )
                     await asyncio.sleep(max(0.0, self.config.default_retry_backoff))
                     continue
@@ -217,7 +219,10 @@ class NeutilsUpdater(GitHubReleaseUpdater):
                     self.name,
                     "zon2nix hit a transient fetch failure; retrying...",
                     operation="compute_hash",
-                    detail=f"attempt {attempt}/{self._ZON2NIX_MAX_ATTEMPTS}",
+                    status=StatusInfo(
+                        kind=StatusKind.RETRY,
+                        value=f"attempt {attempt}/{self._ZON2NIX_MAX_ATTEMPTS}",
+                    ),
                 )
                 await asyncio.sleep(max(0.0, self.config.default_retry_backoff))
                 continue
@@ -228,14 +233,14 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
     ) -> EventStream:
-        archive_bytes = await fetch_url(
+        archive_bytes = await update_net.fetch_url(
             session,
             self._archive_url(info.version),
             request_timeout=self.config.default_timeout,
             config=self.config,
         )
 
-        current_system = get_current_nix_platform()
+        current_system = update_nix.get_current_nix_platform()
         repo_root = get_repo_file(".")
         zig_installable = (
             f"{_local_flake_url(repo_root)}#pkgs.{current_system}.zig_0_15"
@@ -300,7 +305,7 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Generate ``build.zig.zon.nix`` and compute the pinned source hash."""
-        pkg_dir = package_dir_for(self.name)
+        pkg_dir = update_paths.package_dir_for(self.name)
         if pkg_dir is None:
             msg = f"Package directory not found for {self.name}"
             raise RuntimeError(msg)
@@ -310,7 +315,6 @@ class NeutilsUpdater(GitHubReleaseUpdater):
             self.name,
             f"Refreshing {artifact_path.name}...",
             operation="compute_hash",
-            detail=str(artifact_path),
         )
 
         artifact_drain = ValueDrain[str]()
@@ -337,8 +341,10 @@ class NeutilsUpdater(GitHubReleaseUpdater):
                     self.name,
                     f"Preserving existing {artifact_path.name} after transient zon2nix failure.",
                     operation="compute_hash",
-                    status="preserved_artifact",
-                    detail=str(artifact_path),
+                    status=StatusInfo(
+                        kind=StatusKind.PRESERVED_ARTIFACT,
+                        value=str(artifact_path),
+                    ),
                 )
                 artifact_content = await asyncio.to_thread(
                     artifact_path.read_text,
@@ -353,7 +359,7 @@ class NeutilsUpdater(GitHubReleaseUpdater):
 
         src_hash_drain = ValueDrain[str]()
         async for event in drain_value_events(
-            compute_fixed_output_hash(
+            update_nix.compute_fixed_output_hash(
                 self.name,
                 self._src_expr(info.version),
                 config=self.config,

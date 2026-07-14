@@ -32,7 +32,7 @@ dock.mkDockModule {
     (appPath "zen-twilight" "Twilight.app")
     (appPath "google-chrome" "Google Chrome.app")
     (appPath "town-assistant" "Town Assistant.app")
-    (appPath "codex" "Codex.app")
+    (appPath "codex" "ChatGPT.app")
     (appPath "claude" "Claude.app")
     (appPath "opencode" "OpenCode Desktop Dev.app")
     (appPath "zed" "Zed Nightly.app")

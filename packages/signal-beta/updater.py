@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar, cast
 
 from lib.update.net import fetch_github_api_paginated
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 
 if TYPE_CHECKING:
     import aiohttp

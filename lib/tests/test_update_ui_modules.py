@@ -29,7 +29,14 @@ from lib.nix.models.sources import (
 )
 from lib.tests._assertions import expect_instance
 from lib.update.artifacts import GeneratedArtifact
-from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
+from lib.update.events import (
+    CommandResult,
+    StatusInfo,
+    StatusKind,
+    StatusPayload,
+    UpdateEvent,
+    UpdateEventKind,
+)
 from lib.update.ui_consumer import ConsumeEventsOptions, EventConsumer, consume_events
 from lib.update.ui_render import Renderer
 from lib.update.ui_state import (
@@ -130,7 +137,21 @@ def test_ui_state_terminal_status_and_visibility() -> None:
     """Run this test case."""
     assert not is_terminal_status("Updated: 1.0 -> 1.1")
     assert not is_terminal_status("Up to date")
-    assert is_terminal_status("still running", {"status": "updated"})
+    assert is_terminal_status(
+        "still running",
+        StatusPayload(info=StatusInfo(kind=StatusKind.UPDATED)),
+    )
+    assert is_terminal_status(
+        "still running",
+        StatusPayload(
+            info=StatusInfo(kind=StatusKind.UPDATE_AVAILABLE, current="1", latest="2"),
+        ),
+    )
+    assert not is_terminal_status(
+        "still running",
+        StatusPayload(info=StatusInfo(kind=StatusKind.COMPUTING_HASH)),
+    )
+    assert not is_terminal_status("plain", StatusPayload(operation="compute_hash"))
     assert not is_terminal_status("Checking demo (current: 1.0)")
 
     operation = OperationState(kind=OperationKind.CHECK_VERSION, label="Checking")
@@ -169,14 +190,26 @@ def test_ui_state_from_meta_and_command_mappers() -> None:
 @pytest.mark.parametrize(
     ("payload", "kind"),
     [
-        ({"operation": OperationKind.CHECK_VERSION.value}, OperationKind.CHECK_VERSION),
-        ({"operation": OperationKind.UPDATE_REF.value}, OperationKind.UPDATE_REF),
-        ({"operation": OperationKind.REFRESH_LOCK.value}, OperationKind.REFRESH_LOCK),
-        ({"operation": OperationKind.COMPUTE_HASH.value}, OperationKind.COMPUTE_HASH),
+        (
+            StatusPayload(operation=OperationKind.CHECK_VERSION.value),
+            OperationKind.CHECK_VERSION,
+        ),
+        (
+            StatusPayload(operation=OperationKind.UPDATE_REF.value),
+            OperationKind.UPDATE_REF,
+        ),
+        (
+            StatusPayload(operation=OperationKind.REFRESH_LOCK.value),
+            OperationKind.REFRESH_LOCK,
+        ),
+        (
+            StatusPayload(operation=OperationKind.COMPUTE_HASH.value),
+            OperationKind.COMPUTE_HASH,
+        ),
     ],
 )
 def test_operation_for_status_matches_expected_kind(
-    payload: dict[str, str],
+    payload: StatusPayload,
     kind: OperationKind,
 ) -> None:
     """Run this test case."""
@@ -193,35 +226,44 @@ def test_operation_for_status_prefers_typed_payload() -> None:
     assert (
         operation_for_status(
             "custom status",
-            {"operation": OperationKind.REFRESH_LOCK.value},
+            StatusPayload(operation=OperationKind.REFRESH_LOCK.value),
         )
         == OperationKind.REFRESH_LOCK
     )
 
 
 def test_operation_for_status_invalid_typed_payload_falls_back_or_none() -> None:
-    """Ignore malformed typed payloads instead of parsing message text."""
+    """Ignore untyped or unmapped payloads instead of parsing message text."""
     assert operation_for_status("Update available: 1 -> 2", []) is None
     assert operation_for_status("Update available: 1 -> 2", {"operation": 1}) is None
-    assert operation_for_status("custom status", {"operation": "not-real"}) is None
+    assert (
+        operation_for_status("custom status", StatusPayload(operation="not-real"))
+        is None
+    )
+    assert (
+        operation_for_status(
+            "custom status",
+            StatusPayload(info=StatusInfo(kind=StatusKind.FETCHING_HASHES)),
+        )
+        is None
+    )
 
 
-def test_payload_status_update_ignores_non_mapping_payload() -> None:
-    """Payload status updates require a structured mapping payload."""
-    assert ui_state_module._payload_status_update(None) is None
+# test_payload_status_update_ignores_non_mapping_payload deleted: the dict
+# parsing helper is gone and non-StatusPayload payloads are ignored upstream.
 
 
-def test_apply_status_ignores_unrenderable_structured_update(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_apply_status_ignores_unrenderable_structured_update() -> None:
     """A recognized operation with no renderable status leaves state unchanged."""
     item = _item()
-    monkeypatch.setattr(ui_state_module, "_payload_status_update", lambda *_args: None)
 
     apply_status(
         item,
         "status message",
-        {"operation": OperationKind.CHECK_VERSION.value},
+        StatusPayload(
+            operation=OperationKind.CHECK_VERSION.value,
+            info=StatusInfo(kind=StatusKind.UP_TO_DATE),
+        ),
     )
 
     assert item.last_operation == OperationKind.CHECK_VERSION
@@ -229,38 +271,82 @@ def test_apply_status_ignores_unrenderable_structured_update(
 
 
 @pytest.mark.parametrize(
-    ("payload", "expected_status", "expected_message"),
+    ("info", "expected_status", "expected_message"),
     [
-        ({"status": "checking_current", "detail": "1.0"}, "running", "current 1.0"),
-        ({"status": "pinned_version", "detail": "2.0"}, "running", "2.0"),
-        ({"status": "latest_version", "detail": "3.0"}, "running", "3.0"),
         (
-            {"status": "update_available", "detail": {"current": "1", "latest": "2"}},
+            StatusInfo(kind=StatusKind.CHECKING_CURRENT, value="1.0"),
+            "running",
+            "current 1.0",
+        ),
+        (StatusInfo(kind=StatusKind.PINNED_VERSION, value="2.0"), "running", "2.0"),
+        (StatusInfo(kind=StatusKind.LATEST_VERSION, value="3.0"), "running", "3.0"),
+        (
+            StatusInfo(kind=StatusKind.UPDATE_AVAILABLE, current="1", latest="2"),
             "success",
             "1 -> 2",
         ),
         (
-            {"status": "up_to_date", "detail": {"scope": "version", "value": "1.0"}},
+            StatusInfo(kind=StatusKind.UP_TO_DATE, scope="version", value="1.0"),
             "no_change",
             "1.0 (up to date)",
         ),
         (
-            {"status": "up_to_date", "detail": {"scope": "hash"}},
+            StatusInfo(kind=StatusKind.UP_TO_DATE, scope="hash"),
             "no_change",
             None,
         ),
         (
-            {"status": "updating_ref", "detail": {"current": "a", "latest": "b"}},
+            StatusInfo(kind=StatusKind.UP_TO_DATE, scope="artifacts"),
+            "no_change",
+            None,
+        ),
+        (
+            StatusInfo(kind=StatusKind.UPDATING_REF, current="a", latest="b"),
             "running",
             "a -> b",
         ),
-        ({"status": "refresh_lock", "detail": "demo"}, "running", "demo"),
-        ({"status": "fetching_hashes"}, "running", "all platforms"),
-        ({"status": "computing_hash", "detail": "linux"}, "running", "linux"),
+        (StatusInfo(kind=StatusKind.REFRESH_LOCK, value="demo"), "running", "demo"),
+        (StatusInfo(kind=StatusKind.FETCHING_HASHES), "running", "all platforms"),
+        (StatusInfo(kind=StatusKind.COMPUTING_HASH, value="linux"), "running", "linux"),
+        (
+            StatusInfo(kind=StatusKind.UNSUPPORTED_PLATFORM, value="x86_64-linux"),
+            "running",
+            "structured status",
+        ),
+        (
+            StatusInfo(kind=StatusKind.SKIPPED, value="unknown_target"),
+            "running",
+            "structured status",
+        ),
+        (
+            StatusInfo(kind=StatusKind.PRESERVED_HASH, value="x86_64-linux"),
+            "running",
+            "structured status",
+        ),
+        (
+            StatusInfo(kind=StatusKind.PRESERVED_DRV_HASH, value="sha256-abc"),
+            "running",
+            "structured status",
+        ),
+        (
+            StatusInfo(kind=StatusKind.PRESERVED_ARTIFACT, value="build.zig.zon.nix"),
+            "running",
+            "structured status",
+        ),
+        (
+            StatusInfo(kind=StatusKind.PARTIAL_HASHES, value="x86_64-linux"),
+            "running",
+            "structured status",
+        ),
+        (
+            StatusInfo(kind=StatusKind.RETRY, value="attempt 2/3"),
+            "running",
+            "structured status",
+        ),
     ],
 )
 def test_apply_status_prefers_structured_status_payloads(
-    payload: dict[str, object],
+    info: StatusInfo,
     expected_status: str,
     expected_message: str | None,
 ) -> None:
@@ -269,7 +355,7 @@ def test_apply_status_prefers_structured_status_payloads(
     apply_status(
         item,
         "structured status",
-        {"operation": OperationKind.COMPUTE_HASH.value, **payload},
+        StatusPayload(operation=OperationKind.COMPUTE_HASH.value, info=info),
     )
     op = item.operations[OperationKind.COMPUTE_HASH]
     assert op.status == expected_status
@@ -289,11 +375,13 @@ def test_apply_status_handles_artifact_materialization_payloads() -> None:
     apply_status(
         item,
         "Refreshing crate2nix artifacts...",
-        {
-            "operation": OperationKind.MATERIALIZE_ARTIFACTS.value,
-            "status": "computing_hash",
-            "detail": "crate2nix artifacts",
-        },
+        StatusPayload(
+            operation=OperationKind.MATERIALIZE_ARTIFACTS.value,
+            info=StatusInfo(
+                kind=StatusKind.COMPUTING_HASH,
+                value="crate2nix artifacts",
+            ),
+        ),
     )
     artifact_op = item.operations[OperationKind.MATERIALIZE_ARTIFACTS]
     assert artifact_op.status == "running"
@@ -302,11 +390,10 @@ def test_apply_status_handles_artifact_materialization_payloads() -> None:
     apply_status(
         item,
         "Prepared crate2nix artifacts",
-        {
-            "operation": OperationKind.MATERIALIZE_ARTIFACTS.value,
-            "status": "updated",
-            "detail": "crate2nix artifacts",
-        },
+        StatusPayload(
+            operation=OperationKind.MATERIALIZE_ARTIFACTS.value,
+            info=StatusInfo(kind=StatusKind.UPDATED, value="crate2nix artifacts"),
+        ),
     )
     assert artifact_op.status == "success"
     assert artifact_op.message == "crate2nix artifacts"
@@ -315,11 +402,14 @@ def test_apply_status_handles_artifact_materialization_payloads() -> None:
     apply_status(
         item2,
         "crate2nix artifacts up to date",
-        {
-            "operation": OperationKind.MATERIALIZE_ARTIFACTS.value,
-            "status": "up_to_date",
-            "detail": {"scope": "artifacts", "value": "crate2nix artifacts"},
-        },
+        StatusPayload(
+            operation=OperationKind.MATERIALIZE_ARTIFACTS.value,
+            info=StatusInfo(
+                kind=StatusKind.UP_TO_DATE,
+                scope="artifacts",
+                value="crate2nix artifacts",
+            ),
+        ),
     )
     same_op = item2.operations[OperationKind.MATERIALIZE_ARTIFACTS]
     assert same_op.status == "no_change"
@@ -335,7 +425,7 @@ def test_apply_status_requires_structured_operation_payloads() -> None:
     apply_status(
         item,
         "custom hash note",
-        {"operation": OperationKind.COMPUTE_HASH.value},
+        StatusPayload(operation=OperationKind.COMPUTE_HASH.value),
     )
     assert item.operations[OperationKind.COMPUTE_HASH].message == "custom hash note"
 
@@ -343,7 +433,7 @@ def test_apply_status_requires_structured_operation_payloads() -> None:
     apply_status(
         item2,
         "no parser match",
-        {"operation": OperationKind.CHECK_VERSION.value},
+        StatusPayload(operation=OperationKind.CHECK_VERSION.value),
     )
     assert item2.operations[OperationKind.CHECK_VERSION].status == "running"
 
@@ -358,11 +448,10 @@ def test_apply_status_rules_and_status_priority() -> None:
     apply_status(
         item,
         "Latest version: 1.0.0",
-        {
-            "operation": OperationKind.CHECK_VERSION.value,
-            "status": "latest_version",
-            "detail": "1.0.0",
-        },
+        StatusPayload(
+            operation=OperationKind.CHECK_VERSION.value,
+            info=StatusInfo(kind=StatusKind.LATEST_VERSION, value="1.0.0"),
+        ),
     )
     assert check_op.status == "running"
     assert check_op.message == "1.0.0"
@@ -370,11 +459,14 @@ def test_apply_status_rules_and_status_priority() -> None:
     apply_status(
         item,
         "Update available: 1.0.0 -> 1.1.0",
-        {
-            "operation": OperationKind.CHECK_VERSION.value,
-            "status": "update_available",
-            "detail": {"current": "1.0.0", "latest": "1.1.0"},
-        },
+        StatusPayload(
+            operation=OperationKind.CHECK_VERSION.value,
+            info=StatusInfo(
+                kind=StatusKind.UPDATE_AVAILABLE,
+                current="1.0.0",
+                latest="1.1.0",
+            ),
+        ),
     )
     assert check_op.status == "success"
     assert check_op.message == "1.0.0 -> 1.1.0"
@@ -383,11 +475,10 @@ def test_apply_status_rules_and_status_priority() -> None:
     apply_status(
         item,
         "Latest version: 1.1.0",
-        {
-            "operation": OperationKind.CHECK_VERSION.value,
-            "status": "latest_version",
-            "detail": "1.1.0",
-        },
+        StatusPayload(
+            operation=OperationKind.CHECK_VERSION.value,
+            info=StatusInfo(kind=StatusKind.LATEST_VERSION, value="1.1.0"),
+        ),
     )
     assert check_op.status == "success"
     assert check_op.message == "1.0.0 -> 1.1.0"
@@ -395,10 +486,10 @@ def test_apply_status_rules_and_status_priority() -> None:
     apply_status(
         item,
         "Fetching hashes for all platforms",
-        {
-            "operation": OperationKind.COMPUTE_HASH.value,
-            "status": "fetching_hashes",
-        },
+        StatusPayload(
+            operation=OperationKind.COMPUTE_HASH.value,
+            info=StatusInfo(kind=StatusKind.FETCHING_HASHES),
+        ),
     )
     hash_op = item.operations[OperationKind.COMPUTE_HASH]
     assert hash_op.status == "running"
@@ -407,11 +498,10 @@ def test_apply_status_rules_and_status_priority() -> None:
     apply_status(
         item,
         "Up to date",
-        {
-            "operation": OperationKind.COMPUTE_HASH.value,
-            "status": "up_to_date",
-            "detail": {"scope": "hash"},
-        },
+        StatusPayload(
+            operation=OperationKind.COMPUTE_HASH.value,
+            info=StatusInfo(kind=StatusKind.UP_TO_DATE, scope="hash"),
+        ),
     )
     assert hash_op.status == "no_change"
     assert hash_op.message is None
@@ -421,54 +511,34 @@ def test_apply_status_rules_and_status_priority() -> None:
     apply_status(
         item2,
         "warning: cache miss",
-        {"operation": OperationKind.COMPUTE_HASH.value},
+        StatusPayload(operation=OperationKind.COMPUTE_HASH.value),
     )
     hash_op2 = item2.operations[OperationKind.COMPUTE_HASH]
     assert hash_op2.status == "running"
     assert hash_op2.message == "warning: cache miss"
 
 
-def test_ui_status_helper_edge_cases_cover_non_string_details() -> None:
-    """Keep helper return values stable for malformed or non-string detail payloads."""
-    assert ui_state_module._up_to_date_status_update("demo") is None
-    assert ui_state_module._up_to_date_status_update({
-        "scope": "artifacts",
-        "value": ["crate2nix"],
-    }) == ui_state_module.StatusUpdate("no_change", clear_message=True)
-    assert ui_state_module._updated_status_update({
-        "value": "crate2nix artifacts"
-    }) == ui_state_module.StatusUpdate("success", "crate2nix artifacts")
-    assert ui_state_module._updated_status_update({
-        "value": ["bad"]
-    }) == ui_state_module.StatusUpdate("success")
-    assert ui_state_module._updated_status_update([
-        "bad"
-    ]) == ui_state_module.StatusUpdate("success")
+# test_ui_status_helper_edge_cases_cover_non_string_details deleted: typed
+# StatusInfo payloads make non-string detail values unrepresentable.
+# test_payload_status_update_rejects_malformed_structured_details deleted:
+# malformed status payload dicts are unrepresentable with StatusPayload.
 
 
-def test_payload_status_update_rejects_malformed_structured_details() -> None:
-    """Ignore structured payload variants that do not match the expected shape."""
-    assert (
-        ui_state_module._payload_status_update({
-            "status": "update_available",
-            "detail": {"current": 1, "latest": "2"},
-        })
-        is None
+def test_apply_status_updated_without_value_keeps_existing_message() -> None:
+    """UPDATED with no value marks success without overwriting the message."""
+    item = _item()
+    op = item.operations[OperationKind.COMPUTE_HASH]
+    op.message = "existing"
+    apply_status(
+        item,
+        "Updated",
+        StatusPayload(
+            operation=OperationKind.COMPUTE_HASH.value,
+            info=StatusInfo(kind=StatusKind.UPDATED),
+        ),
     )
-    assert (
-        ui_state_module._payload_status_update({
-            "status": "up_to_date",
-            "detail": {"scope": "version", "value": 1},
-        })
-        is None
-    )
-    assert (
-        ui_state_module._payload_status_update({
-            "status": "updating_ref",
-            "detail": {"current": "a", "latest": 2},
-        })
-        is None
-    )
+    assert op.status == "success"
+    assert op.message == "existing"
 
 
 def test_apply_status_ignores_unknown_or_missing_operations() -> None:
@@ -479,15 +549,17 @@ def test_apply_status_ignores_unknown_or_missing_operations() -> None:
     apply_status(
         item,
         "Computing hash for demo.",
-        {
-            "operation": OperationKind.COMPUTE_HASH.value,
-            "status": "computing_hash",
-            "detail": "demo",
-        },
+        StatusPayload(
+            operation=OperationKind.COMPUTE_HASH.value,
+            info=StatusInfo(kind=StatusKind.COMPUTING_HASH, value="demo"),
+        ),
     )
     assert check_op.status == "pending"
 
     apply_status(item, "unrelated status")
+    assert check_op.status == "pending"
+
+    apply_status(item, "typed but unmapped", StatusPayload(operation="not-real"))
     assert check_op.status == "pending"
 
 
@@ -1127,8 +1199,7 @@ def test_event_consumer_detail_priority_and_status_handlers(
             "demo",
             "Latest version: 1.0.0",
             operation=OperationKind.CHECK_VERSION.value,
-            status="latest_version",
-            detail="1.0.0",
+            status=StatusInfo(kind=StatusKind.LATEST_VERSION, value="1.0.0"),
         ),
         item,
     )
@@ -1137,8 +1208,7 @@ def test_event_consumer_detail_priority_and_status_handlers(
             "demo",
             "Updated: 1.0 -> 1.1",
             operation=OperationKind.CHECK_VERSION.value,
-            status="updated",
-            detail="1.0 -> 1.1",
+            status=StatusInfo(kind=StatusKind.UPDATED, value="1.0 -> 1.1"),
         ),
         item,
     )
@@ -1158,8 +1228,7 @@ def test_event_consumer_detail_priority_and_status_handlers(
             "demo",
             "Updated: 1.0 -> 1.1",
             operation=OperationKind.CHECK_VERSION.value,
-            status="updated",
-            detail="1.0 -> 1.1",
+            status=StatusInfo(kind=StatusKind.UPDATED, value="1.0 -> 1.1"),
         ),
         item_non_tty,
     )

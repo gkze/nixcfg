@@ -32,6 +32,8 @@ from lib.update.events import (
     CommandResult,
     EventStream,
     GatheredValues,
+    StatusInfo,
+    StatusKind,
     UpdateEvent,
     UpdateEventKind,
     ValueDrain,
@@ -355,7 +357,9 @@ async def compute_sri_hash(source: str, url: str) -> EventStream:
     args.append(url)
     config = resolve_active_config(None)
     attempts = max(1, config.default_retries)
-    for attempt in range(1, attempts + 1):  # pragma: no branch
+    for attempt in range(
+        1, attempts + 1
+    ):  # pragma: no branch -- loop always returns or raises before exhausting
         try:
             async for event in _emit_successful_command(
                 source=source,
@@ -383,7 +387,10 @@ async def compute_sri_hash(source: str, url: str) -> EventStream:
                 source,
                 "nix-prefetch-url hit a transient failure; retrying...",
                 operation="compute_hash",
-                detail=f"attempt {next_attempt}/{attempts}",
+                status=StatusInfo(
+                    kind=StatusKind.RETRY,
+                    value=f"attempt {next_attempt}/{attempts}",
+                ),
             )
             await asyncio.sleep(max(0.0, config.default_retry_backoff))
         else:

@@ -14,10 +14,17 @@ from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module_for_test as _load_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
-from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
+from lib.update.events import (
+    EventStream,
+    StatusInfo,
+    StatusKind,
+    StatusPayload,
+    UpdateEvent,
+    UpdateEventKind,
+)
+from lib.update.updaters import VersionInfo
 from lib.update.updaters import github_release as github_release_module
 from lib.update.updaters import materialization as materialization_mod
-from lib.update.updaters.base import VersionInfo
 from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
 
 
@@ -101,8 +108,7 @@ def test_codex_updater_refreshes_crate2nix_artifacts(
             name,
             "Prepared crate2nix artifacts",
             operation="materialize_artifacts",
-            status="updated",
-            detail="crate2nix artifacts",
+            status=StatusInfo(kind=StatusKind.UPDATED, value="crate2nix artifacts"),
         )
 
     monkeypatch.setattr(
@@ -196,7 +202,7 @@ def test_crate2nix_artifacts_mixin_streams_shared_materialization_events(
         UpdateEventKind.STATUS,
         UpdateEventKind.ARTIFACT,
     ]
-    assert events[0].payload == {"operation": "materialize_artifacts"}
+    assert events[0].payload == StatusPayload(operation="materialize_artifacts")
     artifact_payload = expect_instance(events[1].payload, list)
     assert len(artifact_payload) == 1
     assert artifact_payload[0].path == Path("packages/demo/Cargo.nix")
@@ -384,9 +390,9 @@ def test_codex_desktop_reads_platform_appcasts(
 ) -> None:
     """Resolve the newest common Codex release and immutable ZIP URLs."""
     updater = codex_desktop_module.CodexDesktopUpdater()
-    newer_arm_url = "https://example.invalid/Codex-darwin-arm64-26.429.61741.zip"
-    arm_url = "https://example.invalid/Codex-darwin-arm64-26.429.20946.zip"
-    x64_url = "https://example.invalid/Codex-darwin-x64-26.429.20946.zip"
+    newer_arm_url = "https://example.invalid/ChatGPT-darwin-arm64-26.429.61741.zip"
+    arm_url = "https://example.invalid/ChatGPT-darwin-arm64-26.429.20946.zip"
+    x64_url = "https://example.invalid/ChatGPT-darwin-x64-26.429.20946.zip"
 
     def _item(version: str, build: str, download_url: str) -> str:
         return f"""

@@ -16,7 +16,7 @@ from lib.update.nix import (
     _build_fetch_pnpm_deps_expr,
     _build_pnpm_10_nodejs_22_expr,
 )
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     FixedOutputHashStep,
     HashEntryUpdater,
     UpdateContext,

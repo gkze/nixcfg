@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import github_release_asset_urls_updater
+from typing import ClassVar
 
-RioUpdater = github_release_asset_urls_updater(
-    "rio",
-    github_owner="raphamorim",
-    github_repo="rio",
-    platforms={
+from lib.update.updaters import GitHubReleaseAssetURLsUpdater, register_updater
+
+
+@register_updater
+class RioUpdater(GitHubReleaseAssetURLsUpdater):
+    """Track Rio macOS DMG assets from GitHub latest releases."""
+
+    name = "rio"
+    GITHUB_OWNER = "raphamorim"
+    GITHUB_REPO = "rio"
+    PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin",
-    },
-    asset_name="rio.dmg",
-    module=__name__,
-)
+    }
+    ASSET_NAME_TEMPLATE: ClassVar[str] = "rio.dmg"

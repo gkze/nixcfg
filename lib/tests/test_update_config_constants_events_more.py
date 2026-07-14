@@ -24,6 +24,9 @@ from lib.update.events import (
     CapturedValue,
     CommandResult,
     GatheredValues,
+    StatusInfo,
+    StatusKind,
+    StatusPayload,
     UpdateEvent,
     UpdateEventKind,
     ValueDrain,
@@ -265,7 +268,7 @@ def test_update_event_expect_helpers_and_type_guards() -> None:
         "working",
         operation="compute_hash",
     )
-    assert typed_status.payload == {"operation": "compute_hash"}
+    assert typed_status.payload == StatusPayload(operation="compute_hash")
 
 
 def _collect_async[T](stream: AsyncIterator[T]) -> list[T]:
@@ -420,21 +423,18 @@ def test_update_event_status_includes_structured_fields() -> None:
         "demo",
         "working",
         operation="compute_hash",
-        status="computing_hash",
-        detail="linux",
+        status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value="linux"),
     )
-    assert event.payload == {
-        "operation": "compute_hash",
-        "status": "computing_hash",
-        "detail": "linux",
-    }
+    assert event.payload == StatusPayload(
+        operation="compute_hash",
+        info=StatusInfo(kind=StatusKind.COMPUTING_HASH, value="linux"),
+    )
     status_only = UpdateEvent.status(
         "demo",
         "done",
-        status="updated",
-        detail={"version": "1.2.3"},
+        status=StatusInfo(kind=StatusKind.UPDATED, value="1.2.3"),
     )
-    assert status_only.payload == {
-        "status": "updated",
-        "detail": {"version": "1.2.3"},
-    }
+    assert status_only.payload == StatusPayload(
+        info=StatusInfo(kind=StatusKind.UPDATED, value="1.2.3"),
+    )
+    assert UpdateEvent.status("demo", "plain").payload is None

@@ -182,3 +182,32 @@ jobs:
         RuntimeError, match="Workflow is missing required job 'missing'"
     ):
         analysis.require_job(job_id="missing")
+
+
+@pytest.mark.parametrize(
+    "job_data",
+    [
+        {},
+        {"strategy": "not-a-mapping"},
+        {"strategy": {"matrix": "${{ fromJSON(needs.discover.outputs.t) }}"}},
+        {"strategy": {"matrix": {"include": []}}},
+    ],
+)
+def test_optional_matrix_include_treats_unusable_matrices_as_absent(
+    job_data: dict[str, object],
+) -> None:
+    """Return no entries when a job lacks a concrete matrix include list."""
+    job = workflow_analysis.analyze_workflow_job("demo", job_data)
+
+    assert job.optional_matrix_include() == ()
+
+
+def test_needs_graph_rejects_cyclic_dependencies() -> None:
+    """Reject workflows whose job needs form a dependency cycle."""
+    analysis = workflow_analysis.WorkflowAnalysis.from_jobs({
+        "a": {"needs": ["b"]},
+        "b": {"needs": ["a"]},
+    })
+
+    with pytest.raises(RuntimeError, match="needs contain a cycle"):
+        analysis.needs_graph()

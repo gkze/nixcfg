@@ -16,7 +16,7 @@ from lib.update.updaters.github_release import (
 if TYPE_CHECKING:
     import aiohttp
 
-    from lib.update.updaters.base import VersionInfo
+    from lib.update.updaters import VersionInfo
 
 
 class _DemoReleaseUpdater(GitHubReleaseUpdater):

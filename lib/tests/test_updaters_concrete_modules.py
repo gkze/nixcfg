@@ -15,11 +15,13 @@ from lib.tests._nix_ast import assert_nix_ast_equal, parse_nix_expr
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module_for_test as _load_module
 from lib.tests._updater_helpers import run_async as _run
+from lib.update import flake as update_flake
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import factories as updater_factories
-from lib.update.updaters.base import VersionInfo, source_override_env
+from lib.update.updaters import VersionInfo
+from lib.update.updaters import strategies as updater_strategies
+from lib.update.updaters.core import source_override_env
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
 if TYPE_CHECKING:
@@ -42,7 +44,6 @@ def _module_fixture(path: str, fixture_name: str) -> object:
     return _fixture
 
 
-chatgpt_module = _module_fixture("overlays/chatgpt/updater.py", "chatgpt_module")
 code_cursor_module = _module_fixture(
     "overlays/code-cursor/updater.py", "code_cursor_module"
 )
@@ -69,37 +70,6 @@ superconductor_module = _module_fixture(
 tsgolint_module = _module_fixture("overlays/tsgolint/updater.py", "tsgolint_module")
 sculptor_module = _module_fixture("packages/sculptor/updater.py", "sculptor_module")
 neutils_module = _module_fixture("packages/neutils/updater.py", "neutils_module")
-
-
-def test_chatgpt_updater_paths(
-    chatgpt_module: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Exercise ChatGPT appcast parsing and download URL selection."""
-    updater = chatgpt_module.ChatGPTUpdater()
-
-    async def _items(*_args: object, **_kwargs: object):
-        return (SparkleAppcastItem("100", "1.2.3", "https://example.com/app.dmg"),)
-
-    monkeypatch.setattr(updater_factories, "fetch_sparkle_appcast_items", _items)
-    latest = _run(updater.fetch_latest(object()))
-    assert latest.version == "1.2.3"
-    assert latest.metadata["url"] == "https://example.com/app.dmg"
-
-    assert (
-        updater.get_download_url("x86_64-darwin", latest)
-        == "https://example.com/app.dmg"
-    )
-
-    async def _missing_url(*_args: object, **_kwargs: object):
-        return (SparkleAppcastItem("100", "1", None),)
-
-    monkeypatch.setattr(
-        updater_factories,
-        "fetch_sparkle_appcast_items",
-        _missing_url,
-    )
-    with pytest.raises(RuntimeError, match="Missing download URL"):
-        _run(updater.fetch_latest(object()))
 
 
 def test_goose_desktop_updater_uses_goose_cli_source_file(
@@ -161,11 +131,8 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
         yield UpdateEvent.value(source, HASH_A)
 
     monkeypatch.setattr(
-        goose_desktop_module,
-        "_base_module",
-        lambda: SimpleNamespace(
-            compute_fixed_output_hash=_fake_compute_fixed_output_hash
-        ),
+        "lib.update.nix.compute_fixed_output_hash",
+        _fake_compute_fixed_output_hash,
     )
 
     events = _run(_collect(updater.fetch_hashes(VersionInfo("1.37.0"), object())))
@@ -533,7 +500,7 @@ def test_netnewswire_updater_paths(
             ),
         )
 
-    monkeypatch.setattr(updater_factories, "fetch_sparkle_appcast_items", _items)
+    monkeypatch.setattr(updater_strategies, "fetch_sparkle_appcast_items", _items)
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == "6.2.1"
     assert latest.metadata["url"] == "https://example.com/NetNewsWire.zip"
@@ -547,7 +514,7 @@ def test_netnewswire_updater_paths(
         return (SparkleAppcastItem("100", None, "https://example.com/app.zip"),)
 
     monkeypatch.setattr(
-        updater_factories,
+        updater_strategies,
         "fetch_sparkle_appcast_items",
         _missing_version,
     )
@@ -558,7 +525,7 @@ def test_netnewswire_updater_paths(
         return (SparkleAppcastItem("100", "6.2.1", None),)
 
     monkeypatch.setattr(
-        updater_factories,
+        updater_strategies,
         "fetch_sparkle_appcast_items",
         _missing_url,
     )
@@ -593,7 +560,7 @@ def test_goose_v8_updater_skips_unchanged_pinned_revision(
         ],
     })
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("unexpected call")),
     )
 
@@ -671,9 +638,7 @@ def test_sentry_cli_updater_paths(
         yield UpdateEvent.status("sentry-cli", f"build {expr[:5]}")
         yield UpdateEvent.value("sentry-cli", HASH_A if call_count == 1 else HASH_B)
 
-    monkeypatch.setattr(
-        "lib.update.updaters.base.compute_fixed_output_hash", _fixed_hash
-    )
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     events = _run(_collect(updater.fetch_hashes(latest, object())))
     values = [e for e in events if e.kind == UpdateEventKind.VALUE]
     payload = _require_hash_entries(values[-1].payload)
@@ -684,7 +649,7 @@ def test_sentry_cli_updater_paths(
         if False:
             yield UpdateEvent.status("x", "y")
 
-    monkeypatch.setattr("lib.update.updaters.base.compute_fixed_output_hash", _no_hash)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _no_hash)
     with pytest.raises(RuntimeError, match="Missing srcHash output"):
         _run(_collect(updater.fetch_hashes(latest, object())))
 
@@ -857,12 +822,17 @@ def test_scratch_updater_paths(
     """Exercise Scratch flake-backed version discovery and hash handling."""
     updater = scratch_module.ScratchUpdater()
 
+    real_get_flake_input_node = update_flake.get_flake_input_node
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_node",
-        lambda _name: SimpleNamespace(locked=SimpleNamespace(rev="f" * 40)),
+        "lib.update.flake.get_flake_input_node",
+        lambda name: (
+            SimpleNamespace(locked=SimpleNamespace(rev="f" * 40))
+            if name == "scratch"
+            else real_get_flake_input_node(name)
+        ),
     )
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_flake_input_version",
+        "lib.update.flake.get_flake_input_version",
         lambda _node: "9.9.9",
     )
     latest = _run(updater.fetch_latest(object()))
@@ -877,9 +847,7 @@ def test_scratch_updater_paths(
         seen_exprs.append(expr)
         yield UpdateEvent.value("scratch", HASH_A if len(seen_exprs) == 1 else HASH_B)
 
-    monkeypatch.setattr(
-        "lib.update.updaters.base.compute_fixed_output_hash", _fixed_hash
-    )
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     events = _run(_collect(updater.fetch_hashes(latest, object())))
     payload = _require_hash_entries(
         [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload
@@ -892,7 +860,7 @@ def test_scratch_updater_paths(
         if False:
             yield UpdateEvent.status("scratch", "none")
 
-    monkeypatch.setattr("lib.update.updaters.base.compute_fixed_output_hash", _no_hash)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _no_hash)
     with pytest.raises(RuntimeError, match="Missing npmDepsHash output"):
         _run(_collect(updater.fetch_hashes(latest, object())))
 
@@ -965,15 +933,14 @@ def test_neutils_updater_emits_generated_artifact_and_src_hash(
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
     monkeypatch.setattr(
-        neutils_module,
-        "package_dir_for",
+        "lib.update.paths.package_dir_for",
         lambda _name: REPO_ROOT / "packages" / "neutils",
     )
 
     async def _fixed_hash(_name: str, _expr: str, **_kwargs: object) -> EventStream:
         yield UpdateEvent.value("neutils", HASH_A)
 
-    monkeypatch.setattr(neutils_module, "compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     latest = VersionInfo(version="0.7.2")
     events = _run(_collect(updater.fetch_hashes(latest, object())))
@@ -1030,3 +997,70 @@ def test_sculptor_updater_paths(
     )
     with pytest.raises(RuntimeError, match="No Last-Modified header"):
         _run(updater.fetch_latest(object()))
+
+
+def test_code_cursor_download_page_requires_all_platform_links(
+    code_cursor_module: ModuleType,
+) -> None:
+    """Reject download pages that omit expected platforms, skipping unknown ones."""
+    updater = code_cursor_module.CodeCursorUpdater()
+    partial_page = '"'.join((
+        updater._api_url("darwin-arm64"),
+        # Unknown platforms in the page are skipped, not collected.
+        updater._api_url("windows-x64"),
+    ))
+    with pytest.raises(RuntimeError, match="missing platform links"):
+        updater._extract_download_api_urls(partial_page)
+
+
+def test_code_cursor_resolve_download_url_follows_redirects(
+    code_cursor_module: ModuleType,
+) -> None:
+    """Resolve API URLs via redirect Location and reject non-redirect answers."""
+    updater = code_cursor_module.CodeCursorUpdater()
+    api_url = updater._api_url("darwin-arm64")
+
+    class _HeadResponse:
+        def __init__(self, status: int, headers: dict[str, str]) -> None:
+            self.status = status
+            self.headers = headers
+
+        async def __aenter__(self) -> _HeadResponse:
+            return self
+
+        async def __aexit__(self, *_args: object) -> bool:
+            return False
+
+    class _Session:
+        def __init__(self, response: _HeadResponse) -> None:
+            self._response = response
+
+        def head(self, url: str, **_kwargs: object) -> _HeadResponse:
+            assert url == api_url
+            return self._response
+
+    redirect = _HeadResponse(302, {"Location": "/production/abc/darwin/arm64/C.dmg"})
+    resolved = _run(updater._resolve_download_url(_Session(redirect), api_url))
+    assert resolved == "https://api2.cursor.sh/production/abc/darwin/arm64/C.dmg"
+
+    with pytest.raises(RuntimeError, match="Expected Cursor download redirect"):
+        _run(updater._resolve_download_url(_Session(_HeadResponse(200, {})), api_url))
+
+    with pytest.raises(RuntimeError, match="did not include Location"):
+        _run(updater._resolve_download_url(_Session(_HeadResponse(302, {})), api_url))
+
+
+def test_code_cursor_require_uniform_regex_value_rejects_mixed_urls(
+    code_cursor_module: ModuleType,
+) -> None:
+    """Reject resolved URL sets that disagree on the extracted value."""
+    import re
+
+    updater = code_cursor_module.CodeCursorUpdater()
+    pattern = re.compile(r"/(?P<commit>[0-9a-f]{3})/")
+    urls = {
+        "darwin-arm64": "https://d/abc/x.dmg",
+        "darwin-x64": "https://d/def/y.dmg",
+    }
+    with pytest.raises(RuntimeError, match="Unable to resolve one Cursor commit"):
+        updater._require_uniform_regex_value(urls, pattern, "commit", context="commit")

@@ -10,7 +10,14 @@ import pytest
 from lib.nix.commands.base import CommandResult as LibCommandResult
 from lib.nix.commands.base import NixCommandError, ProcessDone, ProcessLine
 from lib.update.config import resolve_config
-from lib.update.events import GatheredValues, UpdateEvent, UpdateEventKind
+from lib.update.events import (
+    GatheredValues,
+    StatusInfo,
+    StatusKind,
+    StatusPayload,
+    UpdateEvent,
+    UpdateEventKind,
+)
 from lib.update.process import (
     NixBuildOptions,
     RunCommandOptions,
@@ -335,7 +342,8 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
     assert retry_end.allow_failure
     assert any(
         event.message == "nix-prefetch-url hit a transient failure; retrying..."
-        and event.payload["detail"] == "attempt 2/2"
+        and isinstance(event.payload, StatusPayload)
+        and event.payload.info == StatusInfo(kind=StatusKind.RETRY, value="attempt 2/2")
         for event in events
         if event.kind is UpdateEventKind.STATUS
     )

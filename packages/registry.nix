@@ -116,10 +116,12 @@ let
       darwinLinuxPackages = [
         "codex"
         "codex-crate2nix-src"
+        "codex-v8-native"
         "gitbutler"
         "gitbutler-crate2nix-src"
         "goose-cli"
         "goose-cli-crate2nix-src"
+        "goose-cli-v8-native"
         "superset"
         "zed-editor-nightly"
         "zed-editor-nightly-crate2nix-src"

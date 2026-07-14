@@ -8,68 +8,42 @@ from typing import TYPE_CHECKING, Protocol
 
 import aiohttp
 
+from lib.update import flake as update_flake
+from lib.update import planner as update_planner
+from lib.update import process as update_process
+from lib.update import refs as update_refs
+from lib.update import updaters as updater_module
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.events import (
-    EventStream,
+    StatusInfo,
+    StatusKind,
     UpdateEvent,
     UpdateEventKind,
     expect_artifact_updates,
 )
 from lib.update.refs import FlakeInputRef, RefTaskOptions
-from lib.update.updaters.base import (
-    FlakeInputHashUpdater,
-    UpdateContext,
-    _call_with_optional_context,
-)
+from lib.update.updaters import UPDATERS, ensure_updaters_loaded
+from lib.update.updaters.core import UpdateContext, _call_with_optional_context
+from lib.update.updaters.flake_backed import FlakeInputHashUpdater
 
 _AIOHTTP_MAX_FIELD_SIZE = 64 * 1024
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Coroutine
+    from collections.abc import Awaitable
     from pathlib import Path
 
     from lib.nix.models.sources import SourcesFile
     from lib.update.artifacts import GeneratedArtifact
     from lib.update.updaters import UpdaterClass
-    from lib.update.updaters.base import VersionInfo
+    from lib.update.updaters.metadata import VersionInfo
 
 
 class EventPut(Protocol):
     def __call__(self, event: UpdateEvent | None, /) -> Awaitable[None]: ...
 
 
-class RunQueueTask(Protocol):
-    def __call__(
-        self,
-        *,
-        source: str,
-        queue: asyncio.Queue[UpdateEvent | None],
-        task: Callable[[], Awaitable[None]],
-    ) -> Awaitable[None]: ...
-
-
-class UpdateFlakeInput(Protocol):
-    def __call__(self, input_name: str, *, source: str) -> EventStream: ...
-
-
-class UpdateRefsTask(Protocol):
-    def __call__(
-        self,
-        input_ref: FlakeInputRef,
-        session: aiohttp.ClientSession,
-        queue: asyncio.Queue[UpdateEvent | None],
-        *,
-        options: RefTaskOptions,
-    ) -> Coroutine[object, object, None]: ...
-
-
-class SourceUpdateTask(Protocol):
-    def __call__(
-        self,
-        name: str,
-        *,
-        context: SourceTaskContext,
-    ) -> Coroutine[object, object, SourceTaskResult]: ...
+def _get_updaters() -> dict[str, UpdaterClass]:
+    return updater_module.resolve_registry_alias(UPDATERS, ensure_updaters_loaded)
 
 
 @dataclass(frozen=True)
@@ -116,18 +90,16 @@ async def _refresh_input_task(
     input_name: str,
     source: str,
     put: EventPut,
-    update_flake_input: UpdateFlakeInput,
 ) -> None:
     await put(
         UpdateEvent.status(
             source,
             f"Updating flake input '{input_name}'...",
             operation="refresh_lock",
-            status="refresh_lock",
-            detail=input_name,
+            status=StatusInfo(kind=StatusKind.REFRESH_LOCK, value=input_name),
         )
     )
-    async for event in update_flake_input(input_name, source=source):
+    async for event in update_flake.update_flake_input(input_name, source=source):
         await put(event)
 
 
@@ -136,7 +108,6 @@ async def _ensure_input_refreshed(
     input_name: str,
     *,
     context: SourceTaskContext,
-    update_flake_input: UpdateFlakeInput,
 ) -> None:
     put = context.queue.put
     async with context.update_input_lock:
@@ -147,7 +118,6 @@ async def _ensure_input_refreshed(
                     input_name=input_name,
                     source=name,
                     put=put,
-                    update_flake_input=update_flake_input,
                 )
             )
             context.update_input_tasks[input_name] = task
@@ -161,8 +131,7 @@ async def _ensure_input_refreshed(
                 name,
                 f"Reusing flake input '{input_name}' refresh...",
                 operation="refresh_lock",
-                status="refresh_lock",
-                detail=input_name,
+                status=StatusInfo(kind=StatusKind.REFRESH_LOCK, value=input_name),
             )
         )
     await task
@@ -172,9 +141,6 @@ async def update_source_task(
     name: str,
     *,
     context: SourceTaskContext,
-    get_updaters: Callable[[], dict[str, UpdaterClass]],
-    run_queue_task: RunQueueTask,
-    update_flake_input: UpdateFlakeInput,
 ) -> SourceTaskResult:
     """Run one source updater and collect emitted generated artifacts."""
     artifacts_by_path: dict[Path, GeneratedArtifact] = {}
@@ -184,7 +150,7 @@ async def update_source_task(
         nonlocal completed
         resolved_config = resolve_active_config(context.config)
         current = context.sources.entries.get(name)
-        updater = get_updaters()[name](config=resolved_config)
+        updater = _get_updaters()[name](config=resolved_config)
         if isinstance(updater, FlakeInputHashUpdater):
             updater.native_only = context.native_only
         input_name = getattr(updater, "input_name", None)
@@ -207,7 +173,6 @@ async def update_source_task(
                 name,
                 input_name,
                 context=context,
-                update_flake_input=update_flake_input,
             )
 
         async for event in _call_with_optional_context(
@@ -224,7 +189,7 @@ async def update_source_task(
 
         completed = True
 
-    await run_queue_task(source=name, queue=context.queue, task=_run)
+    await update_process.run_queue_task(source=name, queue=context.queue, task=_run)
     return SourceTaskResult(
         completed=completed,
         artifacts=tuple(
@@ -243,7 +208,6 @@ async def run_ref_phase(
     queue: asyncio.Queue[UpdateEvent | None],
     dry_run: bool,
     config: UpdateConfig,
-    update_refs_task: UpdateRefsTask,
 ) -> None:
     """Run the flake ref update phase."""
     async with aiohttp.ClientSession(
@@ -253,7 +217,7 @@ async def run_ref_phase(
         async with asyncio.TaskGroup() as group:
             for inp in ref_inputs:
                 group.create_task(
-                    update_refs_task(
+                    update_refs.update_refs_task(
                         inp,
                         session,
                         queue,
@@ -266,15 +230,7 @@ async def run_ref_phase(
                 )
 
 
-async def run_sources_phase(
-    context: SourcesPhaseContext,
-    *,
-    get_updaters: Callable[[], dict[str, UpdaterClass]],
-    source_update_waves: Callable[
-        [list[str], dict[str, UpdaterClass]], list[list[str]]
-    ],
-    update_source_task: SourceUpdateTask,
-) -> None:
+async def run_sources_phase(context: SourcesPhaseContext) -> None:
     """Run source update tasks in dependency-respecting waves."""
     async with aiohttp.ClientSession(
         max_field_size=_AIOHTTP_MAX_FIELD_SIZE,
@@ -282,8 +238,11 @@ async def run_sources_phase(
         update_input_lock = asyncio.Lock()
         update_input_tasks: dict[str, asyncio.Task[None]] = {}
         generated_artifacts: dict[Path, str] = {}
-        updaters = get_updaters()
-        source_waves = source_update_waves(context.source_names, updaters)
+        updaters = _get_updaters()
+        source_waves = update_planner.source_update_waves(
+            context.source_names, updaters
+        )
+        source_task_slots = asyncio.Semaphore(context.config.max_nix_builds)
 
         def _source_task_context(name: str) -> SourceTaskContext:
             return SourceTaskContext(
@@ -299,6 +258,13 @@ async def run_sources_phase(
                 pinned_version=context.pinned.get(name),
                 dry_run=context.dry_run,
             )
+
+        async def _run_source_with_limit(name: str) -> SourceTaskResult:
+            async with source_task_slots:
+                return await update_source_task(
+                    name,
+                    context=_source_task_context(name),
+                )
 
         completed_sources: dict[str, bool] = {}
         for wave in source_waves:
@@ -331,12 +297,7 @@ async def run_sources_phase(
             else:
                 async with asyncio.TaskGroup() as group:
                     tasks = {
-                        name: group.create_task(
-                            update_source_task(
-                                name,
-                                context=_source_task_context(name),
-                            )
-                        )
+                        name: group.create_task(_run_source_with_limit(name))
                         for name in runnable
                     }
                 wave_results = {name: task.result() for name, task in tasks.items()}

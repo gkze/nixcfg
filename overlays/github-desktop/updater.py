@@ -5,20 +5,25 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
-from lib.update.events import UpdateEvent, ValueDrain, drain_value_events, require_value
+from lib.update import flake as update_flake
+from lib.update import nix as update_nix
+from lib.update.events import (
+    StatusInfo,
+    StatusKind,
+    UpdateEvent,
+    ValueDrain,
+    drain_value_events,
+    expect_str,
+    require_value,
+)
 from lib.update.nix import _build_overlay_attr_expr
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     FlakeInputUpdater,
     UpdateContext,
     VersionInfo,
-    _coerce_context,
-    compute_drv_fingerprint,
-    compute_fixed_output_hash,
-    expect_str,
-    get_flake_input_node,
-    get_flake_input_version,
     register_updater,
 )
+from lib.update.updaters.core import _coerce_context
 from lib.update.updaters.metadata import FlakeInputMetadata
 
 if TYPE_CHECKING:
@@ -61,8 +66,8 @@ class GitHubDesktopUpdater(FlakeInputUpdater):
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Resolve the currently locked beta tag from the flake input."""
         _ = session
-        node = get_flake_input_node(self._input)
-        ref = get_flake_input_version(node)
+        node = update_flake.get_flake_input_node(self._input)
+        ref = update_flake.get_flake_input_version(node)
         commit = node.locked.rev if node.locked is not None else None
         return VersionInfo(
             version=_version_from_release_ref(ref),
@@ -105,7 +110,10 @@ class GitHubDesktopUpdater(FlakeInputUpdater):
         ):
             return False
         try:
-            drv_hash = await compute_drv_fingerprint(self.name, config=self.config)
+            drv_hash = await update_nix.compute_drv_fingerprint(
+                self.name,
+                config=self.config,
+            )
         except RuntimeError:
             return False
         update_context.drv_fingerprint = drv_hash
@@ -124,7 +132,7 @@ class GitHubDesktopUpdater(FlakeInputUpdater):
         for hash_type, attr_path in self._CACHE_ATTRS:
             hash_drain = ValueDrain[str]()
             async for event in drain_value_events(
-                compute_fixed_output_hash(
+                update_nix.compute_fixed_output_hash(
                     self.name,
                     _build_overlay_attr_expr(self.name, attr_path),
                     env={"FAKE_HASHES": "1"},
@@ -152,13 +160,15 @@ class GitHubDesktopUpdater(FlakeInputUpdater):
             self.name,
             "Computing derivation fingerprint...",
             operation="compute_hash",
-            status="computing_hash",
-            detail="derivation fingerprint",
+            status=StatusInfo(
+                kind=StatusKind.COMPUTING_HASH,
+                value="derivation fingerprint",
+            ),
         )
         try:
             drv_hash = update_context.drv_fingerprint
             if drv_hash is None:
-                drv_hash = await compute_drv_fingerprint(
+                drv_hash = await update_nix.compute_drv_fingerprint(
                     self.name,
                     config=self.config,
                 )

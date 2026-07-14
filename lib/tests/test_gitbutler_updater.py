@@ -16,7 +16,7 @@ from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import UpdateEvent, UpdateEventKind
 from lib.update.flake import flake_fetch_expression
 from lib.update.nix import _build_fetch_pnpm_deps_expr, _build_pnpm_10_nodejs_22_expr
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 from lib.update.updaters.metadata import FlakeInputMetadata
 
 HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -131,7 +131,7 @@ def test_gitbutler_updater_builds_pnpm_hash_expression(
         yield UpdateEvent.value(name, HASH)
 
     monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     events = _run(
         _collect(
@@ -183,7 +183,7 @@ def test_gitbutler_updater_streams_artifacts_before_hashing(
 
     monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
     monkeypatch.setattr(updater, "stream_materialized_artifacts", _artifacts)
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     events = _run(
         _collect(updater.fetch_hashes(VersionInfo(version="0.19.9"), object()))
@@ -243,9 +243,9 @@ def test_gitbutler_update_keeps_drv_hash_when_artifacts_change(
 
     monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
     monkeypatch.setattr(updater, "stream_materialized_artifacts", _artifacts)
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     monkeypatch.setattr(
-        "lib.update.updaters.base.compute_drv_fingerprint",
+        "lib.update.nix.compute_drv_fingerprint",
         _compute_drv_fingerprint,
     )
 
@@ -280,7 +280,7 @@ def test_gitbutler_updater_requires_npm_deps_hash(
 
     monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
     monkeypatch.setattr(updater, "stream_materialized_artifacts", empty_event_stream)
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _missing_hash)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _missing_hash)
 
     with pytest.raises(RuntimeError, match="Missing npmDepsHash output"):
         _run(_collect(updater.fetch_hashes(VersionInfo(version="0.19.9"), object())))

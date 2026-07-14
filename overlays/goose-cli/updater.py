@@ -19,7 +19,7 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.nix import _build_fetch_from_github_expr, compute_fixed_output_hash
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     Crate2NixArtifactsMixin,
     UpdateContext,
     VersionInfo,

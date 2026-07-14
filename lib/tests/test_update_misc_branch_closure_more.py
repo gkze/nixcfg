@@ -97,7 +97,7 @@ def test_compute_drv_fingerprint_without_store_prefix(
 def test_nix_cargo_yields_passthrough_events(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forward non-gather events from ``gather_event_streams``."""
     from lib.update.nix_cargo import compute_import_cargo_lock_output_hashes
-    from lib.update.updaters.base import CargoLockGitDep
+    from lib.update.updaters import CargoLockGitDep
 
     async def _fake_gather(_streams: object) -> AsyncIterator[object]:
         yield UpdateEvent.status("demo", "prefetching")
@@ -315,7 +315,8 @@ def test_small_module_helper_edges() -> None:
     from lib.nix.models.sources import _merge_drv_hash
     from lib.tests._updater_helpers import load_repo_module
     from lib.update import crate2nix
-    from lib.update.updaters import factories
+    from lib.update.updaters.github_release import GitHubReleaseAssetURLsUpdater
+    from lib.update.updaters.strategies import SparkleAppcastUpdater
     from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
     patch_compiler = load_repo_module(
@@ -337,41 +338,59 @@ def test_small_module_helper_edges() -> None:
         "github:owner/repo#demo"
     )
 
-    assert (
-        factories._render_asset_name(
-            lambda version, platform_value: f"{version}-{platform_value}",
-            version="1.2.3",
-            platform_value="arm64",
-        )
-        == "1.2.3-arm64"
-    )
-    assert (
-        factories._sparkle_item_version(
-            SparkleAppcastItem("100", None, "https://example.com/app.zip"),
-            version_field="short_or_version",
-        )
-        == "100"
-    )
-    assert (
-        factories._sparkle_item_version(
-            SparkleAppcastItem("100", "1.0", "https://example.com/app.zip"),
-            version_field="invalid",
-        )
-        is None
-    )
+    class _TemplatedAssetNames(GitHubReleaseAssetURLsUpdater):
+        name = "asset-name-template-demo"
+        GITHUB_OWNER = "owner"
+        GITHUB_REPO = "repo"
+        ASSET_NAME_TEMPLATE = "{version}-{platform_value}"
+
+    class _DefaultAssetNames(GitHubReleaseAssetURLsUpdater):
+        name = "asset-name-default-demo"
+        GITHUB_OWNER = "owner"
+        GITHUB_REPO = "repo"
+
+    assert _TemplatedAssetNames()._asset_name("1.2.3", "arm64") == "1.2.3-arm64"
+    with pytest.raises(NotImplementedError):
+        _DefaultAssetNames()._asset_name("1.2.3", "arm64")
+
+    class _EnclosureVersionSparkle(SparkleAppcastUpdater):
+        name = "sparkle-version-demo"
+        APPCAST_URL = "https://example.com/appcast.xml"
+
+    class _ShortVersionSparkle(_EnclosureVersionSparkle):
+        name = "sparkle-short-version-demo"
+        VERSION_FIELD = "short_version"
+
+    class _ShortOrVersionSparkle(_EnclosureVersionSparkle):
+        name = "sparkle-short-or-version-demo"
+        VERSION_FIELD = "short_or_version"
+
+    item_without_short = SparkleAppcastItem("100", None, "https://example.com/app.zip")
+    item_with_short = SparkleAppcastItem("100", "1.0", "https://example.com/app.zip")
+    assert _EnclosureVersionSparkle().item_version(item_with_short) == "100"
+    assert _ShortVersionSparkle().item_version(item_with_short) == "1.0"
+    assert _ShortVersionSparkle().item_version(item_without_short) is None
+    assert _ShortOrVersionSparkle().item_version(item_with_short) == "1.0"
+    assert _ShortOrVersionSparkle().item_version(item_without_short) == "100"
+
+    from lib.update.updaters.metadata import VersionInfo
 
     orbstack = load_repo_module(
         "overlays/orbstack/updater.py",
         "orbstack_updater_branch_more",
     )
-    assert orbstack._download_url("1.2.3-456", "aarch64-darwin", "arm64") == (
-        "https://cdn-updates.orbstack.dev/arm64/OrbStack_v1.2.3_456_arm64.dmg"
-    )
+    assert orbstack.OrbStackUpdater().get_download_url(
+        "aarch64-darwin",
+        VersionInfo(version="1.2.3-456"),
+    ) == ("https://cdn-updates.orbstack.dev/arm64/OrbStack_v1.2.3_456_arm64.dmg")
     tolaria = load_repo_module(
         "packages/tolaria/updater.py",
         "tolaria_updater_branch_more",
     )
-    assert tolaria._download_url("2026.1.5", "aarch64-darwin", "Silicon") == (
+    assert tolaria.TolariaUpdater().get_download_url(
+        "aarch64-darwin",
+        VersionInfo(version="2026.1.5"),
+    ) == (
         "https://github.com/refactoringhq/tolaria/releases/download/v2026-01-05/"
         "Tolaria_2026.1.5_macOS_Silicon.app.tar.gz"
     )
@@ -763,7 +782,7 @@ def test_linear_cli_and_superconductor_branch_edges(
 ) -> None:
     """Cover package updater retry classification and zero-attempt branches."""
     from lib.tests._updater_helpers import load_repo_module
-    from lib.update.updaters.base import VersionInfo
+    from lib.update.updaters import VersionInfo
 
     linear = load_repo_module(
         "packages/linear-cli/updater.py",
@@ -791,7 +810,7 @@ def test_linear_cli_and_superconductor_branch_edges(
         yield UpdateEvent.value(name, {url_list[0]: "sha256-demo"})
 
     monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
-    monkeypatch.setattr(linear, "compute_url_hashes", _compute_url_hashes)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
 
     events = _collect(updater.fetch_hashes(VersionInfo("1.0.0"), object()))
     assert events[-1].kind is UpdateEventKind.VALUE

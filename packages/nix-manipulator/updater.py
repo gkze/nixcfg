@@ -1,9 +1,15 @@
 """Updater for nix-manipulator checked-in uv.lock."""
 
-from lib.update.updaters.base import uv_lock_updater
+from typing import ClassVar
 
-NixManipulatorUpdater = uv_lock_updater(
-    "nix-manipulator",
-    lock_env={"SETUPTOOLS_SCM_PRETEND_VERSION": "{version}"},
-    module=__name__,
-)
+from lib.update.updaters import UvLockUpdater, register_updater
+
+
+@register_updater
+class NixManipulatorUpdater(UvLockUpdater):
+    """Uv lock updater for nix-manipulator."""
+
+    name = "nix-manipulator"
+    lock_env: ClassVar[dict[str, str]] = {
+        "SETUPTOOLS_SCM_PRETEND_VERSION": "{version}",
+    }

@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import json_field_download_updater
+from typing import ClassVar
 
-WarpPreviewUpdater = json_field_download_updater(
-    "warp-preview",
-    json_url="https://releases.warp.dev/channel_versions.json",
-    version_path=("preview", "version"),
-    platforms={"aarch64-darwin": "darwin"},
-    download_url="https://releases.warp.dev/preview/v{version}/WarpPreview.dmg",
-    display_name="Warp Preview",
-    version_transform=lambda version: version.removeprefix("v"),
-    module=__name__,
-)
+from lib.update.updaters import JsonFieldDownloadUpdater, register_updater
+
+
+@register_updater
+class WarpPreviewUpdater(JsonFieldDownloadUpdater):
+    """Resolve Warp Preview versions from the channel versions JSON feed."""
+
+    name = "warp-preview"
+    JSON_URL = "https://releases.warp.dev/channel_versions.json"
+    VERSION_PATH = ("preview", "version")
+    PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "darwin"}
+    DOWNLOAD_URL_TEMPLATE = (
+        "https://releases.warp.dev/preview/v{version}/WarpPreview.dmg"
+    )
+
+    def transform_version(self, raw: str) -> str:
+        """Strip the ``v`` prefix from the feed's version field."""
+        return raw.removeprefix("v")

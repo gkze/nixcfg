@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":  # pragma: no cover - CLI entrypoint
+if __name__ == "__main__":  # pragma: no cover -- CLI entrypoint
     import sys
 
     raise SystemExit(main(sys.argv[1:]))

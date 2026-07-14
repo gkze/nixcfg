@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from lib.update.updaters._sourcefile import resolve_sourcefile
 
 if TYPE_CHECKING:
-    from lib.update.updaters.base import Updater
+    from lib.update.updaters.core import Updater
 
 
 type UpdaterClass = type[Updater]

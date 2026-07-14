@@ -118,6 +118,9 @@ explicit-preview-rules = true
 # SchemaStore's workflow schema generates very long prose docstrings and a few
 # legacy typing constructs that are valid at runtime but noisy under Ruff.
 "lib/github_actions/models/_generated.py" = ["D205", "D404", "E501"]
+# Workflow definitions embed GitHub Actions secret expressions (not real
+# credentials) and CI-runner /tmp paths inside generated shell steps.
+"lib/update/ci/workflow_defs.py" = ["S105", "S108"]
 
 [tool.ruff.lint.isort]
 # Classify these imports as first-party for stable import ordering.
@@ -227,12 +230,27 @@ branch = true
 source = ["nixcfg", "lib", "modules", "packages", "overlays", "home/george/bin"]
 
 [tool.coverage.report]
-# Require at least this total coverage percentage.
+# Require at least this total coverage percentage. The floor stays at 100%;
+# deliberate exclusions must be visible in the diff instead of hiding in a
+# lower number.
 fail_under = 100
 # Exclude test modules from coverage totals.
 omit = ["lib/tests/*"]
 # Show exact missing lines in text coverage reports.
 show_missing = true
+# Replace the default bare-pragma with a reason-required form: only
+# `# pragma: no cover -- <reason>` excludes a line, so every exclusion
+# carries a reviewable justification. Reserve it for defensive/unreachable
+# branches where a test would only restate the implementation. Setting
+# exclude_lines replaces coverage's defaults, so the non-pragma defaults
+# (ellipsis stubs, TYPE_CHECKING blocks) are restated here verbatim.
+exclude_lines = [
+  '# pragma: no cover -- \S',
+  '^\s*(((async )?def .*?)?\)(\s*->.*?)?:\s*)?\.\.\.\s*(#|$)',
+  'if (typing\.)?TYPE_CHECKING:',
+]
+# Same rule for partial-branch exclusions (no non-pragma defaults to restate).
+partial_branches = ['# pragma: no branch -- \S']
 
 [tool.mutmut]
 # Mutate runtime modules while excluding tests and generated artifacts.

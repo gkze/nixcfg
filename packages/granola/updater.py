@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 from lib import json_utils
 from lib.update.net import fetch_url
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 from lib.update.updaters.metadata import GranolaFeedMetadata, require_metadata_str
 
 

@@ -2,21 +2,28 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import electron_builder_asset_urls_updater
+from typing import TYPE_CHECKING, ClassVar
 
-WaveUpdater = electron_builder_asset_urls_updater(
-    "wave",
-    feed_url="https://dl.waveterm.dev/releases-w2/latest-mac.yml",
-    platforms={
+from lib.update.updaters import ElectronBuilderAssetURLsUpdater, register_updater
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+
+@register_updater
+class WaveUpdater(ElectronBuilderAssetURLsUpdater):
+    """Track Wave terminal DMG assets from the electron-builder feed."""
+
+    name = "wave"
+    FEED_URL: ClassVar[str] = "https://dl.waveterm.dev/releases-w2/latest-mac.yml"
+    PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "arm64",
-    },
-    selectors={
+    }
+    SELECTORS: ClassVar[Mapping[str, Callable[[str, str], bool]]] = {
         "aarch64-darwin": lambda version, url: url.endswith(
             f"Wave-darwin-arm64-{version}.dmg"
         ),
-    },
-    fallback_url=(
+    }
+    DOWNLOAD_URL_TEMPLATE: ClassVar[str] = (
         "https://dl.waveterm.dev/releases-w2/Wave-darwin-{platform_value}-{version}.dmg"
-    ),
-    module=__name__,
-)
+    )

@@ -2,23 +2,30 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import pinned_source_download_updater
+from typing import ClassVar
+
+from lib.update.updaters import (
+    PinnedSourceDownloadUpdater,
+    VersionInfo,
+    register_updater,
+)
 
 
-def _download_url(version: str, _platform: str, platform_value: str) -> str:
-    release, build = version.split("-", maxsplit=1)
-    return (
-        f"https://cdn-updates.orbstack.dev/{platform_value}/"
-        f"OrbStack_v{release}_{build}_{platform_value}.dmg"
-    )
+@register_updater
+class OrbStackUpdater(PinnedSourceDownloadUpdater):
+    """Pinned download updater for the OrbStack macOS app archives."""
 
-
-OrbStackUpdater = pinned_source_download_updater(
-    "orbstack",
-    platforms={
+    name = "orbstack"
+    PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "arm64",
         "x86_64-darwin": "amd64",
-    },
-    download_url=_download_url,
-    module=__name__,
-)
+    }
+
+    def get_download_url(self, platform: str, info: VersionInfo) -> str:
+        """Build the CDN URL from the release/build version components."""
+        platform_value = self.PLATFORMS[platform]
+        release, build = info.version.split("-", maxsplit=1)
+        return (
+            f"https://cdn-updates.orbstack.dev/{platform_value}/"
+            f"OrbStack_v{release}_{build}_{platform_value}.dmg"
+        )

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import pinned_source_download_updater
+from typing import ClassVar
 
-TodoistDesktopUpdater = pinned_source_download_updater(
-    "todoist-desktop",
-    platforms={"aarch64-darwin": "arm64"},
-    download_url=(
+from lib.update.updaters import PinnedSourceDownloadUpdater, register_updater
+
+
+@register_updater
+class TodoistDesktopUpdater(PinnedSourceDownloadUpdater):
+    """Pinned download updater for the Todoist desktop macOS app archive."""
+
+    name = "todoist-desktop"
+    PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "arm64"}
+    DOWNLOAD_URL_TEMPLATE = (
         "https://electron-dl.todoist.net/mac/"
         "Todoist-darwin-{version}-{platform_value}-latest.dmg"
-    ),
-    module=__name__,
-)
+    )

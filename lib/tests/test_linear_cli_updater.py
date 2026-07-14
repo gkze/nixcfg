@@ -11,7 +11,7 @@ from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEvent, UpdateEventKind
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 
 
 def _load_module() -> ModuleType:
@@ -32,7 +32,9 @@ def test_linear_cli_resolve_deno_version_returns_trimmed_eval_output(
     module = _load_module()
     updater = module.LinearCliUpdater()
 
-    monkeypatch.setattr(module, "get_current_nix_platform", lambda: "aarch64-darwin")
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
 
     async def _run_nix(args: list[str], *, check: bool):
         assert args == [
@@ -73,7 +75,9 @@ def test_linear_cli_resolve_deno_version_rejects_failed_or_empty_eval(
     module = _load_module()
     updater = module.LinearCliUpdater()
 
-    monkeypatch.setattr(module, "get_current_nix_platform", lambda: "x86_64-linux")
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "x86_64-linux"
+    )
 
     async def _run_nix(_args: list[str], *, check: bool):
         assert check is False
@@ -208,7 +212,7 @@ def test_linear_cli_fetch_hashes_forwards_events_and_emits_sorted_entries(
 
     monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
     monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
-    monkeypatch.setattr(module, "compute_url_hashes", _compute_url_hashes)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
 
     events = _run(
         _collect_events(updater.fetch_hashes(VersionInfo(version="1.2.3"), object()))
@@ -264,7 +268,7 @@ def test_linear_cli_fetch_hashes_retries_transient_manifest_failure(
     monkeypatch.setattr(module.asyncio, "sleep", _sleep)
     monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
     monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
-    monkeypatch.setattr(module, "compute_url_hashes", _compute_url_hashes)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
 
     events = _run(
         _collect_events(updater.fetch_hashes(VersionInfo(version="1.2.3"), object()))
@@ -317,7 +321,7 @@ def test_linear_cli_fetch_hashes_requires_denort_hash_mapping(monkeypatch) -> No
 
     monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
     monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
-    monkeypatch.setattr(module, "compute_url_hashes", _compute_url_hashes)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
 
     with pytest.raises(RuntimeError, match="Missing denort hash output"):
         _run(
@@ -345,7 +349,7 @@ def test_linear_cli_fetch_hashes_rejects_non_mapping_hash_payload(monkeypatch) -
 
     monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
     monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
-    monkeypatch.setattr(module, "compute_url_hashes", _compute_url_hashes)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
 
     with pytest.raises(TypeError, match="Expected hash mapping payload"):
         _run(

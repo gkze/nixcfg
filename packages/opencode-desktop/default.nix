@@ -59,6 +59,7 @@ let
     "packages/opencode"
     desktopPackagePath
     "packages/app"
+    "packages/codemode"
     "packages/core"
     "packages/server"
     "packages/effect-drizzle-sqlite"
@@ -67,7 +68,6 @@ let
     "packages/plugin"
     "packages/protocol"
     "packages/schema"
-    "packages/shared"
     "packages/session-ui"
     "packages/tui"
     "packages/ui"
@@ -265,12 +265,6 @@ stdenv.mkDerivation {
 
         ${stdenv.shell} ${hoistedOpentuiLinker}
 
-        if [ -e packages/opencode/node_modules/glob ] && [ ! -e packages/shared/node_modules/glob ]; then
-          mkdir -p packages/shared/node_modules
-          chmod u+w packages/shared/node_modules
-          ln -s ../../opencode/node_modules/glob packages/shared/node_modules/glob
-        fi
-
         (
           cd ${desktopPackagePath}
           bun ./scripts/prepare.ts
@@ -304,12 +298,6 @@ stdenv.mkDerivation {
         patchShebangs packages/*/node_modules
 
         ${stdenv.shell} ${hoistedOpentuiLinker}
-
-        if [ -e packages/opencode/node_modules/glob ] && [ ! -e packages/shared/node_modules/glob ]; then
-          mkdir -p packages/shared/node_modules
-          chmod u+w packages/shared/node_modules
-          ln -s ../../opencode/node_modules/glob packages/shared/node_modules/glob
-        fi
 
         (
           cd ${desktopPackagePath}

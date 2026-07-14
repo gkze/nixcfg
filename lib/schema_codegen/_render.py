@@ -42,7 +42,7 @@ def _import_optional(module_name: str, *, feature: str) -> object:
     """Import an optional dependency or raise a helpful runtime error."""
     try:
         return importlib.import_module(module_name)
-    except ModuleNotFoundError as exc:  # pragma: no cover - exercised in live CLI
+    except ModuleNotFoundError as exc:  # pragma: no cover -- exercised in live CLI
         msg = (
             f"{feature} requires optional dependency {module_name!r}. "
             "Install the `codegen` extra to use this command."

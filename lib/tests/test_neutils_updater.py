@@ -21,7 +21,7 @@ from lib.update.events import (
     expect_artifact_updates,
 )
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 
 
 def _load_module(name: str = "neutils_updater_test") -> ModuleType:
@@ -193,8 +193,10 @@ def test_render_build_zig_zon_nix_renders_artifact_with_resolved_tools(
             CommandResult(args=args, returncode=0, stdout="ok", stderr=""),
         )
 
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(module, "get_current_nix_platform", lambda: "aarch64-darwin")
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
     monkeypatch.setattr(module, "get_repo_file", lambda _path: Path("/repo/root"))
     monkeypatch.setattr(
         module,
@@ -247,8 +249,10 @@ def test_render_build_zig_zon_nix_surfaces_zon2nix_failure(
             ),
         )
 
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(module, "get_current_nix_platform", lambda: "aarch64-darwin")
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
     monkeypatch.setattr(module, "get_repo_file", lambda _path: Path("/repo/root"))
     monkeypatch.setattr(
         module,
@@ -316,8 +320,10 @@ def test_render_build_zig_zon_nix_retries_transient_zon2nix_failure(
     async def _sleep(delay: float) -> None:
         sleep_delays.append(delay)
 
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(module, "get_current_nix_platform", lambda: "aarch64-darwin")
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
     monkeypatch.setattr(module, "get_repo_file", lambda _path: Path("/repo/root"))
     monkeypatch.setattr(updater, "_resolve_installable_path", _resolve)
     monkeypatch.setattr(module, "run_command", _run_command)
@@ -372,8 +378,10 @@ def test_render_build_zig_zon_nix_retries_transient_zon2nix_timeout(
     async def _sleep(delay: float) -> None:
         sleep_delays.append(delay)
 
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(module, "get_current_nix_platform", lambda: "aarch64-darwin")
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
     monkeypatch.setattr(module, "get_repo_file", lambda _path: Path("/repo/root"))
     monkeypatch.setattr(updater, "_resolve_installable_path", _resolve)
     monkeypatch.setattr(module, "run_command", _run_command)
@@ -427,8 +435,10 @@ def test_render_build_zig_zon_nix_yields_tool_resolution_events(
             CommandResult(args=args, returncode=0, stdout="ok", stderr=""),
         )
 
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(module, "get_current_nix_platform", lambda: "aarch64-darwin")
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
     monkeypatch.setattr(module, "get_repo_file", lambda _path: Path("/repo/root"))
     monkeypatch.setattr(updater, "_resolve_installable_path", _resolve)
     monkeypatch.setattr(module, "run_command", _run_command)
@@ -453,7 +463,7 @@ def test_fetch_hashes_requires_package_directory(
     module = _load_module("neutils_updater_test_missing_pkg_dir")
     updater = module.NeutilsUpdater()
 
-    monkeypatch.setattr(module, "package_dir_for", lambda _name: None)
+    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: None)
 
     with pytest.raises(RuntimeError, match="Package directory not found for neutils"):
         _run(
@@ -483,9 +493,10 @@ def test_fetch_hashes_emits_generated_artifact_and_src_hash(
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
     monkeypatch.setattr(
-        module, "package_dir_for", lambda _name: REPO_ROOT / "packages" / "neutils"
+        "lib.update.paths.package_dir_for",
+        lambda _name: REPO_ROOT / "packages" / "neutils",
     )
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     events = _run(
         _collect_events(updater.fetch_hashes(VersionInfo(version="0.7.2"), object()))
@@ -529,8 +540,8 @@ def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failur
         yield UpdateEvent.value(name, "sha256-src")
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
-    monkeypatch.setattr(module, "package_dir_for", lambda _name: pkg_dir)
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: pkg_dir)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     events = _run(
         _collect_events(
@@ -592,8 +603,8 @@ def test_fetch_hashes_rejects_preserve_when_artifact_is_not_current(
         yield UpdateEvent.value(updater.name, "sha256-src")
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
-    monkeypatch.setattr(module, "package_dir_for", lambda _name: pkg_dir)
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: pkg_dir)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     with pytest.raises(RuntimeError, match="Command timed out after 180s"):
         _run(
@@ -605,3 +616,48 @@ def test_fetch_hashes_rejects_preserve_when_artifact_is_not_current(
                 )
             )
         )
+
+
+def test_render_build_zig_zon_nix_reraises_non_transient_stream_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Surface non-transient zon2nix stream failures without retrying."""
+    module = _load_module("neutils_updater_test_render_non_transient")
+    updater = module.NeutilsUpdater()
+    command_calls: list[list[str]] = []
+
+    async def _fetch_url(*_args: object, **_kwargs: object) -> bytes:
+        return _build_archive()
+
+    async def _resolve(_installable: str):
+        yield UpdateEvent.value(updater.name, "/nix/store/tool")
+
+    async def _run_command(args: list[str], *, options: object):
+        _ = options
+        command_calls.append(args)
+        msg = "zon2nix failed: unsupported zon syntax"
+        raise RuntimeError(msg)
+        yield
+
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
+    monkeypatch.setattr(module, "get_repo_file", lambda _path: Path("/repo/root"))
+    monkeypatch.setattr(
+        module,
+        "_local_flake_url",
+        lambda root: f"git+file://{root}?dirty=1",
+    )
+    monkeypatch.setattr(updater, "_resolve_installable_path", _resolve)
+    monkeypatch.setattr(module, "run_command", _run_command)
+
+    with pytest.raises(RuntimeError, match="unsupported zon syntax"):
+        _run(
+            _collect_events(
+                updater._render_build_zig_zon_nix(
+                    VersionInfo(version="0.7.2"), object()
+                )
+            )
+        )
+    assert len(command_calls) == 1

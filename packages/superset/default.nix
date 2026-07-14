@@ -289,7 +289,9 @@ else
 
       bun run --cwd apps/desktop copy:native-modules
 
-      PYTHONPATH=${../..} ${lib.getExe python3} ${patchBindingGypHelper} \
+      PYTHONPATH=${
+        import ../../lib/codemods-pythonpath.nix { inherit lib; }
+      } ${lib.getExe python3} ${patchBindingGypHelper} \
         apps/desktop/node_modules
 
       bun run --cwd apps/desktop generate:icons

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+from lib.update.updaters.flake_backed import FlakeInputUpdater
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from lib.nix.models.sources import SourceEntry
     from lib.update.refs import FlakeInputRef
 
 
@@ -19,6 +22,23 @@ class _UpdateOptionsLike(Protocol):
     no_sources: bool
     no_input: bool
     check: bool
+
+
+def source_backing_input_name(
+    name: str,
+    updater_cls: type[object] | None,
+    entry: SourceEntry | None = None,
+) -> str | None:
+    """Return the flake input that backs one source, if any."""
+    if updater_cls is not None:
+        input_name = getattr(updater_cls, "input_name", None)
+        if isinstance(input_name, str) and input_name:
+            return input_name
+        if issubclass(updater_cls, FlakeInputUpdater):
+            return name
+    if entry is not None and entry.input:
+        return entry.input
+    return None
 
 
 def companion_source_name(updater_cls: type[object] | None) -> str | None:
@@ -117,8 +137,6 @@ def add_companion_source_children(
 def select_target_source_names(
     target_names: tuple[str, ...],
     updaters: Mapping[str, type[object]],
-    *,
-    source_backing_input_name: Callable[..., str | None],
 ) -> list[str]:
     """Resolve source targets, expanding backing-input and companion sources."""
     if not target_names:
@@ -158,21 +176,6 @@ def select_target_source_names(
     )
 
 
-def select_source_names(
-    source: str | None,
-    updaters: Mapping[str, type[object]],
-    *,
-    source_backing_input_name: Callable[..., str | None],
-) -> list[str]:
-    """Resolve one legacy source target into updater source names."""
-    target_names = () if source is None else (source,)
-    return select_target_source_names(
-        target_names,
-        updaters,
-        source_backing_input_name=source_backing_input_name,
-    )
-
-
 def source_update_waves(
     source_names: Sequence[str],
     updaters: Mapping[str, type[object]],
@@ -194,7 +197,6 @@ def resolve_update_targets[ResolvedTargetsT](
     *,
     updaters: Mapping[str, type[object]],
     ref_inputs: list[FlakeInputRef],
-    source_backing_input_name: Callable[..., str | None],
     result_type: type[ResolvedTargetsT],
 ) -> ResolvedTargetsT:
     """Resolve target sets and operational flags from update options."""
@@ -203,11 +205,7 @@ def resolve_update_targets[ResolvedTargetsT](
     all_known_names = all_source_names | all_ref_names
 
     target_names = opts.target_names
-    source_names = select_target_source_names(
-        target_names,
-        updaters,
-        source_backing_input_name=source_backing_input_name,
-    )
+    source_names = select_target_source_names(target_names, updaters)
 
     # --native-only implies --no-refs: in CI, refs are managed by the pipeline.
     do_refs = not opts.no_refs and not opts.native_only
@@ -250,7 +248,7 @@ __all__ = [
     "companion_source_name",
     "companion_source_parent",
     "resolve_update_targets",
-    "select_source_names",
     "select_target_source_names",
+    "source_backing_input_name",
     "source_update_waves",
 ]

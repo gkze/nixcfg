@@ -27,11 +27,13 @@ from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
+from nix_manipulator.expressions.with_statement import WithStatement
 
 from lib import mac_apps_helper
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
+    binding_map,
     expect_binding,
     expect_scope_binding,
     parse_nix_expr,
@@ -157,6 +159,13 @@ def _curried_call(
         name=FunctionCall(name=name, argument=rendered_first_arg),
         argument=Parenthesis(value=second_arg),
     )
+
+
+def _concat_terms(expression: NixExpression) -> list[NixExpression]:
+    """Flatten one left-associative Nix list concatenation."""
+    if isinstance(expression, BinaryExpression) and expression.operator.name == "++":
+        return [*_concat_terms(expression.left), *_concat_terms(expression.right)]
+    return [expression]
 
 
 def _system_applications_script_expr(
@@ -387,12 +396,12 @@ def test_mac_app_entry_defaults_to_copy_mode() -> None:
 
 
 def test_shared_darwin_app_helpers_default_to_copy_mode_metadata() -> None:
-    """Shared macOS app helpers should advertise copy mode for dockable bundles."""
+    """The shared macApp passthru should advertise copy mode for dockable bundles."""
     mac_app = expect_instance(
         nix_source_fragment_expr(
-            "overlays/_lib/helpers/darwin-apps.nix",
-            "      macApp = ",
-            "\n      // macApp;",
+            "overlays/_lib/mk-mac-app-passthru.nix",
+            "  macApp = ",
+            "\n  // macApp;",
         ),
         AttributeSet,
     )
@@ -436,8 +445,8 @@ def test_pkg_app_helper_expands_pkg_into_fresh_destination() -> None:
     install_phase = expect_instance(
         nix_source_fragment_expr(
             "overlays/_lib/helpers/darwin-apps.nix",
-            "      installPhase = ",
-            ";\n    };",
+            "        installPhase = ",
+            ";\n      };",
             occurrence=3,
         ),
         IndentedString,
@@ -1347,6 +1356,28 @@ def test_netnewswire_package_exposes_copy_mode_mac_app_metadata() -> None:
     )
 
 
+def test_codex_desktop_package_ships_the_unified_chatgpt_bundle() -> None:
+    """Codex Desktop should install the merged app under its upstream ChatGPT name."""
+    package_source = Path(REPO_ROOT / "packages/codex-desktop/default.nix").read_text(
+        encoding="utf-8"
+    )
+    package = expect_instance(parse_nix_expr(package_source), FunctionDefinition)
+    derivation = expect_instance(package.output, FunctionCall)
+    derivation_args = expect_instance(derivation.argument, AttributeSet)
+
+    assert_nix_ast_equal(derivation.name, Identifier(name="mkZipApp"))
+    assert_nix_ast_equal(
+        expect_binding(derivation_args.values, "appName").value,
+        StringPrimitive(value="ChatGPT"),
+    )
+    # The zip's ChatGPT.app payload must flow through mkZipApp defaults so the
+    # bundle, executable, and source path all stay on the upstream name.
+    derivation_bindings = binding_map(derivation_args.values)
+    assert "sourceAppPath" not in derivation_bindings
+    assert "executableName" not in derivation_bindings
+    assert "bundleName" not in derivation_bindings
+
+
 def test_zen_twilight_package_embeds_autoconfig_and_resigns_app() -> None:
     """The Twilight package should carry nixcfg's app-bundle AutoConfig hook."""
     sources = json.loads(
@@ -1549,20 +1580,7 @@ def test_managed_gui_app_tiny_overlays_keep_copy_mode_metadata_contracts() -> No
         AttributeSet,
     )
 
-    assert_nix_ast_equal(
-        expect_binding(tiny_overlays.values, "chatgpt").value,
-        _curried_call(
-            Identifier(name="withManagedMacApp"),
-            FunctionCall(
-                name=FunctionCall(
-                    name=identifier_attr_path("final", "mkSourceOverride"),
-                    argument=StringPrimitive(value="chatgpt", raw_string=True),
-                ),
-                argument=identifier_attr_path("prev", "chatgpt"),
-            ),
-            StringPrimitive(value="ChatGPT.app", raw_string=True),
-        ),
-    )
+    assert "chatgpt" not in binding_map(tiny_overlays.values)
     assert_nix_ast_equal(
         expect_binding(tiny_overlays.values, "code-cursor").value,
         _curried_call(
@@ -1721,6 +1739,51 @@ def test_vscode_insiders_overlay_keeps_copy_mode_mac_app_metadata_contract() -> 
     )
 
 
+def test_george_config_routes_only_the_unified_chatgpt_app() -> None:
+    """The merged app should be the only managed ChatGPT application."""
+    root = _module_output("home/george/configuration.nix")
+    nixcfg = expect_instance(expect_binding(root.values, "nixcfg").value, AttributeSet)
+    routing = expect_instance(
+        expect_scope_binding(nixcfg, "managedMacAppRouting").value,
+        BinaryExpression,
+    )
+    base_routing = expect_instance(routing.left, AttributeSet)
+
+    assert "chatgpt" not in binding_map(base_routing.values)
+
+    codex = expect_instance(
+        expect_binding(base_routing.values, "codex").value, AttributeSet
+    )
+    assert (
+        expect_binding(codex.values, "package").value.rebuild() == "pkgs.codex-desktop"
+    )
+    assert "bundleName" not in binding_map(codex.values)
+
+
+def test_darwin_gui_package_set_retains_only_unified_chatgpt_app() -> None:
+    """The default Darwin package set should retain only the unified app."""
+    root = _module_output("modules/home/packages.nix")
+    package_set_table = expect_instance(
+        expect_scope_binding(root, "packageSetTable").value,
+        WithStatement,
+    )
+    gui_apps = next(
+        entry
+        for entry in package_set_table.body.value
+        if expect_binding(entry.values, "name").value.rebuild() == '"guiApps"'
+    )
+    package_terms = _concat_terms(expect_binding(gui_apps.values, "packages").value)
+    darwin_optionals = expect_instance(package_terms[-1], FunctionCall)
+    assert darwin_optionals.name.rebuild() == "lib.optionals stdenv.isDarwin"
+    darwin_packages = expect_instance(darwin_optionals.argument, NixList)
+    package_names = [
+        expect_instance(package, Identifier).name for package in darwin_packages.value
+    ]
+
+    assert "codex-desktop" in package_names
+    assert "chatgpt" not in package_names
+
+
 def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
     """Dock modules should consume resolved app paths instead of hard-coded app dirs."""
 
@@ -1818,6 +1881,9 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
     assert '(appPath "figma" "Figma.app")' in town_dock
     assert '(appPath "linear" "Linear.app")' in town_dock
     assert '(appPath "opencode" "OpenCode Desktop Dev.app")' in town_dock
+    assert '(appPath "codex" "ChatGPT.app")' in town_dock
+    assert '(appPath "chatgpt" "ChatGPT.app")' not in town_dock
+    assert not any("Codex.app" in item for item in town_dock)
     assert '"/Applications/OpenCode Desktop Dev.app"' not in town_dock
     assert '"/Applications/Cursor.app"' not in town_dock
     assert '"/Applications/Visual Studio Code - Insiders.app"' not in town_dock
@@ -1833,8 +1899,8 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
         assert '"/Applications"' not in remove_others
 
 
-def test_dock_activation_updates_items_without_clearing_the_dock() -> None:
-    """Dock activation should avoid leaving the Dock empty after partial failures."""
+def test_dock_activation_updates_and_orders_items_without_clearing_the_dock() -> None:
+    """Dock activation should enforce list order without risking an empty Dock."""
     mk_dock_module = expect_instance(
         nix_source_fragment_expr(
             "modules/darwin/george/dock-lib.nix",
@@ -1844,6 +1910,12 @@ def test_dock_activation_updates_items_without_clearing_the_dock() -> None:
         FunctionDefinition,
     )
     dock_label = expect_scope_binding(mk_dock_module.output, "dockLabel").value
+    positioned_apps = expect_scope_binding(
+        mk_dock_module.output, "positionedApps"
+    ).value
+    positioned_others = expect_scope_binding(
+        mk_dock_module.output, "positionedOthers"
+    ).value
     add_apps = expect_scope_binding(mk_dock_module.output, "addAppCommands").value
     add_others = expect_scope_binding(mk_dock_module.output, "addOtherCommands").value
     remove_others = expect_scope_binding(
@@ -1854,12 +1926,22 @@ def test_dock_activation_updates_items_without_clearing_the_dock() -> None:
         dock_label,
         'path: lib.removeSuffix ".app" (builtins.baseNameOf path)',
     )
+    assert_nix_ast_equal(
+        positioned_apps,
+        "lib.imap1 (position: app: { inherit app position; }) apps",
+    )
+    assert_nix_ast_equal(
+        positioned_others,
+        "lib.imap1 (position: other: { inherit other position; }) others",
+    )
     for expression in (add_apps, add_others, remove_others):
         shell_text = expression.rebuild()
         assert "--remove all" not in shell_text
 
     assert "--replacing ${escapeShellArg (dockLabel app)}" in add_apps.rebuild()
+    assert "--position ${toString position}" in add_apps.rebuild()
     assert "--replacing ${escapeShellArg (dockLabel other)}" in add_others.rebuild()
+    assert "--position ${toString position}" in add_others.rebuild()
     assert '"$dockutil" --find ${escapeShellArg other} --section others' in (
         remove_others.rebuild()
     )

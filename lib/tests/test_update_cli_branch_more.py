@@ -16,27 +16,13 @@ from lib.update.cli import (
     ResolvedTargets,
     UpdateOptions,
     UpdateSummary,
-    _add_companion_source_children,
-    _add_companion_source_parents,
     _build_item_meta,
     _build_run_plan,
     _build_update_options,
-    _companion_source_depths,
     _emit_summary,
     _execute_run_plan,
-    _handle_list_targets_request,
-    _handle_validate_request,
     _is_tty,
-    _persist_source_updates,
-    _run_ref_phase,
-    _run_sources_phase,
     _RunPlan,
-    _select_source_names,
-    _source_update_waves,
-    _SourcesPhaseContext,
-    _SourceTaskContext,
-    _SourceTaskResult,
-    _update_source_task,
     run_update_command,
 )
 from lib.update.cli_inventory import (
@@ -44,11 +30,29 @@ from lib.update.cli_inventory import (
     _InventoryRefTarget,
     _InventorySourceTarget,
     _InventoryTarget,
+    handle_list_targets_request,
 )
+from lib.update.cli_validation import handle_validate_request
 from lib.update.config import resolve_config
 from lib.update.events import UpdateEvent
+from lib.update.persistence import persist_source_updates
+from lib.update.planner import (
+    add_companion_source_children,
+    add_companion_source_parents,
+    companion_source_depths,
+    select_target_source_names,
+    source_update_waves,
+)
 from lib.update.refs import FlakeInputRef
-from lib.update.updaters.base import DenoDepsHashUpdater, VersionInfo
+from lib.update.source_runner import (
+    SourcesPhaseContext,
+    SourceTaskContext,
+    SourceTaskResult,
+    run_ref_phase,
+    run_sources_phase,
+    update_source_task,
+)
+from lib.update.updaters import DenoDepsHashUpdater, VersionInfo
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -155,9 +159,9 @@ def test_source_selection_detects_companion_cycles_and_empty_waves() -> None:
         companion_of = "a"
 
     with pytest.raises(RuntimeError, match="Companion source cycle"):
-        _select_source_names(None, {"a": _A, "b": _B})
+        select_target_source_names((), {"a": _A, "b": _B})
 
-    assert _source_update_waves([], {}) == []
+    assert source_update_waves([], {}) == []
 
 
 def test_companion_source_graph_helpers_cover_cycles_and_revisits() -> None:
@@ -176,17 +180,17 @@ def test_companion_source_graph_helpers_cover_cycles_and_revisits() -> None:
         companion_of = "cycle-a"
 
     with pytest.raises(RuntimeError, match="cycle-a -> cycle-b -> cycle-a"):
-        _companion_source_depths(
+        companion_source_depths(
             {"cycle-a", "cycle-b"},
             {"cycle-a": _CycleA, "cycle-b": _CycleB},
         )
 
     names = {"child", "root"}
-    _add_companion_source_parents(names, {"child": _Child, "root": _Root})
+    add_companion_source_parents(names, {"child": _Child, "root": _Root})
     assert names == {"child", "root"}
 
     children: set[str] = set()
-    _add_companion_source_children(
+    add_companion_source_children(
         children,
         roots={"child", "root"},
         updaters={"child": _Child, "root": _Root},
@@ -218,7 +222,7 @@ def test_list_and_validate_non_json_paths(
     """Exercise non-JSON list/validate printing branches and early returns."""
     monkeypatch.setattr(
         "lib.update.cli_inventory.build_update_inventory",
-        lambda *, dependencies: [
+        lambda: [
             _InventoryTarget(
                 name="inp",
                 handles=_InventoryHandles(
@@ -264,7 +268,7 @@ def test_list_and_validate_non_json_paths(
         ],
     )
     assert (
-        _handle_list_targets_request(UpdateOptions(list_targets=True, json=False)) == 0
+        handle_list_targets_request(UpdateOptions(list_targets=True, json=False)) == 0
     )
     rendered = capsys.readouterr().out
     assert "nixcfg update inventory" in rendered
@@ -275,24 +279,26 @@ def test_list_and_validate_non_json_paths(
     assert "writes" in rendered
 
     out = OutputOptions(json_output=False, quiet=False)
-    assert _handle_validate_request(UpdateOptions(validate=False), out) is None
+    assert handle_validate_request(UpdateOptions(validate=False), out) is None
 
     monkeypatch.setattr(
-        "lib.update.cli.load_all_sources",
+        "lib.update.sources.load_all_sources",
         lambda: SourcesFile(entries={"a": SourceEntry(hashes={})}),
     )
     monkeypatch.setattr(
-        "lib.update.cli.validate_source_discovery_consistency", lambda: None
+        "lib.update.sources.validate_source_discovery_consistency", lambda: None
     )
-    assert _handle_validate_request(UpdateOptions(validate=True, json=False), out) == 0
+    assert handle_validate_request(UpdateOptions(validate=True, json=False), out) == 0
     assert "Validated sources.json entries" in capsys.readouterr().out
 
     def _boom() -> None:
         msg = "broken"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr("lib.update.cli.validate_source_discovery_consistency", _boom)
-    assert _handle_validate_request(UpdateOptions(validate=True, json=False), out) == 1
+    monkeypatch.setattr(
+        "lib.update.sources.validate_source_discovery_consistency", _boom
+    )
+    assert handle_validate_request(UpdateOptions(validate=True, json=False), out) == 1
     assert "Validation failed" in capsys.readouterr().err
 
 
@@ -329,7 +335,7 @@ def test_build_item_meta_without_sources_and_list_targets_without_refs(
 
     monkeypatch.setattr(
         "lib.update.cli_inventory.build_update_inventory",
-        lambda *, dependencies: [
+        lambda: [
             _InventoryTarget(
                 name="src",
                 handles=_InventoryHandles(
@@ -354,7 +360,7 @@ def test_build_item_meta_without_sources_and_list_targets_without_refs(
         ],
     )
     assert (
-        _handle_list_targets_request(UpdateOptions(list_targets=True, json=False)) == 0
+        handle_list_targets_request(UpdateOptions(list_targets=True, json=False)) == 0
     )
     rendered = capsys.readouterr().out
     assert "nixcfg update inventory" in rendered
@@ -381,7 +387,7 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
             yield UpdateEvent.status("demo", "updated")
             yield UpdateEvent.result("demo")
 
-    monkeypatch.setattr("lib.update.cli.UPDATERS", {"demo": _DummyUpdater})
+    monkeypatch.setattr("lib.update.source_runner.UPDATERS", {"demo": _DummyUpdater})
 
     async def _run_queue_task(
         *, source: str, queue: asyncio.Queue[UpdateEvent | None], task
@@ -394,15 +400,15 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
     ) -> AsyncIterator[UpdateEvent]:
         yield UpdateEvent.status(source, "input refreshed")
 
-    monkeypatch.setattr("lib.update.cli.run_queue_task", _run_queue_task)
-    monkeypatch.setattr("lib.update.cli.update_flake_input", _update_input)
+    monkeypatch.setattr("lib.update.process.run_queue_task", _run_queue_task)
+    monkeypatch.setattr("lib.update.flake.update_flake_input", _update_input)
 
     async def _run_source_task() -> list[UpdateEvent]:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
         async with aiohttp.ClientSession() as session:
-            await _update_source_task(
+            await update_source_task(
                 "demo",
-                context=_SourceTaskContext(
+                context=SourceTaskContext(
                     sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
                     update_input=True,
                     native_only=False,
@@ -435,11 +441,11 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
         _ = (session, options)
         await queue.put(UpdateEvent.status(input_ref.name, "ref phase"))
 
-    monkeypatch.setattr("lib.update.cli.update_refs_task", _update_ref)
+    monkeypatch.setattr("lib.update.refs.update_refs_task", _update_ref)
 
     async def _run_refs() -> list[UpdateEvent]:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-        await _run_ref_phase(
+        await run_ref_phase(
             ref_inputs=[
                 FlakeInputRef(
                     name="inp", owner="o", repo="r", ref="v1", input_type="github"
@@ -462,15 +468,15 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
     calls: list[tuple[str, int]] = []
 
     async def _update_source(
-        name: str, *, context: _SourceTaskContext
-    ) -> _SourceTaskResult:
+        name: str, *, context: SourceTaskContext
+    ) -> SourceTaskResult:
         calls.append((name, id(context.update_input_tasks)))
-        return _SourceTaskResult(completed=True)
+        return SourceTaskResult(completed=True)
 
-    monkeypatch.setattr("lib.update.cli._update_source_task", _update_source)
+    monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
     _run(
-        _run_sources_phase(
-            context=_SourcesPhaseContext(
+        run_sources_phase(
+            context=SourcesPhaseContext(
                 source_names=["demo", "other"],
                 sources=SourcesFile(
                     entries={
@@ -522,15 +528,15 @@ def test_update_source_task_collects_artifact_events(
         _ = (source, queue)
         await task()
 
-    monkeypatch.setattr("lib.update.cli.UPDATERS", {"demo": _ArtifactUpdater})
-    monkeypatch.setattr("lib.update.cli.run_queue_task", _run_queue_task)
+    monkeypatch.setattr("lib.update.source_runner.UPDATERS", {"demo": _ArtifactUpdater})
+    monkeypatch.setattr("lib.update.process.run_queue_task", _run_queue_task)
 
-    async def _run_case() -> _SourceTaskResult:
+    async def _run_case() -> SourceTaskResult:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
         async with aiohttp.ClientSession() as session:
-            return await _update_source_task(
+            return await update_source_task(
                 "demo",
-                context=_SourceTaskContext(
+                context=SourceTaskContext(
                     sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
                     update_input=False,
                     native_only=False,
@@ -560,21 +566,21 @@ def test_run_sources_phase_serializes_when_max_nix_builds_is_one(
     max_active = 0
 
     async def _update_source(
-        _name: str, *, context: _SourceTaskContext
-    ) -> _SourceTaskResult:
+        _name: str, *, context: SourceTaskContext
+    ) -> SourceTaskResult:
         nonlocal active, max_active
         _ = context
         active += 1
         max_active = max(max_active, active)
         await asyncio.sleep(0)
         active -= 1
-        return _SourceTaskResult(completed=True)
+        return SourceTaskResult(completed=True)
 
-    monkeypatch.setattr("lib.update.cli._update_source_task", _update_source)
+    monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
 
     _run(
-        _run_sources_phase(
-            context=_SourcesPhaseContext(
+        run_sources_phase(
+            context=SourcesPhaseContext(
                 source_names=["demo", "other"],
                 sources=SourcesFile(
                     entries={
@@ -594,6 +600,49 @@ def test_run_sources_phase_serializes_when_max_nix_builds_is_one(
     assert max_active == 1
 
 
+def test_run_sources_phase_bounds_concurrent_tasks_within_wave(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Honor the configured source-task concurrency limit within one wave."""
+    active = 0
+    max_active = 0
+    completed: list[str] = []
+
+    async def _update_source(
+        name: str, *, context: SourceTaskContext
+    ) -> SourceTaskResult:
+        nonlocal active, max_active
+        _ = context
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        completed.append(name)
+        active -= 1
+        return SourceTaskResult(completed=True)
+
+    monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
+
+    source_names = ["one", "two", "three", "four", "five"]
+    _run(
+        run_sources_phase(
+            context=SourcesPhaseContext(
+                source_names=source_names,
+                sources=SourcesFile(
+                    entries={name: SourceEntry(hashes={}) for name in source_names}
+                ),
+                queue=asyncio.Queue(),
+                update_input=False,
+                native_only=False,
+                config=resolve_config(max_nix_builds=2),
+                pinned={},
+            )
+        )
+    )
+
+    assert max_active == 2
+    assert sorted(completed) == sorted(source_names)
+
+
 def test_run_sources_phase_passes_companion_artifacts_between_waves(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -608,10 +657,10 @@ def test_run_sources_phase_passes_companion_artifacts_between_waves(
     seen_overrides: list[dict[str, str]] = []
 
     async def _update_source(
-        name: str, *, context: _SourceTaskContext
-    ) -> _SourceTaskResult:
+        name: str, *, context: SourceTaskContext
+    ) -> SourceTaskResult:
         if name == "codex":
-            return _SourceTaskResult(
+            return SourceTaskResult(
                 completed=True,
                 artifacts=(
                     GeneratedArtifact.text(
@@ -624,17 +673,17 @@ def test_run_sources_phase_passes_companion_artifacts_between_waves(
         seen_overrides.append({
             str(path): content for path, content in context.generated_artifacts.items()
         })
-        return _SourceTaskResult(completed=True)
+        return SourceTaskResult(completed=True)
 
     monkeypatch.setattr(
-        "lib.update.cli.UPDATERS",
+        "lib.update.source_runner.UPDATERS",
         {"codex": _CodexUpdater, "codex-v8": _CodexV8Updater},
     )
-    monkeypatch.setattr("lib.update.cli._update_source_task", _update_source)
+    monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
 
     _run(
-        _run_sources_phase(
-            context=_SourcesPhaseContext(
+        run_sources_phase(
+            context=SourcesPhaseContext(
                 source_names=["codex", "codex-v8"],
                 sources=SourcesFile(
                     entries={
@@ -668,24 +717,24 @@ def test_run_sources_phase_skips_companions_after_failed_parent(
         companion_of = "parent"
 
     async def _update_source(
-        name: str, *, context: _SourceTaskContext
-    ) -> _SourceTaskResult:
+        name: str, *, context: SourceTaskContext
+    ) -> SourceTaskResult:
         _ = context
         if name == "parent":
-            return _SourceTaskResult(completed=False)
+            return SourceTaskResult(completed=False)
         msg = "child updater should not run after parent failure"
         raise AssertionError(msg)
 
     monkeypatch.setattr(
-        "lib.update.cli.UPDATERS",
+        "lib.update.source_runner.UPDATERS",
         {"parent": _ParentUpdater, "child": _ChildUpdater},
     )
-    monkeypatch.setattr("lib.update.cli._update_source_task", _update_source)
+    monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
 
     async def _run_case() -> list[UpdateEvent]:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-        await _run_sources_phase(
-            context=_SourcesPhaseContext(
+        await run_sources_phase(
+            context=SourcesPhaseContext(
                 source_names=["parent", "child"],
                 sources=SourcesFile(
                     entries={
@@ -748,9 +797,11 @@ def test_update_source_task_dedupes_shared_input_refreshes(
         await asyncio.sleep(0)
         yield UpdateEvent.status(source, f"input refreshed for {_input_name}")
 
-    monkeypatch.setattr("lib.update.cli.UPDATERS", {"one": _Updater, "two": _Updater})
-    monkeypatch.setattr("lib.update.cli.run_queue_task", _run_queue_task)
-    monkeypatch.setattr("lib.update.cli.update_flake_input", _update_input)
+    monkeypatch.setattr(
+        "lib.update.source_runner.UPDATERS", {"one": _Updater, "two": _Updater}
+    )
+    monkeypatch.setattr("lib.update.process.run_queue_task", _run_queue_task)
+    monkeypatch.setattr("lib.update.flake.update_flake_input", _update_input)
 
     async def _run_case() -> list[UpdateEvent]:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
@@ -764,9 +815,9 @@ def test_update_source_task_dedupes_shared_input_refreshes(
         )
         async with aiohttp.ClientSession() as session:
             await asyncio.gather(
-                _update_source_task(
+                update_source_task(
                     "one",
-                    context=_SourceTaskContext(
+                    context=SourceTaskContext(
                         sources=shared_sources,
                         update_input=True,
                         native_only=False,
@@ -778,9 +829,9 @@ def test_update_source_task_dedupes_shared_input_refreshes(
                         config=resolve_config(),
                     ),
                 ),
-                _update_source_task(
+                update_source_task(
                     "two",
-                    context=_SourceTaskContext(
+                    context=SourceTaskContext(
                         sources=shared_sources,
                         update_input=True,
                         native_only=False,
@@ -852,16 +903,16 @@ def test_update_source_task_sets_native_only_for_deno_updater(
         if False:
             yield UpdateEvent.status("demo", "unused")
 
-    monkeypatch.setattr("lib.update.cli.UPDATERS", {"demo": _DenoUpdater})
-    monkeypatch.setattr("lib.update.cli.run_queue_task", _run_queue_task)
-    monkeypatch.setattr("lib.update.cli.update_flake_input", _update_input)
+    monkeypatch.setattr("lib.update.source_runner.UPDATERS", {"demo": _DenoUpdater})
+    monkeypatch.setattr("lib.update.process.run_queue_task", _run_queue_task)
+    monkeypatch.setattr("lib.update.flake.update_flake_input", _update_input)
 
     async def _run_case() -> None:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
         async with aiohttp.ClientSession() as session:
-            await _update_source_task(
+            await update_source_task(
                 "demo",
-                context=_SourceTaskContext(
+                context=SourceTaskContext(
                     sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
                     update_input=True,
                     native_only=True,
@@ -919,16 +970,16 @@ def test_update_source_task_skips_input_update_when_disabled(
         if False:
             yield UpdateEvent.status("demo", "unused")
 
-    monkeypatch.setattr("lib.update.cli.UPDATERS", {"demo": _Updater})
-    monkeypatch.setattr("lib.update.cli.run_queue_task", _run_queue_task)
-    monkeypatch.setattr("lib.update.cli.update_flake_input", _update_input)
+    monkeypatch.setattr("lib.update.source_runner.UPDATERS", {"demo": _Updater})
+    monkeypatch.setattr("lib.update.process.run_queue_task", _run_queue_task)
+    monkeypatch.setattr("lib.update.flake.update_flake_input", _update_input)
 
     async def _run_case() -> None:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
         async with aiohttp.ClientSession() as session:
-            await _update_source_task(
+            await update_source_task(
                 "demo",
-                context=_SourceTaskContext(
+                context=SourceTaskContext(
                     sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
                     update_input=False,
                     native_only=False,
@@ -963,15 +1014,20 @@ def test_persist_updates_and_build_plan_edge_paths(
         ref_inputs=[],
         source_names=["a"],
     )
-    _persist_source_updates(
-        resolved=resolved_skip,
+    persist_source_updates(
+        do_sources=resolved_skip.do_sources,
+        source_names=resolved_skip.source_names,
+        dry_run=resolved_skip.dry_run,
+        native_only=resolved_skip.native_only,
         sources=sources,
         source_updates={"a": SourceEntry(hashes={"x86_64-linux": "sha256-1"})},
         details={"a": "updated"},
     )
 
     saved: list[SourcesFile] = []
-    monkeypatch.setattr("lib.update.cli.save_sources", lambda src: saved.append(src))
+    monkeypatch.setattr(
+        "lib.update.sources.save_sources", lambda src: saved.append(src)
+    )
     resolved = ResolvedTargets(
         all_source_names={"a"},
         all_ref_inputs=[],
@@ -985,8 +1041,11 @@ def test_persist_updates_and_build_plan_edge_paths(
         ref_inputs=[],
         source_names=["a"],
     )
-    _persist_source_updates(
-        resolved=resolved,
+    persist_source_updates(
+        do_sources=resolved.do_sources,
+        source_names=resolved.source_names,
+        dry_run=resolved.dry_run,
+        native_only=resolved.native_only,
         sources=sources,
         source_updates={},
         details={"a": "no_change"},
@@ -1058,15 +1117,18 @@ def test_execute_run_plan_branches_and_run_update_command_source_ref_check(
     async def _run_ref_phase(**_kwargs: object) -> None:
         phase_calls.append("refs")
 
-    async def _run_sources_phase(*, context: object) -> None:
+    async def _run_sources_phase(context: object) -> None:
         _ = context
         phase_calls.append("sources")
 
     monkeypatch.setattr("lib.update.cli.consume_events", _consume)
-    monkeypatch.setattr("lib.update.cli._run_ref_phase", _run_ref_phase)
-    monkeypatch.setattr("lib.update.cli._run_sources_phase", _run_sources_phase)
+    monkeypatch.setattr("lib.update.source_runner.run_ref_phase", _run_ref_phase)
     monkeypatch.setattr(
-        "lib.update.cli._persist_materialized_updates", lambda **_kwargs: None
+        "lib.update.source_runner.run_sources_phase", _run_sources_phase
+    )
+    monkeypatch.setattr(
+        "lib.update.persistence.persist_materialized_updates",
+        lambda **_kwargs: None,
     )
 
     cfg = resolve_config()

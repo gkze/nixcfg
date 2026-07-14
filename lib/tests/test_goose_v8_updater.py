@@ -13,7 +13,7 @@ from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEventKind
 from lib.update.nix import _build_fetchgit_call
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 
 
 def _load_module(module_name: str = "goose_v8_updater_test"):
@@ -170,9 +170,9 @@ def test_goose_v8_fetch_hashes_success_path(monkeypatch: pytest.MonkeyPatch) -> 
             },
         )
 
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(module, "compute_url_hashes", _url_hashes)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _url_hashes)
 
     session = object()
     events = _run(_collect_events(updater.fetch_hashes(info, session)))
@@ -234,7 +234,7 @@ def test_goose_v8_fetch_hashes_rejects_non_string_src_hash(
         _ = config
         yield module.UpdateEvent.value("goose-v8", {"hash": "sha256-src"})
 
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _bad_src_hash)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _bad_src_hash)
 
     with pytest.raises(TypeError, match="Expected src hash string, got dict"):
         _run(
@@ -272,8 +272,8 @@ def test_goose_v8_fetch_hashes_rejects_bad_cargo_toml_or_missing_version(
         _ = (request_timeout, config)
         return cargo_toml
 
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
 
     with pytest.raises(expected_exception, match=match):
         _run(
@@ -310,9 +310,9 @@ def test_goose_v8_fetch_hashes_rejects_missing_asset_hash(
             },
         )
 
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(module, "compute_url_hashes", _url_hashes)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _url_hashes)
 
     with pytest.raises(
         KeyError, match="src_binding_release_x86_64-unknown-linux-gnu\\.rs"
@@ -345,9 +345,9 @@ def test_goose_v8_fetch_hashes_requires_asset_hash_capture(
     async def _missing_assets(name: str, _urls):
         yield module.UpdateEvent.status(name, "hashing release assets")
 
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(module, "compute_url_hashes", _missing_assets)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _missing_assets)
 
     with pytest.raises(RuntimeError, match="Missing prebuilt rusty_v8 hash output"):
         _run(
@@ -386,9 +386,9 @@ def test_goose_v8_fetch_hashes_handles_missing_wrapped_asset_capture(
                 "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             )
 
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
-    monkeypatch.setattr(module, "compute_url_hashes", _url_hashes)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _url_hashes)
     monkeypatch.setattr(module, "capture_stream_value", _capture_selectively)
 
     assert (
@@ -412,7 +412,7 @@ def test_goose_v8_fetch_hashes_requires_src_hash_capture(
         _ = config
         yield module.UpdateEvent.status("goose-v8", "building src")
 
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     with pytest.raises(RuntimeError, match="Missing srcHash output"):
         _run(

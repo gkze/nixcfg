@@ -18,8 +18,8 @@ from lib.tests._updater_helpers import install_fixed_hash_stream
 from lib.tests._updater_helpers import load_repo_module as _load_updater
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEventKind
-from lib.update.updaters import factories as updater_factories
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
+from lib.update.updaters import strategies as updater_strategies
 from lib.update.updaters.metadata import GranolaFeedMetadata
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
@@ -137,10 +137,10 @@ def test_codex_desktop_fetch_latest_and_download_urls(
         "packages/codex-desktop/updater.py", "codex_desktop_updater_test"
     )
     updater = module.CodexDesktopUpdater()
-    newer_arm_url = "https://example.invalid/Codex-darwin-arm64-26.429.61741.zip"
+    newer_arm_url = "https://example.invalid/ChatGPT-darwin-arm64-26.429.61741.zip"
     urls = {
-        "aarch64-darwin": "https://example.invalid/Codex-darwin-arm64-26.429.20946.zip",
-        "x86_64-darwin": "https://example.invalid/Codex-darwin-x64-26.429.20946.zip",
+        "aarch64-darwin": "https://example.invalid/ChatGPT-darwin-arm64-26.429.20946.zip",
+        "x86_64-darwin": "https://example.invalid/ChatGPT-darwin-x64-26.429.20946.zip",
     }
 
     def _item(version: str, build: str, download_url: str) -> str:
@@ -186,7 +186,7 @@ def test_codex_desktop_fetch_latest_and_download_urls(
         VersionInfo(version="26.429.20946-2312"),
     ) == (
         "https://persistent.oaistatic.com/codex-app-prod/"
-        "Codex-darwin-arm64-26.429.20946.zip"
+        "ChatGPT-darwin-arm64-26.429.20946.zip"
     )
 
 
@@ -246,7 +246,7 @@ def test_netnewswire_fetch_latest_and_download_url(
             ),
         )
 
-    monkeypatch.setattr(updater_factories, "fetch_sparkle_appcast_items", _fetch_items)
+    monkeypatch.setattr(updater_strategies, "fetch_sparkle_appcast_items", _fetch_items)
 
     latest = _run(updater.fetch_latest(object()))
 
@@ -286,7 +286,7 @@ def test_netnewswire_rejects_invalid_appcast_shapes(
         return (item,)
 
     monkeypatch.setattr(
-        updater_factories,
+        updater_strategies,
         "fetch_sparkle_appcast_items",
         _fetch_items,
     )

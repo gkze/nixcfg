@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 from lib import json_utils
 from lib.update.net import fetch_json
-from lib.update.updaters.base import SingleURLHashEntryUpdater, VersionInfo
+from lib.update.updaters import SingleURLHashEntryUpdater, VersionInfo
 from lib.update.updaters.metadata import DownloadUrlMetadata
 from lib.update.updaters.registry import register_updater
 

@@ -12,13 +12,11 @@ import pytest
 import typer
 
 if TYPE_CHECKING:
-    from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
+    from lib.nix.models.flake_lock import FlakeLock
     from lib.update.events import UpdateEvent
 
-import lib.update.cli as update_cli_module
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourcesFile
 from lib.update import cli_inventory as cli_inventory_module
-from lib.update import cli_validation as cli_validation_module
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.cli import (
     OutputOptions,
@@ -28,25 +26,16 @@ from lib.update.cli import (
     _argv_runs_top_level_update,
     _build_item_meta,
     _build_run_plan,
-    _build_update_inventory,
     _build_update_options,
-    _companion_source_name,
     _emit_summary,
     _execute_run_plan,
-    _flatten_artifact_updates,
     _get_updaters,
-    _handle_list_targets_request,
     _handle_preflight_requests,
     _handle_schema_request,
-    _handle_validate_request,
     _is_tty,
     _load_pinned_versions,
     _load_sources_for_run,
     _maybe_reexec_checkout_update,
-    _merge_source_updates,
-    _persist_generated_artifacts,
-    _persist_materialized_updates,
-    _persist_source_updates,
     _resolve_full_output,
     _resolve_runtime_config,
     _resolve_tty_settings,
@@ -60,10 +49,7 @@ from lib.update.cli import (
 from lib.update.cli_inventory import (
     _build_inventory_summary,
     _classify_updater_kind,
-    _collect_flake_inputs_for_list,
-    _collect_source_entries_for_list,
     _crate2nix_generated_artifact_paths,
-    _flake_source_string,
     _generated_artifact_paths,
     _inventory_classification,
     _inventory_sort_value,
@@ -71,16 +57,24 @@ from lib.update.cli_inventory import (
     _InventoryRefTarget,
     _InventorySourceTarget,
     _InventoryTarget,
-    _ListRow,
     _repo_relative_path,
-    _row_sort_value,
-    _source_backing_input_name,
     _source_hash_kinds,
+    handle_list_targets_request,
 )
+from lib.update.cli_validation import handle_validate_request
+from lib.update.flake import resolve_root_input_node
 from lib.update.paths import REPO_ROOT
+from lib.update.persistence import (
+    flatten_artifact_updates,
+    merge_source_updates,
+    persist_generated_artifacts,
+    persist_materialized_updates,
+    persist_source_updates,
+)
+from lib.update.planner import companion_source_name, source_backing_input_name
 from lib.update.refs import FlakeInputRef
 from lib.update.ui_state import OperationKind
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     ChecksumProvidedUpdater,
     DenoManifestUpdater,
     DownloadHashUpdater,
@@ -411,7 +405,7 @@ def test_resolved_targets_and_item_meta(monkeypatch: pytest.MonkeyPatch) -> None
 
     source_updates = {"src": SourceEntry(hashes={"x86_64-linux": "sha256-1"})}
     existing = {"src": SourceEntry(hashes={"aarch64-darwin": "sha256-2"})}
-    merged = _merge_source_updates(existing, source_updates, native_only=True)
+    merged = merge_source_updates(existing, source_updates, native_only=True)
     assert "src" in merged
 
 
@@ -474,8 +468,8 @@ def test_resolved_targets_expand_primary_source_to_companion_sources(
     )
     monkeypatch.setattr("lib.update.cli.get_flake_inputs_with_refs", list)
 
-    assert _companion_source_name(_CodexV8Updater) == "codex"
-    assert _companion_source_name(None) is None
+    assert companion_source_name(_CodexV8Updater) == "codex"
+    assert companion_source_name(None) is None
 
     resolved = ResolvedTargets.from_options(UpdateOptions(source="codex", no_refs=True))
 
@@ -566,11 +560,9 @@ def test_preflight_handlers_schema_list_validate(
     ]
     monkeypatch.setattr(
         "lib.update.cli_inventory.build_update_inventory",
-        lambda *, dependencies: inventory,
+        lambda: inventory,
     )
-    list_code = _handle_list_targets_request(
-        UpdateOptions(list_targets=True, json=True)
-    )
+    list_code = handle_list_targets_request(UpdateOptions(list_targets=True, json=True))
     assert list_code == 0
     list_payload = json.loads(capsys.readouterr().out)
     assert list_payload["schemaVersion"] == 1
@@ -578,7 +570,7 @@ def test_preflight_handlers_schema_list_validate(
     assert [item["name"] for item in list_payload["targets"]] == ["a", "b", "i"]
     assert list_payload["summary"]["counts"]["sourceOnly"] == 1
 
-    sorted_by_type_code = _handle_list_targets_request(
+    sorted_by_type_code = handle_list_targets_request(
         UpdateOptions(list_targets=True, json=True, sort_by="type")
     )
     assert sorted_by_type_code == 0
@@ -590,13 +582,13 @@ def test_preflight_handlers_schema_list_validate(
     ]
 
     monkeypatch.setattr(
-        "lib.update.cli.load_all_sources",
+        "lib.update.sources.load_all_sources",
         lambda: SourcesFile(entries={"a": SourceEntry(hashes={})}),
     )
     monkeypatch.setattr(
-        "lib.update.cli.validate_source_discovery_consistency", lambda: None
+        "lib.update.sources.validate_source_discovery_consistency", lambda: None
     )
-    validate_code = _handle_validate_request(
+    validate_code = handle_validate_request(
         UpdateOptions(validate=True, json=True), OutputOptions(json_output=True)
     )
     assert validate_code == 0
@@ -607,8 +599,10 @@ def test_preflight_handlers_schema_list_validate(
         msg = "nope"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr("lib.update.cli.validate_source_discovery_consistency", _boom)
-    validate_err = _handle_validate_request(
+    monkeypatch.setattr(
+        "lib.update.sources.validate_source_discovery_consistency", _boom
+    )
+    validate_err = handle_validate_request(
         UpdateOptions(validate=True, json=True), OutputOptions(json_output=True)
     )
     assert validate_err == 1
@@ -631,11 +625,11 @@ def test_handle_preflight_requests_checks_schema_list_then_validate(
         lambda _opts: calls.append("schema") or None,
     )
     monkeypatch.setattr(
-        "lib.update.cli._handle_list_targets_request",
+        "lib.update.cli.handle_list_targets_request",
         lambda _opts: calls.append("list") or None,
     )
     monkeypatch.setattr(
-        "lib.update.cli._handle_validate_request",
+        "lib.update.cli.handle_validate_request",
         lambda _opts, _out: calls.append("validate") or 9,
     )
 
@@ -656,15 +650,15 @@ def test_handle_preflight_requests_checks_schema_list_then_validate(
         lambda _opts: calls.append("schema") or None,
     )
     monkeypatch.setattr(
-        "lib.update.cli._handle_list_targets_request",
+        "lib.update.cli.handle_list_targets_request",
         lambda _opts: calls.append("list") or 5,
     )
     assert _handle_preflight_requests(UpdateOptions(), OutputOptions()) == 5
     assert calls == ["sort", "schema", "list"]
 
 
-def test_list_helpers_resolve_root_and_source_string() -> None:
-    """Resolve root input nodes and render input source strings."""
+def test_list_helpers_resolve_root_input_node() -> None:
+    """Resolve root input nodes for direct, follows, and missing inputs."""
 
     class _Lock:
         def __init__(self) -> None:
@@ -682,278 +676,34 @@ def test_list_helpers_resolve_root_and_source_string() -> None:
             }
 
     lock = _Lock()
-    direct_node, direct_follows = update_cli_module.resolve_root_input_node(
+    direct_node, direct_follows = resolve_root_input_node(
         cast("FlakeLock", lock), "direct"
     )
     assert direct_node is lock.nodes["node-a"]
     assert direct_follows is None
 
-    follows_node, follows_path = update_cli_module.resolve_root_input_node(
+    follows_node, follows_path = resolve_root_input_node(
         cast("FlakeLock", lock), "follows"
     )
     assert follows_node is lock.nodes["node-b"]
     assert follows_path == "wrapper/nixpkgs"
 
-    missing_node, missing_path = update_cli_module.resolve_root_input_node(
+    missing_node, missing_path = resolve_root_input_node(
         cast("FlakeLock", lock), "missing"
     )
     assert missing_node is None
     assert missing_path is None
 
-    unresolved_node, unresolved_path = update_cli_module.resolve_root_input_node(
+    unresolved_node, unresolved_path = resolve_root_input_node(
         cast("FlakeLock", lock), "unresolved"
     )
     assert unresolved_node is None
     assert unresolved_path == "wrapper/missing"
 
-    github_node = SimpleNamespace(
-        original=SimpleNamespace(
-            type="github", owner="owner", repo="repo", url=None, path=None
-        ),
-        locked=None,
-    )
-    assert (
-        _flake_source_string(cast("FlakeLockNode", github_node), None)
-        == "github:owner/repo"
-    )
-    url_node = SimpleNamespace(
-        original=SimpleNamespace(
-            type="git", owner=None, repo=None, url="https://x", path=None
-        ),
-        locked=None,
-    )
-    assert (
-        _flake_source_string(cast("FlakeLockNode", url_node), None) == "git:https://x"
-    )
 
-    path_node = SimpleNamespace(
-        original=SimpleNamespace(
-            type="path", owner=None, repo=None, url=None, path="./local"
-        ),
-        locked=None,
-    )
-    assert (
-        _flake_source_string(cast("FlakeLockNode", path_node), None) == "path:./local"
-    )
-
-    unknown_node = SimpleNamespace(
-        original=SimpleNamespace(type=None, owner=None, repo=None, url=None, path=None),
-        locked=None,
-    )
-    assert (
-        _flake_source_string(cast("FlakeLockNode", unknown_node), "dep/nixpkgs")
-        == "follows:dep/nixpkgs"
-    )
-    url_only_node = SimpleNamespace(
-        original=SimpleNamespace(type=None, owner=None, repo=None, url=None, path=None),
-        locked=SimpleNamespace(
-            type=None, owner=None, repo=None, url="https://plain", path=None
-        ),
-    )
-    assert (
-        _flake_source_string(cast("FlakeLockNode", url_only_node), None)
-        == "https://plain"
-    )
-    path_only_node = SimpleNamespace(
-        original=SimpleNamespace(type=None, owner=None, repo=None, url=None, path=None),
-        locked=SimpleNamespace(
-            type=None, owner=None, repo=None, url=None, path="./plain"
-        ),
-    )
-    assert (
-        _flake_source_string(cast("FlakeLockNode", path_only_node), None) == "./plain"
-    )
-
-    type_only_node = SimpleNamespace(
-        original=SimpleNamespace(type=None, owner=None, repo=None, url=None, path=None),
-        locked=SimpleNamespace(
-            type="tarball", owner=None, repo=None, url=None, path=None
-        ),
-    )
-    assert (
-        _flake_source_string(cast("FlakeLockNode", type_only_node), None) == "tarball"
-    )
-    assert _flake_source_string(None, None) == "<unknown>"
-
-
-def test_collect_flake_inputs_for_list() -> None:
-    """Collect table rows for flake inputs with ref fallback behavior."""
-
-    class _Lock:
-        def __init__(self) -> None:
-            self.root_node = SimpleNamespace(
-                inputs={
-                    "with-ref": "node-ref",
-                    "with-selector": "node-selector",
-                    "with-inferred": "node-inferred",
-                    "unknown-inferred": "node-unknown",
-                    "missing-node": "node-missing",
-                }
-            )
-            self.nodes = {
-                "node-ref": SimpleNamespace(
-                    original=SimpleNamespace(
-                        type="github",
-                        owner="o",
-                        repo="r",
-                        ref="v1",
-                        rev=None,
-                        url=None,
-                        path=None,
-                    ),
-                    locked=SimpleNamespace(
-                        rev="rev1",
-                        type="github",
-                        owner="o",
-                        repo="r",
-                        url=None,
-                        path=None,
-                    ),
-                ),
-                "node-selector": SimpleNamespace(
-                    original=SimpleNamespace(
-                        type="github",
-                        owner="o",
-                        repo="r",
-                        ref=None,
-                        rev="selector-ref",
-                        url=None,
-                        path=None,
-                    ),
-                    locked=SimpleNamespace(
-                        rev="rev2",
-                        type="github",
-                        owner="o",
-                        repo="r",
-                        url=None,
-                        path=None,
-                    ),
-                ),
-                "node-inferred": SimpleNamespace(
-                    original=SimpleNamespace(
-                        type="github",
-                        owner="o",
-                        repo="r",
-                        ref=None,
-                        rev=123,
-                        url=None,
-                        path=None,
-                    ),
-                    locked=SimpleNamespace(
-                        rev="rev3",
-                        type="github",
-                        owner="o",
-                        repo="r",
-                        url=None,
-                        path=None,
-                    ),
-                ),
-                "node-unknown": SimpleNamespace(
-                    original=SimpleNamespace(
-                        type="github",
-                        owner="o",
-                        repo="r",
-                        ref=None,
-                        rev=456,
-                        url=None,
-                        path=None,
-                    ),
-                    locked=SimpleNamespace(
-                        rev="rev4",
-                        type="github",
-                        owner="o",
-                        repo="r",
-                        url=None,
-                        path=None,
-                    ),
-                ),
-            }
-
-        def _resolve_target_node_name(self, input_name: str) -> str | None:
-            _ = input_name
-            return None
-
-    rows = _collect_flake_inputs_for_list(
-        load_lock=_Lock,
-        resolve_root_input_node=update_cli_module.resolve_root_input_node,
-        flake_source_string=_flake_source_string,
-        get_flake_input_version=lambda node: (
-            "unknown"
-            if node is not None and getattr(node.locked, "rev", None) == "rev4"
-            else "inferred-version"
-            if node is not None
-            else "unknown"
-        ),
-    )
-    by_name = {row.name: row for row in rows}
-
-    assert by_name["with-ref"].item_type == "flake"
-    assert by_name["with-ref"].ref == "v1"
-    assert by_name["with-ref"].rev == "rev1"
-    assert by_name["with-selector"].ref == "selector-ref"
-    assert by_name["with-inferred"].ref == "inferred-version"
-    assert by_name["unknown-inferred"].ref is None
-    assert by_name["missing-node"].ref is None
-
-
-def test_collect_source_entries_for_list() -> None:
-    """Collect table rows for sources.json entries and source paths."""
-    rows = _collect_source_entries_for_list(
-        load_sources=lambda: SourcesFile(
-            entries={
-                "inside": SourceEntry(
-                    version="1.0.0",
-                    hashes={},
-                    urls={"x86_64-linux": "https://example.com/inside.tgz"},
-                ),
-                "outside": SourceEntry(
-                    version="2.0.0",
-                    hashes={},
-                    commit="d" * 40,
-                    urls={
-                        "x86_64-linux": "https://example.com/outside-linux.tgz",
-                        "aarch64-darwin": "https://example.com/outside-macos.tgz",
-                    },
-                ),
-                "no-url": SourceEntry(version="3.0.0", hashes={}),
-            }
-        ),
-        source_path_map=lambda _filename: {
-            "inside": REPO_ROOT / "packages" / "inside" / "sources.json",
-            "outside": Path("/tmp/outside/sources.json"),
-            "no-url": REPO_ROOT / "overlays" / "no-url" / "sources.json",
-        },
-    )
-    by_name = {row.name: row for row in rows}
-
-    assert by_name["inside"].item_type == "sources.json"
-    assert by_name["inside"].source == "https://example.com/inside.tgz"
-    assert by_name["inside"].ref == "1.0.0"
-    assert by_name["inside"].rev is None
-    assert (
-        by_name["outside"].source == "https://example.com/outside-linux.tgz (+1 more)"
-    )
-    assert by_name["outside"].rev == "d" * 40
-    assert by_name["no-url"].source == "<none>"
-
-
-def test_row_sort_value_variants() -> None:
-    """Sort key helper should return the selected column value."""
-    row = _ListRow(
-        name="demo",
-        item_type="flake",
-        source="https://example.com/demo.tgz",
-        ref="v1.2.3",
-        rev="a" * 40,
-    )
-    assert _row_sort_value(row, "name") == "demo"
-    assert _row_sort_value(row, "type") == "flake"
-    assert _row_sort_value(row, "source") == "https://example.com/demo.tgz"
-    assert _row_sort_value(row, "ref") == "v1.2.3"
-    assert _row_sort_value(row, "rev") == "a" * 40
-
-
-def test_inventory_helpers_and_sorting() -> None:  # noqa: PLR0915
+def test_inventory_helpers_and_sorting(  # noqa: PLR0915
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Cover inventory helper branches, labels, and sort aliases."""
 
     class _FlakeHash(FlakeInputHashUpdater):
@@ -1013,13 +763,11 @@ def test_inventory_helpers_and_sorting() -> None:  # noqa: PLR0915
         )
 
     entry_with_input = SourceEntry(hashes={}, input="from-entry")
-    assert _source_backing_input_name("flake-hash", _FlakeHash) == "flake-hash"
-    assert _source_backing_input_name("explicit", _ExplicitInput) == "explicit-input"
-    assert _source_backing_input_name("deno", _Deno) == "deno"
-    assert (
-        _source_backing_input_name("fallback", None, entry_with_input) == "from-entry"
-    )
-    assert _source_backing_input_name("none", None) is None
+    assert source_backing_input_name("flake-hash", _FlakeHash) == "flake-hash"
+    assert source_backing_input_name("explicit", _ExplicitInput) == "explicit-input"
+    assert source_backing_input_name("deno", _Deno) == "deno"
+    assert source_backing_input_name("fallback", None, entry_with_input) == "from-entry"
+    assert source_backing_input_name("none", None) is None
 
     entry_hashes = SourceEntry(
         hashes=HashCollection(entries=[HashEntry.create("vendorHash", "sha256-abc=")])
@@ -1039,98 +787,49 @@ def test_inventory_helpers_and_sorting() -> None:  # noqa: PLR0915
     assert _classify_updater_kind(_HashEntry) == "custom-hash"
     assert _classify_updater_kind(_Custom) == "custom-hash"
 
-    def repo_relative_path(path: Path | None) -> str | None:
-        return _repo_relative_path(
-            path,
-            repo_root=lambda: Path(REPO_ROOT),
-        )
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.package_dir_for",
+        lambda name: None if name == "missing" else REPO_ROOT / "packages" / name,
+    )
 
-    assert _generated_artifact_paths(
-        "deno",
-        _Deno,
-        package_dir_for=lambda name: (
-            None if name == "missing" else REPO_ROOT / "packages" / name
-        ),
-        repo_relative_path=repo_relative_path,
-    ) == ("packages/deno/deno-deps.json",)
-    assert (
-        _generated_artifact_paths(
-            "missing",
-            _Deno,
-            package_dir_for=lambda name: (
-                None if name == "missing" else REPO_ROOT / "packages" / name
-            ),
-            repo_relative_path=repo_relative_path,
-        )
-        == ()
+    assert _generated_artifact_paths("deno", _Deno) == ("packages/deno/deno-deps.json",)
+    assert _generated_artifact_paths("missing", _Deno) == ()
+    assert _generated_artifact_paths("custom", _Custom) == ()
+    assert _generated_artifact_paths("custom-artifact", _CustomArtifact) == (
+        "packages/custom-artifact/generated.nix",
     )
-    assert (
-        _generated_artifact_paths(
-            "custom",
-            _Custom,
-            package_dir_for=lambda name: (
-                None if name == "missing" else REPO_ROOT / "packages" / name
-            ),
-            repo_relative_path=repo_relative_path,
-        )
-        == ()
+    assert _generated_artifact_paths("uv-lock", _UvLock) == (
+        "packages/uv-lock/uv.lock",
     )
-    assert (
-        _generated_artifact_paths(
-            "duplicate-name",
-            _Custom,
-            package_dir_for=lambda _name: (_ for _ in ()).throw(
+    assert _generated_artifact_paths("custom-uv-lock", _CustomUvLock) == (
+        "packages/custom-uv-lock/pinned.lock",
+    )
+
+    with monkeypatch.context() as patches:
+        patches.setattr(
+            "lib.update.cli_inventory.package_dir_for",
+            lambda _name: (_ for _ in ()).throw(
                 RuntimeError("Duplicate package directories")
             ),
-            repo_relative_path=repo_relative_path,
         )
-        == ()
-    )
-    assert _generated_artifact_paths(
-        "custom-artifact",
-        _CustomArtifact,
-        package_dir_for=lambda name: (
-            None if name == "missing" else REPO_ROOT / "packages" / name
-        ),
-        repo_relative_path=repo_relative_path,
-    ) == ("packages/custom-artifact/generated.nix",)
-    assert (
-        _generated_artifact_paths(
-            "custom-artifact",
-            _CustomArtifact,
-            package_dir_for=lambda name: (
-                None if name == "missing" else REPO_ROOT / "packages" / name
-            ),
-            repo_relative_path=lambda _path: None,
+        assert _generated_artifact_paths("duplicate-name", _Custom) == ()
+
+    with monkeypatch.context() as patches:
+        patches.setattr(
+            "lib.update.cli_inventory._repo_relative_path",
+            lambda _path: None,
         )
-        == ()
-    )
-    assert _generated_artifact_paths(
-        "uv-lock",
-        _UvLock,
-        package_dir_for=lambda name: (
-            None if name == "missing" else REPO_ROOT / "packages" / name
-        ),
-        repo_relative_path=repo_relative_path,
-    ) == ("packages/uv-lock/uv.lock",)
-    assert _generated_artifact_paths(
-        "custom-uv-lock",
-        _CustomUvLock,
-        package_dir_for=lambda name: (
-            None if name == "missing" else REPO_ROOT / "packages" / name
-        ),
-        repo_relative_path=repo_relative_path,
-    ) == ("packages/custom-uv-lock/pinned.lock",)
+        assert _generated_artifact_paths("custom-artifact", _CustomArtifact) == ()
 
     assert (
-        repo_relative_path(REPO_ROOT / "packages" / "demo" / "sources.json")
+        _repo_relative_path(REPO_ROOT / "packages" / "demo" / "sources.json")
         == "packages/demo/sources.json"
     )
     assert (
-        repo_relative_path(Path("/tmp/outside/sources.json"))
+        _repo_relative_path(Path("/tmp/outside/sources.json"))
         == "/tmp/outside/sources.json"
     )
-    assert repo_relative_path(None) is None
+    assert _repo_relative_path(None) is None
 
     assert (
         _inventory_classification(
@@ -1366,7 +1065,9 @@ def test_inventory_helpers_and_sorting() -> None:  # noqa: PLR0915
     )
 
 
-def test_build_update_inventory_uses_logical_targets() -> None:
+def test_build_update_inventory_uses_logical_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Build logical inventory entries from updater/ref metadata."""
 
     class _BothUpdater(FlakeInputHashUpdater):
@@ -1410,59 +1111,55 @@ def test_build_update_inventory_uses_logical_targets() -> None:
             _ = input_name
             return None
 
-    def repo_relative_path(path: Path | None) -> str | None:
-        return _repo_relative_path(
-            path,
-            repo_root=lambda: Path(REPO_ROOT),
-        )
-
-    targets = cli_inventory_module.build_update_inventory(
-        dependencies=cli_inventory_module.InventoryDependencies(
-            load_sources=lambda: sources,
-            source_path_map=lambda _filename: {
-                "both": REPO_ROOT / "packages" / "both" / "sources.json",
-                "desktop": REPO_ROOT / "packages" / "desktop" / "sources.json",
-            },
-            list_ref_inputs=lambda: [
-                FlakeInputRef(
-                    name="both",
-                    owner="o",
-                    repo="r",
-                    ref="v1.0.0",
-                    input_type="github",
-                ),
-                FlakeInputRef(
-                    name="ref-only",
-                    owner="o",
-                    repo="r",
-                    ref="v3.0.0",
-                    input_type="github",
-                ),
-            ],
-            load_lock=_Lock,
-            get_updaters=lambda: {
-                "both": _BothUpdater,
-                "desktop": _DesktopUpdater,
-                "deno": _DenoUpdater,
-            },
-            source_file_for=lambda name: REPO_ROOT / "packages" / name / "sources.json",
-            resolve_root_input_node=update_cli_module.resolve_root_input_node,
-            source_backing_input_name=_source_backing_input_name,
-            generated_artifact_paths=lambda name, updater_cls: (
-                _generated_artifact_paths(
-                    name,
-                    updater_cls,
-                    package_dir_for=lambda package_name: (
-                        REPO_ROOT / "packages" / package_name
-                    ),
-                    repo_relative_path=repo_relative_path,
-                )
-            ),
-            source_hash_kinds=_source_hash_kinds,
-            classify_updater_kind=_classify_updater_kind,
-            repo_relative_path=repo_relative_path,
-        )
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.load_all_sources",
+        lambda: sources,
     )
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.package_file_map",
+        lambda _filename: {
+            "both": REPO_ROOT / "packages" / "both" / "sources.json",
+            "desktop": REPO_ROOT / "packages" / "desktop" / "sources.json",
+        },
+    )
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.get_flake_inputs_with_refs",
+        lambda: [
+            FlakeInputRef(
+                name="both",
+                owner="o",
+                repo="r",
+                ref="v1.0.0",
+                input_type="github",
+            ),
+            FlakeInputRef(
+                name="ref-only",
+                owner="o",
+                repo="r",
+                ref="v3.0.0",
+                input_type="github",
+            ),
+        ],
+    )
+    monkeypatch.setattr("lib.update.cli_inventory.load_flake_lock", _Lock)
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.UPDATERS",
+        {
+            "both": _BothUpdater,
+            "desktop": _DesktopUpdater,
+            "deno": _DenoUpdater,
+        },
+    )
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.sources_file_for",
+        lambda name: REPO_ROOT / "packages" / name / "sources.json",
+    )
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.package_dir_for",
+        lambda package_name: REPO_ROOT / "packages" / package_name,
+    )
+
+    targets = cli_inventory_module.build_update_inventory()
     by_name = {target.name: target for target in targets}
 
     assert [target.name for target in targets] == [
@@ -1500,66 +1197,6 @@ def test_build_update_inventory_uses_logical_targets() -> None:
     assert by_name["ref-only"].ref_target.locked_rev is None
 
 
-def test_build_update_inventory_wrapper_builds_dependency_bundle(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Build the inventory through the shared dependency-bundle API."""
-    captured: dict[str, object] = {}
-
-    def _fake_build_update_inventory(*, dependencies: object) -> list[object]:
-        captured["dependencies"] = dependencies
-        return ["wrapped"]
-
-    monkeypatch.setattr(
-        "lib.update.cli.build_update_inventory",
-        _fake_build_update_inventory,
-    )
-
-    assert _build_update_inventory() == ["wrapped"]
-    monkeypatch.setattr(
-        "lib.update.cli.package_dir_for",
-        lambda name: REPO_ROOT / "packages" / name,
-    )
-
-    class _DenoUpdater(DenoManifestUpdater):
-        name = "demo"
-
-    dependencies = captured["dependencies"]
-    assert isinstance(dependencies, cli_inventory_module.InventoryDependencies)
-    assert dependencies.load_sources is update_cli_module.load_all_sources
-    assert dependencies.source_path_map is update_cli_module.package_file_map
-    assert dependencies.list_ref_inputs is update_cli_module.get_flake_inputs_with_refs
-    assert dependencies.load_lock is update_cli_module.load_flake_lock
-    assert dependencies.get_updaters is update_cli_module._get_updaters
-    assert dependencies.source_file_for is update_cli_module.sources_file_for
-    assert (
-        dependencies.resolve_root_input_node
-        is update_cli_module.resolve_root_input_node
-    )
-    assert (
-        dependencies.source_backing_input_name
-        is cli_inventory_module._source_backing_input_name
-    )
-    assert dependencies.source_hash_kinds is cli_inventory_module._source_hash_kinds
-    assert (
-        dependencies.classify_updater_kind
-        is cli_inventory_module._classify_updater_kind
-    )
-    assert (
-        dependencies.repo_relative_path(
-            REPO_ROOT / "packages" / "demo" / "sources.json"
-        )
-        == "packages/demo/sources.json"
-    )
-    assert (
-        dependencies.repo_relative_path(Path("/tmp/outside/sources.json"))
-        == "/tmp/outside/sources.json"
-    )
-    assert dependencies.generated_artifact_paths("demo", _DenoUpdater) == (
-        "packages/demo/deno-deps.json",
-    )
-
-
 def test_generated_artifact_paths_include_crate2nix_outputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1586,14 +1223,11 @@ def test_generated_artifact_paths_include_crate2nix_outputs(
         "packages/demo/crate-hashes.json",
     )
 
-    assert _generated_artifact_paths(
-        "demo",
-        _DenoUpdater,
-        package_dir_for=lambda _name: REPO_ROOT / "packages" / "demo",
-        repo_relative_path=lambda path: (
-            None if path is None else str(path.relative_to(REPO_ROOT))
-        ),
-    ) == (
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.package_dir_for",
+        lambda _name: REPO_ROOT / "packages" / "demo",
+    )
+    assert _generated_artifact_paths("demo", _DenoUpdater) == (
         "packages/demo/deno-deps.json",
         "packages/demo/Cargo.nix",
         "packages/demo/crate-hashes.json",
@@ -1626,13 +1260,16 @@ def test_generated_artifact_paths_fall_back_when_manifest_or_crate2nix_import_is
         "lib.update.cli_inventory.importlib.import_module",
         lambda name: fake_module if name == "lib.update.crate2nix" else None,
     )
+    monkeypatch.setattr(
+        "lib.update.cli_inventory.package_dir_for",
+        lambda _name: REPO_ROOT / "packages" / "demo",
+    )
+    monkeypatch.setattr(
+        "lib.update.cli_inventory._repo_relative_path",
+        lambda _path: None,
+    )
 
-    assert _generated_artifact_paths(
-        "demo",
-        _DenoUpdater,
-        package_dir_for=lambda _name: REPO_ROOT / "packages" / "demo",
-        repo_relative_path=lambda _path: None,
-    ) == (
+    assert _generated_artifact_paths("demo", _DenoUpdater) == (
         "packages/demo/Cargo.nix",
         "packages/demo/crate-hashes.json",
     )
@@ -1723,44 +1360,6 @@ def test_build_item_meta_appends_materialize_artifacts_when_supported(
         OperationKind.REFRESH_LOCK,
         OperationKind.MATERIALIZE_ARTIFACTS,
         OperationKind.COMPUTE_HASH,
-    )
-
-
-def test_handle_validate_request_wrapper_builds_dependency_bundle(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Forward validation through the shared dependency-bundle API."""
-    captured: dict[str, object] = {}
-
-    def _fake_handle_validate_request(
-        opts: UpdateOptions,
-        out: OutputOptions,
-        *,
-        dependencies: object,
-    ) -> int:
-        captured["opts"] = opts
-        captured["out"] = out
-        captured["dependencies"] = dependencies
-        return 7
-
-    monkeypatch.setattr(
-        "lib.update.cli.handle_validate_request",
-        _fake_handle_validate_request,
-    )
-
-    opts = UpdateOptions(validate=True)
-    out = OutputOptions(json_output=True)
-
-    assert _handle_validate_request(opts, out) == 7
-
-    dependencies = captured["dependencies"]
-    assert captured["opts"] is opts
-    assert captured["out"] is out
-    assert isinstance(dependencies, cli_validation_module.ValidationDependencies)
-    assert dependencies.load_sources is update_cli_module.load_all_sources
-    assert (
-        dependencies.validate_source_discovery_consistency
-        is update_cli_module.validate_source_discovery_consistency
     )
 
 
@@ -1870,11 +1469,14 @@ def test_load_sources_and_persist_updates(monkeypatch: pytest.MonkeyPatch) -> No
 
     save_calls: list[SourcesFile] = []
     monkeypatch.setattr(
-        "lib.update.cli.save_sources", lambda src: save_calls.append(src)
+        "lib.update.sources.save_sources", lambda src: save_calls.append(src)
     )
     updates = {"a": SourceEntry(hashes={"x86_64-linux": "sha256-1"})}
-    _persist_source_updates(
-        resolved=resolved,
+    persist_source_updates(
+        do_sources=resolved.do_sources,
+        source_names=resolved.source_names,
+        dry_run=resolved.dry_run,
+        native_only=resolved.native_only,
         sources=source_file,
         source_updates=updates,
         details={"a": "updated"},
@@ -1886,45 +1488,37 @@ def test_persist_generated_artifacts_and_materialized_updates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Persist generated artifacts before sources and respect dry-run."""
-    resolved = ResolvedTargets(
-        all_source_names={"demo"},
-        all_ref_inputs=[],
-        all_ref_names=set(),
-        all_known_names={"demo"},
-        do_refs=False,
-        do_sources=True,
-        do_input_refresh=False,
-        dry_run=False,
-        native_only=False,
-        ref_inputs=[],
-        source_names=["demo"],
-    )
     artifact = GeneratedArtifact.text("artifacts/demo.txt", "hello\n")
     other_artifact = GeneratedArtifact.text("artifacts/other.txt", "other\n")
-    assert _flatten_artifact_updates(
+    assert flatten_artifact_updates(
         {"other": (other_artifact,), "demo": (artifact,)},
     ) == [artifact, other_artifact]
 
     saved_artifacts: list[list[GeneratedArtifact]] = []
     saved_sources: list[SourcesFile] = []
     monkeypatch.setattr(
-        "lib.update.cli.save_generated_artifacts",
+        "lib.update.artifacts.save_generated_artifacts",
         lambda artifacts: saved_artifacts.append(list(artifacts)),
     )
     monkeypatch.setattr(
-        "lib.update.cli.save_sources",
+        "lib.update.sources.save_sources",
         lambda sources: saved_sources.append(sources),
     )
 
-    _persist_generated_artifacts(
-        resolved=resolved,
+    persist_generated_artifacts(
+        do_sources=True,
+        source_names=["demo"],
+        dry_run=False,
         artifact_updates={"demo": (artifact,)},
         details={"demo": "updated"},
     )
     assert saved_artifacts == [[artifact]]
 
-    _persist_materialized_updates(
-        resolved=resolved,
+    persist_materialized_updates(
+        do_sources=True,
+        source_names=["demo"],
+        dry_run=False,
+        native_only=False,
         sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
         source_updates={"demo": SourceEntry(hashes={"x86_64-linux": "sha256-1"})},
         artifact_updates={"demo": (artifact,)},
@@ -1933,48 +1527,28 @@ def test_persist_generated_artifacts_and_materialized_updates(
     assert len(saved_artifacts) == 2
     assert len(saved_sources) == 1
 
-    dry_run_resolved = ResolvedTargets(
-        all_source_names={"demo"},
-        all_ref_inputs=[],
-        all_ref_names=set(),
-        all_known_names={"demo"},
-        do_refs=False,
+    persist_generated_artifacts(
         do_sources=True,
-        do_input_refresh=False,
+        source_names=["demo"],
         dry_run=True,
-        native_only=False,
-        ref_inputs=[],
-        source_names=["demo"],
-    )
-    _persist_generated_artifacts(
-        resolved=dry_run_resolved,
         artifact_updates={"demo": (artifact,)},
         details={"demo": "updated"},
     )
     assert len(saved_artifacts) == 2
 
-    skipped_resolved = ResolvedTargets(
-        all_source_names={"demo"},
-        all_ref_inputs=[],
-        all_ref_names=set(),
-        all_known_names={"demo"},
-        do_refs=False,
+    persist_generated_artifacts(
         do_sources=False,
-        do_input_refresh=False,
-        dry_run=False,
-        native_only=False,
-        ref_inputs=[],
         source_names=["demo"],
-    )
-    _persist_generated_artifacts(
-        resolved=skipped_resolved,
+        dry_run=False,
         artifact_updates={"demo": (artifact,)},
         details={"demo": "updated"},
     )
     assert len(saved_artifacts) == 2
 
-    _persist_generated_artifacts(
-        resolved=resolved,
+    persist_generated_artifacts(
+        do_sources=True,
+        source_names=["demo"],
+        dry_run=False,
         artifact_updates={"demo": (artifact,)},
         details={"demo": "error"},
     )
@@ -2085,14 +1659,16 @@ def test_execute_run_plan_and_top_level_entrypoints(
     async def _run_ref_phase(**_kwargs: object) -> None:
         return None
 
-    async def _run_sources_phase(*, context: object) -> None:
+    async def _run_sources_phase(context: object) -> None:
         _ = context
 
     monkeypatch.setattr("lib.update.cli.consume_events", _consume)
-    monkeypatch.setattr("lib.update.cli._run_ref_phase", _run_ref_phase)
-    monkeypatch.setattr("lib.update.cli._run_sources_phase", _run_sources_phase)
+    monkeypatch.setattr("lib.update.source_runner.run_ref_phase", _run_ref_phase)
     monkeypatch.setattr(
-        "lib.update.cli._persist_materialized_updates", lambda **_kwargs: None
+        "lib.update.source_runner.run_sources_phase", _run_sources_phase
+    )
+    monkeypatch.setattr(
+        "lib.update.persistence.persist_materialized_updates", lambda **_kwargs: None
     )
 
     cfg = SimpleNamespace(default_log_tail_lines=10, default_render_interval=0.1)

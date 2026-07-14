@@ -554,5 +554,5 @@ def main(*, progress: ProgressReporter | None = None) -> None:
     _emit_progress(progress, "Schema codegen complete.")
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":  # pragma: no cover -- CLI entrypoint
     main()

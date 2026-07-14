@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import pinned_source_download_updater
+from typing import ClassVar
 
-AraUpdater = pinned_source_download_updater(
-    "ara",
-    platforms={"aarch64-darwin": "arm64"},
-    download_url="https://db.ara.so/storage/v1/object/public/releases/Ara_{version}.zip",
-    module=__name__,
-)
+from lib.update.updaters import PinnedSourceDownloadUpdater, register_updater
+
+
+@register_updater
+class AraUpdater(PinnedSourceDownloadUpdater):
+    """Pinned download updater for the Ara macOS app archive."""
+
+    name = "ara"
+    PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "arm64"}
+    DOWNLOAD_URL_TEMPLATE = (
+        "https://db.ara.so/storage/v1/object/public/releases/Ara_{version}.zip"
+    )

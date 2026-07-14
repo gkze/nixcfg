@@ -43,16 +43,6 @@
       # resolves it from packages/opencode/node_modules/. Symlink it so
       # fs.realpathSync can find parser.worker.js at build time.
       ${final.stdenv.shell} ${./link-hoisted-opentui-packages.sh}
-
-      # opencode 1.4.6 imports glob from packages/shared/src/util/glob.ts, but
-      # Bun only materializes glob in packages/opencode/node_modules. Mirror it
-      # into packages/shared so the desktop bundle can resolve the shared
-      # workspace package during compilation.
-      if [ -d packages/shared ] && [ -e packages/opencode/node_modules/glob ] && [ ! -e packages/shared/node_modules/glob ]; then
-        mkdir -p packages/shared/node_modules
-        chmod u+w packages/shared/node_modules
-        ln -s ../../opencode/node_modules/glob packages/shared/node_modules/glob
-      fi
     '';
     node_modules = old.node_modules.overrideAttrs (nodeOld: {
       nativeBuildInputs = (nodeOld.nativeBuildInputs or [ ]) ++ [ final.python3 ];
@@ -64,26 +54,6 @@
         ${final.lib.getExe final.python3} ${./pin_ghostty_web_ref.py} .
       '';
       outputHash = slib.sourceHashForPlatform "opencode" "nodeModulesHash" system;
-      # bun 1.3.8+ no longer creates .bun/node_modules/, making the
-      # upstream canonicalize/normalize scripts fail. Guard them so they
-      # only run when .bun/node_modules actually exists.
-      #
-      # Upstream's filtered install now needs the root workspace too because
-      # packages/opencode/src/cli/cmd/generate.ts imports prettier from the
-      # root package's devDependencies at build time.
-      buildPhase =
-        builtins.replaceStrings
-          [
-            "--filter '!./' \\\n"
-            "--filter './packages/shared' \\\n"
-            "bun --bun"
-          ]
-          [
-            "--filter './' \\\n"
-            "--filter './packages/shared' \\\n      --filter './packages/script' \\\n"
-            "[ -d node_modules/.bun/node_modules ] && bun --bun"
-          ]
-          (nodeOld.buildPhase or "");
     });
   });
 }

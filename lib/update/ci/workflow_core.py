@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import importlib
 import json
 import subprocess
@@ -306,21 +307,65 @@ def cmd_list_update_targets(
     )
 
 
-def cmd_verify_workflow_contracts(
+def cmd_generate_workflows(
     *,
-    workflow: Path,
-    validator: Callable[..., None],
-    description: str,
+    render: Callable[[], Mapping[str, str]],
+    root: Path,
     stdout: TextIO,
     stderr: TextIO,
 ) -> int:
-    """Validate one workflow contract set and report the result."""
+    """Write generated workflow documents into the repository tree."""
     try:
-        validator(workflow_path=workflow)
-    except (RuntimeError, TypeError) as exc:
+        rendered = render()
+    except RuntimeError as exc:
         stderr.write(f"{exc}\n")
         return 1
-    stdout.write(f"Verified {description} for {workflow}\n")
+    for relative_path, text in rendered.items():
+        target = root / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+        stdout.write(f"Wrote {relative_path}\n")
+    return 0
+
+
+def cmd_verify_generated_workflows(
+    *,
+    render: Callable[[], Mapping[str, str]],
+    root: Path,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    """Diff generated workflow documents against the committed files."""
+    try:
+        rendered = render()
+    except RuntimeError as exc:
+        stderr.write(f"{exc}\n")
+        return 1
+    drifted = False
+    for relative_path, text in rendered.items():
+        target = root / relative_path
+        if not target.exists():
+            drifted = True
+            stderr.write(f"{relative_path}: generated workflow file is missing\n")
+            continue
+        on_disk = target.read_text(encoding="utf-8")
+        if on_disk == text:
+            continue
+        drifted = True
+        stderr.writelines(
+            difflib.unified_diff(
+                on_disk.splitlines(keepends=True),
+                text.splitlines(keepends=True),
+                fromfile=f"{relative_path} (on disk)",
+                tofile=f"{relative_path} (generated)",
+            )
+        )
+    if drifted:
+        stderr.write(
+            "Generated workflows drifted; run `nixcfg ci workflow generate`.\n"
+        )
+        return 1
+    stdout.write(f"Verified {len(rendered)} generated workflow files\n")
     return 0
 
 

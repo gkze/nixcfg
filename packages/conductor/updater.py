@@ -12,9 +12,9 @@ import aiohttp
 
 if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry
-    from lib.update.updaters.base import UpdateContext
+    from lib.update.updaters import UpdateContext
 
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     AssetURLsMetadataUpdater,
     VersionInfo,
     register_updater,

@@ -9,7 +9,7 @@ import aiohttp
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     FlakeInputHashUpdater,
     HashEntryUpdater,
     VersionInfo,
@@ -178,7 +178,7 @@ def test_flake_input_updater_recomputes_when_version_differs() -> None:
         )
         info = VersionInfo(version="v9.9.9", metadata={})
         with patch(
-            "lib.update.updaters.base.compute_drv_fingerprint",
+            "lib.update.nix.compute_drv_fingerprint",
             new_callable=AsyncMock,
             return_value="abc123deadbeef",
         ) as compute_drv_fingerprint:
@@ -207,7 +207,7 @@ def test_flake_input_updater_skips_when_fingerprint_matches() -> None:
         })
         info = VersionInfo(version="v1.0.0", metadata={})
         with patch(
-            "lib.update.updaters.base.compute_drv_fingerprint",
+            "lib.update.nix.compute_drv_fingerprint",
             new_callable=AsyncMock,
             return_value="abc123deadbeef",
         ):
@@ -234,7 +234,7 @@ def test_flake_input_updater_recomputes_when_fingerprint_differs() -> None:
         })
         info = VersionInfo(version="v1.0.0", metadata={})
         with patch(
-            "lib.update.updaters.base.compute_drv_fingerprint",
+            "lib.update.nix.compute_drv_fingerprint",
             new_callable=AsyncMock,
             return_value="different_fingerprint",
         ):
@@ -261,7 +261,7 @@ def test_flake_input_updater_recomputes_when_fingerprint_fails() -> None:
         })
         info = VersionInfo(version="v1.0.0", metadata={})
         with patch(
-            "lib.update.updaters.base.compute_drv_fingerprint",
+            "lib.update.nix.compute_drv_fingerprint",
             new_callable=AsyncMock,
             side_effect=RuntimeError("nix eval failed"),
         ):

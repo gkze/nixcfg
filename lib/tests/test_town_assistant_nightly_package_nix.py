@@ -21,8 +21,8 @@ from lib.tests._nix_ast import (
 )
 from lib.tests._updater_helpers import load_repo_module, run_async
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import factories as updater_factories
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
+from lib.update.updaters import strategies as updater_strategies
 from lib.update.updaters.metadata import DownloadUrlMetadata
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
@@ -116,7 +116,7 @@ def test_town_assistant_nightly_fetch_latest_and_download_url(
             ),
         )
 
-    monkeypatch.setattr(updater_factories, "fetch_sparkle_appcast_items", _fetch_items)
+    monkeypatch.setattr(updater_strategies, "fetch_sparkle_appcast_items", _fetch_items)
 
     latest = run_async(updater.fetch_latest(object()))
 
@@ -166,7 +166,7 @@ def test_town_assistant_nightly_rejects_invalid_appcast_shapes(
         return (item,)
 
     monkeypatch.setattr(
-        updater_factories,
+        updater_strategies,
         "fetch_sparkle_appcast_items",
         _fetch_items,
     )

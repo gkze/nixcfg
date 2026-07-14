@@ -1,6 +1,6 @@
 """Updater for hermes-agent flake input metadata."""
 
-from lib.update.updaters.base import FlakeInputMetadataUpdater, register_updater
+from lib.update.updaters import FlakeInputMetadataUpdater, register_updater
 
 
 @register_updater

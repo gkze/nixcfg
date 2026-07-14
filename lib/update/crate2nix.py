@@ -17,7 +17,7 @@ from typing import Protocol, cast
 
 from lib.import_utils import load_module_from_path
 from lib.update.artifacts import GeneratedArtifact
-from lib.update.events import EventStream, UpdateEvent
+from lib.update.events import EventStream, StatusInfo, StatusKind, UpdateEvent
 from lib.update.nix import get_current_nix_platform
 from lib.update.paths import REPO_ROOT, local_flake_url
 
@@ -438,8 +438,7 @@ async def stream_crate2nix_artifact_updates(
             name,
             "No crate2nix target registered; skipping artifact refresh",
             operation=operation,
-            status="skipped",
-            detail="unknown_target",
+            status=StatusInfo(kind=StatusKind.SKIPPED, value="unknown_target"),
         )
         return
     current_platform = _current_platform()
@@ -448,8 +447,10 @@ async def stream_crate2nix_artifact_updates(
             name,
             "crate2nix target is unsupported on this platform; skipping artifact refresh",
             operation=operation,
-            status="unsupported_platform",
-            detail=current_platform,
+            status=StatusInfo(
+                kind=StatusKind.UNSUPPORTED_PLATFORM,
+                value=current_platform,
+            ),
         )
         return
 
@@ -457,8 +458,10 @@ async def stream_crate2nix_artifact_updates(
         name,
         "Refreshing crate2nix artifacts...",
         operation=operation,
-        status="computing_hash",
-        detail="crate2nix artifacts",
+        status=StatusInfo(
+            kind=StatusKind.COMPUTING_HASH,
+            value="crate2nix artifacts",
+        ),
     )
 
     artifacts = await asyncio.to_thread(crate2nix_artifact_updates, name)
@@ -468,8 +471,7 @@ async def stream_crate2nix_artifact_updates(
             name,
             "Prepared crate2nix artifacts",
             operation=operation,
-            status="updated",
-            detail="crate2nix artifacts",
+            status=StatusInfo(kind=StatusKind.UPDATED, value="crate2nix artifacts"),
         )
         return
 
@@ -477,8 +479,11 @@ async def stream_crate2nix_artifact_updates(
         name,
         "crate2nix artifacts up to date",
         operation=operation,
-        status="up_to_date",
-        detail={"scope": "artifacts", "value": "crate2nix artifacts"},
+        status=StatusInfo(
+            kind=StatusKind.UP_TO_DATE,
+            scope="artifacts",
+            value="crate2nix artifacts",
+        ),
     )
 
 

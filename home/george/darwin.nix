@@ -18,7 +18,7 @@ let
       set -eu
 
       home_dir=${lib.escapeShellArg config.home.homeDirectory}
-      app_root="$home_dir/Applications/Codex.app/Contents/Resources/plugins/openai-bundled"
+      app_root="$home_dir/Applications/ChatGPT.app/Contents/Resources/plugins/openai-bundled"
       tmp_root="$home_dir/.codex/.tmp/bundled-marketplaces/openai-bundled"
       manifest_src="$app_root/.agents/plugins/marketplace.json"
       manifest_dst="$tmp_root/.agents/plugins/marketplace.json"

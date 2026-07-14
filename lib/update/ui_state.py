@@ -5,26 +5,32 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, assert_never
+
+from lib.update.events import StatusInfo, StatusKind, StatusPayload
 
 if TYPE_CHECKING:
     from rich.spinner import Spinner
 
     from lib.nix.models.sources import SourceEntry
-    from lib.update.events import CommandArgs, StatusPayload
+    from lib.update.events import CommandArgs
 
 SummaryStatus = Literal["updated", "error", "no_change"]
+
+_TERMINAL_STATUS_KINDS = frozenset({
+    StatusKind.UPDATE_AVAILABLE,
+    StatusKind.UPDATED,
+})
 
 
 def is_terminal_status(message: str, payload: object | None = None) -> bool:
     """Return whether a status line represents terminal completion."""
     _ = message
-    status_payload = _status_payload(payload)
-    return status_payload is not None and status_payload.get("status") in {
-        "no_change",
-        "update_available",
-        "updated",
-    }
+    return (
+        isinstance(payload, StatusPayload)
+        and payload.info is not None
+        and payload.info.kind in _TERMINAL_STATUS_KINDS
+    )
 
 
 class OperationKind(StrEnum):
@@ -127,84 +133,51 @@ class StatusUpdate:
     clear_message: bool = False
 
 
-def _status_payload(payload: object | None) -> StatusPayload | None:
-    if not isinstance(payload, dict):
-        return None
-    filtered = {key: value for key, value in payload.items() if isinstance(key, str)}
-    return cast("StatusPayload", filtered)
-
-
-def _detail_payload(detail: object) -> StatusPayload | None:
-    return _status_payload(detail)
-
-
-def _up_to_date_status_update(detail: object) -> StatusUpdate | None:
-    detail_payload = _detail_payload(detail)
-    if detail_payload is None:
-        return None
-    value = detail_payload.get("value")
-    scope = detail_payload.get("scope")
-    if scope == "hash":
+def _up_to_date_update(info: StatusInfo) -> StatusUpdate | None:
+    if info.scope == "hash":
         return StatusUpdate("no_change", clear_message=True)
-    if scope == "artifacts":
-        if isinstance(value, str):
-            return StatusUpdate("no_change", f"{value} (up to date)")
+    if info.value is not None:
+        return StatusUpdate("no_change", f"{info.value} (up to date)")
+    if info.scope == "artifacts":
         return StatusUpdate("no_change", clear_message=True)
-    if isinstance(value, str):
-        return StatusUpdate("no_change", f"{value} (up to date)")
     return None
 
 
-def _updated_status_update(detail: object) -> StatusUpdate:
-    if isinstance(detail, str):
-        return StatusUpdate("success", detail)
-    detail_payload = _detail_payload(detail)
-    if detail_payload is not None:
-        value = detail_payload.get("value")
-        if isinstance(value, str):
-            return StatusUpdate("success", value)
-    return StatusUpdate("success")
-
-
-def _payload_status_update(  # noqa: PLR0911
-    payload: object | None,
-    message: str | None = None,
-) -> StatusUpdate | None:
-    status_payload = _status_payload(payload)
-    if status_payload is None:
-        return None
-    status_name = status_payload.get("status")
-    detail = status_payload.get("detail")
-    if status_name == "checking_current" and isinstance(detail, str):
-        return StatusUpdate("running", f"current {detail}")
-    if status_name == "pinned_version" and isinstance(detail, str):
-        return StatusUpdate("running", detail)
-    if status_name == "latest_version" and isinstance(detail, str):
-        return StatusUpdate("running", detail)
-    detail_payload = _detail_payload(detail)
-    if status_name == "update_available" and detail_payload is not None:
-        current = detail_payload.get("current")
-        latest = detail_payload.get("latest")
-        if isinstance(current, str) and isinstance(latest, str):
-            return StatusUpdate("success", f"{current} -> {latest}")
-    if status_name == "up_to_date":
-        return _up_to_date_status_update(detail)
-    if status_name == "updated":
-        return _updated_status_update(detail)
-    if status_name == "updating_ref" and detail_payload is not None:
-        current = detail_payload.get("current")
-        latest = detail_payload.get("latest")
-        if isinstance(current, str) and isinstance(latest, str):
-            return StatusUpdate("running", f"{current} -> {latest}")
-    if status_name == "refresh_lock" and isinstance(detail, str):
-        return StatusUpdate("running", detail)
-    if status_name == "fetching_hashes":
-        return StatusUpdate("running", "all platforms")
-    if status_name == "computing_hash" and isinstance(detail, str):
-        return StatusUpdate("running", detail)
-    if isinstance(status_payload.get("operation"), str):
-        return StatusUpdate("running", message)
-    return None
+def _status_update(info: StatusInfo, message: str | None) -> StatusUpdate | None:
+    """Map typed status intent onto a renderer status transition."""
+    match info.kind:
+        case StatusKind.CHECKING_CURRENT:
+            update = StatusUpdate("running", f"current {info.value}")
+        case (
+            StatusKind.PINNED_VERSION
+            | StatusKind.LATEST_VERSION
+            | StatusKind.REFRESH_LOCK
+            | StatusKind.COMPUTING_HASH
+        ):
+            update = StatusUpdate("running", info.value)
+        case StatusKind.UPDATE_AVAILABLE:
+            update = StatusUpdate("success", f"{info.current} -> {info.latest}")
+        case StatusKind.UP_TO_DATE:
+            update = _up_to_date_update(info)
+        case StatusKind.UPDATED:
+            update = StatusUpdate("success", info.value)
+        case StatusKind.UPDATING_REF:
+            update = StatusUpdate("running", f"{info.current} -> {info.latest}")
+        case StatusKind.FETCHING_HASHES:
+            update = StatusUpdate("running", "all platforms")
+        case (
+            StatusKind.UNSUPPORTED_PLATFORM
+            | StatusKind.SKIPPED
+            | StatusKind.PRESERVED_HASH
+            | StatusKind.PRESERVED_DRV_HASH
+            | StatusKind.PRESERVED_ARTIFACT
+            | StatusKind.PARTIAL_HASHES
+            | StatusKind.RETRY
+        ):
+            update = StatusUpdate("running", message)
+        case _ as unreachable:  # pragma: no cover -- StatusKind match is exhaustive
+            assert_never(unreachable)
+    return update
 
 
 def command_args_from_payload(payload: object) -> CommandArgs | None:
@@ -217,12 +190,8 @@ def command_args_from_payload(payload: object) -> CommandArgs | None:
     return None
 
 
-def _operation_from_status_payload(payload: object) -> OperationKind | None:
-    status_payload = _status_payload(payload)
-    if status_payload is None:
-        return None
-    operation = status_payload.get("operation")
-    if not isinstance(operation, str):
+def _operation_kind(operation: str | None) -> OperationKind | None:
+    if operation is None:
         return None
     try:
         return OperationKind(operation)
@@ -234,9 +203,11 @@ def operation_for_status(
     message: str,
     payload: object | None = None,
 ) -> OperationKind | None:
-    """Map a status message to its UI operation group."""
+    """Map a status event payload to its UI operation group."""
     _ = message
-    return _operation_from_status_payload(payload)
+    if not isinstance(payload, StatusPayload):
+        return None
+    return _operation_kind(payload.operation)
 
 
 def operation_for_command(args: list[str] | None) -> OperationKind:
@@ -282,14 +253,20 @@ def _apply_status_rules(
 
 def apply_status(item: ItemState, message: str, payload: object | None = None) -> None:
     """Apply a status message update to the matching operation state."""
-    kind = operation_for_status(message, payload)
+    if not isinstance(payload, StatusPayload):
+        return
+    kind = _operation_kind(payload.operation)
     if kind is None:
         return
     operation = item.operations.get(kind)
     if operation is None:
         return
     item.last_operation = kind
-    update = _payload_status_update(payload, message)
+    update = (
+        StatusUpdate("running", message)
+        if payload.info is None
+        else _status_update(payload.info, message)
+    )
     if update is None:
         return
     _apply_status_rules(operation, update)

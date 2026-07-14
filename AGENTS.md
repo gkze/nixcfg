@@ -296,12 +296,13 @@ Common failure classes here:
 - `npmDepsHash` / `denoDepsHash` / `vendorHash` mismatches
 - workflow artifact naming/path mismatches
 
-When touching workflow artifact contracts, update both the workflow and the verification/testing
-side. Relevant places include:
+The workflow YAML for `update.yml`, `ci.yml`, and `update-certify.yml` is generated from typed
+Python models. Never hand-edit those files; change the defs and regenerate. Relevant places:
 
-- `lib/update/ci/workflow_steps.py`
-- `lib/tests/test_ci_workflow_artifact_contracts.py`
-- `nixcfg ci workflow verify-artifacts`
+- `lib/update/ci/workflow_defs.py` (source of truth)
+- `lib/update/ci/workflow_model.py` (model, renderer, structural invariants)
+- `nixcfg ci workflow generate` / `nixcfg ci workflow verify-generated`
+- `lib/tests/test_ci_workflow_defs.py`
 
 ### When simplifying, remove accidental complexity without breaking discovery or exports
 
@@ -449,7 +450,19 @@ Quality bar reminders:
 - Python is `3.14+`
 - Ruff is configured aggressively
 - `ty` warnings fail
-- coverage floor is `100%`
+- coverage floor is `100%`, with explicit reason-annotated exclusions
+
+Coverage exclusion policy: the floor stays at 100%, but a line or branch may be
+excluded with `# pragma: no cover -- <reason>` / `# pragma: no branch -- <reason>`
+(the reason is mandatory; bare pragmas do not exclude anything). An exclusion is
+justified only when a test would merely restate the implementation — defensive
+re-raises, `__main__` guards, abstract method bodies, platform branches CI
+cannot execute. If a branch can fail meaningfully, write a behavioral test
+instead; if it genuinely cannot execute, consider deleting the branch before
+excluding it. Whole-module exemptions are not allowed except via an explicit,
+commented entry in `pyproject.toml`. Never satisfy the floor by writing tests
+that mock every collaborator just to walk a line — that is the design smell the
+policy exists to prevent.
 
 ### Nix / flake / host outputs
 
@@ -465,7 +478,7 @@ Only use this when the task truly requires an actual local apply:
 
 ### Workflow / update / artifact validation
 
-- `nix run .#nixcfg -- ci workflow verify-artifacts`
+- `nix run .#nixcfg -- ci workflow verify-generated`
 - `uv run python -m lib.update.ci.crate2nix`
 - relevant `nix run .#nixcfg -- ci ...` subcommands
 - relevant `nix run .#nixcfg -- update ...` commands
@@ -510,6 +523,9 @@ working alone.
 ### Do not hand-edit unless the task is explicitly about regeneration
 
 - `.pre-commit-config.yaml`
+- `.github/workflows/update.yml`, `.github/workflows/ci.yml`, and
+  `.github/workflows/update-certify.yml` (regenerate via `nixcfg ci workflow generate` from
+  `lib/update/ci/workflow_defs.py`)
 - `packages/**/Cargo.nix`
 - `packages/**/crate-hashes.json`
 - `packages/**/sources.json`

@@ -72,7 +72,7 @@ def install_fixed_hash_stream(
     monkeypatch: _MonkeyPatch,
     outputs: Sequence[tuple[str | None, object]],
     *,
-    target: str = "lib.update.updaters.base.compute_fixed_output_hash",
+    target: str = "lib.update.nix.compute_fixed_output_hash",
 ) -> list[dict[str, object]]:
     """Patch ``compute_fixed_output_hash`` with a configured async stream."""
     calls: list[dict[str, object]] = []

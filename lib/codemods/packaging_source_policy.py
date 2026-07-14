@@ -62,10 +62,12 @@ def _rewrite_function_formals_for_parser(text: str) -> str:
         if not current:
             return text
         current.append(line)
-    if current:  # pragma: no branch
+    if current:  # pragma: no branch -- final block is always non-empty here
         blocks.append(current)
 
-    if not blocks:  # pragma: no cover
+    if (
+        not blocks
+    ):  # pragma: no cover -- defensive; scanner only runs on non-empty blocks
         return text
 
     rewritten = ["{ " + blocks[0][0].strip().removesuffix(",")]

@@ -5,7 +5,7 @@
   lib,
   nodejs,
   outputs,
-  pnpm_10,
+  pnpm_11,
   pnpmConfigHook,
   stdenv,
   sourceHashPackageName ? "t3code",
@@ -21,7 +21,7 @@ let
   revSuffix = builtins.substring 0 7 (outputs.lib.flakeLock.t3code.locked.rev or "unknown");
   version = "${baseVersion}-main-${revSuffix}";
   nodeModulesVersion = "deps";
-  pnpm = pnpm_10.override { inherit nodejs; };
+  pnpm = pnpm_11.override { inherit nodejs; };
   childDirectoryNames =
     path: builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir path));
   workspaceParentNames = [

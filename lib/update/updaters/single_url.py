@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import HashEntry, SourceEntry
+from lib.update import process as update_process
 from lib.update.events import (
     EventStream,
     UpdateEvent,
@@ -14,13 +15,10 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.updaters.core import HashEntryUpdater, UpdateContext
-from lib.update.updaters.dependencies import updater_dependencies
 from lib.update.updaters.metadata import VersionInfo, metadata_get_str
 
 if TYPE_CHECKING:
     import aiohttp
-
-_dependencies = updater_dependencies()
 
 
 async def stream_single_url_hash_entry(
@@ -32,7 +30,7 @@ async def stream_single_url_hash_entry(
     """Hash one URL and emit a single sha256 :class:`HashEntry` with that URL."""
     hash_drain = ValueDrain[dict[str, str]]()
     async for event in drain_value_events(
-        _dependencies.compute_url_hashes(source_name, [url]),
+        update_process.compute_url_hashes(source_name, [url]),
         hash_drain,
         parse=expect_hash_mapping,
     ):

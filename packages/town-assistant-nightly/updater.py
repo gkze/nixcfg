@@ -2,26 +2,28 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import sparkle_appcast_updater
-from lib.update.updaters.vendor_feeds import SparkleAppcastItem, require_version
+from typing import TYPE_CHECKING, ClassVar
 
-_APPCAST_URL = (
-    "https://town-macos-app.s3.us-east-1.amazonaws.com/desktop/nightly/appcast.xml"
-)
+from lib.update.updaters import SparkleAppcastUrlUpdater, register_updater
+from lib.update.updaters.vendor_feeds import require_version
 
-
-def _nightly_version(item: SparkleAppcastItem) -> str:
-    short_version = require_version(item.short_version, context=_APPCAST_URL)
-    build_version = require_version(item.version, context=_APPCAST_URL)
-    return f"{short_version}-{build_version}"
+if TYPE_CHECKING:
+    from lib.update.updaters import SparkleAppcastItem
 
 
-TownAssistantNightlyUpdater = sparkle_appcast_updater(
-    "town-assistant-nightly",
-    appcast_url=_APPCAST_URL,
-    platforms={"aarch64-darwin": "darwin-aarch64"},
-    version_transform=_nightly_version,
-    appcast_url_metadata=True,
-    url_metadata_context="Town Assistant nightly metadata",
-    module=__name__,
-)
+@register_updater
+class TownAssistantNightlyUpdater(SparkleAppcastUrlUpdater):
+    """Resolve Town Assistant nightly builds from its Sparkle feed."""
+
+    name = "town-assistant-nightly"
+    APPCAST_URL = (
+        "https://town-macos-app.s3.us-east-1.amazonaws.com/desktop/nightly/appcast.xml"
+    )
+    URL_METADATA_CONTEXT: ClassVar[str | None] = "Town Assistant nightly metadata"
+    PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "darwin-aarch64"}
+
+    def item_version(self, item: SparkleAppcastItem) -> str | None:
+        """Combine the short version and build number into a version token."""
+        short_version = require_version(item.short_version, context=self.APPCAST_URL)
+        build_version = require_version(item.version, context=self.APPCAST_URL)
+        return f"{short_version}-{build_version}"

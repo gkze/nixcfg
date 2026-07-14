@@ -13,7 +13,7 @@ from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.nix import _build_fetchgit_call
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 
 
 def _load_module(module_name: str):
@@ -50,8 +50,8 @@ def test_codex_v8_updater_computes_recursive_src_hash(monkeypatch) -> None:
             },
         )
 
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _hash_stream)
-    monkeypatch.setattr(module, "compute_url_hashes", _url_hashes)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _hash_stream)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _url_hashes)
 
     events = _run(
         _collect_events(
@@ -217,8 +217,8 @@ def test_codex_v8_fetch_hashes_forwards_non_value_events(monkeypatch) -> None:
             },
         )
 
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _hash_stream)
-    monkeypatch.setattr(module, "compute_url_hashes", _url_hashes)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _hash_stream)
+    monkeypatch.setattr("lib.update.process.compute_url_hashes", _url_hashes)
 
     events = _run(
         _collect_events(

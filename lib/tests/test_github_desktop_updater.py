@@ -13,7 +13,7 @@ from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEvent, UpdateEventKind
-from lib.update.updaters.base import UpdateContext, VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -53,7 +53,9 @@ def test_github_desktop_fetch_latest_reads_locked_release_ref(
 ) -> None:
     """Resolve package version from the beta flake input ref."""
     module = _load_updater_module()
-    monkeypatch.setattr(module, "get_flake_input_node", lambda _name: _locked_node())
+    monkeypatch.setattr(
+        "lib.update.flake.get_flake_input_node", lambda _name: _locked_node()
+    )
     updater = module.GitHubDesktopUpdater()
 
     info = _run(
@@ -70,7 +72,7 @@ def test_github_desktop_fetch_latest_requires_release_ref(
     """Reject refs that cannot map to GitHub Desktop package versions."""
     module = _load_updater_module()
     monkeypatch.setattr(
-        module, "get_flake_input_node", lambda _name: _locked_node("main")
+        "lib.update.flake.get_flake_input_node", lambda _name: _locked_node("main")
     )
     updater = module.GitHubDesktopUpdater()
 
@@ -84,8 +86,7 @@ def test_github_desktop_fetch_latest_rejects_empty_release_version(
     """Reject release refs that omit the version suffix."""
     module = _load_updater_module()
     monkeypatch.setattr(
-        module,
-        "get_flake_input_node",
+        "lib.update.flake.get_flake_input_node",
         lambda _name: _locked_node("refs/tags/release-"),
     )
     updater = module.GitHubDesktopUpdater()
@@ -136,7 +137,7 @@ def test_github_desktop_fetch_hashes_computes_both_yarn_caches(
         calls.append({"name": name, "expr": expr, "env": env, "config": config})
         yield UpdateEvent.value(name, ROOT_HASH if len(calls) == 1 else APP_HASH)
 
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     updater = module.GitHubDesktopUpdater()
 
     events = _run(
@@ -175,7 +176,7 @@ def test_github_desktop_fetch_hashes_requires_each_cache_hash(
         _ = (env, config)
         yield UpdateEvent.status(name, "hashing")
 
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fixed_hash)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     updater = module.GitHubDesktopUpdater()
 
     with pytest.raises(RuntimeError, match="Missing yarnRootHash output"):
@@ -209,7 +210,7 @@ def test_github_desktop_is_latest_requires_hashes_and_drv_fingerprint(
         _ = config
         return "drv"
 
-    monkeypatch.setattr(module, "compute_drv_fingerprint", _fingerprint)
+    monkeypatch.setattr("lib.update.nix.compute_drv_fingerprint", _fingerprint)
 
     assert _run(updater._is_latest(entry, VersionInfo(version="3.5.9-beta2"))) is True
     assert _run(updater._is_latest(entry, VersionInfo(version="3.5.9-beta3"))) is False
@@ -228,7 +229,7 @@ def test_github_desktop_is_latest_requires_hashes_and_drv_fingerprint(
         msg = "boom"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr(module, "compute_drv_fingerprint", _fingerprint_failure)
+    monkeypatch.setattr("lib.update.nix.compute_drv_fingerprint", _fingerprint_failure)
     assert _run(updater._is_latest(entry, VersionInfo(version="3.5.9-beta2"))) is False
 
 
@@ -273,7 +274,7 @@ def test_github_desktop_finalize_result_warns_when_fingerprint_fails(
         msg = "boom"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr(module, "compute_drv_fingerprint", _fingerprint_failure)
+    monkeypatch.setattr("lib.update.nix.compute_drv_fingerprint", _fingerprint_failure)
 
     events = _run(_collect_events(updater._finalize_result(entry)))
 

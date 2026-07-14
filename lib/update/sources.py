@@ -69,6 +69,20 @@ def load_source_entry(path: Path) -> SourceEntry:
     return _load_entry(path)
 
 
+def read_pinned_source_version(name: str) -> str:
+    """Read the pinned version from one updater-managed ``sources.json`` file."""
+    pkg_dir = package_dir_for(name)
+    if pkg_dir is None:
+        msg = f"Package directory not found for {name}"
+        raise RuntimeError(msg)
+    entry = load_source_entry(pkg_dir / "sources.json")
+    version = entry.version
+    if not isinstance(version, str) or not version:
+        msg = f"{name} sources.json is missing a pinned version"
+        raise RuntimeError(msg)
+    return version
+
+
 def load_all_sources() -> SourcesFile:
     """Load and merge every per-package ``sources.json`` into one :class:`SourcesFile`."""
     return SourcesFile(
@@ -135,15 +149,21 @@ def validate_source_discovery_consistency() -> None:
     raise RuntimeError("\n".join(lines))
 
 
-def save_sources(sources: SourcesFile) -> None:
-    """Write each entry back to its per-package ``sources.json``.
+def save_source_updates(
+    source_updates: dict[str, SourceEntry],
+    *,
+    merge_existing: bool = False,
+) -> dict[str, SourceEntry]:
+    """Write only the supplied entries to their per-package ``sources.json``.
 
     Per-package files store a bare entry (not wrapped in ``{name: entry}``).
+    When ``merge_existing`` is true, read and merge the current entry while
+    holding the same per-source lock used for the atomic write.
     """
     path_map = _source_file_map()
 
     missing: list[str] = []
-    for name in sources.entries:
+    for name in source_updates:
         if name in path_map:
             continue
         pkg_dir = package_dir_for(name)
@@ -158,13 +178,26 @@ def save_sources(sources: SourcesFile) -> None:
         )
         raise RuntimeError(msg)
 
-    for name, entry in sources.entries.items():
+    persisted_updates: dict[str, SourceEntry] = {}
+    for name, entry in source_updates.items():
         path = path_map.get(name)
         if path is None:
             continue
         lock_path = path.with_suffix(".json.lock")
         with FileLock(lock_path):
-            atomic_write_json(path, entry.to_dict())
+            persisted_entry = (
+                _load_entry(path).merge(entry)
+                if merge_existing and path.exists()
+                else entry
+            )
+            atomic_write_json(path, persisted_entry.to_dict())
+        persisted_updates[name] = persisted_entry
+    return persisted_updates
+
+
+def save_sources(sources: SourcesFile) -> None:
+    """Write every entry in ``sources`` to its per-package ``sources.json``."""
+    save_source_updates(sources.entries)
 
 
 def save_source_entry(path: Path, entry: SourceEntry) -> None:

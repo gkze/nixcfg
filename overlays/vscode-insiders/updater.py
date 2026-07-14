@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lib.update.updaters.base import register_updater
+from lib.update.updaters import register_updater
 from lib.update.updaters.platform_api import PlatformAPIUpdater
 
 if TYPE_CHECKING:
-    from lib.update.updaters.base import VersionInfo
+    from lib.update.updaters import VersionInfo
 
 VSCODE_PLATFORMS = {
     "aarch64-darwin": "darwin-arm64",

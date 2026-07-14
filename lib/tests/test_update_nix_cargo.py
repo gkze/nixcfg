@@ -18,7 +18,7 @@ from lib.update.nix_cargo import (
     _select_matching_git_dep,
     compute_import_cargo_lock_output_hashes,
 )
-from lib.update.updaters.base import CargoLockGitDep
+from lib.update.updaters import CargoLockGitDep
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

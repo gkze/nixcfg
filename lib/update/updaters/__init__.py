@@ -1,8 +1,8 @@
 """Updater registry with automatic per-package discovery.
 
 Loads updater modules by scanning package/overlay updater files in the repo.
-Importing each module runs explicit ``register_updater(...)`` calls or factory
-helpers, which populate :data:`UPDATERS`.
+Importing each module runs explicit ``register_updater(...)`` calls, which
+populate :data:`UPDATERS`.
 """
 
 import importlib.util
@@ -11,78 +11,67 @@ from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING
 
-import lib.update.updaters.base as _updaters_base
-import lib.update.updaters.github_raw_file as _github_raw_file_module
-import lib.update.updaters.github_release as _github_release_module
-import lib.update.updaters.platform_api as _platform_api_module
-import lib.update.updaters.single_url as _single_url_module
 from lib.update.paths import REPO_ROOT, package_file_map
+from lib.update.sources import read_pinned_source_version
+from lib.update.updaters.core import (
+    AssetURLsMetadataUpdater,
+    CargoLockGitDep,
+    ChecksumProvidedUpdater,
+    DownloadHashUpdater,
+    DownloadUrlMetadataUpdater,
+    FixedOutputHashStep,
+    HashEntryUpdater,
+    SourceThenOverlayHashMixin,
+    UpdateContext,
+    Updater,
+    stream_fixed_output_hashes,
+    stream_url_hash_mapping,
+)
+from lib.update.updaters.flake_backed import (
+    BunNodeModulesHashUpdater,
+    CargoVendorHashUpdater,
+    DenoDepsHashUpdater,
+    DenoManifestUpdater,
+    FlakeInputHashUpdater,
+    FlakeInputMetadataUpdater,
+    FlakeInputUpdater,
+    GoVendorHashUpdater,
+    NpmDepsHashUpdater,
+    UvLockUpdater,
+)
+from lib.update.updaters.github_raw_file import GitHubRawFileUpdater
+from lib.update.updaters.github_release import (
+    GitHubReleaseAssetURLsUpdater,
+    GitHubReleaseUpdater,
+)
+from lib.update.updaters.materialization import (
+    Crate2NixArtifactsMixin,
+    Crate2NixMetadataUpdater,
+    MaterializesArtifactsMixin,
+)
+from lib.update.updaters.metadata import VersionInfo
+from lib.update.updaters.platform_api import (
+    DownloadingPlatformAPIUpdater,
+    PlatformAPIUpdater,
+)
 from lib.update.updaters.registry import UPDATERS, UpdaterClass, register_updater
-
-CargoLockGitDep = _updaters_base.CargoLockGitDep
-ChecksumProvidedUpdater = _updaters_base.ChecksumProvidedUpdater
-DenoDepsHashUpdater = _updaters_base.DenoDepsHashUpdater
-DownloadHashUpdater = _updaters_base.DownloadHashUpdater
-FixedOutputHashStep = _updaters_base.FixedOutputHashStep
-FlakeInputHashUpdater = _updaters_base.FlakeInputHashUpdater
-FlakeInputMetadataUpdater = _updaters_base.FlakeInputMetadataUpdater
-FlakeInputUpdater = _updaters_base.FlakeInputUpdater
-HashEntryUpdater = _updaters_base.HashEntryUpdater
-SourceThenOverlayHashMixin = _updaters_base.SourceThenOverlayHashMixin
-MaterializesArtifactsMixin = _updaters_base.MaterializesArtifactsMixin
-Crate2NixArtifactsMixin = _updaters_base.Crate2NixArtifactsMixin
-Crate2NixMetadataUpdater = _updaters_base.Crate2NixMetadataUpdater
-UpdateContext = _updaters_base.UpdateContext
-Updater = _updaters_base.Updater
-UvLockUpdater = _updaters_base.UvLockUpdater
-VersionInfo = _updaters_base.VersionInfo
-SingleURLHashEntryUpdater = _single_url_module.SingleURLHashEntryUpdater
-bun_node_modules_updater = _updaters_base.bun_node_modules_updater
-cargo_vendor_updater = _updaters_base.cargo_vendor_updater
-deno_deps_updater = _updaters_base.deno_deps_updater
-flake_input_hash_updater = _updaters_base.flake_input_hash_updater
-go_vendor_updater = _updaters_base.go_vendor_updater
-npm_deps_updater = _updaters_base.npm_deps_updater
-uv_lock_hash_updater = _updaters_base.uv_lock_hash_updater
-uv_lock_updater = _updaters_base.uv_lock_updater
-stream_fixed_output_hashes = _updaters_base.stream_fixed_output_hashes
-stream_url_hash_mapping = _updaters_base.stream_url_hash_mapping
-GitHubRawFileUpdater = _github_raw_file_module.GitHubRawFileUpdater
-github_raw_file_updater = _github_raw_file_module.github_raw_file_updater
-GitHubReleaseUpdater = _github_release_module.GitHubReleaseUpdater
-GitHubReleaseAssetURLsUpdater = _github_release_module.GitHubReleaseAssetURLsUpdater
-DownloadingPlatformAPIUpdater = _platform_api_module.DownloadingPlatformAPIUpdater
-PlatformAPIUpdater = _platform_api_module.PlatformAPIUpdater
+from lib.update.updaters.single_url import SingleURLHashEntryUpdater
+from lib.update.updaters.strategies import (
+    ElectronBuilderAssetURLsUpdater,
+    HeadArtifactDownloadUpdater,
+    JsonFieldDownloadUpdater,
+    PinnedSourceDownloadUpdater,
+    SparkleAppcastUpdater,
+    SparkleAppcastUrlUpdater,
+    VersionEndpointDownloadUpdater,
+)
+from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 _DISCOVERY_LOCK = Lock()
 _DISCOVERY_STATE = {"complete": False}
-_GO_VENDOR_UPDATERS = (
-    "anthropic-cli",
-    "axiom-cli",
-    "gogcli",
-    "openai-cli",
-)
-
-
-def _register_factory_updaters() -> None:
-    """Register declarative updater factory entries."""
-    for name in _GO_VENDOR_UPDATERS:
-        if name not in UPDATERS:
-            go_vendor_updater(name, module=__name__)
-
-    if "emdash" not in UPDATERS:
-        flake_input_hash_updater(
-            "emdash",
-            "npmDepsHash",
-            module=__name__,
-            platform_specific=True,
-        )
-
-    if "opencode" not in UPDATERS:
-        bun_node_modules_updater("opencode", module=__name__)
 
 
 def _updater_module_paths() -> dict[str, Path]:
@@ -119,7 +108,6 @@ def _prefer_repo_lib_paths() -> None:
 def _discover_updaters() -> None:
     """Import every discovered updater module to trigger registration."""
     _prefer_repo_lib_paths()
-    _register_factory_updaters()
     for name, updater_file in sorted(_updater_module_paths().items()):
         # Use a stable module name so re-imports are safe.
         mod_name = f"_updater_pkg.{name}"
@@ -161,13 +149,19 @@ def resolve_registry_alias(
 __all__ = [
     "REPO_ROOT",
     "UPDATERS",
+    "AssetURLsMetadataUpdater",
+    "BunNodeModulesHashUpdater",
     "CargoLockGitDep",
+    "CargoVendorHashUpdater",
     "ChecksumProvidedUpdater",
     "Crate2NixArtifactsMixin",
     "Crate2NixMetadataUpdater",
     "DenoDepsHashUpdater",
+    "DenoManifestUpdater",
     "DownloadHashUpdater",
+    "DownloadUrlMetadataUpdater",
     "DownloadingPlatformAPIUpdater",
+    "ElectronBuilderAssetURLsUpdater",
     "FixedOutputHashStep",
     "FlakeInputHashUpdater",
     "FlakeInputMetadataUpdater",
@@ -175,28 +169,29 @@ __all__ = [
     "GitHubRawFileUpdater",
     "GitHubReleaseAssetURLsUpdater",
     "GitHubReleaseUpdater",
+    "GoVendorHashUpdater",
     "HashEntryUpdater",
+    "HeadArtifactDownloadUpdater",
+    "JsonFieldDownloadUpdater",
     "MaterializesArtifactsMixin",
+    "NpmDepsHashUpdater",
+    "PinnedSourceDownloadUpdater",
     "PlatformAPIUpdater",
     "SingleURLHashEntryUpdater",
     "SourceThenOverlayHashMixin",
+    "SparkleAppcastItem",
+    "SparkleAppcastUpdater",
+    "SparkleAppcastUrlUpdater",
     "UpdateContext",
     "Updater",
     "UpdaterClass",
     "UvLockUpdater",
+    "VersionEndpointDownloadUpdater",
     "VersionInfo",
-    "bun_node_modules_updater",
-    "cargo_vendor_updater",
-    "deno_deps_updater",
     "ensure_updaters_loaded",
-    "flake_input_hash_updater",
-    "github_raw_file_updater",
-    "go_vendor_updater",
-    "npm_deps_updater",
+    "read_pinned_source_version",
     "register_updater",
     "resolve_registry_alias",
     "stream_fixed_output_hashes",
     "stream_url_hash_mapping",
-    "uv_lock_hash_updater",
-    "uv_lock_updater",
 ]

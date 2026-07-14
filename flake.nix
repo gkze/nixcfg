@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.1.37";
+      url = "github:generalaction/emdash/v1.1.38";
       flake = false;
     };
     flake-edit = {
@@ -87,7 +87,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.7.1";
+      url = "github:NousResearch/hermes-agent/v2026.7.7.2";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -141,7 +141,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.65.0";
+      url = "github:max-sixty/worktrunk/v0.67.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -149,7 +149,7 @@
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.16.0";
+      url = "github:anthropics/anthropic-cli/v1.17.0";
       flake = false;
     };
     catppuccin = {
@@ -166,7 +166,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.142.5";
+      url = "github:openai/codex/rust-v0.144.3";
       flake = false;
     };
     curator = {
@@ -174,7 +174,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.33.0";
+      url = "github:steipete/gogcli/v0.34.0";
       flake = false;
     };
     openai-cli = {
@@ -231,7 +231,7 @@
       flake = false;
     };
     mux = {
-      url = "github:coder/mux/v0.27.0";
+      url = "github:coder/mux/v0.28.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mountpoint-s3 = {
@@ -388,6 +388,201 @@
               ${resolve command}
               touch $out
             '';
+          # Evaluate the nixcfg package once per system and share it across
+          # every check below instead of re-deriving it per check.
+          nixcfgPackages = lib.genAttrs systems (
+            system: mkNixcfgPackage baseOutputs.legacyPackages.${system}
+          );
+          # Repo checks, keyed by check name. Each spec is a mkRepoCheck
+          # argument set; `nixcfg = true` additionally passes the shared
+          # `nixcfgPkg`/`nixcfgVenv` for that system into the command.
+          mkNamedRepoCheck =
+            checkName: spec:
+            mkRepoCheck (
+              builtins.removeAttrs spec [ "nixcfg" ]
+              // {
+                name = "check-${checkName}";
+                command =
+                  if spec.nixcfg or false then
+                    context:
+                    let
+                      nixcfgPkg = nixcfgPackages.${context.pkgs.stdenv.hostPlatform.system};
+                    in
+                    spec.command (
+                      context
+                      // {
+                        inherit nixcfgPkg;
+                        nixcfgVenv = nixcfgPkg.passthru.venv;
+                      }
+                    )
+                  else
+                    spec.command;
+              }
+            );
+          repoCheckSpecs = {
+            "lint-editorconfig" = {
+              command =
+                { lib, pkgs, ... }:
+                ''
+                  ${lib.getExe pkgs."editorconfig-checker"} -exclude '^\.pre-commit-config\.yaml$'
+                '';
+            };
+
+            "format-yaml-yamlfmt" = {
+              command =
+                { lib, pkgs, ... }:
+                ''
+                  ${lib.getExe pkgs.yamlfmt} -lint -gitignore_excludes -conf .yamlfmt .
+                '';
+            };
+
+            "lint-yaml-yamllint" = {
+              command =
+                { lib, pkgs, ... }:
+                ''
+                  ${lib.getExe pkgs.yamllint} -c .yamllint .
+                '';
+            };
+
+            "format-web-oxfmt" = {
+              command =
+                { lib, pkgs, ... }:
+                ''
+                  ${lib.getExe pkgs.oxfmt} --check --config .oxfmtrc.json --no-error-on-unmatched-pattern ${lib.escapeShellArgs oxfmtPatterns}
+                '';
+            };
+
+            "lint-web-oxlint" = {
+              command =
+                { lib, pkgs, ... }:
+                ''
+                  OXLINT_TSGOLINT_PATH=${lib.getExe pkgs.tsgolint} ${lib.getExe pkgs.oxlint} --config .oxlintrc.json --type-aware --quiet .
+                '';
+            };
+
+            "format-python-pyupgrade" = {
+              repoWritable = true;
+              nixcfg = true;
+              command =
+                {
+                  lib,
+                  pkgs,
+                  nixcfgVenv,
+                  ...
+                }:
+                ''
+                  ${lib.getExe pkgs.git} init -q .
+                  ${lib.getExe pkgs.git} add -A
+                  find . \
+                    \( -path './.direnv' -o -path './.git' -o -path './.pytest_cache' -o -path './.ruff_cache' -o -path './.venv' -o -path './node_modules' -o -path './result' -o -name '_generated.py' \) -prune -o \
+                    -type f \
+                    \( -name '*.py' -o -name '*.pyi' ${pythonScriptFindPredicates} \) \
+                    -print0 \
+                    | ${pkgs.findutils}/bin/xargs -0 -r ${nixcfgVenv}/bin/python -m lib.fix_python_multi_except --pyupgrade-exe ${nixcfgVenv}/bin/pyupgrade --pyupgrade-arg=--py313-plus
+                  ${lib.getExe pkgs.git} diff --exit-code -- .
+                '';
+            };
+
+            "lint-python-compile" = {
+              nixcfg = true;
+              command =
+                { lib, nixcfgVenv, ... }:
+                ''
+                  ${nixcfgVenv}/bin/python ${./lib/check_python_compile.py} ${lib.escapeShellArgs compilePaths}
+                '';
+            };
+
+            "format-python-ruff" = {
+              nixcfg = true;
+              setup = ''
+                export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
+              '';
+              command =
+                { nixcfgVenv, ... }:
+                ''
+                  ${nixcfgVenv}/bin/ruff format --check --config pyproject.toml .
+                '';
+            };
+
+            "lint-python-ruff" = {
+              nixcfg = true;
+              setup = ''
+                export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
+              '';
+              command =
+                { nixcfgVenv, ... }:
+                ''
+                  ${nixcfgVenv}/bin/ruff check --config pyproject.toml .
+                '';
+            };
+
+            "lint-python-ty" = {
+              nixcfg = true;
+              command =
+                { nixcfgVenv, ... }:
+                ''
+                  ${nixcfgVenv}/bin/ty check --python ${nixcfgVenv}/bin/python .
+                '';
+            };
+
+            "lint-workflows-actionlint" = {
+              repoWritable = true;
+              command =
+                { lib, pkgs, ... }:
+                ''
+                  ${lib.getExe pkgs.git} init -q .
+                  ${pkgs.findutils}/bin/find .github/workflows -maxdepth 1 -type f ! -name '*.lock.yml' \( -name '*.yml' -o -name '*.yaml' \) -print0 \
+                    | ${pkgs.findutils}/bin/xargs -0 ${lib.getExe pkgs.actionlint}
+                '';
+            };
+
+            "test-python-pytest" = {
+              repoWritable = true;
+              nixcfg = true;
+              runCommandAttrs =
+                { pkgs, ... }:
+                {
+                  nativeBuildInputs = [
+                    pkgs.cacert
+                    pkgs.git
+                    pkgs.nix
+                  ];
+                };
+              setup =
+                { pkgs, ... }:
+                let
+                  certFile = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+                  nixConfig = "experimental-features = nix-command flakes";
+                in
+                ''
+                  export COVERAGE_FILE="$TMPDIR/.coverage"
+                  export CURL_CA_BUNDLE="${certFile}"
+                  export GIT_SSL_CAINFO="${certFile}"
+                  export NIX_CONFIG="${nixConfig}"
+                  export NIXCFG_NIXPKGS_PATH="${inputs.nixpkgs}"
+                  export NIX_SSL_CERT_FILE="${certFile}"
+                  export REQUESTS_CA_BUNDLE="${certFile}"
+                  export SSL_CERT_FILE="${certFile}"
+                '';
+              command =
+                { pkgs, nixcfgVenv, ... }:
+                ''
+                  ${lib.getExe pkgs.git} init -q .
+                  ${lib.getExe pkgs.git} add -A .
+                  ${nixcfgVenv}/bin/coverage run -m pytest
+                  ${nixcfgVenv}/bin/coverage report
+                '';
+            };
+
+            "verify-workflow-generated" = {
+              nixcfg = true;
+              command =
+                { nixcfgPkg, ... }:
+                ''
+                  ${nixcfgPkg}/bin/nixcfg ci workflow verify-generated
+                '';
+            };
+          };
         in
         {
           inherit inputs;
@@ -444,49 +639,60 @@
               textHygieneFormat = pkgs.writeShellScriptBin "format-text-hygiene" ''
                 exec ${lib.getExe pkgs.python3} ${textHygieneScript} "$@"
               '';
-              jsonlFormat = pkgs.writeShellScriptBin "format-jsonl" ''
-                set -euo pipefail
+              # Shared shape for formatters that rewrite files in place: format
+              # each file into a scratch location, then overwrite the original
+              # only when the formatted result differs.
+              mkFormatWrapper =
+                {
+                  name,
+                  tmpTemplate,
+                  directory ? false,
+                  resultFile ? null,
+                  # Shell snippet that reads "$file" and writes the formatted
+                  # result to "$formatted" ("$tmp" is the scratch file or dir).
+                  format,
+                }:
+                pkgs.writeShellScriptBin name ''
+                  set -euo pipefail
 
-                for file in "$@"; do
-                  tmp="$(${lib.getExe' pkgs.coreutils "mktemp"} "''${TMPDIR:-/tmp}/jsonl.XXXXXX")"
-                  ${lib.getExe pkgs.jq} -c . "$file" > "$tmp"
-                  if ! ${lib.getExe' pkgs.diffutils "cmp"} -s "$tmp" "$file"; then
-                    ${lib.getExe' pkgs.coreutils "cat"} "$tmp" > "$file"
-                  fi
-                  ${lib.getExe' pkgs.coreutils "rm"} "$tmp"
-                done
-              '';
-              goModFormat = pkgs.writeShellScriptBin "format-go-mod" ''
-                set -euo pipefail
-
-                for file in "$@"; do
-                  tmp_dir="$(${lib.getExe' pkgs.coreutils "mktemp"} -d "''${TMPDIR:-/tmp}/go-mod.XXXXXX")"
-                  ${lib.getExe' pkgs.coreutils "cp"} "$file" "$tmp_dir/go.mod"
+                  for file in "$@"; do
+                    tmp="$(${lib.getExe' pkgs.coreutils "mktemp"} ${lib.optionalString directory "-d "}"''${TMPDIR:-/tmp}/${tmpTemplate}.XXXXXX")"
+                    formatted=${if directory then ''"$tmp/${resultFile}"'' else ''"$tmp"''}
+                    ${format}
+                    if ! ${lib.getExe' pkgs.diffutils "cmp"} -s "$formatted" "$file"; then
+                      ${lib.getExe' pkgs.coreutils "cat"} "$formatted" > "$file"
+                    fi
+                    ${lib.getExe' pkgs.coreutils "rm"} -rf "$tmp"
+                  done
+                '';
+              jsonlFormat = mkFormatWrapper {
+                name = "format-jsonl";
+                tmpTemplate = "jsonl";
+                format = ''${lib.getExe pkgs.jq} -c . "$file" > "$formatted"'';
+              };
+              goModFormat = mkFormatWrapper {
+                name = "format-go-mod";
+                tmpTemplate = "go-mod";
+                directory = true;
+                resultFile = "go.mod";
+                format = ''
+                  ${lib.getExe' pkgs.coreutils "cp"} "$file" "$formatted"
                   (
-                    cd "$tmp_dir"
+                    cd "$tmp"
                     ${lib.getExe' pkgs.go "go"} mod edit -fmt go.mod
                   )
-                  if ! ${lib.getExe' pkgs.diffutils "cmp"} -s "$tmp_dir/go.mod" "$file"; then
-                    ${lib.getExe' pkgs.coreutils "cat"} "$tmp_dir/go.mod" > "$file"
-                  fi
-                  ${lib.getExe' pkgs.coreutils "rm"} -rf "$tmp_dir"
-                done
-              '';
-              twilightAutoconfigFormat = pkgs.writeShellScriptBin "format-twilight-autoconfig" ''
-                set -euo pipefail
-
-                for file in "$@"; do
-                  tmp="$(${lib.getExe' pkgs.coreutils "mktemp"} "''${TMPDIR:-/tmp}/twilight-autoconfig.XXXXXX")"
+                '';
+              };
+              twilightAutoconfigFormat = mkFormatWrapper {
+                name = "format-twilight-autoconfig";
+                tmpTemplate = "twilight-autoconfig";
+                format = ''
                   ${lib.getExe pkgs.oxfmt} \
                     --config .oxfmtrc.json \
                     --stdin-filepath twilight.js \
-                    < "$file" > "$tmp"
-                  if ! ${lib.getExe' pkgs.diffutils "cmp"} -s "$tmp" "$file"; then
-                    ${lib.getExe' pkgs.coreutils "cat"} "$tmp" > "$file"
-                  fi
-                  ${lib.getExe' pkgs.coreutils "rm"} "$tmp"
-                done
-              '';
+                    < "$file" > "$formatted"
+                '';
+              };
               inherit
                 (evalModule pkgs {
                   projectRootFile = "flake.nix";
@@ -520,12 +726,10 @@
                     shellcheck = {
                       enable = true;
                       includes = lintFiles.shell.globs;
-                      excludes = lintFiles.shell.excludeGlobs;
                     };
                     shfmt = {
                       enable = true;
                       includes = lintFiles.shell.globs;
-                      excludes = lintFiles.shell.excludeGlobs;
                     };
                     yamlfmt = {
                       enable = true;
@@ -649,292 +853,38 @@
               }
             );
 
-          checks."format-repo" = lib.mkForce (
-            { lib, outputs', ... }:
-            ''
-              ${lib.getExe outputs'.formatter} .
-            ''
-          );
-
-          checks."lint-editorconfig" = mkRepoCheck {
-            name = "check-lint-editorconfig";
-            command =
-              {
-                lib,
-                pkgs,
-                ...
-              }:
+          checks = {
+            "format-repo" = lib.mkForce (
+              { lib, outputs', ... }:
               ''
-                ${lib.getExe pkgs."editorconfig-checker"} -exclude '^\.pre-commit-config\.yaml$'
-              '';
-          };
-
-          checks."format-yaml-yamlfmt" = mkRepoCheck {
-            name = "check-format-yaml-yamlfmt";
-            command =
-              {
-                lib,
-                pkgs,
-                ...
-              }:
+                ${lib.getExe outputs'.formatter} .
               ''
-                ${lib.getExe pkgs.yamlfmt} -lint -gitignore_excludes -conf .yamlfmt .
-              '';
-          };
+            );
 
-          checks."lint-yaml-yamllint" = mkRepoCheck {
-            name = "check-lint-yaml-yamllint";
-            command =
-              {
-                lib,
-                pkgs,
-                ...
-              }:
-              ''
-                ${lib.getExe pkgs.yamllint} -c .yamllint .
-              '';
-          };
-
-          checks."format-web-oxfmt" = mkRepoCheck {
-            name = "check-format-web-oxfmt";
-            command =
-              {
-                lib,
-                pkgs,
-                ...
-              }:
-              ''
-                ${lib.getExe pkgs.oxfmt} --check --config .oxfmtrc.json --no-error-on-unmatched-pattern ${lib.escapeShellArgs oxfmtPatterns}
-              '';
-          };
-
-          checks."lint-web-oxlint" = mkRepoCheck {
-            name = "check-lint-web-oxlint";
-            command =
-              {
-                lib,
-                pkgs,
-                ...
-              }:
-              ''
-                OXLINT_TSGOLINT_PATH=${lib.getExe pkgs.tsgolint} ${lib.getExe pkgs.oxlint} --config .oxlintrc.json --type-aware --quiet .
-              '';
-          };
-
-          checks."format-python-pyupgrade" = mkRepoCheck {
-            name = "check-format-python-pyupgrade";
-            repoWritable = true;
-            command =
-              { lib, pkgs, ... }:
-              let
-                nixcfgPkg = mkNixcfgPackage pkgs;
-                nixcfgVenv = nixcfgPkg.passthru.venv;
-              in
-              ''
-                ${lib.getExe pkgs.git} init -q .
-                ${lib.getExe pkgs.git} add -A
-                find . \
-                  \( -path './.direnv' -o -path './.git' -o -path './.pytest_cache' -o -path './.ruff_cache' -o -path './.venv' -o -path './node_modules' -o -path './result' -o -name '_generated.py' \) -prune -o \
-                  -type f \
-                  \( -name '*.py' -o -name '*.pyi' ${pythonScriptFindPredicates} \) \
-                  -print0 \
-                  | ${pkgs.findutils}/bin/xargs -0 -r ${nixcfgVenv}/bin/python -m lib.fix_python_multi_except --pyupgrade-exe ${nixcfgVenv}/bin/pyupgrade --pyupgrade-arg=--py313-plus
-                ${lib.getExe pkgs.git} diff --exit-code -- .
-              '';
-          };
-
-          checks."lint-python-compile" = mkRepoCheck {
-            name = "check-lint-python-compile";
-            command =
-              { lib, pkgs, ... }:
-              let
-                compileTargets = lib.escapeShellArgs compilePaths;
-                nixcfgPkg = mkNixcfgPackage pkgs;
-              in
-              ''
-                ${nixcfgPkg.passthru.venv}/bin/python ${./lib/check_python_compile.py} ${compileTargets}
-              '';
-          };
-
-          checks."format-python-ruff" = mkRepoCheck {
-            name = "check-format-python-ruff";
-            setup = ''
-              export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
-            '';
-            command =
-              {
-                pkgs,
-                ...
-              }:
-              let
-                nixcfgPkg = mkNixcfgPackage pkgs;
-              in
-              ''
-                ${nixcfgPkg.passthru.venv}/bin/ruff format --check --config pyproject.toml .
-              '';
-          };
-
-          checks."lint-python-ruff" = mkRepoCheck {
-            name = "check-lint-python-ruff";
-            setup = ''
-              export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
-            '';
-            command =
-              {
-                pkgs,
-                ...
-              }:
-              let
-                nixcfgPkg = mkNixcfgPackage pkgs;
-              in
-              ''
-                ${nixcfgPkg.passthru.venv}/bin/ruff check --config pyproject.toml .
-              '';
-          };
-
-          checks."lint-python-ty" = mkRepoCheck {
-            name = "check-lint-python-ty";
-            command =
-              {
-                pkgs,
-                ...
-              }:
-              let
-                nixcfgPkg = mkNixcfgPackage pkgs;
-                nixcfgVenv = nixcfgPkg.passthru.venv;
-              in
-              ''
-                ${nixcfgVenv}/bin/ty check --python ${nixcfgVenv}/bin/python .
-              '';
-          };
-
-          checks."lint-workflows-actionlint" = mkRepoCheck {
-            name = "check-lint-workflows-actionlint";
-            repoWritable = true;
-            command =
-              {
-                lib,
-                pkgs,
-                ...
-              }:
-              ''
-                ${lib.getExe pkgs.git} init -q .
-                ${pkgs.findutils}/bin/find .github/workflows -maxdepth 1 -type f ! -name '*.lock.yml' \( -name '*.yml' -o -name '*.yaml' \) -print0 \
-                  | ${pkgs.findutils}/bin/xargs -0 ${lib.getExe pkgs.actionlint}
-              '';
-          };
-
-          checks."test-nix-default-api" =
-            { pkgs, ... }:
-            assert import ./tests/nix/default-api/default-api.nix { src = ./.; };
-            pkgs.runCommand "check-test-nix-default-api" { } ''
-              touch $out
-            '';
-
-          checks."test-nix-package-helpers" =
-            { pkgs, ... }:
-            assert import ./tests/nix/package-helpers.nix { src = ./.; };
-            pkgs.runCommand "check-test-nix-package-helpers" { } ''
-              touch $out
-            '';
-
-          checks."test-nix-opencode-desktop" =
-            { pkgs, ... }:
-            assert import ./packages/opencode-desktop/tests.nix { inherit self; };
-            pkgs.runCommand "check-test-nix-opencode-desktop" { } ''
-              touch $out
-            '';
-
-          checks."cache-electron-runtimes" = { pkgs, ... }: pkgs.electron-runtimes;
-
-          checks."test-python-pytest" = mkRepoCheck {
-            name = "check-test-python-pytest";
-            repoWritable = true;
-            runCommandAttrs =
+            "test-nix-default-api" =
               { pkgs, ... }:
-              {
-                nativeBuildInputs = [
-                  pkgs.cacert
-                  pkgs.git
-                  pkgs.nix
-                ];
-              };
-            setup =
-              { pkgs, ... }:
-              let
-                certFile = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-                nixConfig = "experimental-features = nix-command flakes";
-              in
-              ''
-                export COVERAGE_FILE="$TMPDIR/.coverage"
-                export CURL_CA_BUNDLE="${certFile}"
-                export GIT_SSL_CAINFO="${certFile}"
-                export NIX_CONFIG="${nixConfig}"
-                export NIXCFG_NIXPKGS_PATH="${inputs.nixpkgs}"
-                export NIX_SSL_CERT_FILE="${certFile}"
-                export REQUESTS_CA_BUNDLE="${certFile}"
-                export SSL_CERT_FILE="${certFile}"
+              assert import ./tests/nix/default-api/default-api.nix { src = ./.; };
+              pkgs.runCommand "check-test-nix-default-api" { } ''
+                touch $out
               '';
-            command =
-              { pkgs, ... }:
-              let
-                nixcfgPkg = mkNixcfgPackage pkgs;
-              in
-              ''
-                ${lib.getExe pkgs.git} init -q .
-                ${lib.getExe pkgs.git} add -A .
-                ${nixcfgPkg.passthru.venv}/bin/coverage run -m pytest
-                ${nixcfgPkg.passthru.venv}/bin/coverage report
-              '';
-          };
 
-          checks."verify-workflow-artifacts-refresh" = mkRepoCheck {
-            name = "check-verify-workflow-artifacts-refresh";
-            command =
+            "test-nix-package-helpers" =
               { pkgs, ... }:
-              let
-                nixcfgPkg = mkNixcfgPackage pkgs;
-              in
-              ''
-                ${nixcfgPkg}/bin/nixcfg ci workflow verify-artifacts
+              assert import ./tests/nix/package-helpers.nix { src = ./.; };
+              pkgs.runCommand "check-test-nix-package-helpers" { } ''
+                touch $out
               '';
-          };
 
-          checks."verify-workflow-artifacts-certify" = mkRepoCheck {
-            name = "check-verify-workflow-artifacts-certify";
-            command =
+            "test-nix-opencode-desktop" =
               { pkgs, ... }:
-              let
-                nixcfgPkg = mkNixcfgPackage pkgs;
-              in
-              ''
-                ${nixcfgPkg}/bin/nixcfg ci workflow verify-artifacts --workflow .github/workflows/update-certify.yml
+              assert import ./packages/opencode-desktop/tests.nix { inherit self; };
+              pkgs.runCommand "check-test-nix-opencode-desktop" { } ''
+                touch $out
               '';
-          };
 
-          checks."verify-workflow-structure-refresh" = mkRepoCheck {
-            name = "check-verify-workflow-structure-refresh";
-            command =
-              { pkgs, ... }:
-              let
-                nixcfgPkg = mkNixcfgPackage pkgs;
-              in
-              ''
-                ${nixcfgPkg}/bin/nixcfg ci workflow verify-structure
-              '';
-          };
-
-          checks."verify-workflow-structure-certify" = mkRepoCheck {
-            name = "check-verify-workflow-structure-certify";
-            command =
-              { pkgs, ... }:
-              let
-                nixcfgPkg = mkNixcfgPackage pkgs;
-              in
-              ''
-                ${nixcfgPkg}/bin/nixcfg ci workflow verify-structure --workflow .github/workflows/update-certify.yml
-              '';
-          };
+            "cache-electron-runtimes" = { pkgs, ... }: pkgs.electron-runtimes;
+          }
+          // builtins.mapAttrs mkNamedRepoCheck repoCheckSpecs;
 
         }
       );

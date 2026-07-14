@@ -173,5 +173,5 @@ def main(argv: list[str] | None = None) -> None:
     patch_source(args.root)
 
 
-if __name__ == "__main__":  # pragma: no cover - CLI entrypoint
+if __name__ == "__main__":  # pragma: no cover -- CLI entrypoint
     main()

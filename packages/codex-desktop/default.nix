@@ -7,12 +7,12 @@
 }:
 mkZipApp {
   pname = "codex-desktop";
-  appName = "Codex";
+  appName = "ChatGPT";
   info = selfSource;
   dontFixup = true;
-  sourceName = "Codex_${selfSource.version}_${stdenvNoCC.hostPlatform.system}.zip";
+  sourceName = "ChatGPT_${selfSource.version}_${stdenvNoCC.hostPlatform.system}.zip";
   meta = with lib; {
-    description = "Codex desktop app";
+    description = "ChatGPT desktop app (unified ChatGPT and Codex)";
     homepage = "https://developers.openai.com/codex/app";
     license = licenses.unfree;
     platforms = platforms.darwin;

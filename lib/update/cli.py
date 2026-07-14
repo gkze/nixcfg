@@ -15,25 +15,13 @@ import typer
 from rich.console import Console
 
 from lib.cli import HELP_CONTEXT_SETTINGS
-from lib.nix.models.sources import SourceEntry, SourcesFile
+from lib.nix.models.sources import SourcesFile
+from lib.update import persistence as update_persistence
 from lib.update import planner as update_planner
 from lib.update import source_runner as update_source_runner
 from lib.update import updaters as updater_module
-from lib.update.artifacts import GeneratedArtifact, save_generated_artifacts
 from lib.update.ci.resolve_versions import load_pinned_versions
-from lib.update.cli_inventory import (
-    InventoryDependencies,
-    _classify_updater_kind,
-    _generated_artifact_paths,
-    _InventoryTarget,
-    _repo_relative_path,
-    _source_backing_input_name,
-    _source_hash_kinds,
-    build_update_inventory,
-)
-from lib.update.cli_inventory import (
-    _handle_list_targets_request as _handle_list_targets_request_impl,
-)
+from lib.update.cli_inventory import handle_list_targets_request
 from lib.update.cli_options import (
     UpdateOptions,
     UpdateOptionsKwargs,
@@ -41,7 +29,6 @@ from lib.update.cli_options import (
     UpdateTTYMode,
 )
 from lib.update.cli_validation import (
-    ValidationDependencies,
     handle_validate_request,
     validate_list_sort_option,
 )
@@ -51,42 +38,20 @@ from lib.update.config import (
     resolve_config,
 )
 from lib.update.constants import ALL_TOOLS, NIX_BUILD_FAILURE_TAIL_LINES, REQUIRED_TOOLS
-from lib.update.flake import (
-    load_flake_lock,
-    resolve_root_input_node,
-    update_flake_input,
-)
-from lib.update.paths import (
-    get_repo_root,
-    package_dir_for,
-    package_file_map,
-    sources_file_for,
-)
-from lib.update.persistence import (
-    flatten_artifact_updates,
-    merge_source_updates,
-    persist_generated_artifacts,
-    persist_materialized_updates,
-    persist_source_updates,
-)
-from lib.update.process import run_queue_task
+from lib.update.paths import get_repo_root
 from lib.update.refs import (
     FlakeInputRef,
     get_flake_inputs_with_refs,
-    update_refs_task,
 )
-from lib.update.sources import (
-    load_all_sources,
-    save_sources,
-    validate_source_discovery_consistency,
-)
+from lib.update.sources import load_all_sources
 from lib.update.ui_consumer import ConsumeEventsOptions, consume_events
 from lib.update.ui_state import ItemMeta, OperationKind, SummaryStatus
 from lib.update.updaters import UPDATERS, UpdaterClass, ensure_updaters_loaded
 
 if TYPE_CHECKING:
     from lib.update.events import UpdateEvent
-    from lib.update.updaters.base import Updater, VersionInfo
+    from lib.update.updaters.core import Updater
+    from lib.update.updaters.metadata import VersionInfo
 
 _TRAILING_TARGET_FLAG_OPTIONS: dict[str, tuple[str, bool]] = {
     "--check": ("check", True),
@@ -231,9 +196,6 @@ __all__ = (
     "run_updates",
 )
 
-_SourceTaskContext = update_source_runner.SourceTaskContext
-_SourcesPhaseContext = update_source_runner.SourcesPhaseContext
-_SourceTaskResult = update_source_runner.SourceTaskResult
 _REEXEC_ENV = "NIXCFG_UPDATE_REEXECED_FROM_CHECKOUT"
 _UPDATE_LIBRARY_RELATIVE_ROOT = Path("lib/update")
 
@@ -318,10 +280,6 @@ def _shows_materialize_artifacts_phase(updater_cls: type[Updater] | None) -> boo
     return bool(getattr(updater_cls, "shows_materialize_artifacts_phase", False))
 
 
-def _companion_source_name(updater_cls: type[Updater] | None) -> str | None:
-    return update_planner.companion_source_name(updater_cls)
-
-
 def _build_update_options(values: UpdateOptionsKwargs) -> UpdateOptions:
     """Compatibility wrapper for shared option construction."""
     return UpdateOptions.from_mapping(values)
@@ -355,7 +313,10 @@ def check_required_tools(
         # refs-only (or explicit --no-sources) mode: don't require hash tooling.
         tools = [str(tool) for tool in REQUIRED_TOOLS]
     elif target_names:
-        selected_sources = _select_target_source_names(target_names, updaters)
+        selected_sources = update_planner.select_target_source_names(
+            target_names,
+            updaters,
+        )
         if selected_sources:
             target_ref_names = {i.name for i in get_flake_inputs_with_refs()}
             required_tools = {
@@ -533,65 +494,6 @@ class UpdateSummary:
 _SUMMARY_STATUS_PRIORITY = {"no_change": 0, "updated": 1, "error": 2}
 
 
-def _companion_source_depths(
-    names: set[str],
-    updaters: dict[str, UpdaterClass],
-) -> dict[str, int]:
-    return update_planner.companion_source_depths(names, updaters)
-
-
-def _add_companion_source_parents(
-    names: set[str],
-    updaters: dict[str, UpdaterClass],
-) -> None:
-    update_planner.add_companion_source_parents(names, updaters)
-
-
-def _add_companion_source_children(
-    names: set[str],
-    *,
-    roots: set[str],
-    updaters: dict[str, UpdaterClass],
-) -> None:
-    update_planner.add_companion_source_children(
-        names,
-        roots=roots,
-        updaters=updaters,
-    )
-
-
-def _select_source_names(
-    source: str | None,
-    updaters: dict[str, UpdaterClass],
-) -> list[str]:
-    """Resolve source targets, expanding backing-input and companion sources."""
-    return update_planner.select_source_names(
-        source,
-        updaters,
-        source_backing_input_name=_source_backing_input_name,
-    )
-
-
-def _select_target_source_names(
-    target_names: tuple[str, ...],
-    updaters: dict[str, UpdaterClass],
-) -> list[str]:
-    """Resolve source targets, expanding backing-input and companion sources."""
-    return update_planner.select_target_source_names(
-        target_names,
-        updaters,
-        source_backing_input_name=_source_backing_input_name,
-    )
-
-
-def _source_update_waves(
-    source_names: list[str],
-    updaters: dict[str, UpdaterClass],
-) -> list[list[str]]:
-    """Group source updates into dependency-respecting execution waves."""
-    return update_planner.source_update_waves(source_names, updaters)
-
-
 @dataclass(frozen=True)
 class ResolvedTargets:
     """Resolved source/input targets and effective mode flags."""
@@ -615,7 +517,6 @@ class ResolvedTargets:
             opts,
             updaters=_get_updaters(),
             ref_inputs=get_flake_inputs_with_refs(),
-            source_backing_input_name=_source_backing_input_name,
             result_type=cls,
         )
 
@@ -639,7 +540,8 @@ def _build_item_meta(
             updater_cls
         )
         has_input_refresh = (
-            _source_backing_input_name(name, updater_cls, entry) is not None
+            update_planner.source_backing_input_name(name, updater_cls, entry)
+            is not None
         )
 
         if in_flake and in_sources:
@@ -717,33 +619,6 @@ def _emit_summary(
     return 1 if had_errors else 0
 
 
-def _merge_source_updates(
-    existing_entries: dict[str, SourceEntry],
-    source_updates: dict[str, SourceEntry],
-    *,
-    native_only: bool,
-) -> dict[str, SourceEntry]:
-    return merge_source_updates(
-        existing_entries,
-        source_updates,
-        native_only=native_only,
-    )
-
-
-async def _update_source_task(
-    name: str,
-    *,
-    context: _SourceTaskContext,
-) -> _SourceTaskResult:
-    return await update_source_runner.update_source_task(
-        name,
-        context=context,
-        get_updaters=_get_updaters,
-        run_queue_task=run_queue_task,
-        update_flake_input=update_flake_input,
-    )
-
-
 def _resolve_runtime_config(opts: UpdateOptions) -> UpdateConfig:
     return resolve_config(
         http_timeout=opts.http_timeout,
@@ -764,63 +639,6 @@ def _handle_schema_request(opts: UpdateOptions) -> int | None:
         return None
     sys.stdout.write(f"{json.dumps(SourcesFile.json_schema())}\n")
     return 0
-
-
-def _inventory_dependencies() -> InventoryDependencies:
-    def repo_relative_path(path: Path | None) -> str | None:
-        return _repo_relative_path(path, repo_root=get_repo_root)
-
-    def generated_artifact_paths(
-        name: str,
-        updater_cls: type[Updater],
-    ) -> tuple[str, ...]:
-        return _generated_artifact_paths(
-            name,
-            updater_cls,
-            package_dir_for=package_dir_for,
-            repo_relative_path=repo_relative_path,
-        )
-
-    return InventoryDependencies(
-        load_sources=load_all_sources,
-        source_path_map=package_file_map,
-        list_ref_inputs=get_flake_inputs_with_refs,
-        load_lock=load_flake_lock,
-        get_updaters=_get_updaters,
-        source_file_for=sources_file_for,
-        resolve_root_input_node=resolve_root_input_node,
-        source_backing_input_name=_source_backing_input_name,
-        generated_artifact_paths=generated_artifact_paths,
-        source_hash_kinds=_source_hash_kinds,
-        classify_updater_kind=_classify_updater_kind,
-        repo_relative_path=repo_relative_path,
-    )
-
-
-def _build_update_inventory() -> list[_InventoryTarget]:
-    return build_update_inventory(dependencies=_inventory_dependencies())
-
-
-def _handle_list_targets_request(opts: UpdateOptions) -> int | None:
-    return _handle_list_targets_request_impl(
-        opts,
-        dependencies=_inventory_dependencies(),
-    )
-
-
-def _validation_dependencies() -> ValidationDependencies:
-    return ValidationDependencies(
-        load_sources=load_all_sources,
-        validate_source_discovery_consistency=validate_source_discovery_consistency,
-    )
-
-
-def _handle_validate_request(opts: UpdateOptions, out: OutputOptions) -> int | None:
-    return handle_validate_request(
-        opts,
-        out,
-        dependencies=_validation_dependencies(),
-    )
 
 
 def _resolve_tty_settings(
@@ -867,99 +685,6 @@ def _load_pinned_versions(
     return pinned
 
 
-async def _run_ref_phase(
-    *,
-    ref_inputs: list[FlakeInputRef],
-    queue: asyncio.Queue[UpdateEvent | None],
-    dry_run: bool,
-    config: UpdateConfig,
-) -> None:
-    await update_source_runner.run_ref_phase(
-        ref_inputs=ref_inputs,
-        queue=queue,
-        dry_run=dry_run,
-        config=config,
-        update_refs_task=update_refs_task,
-    )
-
-
-async def _run_sources_phase(
-    context: _SourcesPhaseContext,
-) -> None:
-    await update_source_runner.run_sources_phase(
-        context,
-        get_updaters=_get_updaters,
-        source_update_waves=_source_update_waves,
-        update_source_task=_update_source_task,
-    )
-
-
-def _flatten_artifact_updates(
-    artifact_updates: dict[str, tuple[GeneratedArtifact, ...]],
-) -> list[GeneratedArtifact]:
-    """Flatten per-source generated artifact updates into one list."""
-    return flatten_artifact_updates(artifact_updates)
-
-
-def _persist_generated_artifacts(
-    *,
-    resolved: ResolvedTargets,
-    artifact_updates: dict[str, tuple[GeneratedArtifact, ...]],
-    details: dict[str, SummaryStatus],
-) -> None:
-    """Persist generated artifacts emitted by source updaters."""
-    persist_generated_artifacts(
-        do_sources=resolved.do_sources,
-        source_names=resolved.source_names,
-        dry_run=resolved.dry_run,
-        artifact_updates=artifact_updates,
-        details=details,
-        save_artifacts=save_generated_artifacts,
-    )
-
-
-def _persist_source_updates(
-    *,
-    resolved: ResolvedTargets,
-    sources: SourcesFile,
-    source_updates: dict[str, SourceEntry],
-    details: dict[str, SummaryStatus],
-) -> None:
-    persist_source_updates(
-        do_sources=resolved.do_sources,
-        source_names=resolved.source_names,
-        dry_run=resolved.dry_run,
-        native_only=resolved.native_only,
-        sources=sources,
-        source_updates=source_updates,
-        details=details,
-        save_source_file=save_sources,
-    )
-
-
-def _persist_materialized_updates(
-    *,
-    resolved: ResolvedTargets,
-    sources: SourcesFile,
-    source_updates: dict[str, SourceEntry],
-    artifact_updates: dict[str, tuple[GeneratedArtifact, ...]],
-    details: dict[str, SummaryStatus],
-) -> None:
-    """Persist generated artifacts first, then update per-package sources."""
-    persist_materialized_updates(
-        do_sources=resolved.do_sources,
-        source_names=resolved.source_names,
-        dry_run=resolved.dry_run,
-        native_only=resolved.native_only,
-        sources=sources,
-        source_updates=source_updates,
-        artifact_updates=artifact_updates,
-        details=details,
-        save_artifacts=save_generated_artifacts,
-        save_source_file=save_sources,
-    )
-
-
 @dataclass(frozen=True)
 class _RunPlan:
     resolved: ResolvedTargets
@@ -979,11 +704,11 @@ def _handle_preflight_requests(opts: UpdateOptions, out: OutputOptions) -> int |
     if schema_result is not None:
         return schema_result
 
-    list_result = _handle_list_targets_request(opts)
+    list_result = handle_list_targets_request(opts)
     if list_result is not None:
         return list_result
 
-    return _handle_validate_request(opts, out)
+    return handle_validate_request(opts, out)
 
 
 def _build_run_plan(opts: UpdateOptions, out: OutputOptions) -> _RunPlan | int:
@@ -1066,7 +791,7 @@ async def _execute_run_plan(
     if plan.resolved.do_refs and plan.resolved.ref_inputs:
         if plan.show_phase_headers:
             out.print("\nPhase 1: flake input refs", style="dim")
-        await _run_ref_phase(
+        await update_source_runner.run_ref_phase(
             ref_inputs=plan.resolved.ref_inputs,
             queue=queue,
             dry_run=plan.resolved.dry_run,
@@ -1077,8 +802,8 @@ async def _execute_run_plan(
         if plan.show_phase_headers:
             out.print("\nPhase 2: sources.json updates", style="dim")
         pinned = _load_pinned_versions(opts, out)
-        await _run_sources_phase(
-            context=_SourcesPhaseContext(
+        await update_source_runner.run_sources_phase(
+            update_source_runner.SourcesPhaseContext(
                 source_names=plan.resolved.source_names,
                 sources=plan.sources,
                 queue=queue,
@@ -1097,8 +822,11 @@ async def _execute_run_plan(
 
     summary = UpdateSummary()
     summary.accumulate(consume_result.details)
-    _persist_materialized_updates(
-        resolved=plan.resolved,
+    update_persistence.persist_materialized_updates(
+        do_sources=plan.resolved.do_sources,
+        source_names=plan.resolved.source_names,
+        dry_run=plan.resolved.dry_run,
+        native_only=plan.resolved.native_only,
         sources=plan.sources,
         source_updates=consume_result.source_updates,
         artifact_updates=consume_result.artifact_updates,

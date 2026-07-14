@@ -10,7 +10,7 @@ from urllib.parse import urljoin
 import aiohttp
 
 from lib.update.net import fetch_url
-from lib.update.updaters.base import VersionInfo, register_updater
+from lib.update.updaters import VersionInfo, register_updater
 from lib.update.updaters.metadata import PlatformAPIMetadata
 from lib.update.updaters.platform_api import DownloadingPlatformAPIUpdater
 

@@ -11,7 +11,14 @@ import pytest
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._updater_helpers import empty_event_stream
 from lib.update.config import resolve_config
-from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
+from lib.update.events import (
+    CommandResult,
+    StatusInfo,
+    StatusKind,
+    StatusPayload,
+    UpdateEvent,
+    UpdateEventKind,
+)
 from lib.update.nix_deno import (
     _build_deno_deps_expr,
     _build_deno_hash_entries,
@@ -314,11 +321,10 @@ def test_compute_deno_deps_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     assert warning_events[0].message == (
         "Warning: 1 platform(s) failed, preserved existing hashes for: aarch64-darwin"
     )
-    assert warning_events[0].payload == {
-        "operation": "compute_hash",
-        "status": "partial_hashes",
-        "detail": ("aarch64-darwin",),
-    }
+    assert warning_events[0].payload == StatusPayload(
+        operation="compute_hash",
+        info=StatusInfo(kind=StatusKind.PARTIAL_HASHES, value="aarch64-darwin"),
+    )
     final = events[-1]
     assert final.kind == UpdateEventKind.VALUE
     payload = final.payload

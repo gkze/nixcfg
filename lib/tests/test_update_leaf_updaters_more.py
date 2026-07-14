@@ -14,8 +14,8 @@ from lib.tests._updater_helpers import (
     run_async,
     updater_from_module,
 )
-from lib.update.updaters import factories as updater_factories
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
+from lib.update.updaters import strategies as updater_strategies
 from lib.update.updaters.metadata import AssetURLsMetadata, DownloadUrlMetadata
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
@@ -62,7 +62,7 @@ def _patch_dependency(
     name: str,
     value: object,
 ) -> None:
-    target = module if hasattr(module, name) else updater_factories
+    target = module if hasattr(module, name) else updater_strategies
     monkeypatch.setattr(target, name, value)
 
 
@@ -638,7 +638,7 @@ def test_leaf_updaters_reject_invalid_vendor_payloads(
             return (SparkleAppcastItem("not-a-semver", None, ""),)
 
         monkeypatch.setattr(
-            updater_factories, "fetch_sparkle_appcast_items", fake_sparkle
+            updater_strategies, "fetch_sparkle_appcast_items", fake_sparkle
         )
     elif isinstance(payload, bytes):
 

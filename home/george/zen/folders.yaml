@@ -61,6 +61,7 @@ workspaces:
           - PlanetScale: https://app.planetscale.com
           - Supabase: https://supabase.com
       - Finance & HR:
+          - Ashby: https://app.ashbyhq.com
           - Branch: https://app.link.com
           - Metronome: https://app.metronome.com
           - Ramp: https://app.ramp.com
@@ -94,6 +95,7 @@ workspaces:
           - PostHog: https://posthog.com
           - Sentry: https://sentry.io
           - Statsig: https://console.statsig.com
+          - StatusGator: https://statusgator.com
       - Productivity:
           - Dropbox: https://dropbox.com
           - Linear: https://linear.app

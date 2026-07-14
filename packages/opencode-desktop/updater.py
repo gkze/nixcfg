@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     FlakeInputHashUpdater,
     UpdateContext,
     VersionInfo,

@@ -15,6 +15,8 @@ from lib.update.config import (
 from lib.update.events import (
     CommandResult,
     EventStream,
+    StatusInfo,
+    StatusKind,
     UpdateEvent,
     UpdateEventKind,
     ValueDrain,
@@ -182,8 +184,7 @@ async def _process_platform_hash(
         context.source,
         f"Computing hash for {platform_name}...",
         operation="compute_hash",
-        status="computing_hash",
-        detail=platform_name,
+        status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value=platform_name),
     )
 
     temp_entries = _build_deno_hash_entries(

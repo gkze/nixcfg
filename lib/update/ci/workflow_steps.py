@@ -30,12 +30,7 @@ from lib.update.ci.pr_body import (
 )
 from lib.update.ci.sources_json_diff import NoChangesMessage
 from lib.update.ci.sources_json_diff import run_diff as run_sources_diff
-from lib.update.ci.workflow_artifact_contracts import (
-    validate_workflow_artifact_contracts,
-)
-from lib.update.ci.workflow_structure_contracts import (
-    validate_workflow_structure_contracts,
-)
+from lib.update.ci.workflow_defs import render_generated_workflows
 from lib.update.paths import (
     PACKAGE_DIRS,
     SOURCES_FILE_NAME,
@@ -151,34 +146,21 @@ _cmd_list_update_targets = _bind_core_command(
 )
 
 
-def _cmd_verify_workflow_contracts(
-    *,
-    workflow: Path,
-    validator: Callable[..., None],
-    description: str,
-) -> int:
-    return _workflow_core.cmd_verify_workflow_contracts(
-        workflow=workflow,
-        validator=validator,
-        description=description,
+def _cmd_generate_workflows(*, root: Path | None = None) -> int:
+    return _workflow_core.cmd_generate_workflows(
+        render=render_generated_workflows,
+        root=get_repo_root() if root is None else root,
         stdout=sys.stdout,
         stderr=sys.stderr,
     )
 
 
-def _cmd_verify_artifacts(*, workflow: Path) -> int:
-    return _cmd_verify_workflow_contracts(
-        workflow=workflow,
-        validator=validate_workflow_artifact_contracts,
-        description="workflow artifact contracts",
-    )
-
-
-def _cmd_verify_structure(*, workflow: Path) -> int:
-    return _cmd_verify_workflow_contracts(
-        workflow=workflow,
-        validator=validate_workflow_structure_contracts,
-        description="workflow structure contracts",
+def _cmd_verify_generated_workflows(*, root: Path | None = None) -> int:
+    return _workflow_core.cmd_verify_generated_workflows(
+        render=render_generated_workflows,
+        root=get_repo_root() if root is None else root,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
     )
 
 
@@ -295,7 +277,7 @@ def _cmd_render_certification_pr_body(
     output: str | Path,
     run_json: Path,
     cachix_name: str,
-    workflow: Path,
+    workflow: Path | None = None,
     jobs_json: Path | None = None,
 ) -> int:
     try:
@@ -574,13 +556,16 @@ def command_render_certification_pr_body(
         ),
     ] = None,
     workflow: Annotated[
-        Path,
+        Path | None,
         typer.Option(
             "-w",
             "--workflow",
-            help="Certification workflow file used to enumerate cached closures.",
+            help=(
+                "Optional certification workflow file used to enumerate cached "
+                "closures; defaults to the typed workflow model."
+            ),
         ),
-    ] = Path(".github/workflows/update-certify.yml"),
+    ] = None,
 ) -> None:
     """Render or replace the certification section in an existing PR body."""
     _exit_with_code(
@@ -605,34 +590,14 @@ def command_list_update_targets() -> None:
     _exit_with_code(_cmd_list_update_targets())
 
 
-def command_verify_artifacts(
-    *,
-    workflow: Annotated[
-        Path,
-        typer.Option(
-            "-w",
-            "--workflow",
-            help="Workflow file to validate.",
-        ),
-    ] = Path(".github/workflows/update.yml"),
-) -> None:
-    """Validate artifact path contracts in one workflow file."""
-    _exit_with_code(_cmd_verify_artifacts(workflow=workflow))
+def command_generate_workflows() -> None:
+    """Render and write the generated GitHub workflow files."""
+    _exit_with_code(_cmd_generate_workflows())
 
 
-def command_verify_structure(
-    *,
-    workflow: Annotated[
-        Path,
-        typer.Option(
-            "-w",
-            "--workflow",
-            help="Workflow file to validate.",
-        ),
-    ] = Path(".github/workflows/update.yml"),
-) -> None:
-    """Validate higher-level structure contracts in one workflow file."""
-    _exit_with_code(_cmd_verify_structure(workflow=workflow))
+def command_verify_generated_workflows() -> None:
+    """Verify committed workflow files match the typed workflow model."""
+    _exit_with_code(_cmd_verify_generated_workflows())
 
 
 def command_validate_bun_lock(
@@ -729,8 +694,8 @@ _register_callbacks((
 _register_commands(
     app,
     (
-        ("verify-artifacts", command_verify_artifacts, None),
-        ("verify-structure", command_verify_structure, None),
+        ("generate", command_generate_workflows, None),
+        ("verify-generated", command_verify_generated_workflows, None),
         ("validate-bun-lock", command_validate_bun_lock, None),
         ("prepare-bun-lock", command_prepare_bun_lock, None),
         (

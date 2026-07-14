@@ -11,7 +11,8 @@ from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_modu
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEventKind
 from lib.update.nix import _build_fetch_from_github_call, _build_overlay_expr
-from lib.update.updaters.base import VersionInfo, source_override_env
+from lib.update.updaters import VersionInfo
+from lib.update.updaters.core import source_override_env
 
 
 def test_gemini_cli_updater_fetch_latest_and_override_payload(monkeypatch) -> None:

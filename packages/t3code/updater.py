@@ -5,16 +5,16 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING, Literal
 
+from lib.update import nix as update_nix
 from lib.update.generated_artifact_commands import stream_command_materialized_artifacts
 from lib.update.nix import _build_overlay_attr_expr
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters._base_proxy import base_module as _base_module
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     UpdateContext,
     VersionInfo,
-    _coerce_context,
     register_updater,
 )
+from lib.update.updaters.core import _coerce_context
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
 
 if TYPE_CHECKING:
@@ -65,7 +65,7 @@ class T3CodeUpdater(FlakeInputHashUpdater):
     ) -> EventStream:
         """Hash the runtime cache directly so workspace FODs cannot pollute it."""
         _ = info
-        return _base_module().compute_fixed_output_hash(
+        return update_nix.compute_fixed_output_hash(
             self.name,
             self._node_modules_expr(system=system),
             env={"FAKE_HASHES": "1"},

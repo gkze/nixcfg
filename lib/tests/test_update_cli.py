@@ -11,7 +11,6 @@ from lib.update.cli import (
     UpdateOptions,
     UpdateSummary,
     _emit_summary,
-    _merge_source_updates,
     run_updates,
 )
 from lib.update.cli_inventory import (
@@ -20,6 +19,7 @@ from lib.update.cli_inventory import (
     _InventorySourceTarget,
     _InventoryTarget,
 )
+from lib.update.persistence import merge_source_updates
 
 
 class _MonkeyPatchLike(Protocol):
@@ -64,7 +64,7 @@ def test_merge_source_updates_native_only_preserves_other_platform_hashes() -> N
         ),
     }
 
-    merged = _merge_source_updates(existing, updates, native_only=True)
+    merged = merge_source_updates(existing, updates, native_only=True)
 
     result_entries = merged["opencode"].hashes.entries
     if result_entries is None:
@@ -87,7 +87,7 @@ def test_merge_source_updates_non_native_returns_updates_unchanged() -> None:
         ),
     }
 
-    merged = _merge_source_updates({}, updates, native_only=False)
+    merged = merge_source_updates({}, updates, native_only=False)
 
     assert merged is updates
 
@@ -99,7 +99,7 @@ def test_run_updates_list_json_outputs_sources_and_inputs(
     """Emit machine-readable inventory payload for list mode."""
     monkeypatch.setattr(
         "lib.update.cli_inventory.build_update_inventory",
-        lambda *, dependencies: [
+        lambda: [
             _InventoryTarget(
                 name="tool",
                 handles=_InventoryHandles(
@@ -220,11 +220,11 @@ def test_run_updates_validate_json_outputs_success(
 ) -> None:
     """Emit validation success details for json mode."""
     monkeypatch.setattr(
-        "lib.update.cli.load_all_sources",
+        "lib.update.sources.load_all_sources",
         lambda: SimpleNamespace(entries={}),
     )
     monkeypatch.setattr(
-        "lib.update.cli.validate_source_discovery_consistency",
+        "lib.update.sources.validate_source_discovery_consistency",
         lambda: None,
     )
 
@@ -242,7 +242,7 @@ def test_run_updates_validate_json_outputs_error(
 ) -> None:
     """Emit validation error details for json mode and fail."""
     monkeypatch.setattr(
-        "lib.update.cli.load_all_sources",
+        "lib.update.sources.load_all_sources",
         lambda: SimpleNamespace(entries={}),
     )
 
@@ -250,7 +250,9 @@ def test_run_updates_validate_json_outputs_error(
         msg = "bad metadata"
         raise ValueError(msg)
 
-    monkeypatch.setattr("lib.update.cli.validate_source_discovery_consistency", _boom)
+    monkeypatch.setattr(
+        "lib.update.sources.validate_source_discovery_consistency", _boom
+    )
 
     opts = UpdateOptions(validate=True, json=True)
     exit_code = asyncio.run(run_updates(opts))

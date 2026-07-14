@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import pinned_source_download_updater
+from typing import ClassVar
 
-CogitoUpdater = pinned_source_download_updater(
-    "cogito",
-    platforms={"aarch64-darwin": "arm64"},
-    download_url="https://downloads.cogito.md/releases/{version}/1/Cogito-{version}-1-mac.zip",
-    module=__name__,
-)
+from lib.update.updaters import PinnedSourceDownloadUpdater, register_updater
+
+
+@register_updater
+class CogitoUpdater(PinnedSourceDownloadUpdater):
+    """Pinned download updater for the Cogito macOS app archive."""
+
+    name = "cogito"
+    PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "arm64"}
+    DOWNLOAD_URL_TEMPLATE = (
+        "https://downloads.cogito.md/releases/{version}/1/Cogito-{version}-1-mac.zip"
+    )

@@ -8,9 +8,9 @@ import pytest
 from pydantic import BaseModel
 
 from lib.nix.models.flake_lock import FlakeLockNode
+from lib.update.updaters import FlakeInputMetadataUpdater
 from lib.update.updaters import metadata as metadata_module
 from lib.update.updaters import registry as registry_module
-from lib.update.updaters.base import FlakeInputMetadataUpdater
 from lib.update.updaters.metadata import (
     NO_METADATA,
     DownloadUrlMetadata,

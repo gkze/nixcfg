@@ -12,47 +12,39 @@ from typing import TYPE_CHECKING
 from rich.console import Console
 from rich.table import Table
 
-from lib.update.updaters.base import (
+from lib.update import updaters as updater_module
+from lib.update.flake import load_flake_lock, resolve_root_input_node
+from lib.update.paths import (
+    get_repo_root,
+    package_dir_for,
+    package_file_map,
+    sources_file_for,
+)
+from lib.update.planner import source_backing_input_name
+from lib.update.refs import get_flake_inputs_with_refs
+from lib.update.sources import load_all_sources
+from lib.update.updaters import UPDATERS, ensure_updaters_loaded
+from lib.update.updaters.core import (
     ChecksumProvidedUpdater,
-    DenoManifestUpdater,
     DownloadHashUpdater,
-    FlakeInputHashUpdater,
-    FlakeInputUpdater,
     HashEntryUpdater,
     Updater,
+)
+from lib.update.updaters.flake_backed import (
+    DenoManifestUpdater,
+    FlakeInputHashUpdater,
     UvLockUpdater,
 )
 from lib.update.updaters.platform_api import PlatformAPIUpdater
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
-    from lib.nix.models.sources import SourceEntry, SourcesFile
+    from lib.nix.models.sources import SourceEntry
     from lib.update.cli_options import UpdateOptions
-    from lib.update.refs import FlakeInputRef
+    from lib.update.updaters import UpdaterClass
 
 
-@dataclass(frozen=True)
-class InventoryDependencies:
-    """Collaborators required to build update inventory rows."""
-
-    load_sources: Callable[[], SourcesFile]
-    source_path_map: Callable[[str], dict[str, Path]]
-    list_ref_inputs: Callable[[], list[FlakeInputRef]]
-    load_lock: Callable[[], FlakeLock]
-    get_updaters: Callable[[], dict[str, type[Updater]]]
-    source_file_for: Callable[[str], Path | None]
-    resolve_root_input_node: Callable[
-        [FlakeLock, str], tuple[FlakeLockNode | None, str | None]
-    ]
-    source_backing_input_name: Callable[
-        [str, type[Updater] | None, SourceEntry | None], str | None
-    ]
-    generated_artifact_paths: Callable[[str, type[Updater]], tuple[str, ...]]
-    source_hash_kinds: Callable[[SourceEntry | None], tuple[str, ...]]
-    classify_updater_kind: Callable[[type[Updater]], str]
-    repo_relative_path: Callable[[Path | None], str | None]
+def _get_updaters() -> dict[str, UpdaterClass]:
+    return updater_module.resolve_registry_alias(UPDATERS, ensure_updaters_loaded)
 
 
 @dataclass(frozen=True)
@@ -193,110 +185,13 @@ class _InventoryTarget:
         }
 
 
-@dataclass(frozen=True)
-class _ListRow:
-    name: str
-    item_type: str
-    source: str
-    ref: str | None
-    rev: str | None
-
-
-def _row_sort_value(row: _ListRow, sort_by: str) -> str:
-    if sort_by == "type":
-        return row.item_type
-    if sort_by == "source":
-        return row.source
-    if sort_by == "ref":
-        return row.ref or ""
-    if sort_by == "rev":
-        return row.rev or ""
-    return row.name
-
-
-def _flake_source_string(node: FlakeLockNode | None, follows: str | None) -> str:
-    original = node.original if node is not None else None
-    locked = node.locked if node is not None else None
-
-    source_type = (
-        original.type
-        if original is not None and original.type
-        else locked.type
-        if locked is not None
-        else None
-    )
-    owner = (
-        original.owner
-        if original is not None and original.owner
-        else locked.owner
-        if locked is not None
-        else None
-    )
-    repo = (
-        original.repo
-        if original is not None and original.repo
-        else locked.repo
-        if locked is not None
-        else None
-    )
-    url = (
-        original.url
-        if original is not None and original.url
-        else locked.url
-        if locked is not None
-        else None
-    )
-    path = (
-        original.path
-        if original is not None and original.path
-        else locked.path
-        if locked is not None
-        else None
-    )
-
-    source = "<unknown>"
-    if source_type in {"github", "gitlab"} and owner and repo:
-        source = f"{source_type}:{owner}/{repo}"
-    elif source_type and url:
-        source = f"{source_type}:{url}"
-    elif source_type and path:
-        source = f"{source_type}:{path}"
-    elif url:
-        source = url
-    elif path:
-        source = path
-    elif follows:
-        source = f"follows:{follows}"
-    elif source_type:
-        source = source_type
-    return source
-
-
-def _repo_relative_path(
-    path: Path | None, *, repo_root: Callable[[], Path]
-) -> str | None:
+def _repo_relative_path(path: Path | None) -> str | None:
     if path is None:
         return None
     try:
-        return str(path.relative_to(repo_root()))
+        return str(path.relative_to(get_repo_root()))
     except ValueError:
         return str(path)
-
-
-def _source_backing_input_name(
-    name: str,
-    updater_cls: type[Updater] | None,
-    entry: SourceEntry | None = None,
-) -> str | None:
-    if updater_cls is not None:
-        input_name = getattr(updater_cls, "input_name", None)
-        if isinstance(input_name, str) and input_name:
-            return input_name
-        if issubclass(updater_cls, FlakeInputUpdater):
-            return name
-    if entry is not None and entry.input:
-        return entry.input
-    return None
 
 
 def _source_hash_kinds(entry: SourceEntry | None) -> tuple[str, ...]:
@@ -329,9 +224,6 @@ def _classify_updater_kind(updater_cls: type[Updater]) -> str:
 def _generated_artifact_paths(
     name: str,
     updater_cls: type[Updater],
-    *,
-    package_dir_for: Callable[[str], Path | None],
-    repo_relative_path: Callable[[Path | None], str | None],
 ) -> tuple[str, ...]:
     crate2nix_paths = _crate2nix_generated_artifact_paths(name)
     declared_paths = getattr(updater_cls, "generated_artifact_files", ())
@@ -350,7 +242,7 @@ def _generated_artifact_paths(
         artifact_paths = tuple(
             resolved
             for relative in declared_paths
-            if (resolved := repo_relative_path(pkg_dir / relative)) is not None
+            if (resolved := _repo_relative_path(pkg_dir / relative)) is not None
         )
 
     if not artifact_paths:
@@ -361,7 +253,7 @@ def _generated_artifact_paths(
             artifact_name = getattr(updater_cls, "manifest_file", "deno-deps.json")
 
         if artifact_name is not None:
-            path = repo_relative_path(pkg_dir / artifact_name)
+            path = _repo_relative_path(pkg_dir / artifact_name)
             if path is not None:
                 artifact_paths = (path,)
 
@@ -408,15 +300,13 @@ def _build_inventory_summary(targets: list[_InventoryTarget]) -> dict[str, objec
     return {"totalTargets": len(targets), "counts": counts}
 
 
-def build_update_inventory(
-    *, dependencies: InventoryDependencies
-) -> list[_InventoryTarget]:
-    """Build logical update targets from one cohesive dependency bundle."""
-    sources = dependencies.load_sources()
-    path_map = dependencies.source_path_map("sources.json")
-    ref_inputs = {item.name: item for item in dependencies.list_ref_inputs()}
-    lock = dependencies.load_lock()
-    updaters = dependencies.get_updaters()
+def build_update_inventory() -> list[_InventoryTarget]:
+    """Build logical update targets from updater and flake input metadata."""
+    sources = load_all_sources()
+    path_map = package_file_map("sources.json")
+    ref_inputs = {item.name: item for item in get_flake_inputs_with_refs()}
+    lock = load_flake_lock()
+    updaters = _get_updaters()
 
     targets: list[_InventoryTarget] = []
     all_names = sorted(set(updaters) | set(ref_inputs))
@@ -424,18 +314,12 @@ def build_update_inventory(
         updater_cls = updaters.get(name)
         entry = sources.entries.get(name)
         ref_input = ref_inputs.get(name)
-        source_backing_input = dependencies.source_backing_input_name(
-            name,
-            updater_cls,
-            entry,
-        )
+        source_backing_input = source_backing_input_name(name, updater_cls, entry)
         backing_input = source_backing_input or (
             ref_input.name if ref_input is not None else None
         )
         generated_artifacts = (
-            ()
-            if updater_cls is None
-            else dependencies.generated_artifact_paths(name, updater_cls)
+            () if updater_cls is None else _generated_artifact_paths(name, updater_cls)
         )
         handles = _InventoryHandles(
             ref_update=name in ref_inputs,
@@ -447,7 +331,7 @@ def build_update_inventory(
 
         ref_target: _InventoryRefTarget | None = None
         if ref_input is not None:
-            node, _follows = dependencies.resolve_root_input_node(lock, name)
+            node, _follows = resolve_root_input_node(lock, name)
             locked = node.locked if node is not None else None
             ref_target = _InventoryRefTarget(
                 input_name=ref_input.name,
@@ -461,13 +345,11 @@ def build_update_inventory(
         source_target: _InventorySourceTarget | None = None
         if updater_cls is not None:
             source_target = _InventorySourceTarget(
-                path=dependencies.repo_relative_path(
-                    path_map.get(name) or dependencies.source_file_for(name)
-                ),
+                path=_repo_relative_path(path_map.get(name) or sources_file_for(name)),
                 version=entry.version if entry is not None else None,
                 commit=entry.commit if entry is not None else None,
-                hash_kinds=dependencies.source_hash_kinds(entry),
-                updater_kind=dependencies.classify_updater_kind(updater_cls),
+                hash_kinds=_source_hash_kinds(entry),
+                updater_kind=_classify_updater_kind(updater_cls),
                 updater_class=updater_cls.__name__,
             )
 
@@ -502,78 +384,6 @@ def _inventory_sort_value(target: _InventoryTarget, sort_by: str) -> str:
     return target.name
 
 
-def _collect_flake_inputs_for_list(
-    *,
-    load_lock: Callable[[], FlakeLock],
-    resolve_root_input_node: Callable[
-        [FlakeLock, str], tuple[FlakeLockNode | None, str | None]
-    ],
-    flake_source_string: Callable[[FlakeLockNode | None, str | None], str],
-    get_flake_input_version: Callable[[FlakeLockNode], str],
-) -> list[_ListRow]:
-    lock = load_lock()
-    root_inputs = lock.root_node.inputs or {}
-    items: list[_ListRow] = []
-
-    for input_name in sorted(root_inputs):
-        node, follows = resolve_root_input_node(lock, input_name)
-        source = flake_source_string(node, follows)
-
-        original = node.original if node is not None else None
-        locked = node.locked if node is not None else None
-        selector = getattr(original, "rev", None) if original is not None else None
-        ref = original.ref if original is not None else None
-        if ref is None and isinstance(selector, str):
-            ref = selector
-        if ref is None and node is not None:
-            inferred = get_flake_input_version(node)
-            if inferred != "unknown":
-                ref = inferred
-        rev = locked.rev if locked is not None else None
-
-        items.append(
-            _ListRow(
-                name=input_name,
-                item_type="flake",
-                source=source,
-                ref=ref,
-                rev=rev,
-            )
-        )
-
-    return items
-
-
-def _collect_source_entries_for_list(
-    *,
-    load_sources: Callable[[], SourcesFile],
-    source_path_map: Callable[[str], dict[str, Path]],
-) -> list[_ListRow]:
-    sources = load_sources()
-    path_map = source_path_map("sources.json")
-    items: list[_ListRow] = []
-
-    for name in sorted(path_map):
-        entry = sources.entries.get(name)
-        source = "<none>"
-        if entry is not None and entry.urls:
-            urls = sorted(set(entry.urls.values()))
-            source = urls[0] if len(urls) == 1 else f"{urls[0]} (+{len(urls) - 1} more)"
-        ref = entry.version if entry is not None else None
-        rev = entry.commit if entry is not None else None
-        items.append(
-            _ListRow(
-                name=name,
-                item_type="sources.json",
-                source=source,
-                ref=ref,
-                rev=rev,
-            )
-        )
-
-    return items
-
-
 def _render_inventory_table(targets: list[_InventoryTarget]) -> None:
     no_color = not sys.stdout.isatty()
     console = Console(no_color=no_color, highlight=not no_color)
@@ -597,15 +407,12 @@ def _render_inventory_table(targets: list[_InventoryTarget]) -> None:
     console.print(table)
 
 
-def _handle_list_targets_request(
-    opts: UpdateOptions,
-    *,
-    dependencies: InventoryDependencies,
-) -> int | None:
+def handle_list_targets_request(opts: UpdateOptions) -> int | None:
+    """Handle ``--list`` by rendering the update inventory."""
     if not opts.list_targets:
         return None
 
-    targets = build_update_inventory(dependencies=dependencies)
+    targets = build_update_inventory()
     targets.sort(
         key=lambda target: (_inventory_sort_value(target, opts.sort_by), target.name)
     )

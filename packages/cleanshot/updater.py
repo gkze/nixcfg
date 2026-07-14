@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.update.net import fetch_url
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 
 if TYPE_CHECKING:
     import aiohttp

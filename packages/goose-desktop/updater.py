@@ -6,11 +6,11 @@ import json
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
+from lib.update import nix as update_nix
 from lib.update import sources as update_sources
 from lib.update.nix import _build_flake_attr_expr
 from lib.update.paths import local_flake_url, sources_file_for
-from lib.update.updaters._base_proxy import base_module as _base_module
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     HashEntryUpdater,
     VersionInfo,
     register_updater,
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.update.events import EventStream
-    from lib.update.updaters.base import UpdateContext
+    from lib.update.updaters import UpdateContext
 
 
 @register_updater
@@ -70,7 +70,7 @@ class GooseDesktopUpdater(HashEntryUpdater):
     ) -> EventStream:
         """Compute the desktop pnpm dependency cache hash directly."""
         _ = (info, session, context)
-        hash_stream = _base_module().compute_fixed_output_hash(
+        hash_stream = update_nix.compute_fixed_output_hash(
             self.name,
             _build_flake_attr_expr(
                 local_flake_url(),

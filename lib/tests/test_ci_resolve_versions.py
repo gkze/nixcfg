@@ -13,7 +13,7 @@ from lib.update.ci.resolve_versions import (
     load_pinned_versions,
     run,
 )
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 
 if TYPE_CHECKING:
     from pathlib import Path

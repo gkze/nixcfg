@@ -12,7 +12,7 @@ from lib.update.nix import (
     get_current_nix_platform,
 )
 from lib.update.paths import local_flake_url
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     SourceThenOverlayHashMixin,
     VersionInfo,
     read_pinned_source_version,

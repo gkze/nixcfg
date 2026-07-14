@@ -16,7 +16,7 @@ import inspect
 import json
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import aiohttp
 import typer
@@ -28,8 +28,14 @@ from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.sources import load_all_sources
 from lib.update.updaters import UPDATERS, UpdaterClass, ensure_updaters_loaded
-from lib.update.updaters.base import Updater, VersionInfo
-from lib.update.updaters.metadata import deserialize_metadata, serialize_metadata
+from lib.update.updaters.metadata import (
+    VersionInfo,
+    deserialize_metadata,
+    serialize_metadata,
+)
+
+if TYPE_CHECKING:
+    from lib.update.updaters.core import Updater
 
 type _JsonSafe = (
     str | int | float | bool | None | dict[str, _JsonSafe] | list[_JsonSafe]

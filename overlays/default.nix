@@ -26,22 +26,16 @@
 
       helpers = import ./_lib/helpers.nix fragArgs;
 
+      mkMacAppPassthru = import ./_lib/mk-mac-app-passthru.nix;
       withManagedMacApp =
         package: bundleName:
         package.overrideAttrs (old: {
-          passthru = (old.passthru or { }) // {
-            macApp = {
-              inherit bundleName;
-              bundleRelPath = "Applications/${bundleName}";
-              installMode = "copy";
-            };
-          };
+          passthru = (old.passthru or { }) // mkMacAppPassthru { inherit bundleName; };
         });
 
       tinyOverlays = {
         appcleaner = withManagedMacApp prev.appcleaner "AppCleaner.app";
         betterdisplay = withManagedMacApp prev.betterdisplay "BetterDisplay.app";
-        chatgpt = withManagedMacApp (final.mkSourceOverride "chatgpt" prev.chatgpt) "ChatGPT.app";
         code-cursor = withManagedMacApp (final.mkSourceOverride "code-cursor" prev.code-cursor) "Cursor.app";
         commander = withManagedMacApp (final.callPackage ../packages/commander {
           selfSource = sources.commander;

@@ -12,7 +12,7 @@ from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEventKind
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 from lib.update.updaters.core import UpdateContext
 
 HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -242,7 +242,7 @@ def test_t3code_workspace_rechecks_node_modules_when_drv_fingerprint_matches(
     monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
     monkeypatch.setattr(module, "_compute_workspace_hash", _fake_compute)
     monkeypatch.setattr(
-        "lib.update.updaters.base.get_current_nix_platform",
+        "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 

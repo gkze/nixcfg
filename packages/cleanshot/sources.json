@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-3d1ySCEghWumophBWarKtHyiIb4Yy5RnhnpPO6HN2KA=",
-    "x86_64-darwin": "sha256-3d1ySCEghWumophBWarKtHyiIb4Yy5RnhnpPO6HN2KA="
+    "aarch64-darwin": "sha256-HgxQrMPqQaEYZL8R3HIgNKWMaxfEVZAOtjHjKAxgus4=",
+    "x86_64-darwin": "sha256-HgxQrMPqQaEYZL8R3HIgNKWMaxfEVZAOtjHjKAxgus4="
   },
   "urls": {
-    "aarch64-darwin": "https://updates.getcleanshot.com/v3/CleanShot-X-4.8.8.dmg",
-    "x86_64-darwin": "https://updates.getcleanshot.com/v3/CleanShot-X-4.8.8.dmg"
+    "aarch64-darwin": "https://updates.getcleanshot.com/v3/CleanShot-X-4.8.9.dmg",
+    "x86_64-darwin": "https://updates.getcleanshot.com/v3/CleanShot-X-4.8.9.dmg"
   },
-  "version": "4.8.8"
+  "version": "4.8.9"
 }

@@ -7,7 +7,7 @@
   makeWrapper,
   nodejs,
   outputs,
-  pnpm_10,
+  pnpm_11,
   pnpmConfigHook,
   python3,
   stdenv,
@@ -23,7 +23,7 @@ let
       lib
       nodejs
       outputs
-      pnpm_10
+      pnpm_11
       pnpmConfigHook
       stdenv
       ;

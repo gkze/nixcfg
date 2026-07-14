@@ -394,7 +394,7 @@ let
         fi
       '';
       postPatch = (attrs.postPatch or "") + ''
-        PYTHONPATH=${../..} ${lib.getExe python3} \
+        PYTHONPATH=${import ../../lib/codemods-pythonpath.nix { inherit lib; }} ${lib.getExe python3} \
           ${./patch_tree_sitter_build_rs.py} \
           binding_rust/build.rs
       '';

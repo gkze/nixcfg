@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     DownloadHashUpdater,
     VersionInfo,
     read_pinned_source_version,
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry
-    from lib.update.updaters.base import UpdateContext
+    from lib.update.updaters import UpdateContext
 
 
 @register_updater

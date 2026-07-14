@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lib.update.artifacts import GeneratedArtifact, save_generated_artifacts
-from lib.update.sources import save_sources
+from lib.nix.models.sources import SourcesFile
+from lib.update import artifacts as update_artifacts
+from lib.update import sources as update_sources
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from lib.nix.models.sources import SourceEntry, SourcesFile
+    from lib.nix.models.sources import SourceEntry
+    from lib.update.artifacts import GeneratedArtifact
     from lib.update.ui_state import SummaryStatus
 
 
@@ -47,9 +47,6 @@ def persist_generated_artifacts(
     dry_run: bool,
     artifact_updates: dict[str, tuple[GeneratedArtifact, ...]],
     details: dict[str, SummaryStatus],
-    save_artifacts: Callable[
-        [list[GeneratedArtifact]], None
-    ] = save_generated_artifacts,
 ) -> None:
     """Persist generated artifacts emitted by successful source updaters."""
     if not (do_sources and source_names):
@@ -63,7 +60,9 @@ def persist_generated_artifacts(
     }
     if not successful_updates:
         return
-    save_artifacts(flatten_artifact_updates(successful_updates))
+    update_artifacts.save_generated_artifacts(
+        flatten_artifact_updates(successful_updates)
+    )
 
 
 def persist_source_updates(
@@ -75,26 +74,35 @@ def persist_source_updates(
     sources: SourcesFile,
     source_updates: dict[str, SourceEntry],
     details: dict[str, SummaryStatus],
-    save_source_file: Callable[[SourcesFile], None] = save_sources,
 ) -> None:
     """Persist per-package sources.json updates from one update run."""
     if not (do_sources and source_names):
         return
 
-    if source_updates:
+    selected_names = set(source_names)
+    successful_updates = {
+        name: entry
+        for name, entry in source_updates.items()
+        if name in selected_names and details.get(name) == "updated"
+    }
+    if not successful_updates:
+        return
+
+    if native_only and not dry_run:
+        merged_updates = update_sources.save_source_updates(
+            successful_updates,
+            merge_existing=True,
+        )
+    else:
         merged_updates = merge_source_updates(
             sources.entries,
-            source_updates,
+            successful_updates,
             native_only=native_only,
         )
-        sources.entries.update(merged_updates)
 
-    if (
-        not dry_run
-        and source_updates
-        and any(details.get(name) == "updated" for name in source_names)
-    ):
-        save_source_file(sources)
+    if not dry_run and not native_only:
+        update_sources.save_sources(SourcesFile(entries=merged_updates))
+    sources.entries.update(merged_updates)
 
 
 def persist_materialized_updates(
@@ -107,10 +115,6 @@ def persist_materialized_updates(
     source_updates: dict[str, SourceEntry],
     artifact_updates: dict[str, tuple[GeneratedArtifact, ...]],
     details: dict[str, SummaryStatus],
-    save_artifacts: Callable[
-        [list[GeneratedArtifact]], None
-    ] = save_generated_artifacts,
-    save_source_file: Callable[[SourcesFile], None] = save_sources,
 ) -> None:
     """Persist generated artifacts first, then per-package sources."""
     persist_generated_artifacts(
@@ -119,7 +123,6 @@ def persist_materialized_updates(
         dry_run=dry_run,
         artifact_updates=artifact_updates,
         details=details,
-        save_artifacts=save_artifacts,
     )
     persist_source_updates(
         do_sources=do_sources,
@@ -129,7 +132,6 @@ def persist_materialized_updates(
         sources=sources,
         source_updates=source_updates,
         details=details,
-        save_source_file=save_source_file,
     )
 
 

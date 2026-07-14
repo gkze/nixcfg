@@ -559,5 +559,5 @@ def cli(
 main = make_main(app, prog_name="cache fod")
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":  # pragma: no cover -- CLI entrypoint
     raise SystemExit(main())

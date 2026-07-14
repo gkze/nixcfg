@@ -11,6 +11,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
+from lib.update.ci.workflow_defs import DEEP_QUALITY_CHECKS, FAST_QUALITY_CHECKS
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -38,31 +40,12 @@ AUTO_FIX_ALLOWED_PATH_PREFIXES: Final = (
     "docs/",
     "misc/",
 )
-# Keep this list aligned with the PR CI surface; the workflow structure tests compare
-# it against .github/workflows/ci.yml so branch-protection drift fails locally.
+# Aligned with the PR CI surface by construction: the quality-matrix slices come
+# from the same typed workflow definitions that generate .github/workflows/ci.yml.
 EXPECTED_REPAIR_PR_REQUIRED_CHECKS: Final = (
     "commitlint",
-    "format-repo",
-    "lint-editorconfig",
-    "format-yaml-yamlfmt",
-    "lint-yaml-yamllint",
-    "format-web-oxfmt",
-    "lint-web-oxlint",
-    "format-python-pyupgrade",
-    "format-python-ruff",
-    "lint-python-compile",
-    "lint-python-ruff",
-    "lint-python-ty",
-    "lint-workflows-actionlint",
-    "test-nix-default-api",
-    "test-nix-package-helpers",
-    "test-nix-opencode-desktop",
-    "cache-electron-runtimes",
-    "test-python-pytest",
-    "verify-workflow-artifacts-refresh",
-    "verify-workflow-artifacts-certify",
-    "verify-workflow-structure-refresh",
-    "verify-workflow-structure-certify",
+    *FAST_QUALITY_CHECKS,
+    *DEEP_QUALITY_CHECKS,
     "lint-pins-pinact",
     "verify-crate2nix",
 )

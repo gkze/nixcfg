@@ -1,5 +1,10 @@
 """Updater for toad checked-in uv.lock."""
 
-from lib.update.updaters.base import uv_lock_updater
+from lib.update.updaters import UvLockUpdater, register_updater
 
-ToadUpdater = uv_lock_updater("toad", module=__name__)
+
+@register_updater
+class ToadUpdater(UvLockUpdater):
+    """Uv lock updater for toad."""
+
+    name = "toad"

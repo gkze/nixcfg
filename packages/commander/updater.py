@@ -9,10 +9,10 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry
-    from lib.update.updaters.base import UpdateContext
+    from lib.update.updaters import UpdateContext
 
 from lib.update.net import fetch_headers, fetch_url
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 from lib.update.updaters.metadata import (
     NO_METADATA,
     DownloadUrlMetadata,

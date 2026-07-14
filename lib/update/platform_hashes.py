@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from lib.update.events import UpdateEvent
+from lib.update.events import StatusInfo, StatusKind, UpdateEvent
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,13 +41,14 @@ def preserved_platform_hash_status(
     preserved: PreservedPlatformHash,
 ) -> UpdateEvent:
     """Build a status event for one preserved platform hash."""
-    detail = {"platform": preserved.platform, "error": preserved.error}
     return UpdateEvent.status(
         source,
         f"Build failed for {preserved.platform}, preserving existing hash",
         operation="compute_hash",
-        status="preserved_hash",
-        detail=detail,
+        status=StatusInfo(
+            kind=StatusKind.PRESERVED_HASH,
+            value=preserved.platform,
+        ),
     )
 
 
@@ -62,8 +63,10 @@ def preserved_platform_hash_warning(
         f"Warning: {len(platforms)} platform(s) failed, "
         f"preserved existing hashes for: {', '.join(platforms)}",
         operation="compute_hash",
-        status="partial_hashes",
-        detail=platforms,
+        status=StatusInfo(
+            kind=StatusKind.PARTIAL_HASHES,
+            value=", ".join(platforms),
+        ),
     )
 
 

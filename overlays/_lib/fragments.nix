@@ -1,18 +1,10 @@
 { fragArgs, overlayDir }:
 let
-  stripNixSuffix = name: builtins.substring 0 ((builtins.stringLength name) - 4) name;
-  entries = builtins.readDir overlayDir;
-  entryNames = builtins.attrNames entries;
-  fragDirs = builtins.filter (
-    name: entries.${name} == "directory" && builtins.pathExists (overlayDir + "/${name}/default.nix")
-  ) entryNames;
-  fragFiles = builtins.filter (
-    name:
-    entries.${name} == "regular"
-    && builtins.match ".*\\.nix" name != null
-    && name != "default.nix"
-    && !(builtins.elem (stripNixSuffix name) fragDirs)
-  ) entryNames;
+  discovery = import ../../lib/discovery.nix;
+  discovered = discovery.discoverDefaultNixEntries {
+    root = overlayDir;
+    excludeFiles = [ "default.nix" ];
+  };
 
   # Overlay fragments with a sibling sources.json get that entry as
   # `selfSource`, which keeps single-source overlays from repeatedly indexing
@@ -31,22 +23,21 @@ let
 
   dirPairs = builtins.map (name: {
     inherit name;
-    attrs = import (overlayDir + "/${name}") (withSelfSource name);
-  }) fragDirs;
+    attrs = import (discovered.pathFor name) (withSelfSource name);
+  }) discovered.dirNames;
   filePairs = builtins.map (
     name:
     let
-      fragmentName = stripNixSuffix name;
-      attrs = import (overlayDir + "/${name}") (withSelfSource fragmentName);
+      attrs = import (discovered.pathFor name) (withSelfSource name);
     in
     if builtins.isAttrs attrs then
       {
-        name = fragmentName;
+        inherit name;
         inherit attrs;
       }
     else
       null
-  ) fragFiles;
+  ) discovered.fileNames;
   fragmentPairs = dirPairs ++ builtins.filter (pair: pair != null) filePairs;
   keyOwners = builtins.foldl' (
     acc: pair:

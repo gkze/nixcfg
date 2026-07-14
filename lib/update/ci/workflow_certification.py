@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 from lib import json_utils
 from lib.update.ci._workflow_analysis import WorkflowAnalysis, load_workflow_analysis
+from lib.update.ci._workflow_yaml import workflow_job_map
 from lib.update.ci.pr_body import (
     CertificationJobResult,
     CertificationSection,
@@ -20,6 +21,7 @@ from lib.update.ci.pr_body import (
     PRBodyModel,
     render_certification_section,
 )
+from lib.update.ci.workflow_defs import update_certify_workflow
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -27,13 +29,18 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True)
 class CertificationPRBodyOptions:
-    """Inputs used to render the certification section onto an update PR."""
+    """Inputs used to render the certification section onto an update PR.
+
+    ``workflow_path`` is optional: when unset, the certified closure inventory
+    comes straight from the typed workflow model in
+    :mod:`lib.update.ci.workflow_defs` instead of re-parsing generated YAML.
+    """
 
     workflow_url: str
     started_at: str
     updated_at: str
     cachix_name: str
-    workflow_path: Path = Path(".github/workflows/update-certify.yml")
+    workflow_path: Path | None = None
     jobs_path: Path | None = None
 
 
@@ -65,6 +72,16 @@ _KNOWN_JOB_STATUSES = frozenset({
 })
 _SUCCESS_JOB_STATUS: CertificationStatus = "success"
 _UNKNOWN_JOB_STATUS: CertificationStatus = "unknown"
+
+
+def _typed_certify_workflow_analysis() -> WorkflowAnalysis:
+    """Build the certification workflow analysis from the typed model."""
+    return WorkflowAnalysis.from_jobs(
+        workflow_job_map(
+            update_certify_workflow().to_data()["jobs"],
+            context="typed update-certify workflow jobs",
+        )
+    )
 
 
 def load_json_file(*, input_path: Path, context: str) -> dict[str, object]:
@@ -393,7 +410,11 @@ def render_certification_pr_body(
 ) -> int:
     """Update the serialized PR body model with certification metadata."""
     current_body = Path(existing_body).read_text(encoding="utf-8")
-    workflow = load_workflow_analysis(options.workflow_path)
+    workflow = (
+        _typed_certify_workflow_analysis()
+        if options.workflow_path is None
+        else load_workflow_analysis(options.workflow_path)
+    )
     certification = _certification_section(options, workflow)
     try:
         model = extract_pr_body_model(current_body)

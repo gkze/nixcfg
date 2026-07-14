@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import sparkle_appcast_updater
+from typing import ClassVar
 
-NetNewsWireUpdater = sparkle_appcast_updater(
-    "netnewswire",
-    appcast_url="https://ranchero.com/downloads/netnewswire-release.xml",
-    platforms={
+from lib.update.updaters import SparkleAppcastUrlUpdater, register_updater
+
+
+@register_updater
+class NetNewsWireUpdater(SparkleAppcastUrlUpdater):
+    """Resolve NetNewsWire versions and download URLs from its Sparkle feed."""
+
+    name = "netnewswire"
+    APPCAST_URL = "https://ranchero.com/downloads/netnewswire-release.xml"
+    VERSION_FIELD = "short_version"
+    URL_METADATA_CONTEXT: ClassVar[str | None] = "NetNewsWire metadata"
+    PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin",
         "x86_64-darwin": "darwin",
-    },
-    version_field="short_version",
-    appcast_url_metadata=True,
-    url_metadata_context="NetNewsWire metadata",
-    module=__name__,
-)
+    }

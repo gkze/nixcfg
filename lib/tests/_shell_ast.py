@@ -48,6 +48,10 @@ def _sanitize_nix_interpolations(text: str) -> str:
                 depth += 1
                 cursor += 2
                 continue
+            if text[cursor] == "{":
+                depth += 1
+                cursor += 1
+                continue
             if text[cursor] == "}":
                 depth -= 1
             cursor += 1

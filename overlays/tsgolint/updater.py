@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 from lib.nix.models.sources import HashCollection
 from lib.update.nix import _build_fetch_from_github_expr
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     SourceThenOverlayHashMixin,
     UpdateContext,
     VersionInfo,

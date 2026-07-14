@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import pinned_source_download_updater
+from typing import ClassVar
 
-SoloUpdater = pinned_source_download_updater(
-    "solo",
-    platforms={"aarch64-darwin": "universal"},
-    download_url=(
+from lib.update.updaters import PinnedSourceDownloadUpdater, register_updater
+
+
+@register_updater
+class SoloUpdater(PinnedSourceDownloadUpdater):
+    """Pinned download updater for the Solo macOS app archive."""
+
+    name = "solo"
+    PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "universal"}
+    DOWNLOAD_URL_TEMPLATE = (
         "https://releases.soloterm.com/darwin/{platform_value}/"
         "Solo_{version}_{platform_value}.app.tar.gz"
-    ),
-    module=__name__,
-)
+    )

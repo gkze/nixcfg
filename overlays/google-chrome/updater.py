@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     import aiohttp
 
 from lib.update.net import fetch_json
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 from lib.update.updaters.metadata import NO_METADATA
 
 

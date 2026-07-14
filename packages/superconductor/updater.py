@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import aiohttp
 
-from lib.update.updaters.base import (
+from lib.update.updaters import (
     AssetURLsMetadataUpdater,
     VersionInfo,
     register_updater,
@@ -19,7 +19,7 @@ from lib.update.updaters.metadata import AssetURLsMetadata
 
 if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry
-    from lib.update.updaters.base import UpdateContext
+    from lib.update.updaters import UpdateContext
 
 HTTP_BAD_REQUEST = 400
 

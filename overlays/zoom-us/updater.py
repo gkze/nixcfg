@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import aiohttp
 
 from lib.update.net import HTTP_BAD_REQUEST
-from lib.update.updaters.base import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 from lib.update.updaters.metadata import NO_METADATA
 
 _VERSION_PATTERN = re.compile(r"/prod/(?P<version>[^/]+)/")

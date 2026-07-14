@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from lib.update.net import fetch_github_api
-from lib.update.updaters.base import DownloadHashUpdater, Updater
+from lib.update.updaters.core import DownloadHashUpdater, Updater
 from lib.update.updaters.metadata import (
     AssetURLsMetadata,
     GitHubReleaseMetadata,
@@ -70,8 +70,18 @@ class GitHubReleaseUpdater(Updater):
 class GitHubReleaseAssetURLsUpdater(GitHubReleaseUpdater, DownloadHashUpdater):
     """Download-hash updater that resolves assets from a GitHub latest release."""
 
+    # Optional ``str.format`` template with ``{version}`` and
+    # ``{platform_value}`` fields; subclasses either set it or override
+    # ``_asset_name``.
+    ASSET_NAME_TEMPLATE: ClassVar[str] = ""
+
     def _asset_name(self, version: str, platform_value: str) -> str:
-        raise NotImplementedError
+        if not self.ASSET_NAME_TEMPLATE:
+            raise NotImplementedError
+        return self.ASSET_NAME_TEMPLATE.format(
+            version=version,
+            platform_value=platform_value,
+        )
 
     def _fallback_url(self, version: str, platform_value: str) -> str:
         return (

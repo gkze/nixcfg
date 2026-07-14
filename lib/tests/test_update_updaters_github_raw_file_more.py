@@ -9,15 +9,21 @@ import aiohttp
 import pytest
 
 from lib.update.events import CapturedValue, UpdateEvent, UpdateEventKind
-from lib.update.updaters.base import VersionInfo
+from lib.update.updaters import VersionInfo
 from lib.update.updaters.github_raw_file import (
     GitHubRawFileMetadata,
     GitHubRawFileUpdater,
-    github_raw_file_updater,
 )
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+
+class _DemoRawFileUpdater(GitHubRawFileUpdater):
+    name = "demo"
+    owner = "owner"
+    repo = "repo"
+    path = "path/to/file.txt"
 
 
 def _collect(stream: AsyncIterator[UpdateEvent]) -> list[UpdateEvent]:
@@ -28,21 +34,6 @@ def _collect(stream: AsyncIterator[UpdateEvent]) -> list[UpdateEvent]:
         return items
 
     return asyncio.run(_run())
-
-
-def test_github_raw_file_updater_factory_sets_class_attributes() -> None:
-    """Create a concrete updater class with fixed repo metadata."""
-    updater_cls = github_raw_file_updater(
-        "demo",
-        owner="owner",
-        repo="repo",
-        path="path/to/file.txt",
-    )
-    assert issubclass(updater_cls, GitHubRawFileUpdater)
-    assert updater_cls.name == "demo"
-    assert updater_cls.owner == "owner"
-    assert updater_cls.repo == "repo"
-    assert updater_cls.path == "path/to/file.txt"
 
 
 def test_fetch_latest_uses_default_branch_and_latest_commit(
@@ -80,13 +71,7 @@ def test_fetch_latest_uses_default_branch_and_latest_commit(
         _latest_commit,
     )
 
-    updater_cls = github_raw_file_updater(
-        "demo",
-        owner="owner",
-        repo="repo",
-        path="path/to/file.txt",
-    )
-    updater = updater_cls()
+    updater = _DemoRawFileUpdater()
 
     async def _run() -> VersionInfo:
         async with aiohttp.ClientSession() as session:
@@ -102,13 +87,7 @@ def test_fetch_hashes_emits_entries_and_validates_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Compute URL hashes and return a sha256 hash entry list."""
-    updater_cls = github_raw_file_updater(
-        "demo",
-        owner="owner",
-        repo="repo",
-        path="path/to/file.txt",
-    )
-    updater = updater_cls()
+    updater = _DemoRawFileUpdater()
 
     with pytest.raises(TypeError, match="Expected string revision metadata"):
         _collect(
@@ -154,12 +133,14 @@ def test_fetch_hashes_emits_entries_and_validates_metadata(
 
 def test_fetch_hashes_accepts_typed_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     """Accept pre-typed metadata without dict coercion."""
-    updater = github_raw_file_updater(
-        "typed-demo",
-        owner="owner",
-        repo="repo",
-        path="path/to/file.txt",
-    )()
+
+    class _TypedDemoRawFileUpdater(GitHubRawFileUpdater):
+        name = "typed-demo"
+        owner = "owner"
+        repo = "repo"
+        path = "path/to/file.txt"
+
+    updater = _TypedDemoRawFileUpdater()
 
     async def _capture(
         _stream: object,

@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-from lib.update.updaters.base import sparkle_appcast_updater
+from typing import ClassVar
+
+from lib.update.updaters import SparkleAppcastUpdater, register_updater
 
 DOWNLOAD_URL = "https://cdn.rogueamoeba.com/airfoil/mac/download/Airfoil.zip"
 
-AirfoilUpdater = sparkle_appcast_updater(
-    "airfoil",
-    appcast_url=(
+
+@register_updater
+class AirfoilUpdater(SparkleAppcastUpdater):
+    """Resolve Airfoil versions from Rogue Amoeba's Sparkle feed."""
+
+    name = "airfoil"
+    APPCAST_URL = (
         "https://rogueamoeba.net/ping/versionCheck.cgi?"
         "format=sparkle&system=999&bundleid=com.rogueamoeba.airfoil"
         "&platform=osx&version=51268000"
-    ),
-    platforms={
+    )
+    PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": DOWNLOAD_URL,
         "x86_64-darwin": DOWNLOAD_URL,
-    },
-    module=__name__,
-)
+    }
