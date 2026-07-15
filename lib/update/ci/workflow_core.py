@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from typing import Protocol, TextIO
 
+    from lib.update.derivation_validation import DerivationValidationFailure
+
     class _UpdateCLI(Protocol):
         class UpdateOptions:
             def __init__(self, *, list_targets: bool) -> None: ...
@@ -50,6 +52,7 @@ LINUX_CLEANUP_PATHS = (
 PREFETCH_FLAKE_INPUTS_ARGS = ["nix", "flake", "archive", "--json"]
 PREFETCH_FLAKE_INPUTS_ATTEMPTS = 3
 PREFETCH_FLAKE_INPUTS_RETRY_DELAYS = (1.0, 2.0)
+UPDATE_DERIVATION_VALIDATION_TIMEOUT_SECONDS = 300
 
 DARWIN_LOCK_SMOKE_EXPRS = (
     ".#darwinConfigurations.argus.config.home-manager.users.george.programs.nixvim.content",
@@ -294,6 +297,30 @@ def cmd_smoke_check_update_app(*, run: Callable[..., object]) -> int:
         stderr=subprocess.DEVNULL,
     )
     return 0
+
+
+def cmd_validate_update_derivations(
+    *,
+    validate: Callable[..., tuple[DerivationValidationFailure, ...]],
+    updaters: Mapping[str, type[object]],
+    stderr: TextIO,
+    timeout: float = UPDATE_DERIVATION_VALIDATION_TIMEOUT_SECONDS,
+) -> int:
+    """Evaluate updater-declared derivations supported by this runner."""
+    failures = validate(
+        sorted(updaters),
+        updaters=updaters,
+        all_declared_systems=False,
+        timeout=timeout,
+    )
+    stderr.writelines(
+        (
+            f"[{failure.source}] Derivation evaluation failed for "
+            f"{failure.installable}:\n{failure.message}\n"
+        )
+        for failure in failures
+    )
+    return 1 if failures else 0
 
 
 def cmd_list_update_targets(

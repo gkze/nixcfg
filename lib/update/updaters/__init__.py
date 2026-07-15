@@ -11,6 +11,7 @@ from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING
 
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.paths import REPO_ROOT, package_file_map
 from lib.update.sources import read_pinned_source_version
 from lib.update.updaters.core import (
@@ -158,6 +159,7 @@ __all__ = [
     "Crate2NixMetadataUpdater",
     "DenoDepsHashUpdater",
     "DenoManifestUpdater",
+    "DerivationValidation",
     "DownloadHashUpdater",
     "DownloadUrlMetadataUpdater",
     "DownloadingPlatformAPIUpdater",

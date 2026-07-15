@@ -19,6 +19,7 @@ UPDATE_SURFACE_EXEMPTIONS = frozenset({
     "electron-runtimes",  # aggregate/cache package, not an external update target
     "goose-cli-v8-native",  # derived cache output owned by goose-cli/goose-v8
     "nix",
+    "nix-prefetch-git",  # nixpkgs backport override, not an independently versioned source
 })
 
 _SURFACE_FILES = ("default.nix", "sources.json", "updater.py")

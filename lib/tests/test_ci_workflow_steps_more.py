@@ -1038,11 +1038,21 @@ def test_command_routing_for_new_and_legacy_aliases(
     )
 
 
+def test_validate_update_derivations_command_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Route the merged-tree validation command through the workflow CLI."""
+    monkeypatch.setattr(ws, "_cmd_validate_update_derivations", lambda: 28)
+
+    assert ws.main(["validate-update-derivations"]) == 28
+
+
 def test_registered_command_metadata_preserves_cli_surface() -> None:
     """Keep command names, alias help text, and mounted groups stable."""
     assert [(command.name, command.help) for command in ws.app.registered_commands] == [
         ("generate", None),
         ("verify-generated", None),
+        ("validate-update-derivations", None),
         ("validate-bun-lock", None),
         ("prepare-bun-lock", None),
         ("build-darwin-config", "Alias for `darwin build`."),

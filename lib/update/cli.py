@@ -16,6 +16,7 @@ from rich.console import Console
 
 from lib.cli import HELP_CONTEXT_SETTINGS
 from lib.nix.models.sources import SourcesFile
+from lib.update import derivation_validation as update_derivation_validation
 from lib.update import persistence as update_persistence
 from lib.update import planner as update_planner
 from lib.update import source_runner as update_source_runner
@@ -833,9 +834,26 @@ async def _execute_run_plan(
         details=consume_result.details,
     )
 
+    validation_failures = ()
+    if not plan.resolved.dry_run and consume_result.errors == 0:
+        validation_failures = update_derivation_validation.validate_derivations(
+            plan.order,
+            updaters=_get_updaters(),
+            timeout=config.default_subprocess_timeout,
+        )
+        if validation_failures:
+            summary.accumulate({
+                failure.source: "error" for failure in validation_failures
+            })
+            for failure in validation_failures:
+                out.print_error(
+                    f"[{failure.source}] Derivation evaluation failed for "
+                    f"{failure.installable}:\n{failure.message}"
+                )
+
     return _emit_summary(
         summary,
-        had_errors=consume_result.errors > 0,
+        had_errors=consume_result.errors > 0 or bool(validation_failures),
         out=out,
         dry_run=plan.resolved.dry_run,
     )

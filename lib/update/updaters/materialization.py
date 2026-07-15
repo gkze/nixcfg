@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from lib.update.crate2nix import stream_crate2nix_artifact_updates
+from lib.update.crate2nix import TARGETS, stream_crate2nix_artifact_updates
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventStream, UpdateEvent
 from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
 
@@ -27,6 +28,19 @@ class MaterializesArtifactsMixin:
 
 class Crate2NixArtifactsMixin(MaterializesArtifactsMixin):
     """Mixin for updaters that materialize checked-in crate2nix artifacts."""
+
+    @classmethod
+    def get_derivation_validations(cls) -> tuple[DerivationValidation, ...]:
+        """Validate final package assembly on each registered target platform."""
+        target = TARGETS.get(cls.name)
+        if target is None:
+            return ()
+        return (
+            DerivationValidation(
+                installable=".#pkgs.{system}.{name}.drvPath",
+                systems=target.supported_platforms,
+            ),
+        )
 
     async def stream_materialized_artifacts(self) -> EventStream:
         """Emit crate2nix artifact events using the standard materialization phase."""

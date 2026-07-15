@@ -101,6 +101,7 @@ _FIXED_OUTPUT_HASH_TRANSIENT_MARKERS = (
     "NameServerFailure",
     "Operation timed out",
     "Temporary failure in name resolution",
+    "aborted due to timeout",
     "cannot download source from any mirror",
     "connection reset",
     "returned error: 502",

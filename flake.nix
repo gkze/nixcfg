@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.1.38";
+      url = "github:generalaction/emdash/v1.1.39";
       flake = false;
     };
     flake-edit = {
@@ -166,7 +166,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.144.3";
+      url = "github:openai/codex/rust-v0.144.4";
       flake = false;
     };
     curator = {
@@ -178,7 +178,7 @@
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.3.0";
+      url = "github:openai/openai-cli/v1.4.0";
       flake = false;
     };
     github-desktop = {
@@ -219,7 +219,7 @@
       flake = false;
     };
     linear-cli = {
-      url = "github:schpet/linear-cli/v2.0.0";
+      url = "github:schpet/linear-cli/v2.1.0";
       flake = false;
     };
     macfuse = {
@@ -881,6 +881,9 @@
               pkgs.runCommand "check-test-nix-opencode-desktop" { } ''
                 touch $out
               '';
+
+            "test-nix-prefetch-git-darwin-heredoc" =
+              { pkgs, ... }: import ./tests/nix/nix-prefetch-git-darwin-heredoc { inherit pkgs; };
 
             "cache-electron-runtimes" = { pkgs, ... }: pkgs.electron-runtimes;
           }

@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from types import ModuleType, SimpleNamespace
-
-import pytest
+from types import ModuleType
+from typing import TYPE_CHECKING
 
 from lib.nix.models.sources import SourceEntry
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import UpdateEventKind
+from lib.update.events import UpdateEvent, UpdateEventKind
 from lib.update.updaters import VersionInfo
 from lib.update.updaters.core import UpdateContext
+
+if TYPE_CHECKING:
+    import pytest
 
 HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 NEW_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
@@ -54,25 +56,39 @@ def test_t3code_workspace_updater_tracks_only_aarch64_darwin() -> None:
     assert updater_cls.supported_platforms == ("aarch64-darwin",)
 
 
-def test_t3code_workspace_fetch_hashes_uses_direct_helper_expr(
+def test_t3code_workspace_fetch_hashes_uses_shared_fixed_output_hash_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Hashing should bypass the missing public package attr and build the helper directly."""
+    """Hash the direct helper expression through the shared retrying Nix probe."""
     module = _load_module()
     updater = module.T3CodeWorkspaceUpdater()
     captured: dict[str, object] = {}
 
-    async def _fake_compute(expr: str):
+    async def _fake_compute(
+        source: str,
+        expr: str,
+        *,
+        env: dict[str, str],
+        config: object,
+    ):
+        captured["source"] = source
         captured["expr"] = expr
-        return HASH
+        captured["env"] = env
+        captured["config"] = config
+        yield UpdateEvent.status(source, "retrying")
+        yield UpdateEvent.value(source, HASH)
 
-    monkeypatch.setattr(module, "_compute_workspace_hash", _fake_compute)
+    monkeypatch.setattr(module, "compute_fixed_output_hash", _fake_compute)
 
     events = _run(_collect(updater.fetch_hashes(VersionInfo(version="main"), object())))
 
+    assert captured["source"] == updater.name
     expr = captured["expr"]
     assert isinstance(expr, str)
     assert_nix_ast_equal(expr, module.T3CodeWorkspaceUpdater._workspace_expression())
+    assert captured["env"] == {"FAKE_HASHES": "1"}
+    assert captured["config"] is updater.config
+    assert events[0].message == "retrying"
     assert events[-1].kind is UpdateEventKind.VALUE
     payload = events[-1].payload
     assert isinstance(payload, list)
@@ -80,89 +96,6 @@ def test_t3code_workspace_fetch_hashes_uses_direct_helper_expr(
     hash_entry = payload[0]
     assert hash_entry.hash == HASH
     assert hash_entry.platform == "aarch64-darwin"
-
-
-def test_t3code_workspace_build_args_wrap_expr_for_nix_build() -> None:
-    """Workspace builds should route through the shared nix expression wrapper."""
-    module = _load_module()
-
-    args = module._workspace_build_args("pkgs.hello")
-
-    assert args[:6] == ["nix", "build", "-L", "--no-link", "--impure", "--expr"]
-    assert_nix_ast_equal(args[-1], module._build_nix_expr("pkgs.hello"))
-
-
-def test_t3code_workspace_compute_hash_rejects_successful_build(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A successful fixed-output build means the fake-hash probe was bypassed."""
-    module = _load_module()
-
-    async def _fake_to_thread(*_args: object, **_kwargs: object) -> object:
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(module.asyncio, "to_thread", _fake_to_thread)
-
-    with pytest.raises(RuntimeError, match="Expected nix build to fail"):
-        _run(module._compute_workspace_hash("pkgs.hello"))
-
-
-def test_t3code_workspace_compute_hash_requires_hash_mismatch_output(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The helper should fail clearly when Nix output lacks a parseable hash."""
-    module = _load_module()
-
-    async def _fake_to_thread(*_args: object, **_kwargs: object) -> object:
-        return SimpleNamespace(returncode=1, stdout="stdout", stderr="stderr")
-
-    monkeypatch.setattr(module.asyncio, "to_thread", _fake_to_thread)
-    monkeypatch.setattr(module.HashMismatchError, "from_output", lambda *_args: None)
-
-    with pytest.raises(RuntimeError, match="Could not find hash in nix output"):
-        _run(module._compute_workspace_hash("pkgs.hello"))
-
-
-def test_t3code_workspace_compute_hash_returns_sri_hash_directly(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Already-SRI hashes should be returned without conversion."""
-    module = _load_module()
-
-    async def _fake_to_thread(*_args: object, **_kwargs: object) -> object:
-        return SimpleNamespace(returncode=1, stdout="", stderr="hash mismatch")
-
-    monkeypatch.setattr(module.asyncio, "to_thread", _fake_to_thread)
-    monkeypatch.setattr(
-        module.HashMismatchError,
-        "from_output",
-        lambda *_args: SimpleNamespace(is_sri=True, hash=HASH),
-    )
-
-    assert _run(module._compute_workspace_hash("pkgs.hello")) == HASH
-
-
-def test_t3code_workspace_compute_hash_converts_non_sri_hash(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Non-SRI hashes should be normalized through the mismatch helper."""
-    module = _load_module()
-
-    async def _fake_to_thread(*_args: object, **_kwargs: object) -> object:
-        return SimpleNamespace(returncode=1, stdout="", stderr="hash mismatch")
-
-    class _Mismatch:
-        is_sri = False
-
-        async def to_sri(self) -> str:
-            return HASH
-
-    monkeypatch.setattr(module.asyncio, "to_thread", _fake_to_thread)
-    monkeypatch.setattr(
-        module.HashMismatchError, "from_output", lambda *_args: _Mismatch()
-    )
-
-    assert _run(module._compute_workspace_hash("pkgs.hello")) == HASH
 
 
 def test_t3code_workspace_is_latest_uses_direct_fingerprint_expr(
@@ -235,12 +168,23 @@ def test_t3code_workspace_rechecks_node_modules_when_drv_fingerprint_matches(
         captured.update({"fingerprint_source": source, "expr": expr, "config": config})
         return "abc123"
 
-    async def _fake_compute(expr: str) -> str:
-        captured["hash_expr"] = expr
-        return NEW_HASH
+    async def _fake_compute(
+        source: str,
+        expr: str,
+        *,
+        env: dict[str, str],
+        config: object,
+    ):
+        captured.update({
+            "hash_source": source,
+            "hash_expr": expr,
+            "hash_env": env,
+            "hash_config": config,
+        })
+        yield UpdateEvent.value(source, NEW_HASH)
 
     monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
-    monkeypatch.setattr(module, "_compute_workspace_hash", _fake_compute)
+    monkeypatch.setattr(module, "compute_fixed_output_hash", _fake_compute)
     monkeypatch.setattr(
         "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
@@ -267,7 +211,10 @@ def test_t3code_workspace_rechecks_node_modules_when_drv_fingerprint_matches(
     assert result.drv_hash == "abc123"
     assert result.hashes.entries[0].hash == NEW_HASH
     assert captured["fingerprint_source"] == "t3code-workspace"
+    assert captured["hash_source"] == "t3code-workspace"
     assert captured["hash_expr"] == captured["expr"]
+    assert captured["hash_env"] == {"FAKE_HASHES": "1"}
+    assert captured["hash_config"] is updater.config
 
 
 def test_t3code_workspace_finalize_result_uses_cached_context_fingerprint() -> None:

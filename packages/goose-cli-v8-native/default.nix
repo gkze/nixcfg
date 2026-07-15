@@ -1,2 +1,1 @@
-{ goose-cli }:
-goose-cli.passthru.v8NativeDrv
+{ goose-cli }: goose-cli.passthru.v8NativeDrv

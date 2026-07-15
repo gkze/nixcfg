@@ -124,17 +124,22 @@ async def _ensure_input_refreshed(
             reuse_existing = False
         else:
             reuse_existing = True
-
-    if reuse_existing:
-        await put(
-            UpdateEvent.status(
-                name,
-                f"Reusing flake input '{input_name}' refresh...",
-                operation="refresh_lock",
-                status=StatusInfo(kind=StatusKind.REFRESH_LOCK, value=input_name),
+        if reuse_existing:
+            await put(
+                UpdateEvent.status(
+                    name,
+                    f"Reusing flake input '{input_name}' refresh...",
+                    operation="refresh_lock",
+                    status=StatusInfo(
+                        kind=StatusKind.REFRESH_LOCK,
+                        value=input_name,
+                    ),
+                )
             )
-        )
-    await task
+        # Every refresh rewrites the shared flake.lock. Keep the lock held
+        # until the command finishes so different inputs cannot race and lose
+        # each other's updates.
+        await task
 
 
 async def update_source_task(

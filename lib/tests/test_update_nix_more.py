@@ -120,6 +120,17 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
     )
     assert _is_retryable_fixed_output_hash_failure(transient)
 
+    pnpm_timeout = CommandResult(
+        args=["nix"],
+        returncode=1,
+        stdout="",
+        stderr=(
+            "The operation was aborted due to timeout\n"
+            "TimeoutError: The operation was aborted due to timeout"
+        ),
+    )
+    assert _is_retryable_fixed_output_hash_failure(pnpm_timeout)
+
     hash_mismatch = CommandResult(
         args=["nix"],
         returncode=1,

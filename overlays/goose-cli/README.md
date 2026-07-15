@@ -18,7 +18,7 @@ graph, while still preserving Goose's custom V8 setup.
 - `default.nix`
   - source surgery for Goose + V8
   - crate overrides and compatibility shims
-  - final package assembly (`goose-cli` + `goose-server`)
+  - final `goose-cli` package assembly
 - `rusty-v8-nix.patch`
   - stable `rusty_v8` and Chromium build-file rewrites that can live as checked-in patches
 - `crate-hashes.json`
@@ -92,12 +92,19 @@ not invalidate the expensive V8 source input.
   library dependency inside Goose's workspace
 - rewrite the `v8-goose` entry in `Cargo.lock`
 
+### CLI and server assembly
+
+Goose removed the legacy `crates/goose-server` workspace member, including the `goosed` and
+`generate_schema` binaries. This overlay intentionally builds only `goose-cli`; its supported
+HTTP/WebSocket ACP server is available through `goose serve`. It does not provide a `goosed` shim
+because the removed REST/OpenAPI server and the ACP server are not command- or protocol-compatible.
+
 ### Crate overrides
 
 These are intentionally centralized in `crateOverrides` inside `default.nix`.
 
-- `commonGooseOverride`
-  - shared native/build inputs for the Goose workspace binaries
+- `gooseCliOverride`
+  - native/build inputs for the Goose CLI crate
 - `xcapLinuxOverride`
   - Linux-only `libxcb` dependency
 - `hipstrOverride`
@@ -195,7 +202,8 @@ nix build --impure -L -vv --show-trace .#goose-cli --no-link
 ```
 
 That build now includes an install-check smoke test for the `goose` binary, covering
-`goose --version` and a clean-home `goose info` invocation.
+`goose --version`, a clean-home `goose info` invocation, and the `goose serve --help` ACP server
+surface.
 
 Then verify the installed CLI actually starts:
 
@@ -204,6 +212,7 @@ GOOSE=$(nix path-info .#goose-cli)/bin/goose
 "$GOOSE" --version
 HOME=$(mktemp -d) XDG_CONFIG_HOME=$(mktemp -d) XDG_STATE_HOME=$(mktemp -d) \
   "$GOOSE" info
+"$GOOSE" serve --help
 ```
 
 For long builds, tee the output to a log file and run it in the background so failures can be

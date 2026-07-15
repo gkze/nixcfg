@@ -1,0 +1,97 @@
+Backport the dynamic-pipe heredoc fix from GNU Bash devel commit
+03e7298d1eb7f7163cda94ee23dcfa983152a540.
+
+macOS can throttle newly-created pipe capacity from 64 KiB to 512 bytes after
+the system-wide pipe KVA high-water mark is reached. Make the heredoc pipe's
+write end nonblocking and fall back to a temporary file when the capacity seen
+at runtime is smaller than the capacity detected while building Bash.
+
+--- configure
++++ configure
+@@ -23136,7 +23136,7 @@
+ dgux*)	LOCAL_CFLAGS=-D_DGUX_SOURCE; LOCAL_LIBS=-ldgc ;;
+ isc*)	LOCAL_CFLAGS=-Disc386 ;;
+ rhapsody*)	LOCAL_CFLAGS=-DRHAPSODY ;;
+-darwin*)	LOCAL_CFLAGS=-DMACOSX ;;
++darwin*)	LOCAL_CFLAGS="-DMACOSX -DPIPESIZE_DYNAMIC" ;;
+ sco3.2v5*)	LOCAL_CFLAGS="-b elf -DWAITPID_BROKEN -DPATH_MAX=1024" ;;
+ sco3.2v4*)	LOCAL_CFLAGS="-DMUST_UNBLOCK_CHLD -DPATH_MAX=1024" ;;
+ sco3.2*)	LOCAL_CFLAGS=-DMUST_UNBLOCK_CHLD ;;
+--- configure.ac
++++ configure.ac
+@@ -1209,7 +1209,7 @@
+ dgux*)		LOCAL_CFLAGS=-D_DGUX_SOURCE; LOCAL_LIBS=-ldgc ;;
+ isc*)		LOCAL_CFLAGS=-Disc386 ;;
+ rhapsody*)	LOCAL_CFLAGS=-DRHAPSODY ;;
+-darwin*)	LOCAL_CFLAGS=-DMACOSX ;;
++darwin*)	LOCAL_CFLAGS="-DMACOSX -DPIPESIZE_DYNAMIC" ;;
+ sco3.2v5*)	LOCAL_CFLAGS="-b elf -DWAITPID_BROKEN -DPATH_MAX=1024" ;;
+ sco3.2v4*)	LOCAL_CFLAGS="-DMUST_UNBLOCK_CHLD -DPATH_MAX=1024" ;;
+ sco3.2*)	LOCAL_CFLAGS=-DMUST_UNBLOCK_CHLD ;;
+--- general.c
++++ general.c
+@@ -596,6 +596,27 @@
+   return 0;
+ }
+
++int
++sh_setnodelay (int fd)
++{
++  int flags;
++
++  if ((flags = fcntl (fd, F_GETFL, 0)) < 0)
++    return -1;
++
++  /* This is defined to O_NDELAY in filecntl.h if O_NONBLOCK is not present
++     and O_NDELAY is defined. */
++#ifdef O_NONBLOCK
++  flags |= O_NONBLOCK;
++#endif
++
++#ifdef O_NDELAY
++  flags |= O_NDELAY;
++#endif
++
++  return (fcntl (fd, F_SETFL, flags));
++}
++
+ /* Just a wrapper for the define in include/filecntl.h */
+ int
+ sh_setclexec (int fd)
+--- general.h
++++ general.h
+@@ -317,6 +317,7 @@
+ extern int assignment (const char *, int);
+
+ extern int sh_unset_nodelay_mode (int);
++extern int sh_setnodelay (int);
+ extern int sh_setclexec (int);
+ extern int sh_validfd (int);
+ extern int fd_ispipe (int);
+--- redir.c
++++ redir.c
+@@ -474,0 +475,13 @@
++#if defined (PIPESIZE_DYNAMIC)
++      /* If we can't count on the pipe size determined at compile time to be
++	 constant across systems, define PIPESIZE_DYNAMIC in configure.ac.
++	 We set the pipe's write end to be non-blocking, try to write, and
++	 fall back to a temp file on error. */
++      if (sh_setnodelay (herepipe[1]) < 0)
++	{
++	  close (herepipe[0]);
++	  close (herepipe[1]);
++	  goto use_tempfile;
++	}
++#endif
++
+@@ -475,0 +489,10 @@
++
++#if defined (PIPESIZE_DYNAMIC)
++      if (r == ENOSPC || r == EAGAIN)
++	{
++	  close (herepipe[0]);
++	  close (herepipe[1]);
++	  goto use_tempfile;
++	}
++#endif
++

@@ -277,6 +277,7 @@ def test_render_build_zig_zon_nix_surfaces_zon2nix_failure(
     [
         "err(default): NameServerFailure",
         "err(default): HttpConnectionClosing",
+        "err(default): ReadFailed",
     ],
 )
 def test_render_build_zig_zon_nix_retries_transient_zon2nix_failure(
@@ -517,11 +518,19 @@ def test_fetch_hashes_emits_generated_artifact_and_src_hash(
     assert events[-1].payload == [HashEntry.create("srcHash", "sha256-src")]
 
 
+@pytest.mark.parametrize(
+    "transient_error",
+    [
+        "Command timed out after 180s: zon2nix",
+        "Command failed (exit 1): zon2nix\nstderr: err(default): ReadFailed",
+    ],
+)
 def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    transient_error: str,
 ) -> None:
-    """Keep the checked-in artifact when current-version zon2nix refresh times out."""
+    """Keep the checked-in artifact after a current-version transient failure."""
     module = _load_module("neutils_updater_test_fetch_hashes_preserve_current")
     updater = module.NeutilsUpdater()
     pkg_dir = tmp_path / "neutils"
@@ -531,7 +540,7 @@ def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failur
 
     async def _render(_info: object, _session: object):
         yield UpdateEvent.status(updater.name, "resolving tools")
-        raise RuntimeError("Command timed out after 180s: zon2nix")
+        raise RuntimeError(transient_error)
 
     async def _fixed_hash(name: str, expr: str, *, config=None):
         assert name == updater.name

@@ -66,6 +66,7 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         "Could not resolve host",
         "HttpConnectionClosing",
         "NameServerFailure",
+        "ReadFailed",
         "Temporary failure in name resolution",
         "connection reset",
         "timed out",

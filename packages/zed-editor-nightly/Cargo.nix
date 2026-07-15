@@ -1344,6 +1344,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "lsp_locations" = rec {
+      packageId = "lsp_locations";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "lsp_locations";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "markdown" = rec {
       packageId = "markdown";
       build = internal.buildRustCrateWithFeatures {
@@ -1558,6 +1568,16 @@ rec {
       packageId = "panel";
       build = internal.buildRustCrateWithFeatures {
         packageId = "panel";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "path" = rec {
+      packageId = "path";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "path";
       };
 
       # Debug support which might change between releases.
@@ -6009,6 +6029,11 @@ rec {
             packageId = "util";
           }
           {
+            name = "which";
+            packageId = "which 6.0.3";
+            target = { target, features }: (!("windows" == target."os" or null));
+          }
+          {
             name = "windows";
             packageId = "windows 0.61.3";
             target = { target, features }: ("windows" == target."os" or null);
@@ -6909,9 +6934,9 @@ rec {
       };
       "async-tar" = rec {
         crateName = "async-tar";
-        version = "0.5.1";
-        edition = "2018";
-        sha256 = "0l3m44zb1yw1xd9mq50g3iyzv4q623jv1gdr34wsly35snr7v4yi";
+        version = "0.6.1";
+        edition = "2024";
+        sha256 = "0jy1aqpk0rvi4acw280imvvbm51n4ix15s7rxashy65nwmqzxbzn";
         libName = "async_tar";
         authors = [
           "dignifiedquire <me@dignifiequire.com>"
@@ -6921,11 +6946,15 @@ rec {
           {
             name = "async-std";
             packageId = "async-std";
-            features = [ "unstable" ];
+            optional = true;
           }
           {
             name = "filetime";
             packageId = "filetime";
+          }
+          {
+            name = "futures-core";
+            packageId = "futures-core";
           }
           {
             name = "libc";
@@ -6933,12 +6962,8 @@ rec {
             target = { target, features }: (target."unix" or false);
           }
           {
-            name = "pin-project";
-            packageId = "pin-project";
-          }
-          {
             name = "redox_syscall";
-            packageId = "redox_syscall 0.2.16";
+            packageId = "redox_syscall 0.7.5";
             target = { target, features }: ("redox" == target."os" or null);
           }
           {
@@ -6956,10 +6981,15 @@ rec {
           }
         ];
         features = {
-          "default" = [ "xattr" ];
+          "async-std" = [ "dep:async-std" ];
+          "default" = [ "xattr" "runtime-async-std" ];
+          "runtime-async-std" = [ "async-std" ];
+          "runtime-tokio" = [ "tokio" "tokio-stream" ];
+          "tokio" = [ "dep:tokio" ];
+          "tokio-stream" = [ "dep:tokio-stream" ];
           "xattr" = [ "dep:xattr" ];
         };
-        resolvedDefaultFeatures = [ "default" "xattr" ];
+        resolvedDefaultFeatures = [ "async-std" "default" "runtime-async-std" "xattr" ];
       };
       "async-task" = rec {
         crateName = "async-task";
@@ -18008,6 +18038,11 @@ rec {
             packageId = "crash-handler";
           }
           {
+            name = "libc";
+            packageId = "libc";
+            target = { target, features }: ("linux" == target."os" or null);
+          }
+          {
             name = "log";
             packageId = "log";
             features = [ "kv_unstable_serde" "serde" ];
@@ -22558,7 +22593,6 @@ rec {
             name = "tree-sitter";
             packageId = "tree-sitter";
             optional = true;
-            features = [ "wasm" ];
           }
           {
             name = "zeta_prompt";
@@ -24807,6 +24841,10 @@ rec {
             packageId = "parking_lot";
           }
           {
+            name = "path";
+            packageId = "path";
+          }
+          {
             name = "proto";
             packageId = "proto";
           }
@@ -25532,13 +25570,34 @@ rec {
         authors = [
           "Stjepan Glavina <stjepang@gmail.com>"
         ];
+        dependencies = [
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.16";
+            optional = true;
+            target = { target, features }: ((("wasm32" == target."arch" or null) || ("wasm64" == target."arch" or null)) && ("unknown" == target."os" or null));
+            features = [ "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.16";
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.16";
+            target = { target, features }: ((("wasm32" == target."arch" or null) || ("wasm64" == target."arch" or null)) && ("unknown" == target."os" or null));
+            features = [ "js" ];
+          }
+        ];
         features = {
           "default" = [ "std" ];
           "getrandom" = [ "dep:getrandom" ];
           "js" = [ "std" "getrandom" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "default" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "getrandom" "js" "std" ];
       };
       "fax" = rec {
         crateName = "fax";
@@ -26006,9 +26065,9 @@ rec {
       };
       "filetime" = rec {
         crateName = "filetime";
-        version = "0.2.26";
+        version = "0.2.29";
         edition = "2018";
-        sha256 = "1vb3vz83saxr084wjf2032hspx7wfc5ggggnhc15i9kg3g6ha1dw";
+        sha256 = "0napyyfccb26r7fyh9hg7ixrh4vph9h7y7k4iv1j19phqwrpla2w";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -26021,17 +26080,6 @@ rec {
             name = "libc";
             packageId = "libc";
             target = { target, features }: (target."unix" or false);
-          }
-          {
-            name = "libredox";
-            packageId = "libredox";
-            target = { target, features }: ("redox" == target."os" or null);
-          }
-          {
-            name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
-            target = { target, features }: (target."windows" or false);
-            features = [ "Win32_Foundation" "Win32_Storage_FileSystem" ];
           }
         ];
 
@@ -26190,7 +26238,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "alloc" "default" "impl-error" "serde" "std" ];
       };
-      "flume" = rec {
+      "flume 0.11.1" = rec {
         crateName = "flume";
         version = "0.11.1";
         edition = "2018";
@@ -26212,12 +26260,6 @@ rec {
             usesDefaultFeatures = false;
           }
           {
-            name = "nanorand";
-            packageId = "nanorand";
-            optional = true;
-            features = [ "getrandom" ];
-          }
-          {
             name = "spin";
             packageId = "spin 0.9.8";
             rename = "spin1";
@@ -26232,7 +26274,51 @@ rec {
           "futures-sink" = [ "dep:futures-sink" ];
           "nanorand" = [ "dep:nanorand" ];
         };
-        resolvedDefaultFeatures = [ "async" "default" "eventual-fairness" "futures-core" "futures-sink" "nanorand" "select" ];
+        resolvedDefaultFeatures = [ "async" "futures-core" "futures-sink" ];
+      };
+      "flume 0.12.0" = rec {
+        crateName = "flume";
+        version = "0.12.0";
+        edition = "2018";
+        sha256 = "1gnk7gji9r12ig35czj2cq441zf5ijmz0bgnz9gfnxx7dk29n4sy";
+        authors = [
+          "Joshua Barretto <joshua.s.barretto@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "fastrand";
+            packageId = "fastrand 2.3.0";
+            optional = true;
+            features = [ "std" "js" ];
+          }
+          {
+            name = "futures-core";
+            packageId = "futures-core";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "futures-sink";
+            packageId = "futures-sink";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "spin";
+            packageId = "spin 0.9.8";
+            rename = "spin1";
+            features = [ "mutex" ];
+          }
+        ];
+        features = {
+          "async" = [ "futures-sink" "futures-core" ];
+          "default" = [ "async" "select" "eventual-fairness" ];
+          "eventual-fairness" = [ "select" "fastrand" ];
+          "fastrand" = [ "dep:fastrand" ];
+          "futures-core" = [ "dep:futures-core" ];
+          "futures-sink" = [ "dep:futures-sink" ];
+        };
+        resolvedDefaultFeatures = [ "async" "default" "eventual-fairness" "fastrand" "futures-core" "futures-sink" "select" ];
       };
       "fnv" = rec {
         crateName = "fnv";
@@ -26603,6 +26689,12 @@ rec {
             packageId = "async-channel 2.5.0";
           }
           {
+            name = "async-std";
+            packageId = "async-std";
+            target = { target, features }: ("windows" == target."os" or null);
+            features = [ "unstable" ];
+          }
+          {
             name = "async-tar";
             packageId = "async-tar";
           }
@@ -26656,6 +26748,10 @@ rec {
           {
             name = "parking_lot";
             packageId = "parking_lot";
+          }
+          {
+            name = "path";
+            packageId = "path";
           }
           {
             name = "paths";
@@ -27631,7 +27727,7 @@ rec {
           "rustc-dep-of-std" = [ "compiler_builtins" "core" "libc/rustc-dep-of-std" "wasi/rustc-dep-of-std" ];
           "wasm-bindgen" = [ "dep:wasm-bindgen" ];
         };
-        resolvedDefaultFeatures = [ "js" "js-sys" "rdrand" "std" "wasm-bindgen" ];
+        resolvedDefaultFeatures = [ "js" "js-sys" "std" "wasm-bindgen" ];
       };
       "getrandom 0.3.4" = rec {
         crateName = "getrandom";
@@ -30444,8 +30540,8 @@ rec {
             name = "xkbcommon";
             packageId = "xkbcommon";
             optional = true;
+            usesDefaultFeatures = false;
             target = { target, features }: (("linux" == target."os" or null) || ("freebsd" == target."os" or null));
-            features = [ "wayland" "x11" ];
           }
           {
             name = "zed-scap";
@@ -30476,14 +30572,14 @@ rec {
           "scap" = [ "dep:scap" ];
           "screen-capture" = [ "gpui/screen-capture" "scap" ];
           "test-support" = [ "gpui/test-support" ];
-          "wayland" = [ "bitflags" "gpui_wgpu" "ashpd/wayland" "calloop-wayland-source" "wayland-backend" "wayland-client" "wayland-cursor" "wayland-protocols" "wayland-protocols-plasma" "wayland-protocols-wlr" "filedescriptor" "xkbcommon" "open" "gpui/wayland" ];
+          "wayland" = [ "bitflags" "gpui_wgpu" "ashpd/wayland" "calloop-wayland-source" "wayland-backend" "wayland-client" "wayland-cursor" "wayland-protocols" "wayland-protocols-plasma" "wayland-protocols-wlr" "filedescriptor" "xkbcommon/wayland" "open" "gpui/wayland" ];
           "wayland-backend" = [ "dep:wayland-backend" ];
           "wayland-client" = [ "dep:wayland-client" ];
           "wayland-cursor" = [ "dep:wayland-cursor" ];
           "wayland-protocols" = [ "dep:wayland-protocols" ];
           "wayland-protocols-plasma" = [ "dep:wayland-protocols-plasma" ];
           "wayland-protocols-wlr" = [ "dep:wayland-protocols-wlr" ];
-          "x11" = [ "gpui_wgpu" "ashpd" "as-raw-xcb-connection" "x11rb" "xkbcommon" "xim" "x11-clipboard" "filedescriptor" "open" "scap?/x11" ];
+          "x11" = [ "gpui_wgpu" "ashpd" "as-raw-xcb-connection" "x11rb" "xkbcommon/x11" "xim" "x11-clipboard" "filedescriptor" "open" "scap?/x11" ];
           "x11-clipboard" = [ "dep:x11-clipboard" ];
           "x11rb" = [ "dep:x11rb" ];
           "xim" = [ "dep:xim" ];
@@ -31309,7 +31405,6 @@ rec {
             name = "tree-sitter";
             packageId = "tree-sitter";
             optional = true;
-            features = [ "wasm" ];
           }
           {
             name = "tree-sitter-bash";
@@ -31397,14 +31492,10 @@ rec {
             packageId = "tree-sitter-yaml";
             optional = true;
           }
-          {
-            name = "util";
-            packageId = "util";
-          }
         ];
         features = {
           "load-grammars" = [ "tree-sitter" "tree-sitter-bash" "tree-sitter-c" "tree-sitter-cpp" "tree-sitter-css" "tree-sitter-diff" "tree-sitter-gitcommit" "tree-sitter-go" "tree-sitter-go-mod" "tree-sitter-gowork" "tree-sitter-jsdoc" "tree-sitter-json" "tree-sitter-md" "tree-sitter-python" "tree-sitter-regex" "tree-sitter-rust" "tree-sitter-typescript" "tree-sitter-yaml" ];
-          "test-support" = [ "load-grammars" ];
+          "test-support" = [ "load-grammars" "tree-sitter/wasm" ];
           "tree-sitter" = [ "dep:tree-sitter" ];
           "tree-sitter-bash" = [ "dep:tree-sitter-bash" ];
           "tree-sitter-c" = [ "dep:tree-sitter-c" ];
@@ -36836,17 +36927,21 @@ rec {
             packageId = "gpui_shared_string";
           }
           {
+            name = "gpui_util";
+            packageId = "gpui_util";
+          }
+          {
             name = "log";
             packageId = "log";
             features = [ "kv_unstable_serde" "serde" ];
           }
           {
-            name = "lsp";
-            packageId = "lsp";
-          }
-          {
             name = "parking_lot";
             packageId = "parking_lot";
+          }
+          {
+            name = "path";
+            packageId = "path";
           }
           {
             name = "regex";
@@ -36874,11 +36969,6 @@ rec {
           {
             name = "tree-sitter";
             packageId = "tree-sitter";
-            features = [ "wasm" ];
-          }
-          {
-            name = "util";
-            packageId = "util";
           }
         ];
         features = {
@@ -36999,6 +37089,10 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "gpui_util";
+            packageId = "gpui_util";
+          }
+          {
             name = "http_client";
             packageId = "http_client";
           }
@@ -37038,10 +37132,6 @@ rec {
           {
             name = "thiserror";
             packageId = "thiserror 2.0.17";
-          }
-          {
-            name = "util";
-            packageId = "util";
           }
         ];
         devDependencies = [
@@ -39628,6 +39718,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+          }
+          {
             name = "async-pipe";
             packageId = "async-pipe";
             optional = true;
@@ -39641,6 +39735,10 @@ rec {
             packageId = "futures";
           }
           {
+            name = "futures-lite";
+            packageId = "futures-lite 1.13.0";
+          }
+          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
@@ -39648,7 +39746,6 @@ rec {
           {
             name = "gpui_util";
             packageId = "gpui_util";
-            optional = true;
           }
           {
             name = "log";
@@ -39686,10 +39783,6 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
-          }
-          {
-            name = "smol";
-            packageId = "smol";
           }
           {
             name = "util";
@@ -39732,10 +39825,9 @@ rec {
         ];
         features = {
           "async-pipe" = [ "dep:async-pipe" ];
-          "gpui_util" = [ "dep:gpui_util" ];
-          "test-support" = [ "async-pipe" "gpui_util" ];
+          "test-support" = [ "async-pipe" ];
         };
-        resolvedDefaultFeatures = [ "async-pipe" "gpui_util" "test-support" ];
+        resolvedDefaultFeatures = [ "async-pipe" "test-support" ];
       };
       "lsp-types" = rec {
         crateName = "lsp-types";
@@ -39775,6 +39867,133 @@ rec {
         features = {
         };
         resolvedDefaultFeatures = [ "default" ];
+      };
+      "lsp_locations" = rec {
+        crateName = "lsp_locations";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/lsp_locations"; };
+        libPath = "src/lsp_locations.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "collections";
+            packageId = "collections";
+          }
+          {
+            name = "editor";
+            packageId = "editor";
+          }
+          {
+            name = "file_icons";
+            packageId = "file_icons";
+          }
+          {
+            name = "fuzzy";
+            packageId = "fuzzy";
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "language";
+            packageId = "language";
+          }
+          {
+            name = "log";
+            packageId = "log";
+            features = [ "kv_unstable_serde" "serde" ];
+          }
+          {
+            name = "picker";
+            packageId = "picker";
+          }
+          {
+            name = "picker_preview";
+            packageId = "picker_preview";
+          }
+          {
+            name = "project";
+            packageId = "project";
+          }
+          {
+            name = "settings";
+            packageId = "settings";
+          }
+          {
+            name = "text";
+            packageId = "text";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
+            name = "ui";
+            packageId = "ui";
+          }
+          {
+            name = "util";
+            packageId = "util";
+          }
+          {
+            name = "workspace";
+            packageId = "workspace";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "editor";
+            packageId = "editor";
+            features = [ "test-support" ];
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            features = [ "test-support" ];
+          }
+          {
+            name = "indoc";
+            packageId = "indoc";
+          }
+          {
+            name = "language";
+            packageId = "language";
+            features = [ "test-support" ];
+          }
+          {
+            name = "lsp";
+            packageId = "lsp";
+            features = [ "test-support" ];
+          }
+          {
+            name = "project";
+            packageId = "project";
+            features = [ "test-support" ];
+          }
+          {
+            name = "settings";
+            packageId = "settings";
+            features = [ "test-support" ];
+          }
+          {
+            name = "theme";
+            packageId = "theme";
+            features = [ "test-support" ];
+          }
+          {
+            name = "workspace";
+            packageId = "workspace";
+            features = [ "test-support" ];
+          }
+        ];
+
       };
       "lyon" = rec {
         crateName = "lyon";
@@ -42541,32 +42760,6 @@ rec {
           }
         ];
 
-      };
-      "nanorand" = rec {
-        crateName = "nanorand";
-        version = "0.7.0";
-        edition = "2021";
-        sha256 = "1hr60b8zlfy7mxjcwx2wfmhpkx7vfr3v9x12shmv1c10b0y32lba";
-        authors = [
-          "Lucy <lucy@absolucy.moe>"
-        ];
-        dependencies = [
-          {
-            name = "getrandom";
-            packageId = "getrandom 0.2.16";
-            optional = true;
-            features = [ "rdrand" "js" ];
-          }
-        ];
-        features = {
-          "default" = [ "std" "tls" "wyrand" "pcg64" "chacha" ];
-          "getrandom" = [ "dep:getrandom" ];
-          "rdseed" = [ "std" ];
-          "std" = [ "alloc" ];
-          "tls" = [ "std" "wyrand" ];
-          "zeroize" = [ "dep:zeroize" ];
-        };
-        resolvedDefaultFeatures = [ "alloc" "chacha" "default" "getrandom" "pcg64" "std" "tls" "wyrand" ];
       };
       "native-tls" = rec {
         crateName = "native-tls";
@@ -48119,6 +48312,39 @@ rec {
         ];
 
       };
+      "path" = rec {
+        crateName = "path";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/path"; };
+        libPath = "src/path.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "dunce";
+            packageId = "dunce";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
+            features = [ "derive" "rc" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+        ];
+        features = {
+          "serde" = [ "dep:serde" ];
+        };
+        resolvedDefaultFeatures = [ "serde" "test-support" ];
+      };
       "pathdiff" = rec {
         crateName = "pathdiff";
         version = "0.2.3";
@@ -52204,6 +52430,10 @@ rec {
             packageId = "parking_lot";
           }
           {
+            name = "path";
+            packageId = "path";
+          }
+          {
             name = "paths";
             packageId = "paths";
           }
@@ -55475,11 +55705,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "test-support" ];
       };
-      "redox_syscall 0.2.16" = rec {
+      "redox_syscall 0.5.18" = rec {
         crateName = "redox_syscall";
-        version = "0.2.16";
-        edition = "2018";
-        sha256 = "16jicm96kjyzm802cxdd1k9jmcph0db1a4lhslcnhjsvhp0mhnpv";
+        version = "0.5.18";
+        edition = "2021";
+        sha256 = "0b9n38zsxylql36vybw18if68yc9jczxmbyzdwyhb9sifmag4azd";
         libName = "syscall";
         authors = [
           "Jeremy Soller <jackpot51@gmail.com>"
@@ -55487,16 +55717,21 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 1.3.2";
+            packageId = "bitflags 2.10.0";
           }
         ];
-
+        features = {
+          "core" = [ "dep:core" ];
+          "default" = [ "userspace" ];
+          "rustc-dep-of-std" = [ "core" "bitflags/rustc-dep-of-std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "userspace" ];
       };
-      "redox_syscall 0.5.18" = rec {
+      "redox_syscall 0.7.5" = rec {
         crateName = "redox_syscall";
-        version = "0.5.18";
+        version = "0.7.5";
         edition = "2021";
-        sha256 = "0b9n38zsxylql36vybw18if68yc9jczxmbyzdwyhb9sifmag4azd";
+        sha256 = "06qvcqy42dv563dsbxpxyig0mslwrhyx3xllknqyl4l41nka2rj6";
         libName = "syscall";
         authors = [
           "Jeremy Soller <jackpot51@gmail.com>"
@@ -59731,7 +59966,7 @@ rec {
           }
           {
             name = "flume";
-            packageId = "flume";
+            packageId = "flume 0.12.0";
           }
           {
             name = "futures";
@@ -65199,7 +65434,7 @@ rec {
           }
           {
             name = "flume";
-            packageId = "flume";
+            packageId = "flume 0.11.1";
             usesDefaultFeatures = false;
             features = [ "async" ];
           }
@@ -72473,6 +72708,15 @@ rec {
             usesDefaultFeatures = false;
             features = [ "test-support" ];
           }
+          {
+            name = "settings";
+            packageId = "settings";
+            features = [ "test-support" ];
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
         ];
         features = {
         };
@@ -73133,6 +73377,11 @@ rec {
             features = [ "user" ];
           }
           {
+            name = "path";
+            packageId = "path";
+            features = [ "serde" ];
+          }
+          {
             name = "percent-encoding";
             packageId = "percent-encoding";
           }
@@ -73224,6 +73473,11 @@ rec {
         ];
         devDependencies = [
           {
+            name = "path";
+            packageId = "path";
+            features = [ "test-support" ];
+          }
+          {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
             features = [ "unstable" ];
@@ -73239,7 +73493,7 @@ rec {
         ];
         features = {
           "rand" = [ "dep:rand" ];
-          "test-support" = [ "rand" "util_macros" ];
+          "test-support" = [ "rand" "util_macros" "path/test-support" ];
           "util_macros" = [ "dep:util_macros" ];
         };
         resolvedDefaultFeatures = [ "rand" "test-support" "util_macros" ];
@@ -87343,9 +87597,9 @@ rec {
       };
       "xattr" = rec {
         crateName = "xattr";
-        version = "0.2.3";
-        edition = "2015";
-        sha256 = "1g7s46l5c0g07ywfjp85hwqy59fzpj3xkx45d2q5xsxawnxjc5bd";
+        version = "1.6.1";
+        edition = "2021";
+        sha256 = "0ml1mb43gqasawillql6b344m0zgq8mz0isi11wj8vbg43a5mr1j";
         authors = [
           "Steven Allen <steven@stebalien.com>"
         ];
@@ -87353,6 +87607,14 @@ rec {
           {
             name = "libc";
             packageId = "libc";
+            target = { target, features }: (("freebsd" == target."os" or null) || ("netbsd" == target."os" or null));
+          }
+          {
+            name = "rustix";
+            packageId = "rustix 1.1.2";
+            usesDefaultFeatures = false;
+            target = { target, features }: (("android" == target."os" or null) || ("linux" == target."os" or null) || ("macos" == target."os" or null) || ("hurd" == target."os" or null));
+            features = [ "fs" "std" ];
           }
         ];
         features = {
@@ -87513,7 +87775,7 @@ rec {
           "wayland" = [ "memmap2" ];
           "x11" = [ "as-raw-xcb-connection" ];
         };
-        resolvedDefaultFeatures = [ "as-raw-xcb-connection" "default" "memmap2" "wayland" "x11" ];
+        resolvedDefaultFeatures = [ "as-raw-xcb-connection" "memmap2" "wayland" "x11" ];
       };
       "xkeysym" = rec {
         crateName = "xkeysym";
@@ -88370,7 +88632,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "1.12.0";
+        version = "1.13.0";
         edition = "2024";
         crateBin = [
           {
@@ -88755,6 +89017,10 @@ rec {
             name = "log";
             packageId = "log";
             features = [ "kv_unstable_serde" "serde" ];
+          }
+          {
+            name = "lsp_locations";
+            packageId = "lsp_locations";
           }
           {
             name = "markdown";

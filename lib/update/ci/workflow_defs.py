@@ -915,6 +915,10 @@ def _refresh_sanity_job() -> Job:
                 run="nix run .#nixcfg -- ci pipeline crate2nix",
             ),
             Step(
+                name="Evaluate update-target package derivations",
+                run=("nix run .#nixcfg -- ci workflow validate-update-derivations"),
+            ),
+            Step(
                 name="Smoke-check update app evaluation",
                 run="nix run .#nixcfg -- ci workflow smoke-check-update-app",
             ),
@@ -926,11 +930,39 @@ def _refresh_sanity_job() -> Job:
     )
 
 
+def _validate_derivations_darwin_job() -> Job:
+    """Validate Darwin update targets against the fully merged artifact tree."""
+    return Job(
+        comment_lines=(
+            "Phase 8: Darwin derivation checks over the merged update tree",
+        ),
+        needs=("merge-generated",),
+        runs_on="macos-15",
+        timeout_minutes=30,
+        steps=(
+            _checkout_step(),
+            _setup_nix_step(),
+            _cachix_step(),
+            _download_step(name="merged-generated", path="."),
+            _nix_cache_step(key=_hash_files_key(_UPDATE_HASH_FILES)),
+            _free_disk_space_step(),
+            Step(
+                name="Evaluate Darwin update-target package derivations",
+                run=("nix run .#nixcfg -- ci workflow validate-update-derivations"),
+            ),
+        ),
+    )
+
+
 def _create_pr_job() -> Job:
     """Phase 9: open or refresh the update PR."""
     return Job(
         comment_lines=("Phase 9: Create PR with updates",),
-        needs=("merge-generated", "refresh-sanity"),
+        needs=(
+            "merge-generated",
+            "validate-derivations-darwin",
+            "refresh-sanity",
+        ),
         runs_on="ubuntu-24.04",
         timeout_minutes=30,
         permissions={
@@ -1017,6 +1049,7 @@ def update_workflow() -> Workflow:
             "crate2nix-linux": _crate2nix_linux_job(),
             "crate2nix-darwin": _crate2nix_darwin_job(),
             "merge-generated": _merge_generated_job(),
+            "validate-derivations-darwin": _validate_derivations_darwin_job(),
             "refresh-sanity": _refresh_sanity_job(),
             "create-pr": _create_pr_job(),
         },

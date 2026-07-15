@@ -643,6 +643,85 @@ def test_run_sources_phase_bounds_concurrent_tasks_within_wave(
     assert sorted(completed) == sorted(source_names)
 
 
+def test_run_sources_phase_serializes_flake_input_refreshes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not let concurrent lock refreshes overwrite each other's flake.lock."""
+
+    class _FirstUpdater:
+        input_name = "first-input"
+
+        def __init__(self, *, config: object | None = None) -> None:
+            _ = config
+
+        async def update_stream(
+            self,
+            current: SourceEntry | None,
+            session: aiohttp.ClientSession,
+            *,
+            pinned_version: VersionInfo | None = None,
+        ) -> AsyncIterator[UpdateEvent]:
+            _ = (current, session, pinned_version)
+            yield UpdateEvent.result("first")
+
+    class _SecondUpdater(_FirstUpdater):
+        input_name = "second-input"
+
+        async def update_stream(
+            self,
+            current: SourceEntry | None,
+            session: aiohttp.ClientSession,
+            *,
+            pinned_version: VersionInfo | None = None,
+        ) -> AsyncIterator[UpdateEvent]:
+            _ = (current, session, pinned_version)
+            yield UpdateEvent.result("second")
+
+    active_refreshes = 0
+    max_active_refreshes = 0
+
+    async def _update_input(
+        _input_name: str,
+        *,
+        source: str,
+    ) -> AsyncIterator[UpdateEvent]:
+        nonlocal active_refreshes, max_active_refreshes
+        active_refreshes += 1
+        max_active_refreshes = max(max_active_refreshes, active_refreshes)
+        try:
+            await asyncio.sleep(0.01)
+            yield UpdateEvent.status(source, "input refreshed")
+        finally:
+            active_refreshes -= 1
+
+    monkeypatch.setattr(
+        "lib.update.source_runner.UPDATERS",
+        {"first": _FirstUpdater, "second": _SecondUpdater},
+    )
+    monkeypatch.setattr("lib.update.flake.update_flake_input", _update_input)
+
+    _run(
+        run_sources_phase(
+            context=SourcesPhaseContext(
+                source_names=["first", "second"],
+                sources=SourcesFile(
+                    entries={
+                        "first": SourceEntry(hashes={}),
+                        "second": SourceEntry(hashes={}),
+                    }
+                ),
+                queue=asyncio.Queue(),
+                update_input=True,
+                native_only=False,
+                config=resolve_config(max_nix_builds=2),
+                pinned={},
+            )
+        )
+    )
+
+    assert max_active_refreshes == 1
+
+
 def test_run_sources_phase_passes_companion_artifacts_between_waves(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

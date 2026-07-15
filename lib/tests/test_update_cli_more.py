@@ -1671,7 +1671,11 @@ def test_execute_run_plan_and_top_level_entrypoints(
         "lib.update.persistence.persist_materialized_updates", lambda **_kwargs: None
     )
 
-    cfg = SimpleNamespace(default_log_tail_lines=10, default_render_interval=0.1)
+    cfg = SimpleNamespace(
+        default_log_tail_lines=10,
+        default_render_interval=0.1,
+        default_subprocess_timeout=30,
+    )
     exit_code = _run_async(
         _execute_run_plan(UpdateOptions(), OutputOptions(), cfg, plan)
     )

@@ -70,6 +70,7 @@ def test_update_workflow_shape() -> None:
         "crate2nix-linux",
         "crate2nix-darwin",
         "merge-generated",
+        "validate-derivations-darwin",
         "refresh-sanity",
         "create-pr",
     ]
@@ -85,6 +86,11 @@ def test_update_workflow_shape() -> None:
 
     create_pr = jobs["create-pr"]
     assert isinstance(create_pr, dict)
+    assert create_pr["needs"] == [
+        "merge-generated",
+        "validate-derivations-darwin",
+        "refresh-sanity",
+    ]
     assert create_pr["permissions"] == {
         "actions": "write",
         "contents": "write",
@@ -103,6 +109,34 @@ def test_update_workflow_final_artifact_matches_python_specs() -> None:
     assert isinstance(refresh_sanity, dict)
     steps = refresh_sanity["steps"]
     assert isinstance(steps, list)
+    derivation_validation = next(
+        step
+        for step in steps
+        if isinstance(step, dict)
+        and step.get("name") == "Evaluate update-target package derivations"
+    )
+    assert derivation_validation["run"] == (
+        "nix run .#nixcfg -- ci workflow validate-update-derivations"
+    )
+
+    darwin_validation = jobs["validate-derivations-darwin"]
+    assert isinstance(darwin_validation, dict)
+    assert darwin_validation["needs"] == "merge-generated"
+    assert darwin_validation["runs-on"] == "macos-15"
+    darwin_steps = darwin_validation["steps"]
+    assert isinstance(darwin_steps, list)
+    assert any(
+        isinstance(step, dict)
+        and isinstance(step.get("with"), dict)
+        and step["with"].get("name") == "merged-generated"
+        for step in darwin_steps
+    )
+    assert any(
+        isinstance(step, dict)
+        and step.get("run")
+        == "nix run .#nixcfg -- ci workflow validate-update-derivations"
+        for step in darwin_steps
+    )
     final_upload = next(
         step
         for step in steps

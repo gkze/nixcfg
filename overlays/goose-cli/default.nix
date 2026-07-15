@@ -109,8 +109,8 @@ let
     rootSrc = patchedSrc;
   };
 
-  # Common inputs shared by the Goose workspace binaries themselves.
-  commonGooseOverride = attrs: {
+  # Native and build inputs needed by the Goose CLI crate.
+  gooseCliOverride = attrs: {
     nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [
       prev.pkg-config
       prev.protobuf
@@ -176,8 +176,7 @@ let
   # Keep all build-system compatibility shims in one place so version bumps can
   # be audited crate-by-crate.
   crateOverrides = prev.defaultCrateOverrides // {
-    goose-cli = commonGooseOverride;
-    goose-server = commonGooseOverride;
+    goose-cli = gooseCliOverride;
     hipstr = hipstrOverride;
     llama-cpp-sys-2 = llamaCppSysOverride;
     rmcp = rmcpOverride;
@@ -185,8 +184,7 @@ let
     xcap = xcapLinuxOverride;
   };
 
-  # Build the two workspace binaries separately, then rejoin them below to keep
-  # the historical goose-cli package shape.
+  # Build the Goose CLI workspace member, including its install-check smoke tests.
   gooseCliDrv = cargoNix.workspaceMembers.goose-cli.build.override {
     inherit crateOverrides;
     runTests = false;
@@ -206,23 +204,11 @@ let
 
       $out/bin/goose --version
       $out/bin/goose info
+      $out/bin/goose serve --help
 
       runHook postInstallCheck
     '';
   });
-
-  gooseServerDrv = cargoNix.workspaceMembers.goose-server.build.override {
-    inherit crateOverrides;
-    runTests = false;
-  };
-
-  workspaceBins = prev.symlinkJoin {
-    name = "goose-cli-workspace-${version}";
-    paths = [
-      gooseCliDrvChecked
-      gooseServerDrv
-    ];
-  };
 in
 {
   goose-cli-crate2nix-src = patchedSrc;
@@ -231,11 +217,11 @@ in
     assert cargoNixV8VersionCheck;
     prev.symlinkJoin {
       name = "goose-cli-${version}";
-      paths = [ workspaceBins ];
+      paths = [ gooseCliDrvChecked ];
       nativeBuildInputs = [ prev.installShellFiles ];
 
       postBuild = ''
-        rm -f $out/bin/generate_manpages $out/bin/generate_schema
+        rm -f $out/bin/generate_manpages
 
         export HOME="$TMPDIR/home"
         export XDG_CACHE_HOME="$TMPDIR/xdg-cache"
@@ -259,7 +245,6 @@ in
         inherit
           cargoNix
           crateOverrides
-          gooseServerDrv
           patchedSrc
           patchedV8Src
           version

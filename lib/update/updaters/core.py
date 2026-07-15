@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 
     import aiohttp
 
+    from lib.update.derivation_validation import DerivationValidation
     from lib.update.updaters.metadata import VersionInfo
 
 
@@ -294,6 +295,7 @@ class Updater(ABC):
     materialize_when_current: ClassVar[bool] = False
     shows_materialize_artifacts_phase: ClassVar[bool] = False
     generated_artifact_files: ClassVar[tuple[str, ...]] = ()
+    derivation_validations: ClassVar[tuple[DerivationValidation, ...]] = ()
     companion_of: ClassVar[str | None] = None
     # Optional tuple of Nix system strings (for example ``"aarch64-darwin"``)
     # this updater may run on. ``None`` means "all platforms" (the default).
@@ -308,6 +310,11 @@ class Updater(ABC):
     def __init__(self, *, config: UpdateConfig | None = None) -> None:
         """Create an updater bound to active config values."""
         self.config = resolve_active_config(config)
+
+    @classmethod
+    def get_derivation_validations(cls) -> tuple[DerivationValidation, ...]:
+        """Return optional post-persistence derivation validation metadata."""
+        return cls.derivation_validations
 
     @abstractmethod
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:

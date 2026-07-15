@@ -31,6 +31,7 @@ from lib.update.ci.pr_body import (
 from lib.update.ci.sources_json_diff import NoChangesMessage
 from lib.update.ci.sources_json_diff import run_diff as run_sources_diff
 from lib.update.ci.workflow_defs import render_generated_workflows
+from lib.update.derivation_validation import validate_derivations
 from lib.update.paths import (
     PACKAGE_DIRS,
     SOURCES_FILE_NAME,
@@ -38,6 +39,7 @@ from lib.update.paths import (
     get_repo_root,
     is_sources_file_path,
 )
+from lib.update.updaters import ensure_updaters_loaded
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -139,6 +141,14 @@ _cmd_eval_darwin_full_smoke = _bind_core_command(
 _cmd_smoke_check_update_app = _bind_core_command(
     _workflow_core.cmd_smoke_check_update_app,
     _run_deps,
+)
+_cmd_validate_update_derivations = _bind_core_command(
+    _workflow_core.cmd_validate_update_derivations,
+    _stderr_deps,
+    lambda: {
+        "validate": validate_derivations,
+        "updaters": ensure_updaters_loaded(),
+    },
 )
 _cmd_list_update_targets = _bind_core_command(
     _workflow_core.cmd_list_update_targets,
@@ -585,6 +595,11 @@ def command_smoke_check_update_app() -> None:
     _exit_with_code(_cmd_smoke_check_update_app())
 
 
+def command_validate_update_derivations() -> None:
+    """Evaluate updater-declared derivations supported by this runner."""
+    _exit_with_code(_cmd_validate_update_derivations())
+
+
 def command_list_update_targets() -> None:
     """List update targets discovered by the update app."""
     _exit_with_code(_cmd_list_update_targets())
@@ -696,6 +711,11 @@ _register_commands(
     (
         ("generate", command_generate_workflows, None),
         ("verify-generated", command_verify_generated_workflows, None),
+        (
+            "validate-update-derivations",
+            command_validate_update_derivations,
+            None,
+        ),
         ("validate-bun-lock", command_validate_bun_lock, None),
         ("prepare-bun-lock", command_prepare_bun_lock, None),
         (

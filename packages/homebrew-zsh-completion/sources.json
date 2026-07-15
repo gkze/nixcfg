@@ -1,10 +1,10 @@
 {
   "hashes": [
     {
-      "hash": "sha256-q2bbaJtZAhitXHKcQhHTYsHNlfUgZ5oAS3G5J6ioRu4=",
+      "hash": "sha256-livCl9FaOagRZxZ2YiVmq+Q48Emuv9jKA/kDw5f7f70=",
       "hashType": "sha256",
-      "url": "https://raw.githubusercontent.com/Homebrew/brew/dfdab6ae6606425cba9843419b040a772ebe17b0/completions/zsh/_brew"
+      "url": "https://raw.githubusercontent.com/Homebrew/brew/44e476a9e75f5b24f4413750f8a291839fa573c2/completions/zsh/_brew"
     }
   ],
-  "version": "dfdab6ae6606425cba9843419b040a772ebe17b0"
+  "version": "44e476a9e75f5b24f4413750f8a291839fa573c2"
 }

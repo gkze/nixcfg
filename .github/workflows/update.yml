@@ -916,6 +916,56 @@ jobs:
             overlays/**/Cargo.nix
             overlays/**/crate-hashes.json
 
+  # Phase 8: Darwin derivation checks over the merged update tree
+  validate-derivations-darwin:
+    needs: merge-generated
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+      # Determinate Nix v3.17.1
+      # Nix uses this token for external api.github.com flake fetches.
+      # The default github.token produces HTTP 401 "Bad credentials" there.
+      - uses: DeterminateSystems/determinate-nix-action@a18f73c54ca8525de051e73c31512a67f44df919
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+      - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
+        with:
+          name: ${{ env.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          extraPullNames: zed
+          useDaemon: true
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: merged-generated
+          path: .
+      # Cache immutable tarball fetch artifacts only. Nix recreates
+      # mutable SQLite metadata caches locally, and persisting them via
+      # archive-based CI caches can restore malformed databases.
+      - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cache/nix/tarball-cache
+            ~/.cache/nix/tarball-cache-v2
+          key: >-
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles( 'flake.lock',
+            'packages/**/sources.json', 'overlays/**/sources.json', 'packages/**/uv.lock',
+            'packages/**/deno-deps.json', 'packages/**/build.zig.zon.nix', 'packages/**/Cargo.nix',
+            'packages/**/crate-hashes.json', 'overlays/**/Cargo.nix',
+            'overlays/**/crate-hashes.json', 'packages/superset/bun.nix',
+            'packages/superset/bun.lock', 'packages/t3code/bun.lock',
+            'packages/t3code-desktop/bun.lock' ) }}
+          restore-keys: |
+            nix-cache-${{ runner.os }}-${{ runner.arch }}-
+            nix-cache-${{ runner.os }}-
+      - name: Free disk space
+        run: nix run .#nixcfg -- ci workflow free-disk-space
+      - name: Evaluate Darwin update-target package derivations
+        run: nix run .#nixcfg -- ci workflow validate-update-derivations
+
   # Phase 8: Refresh sanity checks required before opening the PR
   refresh-sanity:
     needs: merge-generated
@@ -965,6 +1015,8 @@ jobs:
         run: nix fmt -- --ci
       - name: Verify crate2nix artifacts are fresh
         run: nix run .#nixcfg -- ci pipeline crate2nix
+      - name: Evaluate update-target package derivations
+        run: nix run .#nixcfg -- ci workflow validate-update-derivations
       - name: Smoke-check update app evaluation
         run: nix run .#nixcfg -- ci workflow smoke-check-update-app
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -991,6 +1043,7 @@ jobs:
   create-pr:
     needs:
       - merge-generated
+      - validate-derivations-darwin
       - refresh-sanity
     runs-on: ubuntu-24.04
     timeout-minutes: 30
