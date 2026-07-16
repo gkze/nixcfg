@@ -67469,9 +67469,9 @@ rec {
       };
       "taffy" = rec {
         crateName = "taffy";
-        version = "0.10.1";
+        version = "0.12.1";
         edition = "2021";
-        sha256 = "0nc8r1kv1kr8ryns7chm255l5q8b2yi77i1s9prw65kw0ia218mf";
+        sha256 = "0zrm1j6png40szbpx73w3dym41ziaw2ykix7x8lpbm3bvl0wibvk";
         authors = [
           "Alice Cecile <alice.i.cecile@gmail.com>"
           "Johnathan Kelley <jkelleyrtp@gmail.com>"

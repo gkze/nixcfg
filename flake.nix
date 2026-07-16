@@ -137,11 +137,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     lumen = {
-      url = "github:jnsahaj/lumen/v2.30.0";
+      url = "github:jnsahaj/lumen/v2.31.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.67.0";
+      url = "github:max-sixty/worktrunk/v0.68.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -219,7 +219,7 @@
       flake = false;
     };
     linear-cli = {
-      url = "github:schpet/linear-cli/v2.1.0";
+      url = "github:schpet/linear-cli/v2.1.1";
       flake = false;
     };
     macfuse = {

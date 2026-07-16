@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-ZBmdt4DVFcoBV7pnCNOA+M1CgZ+x/Az7VhyrW16aUq8="
+    "aarch64-darwin": "sha256-t7FpTZ9Fh6uCngNHUjeCrm9v2GRanshcOPDdI75oqyk="
   },
   "urls": {
-    "aarch64-darwin": "https://tip.files.ghostty.org/f815f8459421e4b53e6c4b9ba559a74e9dc62798/Ghostty.dmg"
+    "aarch64-darwin": "https://tip.files.ghostty.org/7cb44fea332efa74e3843e531fd1aa4e764a8e4d/Ghostty.dmg"
   },
-  "version": "16496-f815f8459421e4b53e6c4b9ba559a74e9dc62798"
+  "version": "16500-7cb44fea332efa74e3843e531fd1aa4e764a8e4d"
 }
