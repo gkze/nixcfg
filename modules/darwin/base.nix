@@ -8,6 +8,7 @@
 let
   inherit (lib) attrByPath mkOption types;
   cfg = config.darwinDefaults;
+  gpgHome = attrByPath [ "home-manager" "users" primaryUser "programs" "gpg" "homedir" ] "/Users/${primaryUser}/.local/share/gnupg" config;
   macApps = import ../../lib/mac-apps.nix { inherit lib pkgs; };
   systemMacAppEntries = macApps.applicationsForScope "system" config.nixcfg.macApps.resolved;
   homeMacAppEntries = macApps.applicationsForScope "system" (
@@ -173,6 +174,8 @@ in
         {
           inherit (cfg.launchd) maxfiles maxproc;
         };
+
+    launchd.user.envVariables.GNUPGHOME = gpgHome;
 
     homebrew = {
       enable = pkgs.stdenv.isDarwin;

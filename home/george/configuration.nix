@@ -33,9 +33,13 @@
   ];
 
   sops = {
-    gnupg.home = config.programs.gpg.homedir;
+    age.keyFile = "${config.xdg.dataHome}/sops-nix/age-key.txt";
     defaultSopsFile = ../../secrets.yaml;
-    environment.PATH = lib.mkForce (lib.makeBinPath [ pkgs.coreutils ] + ":/usr/bin:/sbin");
+    environment = {
+      GNUPGHOME = "/var/empty";
+      PATH = lib.mkForce (lib.makeBinPath [ pkgs.coreutils ] + ":/usr/bin:/sbin");
+      SOPS_GPG_EXEC = "/usr/bin/false";
+    };
     secrets.github_pat = { };
     secrets.opencode_server_password = { };
   };
@@ -96,6 +100,11 @@
       fi
     '';
     file = {
+      ".gnupg" = {
+        force = true;
+        source = config.lib.file.mkOutOfStoreSymlink config.programs.gpg.homedir;
+      };
+
       # Keep the Nix-generated VS Code settings content, but materialize it as a
       # normal file so the editor can mutate it between switches.
       "${config.home.homeDirectory}/Library/Application Support/${
@@ -118,7 +127,7 @@
             pinentry-program ${pinentryProgram}
           '';
           onChange = ''
-            GNUPGHOME=${lib.escapeShellArg config.programs.gpg.homedir} ${gpgconf} --kill gpg-agent
+            GNUPGHOME=${lib.escapeShellArg config.programs.gpg.homedir} ${gpgconf} --reload gpg-agent
           '';
         };
 

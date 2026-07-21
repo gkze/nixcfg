@@ -1,8 +1,11 @@
 ---
 keys:
   - &george EF550412DBEBCE71
+  - &george_age age14e5zlw4ktxh3f0efhthgdcwg8dshc89r2tntj532zyaenwqw354sdxleh6
 creation_rules:
   - path_regex: secrets\.yaml$
     key_groups:
-      - pgp:
+      - age:
+          - *george_age
+        pgp:
           - *george

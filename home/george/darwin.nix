@@ -113,14 +113,16 @@ in
         ];
       };
     };
-    gpg-agent = {
+    gpg-home = {
       enable = true;
       config = {
-        Label = "org.gnupg.gpg-agent";
+        Label = "org.gnupg.home";
         RunAtLoad = true;
         ProgramArguments = [
-          "${pkgs.gnupg}/bin/gpg-agent"
-          "--server"
+          "/bin/launchctl"
+          "setenv"
+          "GNUPGHOME"
+          config.programs.gpg.homedir
         ];
       };
     };

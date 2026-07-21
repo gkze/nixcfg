@@ -129,7 +129,7 @@ in
         bindkey "^R" history-incremental-search-backward
         typeset -U PATH MANPATH
 
-        export GPG_TTY=$(tty)
+        source ${./gpg-tty.zsh}
 
         ${cfg.extraInitContent}
       '';

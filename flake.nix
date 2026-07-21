@@ -868,6 +868,13 @@
                 touch $out
               '';
 
+            "test-nix-gpg-session" =
+              { pkgs, ... }:
+              assert import ./tests/nix/gpg-session { inherit self; };
+              pkgs.runCommand "check-test-nix-gpg-session" { } ''
+                touch $out
+              '';
+
             "test-nix-package-helpers" =
               { pkgs, ... }:
               assert import ./tests/nix/package-helpers.nix { src = ./.; };
@@ -886,6 +893,20 @@
 
             "test-nix-prefetch-git-darwin-heredoc" =
               { pkgs, ... }: import ./tests/nix/nix-prefetch-git-darwin-heredoc { inherit pkgs; };
+
+            "test-sops-age-policy" =
+              { pkgs, ... }:
+              import ./tests/nix/sops-age-policy {
+                inherit pkgs;
+                src = ./.;
+              };
+
+            "test-zsh-gpg-tty" =
+              { pkgs, ... }:
+              import ./tests/nix/zsh-gpg-tty {
+                inherit pkgs;
+                src = ./.;
+              };
 
             "cache-electron-runtimes" = { pkgs, ... }: pkgs.electron-runtimes;
           }
