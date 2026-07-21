@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry
 
 from lib.nix.models.sources import HashCollection
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (
     SourceThenOverlayHashMixin,
@@ -26,6 +27,12 @@ class TsgolintUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     GITHUB_OWNER = "oxc-project"
     GITHUB_REPO = "tsgolint"
     dependency_hash_type = "vendorHash"
+    derivation_validations = (
+        DerivationValidation(
+            installable=".#pkgs.{system}.{name}",
+            mode="build",
+        ),
+    )
 
     @staticmethod
     def _src_expr(version: str) -> str:

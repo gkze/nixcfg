@@ -113,7 +113,7 @@ def test_update_workflow_final_artifact_matches_python_specs() -> None:
         step
         for step in steps
         if isinstance(step, dict)
-        and step.get("name") == "Evaluate update-target package derivations"
+        and step.get("name") == "Validate update-target package derivations"
     )
     assert derivation_validation["run"] == (
         "nix run .#nixcfg -- ci workflow validate-update-derivations"

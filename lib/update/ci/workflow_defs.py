@@ -915,7 +915,7 @@ def _refresh_sanity_job() -> Job:
                 run="nix run .#nixcfg -- ci pipeline crate2nix",
             ),
             Step(
-                name="Evaluate update-target package derivations",
+                name="Validate update-target package derivations",
                 run=("nix run .#nixcfg -- ci workflow validate-update-derivations"),
             ),
             Step(
@@ -947,7 +947,7 @@ def _validate_derivations_darwin_job() -> Job:
             _nix_cache_step(key=_hash_files_key(_UPDATE_HASH_FILES)),
             _free_disk_space_step(),
             Step(
-                name="Evaluate Darwin update-target package derivations",
+                name="Validate Darwin update-target package derivations",
                 run=("nix run .#nixcfg -- ci workflow validate-update-derivations"),
             ),
         ),

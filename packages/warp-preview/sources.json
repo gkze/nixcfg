@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-CgFnKHze/z6UoxuB/yGp6F2Cgb1+xC/IYNEUUgU8rYM="
+    "aarch64-darwin": "sha256-jCHY86C7ahpP3IZqxqhXMwuZ9DgMqHAoTSk3k0HX6+o="
   },
   "urls": {
-    "aarch64-darwin": "https://releases.warp.dev/preview/v0.2026.07.08.17.54.preview_02/WarpPreview.dmg"
+    "aarch64-darwin": "https://releases.warp.dev/preview/v0.2026.07.15.08.55.preview_01/WarpPreview.dmg"
   },
-  "version": "0.2026.07.08.17.54.preview_02"
+  "version": "0.2026.07.15.08.55.preview_01"
 }

@@ -27,6 +27,7 @@ def test_surface_alias_and_exemption_contracts() -> None:
         "electron-runtimes",
         "goose-cli-v8-native",
         "nix",
+        "nix-direnv",
         "nix-prefetch-git",
     } == UPDATE_SURFACE_EXEMPTIONS
     assert canonical_update_surface_name("opencode-desktop-dev") == ("opencode-desktop")

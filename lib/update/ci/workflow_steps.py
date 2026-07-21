@@ -596,7 +596,7 @@ def command_smoke_check_update_app() -> None:
 
 
 def command_validate_update_derivations() -> None:
-    """Evaluate updater-declared derivations supported by this runner."""
+    """Validate updater-declared derivations supported by this runner."""
     _exit_with_code(_cmd_validate_update_derivations())
 
 

@@ -1,4 +1,4 @@
-"""Behavioral tests for target-aware update derivation evaluation."""
+"""Behavioral tests for target-aware update derivation validation."""
 
 from __future__ import annotations
 
@@ -38,6 +38,12 @@ class _LinuxOnlyUpdater:
 
 class _PortableUpdater:
     derivation_validations = (DerivationValidation(installable=".#portable.drvPath"),)
+
+
+class _BuildPortableUpdater:
+    derivation_validations = (
+        DerivationValidation(installable=".#portable", mode="build"),
+    )
 
 
 class _DuplicateUpdater:
@@ -187,6 +193,27 @@ def test_validate_derivations_runs_nix_eval_from_repo_root() -> None:
     ]
 
 
+def test_validate_derivations_can_build_an_installable() -> None:
+    """Build-mode validation should realize the package without creating a result link."""
+    calls: list[list[str]] = []
+
+    def _run(
+        args: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    failures = validation.validate_derivations(
+        ["portable"],
+        updaters={"portable": _BuildPortableUpdater},
+        run=_run,
+    )
+
+    assert failures == ()
+    assert calls == [["nix", "build", "--no-link", ".#portable"]]
+
+
 def test_validate_derivations_uses_one_total_deadline() -> None:
     """Skip every remaining request after the shared validation deadline expires."""
 
@@ -266,6 +293,28 @@ def test_validate_derivations_reports_failed_command_output(
     )
 
 
+def test_validate_derivations_labels_an_empty_build_failure() -> None:
+    """Use the validation mode when a failed command produces no diagnostics."""
+
+    def _run(
+        args: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
+
+    assert validation.validate_derivations(
+        ["portable"],
+        updaters={"portable": _BuildPortableUpdater},
+        run=_run,
+    ) == (
+        DerivationValidationFailure(
+            source="portable",
+            installable=".#portable",
+            message="nix build failed",
+        ),
+    )
+
+
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
@@ -327,17 +376,31 @@ def test_cmd_validate_update_derivations_checks_current_system_and_fails() -> No
         == 1
     )
     assert calls == [(["demo", "zeta"], False, 12)]
-    assert "[demo] Derivation evaluation failed" in stderr.getvalue()
+    assert "[demo] Derivation validation failed" in stderr.getvalue()
     assert "broken graph" in stderr.getvalue()
 
 
 def test_cmd_validate_update_derivations_succeeds_without_failures() -> None:
-    """Succeed when every declared merged-tree derivation evaluates."""
+    """Succeed when every declared merged-tree derivation validates."""
+    timeouts: list[float] = []
+
+    def _validate(
+        _names: list[str],
+        *,
+        updaters: object,
+        all_declared_systems: bool,
+        timeout: float,
+    ) -> tuple[DerivationValidationFailure, ...]:
+        _ = updaters, all_declared_systems
+        timeouts.append(timeout)
+        return ()
+
     assert (
         cmd_validate_update_derivations(
-            validate=lambda *_args, **_kwargs: (),
+            validate=_validate,
             updaters={"demo": _PortableUpdater},
             stderr=StringIO(),
         )
         == 0
     )
+    assert timeouts == [1200]

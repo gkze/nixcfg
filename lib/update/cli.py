@@ -847,7 +847,7 @@ async def _execute_run_plan(
             })
             for failure in validation_failures:
                 out.print_error(
-                    f"[{failure.source}] Derivation evaluation failed for "
+                    f"[{failure.source}] Derivation validation failed for "
                     f"{failure.installable}:\n{failure.message}"
                 )
 

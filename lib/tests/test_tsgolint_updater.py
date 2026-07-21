@@ -10,6 +10,7 @@ from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.nix import _build_fetch_from_github_call, _build_overlay_expr
 from lib.update.updaters import VersionInfo
 from lib.update.updaters.core import source_override_env
@@ -20,6 +21,18 @@ if TYPE_CHECKING:
 
 def _load_module(module_name: str):
     return load_repo_module("overlays/tsgolint/updater.py", module_name)
+
+
+def test_tsgolint_validates_the_updated_package_build() -> None:
+    """The updater should realize tsgolint after refreshing its dependency hash."""
+    module = _load_module("tsgolint_validation_test")
+
+    assert module.TsgolintUpdater.get_derivation_validations() == (
+        DerivationValidation(
+            installable=".#pkgs.{system}.{name}",
+            mode="build",
+        ),
+    )
 
 
 def test_tsgolint_is_latest_rejects_fake_and_empty_hash_mappings() -> None:

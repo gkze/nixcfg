@@ -52,7 +52,7 @@ LINUX_CLEANUP_PATHS = (
 PREFETCH_FLAKE_INPUTS_ARGS = ["nix", "flake", "archive", "--json"]
 PREFETCH_FLAKE_INPUTS_ATTEMPTS = 3
 PREFETCH_FLAKE_INPUTS_RETRY_DELAYS = (1.0, 2.0)
-UPDATE_DERIVATION_VALIDATION_TIMEOUT_SECONDS = 300
+UPDATE_DERIVATION_VALIDATION_TIMEOUT_SECONDS = 1200
 
 DARWIN_LOCK_SMOKE_EXPRS = (
     ".#darwinConfigurations.argus.config.home-manager.users.george.programs.nixvim.content",
@@ -306,7 +306,7 @@ def cmd_validate_update_derivations(
     stderr: TextIO,
     timeout: float = UPDATE_DERIVATION_VALIDATION_TIMEOUT_SECONDS,
 ) -> int:
-    """Evaluate updater-declared derivations supported by this runner."""
+    """Validate updater-declared derivations supported by this runner."""
     failures = validate(
         sorted(updaters),
         updaters=updaters,
@@ -315,7 +315,7 @@ def cmd_validate_update_derivations(
     )
     stderr.writelines(
         (
-            f"[{failure.source}] Derivation evaluation failed for "
+            f"[{failure.source}] Derivation validation failed for "
             f"{failure.installable}:\n{failure.message}\n"
         )
         for failure in failures

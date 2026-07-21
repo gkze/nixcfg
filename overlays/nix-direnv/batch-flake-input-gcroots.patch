@@ -1,0 +1,130 @@
+diff --git a/direnvrc b/direnvrc
+index b700f6f..c42468d 100644
+--- a/direnvrc
++++ b/direnvrc
+@@ -190,6 +190,54 @@ _nix_add_gcroot() {
+   _nix build --out-link "$symlink" "$storepath"
+ }
+-
++
++_nix_add_flake_input_gcroots() {
++  local flake_inputs=${1%/}
++  local flake_input_paths=$2
++  local root_name=${3:-input}
++  local store_path
++  local -a store_paths=()
++  local -A seen_store_paths=()
++
++  while [[ $flake_input_paths =~ /nix/store/[^\"]+ ]]; do
++    store_path="${BASH_REMATCH[0]}"
++    flake_input_paths="${flake_input_paths/${store_path}/}"
++
++    if [[ -n ${seen_store_paths[$store_path]+x} ]]; then
++      continue
++    fi
++
++    seen_store_paths["$store_path"]=1
++    store_paths+=("$store_path")
++  done
++
++  # Do not let an empty input list make `nix build` default to the current flake.
++  if ((${#store_paths[@]} == 0)); then
++    return 0
++  fi
++
++  _nix build --out-link "${flake_inputs}/${root_name}" "${store_paths[@]}"
++}
++
++_nix_clean_stale_flake_gcroots() {
++  local layout_dir=$1
++  local current_profile=$2
++  local current_profile_rc=$3
++  local current_flake_input_root=$4
++  local gcroot
++
++  for gcroot in "$layout_dir"/{nix,flake}-profile*; do
++    if [[ $gcroot != "$current_profile" && $gcroot != "$current_profile_rc" ]]; then
++      rm -f "$gcroot"
++    fi
++  done
++
++  for gcroot in "$layout_dir/flake-inputs/"*; do
++    if [[ $gcroot != "$current_flake_input_root" && $gcroot != "$current_flake_input_root"-* ]]; then
++      rm -f "$gcroot"
++    fi
++  done
++}
++
+ _nix_refresh_gcroots() {
+   # Use touch to update all symlinks' timestamps to prevent nh
+   # from garbage collecting the frequently used direnv environment.
+@@ -300,6 +348,12 @@ use_flake() {
+   profile="${layout_dir}/flake-profile$(_nix_argsum_suffix "$flake_expr")"
+   local profile_rc="${profile}.rc"
+   local flake_inputs="${layout_dir}/flake-inputs/"
++  local retry_file="${layout_dir}/flake-retry"
++  mkdir -p "$layout_dir"
++  if [[ ! -e $retry_file ]]; then
++    touch "$retry_file"
++  fi
++  watch_file "$retry_file"
+-
++
+   local watches
+   _nix_direnv_watches watches
+@@ -342,28 +396,36 @@ use_flake() {
+       local tmp_profile_rc
+       local tmp_profile="${layout_dir}/flake-tmp-profile.$$"
+       if tmp_profile_rc=$(_nix print-dev-env --profile "$tmp_profile" "$@"); then
+-        # If we've gotten here, the user's current devShell is valid and we should cache it
+-        _nix_clean_old_gcroots "$layout_dir"
+-
+-        # We need to update our cache
+-        echo "$tmp_profile_rc" >"$profile_rc"
+-        _nix_add_gcroot "$tmp_profile" "$profile"
+-        rm -f "$tmp_profile" "$tmp_profile"*
+-
+-        # also add garbage collection root for source
+         local flake_input_paths
++        local flake_input_root="${flake_inputs%/}/input-$$"
++        local renewal_failure=
+         mkdir -p "$flake_inputs"
+-        flake_input_paths=$(_nix flake archive \
++        if ! flake_input_paths=$(_nix flake archive \
+           --json --no-write-lock-file \
+-          -- "$flake_uri")
++          -- "$flake_uri"); then
++          renewal_failure="Archiving flake inputs failed."
++        elif ! _nix_add_flake_input_gcroots "$flake_inputs" "$flake_input_paths" "input-$$"; then
++          renewal_failure="Creating flake input GC roots failed."
++        elif ! _nix_add_gcroot "$tmp_profile" "$profile"; then
++          renewal_failure="Creating devShell profile GC root failed."
++        fi
+-
++
+-        while [[ $flake_input_paths =~ /nix/store/[^\"]+ ]]; do
+-          local store_path="${BASH_REMATCH[0]}"
+-          _nix_add_gcroot "${store_path}" "${flake_inputs}/${store_path##*/}"
+-          flake_input_paths="${flake_input_paths/${store_path}/}"
+-        done
+-
+-        _nix_direnv_info "Renewed cache"
++        if [[ -n $renewal_failure ]]; then
++          rm -f "$tmp_profile" "$tmp_profile"* "$flake_input_root" "$flake_input_root"-* "$retry_file"
++          if [[ $_nix_direnv_allow_fallback -eq 1 && -e $profile_rc ]]; then
++            _nix_direnv_warning "$renewal_failure Falling back to previous environment!"
++            export NIX_DIRENV_DID_FALLBACK=1
++          else
++            return 1
++          fi
++        else
++          # The new environment and its input roots are complete. Replace the
++          # cache now, then remove roots left by the previous environment.
++          echo "$tmp_profile_rc" >"$profile_rc"
++          rm -f "$tmp_profile" "$tmp_profile"*
++          _nix_clean_stale_flake_gcroots "$layout_dir" "$profile" "$profile_rc" "$flake_input_root"
++          _nix_direnv_info "Renewed cache"
++        fi
+       else
+         # The user's current flake failed to evaluate,
+         # but there is already a prior profile_rc,

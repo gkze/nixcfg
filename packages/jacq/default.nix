@@ -1,11 +1,11 @@
 {
   mkSimpleDarwinApp,
-  mkZipApp,
+  mkDmgApp,
   selfSource,
   ...
 }:
 mkSimpleDarwinApp {
-  builder = mkZipApp;
+  builder = mkDmgApp;
   pname = "jacq";
   appName = "Jacq";
   info = selfSource;

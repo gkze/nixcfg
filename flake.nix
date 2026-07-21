@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.1.39";
+      url = "github:generalaction/emdash/v1.1.40";
       flake = false;
     };
     flake-edit = {
@@ -137,7 +137,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     lumen = {
-      url = "github:jnsahaj/lumen/v2.31.0";
+      url = "github:jnsahaj/lumen/v2.32.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
@@ -149,7 +149,7 @@
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.17.0";
+      url = "github:anthropics/anthropic-cli/v1.18.0";
       flake = false;
     };
     catppuccin = {
@@ -166,7 +166,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.144.4";
+      url = "github:openai/codex/rust-v0.144.6";
       flake = false;
     };
     curator = {
@@ -174,7 +174,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.34.0";
+      url = "github:steipete/gogcli/v0.34.1";
       flake = false;
     };
     openai-cli = {
@@ -184,7 +184,7 @@
     github-desktop = {
       type = "git";
       url = "https://github.com/desktop/desktop.git";
-      ref = "refs/tags/release-3.6.2";
+      ref = "refs/tags/release-3.6.3";
       submodules = true;
       flake = false;
     };
@@ -881,6 +881,8 @@
               pkgs.runCommand "check-test-nix-opencode-desktop" { } ''
                 touch $out
               '';
+
+            "test-nix-direnv-batched-gcroots" = { pkgs, ... }: pkgs.nix-direnv.tests.batchedFlakeInputGcRoots;
 
             "test-nix-prefetch-git-darwin-heredoc" =
               { pkgs, ... }: import ./tests/nix/nix-prefetch-git-darwin-heredoc { inherit pkgs; };

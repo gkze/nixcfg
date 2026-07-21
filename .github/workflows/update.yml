@@ -963,7 +963,7 @@ jobs:
             nix-cache-${{ runner.os }}-
       - name: Free disk space
         run: nix run .#nixcfg -- ci workflow free-disk-space
-      - name: Evaluate Darwin update-target package derivations
+      - name: Validate Darwin update-target package derivations
         run: nix run .#nixcfg -- ci workflow validate-update-derivations
 
   # Phase 8: Refresh sanity checks required before opening the PR
@@ -1015,7 +1015,7 @@ jobs:
         run: nix fmt -- --ci
       - name: Verify crate2nix artifacts are fresh
         run: nix run .#nixcfg -- ci pipeline crate2nix
-      - name: Evaluate update-target package derivations
+      - name: Validate update-target package derivations
         run: nix run .#nixcfg -- ci workflow validate-update-derivations
       - name: Smoke-check update app evaluation
         run: nix run .#nixcfg -- ci workflow smoke-check-update-app

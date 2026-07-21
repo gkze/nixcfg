@@ -92,6 +92,7 @@ workspaces:
           - Axiom: https://app.axiom.co
           - Datadog: https://us5.datadoghq.com
           - LangSmith: https://smith.langchain.com
+          - PagerDuty: https://towndotcom.pagerduty.com/incidents
           - PostHog: https://posthog.com
           - Sentry: https://sentry.io
           - Statsig: https://console.statsig.com

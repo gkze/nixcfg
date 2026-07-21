@@ -1,11 +1,11 @@
-"""Target-aware Nix derivation evaluation after updater persistence."""
+"""Target-aware Nix derivation validation after updater persistence."""
 
 from __future__ import annotations
 
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from lib.update.nix import get_current_nix_platform
 from lib.update.paths import get_repo_root
@@ -14,25 +14,30 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
 
 
+type DerivationValidationMode = Literal["eval", "build"]
+
+
 @dataclass(frozen=True)
 class DerivationValidation:
-    """One updater-owned derivation installable template to evaluate."""
+    """One updater-owned derivation installable template to validate."""
 
     installable: str
     systems: tuple[str, ...] | None = None
+    mode: DerivationValidationMode = "eval"
 
 
 @dataclass(frozen=True)
 class DerivationValidationRequest:
-    """One concrete derivation evaluation for an update target."""
+    """One concrete derivation validation for an update target."""
 
     source: str
     installable: str
+    mode: DerivationValidationMode = "eval"
 
 
 @dataclass(frozen=True)
 class DerivationValidationFailure:
-    """A failed derivation evaluation with user-facing diagnostics."""
+    """A failed derivation validation with user-facing diagnostics."""
 
     source: str
     installable: str
@@ -54,7 +59,7 @@ def resolve_derivation_validations(
     """Resolve concrete validation requests for selected updater targets."""
     current_system = get_current_nix_platform()
     requests: list[DerivationValidationRequest] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, DerivationValidationMode]] = set()
 
     for source in source_names:
         updater = updaters.get(source)
@@ -83,7 +88,7 @@ def resolve_derivation_validations(
                     name=source,
                     system=system,
                 )
-                key = (source, installable)
+                key = (source, installable, validation.mode)
                 if key in seen:
                     continue
                 seen.add(key)
@@ -91,6 +96,7 @@ def resolve_derivation_validations(
                     DerivationValidationRequest(
                         source=source,
                         installable=installable,
+                        mode=validation.mode,
                     )
                 )
 
@@ -106,7 +112,7 @@ def validate_derivations(
     run: _Runner | None = None,
     clock: Callable[[], float] | None = None,
 ) -> tuple[DerivationValidationFailure, ...]:
-    """Evaluate declared derivations and return every failure."""
+    """Validate declared derivations and return every failure."""
     runner = subprocess.run if run is None else run
     monotonic = time.monotonic if clock is None else clock
     failures: list[DerivationValidationFailure] = []
@@ -130,7 +136,11 @@ def validate_derivations(
                     for remaining in requests[index:]
                 )
                 break
-        args = ["nix", "eval", "--raw", request.installable]
+        args = (
+            ["nix", "build", "--no-link", request.installable]
+            if request.mode == "build"
+            else ["nix", "eval", "--raw", request.installable]
+        )
         try:
             result = runner(
                 args,
@@ -146,7 +156,9 @@ def validate_derivations(
             if result.returncode == 0:
                 continue
             message = (
-                result.stderr.strip() or result.stdout.strip() or "nix eval failed"
+                result.stderr.strip()
+                or result.stdout.strip()
+                or f"nix {request.mode} failed"
             )
         failures.append(
             DerivationValidationFailure(
@@ -162,6 +174,7 @@ def validate_derivations(
 __all__ = [
     "DerivationValidation",
     "DerivationValidationFailure",
+    "DerivationValidationMode",
     "DerivationValidationRequest",
     "resolve_derivation_validations",
     "validate_derivations",
