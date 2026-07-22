@@ -3820,9 +3820,9 @@ rec {
       };
       "agent-client-protocol" = rec {
         crateName = "agent-client-protocol";
-        version = "1.1.0";
+        version = "1.3.0";
         edition = "2024";
-        sha256 = "162s7vv6q9hgv1lv9pqzspf9zij51wvscfs9qygxkjbjg8lwhd7d";
+        sha256 = "0i14fpaqrckq8qyxw6flxyyxl1a0lp51bscqzbmy1nzlb1m6sf0x";
         libName = "agent_client_protocol";
         authors = [
           "Zed <hi@zed.dev>"
@@ -3836,6 +3836,10 @@ rec {
             name = "agent-client-protocol-schema";
             packageId = "agent-client-protocol-schema";
             features = [ "tracing" ];
+          }
+          {
+            name = "async-io";
+            packageId = "async-io";
           }
           {
             name = "async-process";
@@ -3856,6 +3860,13 @@ rec {
           {
             name = "rustc-hash";
             packageId = "rustc-hash 2.1.1";
+          }
+          {
+            name = "rustix";
+            packageId = "rustix 1.1.2";
+            usesDefaultFeatures = false;
+            target = { target, features }: (target."unix" or false);
+            features = [ "std" "process" ];
           }
           {
             name = "schemars";
@@ -3905,9 +3916,9 @@ rec {
       };
       "agent-client-protocol-derive" = rec {
         crateName = "agent-client-protocol-derive";
-        version = "1.1.0";
+        version = "1.3.0";
         edition = "2024";
-        sha256 = "0f77m9izsc92rx4izqfx1b3qhbnhy0nrgnsf285glwqhsiy8gq0d";
+        sha256 = "1np177qv7v50i4n6cllc65ina1xkym54vs8l3n99x9hqs4s4kfcp";
         procMacro = true;
         libName = "agent_client_protocol_derive";
         authors = [
@@ -5122,7 +5133,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "home";
@@ -5286,7 +5297,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "cfg-if";
@@ -10775,7 +10786,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "cexpr";
@@ -10857,7 +10868,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "cexpr";
@@ -11066,11 +11077,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" ];
       };
-      "bitflags 2.10.0" = rec {
+      "bitflags 2.13.1" = rec {
         crateName = "bitflags";
-        version = "2.10.0";
+        version = "2.13.1";
         edition = "2021";
-        sha256 = "1lqxwc3625lcjrjm5vygban9v8a6dlxisp1aqylibiaw52si4bl1";
+        sha256 = "1nl76mpykmwmb8rq1l5vw1azdh1wvxdrnsk4sy3rdrzx01nvg25m";
         authors = [
           "The Rust Project Developers"
         ];
@@ -12315,7 +12326,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "polling";
@@ -14159,6 +14170,7 @@ rec {
           {
             name = "gpui_tokio";
             packageId = "gpui_tokio";
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
           }
           {
             name = "http_client";
@@ -14384,7 +14396,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "block";
@@ -14473,7 +14485,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "block";
@@ -16779,7 +16791,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "core-foundation";
@@ -16819,7 +16831,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "core-foundation";
@@ -16888,7 +16900,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "core-foundation";
@@ -16918,7 +16930,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "block";
@@ -17209,7 +17221,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "fontdb";
@@ -20022,7 +20034,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "client";
@@ -21217,7 +21229,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_UI_Shell" "Win32_Foundation" "Win32_Globalization" "Win32_System_Com" ];
           }
@@ -21276,7 +21288,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             usesDefaultFeatures = false;
             features = [ "std" ];
           }
@@ -24190,7 +24202,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" ];
           }
@@ -24887,6 +24899,10 @@ rec {
           {
             name = "wasmparser";
             packageId = "wasmparser 0.252.0";
+          }
+          {
+            name = "which";
+            packageId = "which 6.0.3";
           }
           {
             name = "ztracing";
@@ -28078,7 +28094,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Networking_WinSock" ];
           }
@@ -29146,7 +29162,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "futures-channel";
@@ -29770,7 +29786,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             usesDefaultFeatures = false;
           }
           {
@@ -29803,7 +29819,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             usesDefaultFeatures = false;
           }
         ];
@@ -29843,7 +29859,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "block";
@@ -30166,7 +30182,7 @@ rec {
             name = "windows";
             packageId = "windows 0.61.3";
             target = { target, features }: ("windows" == target."os" or null);
-            features = [ "Win32_Foundation" "Win32_System_Power" ];
+            features = [ "Data_Xml_Dom" "Foundation_Numerics" "Globalization_DateTimeFormatting" "Storage_Search" "Storage_Streams" "System_Threading" "UI_Notifications" "UI_ViewManagement" "Wdk_System_SystemServices" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics_Direct3D" "Win32_Graphics_Direct3D11" "Win32_Graphics_Direct3D_Fxc" "Win32_Graphics_DirectComposition" "Win32_Graphics_DirectWrite" "Win32_Graphics_DirectManipulation" "Win32_Graphics_Dwm" "Win32_Graphics_Dxgi" "Win32_Graphics_Dxgi_Common" "Win32_Graphics_Gdi" "Win32_Graphics_Imaging" "Win32_Graphics_Hlsl" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage_FileSystem" "Win32_Storage_Packaging_Appx" "Win32_System_Com" "Win32_System_Com_StructuredStorage" "Win32_System_Console" "Win32_System_Diagnostics_Debug" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_JobObjects" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Performance" "Win32_System_Pipes" "Win32_System_RestartManager" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Variant" "Win32_System_WinRT" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input_Ime" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Input_Pointer" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_Shell_PropertiesSystem" "Win32_UI_WindowsAndMessaging" "Win32_Media" "Win32_Foundation" "Win32_System_Power" ];
           }
           {
             name = "zed-font-kit";
@@ -30331,7 +30347,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             target = { target, features }: (("linux" == target."os" or null) || ("freebsd" == target."os" or null));
           }
@@ -31883,7 +31899,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "bytemuck";
@@ -32366,7 +32382,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             features = [ "serde" ];
           }
           {
@@ -34440,6 +34456,10 @@ rec {
             features = [ "kv_unstable_serde" "serde" ];
           }
           {
+            name = "menu";
+            packageId = "menu";
+          }
+          {
             name = "project";
             packageId = "project";
           }
@@ -34680,7 +34700,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "inotify-sys";
@@ -36345,9 +36365,9 @@ rec {
       };
       "kqueue" = rec {
         crateName = "kqueue";
-        version = "1.1.1";
+        version = "1.2.0";
         edition = "2021";
-        sha256 = "0sjrsnza8zxr1zfpv6sa0zapd54kx9wlijrz9apqvs6wsw303hza";
+        sha256 = "1dc7rm23i7s1574xx185836rxyzynrsv5wkn96nf0649f990fg17";
         authors = [
           "William Orr <will@worrbase.com>"
         ];
@@ -36365,9 +36385,9 @@ rec {
       };
       "kqueue-sys" = rec {
         crateName = "kqueue-sys";
-        version = "1.0.4";
-        edition = "2018";
-        sha256 = "12w3wi90y4kwis4k9g6fp0kqjdmc6l00j16g8mgbhac7vbzjb5pd";
+        version = "1.1.2";
+        edition = "2021";
+        sha256 = "11xhzsgwc82g85072c6m8nimxxqkax4n40sikcsk9hks5573la87";
         libName = "kqueue_sys";
         authors = [
           "William Orr <will@worrbase.com>"
@@ -36376,7 +36396,8 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 1.3.2";
+            packageId = "bitflags 2.13.1";
+            usesDefaultFeatures = false;
           }
           {
             name = "libc";
@@ -38391,7 +38412,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "libc";
@@ -39623,7 +39644,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "cfg-if";
@@ -41515,7 +41536,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "block";
@@ -41670,7 +41691,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "debugid";
@@ -41715,11 +41736,11 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             target = { target, features }: ("windows" == target."os" or null);
           }
           {
@@ -42084,7 +42105,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage_FileSystem" "Win32_System_IO" "Win32_System_Pipes" "Win32_System_Threading" ];
           }
         ];
@@ -42454,7 +42475,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "cfg-if";
@@ -42942,7 +42963,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "jni-sys";
@@ -43081,7 +43102,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "cfg-if";
@@ -43128,7 +43149,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "cfg-if";
@@ -43180,7 +43201,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "cfg-if";
@@ -43497,7 +43518,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             target = { target, features }: ("macos" == target."os" or null);
           }
           {
@@ -43589,8 +43610,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/notify";
-          rev = "faecbc33db4f59313e5225ef766bfd9e54a54cfd";
-          sha256 = "01d00n22yk4bw5ihs01jg8m2r9xwaslf59lkxa2bvmiq9rjialsq";
+          rev = "0890bbb8ca40a4b5d1f67031698dd7918b37d991";
+          sha256 = "1q51a4lbx352m4xywb8b5w6zqc5vjbhr626m0q1i28i7bal0cbh8";
         };
         authors = [
           "Félix Saparelli <me@passcod.name>"
@@ -43600,7 +43621,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             target = { target, features }: ("macos" == target."os" or null);
           }
           {
@@ -43805,8 +43826,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/notify";
-          rev = "faecbc33db4f59313e5225ef766bfd9e54a54cfd";
-          sha256 = "01d00n22yk4bw5ihs01jg8m2r9xwaslf59lkxa2bvmiq9rjialsq";
+          rev = "0890bbb8ca40a4b5d1f67031698dd7918b37d991";
+          sha256 = "1q51a4lbx352m4xywb8b5w6zqc5vjbhr626m0q1i28i7bal0cbh8";
         };
         libName = "notify_types";
         authors = [
@@ -43815,7 +43836,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
         ];
         features = {
@@ -43859,7 +43880,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             rename = "windows";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_Security" ];
@@ -44716,7 +44737,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -45056,7 +45077,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
             features = [ "std" ];
@@ -45392,7 +45413,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
             features = [ "std" ];
@@ -45591,7 +45612,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
             features = [ "std" ];
@@ -45622,7 +45643,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -45715,7 +45736,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
             features = [ "std" ];
@@ -45965,7 +45986,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -46050,7 +46071,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
             features = [ "std" ];
@@ -46191,7 +46212,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -46278,7 +46299,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
             features = [ "std" ];
@@ -46403,7 +46424,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -46472,7 +46493,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
             features = [ "std" ];
@@ -46550,7 +46571,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
             features = [ "std" ];
@@ -47624,7 +47645,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "cfg-if";
@@ -51602,7 +51623,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "crc32fast";
@@ -52448,7 +52469,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "hex";
@@ -53560,7 +53581,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "num-traits";
@@ -54209,7 +54230,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "memchr";
@@ -54249,7 +54270,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "getopts";
@@ -54294,7 +54315,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "memchr";
@@ -55960,7 +55981,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
         ];
         features = {
@@ -55982,7 +56003,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
         ];
         features = {
@@ -59153,7 +59174,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             usesDefaultFeatures = false;
           }
           {
@@ -59264,7 +59285,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             usesDefaultFeatures = false;
           }
           {
@@ -59318,7 +59339,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" ];
           }
@@ -59936,7 +59957,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "bytemuck";
@@ -61126,7 +61147,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "collections";
@@ -61184,6 +61205,10 @@ rec {
           {
             name = "project";
             packageId = "project";
+          }
+          {
+            name = "regex";
+            packageId = "regex";
           }
           {
             name = "serde";
@@ -61401,7 +61426,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "core-foundation";
@@ -61448,7 +61473,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "core-foundation";
@@ -61522,7 +61547,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "cssparser";
@@ -64445,7 +64470,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" "Win32_System_IO" "Win32_System_Threading" "Win32_System_WindowsProgramming" ];
           }
@@ -64549,7 +64574,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
         ];
         features = {
@@ -64983,7 +65008,7 @@ rec {
           }
           {
             name = "webpki-roots";
-            packageId = "webpki-roots";
+            packageId = "webpki-roots 0.26.8";
             optional = true;
           }
         ];
@@ -65256,7 +65281,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             usesDefaultFeatures = false;
             features = [ "serde" ];
           }
@@ -65474,7 +65499,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             usesDefaultFeatures = false;
           }
           {
@@ -67387,7 +67412,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "core-foundation";
@@ -67491,7 +67516,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "cap-fs-ext";
@@ -68185,7 +68210,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Storage_FileSystem" "Win32_Foundation" ];
           }
@@ -71089,7 +71114,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "bytes";
@@ -71190,7 +71215,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "bytes";
@@ -74472,7 +74497,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -75305,7 +75330,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "indexmap";
@@ -75329,7 +75354,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "hashbrown";
@@ -75371,7 +75396,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "hashbrown";
@@ -75420,7 +75445,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "hashbrown";
@@ -75462,7 +75487,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "hashbrown";
@@ -75558,7 +75583,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "bumpalo";
@@ -76542,7 +76567,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "heck";
@@ -76583,7 +76608,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "bytes";
@@ -76922,7 +76947,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "rustix";
@@ -76980,7 +77005,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "wayland-backend";
@@ -77016,7 +77041,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "wayland-backend";
@@ -77056,7 +77081,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "wayland-backend";
@@ -77649,7 +77674,7 @@ rec {
           "default" = [ "std" ];
           "std" = [ "wasm-bindgen/std" "js-sys/std" ];
         };
-        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AngleInstancedArrays" "AudioBuffer" "AudioBufferSourceNode" "AudioContext" "AudioContextOptions" "AudioContextState" "AudioDestinationNode" "AudioNode" "AudioScheduledSourceNode" "BaseAudioContext" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "Clipboard" "ClipboardEvent" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "DedicatedWorkerGlobalScope" "Document" "DomRect" "DomRectReadOnly" "DragEvent" "Element" "Event" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "File" "FileList" "FormData" "Headers" "HtmlCanvasElement" "HtmlElement" "HtmlImageElement" "HtmlInputElement" "HtmlMediaElement" "HtmlVideoElement" "ImageBitmap" "ImageData" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MessageEvent" "MouseEvent" "Navigator" "Node" "NodeList" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OvrMultiview2" "PointerEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Response" "RtcDataChannel" "RtcDataChannelEvent" "RtcDataChannelState" "RtcIceCandidate" "RtcPeerConnection" "RtcPeerConnectionIceEvent" "RtcSdpType" "RtcSessionDescriptionInit" "RtcSignalingState" "Screen" "ServiceWorkerGlobalScope" "Storage" "StreamPipeOptions" "TransformStream" "TransformStreamDefaultController" "Transformer" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "VideoFrame" "VisualViewport" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebSocket" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "WorkerOptions" "WorkerType" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
+        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AngleInstancedArrays" "AudioBuffer" "AudioBufferSourceNode" "AudioContext" "AudioContextOptions" "AudioContextState" "AudioDestinationNode" "AudioNode" "AudioScheduledSourceNode" "BaseAudioContext" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "Clipboard" "ClipboardEvent" "CloseEvent" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "DedicatedWorkerGlobalScope" "Document" "DomRect" "DomRectReadOnly" "DragEvent" "Element" "Event" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "File" "FileList" "FormData" "Headers" "HtmlCanvasElement" "HtmlElement" "HtmlImageElement" "HtmlInputElement" "HtmlMediaElement" "HtmlVideoElement" "ImageBitmap" "ImageData" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MessageEvent" "MouseEvent" "Navigator" "Node" "NodeList" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OvrMultiview2" "PointerEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Response" "RtcDataChannel" "RtcDataChannelEvent" "RtcDataChannelState" "RtcIceCandidate" "RtcPeerConnection" "RtcPeerConnectionIceEvent" "RtcSdpType" "RtcSessionDescriptionInit" "RtcSignalingState" "Screen" "ServiceWorkerGlobalScope" "Storage" "StreamPipeOptions" "TransformStream" "TransformStreamDefaultController" "Transformer" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "VideoFrame" "VisualViewport" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebSocket" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "WorkerOptions" "WorkerType" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
       };
       "web-time" = rec {
         crateName = "web-time";
@@ -77821,11 +77846,27 @@ rec {
         ];
 
       };
-      "webpki-roots" = rec {
+      "webpki-roots 0.26.8" = rec {
         crateName = "webpki-roots";
         version = "0.26.8";
         edition = "2018";
         sha256 = "1jf54brni9lk4ak5pkma2pn18hli22gr7i7wp9zn2lzayy8v4412";
+        libName = "webpki_roots";
+        dependencies = [
+          {
+            name = "rustls-pki-types";
+            packageId = "rustls-pki-types";
+            rename = "pki-types";
+            usesDefaultFeatures = false;
+          }
+        ];
+
+      };
+      "webpki-roots 1.0.8" = rec {
+        crateName = "webpki-roots";
+        version = "1.0.8";
+        edition = "2021";
+        sha256 = "1gricxbz1xk561qjflv5q2y4bap5lyspv7c2dxygl0920c3cp1dz";
         libName = "webpki_roots";
         dependencies = [
           {
@@ -77967,7 +78008,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "bytemuck";
@@ -78180,7 +78221,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "bytemuck";
@@ -78423,7 +78464,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "block2";
@@ -78756,7 +78797,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "bytemuck";
@@ -78982,7 +79023,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "thiserror";
@@ -79143,7 +79184,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" "Win32_System_SystemInformation" ];
           }
@@ -84515,7 +84556,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_IO" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
       };
       "windows-sys 0.59.0" = rec {
         crateName = "windows-sys";
@@ -84774,7 +84815,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Ioctl" "Win32_System_Kernel" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Performance" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Time" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Ioctl" "Win32_System_Kernel" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Performance" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Time" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-sys 0.60.2" = rec {
         crateName = "windows-sys";
@@ -85039,7 +85080,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Kernel" "Win32_System_Memory" "Win32_System_SystemInformation" "Win32_System_Threading" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Kernel" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
       };
       "windows-sys 0.61.2" = rec {
         crateName = "windows-sys";
@@ -85301,7 +85342,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "default" ];
       };
       "windows-targets 0.42.2" = rec {
         crateName = "windows-targets";
@@ -86055,7 +86096,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "windows-sys";
@@ -86095,7 +86136,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "wit-bindgen-rt";
@@ -86278,7 +86319,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             optional = true;
           }
           {
@@ -86581,7 +86622,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "indexmap";
@@ -86643,7 +86684,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "indexmap";
@@ -86720,7 +86761,7 @@ rec {
           }
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "indexmap";
@@ -88022,7 +88063,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
             usesDefaultFeatures = false;
           }
         ];
@@ -88320,9 +88361,14 @@ rec {
       };
       "yawc" = rec {
         crateName = "yawc";
-        version = "0.2.5";
+        version = "0.3.3";
         edition = "2021";
-        sha256 = "1i98j24qn2ma1rk8qnvq9pdsms81apxlz6h77bkllnqk48lxi98r";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/zed-industries/yawc";
+          rev = "71a452f551cac178367eaac5d7418a09afa1f3a2";
+          sha256 = "0x9jag12b0v5mvyn0nzdgbhylyjg4i3hqf98pz65wblp5qpfwsg3";
+        };
         authors = [
           "Dario <dario@infinitefieldtrading.com>"
         ];
@@ -88344,6 +88390,12 @@ rec {
           {
             name = "futures";
             packageId = "futures";
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.16";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "js" ];
           }
           {
             name = "http-body-util";
@@ -88368,6 +88420,11 @@ rec {
             target = { target, features }: ("wasm32" == target."arch" or null);
           }
           {
+            name = "log";
+            packageId = "log";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
             name = "nom";
             packageId = "nom 8.0.0";
             target = { target, features }: (!("wasm32" == target."arch" or null));
@@ -88380,7 +88437,6 @@ rec {
           {
             name = "rand";
             packageId = "rand 0.8.6";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
           }
           {
             name = "sha1";
@@ -88389,7 +88445,7 @@ rec {
           }
           {
             name = "thiserror";
-            packageId = "thiserror 1.0.69";
+            packageId = "thiserror 2.0.17";
           }
           {
             name = "tokio";
@@ -88403,7 +88459,7 @@ rec {
             packageId = "tokio-rustls 0.26.4";
             usesDefaultFeatures = false;
             target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "ring" "logging" "tls12" ];
+            features = [ "logging" "tls12" ];
           }
           {
             name = "tokio-util";
@@ -88430,11 +88486,11 @@ rec {
             packageId = "web-sys";
             usesDefaultFeatures = false;
             target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "WebSocket" "MessageEvent" ];
+            features = [ "console" "WebSocket" "BinaryType" "CloseEvent" "MessageEvent" ];
           }
           {
             name = "webpki-roots";
-            packageId = "webpki-roots";
+            packageId = "webpki-roots 1.0.8";
             target = { target, features }: (!("wasm32" == target."arch" or null));
           }
         ];
@@ -88446,6 +88502,16 @@ rec {
             features = [ "http1" "server" "client" ];
           }
           {
+            name = "log";
+            packageId = "log";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.6";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
             name = "tokio";
             packageId = "tokio";
             target = { target, features }: (!("wasm32" == target."arch" or null));
@@ -88453,25 +88519,25 @@ rec {
           }
           {
             name = "webpki-roots";
-            packageId = "webpki-roots";
+            packageId = "webpki-roots 1.0.8";
             target = { target, features }: (!("wasm32" == target."arch" or null));
           }
         ];
         features = {
           "axum" = [ "axum-core" "http" ];
           "axum-core" = [ "dep:axum-core" ];
+          "default" = [ "rustls-ring" ];
           "http" = [ "dep:http" ];
-          "json" = [ "serde_json" "serde" ];
-          "log" = [ "dep:log" ];
-          "logging" = [ "log" ];
           "reqwest" = [ "dep:reqwest" ];
+          "rustls-aws-lc-rs" = [ "tokio-rustls/aws-lc-rs" ];
+          "rustls-ring" = [ "tokio-rustls/ring" ];
           "serde" = [ "dep:serde" ];
-          "serde_json" = [ "dep:serde_json" ];
           "simd" = [ "simdutf8" ];
           "simdutf8" = [ "dep:simdutf8" ];
+          "smol" = [ "dep:smol" ];
           "zlib" = [ "flate2/any_zlib" "flate2/zlib-rs" ];
         };
-        resolvedDefaultFeatures = [ "default" ];
+        resolvedDefaultFeatures = [ "default" "rustls-ring" ];
       };
       "yazi" = rec {
         crateName = "yazi";
@@ -89765,7 +89831,7 @@ rec {
         dependencies = [
           {
             name = "bitflags";
-            packageId = "bitflags 2.10.0";
+            packageId = "bitflags 2.13.1";
           }
           {
             name = "byteorder";

@@ -26,12 +26,14 @@ def make_session_tab(
     url: str,
     *,
     sync_id: str,
+    static_label: str | None = None,
 ) -> object:
     """Build one minimal session tab with an active URL."""
     return make_zentool_tab(
         zentool,
         entries=[make_session_entry(zentool, url=url, title="Tab")],
         sync_id=sync_id,
+        static_label=static_label,
         hidden=False,
     )
 
@@ -234,6 +236,119 @@ def test_tab_pool_indexes_tabs_by_active_url_and_claims_in_order(
     assert pool.claim("https://example.com") is None
     assert pool.claim("") is empty
     assert pool.claim("https://missing.example") is None
+
+
+def test_tab_pool_claims_by_label_with_origin_restriction(
+    zentool: ModuleType,
+) -> None:
+    """Label claims should trim, casefold, and honor same-origin-only mode."""
+    cross_origin = make_session_tab(
+        zentool,
+        "https://sso.example/park",
+        sync_id="tab-cross",
+        static_label="  GitHub  ",
+    )
+    same_origin = make_session_tab(
+        zentool,
+        "https://github.com/notifications",
+        sync_id="tab-same",
+        static_label="GitHub",
+    )
+    solo = make_session_tab(
+        zentool,
+        "https://solo.example/home",
+        sync_id="tab-solo",
+        static_label="Solo",
+    )
+    pool = zentool.TabPool([cross_origin, same_origin, solo])
+
+    assert (
+        pool.claim_by_label(
+            "github",
+            url="https://github.com/coder",
+            same_origin_only=True,
+        )
+        is same_origin
+    )
+    assert (
+        pool.claim_by_label(" GitHub ", url="https://github.com/coder") is cross_origin
+    )
+    assert pool.claim_by_label("GitHub", url="https://github.com/coder") is None
+    assert (
+        pool.claim_by_label(
+            "Solo",
+            url="https://nomatch.example/",
+            same_origin_only=True,
+        )
+        is None
+    )
+    assert pool.claim_by_label("Solo", url="about:blank", same_origin_only=True) is None
+    assert pool.claim_by_label("Solo", url="https://nomatch.example/") is solo
+    assert pool.claim_by_label("   ", url="https://github.com/coder") is None
+    assert pool.claim_by_label("missing", url="https://github.com/coder") is None
+
+
+def test_tab_pool_claims_by_origin_with_scheme_and_label_guards(
+    zentool: ModuleType,
+) -> None:
+    """Origin claims should walk managed tabs FIFO and skip unmanaged or non-HTTP tabs."""
+    unmanaged = make_session_tab(
+        zentool,
+        "https://app.example/adhoc",
+        sync_id="tab-adhoc",
+    )
+    first = make_session_tab(
+        zentool,
+        "https://app.example/a",
+        sync_id="tab-a",
+        static_label="A",
+    )
+    second = make_session_tab(
+        zentool,
+        "https://app.example/b",
+        sync_id="tab-b",
+        static_label="B",
+    )
+    non_http = make_session_tab(
+        zentool,
+        "about:blank",
+        sync_id="tab-about",
+        static_label="Blank",
+    )
+    pool = zentool.TabPool([unmanaged, first, second, non_http])
+
+    assert pool.claim_by_origin("https://app.example/zzz") is first
+    assert pool.claim_by_origin("https://app.example/zzz") is second
+    assert pool.claim_by_origin("https://app.example/zzz") is None
+    assert pool.claim_by_origin("about:blank") is None
+    assert pool.claim_by_origin("https://other.example/") is None
+
+
+def test_tab_pool_claims_are_exclusive_across_indexes(
+    zentool: ModuleType,
+) -> None:
+    """A tab claimed through one index should be invisible to the others."""
+    by_url = make_session_tab(
+        zentool,
+        "https://app.example/page",
+        sync_id="tab-url",
+        static_label="App",
+    )
+    by_label = make_session_tab(
+        zentool,
+        "https://docs.example/home",
+        sync_id="tab-label",
+        static_label="Docs",
+    )
+    pool = zentool.TabPool([by_url, by_label])
+
+    assert pool.claim("https://app.example/page") is by_url
+    assert pool.claim_by_label("App", url="https://app.example/page") is None
+    assert pool.claim_by_origin("https://app.example/page") is None
+
+    assert pool.claim_by_label("docs", url="https://elsewhere.example/") is by_label
+    assert pool.claim("https://docs.example/home") is None
+    assert pool.claim_by_origin("https://docs.example/home") is None
 
 
 def test_stdout_stderr_and_stdout_raw_write_expected_stream_output(

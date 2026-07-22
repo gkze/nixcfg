@@ -352,6 +352,11 @@
     };
 
   catppuccin = lib.mkIf (config.theme.name == "catppuccin") {
+    # catppuccin/nix now gates every per-program module on the global enable;
+    # keep autoEnable off so only the explicit opt-ins below are themed and
+    # Stylix stays the broad baseline.
+    enable = true;
+    autoEnable = false;
     flavor = config.theme.variant;
     accent = config.theme.accentColor;
 
@@ -361,7 +366,6 @@
     bottom.enable = true;
     eza.enable = true;
     element-desktop.enable = true;
-    gemini-cli.enable = true;
     vscode.profiles.default = {
       enable = true;
       icons.enable = true;

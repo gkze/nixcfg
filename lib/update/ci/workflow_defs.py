@@ -1006,18 +1006,6 @@ def _create_pr_job() -> Job:
                     "body-path": "/tmp/pr-body.md",
                 },
             ),
-            Step(
-                name="Dispatch PR-head CI workflow",
-                if_=(
-                    "steps.cpr.outputs.pull-request-number != '' && "
-                    "steps.cpr.outputs.pull-request-operation != 'closed'"
-                ),
-                env={
-                    "GH_TOKEN": _UPDATE_TOKEN,
-                    "UPDATE_BRANCH": "${{ steps.cpr.outputs.pull-request-branch }}",
-                },
-                run='gh workflow run ci.yml --ref "${UPDATE_BRANCH}"',
-            ),
         ),
     )
 

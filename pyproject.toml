@@ -115,9 +115,6 @@ explicit-preview-rules = true
   "TRY003",
   "TRY004",
 ]
-# SchemaStore's workflow schema generates very long prose docstrings and a few
-# legacy typing constructs that are valid at runtime but noisy under Ruff.
-"lib/github_actions/models/_generated.py" = ["D205", "D404", "E501"]
 # Workflow definitions embed GitHub Actions secret expressions (not real
 # credentials) and CI-runner /tmp paths inside generated shell steps.
 "lib/update/ci/workflow_defs.py" = ["S105", "S108"]
@@ -198,15 +195,6 @@ include = ["lib/schema_codegen/models/_generated.py"]
 [tool.ty.overrides.rules]
 invalid-type-form = "ignore"
 
-[[tool.ty.overrides]]
-# SchemaStore's generated workflow models still rely on constrained-type
-# expressions and enum-default assignments that Ty flags but Pydantic accepts.
-include = ["lib/github_actions/models/_generated.py"]
-
-[tool.ty.overrides.rules]
-invalid-assignment = "ignore"
-invalid-type-form = "ignore"
-
 [tool.ty.terminal]
 # Return non-zero when Ty emits warnings.
 error-on-warning = true
@@ -252,34 +240,12 @@ exclude_lines = [
 # Same rule for partial-branch exclusions (no non-pragma defaults to restate).
 partial_branches = ['# pragma: no branch -- \S']
 
-[tool.mutmut]
-# Mutate runtime modules while excluding tests and generated artifacts.
-paths_to_mutate = ["lib/nix/commands", "lib/nix/models", "lib/nix/schemas"]
-# Copy repository paths needed by pytest when running inside `mutants/`.
-also_copy = [
-  "darwin",
-  "home",
-  "lib",
-  "modules",
-  "overlays",
-  "packages",
-  "flake.lock",
-  "nixcfg.py",
-]
-# Focus mutation work on lines hit by coverage.
-mutate_only_covered_lines = true
-# Point test discovery to the in-repo pytest tree.
-tests_dir = ["lib/tests"]
-# Skip generated model code from mutation testing.
-do_not_mutate = ["lib/nix/models/_generated.py"]
-
 [dependency-groups]
 # Install these tools only for local development and quality checks.
 dev = [
   "cosmic-ray>=8.3.18",
   "coverage>=7.13.4",
   "datamodel-code-generator[http]>=0.54.0",
-  "mutmut>=3.5.0",
   "pytest>=9.0.2",
   "pytest-xdist>=3.8.0",
   "tree-sitter-bash>=0.25.0",

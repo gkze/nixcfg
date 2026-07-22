@@ -1,13 +1,13 @@
 {
   "hashes": [
     {
-      "hash": "sha256-O9BVHXJLzyqcYz9GcS1XlpLTbJtluvFibWb44Gekzq8=",
+      "hash": "sha256-WjBHm7/NbwKxlLl9OLO9ynmlZgwM6VYT7375yvY95jU=",
       "hashType": "srcHash"
     },
     {
-      "hash": "sha256-rhEZ3vvDAxvvB19YSB1HMBntk/3D1DKPKfCGiVDYMh0=",
+      "hash": "sha256-G80LZKip9h/j27WaXU22TW9rIRnsu/y76R8OOiN7ZRo=",
       "hashType": "vendorHash"
     }
   ],
-  "version": "0.25.0"
+  "version": "7.0.2001"
 }

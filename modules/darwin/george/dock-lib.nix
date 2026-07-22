@@ -50,6 +50,13 @@
       hasHomeActivation = options ? home && options.home ? activation && pkgs != null && lib ? hm;
       dockutil = if pkgs != null then "${pkgs.dockutil}/bin/dockutil" else "";
       dockLabel = path: lib.removeSuffix ".app" (builtins.baseNameOf path);
+      dockSortToDarwinArrangement = {
+        name = "name";
+        dateadded = "date-added";
+        datemodified = "date-modified";
+        datecreated = "date-created";
+        kind = "kind";
+      };
 
       removeOtherCommands = concatMapStringsSep "\n" (other: ''
         if "$dockutil" --find ${escapeShellArg other} --section others >/dev/null 2>&1; then
@@ -60,7 +67,7 @@
       '') removeOthers;
 
       positionedApps = lib.imap1 (position: app: { inherit app position; }) apps;
-      positionedOthers = lib.imap1 (position: other: { inherit other position; }) others;
+      positionedOthers = lib.imap1 (position: other: other // { inherit position; }) others;
 
       addAppCommands = concatMapStringsSep "\n" (
         { app, position }:
@@ -75,24 +82,29 @@
         ''
       ) positionedApps;
 
-      addOtherCommands = concatMapStringsSep "\n" (
-        { other, position }:
-        ''
-          if [ -e ${escapeShellArg other} ]; then
-            if ! "$dockutil" --add ${escapeShellArg other} --replacing ${escapeShellArg (dockLabel other)} --position ${toString position} --section others --no-restart >/dev/null; then
-              echo "warning: failed to add Dock item ${other}" >&2
-            fi
-          else
-            echo "warning: skipping missing Dock item ${other}" >&2
+      addOtherCommands = concatMapStringsSep "\n" (other: ''
+        if [ -e ${escapeShellArg other.path} ]; then
+          if ! "$dockutil" --add ${escapeShellArg other.path} --replacing ${escapeShellArg (dockLabel other.path)} --position ${toString other.position} --section others --sort ${escapeShellArg other.sort} --no-restart >/dev/null; then
+            echo "warning: failed to add Dock item ${other.path}" >&2
           fi
-        ''
-      ) positionedOthers;
+        else
+          echo "warning: skipping missing Dock item ${other.path}" >&2
+        fi
+      '') positionedOthers;
     in
     mkMerge [
       (optionalAttrs hasDarwinDock {
         system.defaults.dock = {
           persistent-apps = map (app: { inherit app; }) apps;
-          persistent-others = others;
+          persistent-others = map (
+            { path, sort }:
+            {
+              folder = {
+                inherit path;
+                arrangement = builtins.getAttr sort dockSortToDarwinArrangement;
+              };
+            }
+          ) others;
         };
       })
 

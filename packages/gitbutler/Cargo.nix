@@ -114,6 +114,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "but-bitbucket" = rec {
+      packageId = "but-bitbucket";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "but-bitbucket";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "but-cherry-apply" = rec {
       packageId = "but-cherry-apply";
       build = internal.buildRustCrateWithFeatures {
@@ -644,16 +654,6 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "gitbutler-repo-actions" = rec {
-      packageId = "gitbutler-repo-actions";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "gitbutler-repo-actions";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
     "gitbutler-stack" = rec {
       packageId = "gitbutler-stack";
       build = internal.buildRustCrateWithFeatures {
@@ -668,16 +668,6 @@ rec {
       packageId = "gitbutler-tauri";
       build = internal.buildRustCrateWithFeatures {
         packageId = "gitbutler-tauri";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "gitbutler-url" = rec {
-      packageId = "gitbutler-url";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "gitbutler-url";
       };
 
       # Debug support which might change between releases.
@@ -1335,7 +1325,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_DataExchange" "Win32_System_Memory" "Win32_System_Ole" "Win32_UI_Shell" ];
           }
@@ -2630,6 +2620,27 @@ rec {
         features = {
         };
       };
+      "bisync" = rec {
+        crateName = "bisync";
+        version = "0.3.0";
+        edition = "2021";
+        sha256 = "19s1xjbbqz71j9wv6ll0g37y37bgnf6j4ppmr9n1j8vgdlpq482h";
+        dependencies = [
+          {
+            name = "bisync_macros";
+            packageId = "bisync_macros";
+          }
+        ];
+
+      };
+      "bisync_macros" = rec {
+        crateName = "bisync_macros";
+        version = "0.2.3";
+        edition = "2021";
+        sha256 = "1xis2zqwj78q492vmcll8z9qkx4c8hkgniby22mgc057a39l07yj";
+        procMacro = true;
+
+      };
       "bit-set 0.5.3" = rec {
         crateName = "bit-set";
         version = "0.5.3";
@@ -3246,6 +3257,10 @@ rec {
             packageId = "but-askpass";
           }
           {
+            name = "but-bitbucket";
+            packageId = "but-bitbucket";
+          }
+          {
             name = "but-cherry-apply";
             packageId = "but-cherry-apply";
             optional = true;
@@ -3306,6 +3321,10 @@ rec {
           {
             name = "but-llm";
             packageId = "but-llm";
+          }
+          {
+            name = "but-meta";
+            packageId = "but-meta";
           }
           {
             name = "but-path";
@@ -3575,11 +3594,6 @@ rec {
             features = [ "sandbox-but-api" ];
           }
           {
-            name = "insta";
-            packageId = "insta";
-            features = [ "json" ];
-          }
-          {
             name = "quote";
             packageId = "quote";
           }
@@ -3713,10 +3727,6 @@ rec {
             features = [ "sha1" "sha256" ];
           }
           {
-            name = "itertools";
-            packageId = "itertools";
-          }
-          {
             name = "rmcp";
             packageId = "rmcp";
             usesDefaultFeatures = false;
@@ -3780,6 +3790,14 @@ rec {
           {
             name = "but-core";
             packageId = "but-core";
+          }
+          {
+            name = "but-db";
+            packageId = "but-db";
+          }
+          {
+            name = "but-forge";
+            packageId = "but-forge";
           }
           {
             name = "but-meta";
@@ -3878,6 +3896,10 @@ rec {
             name = "but-askpass";
             packageId = "but-askpass";
             optional = true;
+          }
+          {
+            name = "but-bitbucket";
+            packageId = "but-bitbucket";
           }
           {
             name = "but-cherry-apply";
@@ -4002,7 +4024,6 @@ rec {
           {
             name = "gitbutler-git";
             packageId = "gitbutler-git";
-            optional = true;
           }
           {
             name = "gitbutler-operating-modes";
@@ -4113,6 +4134,11 @@ rec {
             packageId = "url";
           }
           {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "serde" ];
+          }
+          {
             name = "which";
             packageId = "which";
           }
@@ -4149,7 +4175,7 @@ rec {
         ];
         features = {
           "export-schema" = [ "but-error/export-schema" "but-workspace/export-schema" "but-hunk-assignment/export-schema" "gitbutler-project/export-schema" "but-rebase/export-schema" "gitbutler-operating-modes/export-schema" "gitbutler-branch/export-schema" "gitbutler-branch-actions/export-schema" "gitbutler-edit-mode/export-schema" "gitbutler-oplog/export-schema" "but-gerrit/export-schema" ];
-          "legacy" = [ "but-ctx/legacy" "but-workspace/legacy" "dep:but-askpass" "dep:gitbutler-user" "dep:gitbutler-project" "dep:gitbutler-branch" "dep:gitbutler-branch-actions" "dep:gitbutler-commit" "dep:gitbutler-reference" "dep:gitbutler-repo" "dep:gitbutler-edit-mode" "dep:gitbutler-operating-modes" "dep:gitbutler-oplog" "dep:gitbutler-git" "dep:but-action" "dep:but-gerrit" "dep:but-worktrees" "dep:but-cherry-apply" ];
+          "legacy" = [ "but-ctx/legacy" "but-workspace/legacy" "dep:but-askpass" "dep:gitbutler-user" "dep:gitbutler-project" "dep:gitbutler-branch" "dep:gitbutler-branch-actions" "dep:gitbutler-commit" "dep:gitbutler-reference" "dep:gitbutler-repo" "dep:gitbutler-edit-mode" "dep:gitbutler-operating-modes" "dep:gitbutler-oplog" "dep:but-action" "dep:but-gerrit" "dep:but-worktrees" "dep:but-cherry-apply" ];
           "napi" = [ "dep:napi" "dep:napi-derive" "legacy" "export-schema" ];
           "tauri" = [ "dep:tauri" "legacy" ];
         };
@@ -4281,6 +4307,89 @@ rec {
           }
         ];
 
+      };
+      "but-bitbucket" = rec {
+        crateName = "but-bitbucket";
+        version = "0.0.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-bitbucket"; };
+        libName = "but_bitbucket";
+        authors = [
+          "GitButler <gitbutler@gitbutler.com>"
+        ];
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "but-error";
+            packageId = "but-error";
+          }
+          {
+            name = "but-forge-storage";
+            packageId = "but-forge-storage";
+          }
+          {
+            name = "but-schemars";
+            packageId = "but-schemars";
+            optional = true;
+          }
+          {
+            name = "but-secret";
+            packageId = "but-secret";
+          }
+          {
+            name = "reqwest";
+            packageId = "reqwest";
+            usesDefaultFeatures = false;
+            features = [ "rustls" "json" "multipart" "query" "stream" "json" ];
+          }
+          {
+            name = "schemars";
+            packageId = "schemars 1.2.1";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" "derive" "uuid1" "preserve_order" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "std" ];
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.18";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "urlencoding";
+            packageId = "urlencoding";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "reqwest";
+            packageId = "reqwest";
+            usesDefaultFeatures = false;
+            features = [ "rustls" "json" "multipart" "query" "stream" "blocking" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+        ];
+        features = {
+          "export-schema" = [ "dep:schemars" "dep:but-schemars" ];
+        };
+        resolvedDefaultFeatures = [ "export-schema" ];
       };
       "but-cherry-apply" = rec {
         crateName = "but-cherry-apply";
@@ -4513,13 +4622,13 @@ rec {
             features = [ "sha1" "sha256" "revision" ];
           }
           {
-            name = "insta";
-            packageId = "insta";
-            features = [ "json" ];
-          }
-          {
             name = "serde_json";
             packageId = "serde_json";
+          }
+          {
+            name = "snapbox";
+            packageId = "snapbox";
+            features = [ "json" ];
           }
         ];
         features = {
@@ -4730,10 +4839,6 @@ rec {
             features = [ "derive" "std" "help" "unstable-markdown" "env" "wrap_help" "color" "error-context" "usage" "suggestions" ];
           }
           {
-            name = "gitbutler-reference";
-            packageId = "gitbutler-reference";
-          }
-          {
             name = "gix";
             packageId = "gix";
             usesDefaultFeatures = false;
@@ -4906,6 +5011,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "but-bitbucket";
+            packageId = "but-bitbucket";
+          }
+          {
             name = "but-db";
             packageId = "but-db";
           }
@@ -4972,8 +5081,14 @@ rec {
             packageId = "urlencoding";
           }
         ];
+        devDependencies = [
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+        ];
         features = {
-          "export-schema" = [ "dep:schemars" "dep:but-schemars" "but-github/export-schema" "but-gitlab/export-schema" ];
+          "export-schema" = [ "dep:schemars" "dep:but-schemars" "but-github/export-schema" "but-gitlab/export-schema" "but-bitbucket/export-schema" ];
         };
         resolvedDefaultFeatures = [ "export-schema" ];
       };
@@ -5324,8 +5439,9 @@ rec {
             packageId = "gitbutler-reference";
           }
           {
-            name = "insta";
-            packageId = "insta";
+            name = "snapbox";
+            packageId = "snapbox";
+            features = [ "json" ];
           }
         ];
         features = {
@@ -5914,6 +6030,11 @@ rec {
             packageId = "napi-derive";
           }
           {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "std" ];
+          }
+          {
             name = "serde_json";
             packageId = "serde_json";
           }
@@ -6028,6 +6149,10 @@ rec {
           {
             name = "open";
             packageId = "open";
+          }
+          {
+            name = "url";
+            packageId = "url";
           }
         ];
 
@@ -6184,8 +6309,9 @@ rec {
             packageId = "gitbutler-reference";
           }
           {
-            name = "insta";
-            packageId = "insta";
+            name = "snapbox";
+            packageId = "snapbox";
+            features = [ "json" ];
           }
         ];
         features = {
@@ -6551,6 +6677,10 @@ rec {
             packageId = "snapbox";
             optional = true;
             features = [ "json" "regex" ];
+          }
+          {
+            name = "temp-env";
+            packageId = "temp-env";
           }
           {
             name = "termtree";
@@ -7047,13 +7177,13 @@ rec {
             packageId = "gitbutler-reference";
           }
           {
-            name = "insta";
-            packageId = "insta";
-            features = [ "json" ];
-          }
-          {
             name = "sapling-renderdag";
             packageId = "sapling-renderdag";
+          }
+          {
+            name = "snapbox";
+            packageId = "snapbox";
+            features = [ "json" ];
           }
         ];
         features = {
@@ -8182,7 +8312,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" ];
           }
@@ -8444,37 +8574,6 @@ rec {
           "portable-atomic" = [ "dep:portable-atomic" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
-      };
-      "console" = rec {
-        crateName = "console";
-        version = "0.16.3";
-        edition = "2021";
-        sha256 = "11zwz1vnfr0nx6dyjx0gjymp8864y5hxwf01ynfd2s8kapsqlknn";
-        dependencies = [
-          {
-            name = "encode_unicode";
-            packageId = "encode_unicode";
-            target = { target, features }: (target."windows" or false);
-          }
-          {
-            name = "libc";
-            packageId = "libc";
-            optional = true;
-          }
-          {
-            name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
-            target = { target, features }: (target."windows" or false);
-            features = [ "Win32_Foundation" "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_UI_Input_KeyboardAndMouse" ];
-          }
-        ];
-        features = {
-          "default" = [ "unicode-width" "ansi-parsing" "std" ];
-          "std" = [ "dep:libc" "alloc" ];
-          "unicode-width" = [ "dep:unicode-width" ];
-          "windows-console-colors" = [ "ansi-parsing" ];
-        };
-        resolvedDefaultFeatures = [ "alloc" "std" ];
       };
       "console-api" = rec {
         crateName = "console-api";
@@ -9650,7 +9749,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: ("msvc" == target."env" or null);
             features = [ "Win32_Foundation" "Win32_System_LibraryLoader" "Win32_Security_Cryptography" ];
           }
@@ -9706,7 +9805,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Networking_WinSock" ];
           }
@@ -10565,7 +10664,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_UI_Shell" "Win32_Foundation" "Win32_Globalization" "Win32_System_Com" ];
           }
@@ -11036,20 +11135,6 @@ rec {
         ];
 
       };
-      "encode_unicode" = rec {
-        crateName = "encode_unicode";
-        version = "1.0.0";
-        edition = "2021";
-        sha256 = "1h5j7j7byi289by63s3w4a8b3g6l5ccdrws7a67nn07vdxj77ail";
-        authors = [
-          "Torbjørn Birch Moltu <t.b.moltu@lyse.net>"
-        ];
-        features = {
-          "ascii" = [ "dep:ascii" ];
-          "default" = [ "std" ];
-        };
-        resolvedDefaultFeatures = [ "default" "std" ];
-      };
       "encoding_rs" = rec {
         crateName = "encoding_rs";
         version = "0.8.35";
@@ -11241,7 +11326,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" ];
           }
@@ -13087,15 +13172,15 @@ rec {
         };
         resolvedDefaultFeatures = [ "v2_58" "v2_60" "v2_62" "v2_64" "v2_66" "v2_68" "v2_70" ];
       };
-      "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20" = rec {
+      "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20" = rec {
         crateName = "gix-trace";
         version = "0.1.20";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_trace";
         authors = [
@@ -13116,15 +13201,15 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "tracing" "tracing-detail" ];
       };
-      "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-validate@0.11.2" = rec {
+      "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-validate@0.11.2" = rec {
         crateName = "gix-validate";
         version = "0.11.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_validate";
         authors = [
@@ -13435,10 +13520,6 @@ rec {
             packageId = "but-forge";
           }
           {
-            name = "but-gerrit";
-            packageId = "but-gerrit";
-          }
-          {
             name = "but-graph";
             packageId = "but-graph";
             features = [ "legacy" ];
@@ -13453,14 +13534,6 @@ rec {
             packageId = "but-oxidize";
           }
           {
-            name = "but-project-handle";
-            packageId = "but-project-handle";
-          }
-          {
-            name = "but-rebase";
-            packageId = "but-rebase";
-          }
-          {
             name = "but-schemars";
             packageId = "but-schemars";
             optional = true;
@@ -13471,19 +13544,9 @@ rec {
             features = [ "legacy" ];
           }
           {
-            name = "but-settings";
-            packageId = "but-settings";
-          }
-          {
             name = "but-workspace";
             packageId = "but-workspace";
             features = [ "legacy" ];
-          }
-          {
-            name = "chrono";
-            packageId = "chrono";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
           }
           {
             name = "git2";
@@ -13497,10 +13560,6 @@ rec {
           {
             name = "gitbutler-commit";
             packageId = "gitbutler-commit";
-          }
-          {
-            name = "gitbutler-git";
-            packageId = "gitbutler-git";
           }
           {
             name = "gitbutler-operating-modes";
@@ -13523,26 +13582,14 @@ rec {
             packageId = "gitbutler-repo";
           }
           {
-            name = "gitbutler-repo-actions";
-            packageId = "gitbutler-repo-actions";
-          }
-          {
             name = "gitbutler-stack";
             packageId = "gitbutler-stack";
-          }
-          {
-            name = "gitbutler-workspace";
-            packageId = "gitbutler-workspace";
           }
           {
             name = "gix";
             packageId = "gix";
             usesDefaultFeatures = false;
-            features = [ "sha1" "sha256" "blob-diff" "revision" "merge" ];
-          }
-          {
-            name = "itertools";
-            packageId = "itertools";
+            features = [ "sha1" "sha256" "blob-diff" "revision" ];
           }
           {
             name = "md5";
@@ -13569,11 +13616,6 @@ rec {
             packageId = "url";
             features = [ "serde" ];
           }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "serde" ];
-          }
         ];
         devDependencies = [
           {
@@ -13585,8 +13627,16 @@ rec {
             packageId = "but-graph";
           }
           {
-            name = "but-hunk-assignment";
-            packageId = "but-hunk-assignment";
+            name = "but-project-handle";
+            packageId = "but-project-handle";
+          }
+          {
+            name = "but-rebase";
+            packageId = "but-rebase";
+          }
+          {
+            name = "but-settings";
+            packageId = "but-settings";
           }
           {
             name = "but-testsupport";
@@ -13595,6 +13645,11 @@ rec {
           {
             name = "ctor";
             packageId = "ctor 0.6.3";
+          }
+          {
+            name = "git2";
+            packageId = "git2";
+            features = [ "vendored-openssl" "vendored-libgit2" ];
           }
           {
             name = "gitbutler-workspace";
@@ -13609,6 +13664,10 @@ rec {
           {
             name = "glob";
             packageId = "glob";
+          }
+          {
+            name = "itertools";
+            packageId = "itertools";
           }
           {
             name = "pretty_assertions";
@@ -14165,10 +14224,6 @@ rec {
             features = [ "legacy" ];
           }
           {
-            name = "but-oxidize";
-            packageId = "but-oxidize";
-          }
-          {
             name = "but-schemars";
             packageId = "but-schemars";
             optional = true;
@@ -14446,10 +14501,6 @@ rec {
             packageId = "git2-hooks";
           }
           {
-            name = "gitbutler-cherry-pick";
-            packageId = "gitbutler-cherry-pick";
-          }
-          {
             name = "gitbutler-project";
             packageId = "gitbutler-project";
           }
@@ -14489,10 +14540,6 @@ rec {
             packageId = "tempfile";
           }
           {
-            name = "toml";
-            packageId = "toml 0.9.12+spec-1.1.0";
-          }
-          {
             name = "tracing";
             packageId = "tracing";
           }
@@ -14507,58 +14554,9 @@ rec {
             packageId = "but-testsupport";
           }
           {
-            name = "gitbutler-user";
-            packageId = "gitbutler-user";
-          }
-          {
-            name = "keyring";
-            packageId = "keyring";
-            features = [ "apple-native" "windows-native" "linux-native-sync-persistent" "crypto-rust" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-            features = [ "arbitrary_precision" ];
-          }
-          {
             name = "snapbox";
             packageId = "snapbox";
             features = [ "json" ];
-          }
-        ];
-
-      };
-      "gitbutler-repo-actions" = rec {
-        crateName = "gitbutler-repo-actions";
-        version = "0.0.0";
-        edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-repo-actions"; };
-        libName = "gitbutler_repo_actions";
-        authors = [
-          "GitButler <gitbutler@gitbutler.com>"
-        ];
-        dependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-          }
-          {
-            name = "but-ctx";
-            packageId = "but-ctx";
-          }
-          {
-            name = "gitbutler-repo";
-            packageId = "gitbutler-repo";
-          }
-          {
-            name = "gitbutler-stack";
-            packageId = "gitbutler-stack";
-          }
-          {
-            name = "gix";
-            packageId = "gix";
-            usesDefaultFeatures = false;
-            features = [ "sha1" "sha256" ];
           }
         ];
 
@@ -14619,15 +14617,6 @@ rec {
             name = "itertools";
             packageId = "itertools";
           }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "std" ];
-          }
-          {
-            name = "toml";
-            packageId = "toml 0.9.12+spec-1.1.0";
-          }
         ];
         devDependencies = [
           {
@@ -14655,13 +14644,12 @@ rec {
             packageId = "gitbutler-git";
           }
           {
-            name = "snapbox";
-            packageId = "snapbox";
-            features = [ "json" ];
-          }
-          {
             name = "tempfile";
             packageId = "tempfile";
+          }
+          {
+            name = "toml";
+            packageId = "toml 0.9.12+spec-1.1.0";
           }
         ];
 
@@ -14874,11 +14862,6 @@ rec {
             name = "url";
             packageId = "url";
           }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "serde" ];
-          }
         ];
         buildDependencies = [
           {
@@ -14900,32 +14883,6 @@ rec {
           "packaged-but-distribution" = [ "but?/packaged-but-distribution" ];
         };
         resolvedDefaultFeatures = [ "custom-protocol" "default" "devtools" "opener" ];
-      };
-      "gitbutler-url" = rec {
-        crateName = "gitbutler-url";
-        version = "0.0.0";
-        edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-url"; };
-        libName = "gitbutler_url";
-        authors = [
-          "GitButler <gitbutler@gitbutler.com>"
-        ];
-        dependencies = [
-          {
-            name = "bstr";
-            packageId = "bstr";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 2.0.18";
-          }
-          {
-            name = "url";
-            packageId = "url";
-            features = [ "serde" ];
-          }
-        ];
-
       };
       "gitbutler-user" = rec {
         crateName = "gitbutler-user";
@@ -15138,8 +15095,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         authors = [
           "Sebastian Thiel <sebastian.thiel@icloud.com>"
@@ -15147,11 +15104,11 @@ rec {
         dependencies = [
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
           }
           {
             name = "gix-validate";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-validate@0.11.2";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-validate@0.11.2";
           }
           {
             name = "gix-actor";
@@ -15274,7 +15231,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-pathspec";
@@ -15347,6 +15304,7 @@ rec {
           {
             name = "gix-utils";
             packageId = "gix-utils";
+            features = [ "bstr" ];
           }
           {
             name = "gix-worktree";
@@ -15363,6 +15321,10 @@ rec {
             name = "gix-worktree-stream";
             packageId = "gix-worktree-stream";
             optional = true;
+          }
+          {
+            name = "gix-zlib";
+            packageId = "gix-zlib";
           }
           {
             name = "nonempty";
@@ -15441,7 +15403,7 @@ rec {
           "need-more-recent-msrv" = [ "merge" "tree-editor" ];
           "pack-cache-lru-dynamic" = [ "gix-pack/pack-cache-lru-dynamic" ];
           "pack-cache-lru-static" = [ "gix-pack/pack-cache-lru-static" ];
-          "parallel" = [ "gix-features/parallel" ];
+          "parallel" = [ "gix-features/parallel" "gix-attributes?/parallel" "gix-filter?/parallel" "gix-pathspec?/parallel" "gix-worktree?/parallel" ];
           "prodash" = [ "dep:prodash" ];
           "progress-tree" = [ "prodash/progress-tree" ];
           "regex" = [ "dep:regex" ];
@@ -15457,10 +15419,6 @@ rec {
           "worktree-archive" = [ "gix-archive" "worktree-stream" "attributes" ];
           "worktree-mutation" = [ "attributes" "dep:gix-worktree-state" ];
           "worktree-stream" = [ "gix-worktree-stream" "attributes" ];
-          "zlib-ng" = [ "gix-features/zlib" ];
-          "zlib-ng-compat" = [ "gix-features/zlib" ];
-          "zlib-rs" = [ "gix-features/zlib" ];
-          "zlib-stock" = [ "gix-features/zlib" ];
         };
         resolvedDefaultFeatures = [ "attributes" "blob-diff" "blocking-http-transport-reqwest" "blocking-http-transport-reqwest-rust-tls" "blocking-network-client" "command" "credentials" "dirwalk" "excludes" "gix-status" "index" "interrupt" "max-control" "max-performance" "max-performance-safe" "merge" "pack-cache-lru-dynamic" "pack-cache-lru-static" "parallel" "revision" "serde" "sha1" "sha256" "status" "tracing" "tracing-detail" "tree-editor" "worktree-mutation" ];
       };
@@ -15471,8 +15429,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_actor";
         authors = [
@@ -15514,8 +15472,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_attributes";
         authors = [
@@ -15530,7 +15488,11 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
+          }
+          {
+            name = "gix-features";
+            packageId = "gix-features";
           }
           {
             name = "gix-glob";
@@ -15538,15 +15500,11 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-quote";
             packageId = "gix-quote";
-          }
-          {
-            name = "kstring";
-            packageId = "kstring";
           }
           {
             name = "serde";
@@ -15570,9 +15528,10 @@ rec {
         ];
         features = {
           "document-features" = [ "dep:document-features" ];
-          "serde" = [ "dep:serde" "bstr/serde" "gix-glob/serde" "kstring/serde" ];
+          "parallel" = [ "gix-features/parallel" ];
+          "serde" = [ "dep:serde" "bstr/serde" "gix-glob/serde" ];
         };
-        resolvedDefaultFeatures = [ "serde" ];
+        resolvedDefaultFeatures = [ "parallel" "serde" ];
       };
       "gix-bitmap" = rec {
         crateName = "gix-bitmap";
@@ -15581,8 +15540,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_bitmap";
         authors = [
@@ -15603,8 +15562,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_chunk";
         authors = [
@@ -15625,8 +15584,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_command";
         authors = [
@@ -15641,11 +15600,11 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-quote";
@@ -15665,8 +15624,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_commitgraph";
         authors = [
@@ -15730,8 +15689,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_config";
         authors = [
@@ -15758,7 +15717,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-ref";
@@ -15767,6 +15726,11 @@ rec {
           {
             name = "gix-sec";
             packageId = "gix-sec";
+          }
+          {
+            name = "gix-utils";
+            packageId = "gix-utils";
+            features = [ "bstr" ];
           }
           {
             name = "smallvec";
@@ -15795,8 +15759,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_config_value";
         authors = [
@@ -15815,7 +15779,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "libc";
@@ -15834,13 +15798,13 @@ rec {
       };
       "gix-credentials" = rec {
         crateName = "gix-credentials";
-        version = "0.38.1";
+        version = "0.38.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_credentials";
         authors = [
@@ -15855,7 +15819,7 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
           }
           {
             name = "gix-command";
@@ -15871,7 +15835,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-prompt";
@@ -15911,13 +15875,13 @@ rec {
       };
       "gix-date" = rec {
         crateName = "gix-date";
-        version = "0.15.5";
+        version = "0.15.6";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_date";
         authors = [
@@ -15963,8 +15927,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_diff";
         authors = [
@@ -15978,7 +15942,7 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
             optional = true;
           }
           {
@@ -16022,7 +15986,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
             optional = true;
           }
           {
@@ -16106,8 +16070,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_dir";
         authors = [
@@ -16121,7 +16085,7 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
           }
           {
             name = "gix-discover";
@@ -16145,7 +16109,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-pathspec";
@@ -16184,8 +16148,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_discover";
         authors = [
@@ -16209,7 +16173,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-ref";
@@ -16231,13 +16195,13 @@ rec {
       };
       "gix-error" = rec {
         crateName = "gix-error";
-        version = "0.2.4";
+        version = "0.2.5";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_error";
         authors = [
@@ -16263,8 +16227,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_features";
         authors = [
@@ -16288,11 +16252,11 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
             optional = true;
           }
           {
@@ -16322,18 +16286,8 @@ rec {
             optional = true;
           }
           {
-            name = "thiserror";
-            packageId = "thiserror 2.0.18";
-            optional = true;
-          }
-          {
             name = "walkdir";
             packageId = "walkdir";
-            optional = true;
-          }
-          {
-            name = "zlib-rs";
-            packageId = "zlib-rs";
             optional = true;
           }
         ];
@@ -16351,19 +16305,19 @@ rec {
           "tracing" = [ "gix-trace/tracing" ];
           "tracing-detail" = [ "gix-trace/tracing-detail" ];
           "walkdir" = [ "dep:walkdir" "dep:gix-path" "dep:gix-utils" ];
-          "zlib" = [ "dep:zlib-rs" "dep:thiserror" ];
         };
-        resolvedDefaultFeatures = [ "crc32" "default" "fs-read-dir" "io-pipe" "once_cell" "parallel" "prodash" "progress" "tracing" "tracing-detail" "walkdir" "zlib" ];
+        resolvedDefaultFeatures = [ "crc32" "default" "fs-read-dir" "io-pipe" "once_cell" "parallel" "prodash" "progress" "tracing" "tracing-detail" "walkdir" ];
       };
       "gix-filter" = rec {
         crateName = "gix-filter";
         version = "0.32.0";
         edition = "2024";
+        crateBin = [];
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_filter";
         authors = [
@@ -16382,7 +16336,7 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
           }
           {
             name = "gix-attributes";
@@ -16407,7 +16361,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-quote";
@@ -16438,9 +16392,11 @@ rec {
           }
         ];
         features = {
+          "parallel" = [ "gix-attributes/parallel" ];
           "sha1" = [ "gix-hash/sha1" ];
           "sha256" = [ "gix-hash/sha256" ];
         };
+        resolvedDefaultFeatures = [ "parallel" ];
       };
       "gix-fs" = rec {
         crateName = "gix-fs";
@@ -16449,8 +16405,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_fs";
         authors = [
@@ -16468,7 +16424,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-utils";
@@ -16490,8 +16446,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_glob";
         authors = [
@@ -16514,7 +16470,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "serde";
@@ -16537,8 +16493,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_hash";
         authors = [
@@ -16595,8 +16551,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_hashtable";
         authors = [
@@ -16637,8 +16593,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_ignore";
         authors = [
@@ -16653,7 +16609,7 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
           }
           {
             name = "gix-glob";
@@ -16661,7 +16617,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "serde";
@@ -16688,8 +16644,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_imara_diff";
         authors = [
@@ -16720,8 +16676,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_index";
         authors = [
@@ -16747,7 +16703,7 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-validate@0.11.2";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-validate@0.11.2";
           }
           {
             name = "gix-bitmap";
@@ -16853,8 +16809,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_lock";
         authors = [
@@ -16885,8 +16841,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_mailmap";
         authors = [
@@ -16932,8 +16888,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_merge";
         authors = [
@@ -16947,7 +16903,7 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
           }
           {
             name = "gix-command";
@@ -16986,7 +16942,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-quote";
@@ -17035,8 +16991,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_negotiate";
         authors = [
@@ -17087,8 +17043,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_object";
         authors = [
@@ -17103,7 +17059,7 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-validate@0.11.2";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-validate@0.11.2";
           }
           {
             name = "gix-actor";
@@ -17173,8 +17129,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_odb";
         authors = [
@@ -17188,7 +17144,7 @@ rec {
           {
             name = "gix-features";
             packageId = "gix-features";
-            features = [ "walkdir" "zlib" "crc32" ];
+            features = [ "walkdir" "crc32" ];
           }
           {
             name = "gix-fs";
@@ -17213,11 +17169,15 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-quote";
             packageId = "gix-quote";
+          }
+          {
+            name = "gix-zlib";
+            packageId = "gix-zlib";
           }
           {
             name = "memmap2";
@@ -17270,8 +17230,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_pack";
         authors = [
@@ -17294,7 +17254,7 @@ rec {
           {
             name = "gix-features";
             packageId = "gix-features";
-            features = [ "crc32" "progress" "zlib" ];
+            features = [ "crc32" "progress" ];
           }
           {
             name = "gix-hash";
@@ -17311,7 +17271,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-tempfile";
@@ -17319,6 +17279,10 @@ rec {
             optional = true;
             usesDefaultFeatures = false;
             target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
+            name = "gix-zlib";
+            packageId = "gix-zlib";
           }
           {
             name = "memmap2";
@@ -17365,7 +17329,7 @@ rec {
           "pack-cache-lru-dynamic" = [ "dep:clru" ];
           "pack-cache-lru-static" = [ "dep:uluru" ];
           "parallel" = [ "gix-features/parallel" ];
-          "serde" = [ "dep:serde" "gix-object/serde" ];
+          "serde" = [ "dep:serde" "gix-object/serde" "gix-zlib/serde" ];
           "sha1" = [ "gix-hash/sha1" ];
           "sha256" = [ "gix-hash/sha256" ];
           "streaming-input" = [ "dep:parking_lot" "dep:gix-tempfile" ];
@@ -17380,8 +17344,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_packetline";
         authors = [
@@ -17402,7 +17366,7 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
           }
           {
             name = "thiserror";
@@ -17449,15 +17413,15 @@ rec {
         ];
 
       };
-      "gix-path 0.12.1" = rec {
+      "gix-path 0.12.2" = rec {
         crateName = "gix-path";
-        version = "0.12.1";
+        version = "0.12.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_path";
         authors = [
@@ -17472,11 +17436,11 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
           }
           {
             name = "gix-validate";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-validate@0.11.2";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-validate@0.11.2";
           }
           {
             name = "thiserror";
@@ -17492,8 +17456,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_pathspec";
         authors = [
@@ -17524,14 +17488,17 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "thiserror";
             packageId = "thiserror 2.0.18";
           }
         ];
-
+        features = {
+          "parallel" = [ "gix-attributes/parallel" ];
+        };
+        resolvedDefaultFeatures = [ "parallel" ];
       };
       "gix-prompt" = rec {
         crateName = "gix-prompt";
@@ -17540,8 +17507,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_prompt";
         authors = [
@@ -17581,14 +17548,18 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_protocol";
         authors = [
           "Sebastian Thiel <sebastian.thiel@icloud.com>"
         ];
         dependencies = [
+          {
+            name = "bisync";
+            packageId = "bisync";
+          }
           {
             name = "bstr";
             packageId = "bstr";
@@ -17597,7 +17568,7 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
             optional = true;
           }
           {
@@ -17660,10 +17631,6 @@ rec {
             packageId = "gix-utils";
           }
           {
-            name = "maybe-async";
-            packageId = "maybe-async";
-          }
-          {
             name = "nonempty";
             packageId = "nonempty";
           }
@@ -17681,7 +17648,7 @@ rec {
         ];
         features = {
           "async-client" = [ "gix-transport/async-client" "dep:async-trait" "dep:futures-io" "futures-lite" "handshake" "fetch" ];
-          "blocking-client" = [ "gix-transport/blocking-client" "maybe-async/is_sync" "handshake" "fetch" ];
+          "blocking-client" = [ "gix-transport/blocking-client" "handshake" "fetch" ];
           "document-features" = [ "dep:document-features" ];
           "fetch" = [ "dep:gix-negotiate" "dep:gix-object" "dep:gix-revwalk" "dep:gix-lock" "dep:gix-refspec" "dep:gix-trace" ];
           "futures-lite" = [ "dep:futures-lite" ];
@@ -17699,8 +17666,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_quote";
         authors = [
@@ -17731,8 +17698,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_ref";
         authors = [
@@ -17741,7 +17708,7 @@ rec {
         dependencies = [
           {
             name = "gix-validate";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-validate@0.11.2";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-validate@0.11.2";
           }
           {
             name = "gix-actor";
@@ -17770,7 +17737,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-tempfile";
@@ -17820,8 +17787,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_refspec";
         authors = [
@@ -17836,7 +17803,7 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-validate@0.11.2";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-validate@0.11.2";
           }
           {
             name = "gix-error";
@@ -17883,8 +17850,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_revision";
         authors = [
@@ -17904,7 +17871,7 @@ rec {
           }
           {
             name = "gix-trace";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-trace@0.1.20";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-trace@0.1.20";
             optional = true;
           }
           {
@@ -17966,8 +17933,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_revwalk";
         authors = [
@@ -18026,8 +17993,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_sec";
         authors = [
@@ -18040,7 +18007,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
             target = { target, features }: (target."windows" or false);
           }
           {
@@ -18075,8 +18042,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_shallow";
         authors = [
@@ -18126,8 +18093,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_status";
         authors = [
@@ -18183,7 +18150,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-pathspec";
@@ -18196,6 +18163,11 @@ rec {
             features = [ "attributes" ];
           }
           {
+            name = "hashbrown";
+            packageId = "hashbrown 0.16.1";
+            target = { target, features }: (target."windows" or false);
+          }
+          {
             name = "portable-atomic";
             packageId = "portable-atomic";
             target = { target, features }: (!("64" == target."has_atomic" or null));
@@ -18203,6 +18175,12 @@ rec {
           {
             name = "thiserror";
             packageId = "thiserror 2.0.18";
+          }
+          {
+            name = "windows-sys";
+            packageId = "windows-sys 0.61.2";
+            target = { target, features }: (target."windows" or false);
+            features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_Security" ];
           }
         ];
         devDependencies = [
@@ -18260,8 +18238,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_submodule";
         authors = [
@@ -18279,7 +18257,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-pathspec";
@@ -18310,8 +18288,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_tempfile";
         authors = [
@@ -18369,8 +18347,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_testtools";
         authors = [
@@ -18423,6 +18401,7 @@ rec {
             name = "gix-worktree";
             packageId = "gix-worktree";
             optional = true;
+            features = [ "parallel" ];
           }
           {
             name = "io-close";
@@ -18461,8 +18440,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_transport";
         authors = [
@@ -18498,6 +18477,10 @@ rec {
             packageId = "gix-packetline";
           }
           {
+            name = "gix-path";
+            packageId = "gix-path 0.12.2";
+          }
+          {
             name = "gix-quote";
             packageId = "gix-quote";
           }
@@ -18508,6 +18491,11 @@ rec {
           {
             name = "gix-url";
             packageId = "gix-url";
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot";
+            optional = true;
           }
           {
             name = "reqwest";
@@ -18539,7 +18527,7 @@ rec {
           "futures-io" = [ "dep:futures-io" ];
           "futures-lite" = [ "dep:futures-lite" ];
           "gix-credentials" = [ "dep:gix-credentials" ];
-          "http-client" = [ "base64" "gix-features/io-pipe" "blocking-client" "gix-credentials" ];
+          "http-client" = [ "base64" "parking_lot" "gix-features/io-pipe" "blocking-client" "gix-credentials" ];
           "http-client-curl" = [ "curl" "http-client" ];
           "http-client-curl-openssl" = [ "http-client-curl" "curl/ssl" ];
           "http-client-curl-rust-tls" = [ "http-client-curl" "curl/rustls" ];
@@ -18547,11 +18535,12 @@ rec {
           "http-client-reqwest-native-tls" = [ "http-client-reqwest" "reqwest/native-tls" ];
           "http-client-reqwest-rust-tls" = [ "http-client-reqwest" "reqwest/rustls" ];
           "http-client-reqwest-rust-tls-trust-dns" = [ "http-client-reqwest" "reqwest/rustls" "reqwest/hickory-dns" ];
+          "parking_lot" = [ "dep:parking_lot" ];
           "pin-project-lite" = [ "dep:pin-project-lite" ];
           "reqwest" = [ "dep:reqwest" ];
           "serde" = [ "dep:serde" "bstr/serde" ];
         };
-        resolvedDefaultFeatures = [ "base64" "blocking-client" "default" "gix-credentials" "http-client" "http-client-reqwest" "http-client-reqwest-rust-tls" "reqwest" "serde" ];
+        resolvedDefaultFeatures = [ "base64" "blocking-client" "default" "gix-credentials" "http-client" "http-client-reqwest" "http-client-reqwest-rust-tls" "parking_lot" "reqwest" "serde" ];
       };
       "gix-traverse" = rec {
         crateName = "gix-traverse";
@@ -18560,8 +18549,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_traverse";
         authors = [
@@ -18627,13 +18616,13 @@ rec {
       };
       "gix-url" = rec {
         crateName = "gix-url";
-        version = "0.36.1";
+        version = "0.36.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_url";
         authors = [
@@ -18648,7 +18637,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "percent-encoding";
@@ -18674,13 +18663,13 @@ rec {
       };
       "gix-utils" = rec {
         crateName = "gix-utils";
-        version = "0.3.3";
+        version = "0.3.4";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_utils";
         authors = [
@@ -18722,8 +18711,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_worktree";
         authors = [
@@ -18737,12 +18726,17 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=09642c6c0aab915a4f67a69848d10a225cce1405#gix-validate@0.11.2";
+            packageId = "git+https://github.com/GitoxideLabs/gitoxide?rev=9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed#gix-validate@0.11.2";
             optional = true;
           }
           {
             name = "gix-attributes";
             packageId = "gix-attributes";
+            optional = true;
+          }
+          {
+            name = "gix-features";
+            packageId = "gix-features";
             optional = true;
           }
           {
@@ -18771,7 +18765,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "serde";
@@ -18793,12 +18787,12 @@ rec {
           "default" = [ "attributes" ];
           "document-features" = [ "dep:document-features" ];
           "gix-features" = [ "dep:gix-features" ];
-          "parallel" = [ "gix-features/parallel" ];
+          "parallel" = [ "gix-features/parallel" "gix-attributes?/parallel" ];
           "serde" = [ "dep:serde" "bstr/serde" "gix-index/serde" "gix-hash/serde" "gix-object/serde" "gix-attributes?/serde" "gix-ignore/serde" ];
           "sha1" = [ "gix-hash/sha1" ];
           "sha256" = [ "gix-hash/sha256" ];
         };
-        resolvedDefaultFeatures = [ "attributes" "default" "serde" ];
+        resolvedDefaultFeatures = [ "attributes" "default" "gix-features" "parallel" "serde" ];
       };
       "gix-worktree-state" = rec {
         crateName = "gix-worktree-state";
@@ -18807,8 +18801,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_worktree_state";
         authors = [
@@ -18842,7 +18836,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-worktree";
@@ -18890,8 +18884,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "09642c6c0aab915a4f67a69848d10a225cce1405";
-          sha256 = "0bb4icjavscprfnzbak3yg6104sgf1xjpbvr0zssd668hmn3g6br";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
         };
         libName = "gix_worktree_stream";
         authors = [
@@ -18901,6 +18895,7 @@ rec {
           {
             name = "gix-attributes";
             packageId = "gix-attributes";
+            features = [ "parallel" ];
           }
           {
             name = "gix-error";
@@ -18909,7 +18904,7 @@ rec {
           {
             name = "gix-features";
             packageId = "gix-features";
-            features = [ "progress" "io-pipe" ];
+            features = [ "progress" "io-pipe" "parallel" ];
           }
           {
             name = "gix-filter";
@@ -18929,7 +18924,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.1";
+            packageId = "gix-path 0.12.2";
           }
           {
             name = "gix-traverse";
@@ -18951,6 +18946,42 @@ rec {
           "sha256" = [ "gix-hash/sha256" ];
         };
         resolvedDefaultFeatures = [ "sha1" "sha256" ];
+      };
+      "gix-zlib" = rec {
+        crateName = "gix-zlib";
+        version = "0.1.0";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/GitoxideLabs/gitoxide";
+          rev = "9949e9fdfa27a6630a8a12f7da07cbdd5c03aeed";
+          sha256 = "1ppdmg6pf5nv1q5cqi1ji7dr5sjdpl1avi150mpbdwwqr517gc2f";
+        };
+        libName = "gix_zlib";
+        authors = [
+          "Sebastian Thiel <sebastian.thiel@icloud.com>"
+        ];
+        dependencies = [
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "derive" ];
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.18";
+          }
+          {
+            name = "zlib-rs";
+            packageId = "zlib-rs";
+          }
+        ];
+        features = {
+          "serde" = [ "dep:serde" ];
+        };
+        resolvedDefaultFeatures = [ "serde" ];
       };
       "glib" = rec {
         crateName = "glib";
@@ -21187,72 +21218,6 @@ rec {
         };
         resolvedDefaultFeatures = [ "block-padding" ];
       };
-      "insta" = rec {
-        crateName = "insta";
-        version = "1.48.0";
-        edition = "2021";
-        sha256 = "10kbxza7vzj4nvkga8r3rfn6z8i3hnh47bnnb1f429n9x3zgiw46";
-        authors = [
-          "Armin Ronacher <armin.ronacher@active-4.com>"
-        ];
-        dependencies = [
-          {
-            name = "console";
-            packageId = "console";
-            optional = true;
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "once_cell";
-            packageId = "once_cell";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            optional = true;
-          }
-          {
-            name = "similar";
-            packageId = "similar";
-            features = [ "inline" ];
-          }
-          {
-            name = "tempfile";
-            packageId = "tempfile";
-          }
-        ];
-        devDependencies = [
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" ];
-          }
-        ];
-        features = {
-          "_cargo_insta_internal" = [ "clap" ];
-          "clap" = [ "dep:clap" ];
-          "colors" = [ "console" ];
-          "console" = [ "dep:console" ];
-          "csv" = [ "dep:csv" "serde" ];
-          "default" = [ "colors" ];
-          "filters" = [ "regex" "strip-ansi-escapes" ];
-          "glob" = [ "walkdir" "globset" ];
-          "globset" = [ "dep:globset" ];
-          "json" = [ "serde" ];
-          "pest" = [ "dep:pest" ];
-          "pest_derive" = [ "dep:pest_derive" ];
-          "redactions" = [ "pest" "pest_derive" "serde" ];
-          "regex" = [ "dep:regex" ];
-          "ron" = [ "dep:ron" "serde" ];
-          "serde" = [ "dep:serde" ];
-          "strip-ansi-escapes" = [ "dep:strip-ansi-escapes" ];
-          "toml" = [ "dep:toml_edit" "dep:toml_writer" "serde" ];
-          "walkdir" = [ "dep:walkdir" ];
-          "yaml" = [ "serde" ];
-        };
-        resolvedDefaultFeatures = [ "colors" "console" "default" "json" "serde" ];
-      };
       "instability" = rec {
         crateName = "instability";
         version = "0.3.12";
@@ -21557,7 +21522,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" ];
           }
@@ -22404,32 +22369,6 @@ rec {
         ];
 
       };
-      "kstring" = rec {
-        crateName = "kstring";
-        version = "2.0.2";
-        edition = "2021";
-        sha256 = "1lfvqlqkg2x23nglznb7ah6fk3vv3y5i759h5l2151ami98gk2sm";
-        authors = [
-          "Ed Page <eopage@gmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "serde";
-            packageId = "serde";
-            optional = true;
-          }
-          {
-            name = "static_assertions";
-            packageId = "static_assertions";
-          }
-        ];
-        features = {
-          "default" = [ "std" "unsafe" ];
-          "document-features" = [ "dep:document-features" ];
-          "serde" = [ "dep:serde" ];
-        };
-        resolvedDefaultFeatures = [ "default" "serde" "std" "unsafe" ];
-      };
       "lab" = rec {
         crateName = "lab";
         version = "0.11.0";
@@ -23176,35 +23115,6 @@ rec {
         features = {
         };
         resolvedDefaultFeatures = [ "default" ];
-      };
-      "maybe-async" = rec {
-        crateName = "maybe-async";
-        version = "0.2.11";
-        edition = "2021";
-        sha256 = "036anp4dzz7sjgdq3zfwzf52ggblpbx1sivlvg2ssq5dhjip6s3l";
-        procMacro = true;
-        libName = "maybe_async";
-        authors = [
-          "Guoli Lyu <guoli-lv@hotmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "proc-macro2";
-            packageId = "proc-macro2";
-          }
-          {
-            name = "quote";
-            packageId = "quote";
-          }
-          {
-            name = "syn";
-            packageId = "syn 2.0.118";
-            features = [ "visit-mut" "full" ];
-          }
-        ];
-        features = {
-        };
-        resolvedDefaultFeatures = [ "default" "is_sync" ];
       };
       "md5" = rec {
         crateName = "md5";
@@ -24581,7 +24491,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             rename = "windows";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_Security" ];
@@ -27492,7 +27402,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.45.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Pipes" "Win32_Security" ];
           }
@@ -29534,7 +29444,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_IO" "Win32_Networking_WinSock" ];
           }
@@ -31947,7 +31857,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" ];
           }
@@ -32208,7 +32118,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Security_Cryptography" ];
@@ -37700,7 +37610,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Storage_FileSystem" "Win32_Foundation" ];
           }
@@ -37812,7 +37722,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" ];
           }
@@ -42545,7 +42455,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" "Win32_System_SystemInformation" ];
           }
@@ -44767,7 +44677,7 @@ rec {
           "Win32_UI_WindowsAndMessaging" = [ "Win32_UI" ];
           "Win32_UI_Wpf" = [ "Win32_UI" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Globalization" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Security" "Win32_System" "Win32_System_Pipes" "default" ];
       };
       "windows-sys 0.52.0" = rec {
         crateName = "windows-sys";
@@ -45274,7 +45184,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_LibraryLoader" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_Time" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_DataExchange" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_Time" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-sys 0.60.2" = rec {
         crateName = "windows-sys";
@@ -45539,7 +45449,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Credentials" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Controls" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Security" "Win32_Security_Credentials" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Controls" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-sys 0.61.2" = rec {
         crateName = "windows-sys";
@@ -45801,7 +45711,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-targets 0.42.2" = rec {
         crateName = "windows-targets";

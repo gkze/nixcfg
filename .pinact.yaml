@@ -1,0 +1,12 @@
+---
+version: 3
+# The determinate-nix-action uses-line is 96 characters once rendered, so the
+# inline "# vX.Y.Z" comment pinact wants cannot fit within the 100-character
+# budget enforced by yamllint and the workflow renderer (MAX_LINE_WIDTH in
+# lib/update/ci/workflow_model.py). The version is recorded in a comment line
+# above the step in lib/update/ci/workflow_defs.py instead. The ignore is
+# pinned to the exact SHA so a bump still fails the check until this entry is
+# updated alongside it.
+ignore_actions:
+  - name: DeterminateSystems/determinate-nix-action
+    ref: a18f73c54ca8525de051e73c31512a67f44df919

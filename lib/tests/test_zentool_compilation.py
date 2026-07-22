@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -63,17 +62,12 @@ def make_compiled_tab(
     folder_id: str | None = None,
     user_context_id: int = 0,
     sync_id: str = "",
-    placeholder: bool = False,
     existing: object | None = None,
 ) -> object:
     """Build one compiled tab node."""
-    if placeholder:
-        spec = SimpleNamespace(name=name, url=url)
-    else:
-        spec_cls = zentool.ItemTabSpec if pinned else zentool.TabSpec
-        spec = spec_cls(name=name, url=url)
+    spec_cls = zentool.ItemTabSpec if pinned else zentool.TabSpec
     return zentool.CompiledTab(
-        spec=spec,
+        spec=spec_cls(name=name, url=url),
         essential=essential,
         pinned=pinned,
         workspace_key=workspace_key,
@@ -81,8 +75,29 @@ def make_compiled_tab(
         folder_id=folder_id,
         user_context_id=user_context_id,
         sync_id=sync_id,
-        placeholder=placeholder,
         existing=existing,
+    )
+
+
+def make_placeholder_tab(
+    zentool: ModuleType,
+    *,
+    workspace_key: str | None,
+    workspace_uuid: str | None,
+    folder_id: str | None = None,
+    user_context_id: int = 0,
+    sync_id: str = "",
+) -> object:
+    """Build one compiled empty-folder placeholder tab node."""
+    return zentool.CompiledTab(
+        spec=None,
+        essential=False,
+        pinned=True,
+        workspace_key=workspace_key,
+        workspace_uuid=workspace_uuid,
+        folder_id=folder_id,
+        user_context_id=user_context_id,
+        sync_id=sync_id,
     )
 
 
@@ -284,16 +299,12 @@ def test_gather_compiled_tabs_preserves_workspace_local_then_global_order(
         pinned=True,
         sync_id="nested-1",
     )
-    ws1_placeholder = make_compiled_tab(
+    ws1_placeholder = make_placeholder_tab(
         zentool,
-        name="",
-        url="",
         workspace_key="work",
         workspace_uuid="{ws1}",
-        pinned=True,
         folder_id="folder-empty",
         sync_id="placeholder-1",
-        placeholder=True,
     )
     ws1_folder = make_compiled_folder(
         zentool,
@@ -382,10 +393,9 @@ def test_match_tabs_to_existing_claims_tabs_and_assigns_sync_ids(
     monkeypatch: pytest.MonkeyPatch,
     zentool: ModuleType,
 ) -> None:
-    """Matching should reuse exact-URL tabs and allocate IDs for unmatched or placeholder tabs."""
+    """Matching should reuse exact-URL tabs, allocate IDs for unmatched tabs, and skip placeholders."""
     next_ids: Iterator[str] = iter([
         "zf-new-essential",
-        "zf-new-placeholder",
         "zf-new-regular",
     ])
     monkeypatch.setattr(zentool, "new_item_id", lambda: next(next_ids))
@@ -405,15 +415,12 @@ def test_match_tabs_to_existing_claims_tabs_and_assigns_sync_ids(
         workspace_uuid="{ws}",
         pinned=True,
     )
-    unmatched_placeholder = make_compiled_tab(
+    prepared_placeholder = make_placeholder_tab(
         zentool,
-        name="",
-        url="",
         workspace_key="work",
         workspace_uuid="{ws}",
-        pinned=True,
         folder_id="folder-empty",
-        placeholder=True,
+        sync_id="sync-placeholder-kept",
     )
     unmatched_regular = make_compiled_tab(
         zentool,
@@ -423,7 +430,7 @@ def test_match_tabs_to_existing_claims_tabs_and_assigns_sync_ids(
         workspace_uuid="{ws}",
         pinned=False,
     )
-    workspace.items = [matched_pinned, unmatched_placeholder]
+    workspace.items = [matched_pinned, prepared_placeholder]
     workspace.tabs = [unmatched_regular]
     matched_essential = make_compiled_tab(
         zentool,
@@ -486,8 +493,8 @@ def test_match_tabs_to_existing_claims_tabs_and_assigns_sync_ids(
     assert matched_pinned.existing is session.tabs[1]
     assert matched_pinned.sync_id == "sync-pinned"
     assert matched_pinned.user_context_id == 12
-    assert unmatched_placeholder.existing is None
-    assert unmatched_placeholder.sync_id == "zf-new-placeholder"
+    assert prepared_placeholder.existing is None
+    assert prepared_placeholder.sync_id == "sync-placeholder-kept"
     assert unmatched_regular.existing is None
     assert unmatched_regular.sync_id == "zf-new-regular"
 
@@ -499,11 +506,6 @@ def test_prepare_folder_placeholders_uses_direct_tab_count_and_reuses_sync_ids(
     """Only folders without direct tabs should get placeholders, including nested empty folders."""
     next_ids: Iterator[str] = iter(["zf-generated-nested", "zf-generated-child"])
     monkeypatch.setattr(zentool, "new_item_id", lambda: next(next_ids))
-    monkeypatch.setattr(
-        zentool,
-        "TabSpec",
-        lambda *, name, url: SimpleNamespace(name=name, url=url),
-    )
 
     nested_empty = make_compiled_folder(
         zentool,
@@ -565,6 +567,7 @@ def test_prepare_folder_placeholders_uses_direct_tab_count_and_reuses_sync_ids(
         "folder-child",
     ]
     assert empty_root.placeholder_tab is not None
+    assert empty_root.placeholder_tab.spec is None
     assert empty_root.placeholder_tab.sync_id == "sync-empty-root"
     assert empty_root.placeholder_tab.folder_id == "folder-empty"
     assert empty_root.placeholder_tab.user_context_id == 55
@@ -613,16 +616,12 @@ def test_assign_folder_links_and_build_folder_group_update_existing_records(
         group_existing=existing_group,
         collapsed=False,
     )
-    primary_folder.placeholder_tab = make_compiled_tab(
+    primary_folder.placeholder_tab = make_placeholder_tab(
         zentool,
-        name="",
-        url="",
         workspace_key="work",
         workspace_uuid="{ws}",
-        pinned=True,
         folder_id="folder-existing",
         sync_id="sync-placeholder",
-        placeholder=True,
     )
     trailing_folder = make_compiled_folder(
         zentool,
@@ -690,17 +689,13 @@ def test_build_desired_tabs_builds_regular_and_placeholder_tabs(
         pinned=False,
         sync_id="sync-regular",
     )
-    placeholder = make_compiled_tab(
+    placeholder = make_placeholder_tab(
         zentool,
-        name="",
-        url="",
         workspace_key="work",
         workspace_uuid="{ws}",
-        pinned=True,
         folder_id="folder-1",
         user_context_id=23,
         sync_id="sync-placeholder",
-        placeholder=True,
     )
     workspace = zentool.WorkspaceCompilation(
         spec=zentool.WorkspaceSpec(name="Work"),
@@ -769,14 +764,10 @@ def test_build_desired_tabs_rejects_placeholder_without_workspace_folder(
     zentool: ModuleType,
 ) -> None:
     """Placeholder tabs must stay attached to a concrete workspace folder."""
-    invalid = make_compiled_tab(
+    invalid = make_placeholder_tab(
         zentool,
-        name="",
-        url="",
         workspace_key=None,
         workspace_uuid=None,
-        pinned=True,
-        placeholder=True,
         sync_id="bad-placeholder",
     )
     workspace = zentool.WorkspaceCompilation(

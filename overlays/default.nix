@@ -44,7 +44,6 @@
         dbeaver-bin = withManagedMacApp prev.dbeaver-bin "dbeaver.app";
         discord = withManagedMacApp prev.discord "Discord.app";
         element-desktop = withManagedMacApp prev.element-desktop "Element.app";
-        inherit (prev) flake-edit;
         google-chrome = withManagedMacApp (final.mkSourceOverride "google-chrome" prev.google-chrome) "Google Chrome.app";
         hoppscotch = withManagedMacApp prev.hoppscotch "Hoppscotch.app";
         iina = withManagedMacApp prev.iina "IINA.app";

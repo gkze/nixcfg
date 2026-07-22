@@ -38,7 +38,7 @@ let
     set -euo pipefail
 
     find . \
-      \( -path './.direnv' -o -path './.git' -o -path './.pytest_cache' -o -path './.ruff_cache' -o -path './.venv' -o -path './node_modules' -o -path './result' -o -name '_generated.py' \) -prune -o \
+      \( -path './.claude/worktrees' -o -path './.direnv' -o -path './.git' -o -path './.pytest_cache' -o -path './.ruff_cache' -o -path './.venv' -o -path './node_modules' -o -path './result' -o -name '_generated.py' \) -prune -o \
       -type f \
       \( -name '*.py' -o -name '*.pyi' ${pythonScriptFindPredicates} \) \
       -print0 \

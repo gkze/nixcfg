@@ -43,16 +43,12 @@
       url = "github:generalaction/emdash/v1.1.40";
       flake = false;
     };
-    flake-edit = {
-      url = "github:a-kenji/flake-edit";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     git-hooks = {
       url = "github:cachix/git-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gitbutler = {
-      url = "github:gitbutlerapp/gitbutler/release/0.21.0";
+      url = "github:gitbutlerapp/gitbutler/release/0.21.1";
       flake = false;
     };
     home-manager = {
@@ -87,7 +83,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.7.7.2";
+      url = "github:NousResearch/hermes-agent/v2026.7.20";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -166,7 +162,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.144.6";
+      url = "github:openai/codex/rust-v0.145.0";
       flake = false;
     };
     curator = {
@@ -226,10 +222,6 @@
       url = "github:macfuse/library";
       flake = false;
     };
-    mdq = {
-      url = "github:yshavit/mdq";
-      flake = false;
-    };
     mux = {
       url = "github:coder/mux/v0.28.0";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -260,10 +252,6 @@
     };
     toad = {
       url = "github:batrachianai/toad/v0.6.20";
-      flake = false;
-    };
-    treewalker-nvim = {
-      url = "github:aaronik/treewalker.nvim";
       flake = false;
     };
     vim-bundle-mako = {
@@ -310,9 +298,15 @@
             pname == "electron"
             && builtins.elem version [
               "38.7.2"
+              "40.1.0"
+              "40.7.0"
+              "40.8.5"
               "40.9.3"
             ]
           );
+        # Spacedrive is marked broken in nixpkgs (upstream development stalled),
+        # but the pinned prebuilt DMG still works; surface it as a warning.
+        problems.handlers.spacedrive.broken = "warn";
       };
 
       overlayList = [
@@ -474,7 +468,7 @@
                   ${lib.getExe pkgs.git} init -q .
                   ${lib.getExe pkgs.git} add -A
                   find . \
-                    \( -path './.direnv' -o -path './.git' -o -path './.pytest_cache' -o -path './.ruff_cache' -o -path './.venv' -o -path './node_modules' -o -path './result' -o -name '_generated.py' \) -prune -o \
+                    \( -path './.claude/worktrees' -o -path './.direnv' -o -path './.git' -o -path './.pytest_cache' -o -path './.ruff_cache' -o -path './.venv' -o -path './node_modules' -o -path './result' -o -name '_generated.py' \) -prune -o \
                     -type f \
                     \( -name '*.py' -o -name '*.pyi' ${pythonScriptFindPredicates} \) \
                     -print0 \

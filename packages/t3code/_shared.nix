@@ -97,7 +97,7 @@ let
         version = nodeModulesVersion;
         src = dependencySource;
         inherit pnpm;
-        fetcherVersion = 3;
+        fetcherVersion = 4;
         hash = outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
       };
     in

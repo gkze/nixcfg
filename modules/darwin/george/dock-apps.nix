@@ -38,9 +38,18 @@ dock.mkDockModule {
     "/System/Applications/System Settings.app"
   ];
   others = [
-    "/Applications"
-    "/Applications/Utilities"
-    "${homeDirectory}/Downloads"
+    {
+      path = "/Applications";
+      sort = "name";
+    }
+    {
+      path = "/Applications/Utilities";
+      sort = "name";
+    }
+    {
+      path = "${homeDirectory}/Downloads";
+      sort = "datemodified";
+    }
   ];
   removeOthers = [
     "${homeDirectory}/Applications"

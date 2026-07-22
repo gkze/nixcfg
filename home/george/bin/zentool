@@ -43,7 +43,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from collections import defaultdict, deque
+from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -774,9 +774,13 @@ class CommandArgs:
 
 @dataclass(slots=True)
 class CompiledTab:
-    """Internal compiled tab node with sync metadata."""
+    """Internal compiled tab node with sync metadata.
 
-    spec: TabSpec | ItemTabSpec
+    ``spec`` is ``None`` for the hidden placeholder tab that keeps an
+    otherwise-empty folder alive in Zen's session store.
+    """
+
+    spec: TabSpec | ItemTabSpec | None
     essential: bool
     pinned: bool
     workspace_key: str | None
@@ -785,7 +789,6 @@ class CompiledTab:
     user_context_id: int
     existing: SessionTab | None = None
     sync_id: str = ""
-    placeholder: bool = False
     preserve_existing_context: bool = True
 
 
@@ -827,20 +830,80 @@ class ExistingFolderRecord:
 
 
 class TabPool:
-    """Match existing tabs by exact active URL."""
+    """Match existing tabs by exact active URL, declared label, or origin."""
 
     def __init__(self, tabs: Iterable[SessionTab]) -> None:
-        """Index tabs by exact URL."""
-        self._by_url: dict[str, deque[SessionTab]] = defaultdict(deque)
+        """Index tabs by exact URL, declared label, and HTTP(S) origin.
+
+        Only tabs carrying a ``zenStaticLabel`` (written by a previous apply)
+        enter the label and origin indexes; unmanaged tabs stay claimable by
+        exact URL alone so drift matching never adopts ad-hoc browsing tabs
+        or silently inherits their container.
+        """
+        self._by_url: dict[str, list[SessionTab]] = defaultdict(list)
+        self._by_label: dict[str, list[SessionTab]] = defaultdict(list)
+        self._by_origin: dict[str, list[SessionTab]] = defaultdict(list)
+        self._claimed_ids: set[int] = set()
         for tab in tabs:
-            self._by_url[active_url(tab)].append(tab)
+            url = active_url(tab)
+            self._by_url[url].append(tab)
+            label = (tab.zen_static_label or "").strip().casefold()
+            if not label:
+                continue
+            self._by_label[label].append(tab)
+            origin = _origin_url(url)
+            if origin is not None:
+                self._by_origin[origin].append(tab)
+
+    def _claim_first(
+        self,
+        candidates: Sequence[SessionTab],
+        *,
+        required_origin: str | None = None,
+    ) -> SessionTab | None:
+        """Claim the first unclaimed candidate, optionally requiring an origin."""
+        for tab in candidates:
+            if id(tab) in self._claimed_ids:
+                continue
+            if required_origin is not None and (
+                _origin_url(active_url(tab)) != required_origin
+            ):
+                continue
+            self._claimed_ids.add(id(tab))
+            return tab
+        return None
 
     def claim(self, url: str) -> SessionTab | None:
-        """Return the first unmatched tab for *url*, if any."""
-        tabs = self._by_url.get(url)
-        if not tabs:
+        """Return the first unclaimed tab exactly at *url*, if any."""
+        return self._claim_first(self._by_url.get(url, ()))
+
+    def claim_by_label(
+        self,
+        name: str,
+        *,
+        url: str,
+        same_origin_only: bool = False,
+    ) -> SessionTab | None:
+        """Claim the first tab declared as *name*, optionally at *url*'s origin."""
+        label = name.strip().casefold()
+        if not label:
             return None
-        return tabs.popleft()
+        required_origin: str | None = None
+        if same_origin_only:
+            required_origin = _origin_url(url)
+            if required_origin is None:
+                return None
+        return self._claim_first(
+            self._by_label.get(label, ()),
+            required_origin=required_origin,
+        )
+
+    def claim_by_origin(self, url: str) -> SessionTab | None:
+        """Return the first unclaimed managed tab sharing *url*'s origin, if any."""
+        origin = _origin_url(url)
+        if origin is None:
+            return None
+        return self._claim_first(self._by_origin.get(origin, ()))
 
 
 @dataclass(frozen=True, slots=True)
@@ -2396,31 +2459,29 @@ def build_tab(
     workspace_uuid: str | None,
     folder_id: str | None,
     user_context_id: int,
-    placeholder: bool = False,
     favicon_resolver: Callable[[str], str | None] | None = None,
 ) -> SessionTab:
     """Return one session tab matching the declarative target."""
     tab = clone_tab(existing)
-    desired_url = spec.url if not placeholder else ""
     current_url = active_url(tab)
-    reset_runtime_entry = placeholder or current_url != desired_url
+    reset_runtime_entry = current_url != spec.url
     if reset_runtime_entry:
-        reset_active_entry(tab, name=spec.name, url=desired_url)
+        reset_active_entry(tab, name=spec.name, url=spec.url)
     tab.zen_sync_id = sync_id
     tab.pinned = pinned or essential
     tab.hidden = False
     tab.zen_workspace = workspace_uuid
     tab.zen_essential = essential
     tab.group_id = folder_id
-    tab.zen_is_empty = placeholder
+    tab.zen_is_empty = False
     tab.user_context_id = user_context_id
-    tab.zen_static_label = None if placeholder else spec.name
+    tab.zen_static_label = spec.name
     if reset_runtime_entry:
         tab.zen_has_static_icon = False
         tab.zen_pinned_icon = None
     maybe_resolve_tab_image(
         tab,
-        desired_url=desired_url,
+        desired_url=spec.url,
         previous_url=current_url,
         reset_runtime_entry=reset_runtime_entry,
         favicon_resolver=favicon_resolver,
@@ -3105,20 +3166,67 @@ def _global_essential_tab_pool(session: SessionState) -> TabPool:
     )
 
 
-def _claim_existing_tab(compiled: CompiledTab, pool: TabPool | None) -> None:
-    """Attach a compiled tab to an existing tab, or allocate its sync ID."""
-    if compiled.placeholder:
-        compiled.sync_id = compiled.spec.url or compiled.sync_id or new_item_id()
-        return
+def _assign_claimed_tab(compiled: CompiledTab, existing: SessionTab | None) -> bool:
+    """Attach one claimed existing tab to *compiled*, reporting success."""
+    if existing is None:
+        return False
+    compiled.existing = existing
+    compiled.sync_id = existing.zen_sync_id
+    if compiled.preserve_existing_context:
+        compiled.user_context_id = existing.user_context_id
+    return True
 
-    compiled.existing = pool.claim(compiled.spec.url) if pool is not None else None
-    compiled.sync_id = (
-        compiled.existing.zen_sync_id
-        if compiled.existing is not None
-        else new_item_id()
-    )
-    if compiled.existing is not None and compiled.preserve_existing_context:
-        compiled.user_context_id = compiled.existing.user_context_id
+
+def _match_pool_tabs(
+    compiled_tabs: Sequence[CompiledTab],
+    pool: TabPool | None,
+) -> None:
+    """Match one pool's compiled tabs by exact URL, then label, then origin.
+
+    Each pass completes for the whole pool before the next starts, and the
+    label pass claims same-origin candidates for every tab before any
+    cross-origin fallback, so an earlier compiled tab can never steal a
+    later tab's better match.
+    """
+    if pool is None:
+        return
+    pending: list[tuple[CompiledTab, TabSpec | ItemTabSpec]] = []
+    for tab in compiled_tabs:
+        spec = tab.spec
+        if spec is not None:
+            pending.append((tab, spec))
+    pending = [
+        (tab, spec)
+        for tab, spec in pending
+        if not _assign_claimed_tab(tab, pool.claim(spec.url))
+    ]
+    pending = [
+        (tab, spec)
+        for tab, spec in pending
+        if not _assign_claimed_tab(
+            tab,
+            pool.claim_by_label(spec.name, url=spec.url, same_origin_only=True),
+        )
+    ]
+    pending = [
+        (tab, spec)
+        for tab, spec in pending
+        if not _assign_claimed_tab(
+            tab,
+            pool.claim_by_label(spec.name, url=spec.url),
+        )
+    ]
+    for tab, spec in pending:
+        _assign_claimed_tab(tab, pool.claim_by_origin(spec.url))
+
+
+def _finalize_sync_id(compiled: CompiledTab) -> None:
+    """Allocate or preserve one compiled tab's sync identifier."""
+    if compiled.spec is None:
+        # Placeholders keep the sync ID assigned at construction time.
+        return
+    if compiled.existing is None:
+        compiled.sync_id = new_item_id()
 
 
 def match_tabs_to_existing(
@@ -3127,7 +3235,15 @@ def match_tabs_to_existing(
     essentials: Sequence[CompiledTab],
     workspaces: Sequence[WorkspaceCompilation],
 ) -> None:
-    """Match compiled tabs to existing session tabs by exact URL."""
+    """Match compiled tabs to existing session tabs by URL, label, and origin.
+
+    Each pool (workspace and essential/pinned/regular category) is matched in
+    deterministic passes: exact active URL first, then the declared label the
+    previous apply stamped as ``zenStaticLabel`` (same-origin candidates pool-
+    wide before cross-origin fallbacks), then HTTP(S) origin among previously
+    managed tabs. A tab claimed by one pass is invisible to later passes.
+    Sync IDs for unmatched tabs are allocated afterwards in traversal order.
+    """
     pools_by_workspace = {
         workspace.key: _workspace_tab_pools(session, workspace)
         for workspace in workspaces
@@ -3138,15 +3254,27 @@ def match_tabs_to_existing(
     }
     essential_pools[None] = _global_essential_tab_pool(session)
 
+    essentials_by_pool: dict[str | None, list[CompiledTab]] = defaultdict(list)
     for tab in essentials:
-        _claim_existing_tab(tab, essential_pools.get(tab.workspace_uuid))
+        essentials_by_pool[tab.workspace_uuid].append(tab)
+    for workspace_uuid, pool_tabs in essentials_by_pool.items():
+        _match_pool_tabs(pool_tabs, essential_pools.get(workspace_uuid))
 
+    pinned_by_workspace: dict[str, list[CompiledTab]] = {}
     for workspace in workspaces:
         pools = pools_by_workspace[workspace.key]
-        for tab in gather_workspace_pinned_tabs(workspace.items):
-            _claim_existing_tab(tab, pools.pinned)
+        pinned_tabs = gather_workspace_pinned_tabs(workspace.items)
+        pinned_by_workspace[workspace.key] = pinned_tabs
+        _match_pool_tabs(pinned_tabs, pools.pinned)
+        _match_pool_tabs(workspace.tabs, pools.regular)
+
+    for tab in essentials:
+        _finalize_sync_id(tab)
+    for workspace in workspaces:
+        for tab in pinned_by_workspace[workspace.key]:
+            _finalize_sync_id(tab)
         for tab in workspace.tabs:
-            _claim_existing_tab(tab, pools.regular)
+            _finalize_sync_id(tab)
 
 
 def direct_tab_count(items: Sequence[CompiledItem]) -> int:
@@ -3163,7 +3291,7 @@ def prepare_folder_placeholders(workspaces: Sequence[WorkspaceCompilation]) -> N
                 continue
             sync_id = folder.placeholder_sync_id or new_item_id()
             folder.placeholder_tab = CompiledTab(
-                spec=TabSpec(name="", url=""),
+                spec=None,
                 essential=False,
                 pinned=True,
                 workspace_key=folder.workspace_key,
@@ -3171,7 +3299,6 @@ def prepare_folder_placeholders(workspaces: Sequence[WorkspaceCompilation]) -> N
                 folder_id=folder.id,
                 user_context_id=workspace.space.container_tab_id,
                 sync_id=sync_id,
-                placeholder=True,
             )
 
 
@@ -3259,7 +3386,8 @@ def build_desired_tabs(
     """Return the desired session tab list."""
     tabs: list[SessionTab] = []
     for compiled in gather_compiled_tabs(essentials, workspaces):
-        if compiled.placeholder:
+        spec = compiled.spec
+        if spec is None:
             if compiled.workspace_uuid is None or compiled.folder_id is None:
                 msg = "placeholder tabs must belong to a workspace folder"
                 raise ZenFoldersError(msg)
@@ -3274,7 +3402,7 @@ def build_desired_tabs(
             continue
         tabs.append(
             build_tab(
-                compiled.spec,
+                spec,
                 existing=compiled.existing,
                 sync_id=compiled.sync_id,
                 pinned=compiled.pinned,

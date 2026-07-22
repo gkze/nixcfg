@@ -216,11 +216,11 @@ def test_build_tab_reuses_active_entry_when_url_already_matches(
     assert built.attributes is not original_attributes
 
 
-def test_build_tab_resets_entry_for_mismatched_url_and_placeholder(
+def test_build_tab_resets_entry_for_mismatched_url(
     monkeypatch: pytest.MonkeyPatch,
     zentool: ModuleType,
 ) -> None:
-    """Build should rewrite history for URL changes and placeholder tabs."""
+    """Build should rewrite history when the active URL changes."""
     monkeypatch.setattr(zentool.time, "time", lambda: 1234.5)
     existing = make_tab(
         zentool,
@@ -241,17 +241,6 @@ def test_build_tab_resets_entry_for_mismatched_url_and_placeholder(
         folder_id="folder-2",
         user_context_id=0,
     )
-    placeholder = zentool.build_tab(
-        spec,
-        existing=existing,
-        sync_id="sync-placeholder",
-        pinned=True,
-        essential=False,
-        workspace_uuid="{workspace}",
-        folder_id="folder-2",
-        user_context_id=0,
-        placeholder=True,
-    )
 
     assert built.entries == [
         zentool.SessionEntry(url="https://new.example", title="Folder Tab")
@@ -263,12 +252,6 @@ def test_build_tab_resets_entry_for_mismatched_url_and_placeholder(
     assert built.zen_is_empty is False
     assert built.last_accessed == 1234500
     assert built.zen_default_user_context_id is None
-
-    assert placeholder.entries == [zentool.SessionEntry(url="", title="Folder Tab")]
-    assert placeholder.zen_static_label is None
-    assert placeholder.zen_pinned_icon is None
-    assert placeholder.zen_has_static_icon is False
-    assert placeholder.zen_is_empty is True
 
 
 def test_build_tab_resolves_favicon_for_new_tab(

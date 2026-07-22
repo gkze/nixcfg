@@ -69,7 +69,7 @@ class ElementDesktopUpdater(HashEntryUpdater):
             src_expr,
             pname="element",
             version=version,
-            fetcher_version=3,
+            fetcher_version=4,
             pnpm=_build_pnpm_10_nodejs_22_expr(),
         )
 

@@ -102,7 +102,7 @@ def test_element_desktop_expr_builders_include_expected_structure() -> None:
             ),
             pname="element",
             version="1.11.99",
-            fetcher_version=3,
+            fetcher_version=4,
             pnpm=_build_pnpm_10_nodejs_22_expr(),
         ),
     )

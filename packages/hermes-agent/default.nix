@@ -56,19 +56,24 @@ else
       };
     };
 
-    hermesVenv = callPackage (hermesSource + "/nix/python.nix") {
-      inherit (inputs)
-        pyproject-build-systems
-        pyproject-nix
-        uv2nix
-        ;
-      python312 = python312ForHermes;
-      dependency-groups = darwinExtras;
-    };
+    hermesVenv =
+      (callPackage (hermesSource + "/nix/python.nix") {
+        inherit (inputs)
+          pyproject-build-systems
+          pyproject-nix
+          uv2nix
+          ;
+        python312 = python312ForHermes;
+        dependency-groups = darwinExtras;
+        inherit (hermesNpmLib) pythonSrc;
+      }).venv;
 
     npm-lockfile-fix = inputs.hermes-agent.inputs.npm-lockfile-fix.packages.${system}.default;
     hermesNpmLib = callPackage (hermesSource + "/nix/lib.nix") {
       inherit npm-lockfile-fix;
+      # Upstream pins the npm toolchain to nodejs_22 (nix/hermes-agent.nix);
+      # keep the build toolchain in lockstep with the wrapper's HERMES_NODE.
+      nodejs = nodejs_22;
     };
     hermesTui = callPackage (hermesSource + "/nix/tui.nix") {
       inherit hermesNpmLib;
@@ -79,7 +84,14 @@ else
 
     bundledSkills = lib.cleanSourceWith {
       src = hermesSource + "/skills";
-      filter = path: _type: !(lib.hasInfix "/index-cache/" path);
+      filter = path: _type: !(lib.hasInfix "/index-cache/" path) && !(lib.hasInfix "/__pycache__/" path);
+    };
+    # Skills are excluded from the wheel as of v2026.7.20 (see upstream
+    # nix/lib.nix pythonSrc); optional skills only reach the agent through
+    # HERMES_OPTIONAL_SKILLS.
+    bundledOptionalSkills = lib.cleanSourceWith {
+      src = hermesSource + "/optional-skills";
+      filter = path: _type: !(lib.hasInfix "/index-cache/" path) && !(lib.hasInfix "/__pycache__/" path);
     };
     bundledPlugins = lib.cleanSourceWith {
       src = hermesSource + "/plugins";
@@ -119,6 +131,7 @@ else
 
       mkdir -p $out/share/hermes-agent $out/bin
       cp -r ${bundledSkills} $out/share/hermes-agent/skills
+      cp -r ${bundledOptionalSkills} $out/share/hermes-agent/optional-skills
       cp -r ${bundledPlugins} $out/share/hermes-agent/plugins
       cp -r ${hermesWeb} $out/share/hermes-agent/web_dist
 
@@ -130,6 +143,7 @@ else
           makeWrapper ${hermesVenv}/bin/${name} $out/bin/${name} \
             --suffix PATH : "${runtimePath}" \
             --set HERMES_BUNDLED_SKILLS $out/share/hermes-agent/skills \
+            --set HERMES_OPTIONAL_SKILLS $out/share/hermes-agent/optional-skills \
             --set HERMES_BUNDLED_PLUGINS $out/share/hermes-agent/plugins \
             --set HERMES_WEB_DIST $out/share/hermes-agent/web_dist \
             --set HERMES_TUI_DIR $out/ui-tui \

@@ -1789,7 +1789,7 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
 
     def dock_items(
         relative_path: str,
-    ) -> tuple[str, list[str], list[str], list[str], FunctionCall, list[Inherit]]:
+    ) -> tuple[str, list[str], NixList, list[str], FunctionCall, list[Inherit]]:
         expr = expect_instance(
             nix_file_expr(relative_path),
             FunctionDefinition,
@@ -1806,12 +1806,7 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
                 expect_binding(args.values, "apps").value, NixList
             ).value
         ]
-        others = [
-            item.rebuild()
-            for item in expect_instance(
-                expect_binding(args.values, "others").value, NixList
-            ).value
-        ]
+        others = expect_instance(expect_binding(args.values, "others").value, NixList)
         remove_others = [
             item.rebuild()
             for item in expect_instance(
@@ -1889,10 +1884,26 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
     assert '"/Applications/Visual Studio Code - Insiders.app"' not in town_dock
 
     for others in (george_others, town_others):
-        assert '"${homeDirectory}/Applications"' not in others
-        assert '"/Applications"' in others
-        assert '"/Applications/Utilities"' in others
-        assert '"${homeDirectory}/Downloads"' in others
+        assert_nix_ast_equal(
+            others,
+            """
+            [
+              {
+                path = "/Applications";
+                sort = "name";
+              }
+              {
+                path = "/Applications/Utilities";
+                sort = "name";
+              }
+              {
+                path = "${homeDirectory}/Downloads";
+                sort = "datemodified";
+              }
+            ]
+            """,
+        )
+        assert '"${homeDirectory}/Applications"' not in others.rebuild()
 
     for remove_others in (george_remove_others, town_remove_others):
         assert '"${homeDirectory}/Applications"' in remove_others
@@ -1932,7 +1943,7 @@ def test_dock_activation_updates_and_orders_items_without_clearing_the_dock() ->
     )
     assert_nix_ast_equal(
         positioned_others,
-        "lib.imap1 (position: other: { inherit other position; }) others",
+        "lib.imap1 (position: other: other // { inherit position; }) others",
     )
     for expression in (add_apps, add_others, remove_others):
         shell_text = expression.rebuild()
@@ -1940,8 +1951,11 @@ def test_dock_activation_updates_and_orders_items_without_clearing_the_dock() ->
 
     assert "--replacing ${escapeShellArg (dockLabel app)}" in add_apps.rebuild()
     assert "--position ${toString position}" in add_apps.rebuild()
-    assert "--replacing ${escapeShellArg (dockLabel other)}" in add_others.rebuild()
-    assert "--position ${toString position}" in add_others.rebuild()
+    assert "--replacing ${escapeShellArg (dockLabel other.path)}" in (
+        add_others.rebuild()
+    )
+    assert "--position ${toString other.position}" in add_others.rebuild()
+    assert "--sort ${escapeShellArg other.sort}" in add_others.rebuild()
     assert '"$dockutil" --find ${escapeShellArg other} --section others' in (
         remove_others.rebuild()
     )
@@ -1953,8 +1967,10 @@ def test_dock_activation_updates_and_orders_items_without_clearing_the_dock() ->
     )
     assert 'if ! "$dockutil" --add ${escapeShellArg app}' in add_apps.rebuild()
     assert 'echo "warning: failed to add Dock app ${app}" >&2' in add_apps.rebuild()
-    assert 'if ! "$dockutil" --add ${escapeShellArg other}' in add_others.rebuild()
-    assert 'echo "warning: failed to add Dock item ${other}" >&2' in (
+    assert 'if ! "$dockutil" --add ${escapeShellArg other.path}' in (
+        add_others.rebuild()
+    )
+    assert 'echo "warning: failed to add Dock item ${other.path}" >&2' in (
         add_others.rebuild()
     )
 

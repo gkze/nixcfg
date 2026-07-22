@@ -89,15 +89,7 @@ uv run coverage report
 # Python test suite
 uv run pytest
 
-# Mutation testing (full run)
-uv run mutmut run --max-children 4
-
-# Mutation testing (targeted rerun by mutant glob)
-uv run mutmut run "lib.nix.commands.*"
-uv run mutmut results
-uv run mutmut browse
-
-# Mutation testing with cosmic-ray (safer fallback on Python 3.14)
+# Mutation testing with cosmic-ray
 uv run cosmic-ray init cosmic-ray.toml .cosmic-ray.sqlite
 uv run cosmic-ray exec cosmic-ray.toml .cosmic-ray.sqlite
 uv run cr-report .cosmic-ray.sqlite

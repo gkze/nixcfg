@@ -16,7 +16,7 @@
     pnpmDeps = prev.fetchPnpmDeps {
       pname = "element";
       inherit version src;
-      fetcherVersion = 3;
+      fetcherVersion = 4;
       hash = slib.sourceHash "element-desktop" "sha256";
     };
   });

@@ -322,6 +322,9 @@ in
     config = {
       enable = true;
       enableMan = true;
+      # Nixvim evaluates plugins through its own nixpkgs instance, which does
+      # not inherit the flake-level allowUnfree; mirror it here.
+      nixpkgs.config.allowUnfree = true;
       files."ftplugin/json.lua".opts.shiftwidth = 2;
       globals.mapleader = " ";
       opts = {

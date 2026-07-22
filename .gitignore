@@ -40,7 +40,6 @@ coverage.xml
 htmlcov/
 
 # Mutation testing
-mutants/
 .cosmic-ray.sqlite
 
 # Per-package update lock artifacts
