@@ -352,8 +352,6 @@ jobs:
             fod_package: opencode-desktop
           - package: codex
             target: .#pkgs.aarch64-darwin.codex
-          - package: gemini-cli
-            target: .#pkgs.aarch64-darwin.gemini-cli
           - package: element-desktop
             target: .#pkgs.aarch64-darwin.element-desktop
           - package: linear-cli
@@ -532,7 +530,6 @@ jobs:
             --exclude-ref .#pkgs.aarch64-darwin.opencode \
             --exclude-ref .#pkgs.aarch64-darwin.opencode-desktop-dev \
             --exclude-ref .#pkgs.aarch64-darwin.codex \
-            --exclude-ref .#pkgs.aarch64-darwin.gemini-cli \
             --exclude-ref .#pkgs.aarch64-darwin.element-desktop \
             --exclude-ref .#pkgs.aarch64-darwin.linear-cli \
             --exclude-ref .#pkgs.aarch64-darwin.neovide \

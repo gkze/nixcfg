@@ -1224,7 +1224,6 @@ DARWIN_PRIORITY_HEAVY_ENTRIES = (
     _heavy_entry("opencode"),
     _heavy_entry("opencode-desktop-dev", fod_package="opencode-desktop"),
     _heavy_entry("codex"),
-    _heavy_entry("gemini-cli"),
     _heavy_entry("element-desktop"),
     _heavy_entry("linear-cli"),
     _heavy_entry("neovide"),

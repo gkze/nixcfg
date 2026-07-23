@@ -601,6 +601,7 @@
     };
 
     # Simple enable-only programs (alphabetical)
+    antigravity-cli.enable = true;
     awscli.enable = true;
     bottom.enable = true;
     codex.enable = true;
@@ -614,7 +615,6 @@
     };
     eza.enable = true;
     fd.enable = true;
-    gemini-cli.enable = true;
     home-manager.enable = true;
     jq.enable = true;
     jujutsu.enable = true;

@@ -16,31 +16,6 @@ from lib.codemods.packaging_source_policy import (
 # are intentionally recorded as migration debt.
 _ALLOWED_NIX_SUBSTITUTE_SITES: Final[tuple[NixSubstituteSite, ...]] = (
     (
-        "overlays/gemini-cli/default.nix",
-        18,
-        'substituteInPlace packages/a2a-server/package.json packages/cli/package.json package-lock.json --replace-fail \'"tar": "7.5.8"\' \'"tar": "7.5.11"\'',
-    ),
-    (
-        "overlays/gemini-cli/default.nix",
-        23,
-        'substituteInPlace packages/cli/package.json package-lock.json --replace-fail \'"clipboardy": "5.2.0"\' \'"clipboardy": "5.2.1"\'',
-    ),
-    (
-        "overlays/gemini-cli/default.nix",
-        76,
-        "substituteInPlace packages/core/src/tools/ripGrep.ts --replace-fail \"const systemRg = resolveExecutable('rg');\" \"const systemRg = '${rg}' || resolveExecutable('rg');\"",
-    ),
-    (
-        "overlays/gemini-cli/default.nix",
-        79,
-        'substituteInPlace packages/core/src/tools/ripGrep.ts --replace-fail "if (isTrustedSystemPath(realPath)) {" "if (realPath === \'${rg}\' || isTrustedSystemPath(realPath)) {"',
-    ),
-    (
-        "overlays/gemini-cli/default.nix",
-        89,
-        'substituteInPlace scripts/build.js --replace-fail "npm run build --workspaces" "npm run build --workspace=@google/gemini-cli-devtools && npm run build --workspaces"',
-    ),
-    (
         "overlays/github-desktop/default.nix",
         60,
         "substituteInPlace \"$node_addon_api_header\" --replace-fail 'static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>(-1);' 'static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>(0);'",
