@@ -91,6 +91,7 @@ workspaces:
       - Observability & Analytics:
           - Axiom: https://app.axiom.co
           - Datadog: https://us5.datadoghq.com
+          - Hex: https://app.hex.tech
           - LangSmith: https://smith.langchain.com
           - PagerDuty: https://towndotcom.pagerduty.com/incidents
           - PostHog: https://posthog.com

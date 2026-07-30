@@ -4385,6 +4385,12 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
           }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "macros" "rt" ];
+          }
         ];
         features = {
           "export-schema" = [ "dep:schemars" "dep:but-schemars" ];
@@ -4953,10 +4959,6 @@ rec {
             packageId = "anyhow";
           }
           {
-            name = "but-core";
-            packageId = "but-core";
-          }
-          {
             name = "but-ctx";
             packageId = "but-ctx";
             features = [ "legacy" ];
@@ -4970,12 +4972,6 @@ rec {
             packageId = "chrono";
             usesDefaultFeatures = false;
             features = [ "std" ];
-          }
-          {
-            name = "gix";
-            packageId = "gix";
-            usesDefaultFeatures = false;
-            features = [ "sha1" "sha256" ];
           }
           {
             name = "walkdir";

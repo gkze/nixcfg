@@ -41,7 +41,6 @@ in
   onepassword = callDarwinAppPackage "onepassword";
   pants-preview = callDarwinAppPackage "pants-preview";
   pica = callDarwinAppPackage "pica";
-  rio = callDarwinAppPackage "rio";
   signal-beta = callDarwinAppPackage "signal-beta";
   solo = callDarwinAppPackage "solo";
   spotify = callDarwinAppPackage "spotify";

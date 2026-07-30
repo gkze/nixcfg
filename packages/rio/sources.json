@@ -1,9 +1,13 @@
 {
-  "hashes": {
-    "aarch64-darwin": "sha256-nlOd5e7aWBw73w9evLLr5yI8h39KkSIaxnwAV4deK8g="
-  },
-  "urls": {
-    "aarch64-darwin": "https://github.com/raphamorim/rio/releases/download/v0.4.11/rio.dmg"
-  },
-  "version": "0.4.11"
+  "hashes": [
+    {
+      "hash": "sha256-dMrN6v8twdlJb6wMv3yRKm/vH8unoyefR6/68JFeWuA=",
+      "hashType": "cargoHash"
+    },
+    {
+      "hash": "sha256-niYrrHnEyseaLOboehuY3dAgqWgxOSlCU1q4vkE+6vg=",
+      "hashType": "srcHash"
+    }
+  ],
+  "version": "0.5.2"
 }

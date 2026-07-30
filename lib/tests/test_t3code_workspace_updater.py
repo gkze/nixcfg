@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from types import ModuleType
-from typing import TYPE_CHECKING
+
+import pytest
 
 from lib.nix.models.sources import SourceEntry
 from lib.tests._nix_ast import assert_nix_ast_equal
@@ -13,9 +14,6 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEvent, UpdateEventKind
 from lib.update.updaters import VersionInfo
 from lib.update.updaters.core import UpdateContext
-
-if TYPE_CHECKING:
-    import pytest
 
 HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 NEW_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
@@ -217,16 +215,81 @@ def test_t3code_workspace_rechecks_node_modules_when_drv_fingerprint_matches(
     assert captured["hash_config"] is updater.config
 
 
-def test_t3code_workspace_finalize_result_uses_cached_context_fingerprint() -> None:
-    """Finalize should attach the precomputed drv fingerprint without recomputing it."""
-    updater = _load_module().T3CodeWorkspaceUpdater()
-    context = UpdateContext(current=None, drv_fingerprint="abc123")
+def test_t3code_workspace_persists_settled_post_materialization_fingerprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persist the derivation identity that settles after dependency materialization."""
+    module = _load_module()
+    updater = module.T3CodeWorkspaceUpdater()
+    fingerprints = iter(("before", "transient", "after", "after"))
 
-    events = _run(_collect(updater._finalize_result(_source_entry(), context=context)))
+    async def _fake_fingerprint(*_args: object, **_kwargs: object) -> str:
+        return next(fingerprints)
 
-    assert events[0].kind is UpdateEventKind.STATUS
-    assert events[-1].kind is UpdateEventKind.VALUE
-    assert events[-1].payload.drv_hash == "abc123"
+    async def _fake_compute(*_args: object, **_kwargs: object):
+        yield UpdateEvent.value(updater.name, HASH)
+
+    monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
+    monkeypatch.setattr(module, "compute_fixed_output_hash", _fake_compute)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    events = _run(
+        _collect(
+            updater.update_stream(
+                _source_entry(drv_hash="before"),
+                object(),
+                pinned_version=VersionInfo(version="main"),
+            )
+        )
+    )
+
+    results = [
+        event.payload
+        for event in events
+        if event.kind is UpdateEventKind.RESULT and event.payload is not None
+    ]
+    assert len(results) == 1
+    assert isinstance(results[0], SourceEntry)
+    assert results[0].drv_hash == "after"
+
+
+def test_t3code_workspace_rejects_unstable_post_materialization_fingerprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not publish source metadata when derivation identity keeps changing."""
+    module = _load_module()
+    updater = module.T3CodeWorkspaceUpdater()
+    fingerprints = iter(("before", "one", "two", "three"))
+
+    async def _fake_fingerprint(*_args: object, **_kwargs: object) -> str:
+        return next(fingerprints)
+
+    async def _fake_compute(*_args: object, **_kwargs: object):
+        yield UpdateEvent.value(updater.name, HASH)
+
+    monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
+    monkeypatch.setattr(module, "compute_fixed_output_hash", _fake_compute)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Derivation fingerprint did not stabilize after 3 evaluations",
+    ):
+        _run(
+            _collect(
+                updater.update_stream(
+                    _source_entry(drv_hash="before"),
+                    object(),
+                    pinned_version=VersionInfo(version="main"),
+                )
+            )
+        )
 
 
 def test_t3code_workspace_finalize_result_computes_missing_fingerprint(

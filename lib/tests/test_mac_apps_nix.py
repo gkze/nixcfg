@@ -24,6 +24,7 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
@@ -38,7 +39,14 @@ from lib.tests._nix_ast import (
     expect_scope_binding,
     parse_nix_expr,
 )
-from lib.tests._nix_eval import nix_attrset, nix_eval_raw, nix_import, nix_let, nix_list
+from lib.tests._nix_eval import (
+    nix_attrset,
+    nix_eval_json,
+    nix_eval_raw,
+    nix_import,
+    nix_let,
+    nix_list,
+)
 from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.update.nix_expr import identifier_attr_path
@@ -1565,6 +1573,58 @@ def test_george_config_manages_mutable_gui_apps_via_scoped_applications() -> Non
 }
 """,
     )
+
+
+@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
+def test_spacedrive_overlay_only_clears_broken_metadata_on_darwin() -> None:
+    """Nix evaluation is needed because AST structure cannot prove overrideAttrs merges."""
+    flake = FunctionCall(
+        name=identifier_attr_path("builtins", "getFlake"),
+        argument=Parenthesis(
+            value=FunctionCall(
+                name=Identifier(name="toString"),
+                argument=NixPath(path=str(REPO_ROOT)),
+            )
+        ),
+    )
+    result = nix_eval_json(
+        nix_let(
+            {"flake": flake},
+            nix_attrset({
+                "bundleName": identifier_attr_path(
+                    "flake",
+                    "pkgs",
+                    "aarch64-darwin",
+                    "spacedrive",
+                    "passthru",
+                    "macApp",
+                    "bundleName",
+                ),
+                "darwinBroken": identifier_attr_path(
+                    "flake",
+                    "pkgs",
+                    "aarch64-darwin",
+                    "spacedrive",
+                    "meta",
+                    "broken",
+                ),
+                "linuxBroken": identifier_attr_path(
+                    "flake",
+                    "pkgs",
+                    "x86_64-linux",
+                    "spacedrive",
+                    "meta",
+                    "broken",
+                ),
+            }),
+        )
+    )
+
+    assert result == {
+        "bundleName": "Spacedrive.app",
+        "darwinBroken": False,
+        "linuxBroken": True,
+    }
 
 
 def test_managed_gui_app_tiny_overlays_keep_copy_mode_metadata_contracts() -> None:

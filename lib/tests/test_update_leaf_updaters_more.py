@@ -232,11 +232,6 @@ def test_onepassword_rechecks_same_version_download_hashes() -> None:
     ("path", "payload", "expected_version"),
     [
         (
-            "packages/comet/updater.py",
-            {"body": {"browser_version": " 1.2.3 "}},
-            "1.2.3",
-        ),
-        (
             "packages/warp-preview/updater.py",
             {"preview": {"version": "v0.2025.01.01"}},
             "0.2025.01.01",
@@ -537,7 +532,6 @@ def test_mole_app_pinned_version_and_urls(monkeypatch: pytest.MonkeyPatch) -> No
             "linux-x86_64",
             "scie-pants-linux-x86_64",
         ),
-        ("packages/rio/updater.py", "1.0.0", "darwin", "rio.dmg"),
         ("packages/yaak-beta/updater.py", "1.0.0", "aarch64", "Yaak_1.0.0_aarch64.dmg"),
     ],
 )
@@ -609,7 +603,6 @@ def test_signal_beta_rejects_unexpected_tags(tag: str) -> None:
         ("packages/arc/updater.py", None),
         ("packages/claude/updater.py", {"releases": []}),
         ("packages/cleanshot/updater.py", b"no version here"),
-        ("packages/comet/updater.py", {"body": {"browser_version": "   "}}),
         ("packages/docker-desktop/updater.py", {"Items": []}),
         (
             "packages/docker-desktop/updater.py",

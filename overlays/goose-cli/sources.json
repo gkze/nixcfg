@@ -1,9 +1,9 @@
 {
   "hashes": [
     {
-      "hash": "sha256-lmeS+iOyZ262H9NykK3GFIEA7ipOnqnurRKPY8xbwKw=",
+      "hash": "sha256-/UTdXth/o9IkDx2Amf645vasaknIhYpnFIuoqLfIgfU=",
       "hashType": "srcHash"
     }
   ],
-  "version": "1.43.0"
+  "version": "1.44.0"
 }

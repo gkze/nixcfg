@@ -29,6 +29,19 @@
       ];
   });
 
+  execline =
+    if prev.stdenv.hostPlatform.isDarwin then
+      prev.execline.overrideAttrs (old: {
+        # Upstream installs aliases beneath umask 077. Darwin preserves those
+        # permissions on symlinks, making root-owned store links unreadable to
+        # unprivileged closure scanners such as Cachix.
+        postInstall = (old.postInstall or "") + ''
+          find "$bin/bin" -type l -exec chmod -h a+rX {} +
+        '';
+      })
+    else
+      prev.execline;
+
   mountpoint-s3 = prev.mountpoint-s3.overrideAttrs (old: {
     buildInputs =
       (old.buildInputs or [ ])

@@ -14808,7 +14808,7 @@ rec {
       };
       "goose" = rec {
         crateName = "goose";
-        version = "1.43.0";
+        version = "1.44.0";
         edition = "2021";
         crateBin = [
           {
@@ -15060,7 +15060,7 @@ rec {
             name = "indexmap";
             packageId = "indexmap 2.14.0";
             usesDefaultFeatures = false;
-            features = [ "std" ];
+            features = [ "serde" "std" ];
           }
           {
             name = "indoc";
@@ -15113,7 +15113,7 @@ rec {
             name = "libc";
             packageId = "libc";
             usesDefaultFeatures = false;
-            target = { target, features }: ("linux" == target."os" or null);
+            target = { target, features }: (target."unix" or false);
             features = [ "std" ];
           }
           {
@@ -15504,12 +15504,6 @@ rec {
             usesDefaultFeatures = false;
           }
           {
-            name = "utoipa";
-            packageId = "utoipa 4.2.3";
-            usesDefaultFeatures = false;
-            features = [ "chrono" ];
-          }
-          {
             name = "uuid";
             packageId = "uuid";
             usesDefaultFeatures = false;
@@ -15537,7 +15531,7 @@ rec {
             packageId = "winapi";
             usesDefaultFeatures = false;
             target = { target, features }: ("windows" == target."os" or null);
-            features = [ "wincred" "std" ];
+            features = [ "wincred" "std" "accctrl" "aclapi" "fileapi" "handleapi" "minwinbase" "sddl" "securitybaseapi" "winbase" "winerror" ];
           }
         ];
         devDependencies = [
@@ -15657,7 +15651,7 @@ rec {
       };
       "goose-acp-macros" = rec {
         crateName = "goose-acp-macros";
-        version = "1.43.0";
+        version = "1.44.0";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-acp-macros"; };
         procMacro = true;
@@ -15682,7 +15676,7 @@ rec {
       };
       "goose-cli" = rec {
         crateName = "goose-cli";
-        version = "1.43.0";
+        version = "1.44.0";
         edition = "2021";
         crateBin = [
           {
@@ -15903,6 +15897,10 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "strsim";
+            packageId = "strsim";
+          }
+          {
             name = "strum";
             packageId = "strum 0.28.0";
             usesDefaultFeatures = false;
@@ -15962,7 +15960,7 @@ rec {
             packageId = "winapi";
             usesDefaultFeatures = false;
             target = { target, features }: ("windows" == target."os" or null);
-            features = [ "wincred" "std" ];
+            features = [ "wincred" "std" "consoleapi" "processenv" "winbase" "wincon" ];
           }
           {
             name = "zip";
@@ -16057,11 +16055,6 @@ rec {
             packageId = "tracing";
             usesDefaultFeatures = false;
             features = [ "std" ];
-          }
-          {
-            name = "utoipa";
-            packageId = "utoipa 4.2.3";
-            usesDefaultFeatures = false;
           }
         ];
 
@@ -16221,16 +16214,17 @@ rec {
             features = [ "std" ];
           }
           {
-            name = "utoipa";
-            packageId = "utoipa 4.2.3";
-            usesDefaultFeatures = false;
-            features = [ "chrono" ];
-          }
-          {
             name = "uuid";
             packageId = "uuid";
             usesDefaultFeatures = false;
             features = [ "v4" "std" "v4" "std" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "env-lock";
+            packageId = "env-lock";
+            usesDefaultFeatures = false;
           }
         ];
         features = {
@@ -16242,7 +16236,7 @@ rec {
       };
       "goose-mcp" = rec {
         crateName = "goose-mcp";
-        version = "1.43.0";
+        version = "1.44.0";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-mcp"; };
         libName = "goose_mcp";
@@ -16507,12 +16501,6 @@ rec {
             features = [ "std" ];
           }
           {
-            name = "utoipa";
-            packageId = "utoipa 4.2.3";
-            usesDefaultFeatures = false;
-            features = [ "chrono" ];
-          }
-          {
             name = "uuid";
             packageId = "uuid";
             usesDefaultFeatures = false;
@@ -16660,12 +16648,6 @@ rec {
             name = "urlencoding";
             packageId = "urlencoding";
             usesDefaultFeatures = false;
-          }
-          {
-            name = "utoipa";
-            packageId = "utoipa 4.2.3";
-            usesDefaultFeatures = false;
-            features = [ "chrono" ];
           }
         ];
         devDependencies = [
@@ -16816,7 +16798,7 @@ rec {
       };
       "goose-test" = rec {
         crateName = "goose-test";
-        version = "1.43.0";
+        version = "1.44.0";
         edition = "2021";
         crateBin = [
           {
@@ -16848,7 +16830,7 @@ rec {
       };
       "goose-test-support" = rec {
         crateName = "goose-test-support";
-        version = "1.43.0";
+        version = "1.44.0";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-test-support"; };
         libName = "goose_test_support";
@@ -25461,9 +25443,9 @@ rec {
       };
       "pctx_code_mode" = rec {
         crateName = "pctx_code_mode";
-        version = "0.3.0";
+        version = "0.4.1";
         edition = "2024";
-        sha256 = "1q4zl133yv8ik2sacqswbc773igmzf9jbahag074832dfzy5z7rx";
+        sha256 = "1n9hy87bbsiwqdg429rivvrqnhl0z0gsv2l0piaqn1rkn5v38nzm";
         dependencies = [
           {
             name = "futures";
@@ -25512,7 +25494,7 @@ rec {
           }
           {
             name = "utoipa";
-            packageId = "utoipa 5.5.0";
+            packageId = "utoipa";
           }
         ];
         devDependencies = [
@@ -25526,9 +25508,9 @@ rec {
       };
       "pctx_codegen" = rec {
         crateName = "pctx_codegen";
-        version = "0.3.0";
+        version = "0.3.1";
         edition = "2024";
-        sha256 = "0yr9bl11db0mzdji33virrsiwlmmlbhp1rvq78gi1l9pk8fij1bv";
+        sha256 = "0in6x9290k7l6zvm5ypz2j0s62bmb9m099xssdmhyhj15g056sx5";
         dependencies = [
           {
             name = "biome_formatter";
@@ -25779,9 +25761,9 @@ rec {
       };
       "pctx_registry" = rec {
         crateName = "pctx_registry";
-        version = "0.1.1";
+        version = "0.1.2";
         edition = "2024";
-        sha256 = "083f6d8wr18b24qf2r3cd5n0kbrkgks930vq5qssb65sffzm6nig";
+        sha256 = "15i8swvkh9pijvgdih15hb05v3d8zzly846j4dz5qccci2n0c715";
         dependencies = [
           {
             name = "deno_error";
@@ -26830,12 +26812,6 @@ rec {
             name = "quote";
             packageId = "quote";
           }
-          {
-            name = "syn";
-            packageId = "syn 1.0.109";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
         ];
         buildDependencies = [
           {
@@ -26848,7 +26824,6 @@ rec {
           "syn" = [ "dep:syn" ];
           "syn-error" = [ "syn" ];
         };
-        resolvedDefaultFeatures = [ "default" "syn" "syn-error" ];
       };
       "proc-macro-error-attr" = rec {
         crateName = "proc-macro-error-attr";
@@ -33140,9 +33115,9 @@ rec {
       };
       "spin" = rec {
         crateName = "spin";
-        version = "0.9.8";
+        version = "0.9.9";
         edition = "2015";
-        sha256 = "0rvam5r0p3a6qhc18scqpvpgb3ckzyqxpgdfyjnghh8ja7byi039";
+        sha256 = "03psal0vh1xdxp7agphw09p7kf50v3bj1zshijq1s5bkdd7jcqrp";
         authors = [
           "Mathijs van de Nes <git@mathijs.vd-nes.nl>"
           "John Ericson <git@JohnEricson.me>"
@@ -40882,58 +40857,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" ];
       };
-      "utoipa 4.2.3" = rec {
-        crateName = "utoipa";
-        version = "4.2.3";
-        edition = "2021";
-        sha256 = "08xbxz3an28g0rv9agmqs1qix4nrrzppylw24r8clz901skb3by5";
-        authors = [
-          "Juha Kukkonen <juha7kukkonen@gmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "indexmap";
-            packageId = "indexmap 2.14.0";
-            features = [ "serde" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "utoipa-gen";
-            packageId = "utoipa-gen 4.3.1";
-          }
-        ];
-        features = {
-          "actix_extras" = [ "utoipa-gen/actix_extras" ];
-          "auto_into_responses" = [ "utoipa-gen/auto_into_responses" ];
-          "axum_extras" = [ "utoipa-gen/axum_extras" ];
-          "chrono" = [ "utoipa-gen/chrono" ];
-          "debug" = [ "utoipa-gen/debug" ];
-          "decimal" = [ "utoipa-gen/decimal" ];
-          "decimal_float" = [ "utoipa-gen/decimal_float" ];
-          "indexmap" = [ "utoipa-gen/indexmap" ];
-          "non_strict_integers" = [ "utoipa-gen/non_strict_integers" ];
-          "rc_schema" = [ "utoipa-gen/rc_schema" ];
-          "repr" = [ "utoipa-gen/repr" ];
-          "rocket_extras" = [ "utoipa-gen/rocket_extras" ];
-          "serde_yaml" = [ "dep:serde_yaml" ];
-          "smallvec" = [ "utoipa-gen/smallvec" ];
-          "time" = [ "utoipa-gen/time" ];
-          "ulid" = [ "utoipa-gen/ulid" ];
-          "url" = [ "utoipa-gen/url" ];
-          "uuid" = [ "utoipa-gen/uuid" ];
-          "yaml" = [ "serde_yaml" "utoipa-gen/yaml" ];
-        };
-        resolvedDefaultFeatures = [ "chrono" ];
-      };
-      "utoipa 5.5.0" = rec {
+      "utoipa" = rec {
         crateName = "utoipa";
         version = "5.5.0";
         edition = "2021";
@@ -40958,7 +40882,7 @@ rec {
           }
           {
             name = "utoipa-gen";
-            packageId = "utoipa-gen 5.5.0";
+            packageId = "utoipa-gen";
             optional = true;
           }
         ];
@@ -40989,48 +40913,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "macros" ];
       };
-      "utoipa-gen 4.3.1" = rec {
-        crateName = "utoipa-gen";
-        version = "4.3.1";
-        edition = "2021";
-        sha256 = "14j3bim9igkqpzmgxc6i2rj1wq1mandx68mdd9sfxycgns54xhi0";
-        procMacro = true;
-        libName = "utoipa_gen";
-        authors = [
-          "Juha Kukkonen <juha7kukkonen@gmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "proc-macro-error";
-            packageId = "proc-macro-error";
-          }
-          {
-            name = "proc-macro2";
-            packageId = "proc-macro2";
-          }
-          {
-            name = "quote";
-            packageId = "quote";
-          }
-          {
-            name = "syn";
-            packageId = "syn 2.0.118";
-            features = [ "full" "extra-traits" ];
-          }
-        ];
-        features = {
-          "actix_extras" = [ "regex" "syn/extra-traits" ];
-          "axum_extras" = [ "regex" "syn/extra-traits" ];
-          "debug" = [ "syn/extra-traits" ];
-          "regex" = [ "dep:regex" ];
-          "rocket_extras" = [ "regex" "syn/extra-traits" ];
-          "ulid" = [ "dep:ulid" ];
-          "url" = [ "dep:url" ];
-          "uuid" = [ "dep:uuid" ];
-        };
-        resolvedDefaultFeatures = [ "chrono" ];
-      };
-      "utoipa-gen 5.5.0" = rec {
+      "utoipa-gen" = rec {
         crateName = "utoipa-gen";
         version = "5.5.0";
         edition = "2021";
@@ -42451,7 +42334,7 @@ rec {
         features = {
           "debug" = [ "impl-debug" ];
         };
-        resolvedDefaultFeatures = [ "cfg" "errhandlingapi" "evntrace" "fileapi" "handleapi" "in6addr" "inaddr" "minwinbase" "minwindef" "ntsecapi" "processthreadsapi" "securitybaseapi" "std" "synchapi" "winbase" "wincred" "windef" "winerror" "winioctl" "winnt" ];
+        resolvedDefaultFeatures = [ "accctrl" "aclapi" "cfg" "consoleapi" "errhandlingapi" "evntrace" "fileapi" "handleapi" "in6addr" "inaddr" "minwinbase" "minwindef" "ntsecapi" "processenv" "processthreadsapi" "sddl" "securitybaseapi" "std" "synchapi" "winbase" "wincon" "wincred" "windef" "winerror" "winioctl" "winnt" ];
       };
       "winapi-i686-pc-windows-gnu" = rec {
         crateName = "winapi-i686-pc-windows-gnu";

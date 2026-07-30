@@ -24,7 +24,7 @@ let
   inherit (goose-cli.passthru) version;
   src = goose-cli.passthru.patchedSrc;
   nodejs = nodejs_24;
-  pnpm = pnpm_10.override { inherit nodejs; };
+  pnpm = pnpm_10.override { nodejs-slim = nodejs; };
   slib = outputs.lib;
 
   desktopPackageJson = builtins.fromJSON (builtins.readFile "${src}/ui/desktop/package.json");

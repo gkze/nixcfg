@@ -54,7 +54,15 @@
         rectangle = withManagedMacApp prev.rectangle "Rectangle.app";
         slack = withManagedMacApp prev.slack "Slack.app";
         sloth-app = withManagedMacApp prev.sloth-app "Sloth.app";
-        spacedrive = withManagedMacApp prev.spacedrive "Spacedrive.app";
+        # Nixpkgs marks the shared package broken for a Linux xdotool ABI issue;
+        # the separately packaged Darwin DMG is unaffected.
+        spacedrive = withManagedMacApp (prev.spacedrive.overrideAttrs (old: {
+          meta =
+            old.meta
+            // prev.lib.optionalAttrs prev.stdenv.hostPlatform.isDarwin {
+              broken = false;
+            };
+        })) "Spacedrive.app";
         zed-editor-nightly =
           if prev.stdenv.hostPlatform.isDarwin then
             withManagedMacApp (final.callPackage ../packages/zed-editor-nightly { }) "Zed Nightly.app"

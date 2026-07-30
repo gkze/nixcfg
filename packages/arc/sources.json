@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-Qd2wsCF5Jwb5cp0zXsQFHtlM4nqSn/rFxjNa5vEP5xo=",
-    "x86_64-darwin": "sha256-Qd2wsCF5Jwb5cp0zXsQFHtlM4nqSn/rFxjNa5vEP5xo="
+    "aarch64-darwin": "sha256-Xe2K/SYdoNwkIqCmuSJFoWr+uiysNAnYq3DBqdUnsjc=",
+    "x86_64-darwin": "sha256-Xe2K/SYdoNwkIqCmuSJFoWr+uiysNAnYq3DBqdUnsjc="
   },
   "urls": {
-    "aarch64-darwin": "https://releases.arc.net/release/Arc-1.156.2-83780.zip",
-    "x86_64-darwin": "https://releases.arc.net/release/Arc-1.156.2-83780.zip"
+    "aarch64-darwin": "https://releases.arc.net/release/Arc-1.157.1-84133.zip",
+    "x86_64-darwin": "https://releases.arc.net/release/Arc-1.157.1-84133.zip"
   },
-  "version": "1.156.2"
+  "version": "1.157.1"
 }

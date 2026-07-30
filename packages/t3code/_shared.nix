@@ -21,7 +21,7 @@ let
   revSuffix = builtins.substring 0 7 (outputs.lib.flakeLock.t3code.locked.rev or "unknown");
   version = "${baseVersion}-main-${revSuffix}";
   nodeModulesVersion = "deps";
-  pnpm = pnpm_11.override { inherit nodejs; };
+  pnpm = pnpm_11.override { nodejs-slim = nodejs; };
   childDirectoryNames =
     path: builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir path));
   workspaceParentNames = [
@@ -120,7 +120,7 @@ let
     env = {
       CI = "1";
       NODE_OPTIONS = "--max-old-space-size=6144";
-      npm_config_manage_package_manager_versions = "false";
+      pnpm_config_pm_on_fail = "ignore";
     };
 
     postUnpack = ''
@@ -140,9 +140,7 @@ let
       export XDG_CONFIG_HOME="$TMPDIR/xdg-config"
       export XDG_DATA_HOME="$TMPDIR/xdg-data"
       export XDG_STATE_HOME="$TMPDIR/xdg-state"
-      export npm_config_manage_package_manager_versions=false
       mkdir -p "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME"
-      pnpm config set manage-package-manager-versions false
 
       chmod -R u+w node_modules ${workspaceBuildShellDirs}
 

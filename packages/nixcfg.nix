@@ -63,31 +63,26 @@ runCommand "nixcfg"
       inherit venv;
     };
   }
-  (
-    let
-      mkCompletionScript =
-        shell:
-        runCommand "nixcfg-completion-${shell}" { } ''
-          ${venv}/bin/python \
-            ${./nixcfg/render_completion.py} \
-            ${lib.escapeShellArg shell} \
-            > $out
-        '';
-    in
-    ''
-      mkdir -p $out/bin
+  ''
+    mkdir -p $out/bin
 
-      makeWrapper ${venv}/bin/nixcfg $out/bin/nixcfg \
-        --prefix PATH : ${
-          lib.makeBinPath [
-            flake-edit
-            nix-prefetch-git
-          ]
-        }
+    makeWrapper ${venv}/bin/nixcfg $out/bin/nixcfg \
+      --prefix PATH : ${
+        lib.makeBinPath [
+          flake-edit
+          nix-prefetch-git
+        ]
+      }
 
-      installShellCompletion --cmd nixcfg \
-        --zsh ${mkCompletionScript "zsh"} \
-        --bash ${mkCompletionScript "bash"} \
-        --fish ${mkCompletionScript "fish"}
-    ''
-  )
+    for shell in zsh bash fish; do
+      ${venv}/bin/python \
+        ${./nixcfg/render_completion.py} \
+        "$shell" \
+        > "nixcfg-completion.$shell"
+    done
+
+    installShellCompletion --cmd nixcfg \
+      --zsh nixcfg-completion.zsh \
+      --bash nixcfg-completion.bash \
+      --fish nixcfg-completion.fish
+  ''

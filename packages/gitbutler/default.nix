@@ -36,7 +36,7 @@ let
   version = lib.removePrefix "release/" (slib.getFlakeVersion pname);
   src = inputs.gitbutler;
   nodejs = nodejs_22;
-  pnpm = pnpm_10.override { inherit nodejs; };
+  pnpm = pnpm_10.override { nodejs-slim = nodejs; };
 
   pnpmDeps =
     if fetchPnpmDeps != null then

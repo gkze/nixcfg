@@ -40,6 +40,8 @@ if TYPE_CHECKING:
     import aiohttp
     from nix_manipulator.expressions.expression import NixExpression
 
+_FINGERPRINT_STABILITY_EVALUATIONS = 3
+
 
 @register_updater
 class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
@@ -185,7 +187,7 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
         info: VersionInfo | None = None,
         context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
-        _ = info
+        _ = (info, context)
 
         yield UpdateEvent.status(
             self.name,
@@ -197,21 +199,31 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
             ),
         )
         try:
-            drv_hash = (
-                context.drv_fingerprint if isinstance(context, UpdateContext) else None
-            )
-            if drv_hash is None:
-                drv_hash = await compute_expr_drv_fingerprint(
+            previous_drv_hash: str | None = None
+            drv_hash: str | None = None
+            for _evaluation in range(_FINGERPRINT_STABILITY_EVALUATIONS):
+                current_drv_hash = await compute_expr_drv_fingerprint(
                     self.name,
                     self._workspace_expr(),
                     config=self.config,
                 )
-            result = result.model_copy(update={"drv_hash": drv_hash})
+                if current_drv_hash == previous_drv_hash:
+                    drv_hash = current_drv_hash
+                    break
+                previous_drv_hash = current_drv_hash
         except RuntimeError as exc:
             yield UpdateEvent.status(
                 self.name,
                 f"Warning: derivation fingerprint unavailable ({exc})",
                 operation="compute_hash",
             )
+        else:
+            if drv_hash is None:
+                msg = (
+                    "Derivation fingerprint did not stabilize after "
+                    f"{_FINGERPRINT_STABILITY_EVALUATIONS} evaluations"
+                )
+                raise RuntimeError(msg)
+            result = result.model_copy(update={"drv_hash": drv_hash})
 
         yield UpdateEvent.value(self.name, result)

@@ -1534,6 +1534,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "openai_subscribed" = rec {
+      packageId = "openai_subscribed";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "openai_subscribed";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "opencode" = rec {
       packageId = "opencode";
       build = internal.buildRustCrateWithFeatures {
@@ -1698,6 +1708,16 @@ rec {
       packageId = "proto";
       build = internal.buildRustCrateWithFeatures {
         packageId = "proto";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "proxy_handshake" = rec {
+      packageId = "proxy_handshake";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "proxy_handshake";
       };
 
       # Debug support which might change between releases.
@@ -3820,9 +3840,9 @@ rec {
       };
       "agent-client-protocol" = rec {
         crateName = "agent-client-protocol";
-        version = "1.3.0";
+        version = "2.0.0";
         edition = "2024";
-        sha256 = "0i14fpaqrckq8qyxw6flxyyxl1a0lp51bscqzbmy1nzlb1m6sf0x";
+        sha256 = "1a46vifi4rq90jzm6rrc098msxn37vvm5p557dsl39pbd5vvr1vd";
         libName = "agent_client_protocol";
         authors = [
           "Zed <hi@zed.dev>"
@@ -3916,9 +3936,9 @@ rec {
       };
       "agent-client-protocol-derive" = rec {
         crateName = "agent-client-protocol-derive";
-        version = "1.3.0";
+        version = "2.0.0";
         edition = "2024";
-        sha256 = "1np177qv7v50i4n6cllc65ina1xkym54vs8l3n99x9hqs4s4kfcp";
+        sha256 = "1p2d4qkiqbjk571q498wvji2kpkflsvpzsrb0ksj8kqyyn041g9s";
         procMacro = true;
         libName = "agent_client_protocol_derive";
         authors = [
@@ -3931,17 +3951,16 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 2.0.117";
-            features = [ "full" "extra-traits" ];
+            packageId = "syn 3.0.3";
           }
         ];
 
       };
       "agent-client-protocol-schema" = rec {
         crateName = "agent-client-protocol-schema";
-        version = "1.4.0";
+        version = "1.5.0";
         edition = "2024";
-        sha256 = "0k13g2qgpxkf8h2j3pkhmzv3fkxn71iv3kqcaps42qrm88arwrq6";
+        sha256 = "0z0qbg4xvqyiy3lvihyasszh1lzlgnyx38pc4b3pidaabf8k3hnm";
         libName = "agent_client_protocol_schema";
         authors = [
           "Zed <hi@zed.dev>"
@@ -12295,6 +12314,11 @@ rec {
             features = [ "test-support" ];
           }
           {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+          {
             name = "util";
             packageId = "util";
             features = [ "test-support" ];
@@ -13845,10 +13869,6 @@ rec {
             features = [ "tokio" "tokio-rustls-manual-roots" ];
           }
           {
-            name = "base64";
-            packageId = "base64 0.22.1";
-          }
-          {
             name = "chrono";
             packageId = "chrono";
             features = [ "serde" "serde" ];
@@ -13912,10 +13932,6 @@ rec {
             packageId = "http_client_tls";
           }
           {
-            name = "httparse";
-            packageId = "httparse";
-          }
-          {
             name = "log";
             packageId = "log";
             features = [ "kv_unstable_serde" "serde" ];
@@ -13939,6 +13955,11 @@ rec {
             name = "postage";
             packageId = "postage";
             features = [ "futures-traits" ];
+          }
+          {
+            name = "proxy_handshake";
+            packageId = "proxy_handshake";
+            features = [ "tokio" ];
           }
           {
             name = "rand";
@@ -14034,12 +14055,6 @@ rec {
             usesDefaultFeatures = false;
             target = { target, features }: (!(("windows" == target."os" or null) || ("macos" == target."os" or null)));
             features = [ "tls12" "ring" ];
-          }
-          {
-            name = "tokio-socks";
-            packageId = "tokio-socks";
-            usesDefaultFeatures = false;
-            features = [ "futures-io" "tokio" ];
           }
           {
             name = "url";
@@ -15079,6 +15094,11 @@ rec {
             features = [ "test-support" ];
           }
           {
+            name = "title_bar";
+            packageId = "title_bar";
+            features = [ "test-support" ];
+          }
+          {
             name = "unindent";
             packageId = "unindent";
           }
@@ -15205,6 +15225,10 @@ rec {
             name = "smallvec";
             packageId = "smallvec";
             features = [ "union" "const_new" ];
+          }
+          {
+            name = "smol";
+            packageId = "smol";
           }
           {
             name = "telemetry";
@@ -18772,6 +18796,10 @@ rec {
             packageId = "feature_flags";
           }
           {
+            name = "fuzzy";
+            packageId = "fuzzy";
+          }
+          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
@@ -18780,6 +18808,10 @@ rec {
             name = "log";
             packageId = "log";
             features = [ "kv_unstable_serde" "serde" ];
+          }
+          {
+            name = "picker";
+            packageId = "picker";
           }
           {
             name = "text";
@@ -25728,6 +25760,10 @@ rec {
             packageId = "inventory";
           }
           {
+            name = "release_channel";
+            packageId = "release_channel";
+          }
+          {
             name = "schemars";
             packageId = "schemars 1.0.4";
             features = [ "indexmap2" ];
@@ -26777,6 +26813,12 @@ rec {
           {
             name = "rope";
             packageId = "rope";
+          }
+          {
+            name = "rustix";
+            packageId = "rustix 1.1.2";
+            target = { target, features }: (target."unix" or false);
+            features = [ "fs" ];
           }
           {
             name = "serde";
@@ -30306,7 +30348,7 @@ rec {
           "windows-manifest" = [ "dep:embed-resource" ];
           "x11" = [ "scap?/x11" ];
         };
-        resolvedDefaultFeatures = [ "backtrace" "bench" "default" "font-kit" "input-latency-histogram" "inspector" "leak-detection" "proptest" "scap" "screen-capture" "test-support" "wayland" "windows-manifest" "x11" ];
+        resolvedDefaultFeatures = [ "backtrace" "bench" "default" "font-kit" "input-latency-histogram" "inspector" "leak-detection" "profiler" "proptest" "scap" "screen-capture" "test-support" "wayland" "windows-manifest" "x11" ];
       };
       "gpui_linux" = rec {
         crateName = "gpui_linux";
@@ -31101,12 +31143,6 @@ rec {
             target = { target, features }: (builtins.elem "wasm" target."family");
           }
           {
-            name = "smallvec";
-            packageId = "smallvec";
-            target = { target, features }: (builtins.elem "wasm" target."family");
-            features = [ "union" "const_new" ];
-          }
-          {
             name = "uuid";
             packageId = "uuid";
             target = { target, features }: (builtins.elem "wasm" target."family");
@@ -31133,7 +31169,7 @@ rec {
             name = "web-sys";
             packageId = "web-sys";
             target = { target, features }: (builtins.elem "wasm" target."family");
-            features = [ "console" "Clipboard" "ClipboardEvent" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "Document" "DomRect" "DragEvent" "Element" "EventTarget" "File" "FileList" "HtmlCanvasElement" "HtmlElement" "HtmlInputElement" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MouseEvent" "Navigator" "PointerEvent" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverSize" "ResizeObserverOptions" "Screen" "Storage" "VisualViewport" "Headers" "Request" "RequestInit" "RequestRedirect" "Response" "WheelEvent" "Window" ];
+            features = [ "console" "Clipboard" "ClipboardEvent" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "Document" "DomRect" "DragEvent" "Element" "EventTarget" "HtmlCanvasElement" "HtmlElement" "HtmlInputElement" "IdleDeadline" "IdleRequestOptions" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MouseEvent" "Navigator" "PointerEvent" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverSize" "ResizeObserverOptions" "Screen" "Storage" "VisualViewport" "Headers" "Request" "RequestCredentials" "RequestInit" "RequestRedirect" "Response" "WheelEvent" "Window" ];
           }
           {
             name = "web-time";
@@ -31222,6 +31258,12 @@ rec {
           {
             name = "swash";
             packageId = "swash";
+          }
+          {
+            name = "unicode-bidi";
+            packageId = "unicode-bidi";
+            usesDefaultFeatures = false;
+            features = [ "hardcoded-data" ];
           }
           {
             name = "unicode-segmentation";
@@ -36666,6 +36708,11 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "grammars";
+            packageId = "grammars";
+            optional = true;
+          }
+          {
             name = "http_client";
             packageId = "http_client";
           }
@@ -36778,6 +36825,11 @@ rec {
             features = [ "wasm" ];
           }
           {
+            name = "tree-sitter-json";
+            packageId = "tree-sitter-json";
+            optional = true;
+          }
+          {
             name = "tree-sitter-md";
             packageId = "tree-sitter-md";
             optional = true;
@@ -36838,6 +36890,10 @@ rec {
             packageId = "gpui";
             usesDefaultFeatures = false;
             features = [ "test-support" ];
+          }
+          {
+            name = "grammars";
+            packageId = "grammars";
           }
           {
             name = "http_client";
@@ -36939,14 +36995,16 @@ rec {
           }
         ];
         features = {
+          "grammars" = [ "dep:grammars" ];
           "rand" = [ "dep:rand" ];
-          "test-support" = [ "rand" "collections/test-support" "lsp/test-support" "text/test-support" "tree-sitter-rust" "tree-sitter-python" "tree-sitter-typescript" "tree-sitter-md" "settings/test-support" "util/test-support" ];
+          "test-support" = [ "rand" "collections/test-support" "grammars" "lsp/test-support" "text/test-support" "tree-sitter-rust" "tree-sitter-python" "tree-sitter-typescript" "tree-sitter-json" "tree-sitter-md" "settings/test-support" "util/test-support" ];
+          "tree-sitter-json" = [ "dep:tree-sitter-json" ];
           "tree-sitter-md" = [ "dep:tree-sitter-md" ];
           "tree-sitter-python" = [ "dep:tree-sitter-python" ];
           "tree-sitter-rust" = [ "dep:tree-sitter-rust" ];
           "tree-sitter-typescript" = [ "dep:tree-sitter-typescript" ];
         };
-        resolvedDefaultFeatures = [ "rand" "test-support" "tree-sitter-md" "tree-sitter-python" "tree-sitter-rust" "tree-sitter-typescript" ];
+        resolvedDefaultFeatures = [ "grammars" "rand" "test-support" "tree-sitter-json" "tree-sitter-md" "tree-sitter-python" "tree-sitter-rust" "tree-sitter-typescript" ];
       };
       "language_core" = rec {
         crateName = "language_core";
@@ -37429,10 +37487,6 @@ rec {
             features = [ "schemars" ];
           }
           {
-            name = "oauth_callback_server";
-            packageId = "oauth_callback_server";
-          }
-          {
             name = "ollama";
             packageId = "ollama";
             features = [ "schemars" ];
@@ -37446,6 +37500,10 @@ rec {
             name = "open_router";
             packageId = "open_router";
             features = [ "schemars" "schemars" ];
+          }
+          {
+            name = "openai_subscribed";
+            packageId = "openai_subscribed";
           }
           {
             name = "opencode";
@@ -37480,14 +37538,6 @@ rec {
             packageId = "settings";
           }
           {
-            name = "sha2";
-            packageId = "sha2";
-          }
-          {
-            name = "smol";
-            packageId = "smol";
-          }
-          {
             name = "strum";
             packageId = "strum 0.27.2";
             features = [ "derive" ];
@@ -37504,10 +37554,6 @@ rec {
           {
             name = "ui_input";
             packageId = "ui_input";
-          }
-          {
-            name = "url";
-            packageId = "url";
           }
           {
             name = "util";
@@ -37654,6 +37700,17 @@ rec {
           }
         ];
         devDependencies = [
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            features = [ "test-support" ];
+          }
+          {
+            name = "http_client";
+            packageId = "http_client";
+            features = [ "test-support" ];
+          }
           {
             name = "language_model";
             packageId = "language_model";
@@ -47376,6 +47433,11 @@ rec {
         ];
         devDependencies = [
           {
+            name = "http_client";
+            packageId = "http_client";
+            features = [ "test-support" ];
+          }
+          {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
             features = [ "unstable" ];
@@ -47540,6 +47602,105 @@ rec {
           "schemars" = [ "dep:schemars" ];
         };
         resolvedDefaultFeatures = [ "default" "schemars" ];
+      };
+      "openai_subscribed" = rec {
+        crateName = "openai_subscribed";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/openai_subscribed"; };
+        libPath = "src/openai_subscribed.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "credentials_provider";
+            packageId = "credentials_provider";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "http_client";
+            packageId = "http_client";
+          }
+          {
+            name = "language_model";
+            packageId = "language_model";
+          }
+          {
+            name = "log";
+            packageId = "log";
+            features = [ "kv_unstable_serde" "serde" ];
+          }
+          {
+            name = "oauth_callback_server";
+            packageId = "oauth_callback_server";
+          }
+          {
+            name = "open_ai";
+            packageId = "open_ai";
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.9.4";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+          {
+            name = "sha2";
+            packageId = "sha2";
+          }
+          {
+            name = "smol";
+            packageId = "smol";
+          }
+          {
+            name = "url";
+            packageId = "url";
+          }
+          {
+            name = "util";
+            packageId = "util";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            features = [ "test-support" ];
+          }
+          {
+            name = "http_client";
+            packageId = "http_client";
+            features = [ "test-support" ];
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot";
+          }
+        ];
+
       };
       "opencode" = rec {
         crateName = "opencode";
@@ -53118,6 +53279,10 @@ rec {
             features = [ "kv_unstable_serde" "serde" ];
           }
           {
+            name = "markdown";
+            packageId = "markdown";
+          }
+          {
             name = "markdown_preview";
             packageId = "markdown_preview";
           }
@@ -54130,6 +54295,71 @@ rec {
           }
         ];
 
+      };
+      "proxy_handshake" = rec {
+        crateName = "proxy_handshake";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/proxy_handshake"; };
+        libPath = "src/proxy_handshake.rs";
+        dependencies = [
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+            optional = true;
+          }
+          {
+            name = "httparse";
+            packageId = "httparse";
+          }
+          {
+            name = "percent-encoding";
+            packageId = "percent-encoding";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.17";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            optional = true;
+            features = [ "io-util" ];
+          }
+          {
+            name = "url";
+            packageId = "url";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "piper";
+            packageId = "piper";
+          }
+          {
+            name = "proptest";
+            packageId = "proptest";
+            features = [ "attr-macro" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "io-util" "macros" "rt" ];
+          }
+        ];
+        features = {
+          "futures-io" = [ "dep:futures" ];
+          "tokio" = [ "dep:tokio" ];
+        };
+        resolvedDefaultFeatures = [ "default" "tokio" ];
       };
       "proxyvars" = rec {
         crateName = "proxyvars";
@@ -56730,6 +56960,7 @@ rec {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
+            features = [ "profiler" ];
           }
           {
             name = "gpui";
@@ -60149,6 +60380,13 @@ rec {
           }
         ];
         devDependencies = [
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("linux" == target."os" or null);
+            features = [ "test-support" ];
+          }
           {
             name = "tempfile";
             packageId = "tempfile";
@@ -67118,6 +67356,39 @@ rec {
         };
         resolvedDefaultFeatures = [ "clone-impls" "default" "derive" "extra-traits" "fold" "full" "parsing" "printing" "proc-macro" "visit" "visit-mut" ];
       };
+      "syn 3.0.3" = rec {
+        crateName = "syn";
+        version = "3.0.3";
+        edition = "2021";
+        sha256 = "18srnql3cd39j9q6hf1az02p67rlr1rf6njx9zx4vxj9i3jvmsak";
+        authors = [
+          "David Tolnay <dtolnay@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "unicode-ident";
+            packageId = "unicode-ident";
+          }
+        ];
+        features = {
+          "default" = [ "derive" "parsing" "printing" "clone-impls" "proc-macro" ];
+          "printing" = [ "dep:quote" ];
+          "proc-macro" = [ "proc-macro2/proc-macro" "quote?/proc-macro" ];
+          "test" = [ "syn-test-suite/all-features" ];
+        };
+        resolvedDefaultFeatures = [ "clone-impls" "default" "derive" "parsing" "printing" "proc-macro" ];
+      };
       "sync_wrapper 0.1.2" = rec {
         crateName = "sync_wrapper";
         version = "0.1.2";
@@ -70176,11 +70447,6 @@ rec {
             packageId = "either";
           }
           {
-            name = "futures-io";
-            packageId = "futures-io";
-            optional = true;
-          }
-          {
             name = "futures-util";
             packageId = "futures-util";
             usesDefaultFeatures = false;
@@ -70214,7 +70480,7 @@ rec {
           "futures-io" = [ "dep:futures-io" ];
           "tokio" = [ "dep:tokio" ];
         };
-        resolvedDefaultFeatures = [ "default" "futures-io" "tokio" ];
+        resolvedDefaultFeatures = [ "default" "tokio" ];
       };
       "tokio-stream" = rec {
         crateName = "tokio-stream";
@@ -71641,8 +71907,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/trash-rs";
-          rev = "47761739192828a66b11a94ba5420b82d63c03c5";
-          sha256 = "0n79s8h6s3y3v2a0jy986xy8irb1zh2gcws9pqbwprrxmrczd3ad";
+          rev = "41c6c800d884a89351f3b8856d12894cccee261d";
+          sha256 = "03yw1zmq0gbz7zkq2lxcqg7fqkrn7lifnkh6vknfka0jlasjvccc";
         };
         authors = [
           "Artur Kovacs <kovacs.artur.barnabas@gmail.com>"
@@ -72996,6 +73262,10 @@ rec {
           {
             name = "ui_macros";
             packageId = "ui_macros";
+          }
+          {
+            name = "web-time";
+            packageId = "web-time";
           }
           {
             name = "windows";
@@ -75287,7 +75557,12 @@ rec {
         crateName = "wasm_thread";
         version = "0.3.3";
         edition = "2018";
-        sha256 = "13i5l2rjlz3k85i2zk650rvdzfbqgldyp39v3kdxmv1dyfvnsldp";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/zed-industries/wasm_thread";
+          rev = "0cf96c7708dfb97ccf3da50347e25edcf75d6937";
+          sha256 = "049wlywqf439mmz8hjk8bgc9ly3032mhq8qn74wscjrli444nm7s";
+        };
         authors = [
           "Jurgis Balciunas <chemicstry@gmail.com>"
         ];
@@ -77674,7 +77949,7 @@ rec {
           "default" = [ "std" ];
           "std" = [ "wasm-bindgen/std" "js-sys/std" ];
         };
-        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AngleInstancedArrays" "AudioBuffer" "AudioBufferSourceNode" "AudioContext" "AudioContextOptions" "AudioContextState" "AudioDestinationNode" "AudioNode" "AudioScheduledSourceNode" "BaseAudioContext" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "Clipboard" "ClipboardEvent" "CloseEvent" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "DedicatedWorkerGlobalScope" "Document" "DomRect" "DomRectReadOnly" "DragEvent" "Element" "Event" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "File" "FileList" "FormData" "Headers" "HtmlCanvasElement" "HtmlElement" "HtmlImageElement" "HtmlInputElement" "HtmlMediaElement" "HtmlVideoElement" "ImageBitmap" "ImageData" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MessageEvent" "MouseEvent" "Navigator" "Node" "NodeList" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OvrMultiview2" "PointerEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Response" "RtcDataChannel" "RtcDataChannelEvent" "RtcDataChannelState" "RtcIceCandidate" "RtcPeerConnection" "RtcPeerConnectionIceEvent" "RtcSdpType" "RtcSessionDescriptionInit" "RtcSignalingState" "Screen" "ServiceWorkerGlobalScope" "Storage" "StreamPipeOptions" "TransformStream" "TransformStreamDefaultController" "Transformer" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "VideoFrame" "VisualViewport" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebSocket" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "WorkerOptions" "WorkerType" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
+        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AngleInstancedArrays" "AudioBuffer" "AudioBufferSourceNode" "AudioContext" "AudioContextOptions" "AudioContextState" "AudioDestinationNode" "AudioNode" "AudioScheduledSourceNode" "BaseAudioContext" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "Clipboard" "ClipboardEvent" "CloseEvent" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "DedicatedWorkerGlobalScope" "Document" "DomRect" "DomRectReadOnly" "DragEvent" "Element" "Event" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "File" "FormData" "Headers" "HtmlCanvasElement" "HtmlElement" "HtmlImageElement" "HtmlInputElement" "HtmlMediaElement" "HtmlVideoElement" "IdleDeadline" "IdleRequestOptions" "ImageBitmap" "ImageData" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MessageEvent" "MouseEvent" "Navigator" "Node" "NodeList" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OvrMultiview2" "PointerEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Response" "RtcDataChannel" "RtcDataChannelEvent" "RtcDataChannelState" "RtcIceCandidate" "RtcPeerConnection" "RtcPeerConnectionIceEvent" "RtcSdpType" "RtcSessionDescriptionInit" "RtcSignalingState" "Screen" "ServiceWorkerGlobalScope" "Storage" "StreamPipeOptions" "TransformStream" "TransformStreamDefaultController" "Transformer" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "VideoFrame" "VisualViewport" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebSocket" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "WorkerOptions" "WorkerType" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
       };
       "web-time" = rec {
         crateName = "web-time";
@@ -88991,7 +89266,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "1.13.0";
+        version = "1.15.0";
         edition = "2024";
         crateBin = [
           {
@@ -89255,7 +89530,7 @@ rec {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
-            features = [ "input-latency-histogram" ];
+            features = [ "input-latency-histogram" "profiler" ];
           }
           {
             name = "gpui";

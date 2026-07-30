@@ -1,15 +1,15 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-J+5V1JN6Js6yUXATSn0J77wM2V4VBZHRIuyi0o2plOE=",
-    "aarch64-linux": "sha256-VrFdzEqMWk3oLkuEGdjz19FNljA98GdJXMI5yamJR2o=",
-    "x86_64-darwin": "sha256-zjpNaiRHYN3KwgHB34IIJbgponK1W5fplj+eZSWrhvQ=",
-    "x86_64-linux": "sha256-nWjRtkNcuYUMY7b5inBDRqvAeoSCbDCrL8uz2kUWxG8="
+    "aarch64-darwin": "sha256-1sMqgNPSAGTE3qjT3Dbp5MKJ6mCif1LHjyjnk4ixDUY=",
+    "aarch64-linux": "sha256-m3XfF56WjiWyJjWg0wN0mCJ3oeBfZvy01V566xGUm3U=",
+    "x86_64-darwin": "sha256-oE2++xG8PVwrBiafWa6cjpAWUIbhJA4GOKO2OLcCKdw=",
+    "x86_64-linux": "sha256-t3ZYBjpQR11jRTJX5LQx4q6j+Nro6wEi4y0DXsY5ZkU="
   },
   "urls": {
-    "aarch64-darwin": "https://download.jetbrains.com/datagrip/datagrip-2026.2-aarch64.dmg",
-    "aarch64-linux": "https://download.jetbrains.com/datagrip/datagrip-2026.2-aarch64.tar.gz",
-    "x86_64-darwin": "https://download.jetbrains.com/datagrip/datagrip-2026.2.dmg",
-    "x86_64-linux": "https://download.jetbrains.com/datagrip/datagrip-2026.2.tar.gz"
+    "aarch64-darwin": "https://download.jetbrains.com/datagrip/datagrip-2026.2.1-aarch64.dmg",
+    "aarch64-linux": "https://download.jetbrains.com/datagrip/datagrip-2026.2.1-aarch64.tar.gz",
+    "x86_64-darwin": "https://download.jetbrains.com/datagrip/datagrip-2026.2.1.dmg",
+    "x86_64-linux": "https://download.jetbrains.com/datagrip/datagrip-2026.2.1.tar.gz"
   },
-  "version": "2026.2"
+  "version": "2026.2.1"
 }

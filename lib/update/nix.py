@@ -140,7 +140,7 @@ def _build_pnpm_10_nodejs_22_expr() -> FunctionCall:
         argument=AttributeSet(
             values=[
                 Binding(
-                    name="nodejs",
+                    name="nodejs-slim",
                     value=_select_attrs(Identifier(name="pkgs"), "nodejs_22"),
                 ),
             ]

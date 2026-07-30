@@ -464,14 +464,14 @@
     ssh = {
       enable = true;
       enableDefaultConfig = false;
-      matchBlocks = {
+      settings = {
         "github.com" = {
-          compression = true;
-          forwardAgent = true;
-          hashKnownHosts = true;
-          user = "git";
+          Compression = true;
+          ForwardAgent = true;
+          HashKnownHosts = true;
+          User = "git";
         };
-        "*".extraOptions = {
+        "*" = {
           AddKeysToAgent = "yes";
           LogLevel = "ERROR";
           StrictHostKeyChecking = "accept-new"; # Accept new keys, but alert on changes (MITM protection)

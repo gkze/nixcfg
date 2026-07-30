@@ -21,6 +21,11 @@ _ALLOWED_NIX_SUBSTITUTE_SITES: Final[tuple[NixSubstituteSite, ...]] = (
         "substituteInPlace \"$node_addon_api_header\" --replace-fail 'static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>(-1);' 'static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>(0);'",
     ),
     (
+        "overlays/rio/default.nix",
+        41,
+        "substituteInPlace \"$out/Applications/Rio.app/Contents/Info.plist\" --replace-fail '{{.Version}}.{{.Now.Format \"20060102150405\"}}' '${version}' --replace-fail '{{.Version}}' '${version}'",
+    ),
+    (
         "overlays/vim-plugin-overrides.nix",
         33,
         "substituteInPlace lua/codesnap/module.lua --replace-fail '${moduleLuaOld}' '${moduleLuaNew}'",

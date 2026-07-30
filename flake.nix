@@ -8,9 +8,9 @@
     nixpkgs-swift.url = "github:NixOS/nixpkgs/70801e06d9730c4f1704fbd3bbf5b8e11c03a2a7";
     nix-homebrew = {
       url = "github:Yeradon/nix-homebrew";
-      # Keep brew-src, homebrew-cask, and homebrew-core pinned as one tested
-      # tuple; current tap syntax can require matching Homebrew/Ruby support.
-      inputs.brew-src.url = "github:Homebrew/brew/fb60c879bac6e441c1e71468c0d0887d4c430558";
+      # Homebrew 5.1.15 is the minimum release with brew bundle --force-cleanup,
+      # required by current nix-darwin. Keep the brew/tap pins tested as a tuple.
+      inputs.brew-src.url = "github:Homebrew/brew/863696a47f8d9292cb25084b6f8228e003084101";
     };
     neovim-nightly-overlay = {
       url = "github:nix-community/neovim-nightly-overlay";
@@ -48,7 +48,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gitbutler = {
-      url = "github:gitbutlerapp/gitbutler/release/0.21.1";
+      url = "github:gitbutlerapp/gitbutler/release/0.21.2";
       flake = false;
     };
     home-manager = {
@@ -62,8 +62,9 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     nixvim = {
+      # Nixvim constructs its own package set; keep its tested Nixpkgs pin
+      # instead of silently substituting the root flake's revision.
       url = "github:nix-community/nixvim";
-      inputs.nixpkgs.follows = "nixpkgs";
     };
     nh = {
       # v4.3.x captures and drops Darwin activation logs even with
@@ -116,7 +117,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     scratch = {
-      url = "github:erictli/scratch/v0.10.0";
+      url = "github:erictli/scratch/v1.0.0";
       flake = false;
     };
     stylix = {
@@ -137,7 +138,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.68.0";
+      url = "github:max-sixty/worktrunk/v0.70.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -145,7 +146,7 @@
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.18.0";
+      url = "github:anthropics/anthropic-cli/v1.21.0";
       flake = false;
     };
     catppuccin = {
@@ -162,11 +163,11 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.145.0";
+      url = "github:openai/codex/rust-v0.146.0";
       flake = false;
     };
     curator = {
-      url = "github:gkze/curator/v0.7.2";
+      url = "github:gkze/curator/v0.7.3";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
@@ -174,7 +175,7 @@
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.4.0";
+      url = "github:openai/openai-cli/v1.6.0";
       flake = false;
     };
     github-desktop = {
@@ -201,12 +202,12 @@
       flake = false;
     };
     homebrew-cask = {
-      # Update with nix-homebrew.inputs.brew-src and homebrew-core.
+      # Retained tap snapshot; revalidate with brew-src changes.
       url = "github:homebrew/homebrew-cask/b40e0b0c4faa6b0d7e458b67bb96820621411bde";
       flake = false;
     };
     homebrew-core = {
-      # Update with nix-homebrew.inputs.brew-src and homebrew-cask.
+      # Retained tap snapshot; revalidate with brew-src changes.
       url = "github:homebrew/homebrew-core/d1b066427e859ac2820238300a3a49fa2880fe1b";
       flake = false;
     };
@@ -215,7 +216,7 @@
       flake = false;
     };
     linear-cli = {
-      url = "github:schpet/linear-cli/v2.1.1";
+      url = "github:schpet/linear-cli/v2.3.0";
       flake = false;
     };
     macfuse = {
@@ -223,7 +224,7 @@
       flake = false;
     };
     mux = {
-      url = "github:coder/mux/v0.28.0";
+      url = "github:coder/mux/v0.28.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mountpoint-s3 = {
@@ -304,9 +305,6 @@
               "40.9.3"
             ]
           );
-        # Spacedrive is marked broken in nixpkgs (upstream development stalled),
-        # but the pinned prebuilt DMG still works; surface it as a warning.
-        problems.handlers.spacedrive.broken = "warn";
       };
 
       overlayList = [
@@ -885,8 +883,43 @@
 
             "test-nix-direnv-batched-gcroots" = { pkgs, ... }: pkgs.nix-direnv.tests.batchedFlakeInputGcRoots;
 
+            "test-nix-execline-darwin-symlinks" =
+              { pkgs, ... }:
+              if !pkgs.stdenv.hostPlatform.isDarwin then
+                pkgs.runCommand "check-execline-darwin-symlinks-skipped" { } ''
+                  touch "$out"
+                ''
+              else
+                pkgs.runCommand "check-execline-darwin-symlinks"
+                  {
+                    nativeBuildInputs = [ pkgs.findutils ];
+                  }
+                  ''
+                    # A separate builder is required because static evaluation
+                    # cannot reproduce Cachix's unprivileged readlink boundary.
+                    link_count=0
+                    while IFS= read -r link; do
+                      ${pkgs.coreutils}/bin/readlink "$link" >/dev/null
+                      link_count=$((link_count + 1))
+                    done < <(${pkgs.findutils}/bin/find ${pkgs.execline.bin}/bin -type l -print)
+
+                    if (( link_count == 0 )); then
+                      echo >&2 "execline installed no symlinks to validate"
+                      exit 1
+                    fi
+
+                    touch "$out"
+                  '';
+
             "test-nix-prefetch-git-darwin-heredoc" =
               { pkgs, ... }: import ./tests/nix/nix-prefetch-git-darwin-heredoc { inherit pkgs; };
+
+            "test-nix-rio-overlay-platforms" =
+              { pkgs, ... }:
+              assert import ./tests/nix/rio-overlay-platforms { };
+              pkgs.runCommand "check-test-nix-rio-overlay-platforms" { } ''
+                touch "$out"
+              '';
 
             "test-sops-age-policy" =
               { pkgs, ... }:

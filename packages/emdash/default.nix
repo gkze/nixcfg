@@ -33,7 +33,7 @@ let
   version = slib.getFlakeVersion pname;
   src = inputs.emdash;
   nodejs = nodejs_24;
-  pnpm = pnpm_10.override { inherit nodejs; };
+  pnpm = pnpm_10.override { nodejs-slim = nodejs; };
   inherit (stdenv.hostPlatform) system;
   npmDepsHash =
     let

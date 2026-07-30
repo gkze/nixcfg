@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-NmuRq3ZaaRPVrkvbnC85q6o+WhnnXy1oFb07KI6sJD8=",
-    "x86_64-darwin": "sha256-+ikJ5PlIVDwlrfZ+eimcAuliLeTJGS38Hvg0ImYRwgo="
+    "aarch64-darwin": "sha256-hTNTjYPQVcDNGWEmAQVgYBKp2sji1OsQS7Yx+eZcco8=",
+    "x86_64-darwin": "sha256-4PdaEsJ8TgG4AdTwPXKrpb4auKze4IMxE8evJrw8VfE="
   },
   "urls": {
-    "aarch64-darwin": "https://desktop.figma.com/mac-arm/Figma-126.6.14.zip",
-    "x86_64-darwin": "https://desktop.figma.com/mac/Figma-126.6.14.zip"
+    "aarch64-darwin": "https://desktop.figma.com/mac-arm/Figma-126.7.10.zip",
+    "x86_64-darwin": "https://desktop.figma.com/mac/Figma-126.7.10.zip"
   },
-  "version": "126.6.14"
+  "version": "126.7.10"
 }

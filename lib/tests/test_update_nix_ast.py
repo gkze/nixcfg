@@ -18,7 +18,9 @@ from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.flake_lock import FlakeLockNode, LockedRef
+from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
+from lib.tests._nix_source import nix_source_fragment_expr
 from lib.update.flake import (
     flake_fetch_expr,
     flake_fetch_expression,
@@ -528,6 +530,37 @@ def test_build_fetch_pnpm_deps_expr_accepts_explicit_pnpm_toolchain() -> None:
             ),
         ),
     )
+
+
+def test_pnpm_toolchain_builder_uses_supported_nodejs_override() -> None:
+    """Updater pnpm expressions should use nixpkgs' supported Node override."""
+    pnpm_override = _build_pnpm_10_nodejs_22_expr()
+    override_args = expect_instance(pnpm_override.argument, AttributeSet)
+
+    assert_nix_ast_equal(
+        expect_binding(override_args.values, "nodejs-slim").value,
+        identifier_attr_path("pkgs", "nodejs_22"),
+    )
+
+
+@pytest.mark.parametrize(
+    "package_path",
+    [
+        "packages/emdash/default.nix",
+        "packages/gitbutler/default.nix",
+        "packages/goose-desktop/default.nix",
+    ],
+)
+def test_pnpm_packages_use_supported_nodejs_override(package_path: str) -> None:
+    """Local pnpm packages should use nixpkgs' supported Node override."""
+    pnpm_override = expect_instance(
+        nix_source_fragment_expr(package_path, "  pnpm = ", ";\n"),
+        FunctionCall,
+    )
+    override_args = expect_instance(pnpm_override.argument, AttributeSet)
+
+    nodejs = expect_binding(override_args.values, "nodejs-slim").value
+    assert expect_instance(nodejs, Identifier).name == "nodejs"
 
 
 def test_build_fetchgit_expr_is_parseable() -> None:

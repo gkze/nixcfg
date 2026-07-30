@@ -42,12 +42,7 @@ _BRANCH_REF_PATTERNS = {
 # In particular, nh >=4.3 currently drops Darwin activation logs even with
 # --show-activation-logs, so keep the flake input pinned until that is resolved
 # upstream.
-#
-# nixvim newer than cb0107f6 can recurse through Stylix's deprecated
-# config.lib.stylix.nixvim.config alias while evaluating Darwin Home Manager
-# lock-smoke expressions. Keep it pinned until that upstream integration is
-# fixed.
-PINNED_REF_INPUTS = frozenset({"nh", "nixvim"})
+PINNED_REF_INPUTS = frozenset({"nh"})
 
 _MIN_COMMIT_HEX_LEN = 7
 _GIT_TAG_REF_PREFIX = "refs/tags/"

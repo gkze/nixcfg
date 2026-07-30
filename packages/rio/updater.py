@@ -1,20 +1,37 @@
-"""Updater for Rio."""
+"""Updater for the Rio source package."""
 
 from __future__ import annotations
 
-from typing import ClassVar
-
-from lib.update.updaters import GitHubReleaseAssetURLsUpdater, register_updater
+from lib.update.derivation_validation import DerivationValidation
+from lib.update.nix import _build_fetch_from_github_expr
+from lib.update.updaters import (
+    GitHubReleaseUpdater,
+    SourceThenOverlayHashMixin,
+    register_updater,
+)
 
 
 @register_updater
-class RioUpdater(GitHubReleaseAssetURLsUpdater):
-    """Track Rio macOS DMG assets from GitHub latest releases."""
+class RioUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
+    """Track Rio releases and compute source plus Cargo vendor hashes."""
 
     name = "rio"
     GITHUB_OWNER = "raphamorim"
     GITHUB_REPO = "rio"
-    PLATFORMS: ClassVar[dict[str, str]] = {
-        "aarch64-darwin": "darwin",
-    }
-    ASSET_NAME_TEMPLATE: ClassVar[str] = "rio.dmg"
+    dependency_hash_type = "cargoHash"
+    supported_platforms = ("aarch64-darwin",)
+    derivation_validations = (
+        DerivationValidation(
+            installable=".#pkgs.{system}.{name}",
+            mode="build",
+        ),
+    )
+
+    @staticmethod
+    def _src_expr(version: str) -> str:
+        return _build_fetch_from_github_expr(
+            "raphamorim",
+            "rio",
+            tag=f"v{version}",
+            fetch_submodules=False,
+        )
